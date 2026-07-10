@@ -36,7 +36,7 @@ def test_error_code_values_are_stable(member: ErrorCode, value: int) -> None:
 
 
 def test_secaware_error_serializes_details_but_hides_them_from_str() -> None:
-    details = {"api_key": "top-secret", "request_id": "req-123"}
+    details = {"provider_host": "internal.example", "request_id": "req-123"}
     error = SecAwareError(
         code=ErrorCode.API_TIMEOUT,
         stage="generation",
@@ -56,10 +56,92 @@ def test_secaware_error_serializes_details_but_hides_them_from_str() -> None:
     assert "API_TIMEOUT" in rendered
     assert "generation" in rendered
     assert "provider request timed out" in rendered
-    assert "api_key" not in rendered
-    assert "top-secret" not in rendered
+    assert "provider_host" not in rendered
+    assert "internal.example" not in rendered
     assert "request_id" not in rendered
     assert "req-123" not in rendered
+
+
+def test_secaware_error_redacts_sensitive_detail_keys_recursively() -> None:
+    details = {
+        "Api_KeyFingerprint": "key-material",
+        "AUTHORIZATION_header": "Bearer credential",
+        "refreshToken": "refresh-credential",
+        "client_SECRET_value": "client-credential",
+        "dbPASSWORD": "database-credential",
+        "nested": [
+            {
+                "safe": "visible",
+                "session_token_id": "session-credential",
+                "deeper": {"passwordHash": "password-hash"},
+            }
+        ],
+    }
+    error = SecAwareError(
+        code=ErrorCode.API_AUTH,
+        stage="generation",
+        message="provider authentication failed",
+        details=details,
+    )
+    expected = {
+        "Api_KeyFingerprint": "[REDACTED]",
+        "AUTHORIZATION_header": "[REDACTED]",
+        "refreshToken": "[REDACTED]",
+        "client_SECRET_value": "[REDACTED]",
+        "dbPASSWORD": "[REDACTED]",
+        "nested": [
+            {
+                "safe": "visible",
+                "session_token_id": "[REDACTED]",
+                "deeper": {"passwordHash": "[REDACTED]"},
+            }
+        ],
+    }
+
+    assert error.details == expected
+    assert error.to_dict()["details"] == expected
+
+
+def test_secaware_error_details_are_independent_snapshots() -> None:
+    details = {
+        "attempts": [{"status": "pending"}],
+        "coordinates": (1, 2),
+    }
+    error = SecAwareError(
+        code=ErrorCode.API_TIMEOUT,
+        stage="generation",
+        message="provider request timed out",
+        details=details,
+    )
+
+    details["attempts"][0]["status"] = "mutated"
+    details["attempts"].append({"status": "added"})
+    serialized = error.to_dict()
+    serialized["details"]["attempts"][0]["status"] = "serialized mutation"
+
+    assert error.details == {
+        "attempts": [{"status": "pending"}],
+        "coordinates": [1, 2],
+    }
+    assert error.to_dict()["details"] == error.details
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"unsupported": object()},
+        {"nested": [object()]},
+        {1: "non-string key"},
+    ],
+)
+def test_secaware_error_rejects_non_json_details(details: dict[object, object]) -> None:
+    with pytest.raises(TypeError):
+        SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage="validation",
+            message="invalid details",
+            details=details,
+        )
 
 
 def test_app_config_rejects_unknown_nested_keys() -> None:
@@ -82,4 +164,3 @@ def test_existing_config_files_still_load(config_name: str) -> None:
 
     assert config.run.name == Path(config_name).stem
     assert config.data.prompts_path == "data/examples/prompts_demo.jsonl"
-
