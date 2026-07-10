@@ -5,6 +5,7 @@ import typer
 
 from secaware.analysis.effects import estimate_effects
 from secaware.analysis.pairing import build_pairs
+from secaware.commands.common import run_cli_action
 from secaware.config import AppConfig, load_config
 from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
@@ -15,6 +16,7 @@ from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.logging_utils import console
 from secaware.oracle.aggregator import run_oracle as run_code_oracle
+from secaware.pipeline.preflight import run_preflight
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.interventions import InterventionRecord
@@ -40,16 +42,24 @@ def _prompt_records(store: RunStore) -> list[PromptRecord]:
 
 
 def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    del config
+    stage = "extract-prompt-tsg"
+    inputs = [store.path("inputs", "prompts.jsonl")]
     output = store.path("tsg", "prompt_tsg.jsonl")
-    if store.should_skip(output, force):
+    outputs = [output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
     prompts = _prompt_records(store)
     write_jsonl(output, [extract_prompt_tsg(prompt) for prompt in prompts])
+    store.record_stage(stage, inputs, outputs)
 
 
 def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    stage = "generate-observed"
+    inputs = [store.path("inputs", "prompts.jsonl")]
     output = store.path("generation", "observed_code.jsonl")
-    if store.should_skip(output, force):
+    outputs = [output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
     prompts = _prompt_records(store)
     provider = get_provider(
@@ -77,6 +87,7 @@ def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) 
                     )
                 )
     write_jsonl(output, records)
+    store.record_stage(stage, inputs, outputs)
 
 
 def extract_code_tsg_stage(
@@ -87,13 +98,17 @@ def extract_code_tsg_stage(
     force: bool,
 ) -> None:
     del config
+    stage = f"extract-code-tsg-{condition}"
     source_name = "observed_code.jsonl" if condition == "observed" else "counterfactual_code.jsonl"
     output_name = "observed_code_tsg.jsonl" if condition == "observed" else "counterfactual_code_tsg.jsonl"
+    inputs = [store.path("generation", source_name)]
     output = store.path("tsg", output_name)
-    if store.should_skip(output, force):
+    outputs = [output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
-    codes = read_jsonl(store.path("generation", source_name), GeneratedCodeRecord)
+    codes = read_jsonl(inputs[0], GeneratedCodeRecord)
     write_jsonl(output, [extract_code_tsg(code) for code in codes])  # type: ignore[arg-type]
+    store.record_stage(stage, inputs, outputs)
 
 
 def run_oracle_stage(
@@ -105,19 +120,31 @@ def run_oracle_stage(
 ) -> None:
     if not config.oracle.use_lightweight_rules:
         raise typer.BadParameter("The engineering v0 requires oracle.use_lightweight_rules=true.")
+    stage = f"run-oracle-{condition}"
     source_name = "observed_code.jsonl" if condition == "observed" else "counterfactual_code.jsonl"
     output_name = "observed_oracle.jsonl" if condition == "observed" else "counterfactual_oracle.jsonl"
+    inputs = [store.path("generation", source_name)]
     output = store.path("oracle", output_name)
-    if store.should_skip(output, force):
+    outputs = [output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
-    codes = read_jsonl(store.path("generation", source_name), GeneratedCodeRecord)
+    codes = read_jsonl(inputs[0], GeneratedCodeRecord)
     write_jsonl(output, [run_code_oracle(code) for code in codes])  # type: ignore[arg-type]
+    store.record_stage(stage, inputs, outputs)
 
 
 def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    stage = "discover"
+    inputs = [
+        store.path("inputs", "prompts.jsonl"),
+        store.path("tsg", "prompt_tsg.jsonl"),
+        store.path("tsg", "observed_code_tsg.jsonl"),
+        store.path("oracle", "observed_oracle.jsonl"),
+    ]
     all_output = store.path("discovery", "hypotheses_all.jsonl")
     selected_output = store.path("discovery", "hypotheses_selected.jsonl")
-    if store.should_skip(all_output, force) and store.should_skip(selected_output, force):
+    outputs = [all_output, selected_output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
     prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "discover"]
     prompt_tsgs = [
@@ -148,12 +175,20 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     selected_h = selected_h[: config.intervention.max_hypotheses]
     write_jsonl(all_output, all_h)
     write_jsonl(selected_output, selected_h)
+    store.record_stage(stage, inputs, outputs)
 
 
 def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    stage = "intervene"
+    inputs = [
+        store.path("inputs", "prompts.jsonl"),
+        store.path("tsg", "prompt_tsg.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
     output = store.path("interventions", "interventions.jsonl")
     paired_output = store.path("interventions", "paired_prompts.jsonl")
-    if store.should_skip(output, force) and store.should_skip(paired_output, force):
+    outputs = [output, paired_output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
     prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "confirm"]
     prompt_by_id = {prompt.prompt_id: prompt for prompt in prompts}
@@ -187,11 +222,18 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             for item in interventions
         ],
     )
+    store.record_stage(stage, inputs, outputs)
 
 
 def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    stage = "generate-counterfactual"
+    inputs = [
+        store.path("inputs", "prompts.jsonl"),
+        store.path("interventions", "interventions.jsonl"),
+    ]
     output = store.path("generation", "counterfactual_code.jsonl")
-    if store.should_skip(output, force):
+    outputs = [output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
     prompts = {prompt.prompt_id: prompt for prompt in _prompt_records(store)}
     interventions = read_jsonl(
@@ -228,12 +270,21 @@ def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: 
                     )
                 )
     write_jsonl(output, records)
+    store.record_stage(stage, inputs, outputs)
 
 
 def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    stage = "confirm"
+    inputs = [
+        store.path("interventions", "interventions.jsonl"),
+        store.path("oracle", "observed_oracle.jsonl"),
+        store.path("oracle", "counterfactual_oracle.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
     pair_output = store.path("analysis", "pair_results.jsonl")
     effect_output = store.path("analysis", "hypothesis_effects.jsonl")
-    if store.should_skip(pair_output, force) and store.should_skip(effect_output, force):
+    outputs = [pair_output, effect_output]
+    if store.should_skip_stage(stage, inputs, outputs, force):
         return
     interventions = read_jsonl(
         store.path("interventions", "interventions.jsonl"), InterventionRecord
@@ -263,13 +314,29 @@ def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             effect.scope_task_family = hypothesis.scope.get("task_family", "")
     write_jsonl(pair_output, pairs)
     write_jsonl(effect_output, effects)
+    store.record_stage(stage, inputs, outputs)
 
 
 def report_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    output = store.path("reports", "summary.md")
-    if store.should_skip(output, force):
-        return
     del config
+    stage = "report"
+    inputs = [
+        store.path("inputs", "prompts.jsonl"),
+        store.path("discovery", "hypotheses_all.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+        store.path("interventions", "interventions.jsonl"),
+        store.path("analysis", "pair_results.jsonl"),
+        store.path("analysis", "hypothesis_effects.jsonl"),
+    ]
+    outputs = [
+        store.path("reports", "funnel.csv"),
+        store.path("reports", "effects.csv"),
+        store.path("reports", "failures.csv"),
+        store.path("reports", "mechanism_cards.jsonl"),
+        store.path("reports", "summary.md"),
+    ]
+    if store.should_skip_stage(stage, inputs, outputs, force):
+        return
     write_reports(
         store.path("reports"),
         prompts=_prompt_records(store),
@@ -287,6 +354,7 @@ def report_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             store.path("analysis", "hypothesis_effects.jsonl"), EffectRecord
         ),  # type: ignore[arg-type]
     )
+    store.record_stage(stage, inputs, outputs)
 
 
 def _matches_scope(prompt: PromptRecord, hypothesis: HypothesisRecord) -> bool:
@@ -302,6 +370,27 @@ def _safe_id(value: str) -> str:
 @app.callback()
 def main() -> None:
     """Run SecAware pipeline stages."""
+
+
+@app.command("preflight")
+def preflight_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+) -> None:
+    def action() -> None:
+        cfg, _store = _load(config, run_dir)
+        report = run_preflight(cfg)
+        typer.echo(
+            "Preflight OK: "
+            f"prompts={report.prompt_count} "
+            f"discover={report.discover_count} "
+            f"confirm={report.confirm_count} "
+            f"models={report.model_count} "
+            f"seeds={report.seed_count} "
+            f"output_dir={report.output_dir}"
+        )
+
+    run_cli_action(action)
 
 
 @app.command("extract-prompt-tsg")

@@ -78,12 +78,16 @@ def manifest_allows_skip(
     output_paths: Sequence[str | Path],
     *,
     force: bool = False,
+    manifest_outputs: Sequence[str | Path] | None = None,
 ) -> bool:
     if force or not output_paths:
         return False
     try:
         manifest = read_stage_manifest(manifest_path)
-        normalized_outputs = [_normalize_path(path) for path in output_paths]
+        normalized_outputs = [
+            _normalize_path(path)
+            for path in (output_paths if manifest_outputs is None else manifest_outputs)
+        ]
     except (OSError, UnicodeError, TypeError, ValueError):
         return False
     if manifest.fingerprint != expected_fingerprint:
