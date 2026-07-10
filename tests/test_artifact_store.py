@@ -1,13 +1,17 @@
 import json
 import traceback
+import warnings
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.generation.request_planner import plan_observed_requests
 from secaware.io import jsonl
 from secaware.io.jsonl import read_jsonl, write_jsonl
+from secaware.schema.generation import GenerationParameters
+from secaware.schema.records import PromptRecord
 
 
 class ExampleRecord(BaseModel):
@@ -167,6 +171,64 @@ def test_write_jsonl_creates_parent_and_atomically_publishes_records(
         {"value": 2},
     ]
     assert list(path.parent.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize("forged_field", ["prompt", "parameters"])
+def test_write_jsonl_revalidates_base_models_before_publishing(
+    tmp_path: Path,
+    forged_field: str,
+) -> None:
+    path = tmp_path / "generation.jsonl"
+    original = '{"old": true}\n'
+    path.write_text(original, encoding="utf-8")
+    secret = "forged-generation-record-secret"
+    prompt = PromptRecord(
+        prompt_id="prompt-a",
+        split="confirm",
+        language="python",
+        task_family="path_handling",
+        cwe="CWE-22",
+        prompt="Read a path.",
+    )
+    record = plan_observed_requests(
+        [prompt],
+        ["model-a"],
+        [1],
+        endpoint_type="mock",
+    )[0]
+    replacement: object = secret
+    if forged_field == "parameters":
+        replacement = GenerationParameters.model_construct(
+            values={"api_key": secret}
+        )
+    forged = record.model_copy(update={forged_field: replacement})
+
+    with pytest.raises(SecAwareError) as exc_info:
+        write_jsonl(path, [forged], stage="generation")
+
+    error = exc_info.value
+    assert error.code is ErrorCode.CONTRACT
+    assert error.details == {"path": str(path), "line": 1}
+    _assert_error_surfaces_are_safe(
+        error,
+        sensitive_values=[secret, "api_key", "ValidationError"],
+    )
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_write_jsonl_does_not_warn_with_forged_model_contents(tmp_path: Path) -> None:
+    path = tmp_path / "records.jsonl"
+    secret = "forged-model-serialization-warning-secret"
+    forged = ExampleRecord(value=1).model_copy(update={"value": secret})
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        with pytest.raises(SecAwareError):
+            write_jsonl(path, [forged], stage="generation")
+
+    assert all(secret not in str(item.message) for item in captured)
+    assert not path.exists()
 
 
 def test_write_jsonl_failure_preserves_target_and_removes_temporary_file(

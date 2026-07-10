@@ -2,16 +2,18 @@ from collections.abc import Iterator, Mapping, Sequence
 import hashlib
 import json
 import math
-from typing import Literal, cast
+from typing import Any, ClassVar, Literal, TypeVar, cast
 
 from pydantic import (
     ConfigDict,
     Field,
     StrictInt,
+    ValidationError,
     field_serializer,
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from secaware.errors import JSONValue
 from secaware.schema.common import StrictModel, VersionedModel
@@ -46,6 +48,92 @@ _V1_PARAMETER_KEYS = frozenset().union(
 )
 _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical v1 contract"
 _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation failed"
+
+
+_SafeValidationModel = TypeVar(
+    "_SafeValidationModel",
+    bound="_SafeValidationMixin",
+)
+
+
+def _sanitized_validation_error(
+    model_name: str,
+    message: str,
+    *,
+    input_type: Literal["python", "json"] = "python",
+) -> ValidationError:
+    return ValidationError.from_exception_data(
+        model_name,
+        [
+            {
+                "type": PydanticCustomError("generation_validation", message),
+                "loc": (),
+                "input": None,
+            }
+        ],
+        input_type=input_type,
+        hide_input=True,
+    )
+
+
+class _SafeValidationMixin:
+    _safe_validation_message: ClassVar[str]
+
+    @classmethod
+    def _safe_error(
+        cls,
+        input_type: Literal["python", "json"] = "python",
+    ) -> ValidationError:
+        return _sanitized_validation_error(
+            cls.__name__,
+            cls._safe_validation_message,
+            input_type=input_type,
+        )
+
+    def __init__(self, /, **data: Any) -> None:
+        try:
+            super().__init__(**data)
+        except ValidationError:
+            pass
+        else:
+            return
+        raise type(self)._safe_error()
+
+    @classmethod
+    def model_validate(
+        cls: type[_SafeValidationModel],
+        obj: object,
+        **kwargs: Any,
+    ) -> _SafeValidationModel:
+        try:
+            return super().model_validate(obj, **kwargs)
+        except ValidationError:
+            pass
+        raise cls._safe_error()
+
+    @classmethod
+    def model_validate_json(
+        cls: type[_SafeValidationModel],
+        json_data: str | bytes | bytearray,
+        **kwargs: Any,
+    ) -> _SafeValidationModel:
+        try:
+            return super().model_validate_json(json_data, **kwargs)
+        except ValidationError:
+            pass
+        raise cls._safe_error("json")
+
+    @classmethod
+    def model_validate_strings(
+        cls: type[_SafeValidationModel],
+        obj: object,
+        **kwargs: Any,
+    ) -> _SafeValidationModel:
+        try:
+            return super().model_validate_strings(obj, **kwargs)
+        except ValidationError:
+            pass
+        raise cls._safe_error()
 
 
 class _FrozenJSONSequence(Sequence[object]):
@@ -180,10 +268,13 @@ def _is_allowed_parameter_value(key: str, value: object) -> bool:
     return False
 
 
-class GenerationParameters(StrictModel):
+class GenerationParameters(_SafeValidationMixin, StrictModel):
+    _safe_validation_message = _INVALID_PARAMETERS_MESSAGE
+
     model_config = ConfigDict(
         frozen=True,
         hide_input_in_errors=True,
+        protected_namespaces=(),
         revalidate_instances="always",
     )
 
@@ -258,10 +349,13 @@ def build_generation_request_id(
     return f"req_{hashlib.sha256(payload).hexdigest()}"
 
 
-class GenerationRequestRecord(VersionedModel):
+class GenerationRequestRecord(_SafeValidationMixin, VersionedModel):
+    _safe_validation_message = _INVALID_REQUEST_INTEGRITY_MESSAGE
+
     model_config = ConfigDict(
         frozen=True,
         hide_input_in_errors=True,
+        protected_namespaces=(),
         revalidate_instances="always",
     )
 

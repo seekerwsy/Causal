@@ -110,7 +110,13 @@ def read_jsonl(
 
 def _dump_record(record: BaseModel | dict) -> str:
     if isinstance(record, BaseModel):
-        return record.model_dump_json()
+        snapshot = record.model_dump(
+            mode="python",
+            round_trip=True,
+            warnings=False,
+        )
+        validated = record.__class__.model_validate(snapshot)
+        return validated.model_dump_json(warnings=False)
     return json.dumps(record, ensure_ascii=False, sort_keys=True)
 
 

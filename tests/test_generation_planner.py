@@ -1,10 +1,13 @@
+from collections.abc import Callable, Iterator, Mapping
 import hashlib
+import json
 import traceback
 
 import pytest
 from pydantic import ValidationError
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.generation import request_planner
 from secaware.generation.request_planner import (
     plan_counterfactual_requests,
     plan_observed_requests,
@@ -50,6 +53,27 @@ def _intervention(
         target_changed=True,
         side_effect=False,
     )
+
+
+class GuardedInfiniteIterator:
+    def __init__(
+        self,
+        factory: Callable[[int], object],
+        *,
+        maximum_reads: int,
+    ) -> None:
+        self.factory = factory
+        self.maximum_reads = maximum_reads
+        self.reads = 0
+
+    def __iter__(self) -> "GuardedInfiniteIterator":
+        return self
+
+    def __next__(self) -> object:
+        self.reads += 1
+        if self.reads > self.maximum_reads:
+            raise RuntimeError("unbounded-materialization-overread-secret")
+        return self.factory(self.reads)
 
 
 def _expected_request_id(values: dict[str, object]) -> str:
@@ -131,6 +155,87 @@ def _assert_request_integrity_rejected_without_echoing(
         assert all(text not in surface for surface in rendered)
 
 
+def _assert_sanitized_validation_error(
+    error: ValidationError,
+    *,
+    expected_message: str,
+    hidden_text: tuple[str, ...],
+) -> None:
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    structured = error.errors()
+    assert len(structured) == 1
+    assert structured[0]["loc"] == ()
+    assert structured[0].get("input") is None
+    assert "ctx" not in structured[0]
+    assert expected_message in structured[0]["msg"]
+
+    surfaces = (
+        str(error),
+        "".join(traceback.format_exception(error)),
+        json.dumps(structured, default=str),
+        error.json(),
+    )
+    for text in hidden_text:
+        assert all(text not in surface for surface in surfaces)
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["constructor", "model_validate", "model_validate_json", "model_validate_strings"],
+)
+def test_generation_parameters_public_validation_errors_are_fully_sanitized(
+    entrypoint: str,
+) -> None:
+    sensitive_key = "api_key"
+    secret = "parameter-validation-surface-secret"
+    payload = {"values": {sensitive_key: secret}}
+
+    with pytest.raises(ValidationError) as exc_info:
+        if entrypoint == "constructor":
+            GenerationParameters(**payload)
+        elif entrypoint == "model_validate":
+            GenerationParameters.model_validate(payload)
+        elif entrypoint == "model_validate_json":
+            GenerationParameters.model_validate_json(json.dumps(payload))
+        else:
+            GenerationParameters.model_validate_strings(payload)
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=(sensitive_key, secret),
+    )
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["constructor", "model_validate", "model_validate_json", "model_validate_strings"],
+)
+def test_generation_request_public_validation_errors_are_fully_sanitized(
+    entrypoint: str,
+) -> None:
+    sensitive_key = "api_key"
+    secret = "request-validation-surface-secret"
+    payload = _record_values(parameters={"values": {sensitive_key: secret}})
+
+    with pytest.raises(ValidationError) as exc_info:
+        if entrypoint == "constructor":
+            GenerationRequestRecord(**payload)
+        elif entrypoint == "model_validate":
+            GenerationRequestRecord.model_validate(payload)
+        elif entrypoint == "model_validate_json":
+            GenerationRequestRecord.model_validate_json(json.dumps(payload))
+        else:
+            GenerationRequestRecord.model_validate_strings({"prompt": secret})
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation request integrity validation failed",
+        hidden_text=(sensitive_key, secret),
+    )
+
+
 def test_generation_request_record_requires_explicit_supported_version() -> None:
     missing_version = _record_values()
     missing_version.pop("schema_version")
@@ -199,11 +304,11 @@ def test_generation_request_record_rejects_forged_integrity_fields_without_echoi
 
 def test_generation_request_record_rejects_conflicting_parameter_seed() -> None:
     values = _record_values(
-        seed_id=17,
-        parameters=GenerationParameters(values={"seed": 23}),
+        seed_id=903_417,
+        parameters=GenerationParameters(values={"seed": 903_418}),
     )
 
-    _assert_request_integrity_rejected_without_echoing(values, "17", "23")
+    _assert_request_integrity_rejected_without_echoing(values, "903417", "903418")
 
 
 @pytest.mark.parametrize(
@@ -371,7 +476,7 @@ def test_planner_revalidates_untrusted_generation_parameter_instances() -> None:
         values={unknown_key: secret}
     )
 
-    with pytest.raises(ValidationError) as exc_info:
+    with pytest.raises(SecAwareError) as exc_info:
         plan_observed_requests(
             [_prompt("prompt-a")],
             ["model-a"],
@@ -383,8 +488,43 @@ def test_planner_revalidates_untrusted_generation_parameter_instances() -> None:
     rendered = (
         str(exc_info.value),
         "".join(traceback.format_exception(exc_info.value)),
+        json.dumps(exc_info.value.to_dict(), sort_keys=True),
     )
+    assert exc_info.value.code is ErrorCode.CONTRACT
     for hidden_text in (unknown_key, secret, "input_value"):
+        assert all(hidden_text not in surface for surface in rendered)
+
+
+def test_planner_safely_wraps_parameter_mapping_snapshot_failures() -> None:
+    secret = "parameter-mapping-iteration-secret"
+
+    class RaisingMapping(Mapping[str, object]):
+        def __getitem__(self, key: str) -> object:
+            raise RuntimeError(secret)
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(("temperature",))
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_observed_requests(
+            [_prompt("prompt-a")],
+            ["model-a"],
+            [1],
+            endpoint_type="mock",
+            parameters=RaisingMapping(),
+        )
+
+    error = exc_info.value
+    assert error.code is ErrorCode.CONTRACT
+    rendered = (
+        str(error),
+        "".join(traceback.format_exception(error)),
+        json.dumps(error.to_dict(), sort_keys=True),
+    )
+    for hidden_text in (secret, "RuntimeError"):
         assert all(hidden_text not in surface for surface in rendered)
 
 
@@ -522,10 +662,10 @@ def test_generation_parameters_reject_boolean_numeric_values(numeric_key: str) -
     ("parameter_name", "invalid_value", "hidden_text"),
     [
         ("temperature", "wrong-temperature-value", "wrong-temperature-value"),
-        ("top_p", None, "None"),
+        ("top_p", None, None),
         ("frequency_penalty", "wrong-frequency-value", "wrong-frequency-value"),
-        ("presence_penalty", None, "None"),
-        ("max_tokens", None, "None"),
+        ("presence_penalty", None, None),
+        ("max_tokens", None, None),
         ("max_tokens", 0, None),
         ("max_completion_tokens", -1, None),
         ("max_output_tokens", 1.5, None),
@@ -539,7 +679,7 @@ def test_generation_parameters_reject_boolean_numeric_values(numeric_key: str) -
         ("reasoning_effort", "   ", None),
         ("reasoning_effort", 7, None),
         ("verbosity", "", None),
-        ("verbosity", None, "None"),
+        ("verbosity", None, None),
     ],
 )
 def test_generation_parameters_enforce_key_specific_types_without_leaking(
@@ -899,3 +1039,403 @@ def test_duplicate_request_id_raises_contract() -> None:
         )
 
     assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+@pytest.mark.parametrize(
+    ("axis", "expected_code"),
+    [
+        ("prompts", ErrorCode.CONTRACT),
+        ("models", ErrorCode.CONFIG),
+        ("seeds", ErrorCode.CONFIG),
+    ],
+)
+def test_observed_planner_materializes_each_iterable_with_a_bound(
+    axis: str,
+    expected_code: ErrorCode,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 3
+    monkeypatch.setattr(
+        request_planner,
+        "MAX_GENERATION_AXIS_ITEMS",
+        limit,
+        raising=False,
+    )
+    factories: dict[str, Callable[[int], object]] = {
+        "prompts": lambda index: _prompt(f"prompt-{index}"),
+        "models": lambda index: f"model-{index}",
+        "seeds": lambda index: index,
+    }
+    guarded = GuardedInfiniteIterator(
+        factories[axis],
+        maximum_reads=limit + 1,
+    )
+    prompts: object = [_prompt("prompt-a")]
+    models: object = ["model-a"]
+    seeds: object = [1]
+    if axis == "prompts":
+        prompts = guarded
+    elif axis == "models":
+        models = guarded
+    else:
+        seeds = guarded
+
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_observed_requests(
+            prompts,  # type: ignore[arg-type]
+            models,  # type: ignore[arg-type]
+            seeds,  # type: ignore[arg-type]
+            endpoint_type="mock",
+        )
+
+    assert exc_info.value.code is expected_code
+    assert guarded.reads == limit + 1
+    assert "overread-secret" not in "".join(
+        traceback.format_exception(exc_info.value)
+    )
+
+
+@pytest.mark.parametrize(
+    ("axis", "expected_code"),
+    [
+        ("interventions", ErrorCode.CONTRACT),
+        ("models", ErrorCode.CONFIG),
+        ("seeds", ErrorCode.CONFIG),
+    ],
+)
+def test_counterfactual_planner_materializes_each_iterable_with_a_bound(
+    axis: str,
+    expected_code: ErrorCode,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 3
+    monkeypatch.setattr(
+        request_planner,
+        "MAX_GENERATION_AXIS_ITEMS",
+        limit,
+        raising=False,
+    )
+    prompt = _prompt("prompt-a")
+    factories: dict[str, Callable[[int], object]] = {
+        "interventions": lambda index: _intervention(
+            prompt,
+            hypothesis_id=f"hyp-{index}",
+            intervention_id=f"int-{index}",
+        ),
+        "models": lambda index: f"model-{index}",
+        "seeds": lambda index: index,
+    }
+    guarded = GuardedInfiniteIterator(
+        factories[axis],
+        maximum_reads=limit + 1,
+    )
+    interventions: object = [_intervention(prompt)]
+    models: object = ["model-a"]
+    seeds: object = [1]
+    if axis == "interventions":
+        interventions = guarded
+    elif axis == "models":
+        models = guarded
+    else:
+        seeds = guarded
+
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_counterfactual_requests(
+            {prompt.prompt_id: prompt},
+            interventions,  # type: ignore[arg-type]
+            models,  # type: ignore[arg-type]
+            seeds,  # type: ignore[arg-type]
+            endpoint_type="mock",
+        )
+
+    assert exc_info.value.code is expected_code
+    assert guarded.reads == limit + 1
+    assert "overread-secret" not in "".join(
+        traceback.format_exception(exc_info.value)
+    )
+
+
+@pytest.mark.parametrize("condition", ["observed", "counterfactual"])
+def test_planner_rejects_request_products_before_record_construction(
+    condition: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        request_planner,
+        "MAX_GENERATION_AXIS_ITEMS",
+        10,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        request_planner,
+        "MAX_GENERATION_REQUESTS",
+        3,
+        raising=False,
+    )
+
+    def forbidden_record(**kwargs: object) -> None:
+        raise AssertionError("request-product-was-built-secret")
+
+    monkeypatch.setattr(request_planner, "_record", forbidden_record)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        if condition == "observed":
+            plan_observed_requests(
+                [_prompt("prompt-a"), _prompt("prompt-b")],
+                ["model-a", "model-b"],
+                [1],
+                endpoint_type="mock",
+            )
+        else:
+            prompt = _prompt("prompt-a")
+            plan_counterfactual_requests(
+                {prompt.prompt_id: prompt},
+                [
+                    _intervention(prompt, intervention_id="int-a"),
+                    _intervention(prompt, intervention_id="int-b"),
+                ],
+                ["model-a", "model-b"],
+                [1],
+                endpoint_type="mock",
+            )
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    assert "request-product-was-built-secret" not in "".join(
+        traceback.format_exception(exc_info.value)
+    )
+
+
+@pytest.mark.parametrize("condition", ["observed", "counterfactual"])
+def test_planner_safely_wraps_input_iterator_failures(condition: str) -> None:
+    secret = "generation-input-iterator-secret"
+
+    def failing_values(first: object):
+        yield first
+        raise RuntimeError(secret)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        if condition == "observed":
+            plan_observed_requests(
+                failing_values(_prompt("prompt-a")),
+                ["model-a"],
+                [1],
+                endpoint_type="mock",
+            )
+        else:
+            prompt = _prompt("prompt-a")
+            plan_counterfactual_requests(
+                {prompt.prompt_id: prompt},
+                failing_values(_intervention(prompt)),
+                ["model-a"],
+                [1],
+                endpoint_type="mock",
+            )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+        json.dumps(exc_info.value.to_dict(), sort_keys=True),
+    )
+    for hidden_text in (secret, "RuntimeError"):
+        assert all(hidden_text not in surface for surface in rendered)
+
+
+def test_observed_planner_snapshots_each_prompt_as_it_is_consumed() -> None:
+    first = _prompt("prompt-a", "original prompt text")
+    second = _prompt("prompt-b", "second prompt text")
+    mutation = "generator-mutated-prompt-secret"
+
+    def prompt_stream():
+        yield first
+        first.prompt = mutation
+        yield second
+
+    records = plan_observed_requests(
+        prompt_stream(),
+        ["model-a"],
+        [1],
+        endpoint_type="mock",
+    )
+
+    assert [record.prompt for record in records] == [
+        "original prompt text",
+        "second prompt text",
+    ]
+    assert mutation not in "".join(record.model_dump_json() for record in records)
+
+
+def test_counterfactual_planner_snapshots_each_intervention_as_it_is_consumed() -> None:
+    prompt = _prompt("prompt-a")
+    first = _intervention(
+        prompt,
+        intervention_id="int-a",
+        counterfactual_prompt="original counterfactual text",
+    )
+    second = _intervention(
+        prompt,
+        intervention_id="int-b",
+        counterfactual_prompt="second counterfactual text",
+    )
+    mutation = "generator-mutated-intervention-secret"
+
+    def intervention_stream():
+        yield first
+        first.counterfactual_prompt = mutation
+        yield second
+
+    records = plan_counterfactual_requests(
+        {prompt.prompt_id: prompt},
+        intervention_stream(),
+        ["model-a"],
+        [1],
+        endpoint_type="mock",
+    )
+
+    assert [record.prompt for record in records] == [
+        "original counterfactual text",
+        "second counterfactual text",
+    ]
+    assert mutation not in "".join(record.model_dump_json() for record in records)
+
+
+def test_counterfactual_planner_snapshots_prompt_mapping_once_without_get() -> None:
+    prompt = _prompt("prompt-a")
+    secret = "prompt-mapping-get-secret"
+
+    class ItemsOnlyPromptMapping(Mapping[str, PromptRecord]):
+        def __init__(self) -> None:
+            self.items_calls = 0
+            self.get_calls = 0
+
+        def __getitem__(self, key: str) -> PromptRecord:
+            return prompt
+
+        def __iter__(self) -> Iterator[str]:
+            return iter((prompt.prompt_id,))
+
+        def __len__(self) -> int:
+            return 1
+
+        def items(self):  # type: ignore[no-untyped-def]
+            self.items_calls += 1
+            return ((prompt.prompt_id, prompt),)
+
+        def get(self, key: str, default: object = None) -> PromptRecord | object:
+            self.get_calls += 1
+            raise RuntimeError(secret)
+
+    prompts = ItemsOnlyPromptMapping()
+    records = plan_counterfactual_requests(
+        prompts,
+        [_intervention(prompt)],
+        ["model-a"],
+        [1],
+        endpoint_type="mock",
+    )
+
+    assert len(records) == 1
+    assert prompts.items_calls == 1
+    assert prompts.get_calls == 0
+    assert secret not in records[0].model_dump_json()
+
+
+@pytest.mark.parametrize("failure_mode", ["items_error", "items_overflow"])
+def test_counterfactual_planner_safely_bounds_prompt_mapping_items(
+    failure_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 2
+    monkeypatch.setattr(request_planner, "MAX_GENERATION_AXIS_ITEMS", limit)
+    prompt = _prompt("prompt-a")
+    secret = "prompt-mapping-items-secret"
+    guarded = GuardedInfiniteIterator(
+        lambda index: (f"prompt-{index}", _prompt(f"prompt-{index}")),
+        maximum_reads=limit + 1,
+    )
+
+    class ControlledItemsMapping(Mapping[str, PromptRecord]):
+        def __init__(self) -> None:
+            self.items_calls = 0
+
+        def __getitem__(self, key: str) -> PromptRecord:
+            return prompt
+
+        def __iter__(self) -> Iterator[str]:
+            return iter((prompt.prompt_id,))
+
+        def __len__(self) -> int:
+            return 1
+
+        def items(self):  # type: ignore[no-untyped-def]
+            self.items_calls += 1
+            if failure_mode == "items_error":
+                raise RuntimeError(secret)
+            return guarded
+
+    prompts = ControlledItemsMapping()
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_counterfactual_requests(
+            prompts,
+            [_intervention(prompt)],
+            ["model-a"],
+            [1],
+            endpoint_type="mock",
+        )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert prompts.items_calls == 1
+    if failure_mode == "items_overflow":
+        assert guarded.reads == limit + 1
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+        json.dumps(exc_info.value.to_dict(), sort_keys=True),
+    )
+    for hidden_text in (secret, "RuntimeError"):
+        assert all(hidden_text not in surface for surface in rendered)
+
+
+@pytest.mark.parametrize("source", ["observed_prompt", "mapped_prompt", "intervention"])
+def test_planner_revalidates_forged_input_models(source: str) -> None:
+    secret = "forged-planner-model-secret"
+    prompt = _prompt("prompt-a")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        if source == "observed_prompt":
+            forged_prompt = prompt.model_copy(update={"split": secret})
+            plan_observed_requests(
+                [forged_prompt],
+                ["model-a"],
+                [1],
+                endpoint_type="mock",
+            )
+        elif source == "mapped_prompt":
+            forged_prompt = prompt.model_copy(update={"split": secret})
+            plan_counterfactual_requests(
+                {prompt.prompt_id: forged_prompt},
+                [_intervention(prompt)],
+                ["model-a"],
+                [1],
+                endpoint_type="mock",
+            )
+        else:
+            forged_intervention = _intervention(prompt).model_copy(
+                update={"factor_type": secret}
+            )
+            plan_counterfactual_requests(
+                {prompt.prompt_id: prompt},
+                [forged_intervention],
+                ["model-a"],
+                [1],
+                endpoint_type="mock",
+            )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+        json.dumps(exc_info.value.to_dict(), sort_keys=True),
+    )
+    for hidden_text in (secret, "ValidationError"):
+        assert all(hidden_text not in surface for surface in rendered)

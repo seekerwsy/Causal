@@ -1,5 +1,9 @@
-from collections.abc import Iterable, Mapping
-from typing import Literal
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from itertools import islice
+from typing import Literal, TypeVar
+
+from pydantic import BaseModel
 
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
 from secaware.schema.common import SCHEMA_VERSION
@@ -15,17 +19,125 @@ from secaware.schema.records import PromptRecord
 
 EndpointType = Literal["mock", "offline", "chat_completions"]
 ParameterInput = GenerationParameters | Mapping[str, JSONValue] | None
+MAX_GENERATION_AXIS_ITEMS = 10_000
+MAX_GENERATION_REQUESTS = 100_000
+
+
+_Input = TypeVar("_Input")
+_Snapshot = TypeVar("_Snapshot")
+_Model = TypeVar("_Model", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class _PromptSnapshot:
+    prompt_id: str
+    prompt: str
+    language: str
+
+
+@dataclass(frozen=True)
+class _InterventionSnapshot:
+    prompt_id: str
+    hypothesis_id: str
+    intervention_id: str
+    counterfactual_prompt: str
 
 
 def _planner_error(code: ErrorCode, message: str) -> SecAwareError:
     return SecAwareError(code=code, stage="generation-planner", message=message)
 
 
+def _bounded_snapshots(
+    values: Iterable[_Input],
+    *,
+    code: ErrorCode,
+    message: str,
+    snapshot: Callable[[_Input], _Snapshot],
+) -> list[_Snapshot]:
+    snapshots: list[_Snapshot] = []
+    exceeded = False
+    try:
+        for index, value in enumerate(islice(values, MAX_GENERATION_AXIS_ITEMS + 1)):
+            if index == MAX_GENERATION_AXIS_ITEMS:
+                exceeded = True
+                break
+            snapshots.append(snapshot(value))
+    except Exception:
+        pass
+    else:
+        if not exceeded:
+            return snapshots
+    raise _planner_error(code, message)
+
+
+def _revalidated_model(value: object, model: type[_Model]) -> _Model:
+    if not isinstance(value, model):
+        raise TypeError("unexpected generation input model")
+    snapshot = value.model_dump(  # type: ignore[attr-defined]
+        mode="python",
+        round_trip=True,
+        warnings=False,
+    )
+    return model.model_validate(snapshot)
+
+
+def _model_id_snapshot(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("invalid model id")
+    return str(value)
+
+
+def _seed_snapshot(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("invalid seed")
+    return int(value)
+
+
+def _prompt_snapshot(value: object) -> _PromptSnapshot:
+    prompt = _revalidated_model(value, PromptRecord)
+    if not prompt.prompt_id.strip() or not prompt.prompt.strip() or not prompt.language.strip():
+        raise ValueError("invalid prompt")
+    return _PromptSnapshot(
+        prompt_id=prompt.prompt_id,
+        prompt=prompt.prompt,
+        language=prompt.language,
+    )
+
+
+def _intervention_snapshot(value: object) -> _InterventionSnapshot:
+    intervention = _revalidated_model(value, InterventionRecord)
+    identifiers = (
+        intervention.prompt_id,
+        intervention.hypothesis_id,
+        intervention.intervention_id,
+    )
+    if any(not identifier.strip() for identifier in identifiers):
+        raise ValueError("invalid intervention")
+    if not intervention.counterfactual_prompt.strip():
+        raise ValueError("invalid intervention")
+    return _InterventionSnapshot(
+        prompt_id=intervention.prompt_id,
+        hypothesis_id=intervention.hypothesis_id,
+        intervention_id=intervention.intervention_id,
+        counterfactual_prompt=intervention.counterfactual_prompt,
+    )
+
+
 def _validated_grid(
     models: Iterable[str], seeds: Iterable[int]
 ) -> tuple[list[str], list[int]]:
-    model_values = list(models)
-    seed_values = list(seeds)
+    model_values = _bounded_snapshots(
+        models,
+        code=ErrorCode.CONFIG,
+        message="generation model axis failed validation",
+        snapshot=_model_id_snapshot,
+    )
+    seed_values = _bounded_snapshots(
+        seeds,
+        code=ErrorCode.CONFIG,
+        message="generation seed axis failed validation",
+        snapshot=_seed_snapshot,
+    )
     if not model_values:
         raise _planner_error(ErrorCode.CONFIG, "generation models must not be empty")
     if len(set(model_values)) != len(model_values):
@@ -37,8 +149,15 @@ def _validated_grid(
     return sorted(model_values), sorted(seed_values)
 
 
-def _validated_observed_prompts(prompts: Iterable[PromptRecord]) -> list[PromptRecord]:
-    prompt_values = list(prompts)
+def _validated_observed_prompts(
+    prompts: Iterable[PromptRecord],
+) -> list[_PromptSnapshot]:
+    prompt_values = _bounded_snapshots(
+        prompts,
+        code=ErrorCode.CONTRACT,
+        message="observed prompt collection failed validation",
+        snapshot=_prompt_snapshot,
+    )
     if not prompt_values:
         raise _planner_error(ErrorCode.CONTRACT, "observed prompt collection must not be empty")
     prompt_ids = [prompt.prompt_id for prompt in prompt_values]
@@ -49,8 +168,13 @@ def _validated_observed_prompts(prompts: Iterable[PromptRecord]) -> list[PromptR
 
 def _validated_interventions(
     interventions: Iterable[InterventionRecord],
-) -> list[InterventionRecord]:
-    intervention_values = list(interventions)
+) -> list[_InterventionSnapshot]:
+    intervention_values = _bounded_snapshots(
+        interventions,
+        code=ErrorCode.CONTRACT,
+        message="counterfactual intervention collection failed validation",
+        snapshot=_intervention_snapshot,
+    )
     if not intervention_values:
         raise _planner_error(
             ErrorCode.CONTRACT,
@@ -71,12 +195,72 @@ def _validated_interventions(
     return intervention_values
 
 
+def _prompt_mapping_entry_snapshot(
+    entry: tuple[object, object],
+) -> tuple[str, _PromptSnapshot]:
+    key, value = entry
+    if not isinstance(key, str):
+        raise ValueError("invalid prompt mapping key")
+    prompt = _prompt_snapshot(value)
+    if key != prompt.prompt_id:
+        raise ValueError("prompt mapping key mismatch")
+    return key, prompt
+
+
+def _validated_prompt_mapping(
+    prompts_by_id: Mapping[str, PromptRecord],
+) -> dict[str, _PromptSnapshot]:
+    try:
+        entries = prompts_by_id.items()
+    except Exception:
+        pass
+    else:
+        snapshots = _bounded_snapshots(
+            entries,
+            code=ErrorCode.CONTRACT,
+            message="counterfactual prompt mapping failed validation",
+            snapshot=_prompt_mapping_entry_snapshot,
+        )
+        result: dict[str, _PromptSnapshot] = {}
+        for key, prompt in snapshots:
+            if key in result:
+                raise _planner_error(
+                    ErrorCode.CONTRACT,
+                    "counterfactual prompt mapping failed validation",
+                )
+            result[key] = prompt
+        return result
+    raise _planner_error(
+        ErrorCode.CONTRACT,
+        "counterfactual prompt mapping failed validation",
+    )
+
+
+def _ensure_request_capacity(*axis_sizes: int) -> None:
+    request_count = 1
+    for size in axis_sizes:
+        request_count *= size
+    if request_count > MAX_GENERATION_REQUESTS:
+        raise _planner_error(
+            ErrorCode.CONFIG,
+            "generation request count exceeds the configured safety limit",
+        )
+
+
 def _parameters(value: ParameterInput) -> GenerationParameters:
     if value is None:
         return GenerationParameters()
-    if isinstance(value, GenerationParameters):
-        return GenerationParameters.model_validate({"values": value.values})
-    return GenerationParameters(values=dict(value))
+    try:
+        snapshot_source = value.values if isinstance(value, GenerationParameters) else value
+        validated = GenerationParameters.model_validate({"values": snapshot_source})
+    except Exception:
+        pass
+    else:
+        return validated
+    raise _planner_error(
+        ErrorCode.CONTRACT,
+        "generation parameters failed validation",
+    )
 
 
 def _record(
@@ -162,6 +346,11 @@ def plan_observed_requests(
 ) -> list[GenerationRequestRecord]:
     prompt_values = _validated_observed_prompts(prompts)
     model_values, seed_values = _validated_grid(models, seeds)
+    _ensure_request_capacity(
+        len(prompt_values),
+        len(model_values),
+        len(seed_values),
+    )
     parameter_values = _parameters(parameters)
     system_template_sha256 = sha256_text(system_template)
     records = [
@@ -208,13 +397,19 @@ def plan_counterfactual_requests(
     system_template: str = "",
     system_template_version: str = "none",
 ) -> list[GenerationRequestRecord]:
+    prompt_values_by_id = _validated_prompt_mapping(prompts_by_id)
     intervention_values = _validated_interventions(interventions)
     model_values, seed_values = _validated_grid(models, seeds)
+    _ensure_request_capacity(
+        len(intervention_values),
+        len(model_values),
+        len(seed_values),
+    )
     parameter_values = _parameters(parameters)
     system_template_sha256 = sha256_text(system_template)
     records: list[GenerationRequestRecord] = []
     for intervention in intervention_values:
-        prompt = prompts_by_id.get(intervention.prompt_id)
+        prompt = prompt_values_by_id.get(intervention.prompt_id)
         if prompt is None:
             raise _planner_error(
                 ErrorCode.CONTRACT,
