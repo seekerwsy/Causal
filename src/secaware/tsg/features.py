@@ -1,0 +1,2 @@
+FACTOR_FEATURE_PREFIX = "factor."
+MOTIF_FEATURE_PREFIX = "motif."

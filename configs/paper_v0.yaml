@@ -1,0 +1,51 @@
+run:
+  name: paper_v0
+  random_seed: 123
+  output_dir: runs/paper_v0
+
+data:
+  prompts_path: data/examples/prompts_demo.jsonl
+
+tsg:
+  prompt_extractor: rule_based_v0
+  code_extractor: python_ast_v0
+
+discovery:
+  min_support_total: 20
+  min_support_each_side: 5
+  top_k_per_scope: 3
+  score_weights:
+    association: 0.35
+    path: 0.35
+    targetability: 0.15
+    stability: 0.15
+    nuisance_penalty: 0.20
+
+intervention:
+  enabled_directions:
+    - risk_down
+  max_hypotheses: 5
+  allow_side_effects_for_directional: true
+
+generation:
+  provider: mock
+  models:
+    - mock-secaware-v0
+  seeds:
+    - 1
+    - 2
+
+oracle:
+  language: python
+  policy_name: python_static_v0
+  use_lightweight_rules: true
+  use_bandit: false
+  use_semgrep: false
+  fail_on_parse_error: true
+
+analysis:
+  bootstrap_samples: 1000
+  ci_level: 0.95
+  min_eligible_pairs: 20
+  min_flip_rate: 0.05
+  max_side_effect_rate_confirmed: 0.10
