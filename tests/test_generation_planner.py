@@ -83,6 +83,8 @@ def _assert_parameters_rejected_without_echoing(
         str(exc_info.value),
         "".join(traceback.format_exception(exc_info.value)),
     )
+    assert all("input_value" not in surface for surface in rendered)
+    assert all("canonical v1 contract" in surface for surface in rendered)
     for text in hidden_text:
         assert all(text not in surface for surface in rendered)
 
@@ -134,6 +136,24 @@ def test_generation_request_record_rejects_invalid_contract_fields(
 ) -> None:
     with pytest.raises(ValidationError):
         GenerationRequestRecord.model_validate(_record_values(**{field: invalid_value}))
+
+
+@pytest.mark.parametrize("unknown_key", ["auth", "unknownProviderOption"])
+def test_generation_request_record_hides_invalid_nested_parameter_input(
+    unknown_key: str,
+) -> None:
+    secret = "nested-record-provider-secret"
+    payload = _record_values(parameters={"values": {unknown_key: secret}})
+
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationRequestRecord.model_validate(payload)
+
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+    )
+    for hidden_text in (unknown_key, secret, "input_value"):
+        assert all(hidden_text not in surface for surface in rendered)
 
 
 def test_generation_parameters_default_empty() -> None:
@@ -222,6 +242,60 @@ def test_generation_parameters_reject_nested_or_non_string_list_values_without_l
 )
 def test_generation_parameters_reject_boolean_numeric_values(numeric_key: str) -> None:
     _assert_parameters_rejected_without_echoing({numeric_key: True}, "True")
+
+
+@pytest.mark.parametrize(
+    ("parameter_name", "invalid_value", "hidden_text"),
+    [
+        ("temperature", "wrong-temperature-value", "wrong-temperature-value"),
+        ("top_p", None, "None"),
+        ("frequency_penalty", "wrong-frequency-value", "wrong-frequency-value"),
+        ("presence_penalty", None, "None"),
+        ("max_tokens", None, "None"),
+        ("max_tokens", 0, None),
+        ("max_completion_tokens", -1, None),
+        ("max_output_tokens", 1.5, None),
+        ("n", 0, None),
+        ("seed", 1.25, None),
+        ("top_logprobs", -1, None),
+        ("logprobs", "wrong-logprobs-value", "wrong-logprobs-value"),
+        ("logprobs", 7, None),
+        ("stop", 42, None),
+        ("reasoning_effort", "", None),
+        ("reasoning_effort", "   ", None),
+        ("reasoning_effort", 7, None),
+        ("verbosity", "", None),
+        ("verbosity", None, "None"),
+    ],
+)
+def test_generation_parameters_enforce_key_specific_types_without_leaking(
+    parameter_name: str,
+    invalid_value: object,
+    hidden_text: str | None,
+) -> None:
+    hidden = () if hidden_text is None else (hidden_text,)
+    _assert_parameters_rejected_without_echoing(
+        {parameter_name: invalid_value},
+        *hidden,
+    )
+
+
+@pytest.mark.parametrize(
+    ("parameter_name", "valid_value"),
+    [
+        ("temperature", 1),
+        ("seed", -1),
+        ("top_logprobs", 0),
+        ("stop", "END"),
+    ],
+)
+def test_generation_parameters_accept_type_boundaries(
+    parameter_name: str,
+    valid_value: object,
+) -> None:
+    parameters = GenerationParameters(values={parameter_name: valid_value})
+
+    assert parameters.values == {parameter_name: valid_value}
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

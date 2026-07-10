@@ -9,57 +9,59 @@ from secaware.schema.common import StrictModel, VersionedModel
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
-_V1_PARAMETER_KEYS = frozenset(
+_FINITE_NUMBER_PARAMETER_KEYS = frozenset(
     {
         "temperature",
         "top_p",
-        "max_tokens",
-        "max_completion_tokens",
-        "max_output_tokens",
-        "seed",
-        "stop",
         "frequency_penalty",
         "presence_penalty",
-        "n",
-        "logprobs",
-        "top_logprobs",
-        "reasoning_effort",
-        "verbosity",
     }
 )
-_NUMERIC_PARAMETER_KEYS = frozenset(
-    {
-        "temperature",
-        "top_p",
-        "max_tokens",
-        "max_completion_tokens",
-        "max_output_tokens",
-        "seed",
-        "frequency_penalty",
-        "presence_penalty",
-        "n",
-        "top_logprobs",
-    }
+_POSITIVE_INTEGER_PARAMETER_KEYS = frozenset(
+    {"max_tokens", "max_completion_tokens", "max_output_tokens", "n"}
+)
+_INTEGER_PARAMETER_KEYS = frozenset({"seed"})
+_NONNEGATIVE_INTEGER_PARAMETER_KEYS = frozenset({"top_logprobs"})
+_BOOLEAN_PARAMETER_KEYS = frozenset({"logprobs"})
+_STOP_PARAMETER_KEYS = frozenset({"stop"})
+_NONEMPTY_STRING_PARAMETER_KEYS = frozenset({"reasoning_effort", "verbosity"})
+_V1_PARAMETER_KEYS = frozenset().union(
+    _FINITE_NUMBER_PARAMETER_KEYS,
+    _POSITIVE_INTEGER_PARAMETER_KEYS,
+    _INTEGER_PARAMETER_KEYS,
+    _NONNEGATIVE_INTEGER_PARAMETER_KEYS,
+    _BOOLEAN_PARAMETER_KEYS,
+    _STOP_PARAMETER_KEYS,
+    _NONEMPTY_STRING_PARAMETER_KEYS,
 )
 _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical v1 contract"
 
 
-def _is_canonical_scalar(value: object) -> bool:
-    if value is None or isinstance(value, (str, bool, int)):
-        return True
-    if isinstance(value, float):
-        return math.isfinite(value)
-    return False
+def _is_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _is_allowed_parameter_value(key: str, value: object) -> bool:
-    if key in _NUMERIC_PARAMETER_KEYS and isinstance(value, bool):
-        return False
-    if _is_canonical_scalar(value):
-        return True
-    return key == "stop" and isinstance(value, list) and all(
-        isinstance(item, str) for item in value
-    )
+    if key in _FINITE_NUMBER_PARAMETER_KEYS:
+        return not isinstance(value, bool) and (
+            isinstance(value, int)
+            or (isinstance(value, float) and math.isfinite(value))
+        )
+    if key in _POSITIVE_INTEGER_PARAMETER_KEYS:
+        return _is_integer(value) and value > 0
+    if key in _INTEGER_PARAMETER_KEYS:
+        return _is_integer(value)
+    if key in _NONNEGATIVE_INTEGER_PARAMETER_KEYS:
+        return _is_integer(value) and value >= 0
+    if key in _BOOLEAN_PARAMETER_KEYS:
+        return isinstance(value, bool)
+    if key in _STOP_PARAMETER_KEYS:
+        return isinstance(value, str) or (
+            isinstance(value, list) and all(isinstance(item, str) for item in value)
+        )
+    if key in _NONEMPTY_STRING_PARAMETER_KEYS:
+        return isinstance(value, str) and bool(value.strip())
+    return False
 
 
 class GenerationParameters(StrictModel):
@@ -80,6 +82,8 @@ class GenerationParameters(StrictModel):
 
 
 class GenerationRequestRecord(VersionedModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     schema_version: Literal["1.0"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     condition: Literal["observed", "counterfactual"]
