@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Iterable, TypeVar
+from typing import Iterable, TextIO, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -133,18 +133,27 @@ def _serialize_record(
     ) from None
 
 
-def write_jsonl(
-    path: str | Path,
-    records: Iterable[BaseModel | dict],
-    *,
-    stage: str = "io",
-) -> None:
-    path = Path(path)
-    temp_path: Path | None = None
-    write_error: SecAwareError | None = None
+def _write_contract_error(*, path: Path, stage: str) -> SecAwareError:
+    return _contract_error(
+        stage=stage,
+        message="JSONL artifact could not be written",
+        path=path,
+    )
+
+
+def _ensure_parent(path: Path, *, stage: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
+    except OSError:
+        pass
+    else:
+        return
+    raise _write_contract_error(path=path, stage=stage) from None
+
+
+def _open_temporary_file(path: Path, *, stage: str) -> TextIO:
+    try:
+        return tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
             newline="\n",
@@ -152,8 +161,56 @@ def write_jsonl(
             suffix=".tmp",
             dir=path.parent,
             delete=False,
-        ) as handle:
-            temp_path = Path(handle.name)
+        )
+    except OSError:
+        pass
+    raise _write_contract_error(path=path, stage=stage) from None
+
+
+def _write_line(handle: TextIO, serialized: str, *, path: Path, stage: str) -> None:
+    try:
+        handle.write(serialized)
+        handle.write("\n")
+    except OSError:
+        pass
+    else:
+        return
+    raise _write_contract_error(path=path, stage=stage) from None
+
+
+def _flush_and_sync(handle: TextIO, *, path: Path, stage: str) -> None:
+    try:
+        handle.flush()
+        os.fsync(handle.fileno())
+    except OSError:
+        pass
+    else:
+        return
+    raise _write_contract_error(path=path, stage=stage) from None
+
+
+def _replace_file(temp_path: Path, path: Path, *, stage: str) -> None:
+    try:
+        os.replace(temp_path, path)
+    except OSError:
+        pass
+    else:
+        return
+    raise _write_contract_error(path=path, stage=stage) from None
+
+
+def write_jsonl(
+    path: str | Path,
+    records: Iterable[BaseModel | dict],
+    *,
+    stage: str = "io",
+) -> None:
+    path = Path(path)
+    _ensure_parent(path, stage=stage)
+    handle = _open_temporary_file(path, stage=stage)
+    temp_path = Path(handle.name)
+    try:
+        with handle:
             for line_number, record in enumerate(records, start=1):
                 serialized = _serialize_record(
                     record,
@@ -161,22 +218,11 @@ def write_jsonl(
                     line=line_number,
                     stage=stage,
                 )
-                handle.write(serialized)
-                handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, path)
-    except OSError:
-        write_error = _contract_error(
-            stage=stage,
-            message="JSONL artifact could not be written",
-            path=path,
-        )
+                _write_line(handle, serialized, path=path, stage=stage)
+            _flush_and_sync(handle, path=path, stage=stage)
+        _replace_file(temp_path, path, stage=stage)
     finally:
-        if temp_path is not None:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-    if write_error is not None:
-        raise write_error from None
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass

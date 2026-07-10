@@ -14,6 +14,10 @@ class ExampleRecord(BaseModel):
     value: int
 
 
+class SourceIterationError(OSError):
+    pass
+
+
 def test_read_jsonl_keeps_missing_files_optional_by_default(tmp_path: Path) -> None:
     assert read_jsonl(
         tmp_path / "missing.jsonl",
@@ -156,6 +160,34 @@ def test_write_jsonl_failure_preserves_target_and_removes_temporary_file(
     assert list(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.parametrize(
+    "source_error",
+    [
+        FileNotFoundError("source artifact disappeared"),
+        SourceIterationError("source iterator failed"),
+    ],
+)
+def test_write_jsonl_preserves_source_iterator_os_errors(
+    tmp_path: Path,
+    source_error: OSError,
+) -> None:
+    path = tmp_path / "records.jsonl"
+    original = '{"old": true}\n'
+    path.write_text(original, encoding="utf-8")
+
+    def failing_records():
+        yield {"value": 1}
+        raise source_error
+
+    with pytest.raises(type(source_error)) as exc_info:
+        write_jsonl(path, failing_records(), stage="generation")
+
+    assert exc_info.value is source_error
+    assert str(exc_info.value) == str(source_error)
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_write_jsonl_replace_failure_preserves_target_and_removes_temp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -169,9 +201,13 @@ def test_write_jsonl_replace_failure_preserves_target_and_removes_temp(
 
     monkeypatch.setattr(jsonl.os, "replace", fail_replace)
 
-    with pytest.raises(Exception):
+    with pytest.raises(SecAwareError) as exc_info:
         write_jsonl(path, [{"value": 2}], stage="generation")
 
+    error = exc_info.value
+    assert error.code is ErrorCode.CONTRACT
+    assert error.stage == "generation"
+    assert error.details == {"path": str(path)}
     assert path.read_text(encoding="utf-8") == original
     assert list(tmp_path.iterdir()) == [path]
 

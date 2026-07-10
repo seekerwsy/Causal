@@ -3,7 +3,9 @@ import math
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from secaware.pipeline import manifest as manifest_module
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
 from secaware.pipeline.manifest import (
     StageManifest,
@@ -131,6 +133,11 @@ def test_stage_manifest_normalizes_input_and_output_paths() -> None:
     assert manifest.outputs == [Path("reports/summary.json").as_posix()]
 
 
+def test_stage_manifest_requires_at_least_one_output() -> None:
+    with pytest.raises(ValidationError):
+        _manifest(fingerprint="fingerprint", outputs=[])
+
+
 def test_stage_manifest_round_trips_through_atomic_write(tmp_path: Path) -> None:
     output = tmp_path / "out.jsonl"
     output.write_text("ready\n", encoding="utf-8")
@@ -182,3 +189,25 @@ def test_manifest_allows_skip_rejects_missing_invalid_or_wrong_outputs(
         _manifest(fingerprint="expected", outputs=[other_output]),
     )
     assert manifest_allows_skip(invalid_manifest, "expected", [expected_output]) is False
+
+
+def test_manifest_allows_skip_rejects_an_empty_output_path_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unsafe_manifest = StageManifest.model_construct(
+        schema_version="1.0",
+        stage="discovery",
+        fingerprint="expected",
+        inputs={"inputs/prompts.jsonl": "input-sha"},
+        config_sha256="config-sha",
+        code_version="test-version",
+        outputs=[],
+    )
+    monkeypatch.setattr(
+        manifest_module,
+        "read_stage_manifest",
+        lambda path: unsafe_manifest,
+    )
+
+    assert manifest_allows_skip(tmp_path / "manifest.json", "expected", []) is False

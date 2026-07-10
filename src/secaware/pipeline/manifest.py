@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 from secaware.pipeline.artifact import _atomic_write_text, canonical_sha256
 from secaware.schema.common import VersionedModel
@@ -20,7 +20,7 @@ class StageManifest(VersionedModel):
     inputs: dict[str, str]
     config_sha256: str
     code_version: str
-    outputs: list[str]
+    outputs: list[str] = Field(min_length=1)
 
     @field_validator("inputs", mode="before")
     @classmethod
@@ -79,7 +79,7 @@ def manifest_allows_skip(
     *,
     force: bool = False,
 ) -> bool:
-    if force:
+    if force or not output_paths:
         return False
     try:
         manifest = read_stage_manifest(manifest_path)
