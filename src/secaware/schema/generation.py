@@ -1,5 +1,6 @@
 from collections.abc import Iterator, Mapping, Sequence
 import hashlib
+from itertools import islice
 import json
 import math
 from typing import Any, ClassVar, Literal, TypeVar, cast
@@ -46,6 +47,8 @@ _V1_PARAMETER_KEYS = frozenset().union(
     _STOP_PARAMETER_KEYS,
     _NONEMPTY_STRING_PARAMETER_KEYS,
 )
+MAX_GENERATION_PARAMETER_ITEMS = len(_V1_PARAMETER_KEYS)
+MAX_STOP_PARAMETER_ITEMS = 64
 _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical v1 contract"
 _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation failed"
 
@@ -93,7 +96,7 @@ class _SafeValidationMixin:
     def __init__(self, /, **data: Any) -> None:
         try:
             super().__init__(**data)
-        except ValidationError:
+        except Exception:
             pass
         else:
             return
@@ -107,7 +110,7 @@ class _SafeValidationMixin:
     ) -> _SafeValidationModel:
         try:
             return super().model_validate(obj, **kwargs)
-        except ValidationError:
+        except Exception:
             pass
         raise cls._safe_error()
 
@@ -119,7 +122,7 @@ class _SafeValidationMixin:
     ) -> _SafeValidationModel:
         try:
             return super().model_validate_json(json_data, **kwargs)
-        except ValidationError:
+        except Exception:
             pass
         raise cls._safe_error("json")
 
@@ -131,7 +134,7 @@ class _SafeValidationMixin:
     ) -> _SafeValidationModel:
         try:
             return super().model_validate_strings(obj, **kwargs)
-        except ValidationError:
+        except Exception:
             pass
         raise cls._safe_error()
 
@@ -207,15 +210,64 @@ class _FrozenJSONMapping(Mapping[str, object]):
         return self
 
 
-def _snapshot_json_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {
-            key: _snapshot_json_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, (_FrozenJSONSequence, list)):
-        return [_snapshot_json_value(item) for item in value]
-    return value
+def _snapshot_stop_parameter(value: object) -> str | list[str]:
+    if type(value) is str:
+        return value
+    if not isinstance(value, (_FrozenJSONSequence, list)):
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+
+    snapshot: list[str] = []
+    for index, item in enumerate(islice(value, MAX_STOP_PARAMETER_ITEMS + 1)):
+        if index == MAX_STOP_PARAMETER_ITEMS or type(item) is not str:
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+        snapshot.append(item)
+    return snapshot
+
+
+def _snapshot_parameter_value(key: str, value: object) -> JSONValue:
+    if key in _FINITE_NUMBER_PARAMETER_KEYS:
+        if type(value) is int:
+            return value
+        if type(value) is float and math.isfinite(value):
+            return value
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+    if key in _POSITIVE_INTEGER_PARAMETER_KEYS:
+        if type(value) is int and value > 0:
+            return value
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+    if key in _INTEGER_PARAMETER_KEYS:
+        if type(value) is int:
+            return value
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+    if key in _NONNEGATIVE_INTEGER_PARAMETER_KEYS:
+        if type(value) is int and value >= 0:
+            return value
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+    if key in _BOOLEAN_PARAMETER_KEYS:
+        if type(value) is bool:
+            return value
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+    if key in _STOP_PARAMETER_KEYS:
+        return _snapshot_stop_parameter(value)
+    if key in _NONEMPTY_STRING_PARAMETER_KEYS:
+        if type(value) is str and value.strip():
+            return value
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+    raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+
+
+def _snapshot_v1_parameters(values: object) -> dict[str, JSONValue]:
+    if not isinstance(values, Mapping):
+        raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+
+    snapshot: dict[str, JSONValue] = {}
+    for index, key in enumerate(islice(values, MAX_GENERATION_PARAMETER_ITEMS + 1)):
+        if index == MAX_GENERATION_PARAMETER_ITEMS:
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+        if type(key) is not str or key not in _V1_PARAMETER_KEYS or key in snapshot:
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+        snapshot[key] = _snapshot_parameter_value(key, values[key])
+    return snapshot
 
 
 def _freeze_json(value: object) -> object:
@@ -241,33 +293,6 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _is_integer(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _is_allowed_parameter_value(key: str, value: object) -> bool:
-    if key in _FINITE_NUMBER_PARAMETER_KEYS:
-        return not isinstance(value, bool) and (
-            isinstance(value, int)
-            or (isinstance(value, float) and math.isfinite(value))
-        )
-    if key in _POSITIVE_INTEGER_PARAMETER_KEYS:
-        return _is_integer(value) and value > 0
-    if key in _INTEGER_PARAMETER_KEYS:
-        return _is_integer(value)
-    if key in _NONNEGATIVE_INTEGER_PARAMETER_KEYS:
-        return _is_integer(value) and value >= 0
-    if key in _BOOLEAN_PARAMETER_KEYS:
-        return isinstance(value, bool)
-    if key in _STOP_PARAMETER_KEYS:
-        return isinstance(value, str) or (
-            isinstance(value, list) and all(isinstance(item, str) for item in value)
-        )
-    if key in _NONEMPTY_STRING_PARAMETER_KEYS:
-        return isinstance(value, str) and bool(value.strip())
-    return False
-
-
 class GenerationParameters(_SafeValidationMixin, StrictModel):
     _safe_validation_message = _INVALID_PARAMETERS_MESSAGE
 
@@ -283,20 +308,10 @@ class GenerationParameters(_SafeValidationMixin, StrictModel):
     @field_validator("values", mode="before")
     @classmethod
     def validate_v1_parameters(cls, values: object) -> object:
-        if not isinstance(values, Mapping):
-            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
         try:
-            snapshot = cast(dict[str, JSONValue], _snapshot_json_value(values))
+            return _snapshot_v1_parameters(values)
         except Exception:
             raise ValueError(_INVALID_PARAMETERS_MESSAGE) from None
-        if any(not isinstance(key, str) or key not in _V1_PARAMETER_KEYS for key in snapshot):
-            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
-        if any(
-            not _is_allowed_parameter_value(key, value)
-            for key, value in snapshot.items()
-        ):
-            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
-        return snapshot
 
     @field_validator("values")
     @classmethod

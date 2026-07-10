@@ -4,7 +4,7 @@ import json
 import traceback
 
 import pytest
-from pydantic import ValidationError
+from pydantic import ValidationError, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation import request_planner
@@ -14,6 +14,7 @@ from secaware.generation.request_planner import (
     sha256_text,
 )
 from secaware.pipeline.artifact import canonical_sha256
+from secaware.schema import generation as generation_schema
 from secaware.schema.generation import GenerationParameters, GenerationRequestRecord
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.interventions import InterventionRecord
@@ -74,6 +75,20 @@ class GuardedInfiniteIterator:
         if self.reads > self.maximum_reads:
             raise RuntimeError("unbounded-materialization-overread-secret")
         return self.factory(self.reads)
+
+
+def _valid_parameter_value(key: str) -> object:
+    if key in {"temperature", "top_p", "frequency_penalty", "presence_penalty"}:
+        return 0.0
+    if key in {"max_tokens", "max_completion_tokens", "max_output_tokens", "n"}:
+        return 1
+    if key in {"seed", "top_logprobs"}:
+        return 0
+    if key == "logprobs":
+        return False
+    if key == "stop":
+        return "END"
+    return "low"
 
 
 def _expected_request_id(values: dict[str, object]) -> str:
@@ -234,6 +249,86 @@ def test_generation_request_public_validation_errors_are_fully_sanitized(
         expected_message="generation request integrity validation failed",
         hidden_text=(sensitive_key, secret),
     )
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["constructor", "model_validate", "model_validate_json", "model_validate_strings"],
+)
+def test_generation_validation_mixin_sanitizes_runtime_errors(
+    entrypoint: str,
+) -> None:
+    secret = "validation-runtime-encode-secret"
+
+    class ExplodingText(str):
+        def encode(self, *args: object, **kwargs: object) -> bytes:
+            raise RuntimeError(secret)
+
+    class ExplodingParameters(GenerationParameters):
+        @model_validator(mode="before")
+        @classmethod
+        def raise_runtime_error(cls, value: object) -> object:
+            ExplodingText("value").encode()
+            return value
+
+    with pytest.raises(ValidationError) as exc_info:
+        if entrypoint == "constructor":
+            ExplodingParameters(values={})
+        elif entrypoint == "model_validate":
+            ExplodingParameters.model_validate({"values": {}})
+        elif entrypoint == "model_validate_json":
+            ExplodingParameters.model_validate_json('{"values": {}}')
+        else:
+            ExplodingParameters.model_validate_strings({"values": {}})
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=(secret, "RuntimeError"),
+    )
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["constructor", "model_validate", "model_validate_strings"],
+)
+def test_generation_parameters_reject_hostile_string_subclasses_safely(
+    entrypoint: str,
+) -> None:
+    secret = "validation-runtime-strip-secret"
+
+    class ExplodingText(str):
+        def strip(self, *args: object, **kwargs: object) -> str:
+            raise RuntimeError(secret)
+
+    payload = {"values": {"reasoning_effort": ExplodingText("medium")}}
+    with pytest.raises(ValidationError) as exc_info:
+        if entrypoint == "constructor":
+            GenerationParameters(**payload)
+        elif entrypoint == "model_validate":
+            GenerationParameters.model_validate(payload)
+        else:
+            GenerationParameters.model_validate_strings(payload)
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=(secret, "RuntimeError"),
+    )
+
+
+@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+def test_generation_validation_mixin_does_not_swallow_base_exceptions(
+    signal: type[BaseException],
+) -> None:
+    class InterruptingParameters(GenerationParameters):
+        @model_validator(mode="before")
+        @classmethod
+        def interrupt(cls, value: object) -> object:
+            raise signal()
+
+    with pytest.raises(signal):
+        InterruptingParameters.model_validate({"values": {}})
 
 
 def test_generation_request_record_requires_explicit_supported_version() -> None:
@@ -427,6 +522,133 @@ def test_generation_parameters_snapshot_nested_containers_before_validation() ->
     assert secret not in parameters.model_dump_json()
 
 
+def test_generation_parameters_bound_top_level_mapping_consumption() -> None:
+    known_keys = sorted(generation_schema._V1_PARAMETER_KEYS)
+    limit = len(known_keys)
+
+    class GuardedParameterMapping(Mapping[str, object]):
+        def __init__(self) -> None:
+            self.key_reads = 0
+            self.value_reads = 0
+
+        def __iter__(self) -> Iterator[str]:
+            for key in known_keys:
+                self.key_reads += 1
+                yield key
+            self.key_reads += 1
+            yield "overflow-unknown-key"
+            raise RuntimeError("parameter-mapping-overread-secret")
+
+        def __getitem__(self, key: str) -> object:
+            self.value_reads += 1
+            return _valid_parameter_value(key)
+
+        def __len__(self) -> int:
+            return 10_000
+
+    source = GuardedParameterMapping()
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationParameters(values=source)
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=("parameter-mapping-overread-secret",),
+    )
+    assert source.key_reads == limit + 1
+    assert source.value_reads == limit
+
+
+def test_generation_parameters_reject_unknown_key_without_reading_its_value() -> None:
+    secret = "unknown-parameter-value-read-secret"
+
+    class UnknownKeyMapping(Mapping[str, object]):
+        def __init__(self) -> None:
+            self.value_reads = 0
+
+        def __iter__(self) -> Iterator[str]:
+            yield "api_key"
+
+        def __getitem__(self, key: str) -> object:
+            self.value_reads += 1
+            raise RuntimeError(secret)
+
+        def __len__(self) -> int:
+            return 1
+
+    source = UnknownKeyMapping()
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationParameters(values=source)
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=("api_key", secret),
+    )
+    assert source.value_reads == 0
+
+
+def test_generation_parameters_bound_stop_list_consumption() -> None:
+    limit = getattr(generation_schema, "MAX_STOP_PARAMETER_ITEMS", 64)
+
+    class GuardedStopList(list[str]):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reads = 0
+
+        def __iter__(self) -> Iterator[str]:
+            while True:
+                self.reads += 1
+                if self.reads > limit + 1:
+                    raise RuntimeError("stop-list-overread-secret")
+                yield "END"
+
+    stop = GuardedStopList()
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationParameters(values={"stop": stop})
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=("stop-list-overread-secret",),
+    )
+    assert stop.reads == limit + 1
+
+
+@pytest.mark.parametrize("source_kind", ["mapping", "stop_list"])
+def test_generation_parameters_sanitize_source_iteration_errors(
+    source_kind: str,
+) -> None:
+    secret = "parameter-source-iteration-secret"
+
+    class RaisingMapping(Mapping[str, object]):
+        def __iter__(self) -> Iterator[str]:
+            yield "temperature"
+
+        def __getitem__(self, key: str) -> object:
+            raise RuntimeError(secret)
+
+        def __len__(self) -> int:
+            return 1
+
+    class RaisingStopList(list[str]):
+        def __iter__(self) -> Iterator[str]:
+            raise RuntimeError(secret)
+
+    values: object = RaisingMapping()
+    if source_kind == "stop_list":
+        values = {"stop": RaisingStopList()}
+
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationParameters.model_validate({"values": values})
+
+    _assert_sanitized_validation_error(
+        exc_info.value,
+        expected_message="generation parameters do not match the canonical v1 contract",
+        hidden_text=(secret, "RuntimeError"),
+    )
+
+
 def test_generation_parameters_do_not_retain_source_container_aliases() -> None:
     source_stop = ["END"]
     source = {"stop": source_stop}
@@ -523,6 +745,32 @@ def test_planner_safely_wraps_parameter_mapping_snapshot_failures() -> None:
         str(error),
         "".join(traceback.format_exception(error)),
         json.dumps(error.to_dict(), sort_keys=True),
+    )
+    for hidden_text in (secret, "RuntimeError"):
+        assert all(hidden_text not in surface for surface in rendered)
+
+
+def test_planner_safely_wraps_hostile_parameter_scalar() -> None:
+    secret = "planner-parameter-strip-secret"
+
+    class ExplodingText(str):
+        def strip(self, *args: object, **kwargs: object) -> str:
+            raise RuntimeError(secret)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_observed_requests(
+            [_prompt("prompt-a")],
+            ["model-a"],
+            [1],
+            endpoint_type="mock",
+            parameters={"reasoning_effort": ExplodingText("medium")},
+        )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+        json.dumps(exc_info.value.to_dict(), sort_keys=True),
     )
     for hidden_text in (secret, "RuntimeError"):
         assert all(hidden_text not in surface for surface in rendered)
@@ -656,6 +904,21 @@ def test_generation_parameters_reject_nested_or_non_string_list_values_without_l
 )
 def test_generation_parameters_reject_boolean_numeric_values(numeric_key: str) -> None:
     _assert_parameters_rejected_without_echoing({numeric_key: True}, "True")
+
+
+@pytest.mark.parametrize(
+    ("parameter_name", "parameter_value"),
+    [
+        ("max_tokens", type("IntegerSubclass", (int,), {})(1)),
+        ("temperature", type("FloatSubclass", (float,), {})(0.2)),
+    ],
+)
+def test_generation_parameters_require_exact_builtin_scalars(
+    parameter_name: str,
+    parameter_value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        GenerationParameters(values={parameter_name: parameter_value})
 
 
 @pytest.mark.parametrize(
