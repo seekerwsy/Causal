@@ -18,6 +18,10 @@ dependencies = [
   "rich>=13",
 ]
 
+[project.scripts]
+secaware = "secaware.cli:app"
+secaware-oracle = "secaware.oracle.cli:app"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
