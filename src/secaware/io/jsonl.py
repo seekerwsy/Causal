@@ -189,6 +189,16 @@ def _flush_and_sync(handle: TextIO, *, path: Path, stage: str) -> None:
     raise _write_contract_error(path=path, stage=stage) from None
 
 
+def _close_temporary_file(handle: TextIO, *, path: Path, stage: str) -> None:
+    try:
+        handle.close()
+    except OSError:
+        pass
+    else:
+        return
+    raise _write_contract_error(path=path, stage=stage) from None
+
+
 def _replace_file(temp_path: Path, path: Path, *, stage: str) -> None:
     try:
         os.replace(temp_path, path)
@@ -210,7 +220,7 @@ def write_jsonl(
     handle = _open_temporary_file(path, stage=stage)
     temp_path = Path(handle.name)
     try:
-        with handle:
+        try:
             for line_number, record in enumerate(records, start=1):
                 serialized = _serialize_record(
                     record,
@@ -220,6 +230,13 @@ def write_jsonl(
                 )
                 _write_line(handle, serialized, path=path, stage=stage)
             _flush_and_sync(handle, path=path, stage=stage)
+        except BaseException:
+            try:
+                handle.close()
+            except OSError:
+                pass
+            raise
+        _close_temporary_file(handle, path=path, stage=stage)
         _replace_file(temp_path, path, stage=stage)
     finally:
         try:

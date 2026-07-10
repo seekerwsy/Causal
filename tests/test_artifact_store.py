@@ -18,6 +18,33 @@ class SourceIterationError(OSError):
     pass
 
 
+class CloseFailingHandle:
+    def __init__(self, path: Path, close_error: OSError) -> None:
+        self.name = str(path)
+        self.close_error = close_error
+        self.close_called = False
+        path.write_text("", encoding="utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
+        self.close()
+
+    def write(self, value: str) -> int:
+        return len(value)
+
+    def flush(self) -> None:
+        return None
+
+    def fileno(self) -> int:
+        return 123
+
+    def close(self) -> None:
+        self.close_called = True
+        raise self.close_error
+
+
 def test_read_jsonl_keeps_missing_files_optional_by_default(tmp_path: Path) -> None:
     assert read_jsonl(
         tmp_path / "missing.jsonl",
@@ -184,6 +211,62 @@ def test_write_jsonl_preserves_source_iterator_os_errors(
 
     assert exc_info.value is source_error
     assert str(exc_info.value) == str(source_error)
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_write_jsonl_wraps_close_error_after_successful_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "records.jsonl"
+    original = '{"old": true}\n'
+    path.write_text(original, encoding="utf-8")
+    temp_path = tmp_path / ".records.jsonl.controlled.tmp"
+    close_error = OSError("sensitive close failure")
+    handle = CloseFailingHandle(temp_path, close_error)
+    monkeypatch.setattr(jsonl.tempfile, "NamedTemporaryFile", lambda **kwargs: handle)
+    monkeypatch.setattr(jsonl.os, "fsync", lambda file_descriptor: None)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        write_jsonl(path, [{"value": 1}], stage="generation")
+
+    error = exc_info.value
+    assert error.code is ErrorCode.CONTRACT
+    assert error.stage == "generation"
+    assert error.details == {"path": str(path)}
+    _assert_error_surfaces_are_safe(
+        error,
+        sensitive_values=[str(close_error), "OSError"],
+    )
+    assert handle.close_called is True
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_write_jsonl_suppresses_close_error_while_preserving_body_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "records.jsonl"
+    original = '{"old": true}\n'
+    path.write_text(original, encoding="utf-8")
+    temp_path = tmp_path / ".records.jsonl.controlled.tmp"
+    handle = CloseFailingHandle(temp_path, OSError("close must not replace body error"))
+    monkeypatch.setattr(jsonl.tempfile, "NamedTemporaryFile", lambda **kwargs: handle)
+    monkeypatch.setattr(jsonl.os, "fsync", lambda file_descriptor: None)
+    source_error = SourceIterationError("source iterator identity must survive")
+
+    def failing_records():
+        yield {"value": 1}
+        raise source_error
+
+    with pytest.raises(SourceIterationError) as exc_info:
+        write_jsonl(path, failing_records(), stage="generation")
+
+    assert exc_info.value is source_error
+    assert str(exc_info.value) == "source iterator identity must survive"
+    assert handle.close_called is True
     assert path.read_text(encoding="utf-8") == original
     assert list(tmp_path.iterdir()) == [path]
 
