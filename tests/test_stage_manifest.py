@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from secaware.pipeline import artifact as artifact_module
 from secaware.pipeline import manifest as manifest_module
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
 from secaware.pipeline.manifest import (
@@ -34,6 +35,39 @@ def test_sha256_file_hashes_file_bytes(tmp_path: Path) -> None:
     path.write_bytes(payload)
 
     assert sha256_file(path) == hashlib.sha256(payload).hexdigest()
+
+
+def test_sha256_path_uses_file_hash_for_a_regular_file(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"artifact-bytes")
+
+    assert artifact_module.sha256_path(path) == sha256_file(path)
+
+
+def test_sha256_path_has_a_stable_empty_directory_hash(tmp_path: Path) -> None:
+    first = tmp_path / "first-empty"
+    second = tmp_path / "second-empty"
+    first.mkdir()
+    second.mkdir()
+
+    assert artifact_module.sha256_path(first) == artifact_module.sha256_path(second)
+
+
+def test_sha256_path_hashes_recursive_relative_paths_and_file_contents(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    (first / "nested").mkdir(parents=True)
+    (second / "nested").mkdir(parents=True)
+    (first / "z.py").write_text("z = 1\n", encoding="utf-8")
+    (first / "nested" / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (second / "nested" / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (second / "z.py").write_text("z = 1\n", encoding="utf-8")
+
+    baseline = artifact_module.sha256_path(first)
+
+    assert artifact_module.sha256_path(second) == baseline
+    (second / "nested" / "a.py").write_text("a = 2\n", encoding="utf-8")
+    assert artifact_module.sha256_path(second) != baseline
 
 
 def test_canonical_sha256_is_stable_for_mapping_order() -> None:

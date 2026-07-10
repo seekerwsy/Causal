@@ -1,9 +1,11 @@
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import Field, ValidationError
 
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import StrictModel
 
 
@@ -70,14 +72,34 @@ class AppConfig(StrictModel):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
 
 
+def _config_error(path: Path) -> SecAwareError:
+    return SecAwareError(
+        code=ErrorCode.CONFIG,
+        stage="config",
+        message="configuration could not be loaded",
+        details={"path": str(path)},
+        retryable=False,
+    )
+
+
 def load_config(path: str | Path, *, run_dir: str | Path | None = None) -> AppConfig:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        raw: dict[str, Any] = yaml.safe_load(handle)
-    if run_dir is not None:
-        raw = dict(raw)
-        raw["run"] = dict(raw.get("run", {}))
-        raw["run"]["output_dir"] = str(run_dir)
-    return AppConfig.model_validate(raw)
+    config_path = Path(path)
+    try:
+        with config_path.open("r", encoding="utf-8") as handle:
+            raw: Any = yaml.safe_load(handle)
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise _config_error(config_path) from None
+    if not isinstance(raw, Mapping):
+        raise _config_error(config_path) from None
+    try:
+        config = AppConfig.model_validate(dict(raw))
+        if run_dir is not None:
+            resolved = config.model_dump(mode="json")
+            resolved["run"]["output_dir"] = str(run_dir)
+            config = AppConfig.model_validate(resolved)
+    except ValidationError:
+        raise _config_error(config_path) from None
+    return config
 
 
 def write_resolved_config(config: AppConfig, path: str | Path) -> None:

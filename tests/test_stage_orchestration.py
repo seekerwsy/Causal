@@ -1,13 +1,17 @@
+import os
 from pathlib import Path
 
 import pytest
 
 from secaware import __version__
+from secaware.cli import generate_observed_stage
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
 from secaware.pipeline.manifest import read_stage_manifest
+from secaware.schema.records import GeneratedCodeRecord, PromptRecord
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +36,38 @@ def _input_and_output(store: RunStore) -> tuple[Path, Path]:
     input_path.write_text("input-v1\n", encoding="utf-8")
     output_path.write_text("output-v1\n", encoding="utf-8")
     return input_path, output_path
+
+
+def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig, RunStore]:
+    prompts_path = tmp_path / "source-prompts.jsonl"
+    write_jsonl(
+        prompts_path,
+        [
+            PromptRecord(
+                prompt_id="prompt-1",
+                split="discover",
+                language="python",
+                task_family="path_handling",
+                cwe="CWE-22",
+                prompt="write a helper",
+            )
+        ],
+    )
+    config = AppConfig.model_validate(
+        {
+            "run": {"name": "file-provider", "output_dir": str(tmp_path / "run")},
+            "data": {"prompts_path": str(prompts_path)},
+            "generation": {
+                "provider": "file",
+                "models": ["model-a"],
+                "seeds": [7],
+                "file_provider_dir": str(provider_dir),
+            },
+        }
+    )
+    store = RunStore(config)
+    store.prepare()
+    return config, store
 
 
 def test_mkdirs_creates_private_stage_manifest_directory(tmp_path: Path) -> None:
@@ -68,9 +104,43 @@ def test_stage_inputs_rejects_a_missing_required_input(tmp_path: Path) -> None:
     assert exc_info.value.code is ErrorCode.CONTRACT
 
 
+def test_file_provider_directory_change_invalidates_generation_stage(tmp_path: Path) -> None:
+    provider_dir = tmp_path / "provider-files"
+    provider_dir.mkdir()
+    generated_path = provider_dir / "model-a_7.py"
+    generated_path.write_text("result = 'first'\n", encoding="utf-8")
+    config, store = _file_provider_store(tmp_path, provider_dir)
+
+    generate_observed_stage(config, store, force=False)
+
+    manifest = read_stage_manifest(store.path(".stages", "generate-observed.json"))
+    relative_provider_dir = Path(os.path.relpath(provider_dir, store.root)).as_posix()
+    assert relative_provider_dir in manifest.inputs
+    generated_path.write_text("result = 'second'\n", encoding="utf-8")
+
+    generate_observed_stage(config, store, force=False)
+
+    records = read_jsonl(
+        store.path("generation", "observed_code.jsonl"),
+        GeneratedCodeRecord,
+        required=True,
+    )
+    assert records[0].code == "result = 'second'\n"
+
+
+def test_missing_file_provider_directory_is_a_contract_error(tmp_path: Path) -> None:
+    config, store = _file_provider_store(tmp_path, tmp_path / "missing-provider-files")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        generate_observed_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
 def test_stage_skip_is_invalidated_by_input_content_change(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
     store.record_stage("report", [input_path], [output_path])
 
     input_path.write_text("input-v2\n", encoding="utf-8")
@@ -81,6 +151,15 @@ def test_stage_skip_is_invalidated_by_input_content_change(tmp_path: Path) -> No
 def test_stage_skip_is_invalidated_by_resolved_config_change(tmp_path: Path) -> None:
     original_store = _store(tmp_path, bootstrap_samples=200)
     input_path, output_path = _input_and_output(original_store)
+    assert (
+        original_store.should_skip_stage(
+            "report",
+            [input_path],
+            [output_path],
+            force=False,
+        )
+        is False
+    )
     original_store.record_stage("report", [input_path], [output_path])
     changed_store = _store(tmp_path, bootstrap_samples=201)
 
@@ -101,6 +180,7 @@ def test_stage_skip_requires_every_declared_output(tmp_path: Path) -> None:
     second_output = store.path("reports", "second.txt")
     second_output.write_text("second\n", encoding="utf-8")
     outputs = [first_output, second_output]
+    assert store.should_skip_stage("report", [input_path], outputs, force=False) is False
     store.record_stage("report", [input_path], outputs)
 
     second_output.unlink()
@@ -111,24 +191,64 @@ def test_stage_skip_requires_every_declared_output(tmp_path: Path) -> None:
 def test_force_disables_stage_skip(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    store.record_stage("report", [input_path], [output_path])
 
     assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+    store.record_stage("report", [input_path], [output_path])
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
 
 
 def test_record_stage_rejects_a_missing_declared_output(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path = store.path("inputs", "source.txt")
     input_path.write_text("input\n", encoding="utf-8")
+    output_path = store.path("reports", "missing.txt")
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
 
     with pytest.raises(SecAwareError) as exc_info:
         store.record_stage(
             "report",
             [input_path],
-            [store.path("reports", "missing.txt")],
+            [output_path],
         )
 
     assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+def test_record_stage_requires_an_execution_snapshot(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not store.path(".stages", "report.json").exists()
+
+
+def test_record_stage_rejects_input_changed_after_execution_snapshot(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    input_path.write_text("changed-during-stage\n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not store.path(".stages", "report.json").exists()
+
+
+def test_record_stage_rejects_config_changed_after_execution_snapshot(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    store.config.analysis.bootstrap_samples += 1
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not store.path(".stages", "report.json").exists()
 
 
 def test_record_stage_rejects_output_path_escape(tmp_path: Path) -> None:

@@ -1,12 +1,14 @@
+import os
 import re
 import shutil
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from secaware import __version__
 from secaware.config import AppConfig, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.pipeline.artifact import canonical_sha256, sha256_file
+from secaware.pipeline.artifact import canonical_sha256, sha256_path
 from secaware.pipeline.manifest import (
     StageManifest,
     build_stage_fingerprint,
@@ -16,10 +18,21 @@ from secaware.pipeline.manifest import (
 from secaware.schema.common import SCHEMA_VERSION
 
 
+@dataclass(frozen=True)
+class _StageSnapshot:
+    stage: str
+    inputs: tuple[tuple[str, str], ...]
+    config_sha256: str
+    fingerprint: str
+    code_version: str
+    outputs: tuple[str, ...]
+
+
 class RunStore:
     def __init__(self, config: AppConfig):
         self.config = config
         self.root = Path(config.run.output_dir)
+        self._pending_snapshots: dict[str, _StageSnapshot] = {}
 
     def path(self, *parts: str) -> Path:
         return self.root.joinpath(*parts)
@@ -52,10 +65,28 @@ class RunStore:
             details={"path": str(path)},
         )
 
-    def _relative_path(self, path: str | Path, *, kind: str) -> str:
+    def _manifest_conflict(self, stage: str, message: str) -> SecAwareError:
+        return SecAwareError(
+            code=ErrorCode.MANIFEST_CONFLICT,
+            stage=stage,
+            message=message,
+        )
+
+    def _relative_path(
+        self,
+        path: str | Path,
+        *,
+        kind: str,
+        allow_outside: bool = False,
+    ) -> str:
         candidate = Path(path)
         try:
-            relative = candidate.resolve().relative_to(self.root.resolve())
+            resolved = candidate.resolve()
+            resolved_root = self.root.resolve()
+            if allow_outside:
+                relative = Path(os.path.relpath(resolved, resolved_root))
+            else:
+                relative = resolved.relative_to(resolved_root)
         except (OSError, ValueError):
             raise self._contract_error(
                 f"{kind} path must remain within the run directory",
@@ -71,20 +102,25 @@ class RunStore:
         inputs: dict[str, str] = {}
         for path_value in paths:
             path = Path(path_value)
-            if not path.is_file():
+            if not path.exists():
                 raise self._contract_error("required stage input is missing", path)
-            relative_path = self._relative_path(path, kind="input")
+            relative_path = self._relative_path(path, kind="input", allow_outside=True)
             try:
-                inputs[relative_path] = sha256_file(path)
-            except OSError:
+                inputs[relative_path] = sha256_path(path)
+            except (OSError, ValueError):
                 raise self._contract_error("required stage input could not be read", path) from None
         return inputs
 
-    def _fingerprint_from_inputs(self, stage: str, inputs: dict[str, str]) -> str:
+    def _fingerprint_from_inputs(
+        self,
+        stage: str,
+        inputs: dict[str, str],
+        config: dict[str, object] | None = None,
+    ) -> str:
         return build_stage_fingerprint(
             stage,
             inputs,
-            self.config.model_dump(mode="json"),
+            self.config.model_dump(mode="json") if config is None else config,
             policy_sha256=None,
             catalog_sha256=None,
             code_version=__version__,
@@ -100,15 +136,24 @@ class RunStore:
         output_paths: Sequence[str | Path],
         force: bool,
     ) -> bool:
-        if force:
-            return False
         outputs = [Path(path) for path in output_paths]
         relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
-        fingerprint = self.stage_fingerprint(stage, input_paths)
+        inputs = self.stage_inputs(input_paths)
+        config = self.config.model_dump(mode="json")
+        fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
+        self._pending_snapshots[stage] = _StageSnapshot(
+            stage=stage,
+            inputs=tuple(sorted(inputs.items())),
+            config_sha256=canonical_sha256(config),
+            fingerprint=fingerprint,
+            code_version=__version__,
+            outputs=tuple(relative_outputs),
+        )
         return manifest_allows_skip(
             self._manifest_path(stage),
             fingerprint,
             outputs,
+            force=force,
             manifest_outputs=relative_outputs,
         )
 
@@ -118,7 +163,6 @@ class RunStore:
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
     ) -> None:
-        inputs = self.stage_inputs(input_paths)
         outputs = [Path(path) for path in output_paths]
         if not outputs:
             raise self._contract_error("stage must declare at least one output", self.root)
@@ -126,16 +170,42 @@ class RunStore:
         for output in outputs:
             if not output.is_file():
                 raise self._contract_error("declared stage output is missing", output)
+        snapshot = self._pending_snapshots.pop(stage, None)
+        if snapshot is None:
+            raise self._manifest_conflict(
+                stage,
+                "stage was not preceded by an execution snapshot",
+            )
+        try:
+            inputs = self.stage_inputs(input_paths)
+        except SecAwareError:
+            raise self._manifest_conflict(
+                stage,
+                "stage inputs changed during execution",
+            ) from None
         config = self.config.model_dump(mode="json")
+        current_config_sha256 = canonical_sha256(config)
+        current_fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
+        if (
+            snapshot.inputs != tuple(sorted(inputs.items()))
+            or snapshot.config_sha256 != current_config_sha256
+            or snapshot.fingerprint != current_fingerprint
+            or snapshot.code_version != __version__
+            or snapshot.outputs != tuple(relative_outputs)
+        ):
+            raise self._manifest_conflict(
+                stage,
+                "stage inputs or configuration changed during execution",
+            )
         write_stage_manifest(
             self._manifest_path(stage),
             StageManifest(
                 schema_version=SCHEMA_VERSION,
-                stage=stage,
-                fingerprint=self._fingerprint_from_inputs(stage, inputs),
-                inputs=inputs,
-                config_sha256=canonical_sha256(config),
-                code_version=__version__,
-                outputs=relative_outputs,
+                stage=snapshot.stage,
+                fingerprint=snapshot.fingerprint,
+                inputs=dict(snapshot.inputs),
+                config_sha256=snapshot.config_sha256,
+                code_version=snapshot.code_version,
+                outputs=list(snapshot.outputs),
             ),
         )

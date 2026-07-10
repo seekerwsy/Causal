@@ -57,6 +57,8 @@ def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool)
 def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     stage = "generate-observed"
     inputs = [store.path("inputs", "prompts.jsonl")]
+    if config.generation.provider == "file" and config.generation.file_provider_dir is not None:
+        inputs.append(Path(config.generation.file_provider_dir))
     output = store.path("generation", "observed_code.jsonl")
     outputs = [output]
     if store.should_skip_stage(stage, inputs, outputs, force):
@@ -231,6 +233,8 @@ def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: 
         store.path("inputs", "prompts.jsonl"),
         store.path("interventions", "interventions.jsonl"),
     ]
+    if config.generation.provider == "file" and config.generation.file_provider_dir is not None:
+        inputs.append(Path(config.generation.file_provider_dir))
     output = store.path("generation", "counterfactual_code.jsonl")
     outputs = [output]
     if store.should_skip_stage(stage, inputs, outputs, force):

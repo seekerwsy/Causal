@@ -186,3 +186,49 @@ def test_preflight_cli_maps_contract_error_to_stderr_without_details_or_prompt_t
     assert secret not in rendered
     assert "private-id" not in rendered
     assert str(prompts_path) not in rendered
+
+
+def test_preflight_cli_maps_missing_config_to_safe_config_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "missing-private-config.yaml"
+
+    result = CliRunner().invoke(app, ["preflight", "--config", str(config_path)])
+
+    assert result.exit_code == int(ErrorCode.CONFIG)
+    assert "[CONFIG] config:" in result.stderr
+    rendered = result.output + result.stderr
+    assert "Traceback" not in rendered
+    assert str(config_path) not in rendered
+
+
+@pytest.mark.parametrize(
+    ("content", "secret"),
+    [
+        ("run: [\nprivate: YAML-PARSER-SECRET\n", "YAML-PARSER-SECRET"),
+        ("- not\n- a\n- mapping\n", ""),
+        (
+            "run:\n"
+            "  name: private\n"
+            "data:\n"
+            "  prompts_path: prompts.jsonl\n"
+            "unknown_field: VALIDATION-SECRET\n",
+            "VALIDATION-SECRET",
+        ),
+    ],
+)
+def test_preflight_cli_maps_invalid_config_to_safe_config_error(
+    tmp_path: Path,
+    content: str,
+    secret: str,
+) -> None:
+    config_path = tmp_path / "private-config.yaml"
+    config_path.write_text(content, encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["preflight", "--config", str(config_path)])
+
+    assert result.exit_code == int(ErrorCode.CONFIG)
+    assert "[CONFIG] config:" in result.stderr
+    rendered = result.output + result.stderr
+    assert "Traceback" not in rendered
+    assert str(config_path) not in rendered
+    if secret:
+        assert secret not in rendered
