@@ -75,7 +75,7 @@ def _parameters(value: ParameterInput) -> GenerationParameters:
     if value is None:
         return GenerationParameters()
     if isinstance(value, GenerationParameters):
-        return value.model_copy(deep=True)
+        return GenerationParameters.model_validate({"values": value.values})
     return GenerationParameters(values=dict(value))
 
 
@@ -124,7 +124,7 @@ def _record(
         endpoint_type=endpoint_type,
         system_template_version=system_template_version,
         system_template_sha256=system_template_sha256,
-        parameters=parameters.model_copy(deep=True),
+        parameters=parameters,
     )
 
 

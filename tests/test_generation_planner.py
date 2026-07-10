@@ -274,6 +274,166 @@ def test_generation_parameters_default_empty() -> None:
     assert GenerationParameters().values == {}
 
 
+def test_generation_parameter_mapping_is_read_only() -> None:
+    secret = "mutation-injected-provider-secret"
+    parameters = GenerationParameters(values={"temperature": 0.2})
+
+    with pytest.raises(TypeError):
+        parameters.values["api_key"] = secret
+
+    assert parameters.values == {"temperature": 0.2}
+    assert secret not in parameters.model_dump_json()
+
+
+def test_generation_parameter_nested_values_are_read_only_and_dump_as_json() -> None:
+    parameters = GenerationParameters(values={"stop": ["END", "DONE"]})
+    original_dump = parameters.model_dump(mode="json")
+    original_hash = canonical_sha256(original_dump)
+    stop = parameters.values["stop"]
+
+    with pytest.raises((AttributeError, TypeError)):
+        stop.append("mutation-injected-provider-secret")
+
+    assert stop == ["END", "DONE"]
+    assert parameters.values == {"stop": ["END", "DONE"]}
+    assert parameters.model_dump(mode="json") == {
+        "values": {"stop": ["END", "DONE"]}
+    }
+    assert isinstance(parameters.model_dump(mode="json")["values"], dict)
+    assert isinstance(parameters.model_dump(mode="json")["values"]["stop"], list)
+    assert canonical_sha256(parameters.model_dump(mode="json")) == original_hash
+
+
+def test_generation_parameters_snapshot_nested_containers_before_validation() -> None:
+    secret = "snapshot-race-injected-provider-secret"
+
+    class MutatingStopList(list[object]):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            stale_values = list.copy(self)
+            list.__setitem__(self, 0, {"api_key": secret})
+            return iter(stale_values)
+
+    parameters = GenerationParameters(
+        values={"stop": MutatingStopList(["END"])}
+    )
+
+    assert parameters.values == {"stop": ["END"]}
+    assert parameters.model_dump(mode="json") == {"values": {"stop": ["END"]}}
+    assert secret not in parameters.model_dump_json()
+
+
+def test_generation_parameters_do_not_retain_source_container_aliases() -> None:
+    source_stop = ["END"]
+    source = {"stop": source_stop}
+    parameters = GenerationParameters(values=source)
+
+    source_stop.append("source-mutation")
+    source["temperature"] = 0.9
+
+    assert parameters.values == {"stop": ["END"]}
+    assert parameters.model_dump(mode="json") == {"values": {"stop": ["END"]}}
+
+
+def test_valid_nested_parameter_instances_survive_revalidation_as_json_lists() -> None:
+    parameters = GenerationParameters(values={"stop": ["END", "DONE"]})
+
+    planned = plan_observed_requests(
+        [_prompt("prompt-a")],
+        ["model-a"],
+        [1],
+        endpoint_type="mock",
+        parameters=parameters,
+    )[0]
+    direct = GenerationRequestRecord.model_validate(
+        _record_values(parameters=parameters)
+    )
+
+    for record in (planned, direct):
+        assert record.parameters.values == {"stop": ["END", "DONE"]}
+        assert record.model_dump(mode="json")["parameters"] == {
+            "values": {"stop": ["END", "DONE"]}
+        }
+
+
+def test_generation_parameters_model_is_frozen() -> None:
+    parameters = GenerationParameters(values={"temperature": 0.2})
+
+    with pytest.raises(ValidationError):
+        parameters.values = {"temperature": 0.9}
+
+    assert parameters.values == {"temperature": 0.2}
+
+
+def test_planner_revalidates_untrusted_generation_parameter_instances() -> None:
+    unknown_key = "untrustedPlannerOption"
+    secret = "planner-model-construct-provider-secret"
+    untrusted = GenerationParameters.model_construct(
+        values={unknown_key: secret}
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        plan_observed_requests(
+            [_prompt("prompt-a")],
+            ["model-a"],
+            [1],
+            endpoint_type="mock",
+            parameters=untrusted,
+        )
+
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+    )
+    for hidden_text in (unknown_key, secret, "input_value"):
+        assert all(hidden_text not in surface for surface in rendered)
+
+
+def test_generation_request_revalidates_untrusted_nested_parameter_instances() -> None:
+    unknown_key = "untrustedRecordOption"
+    secret = "record-model-construct-provider-secret"
+    untrusted = GenerationParameters.model_construct(
+        values={unknown_key: secret}
+    )
+    payload = _record_values(parameters=untrusted)
+
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationRequestRecord.model_validate(payload)
+
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+    )
+    for hidden_text in (unknown_key, secret, "input_value"):
+        assert all(hidden_text not in surface for surface in rendered)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("prompt", "changed prompt"),
+        ("model_id", "changed-model"),
+        ("parameters", GenerationParameters(values={"temperature": 0.9})),
+    ],
+)
+def test_generation_request_identity_fields_are_frozen(
+    field: str,
+    replacement: object,
+) -> None:
+    record = plan_observed_requests(
+        [_prompt("prompt-a")],
+        ["model-a"],
+        [1],
+        endpoint_type="mock",
+        parameters={"temperature": 0.2},
+    )[0]
+    original = record.model_dump(mode="json")
+
+    with pytest.raises(ValidationError):
+        setattr(record, field, replacement)
+
+    assert record.model_dump(mode="json") == original
+
+
 @pytest.mark.parametrize(
     ("parameter_name", "parameter_value"),
     [

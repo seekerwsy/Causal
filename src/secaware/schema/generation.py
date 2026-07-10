@@ -1,9 +1,17 @@
+from collections.abc import Iterator, Mapping, Sequence
 import hashlib
 import json
 import math
-from typing import Literal
+from typing import Literal, cast
 
-from pydantic import ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from secaware.errors import JSONValue
 from secaware.schema.common import StrictModel, VersionedModel
@@ -40,6 +48,107 @@ _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical 
 _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation failed"
 
 
+class _FrozenJSONSequence(Sequence[object]):
+    __slots__ = ("__items",)
+
+    def __init__(self, values: Sequence[object]) -> None:
+        object.__setattr__(
+            self,
+            "_FrozenJSONSequence__items",
+            tuple(_freeze_json(value) for value in values),
+        )
+
+    def __getitem__(self, index: int | slice) -> object:
+        return self.__items[index]
+
+    def __iter__(self) -> Iterator[object]:
+        return iter(self.__items)
+
+    def __len__(self) -> int:
+        return len(self.__items)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (str, bytes)) or not isinstance(other, Sequence):
+            return False
+        return _thaw_json(self) == _thaw_json(other)
+
+    def __repr__(self) -> str:
+        return repr(_thaw_json(self))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise TypeError("generation parameter values are read-only")
+
+    def __deepcopy__(self, memo: dict[int, object]) -> "_FrozenJSONSequence":
+        return self
+
+
+class _FrozenJSONMapping(Mapping[str, object]):
+    __slots__ = ("__items",)
+
+    def __init__(self, values: Mapping[str, object]) -> None:
+        object.__setattr__(
+            self,
+            "_FrozenJSONMapping__items",
+            tuple((key, _freeze_json(value)) for key, value in values.items()),
+        )
+
+    def __getitem__(self, key: str) -> object:
+        for candidate, value in self.__items:
+            if candidate == key:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _ in self.__items)
+
+    def __len__(self) -> int:
+        return len(self.__items)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Mapping):
+            return False
+        return _thaw_json(self) == _thaw_json(other)
+
+    def __repr__(self) -> str:
+        return repr(_thaw_json(self))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise TypeError("generation parameter values are read-only")
+
+    def __deepcopy__(self, memo: dict[int, object]) -> "_FrozenJSONMapping":
+        return self
+
+
+def _snapshot_json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {
+            key: _snapshot_json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (_FrozenJSONSequence, list)):
+        return [_snapshot_json_value(item) for item in value]
+    return value
+
+
+def _freeze_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _FrozenJSONMapping(value)
+    if isinstance(value, list):
+        return _FrozenJSONSequence(value)
+    return value
+
+
+def _thaw_json(value: object) -> JSONValue:
+    if isinstance(value, Mapping):
+        return cast(
+            JSONValue,
+            {key: _thaw_json(item) for key, item in value.items()},
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return cast(JSONValue, [_thaw_json(item) for item in value])
+    return cast(JSONValue, value)
+
+
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -72,20 +181,40 @@ def _is_allowed_parameter_value(key: str, value: object) -> bool:
 
 
 class GenerationParameters(StrictModel):
-    model_config = ConfigDict(hide_input_in_errors=True)
+    model_config = ConfigDict(
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+    )
 
-    values: dict[str, JSONValue] = Field(default_factory=dict)
+    values: Mapping[str, JSONValue] = Field(default_factory=dict)
 
     @field_validator("values", mode="before")
     @classmethod
     def validate_v1_parameters(cls, values: object) -> object:
-        if not isinstance(values, dict):
+        if not isinstance(values, Mapping):
             raise ValueError(_INVALID_PARAMETERS_MESSAGE)
-        if any(not isinstance(key, str) or key not in _V1_PARAMETER_KEYS for key in values):
+        try:
+            snapshot = cast(dict[str, JSONValue], _snapshot_json_value(values))
+        except Exception:
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE) from None
+        if any(not isinstance(key, str) or key not in _V1_PARAMETER_KEYS for key in snapshot):
             raise ValueError(_INVALID_PARAMETERS_MESSAGE)
-        if any(not _is_allowed_parameter_value(key, value) for key, value in values.items()):
+        if any(
+            not _is_allowed_parameter_value(key, value)
+            for key, value in snapshot.items()
+        ):
             raise ValueError(_INVALID_PARAMETERS_MESSAGE)
-        return values
+        return snapshot
+
+    @field_validator("values")
+    @classmethod
+    def freeze_values(cls, values: Mapping[str, JSONValue]) -> Mapping[str, JSONValue]:
+        return cast(Mapping[str, JSONValue], _FrozenJSONMapping(values))
+
+    @field_serializer("values")
+    def serialize_values(self, values: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
+        return cast(dict[str, JSONValue], _thaw_json(values))
 
 
 def build_generation_request_id(
@@ -130,7 +259,11 @@ def build_generation_request_id(
 
 
 class GenerationRequestRecord(VersionedModel):
-    model_config = ConfigDict(hide_input_in_errors=True)
+    model_config = ConfigDict(
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+    )
 
     schema_version: Literal["1.0"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
