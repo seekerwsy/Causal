@@ -2,9 +2,11 @@ from collections.abc import Mapping
 from enum import IntEnum
 from typing import Any, TypeAlias
 
+from pydantic import JsonValue
+
 
 JSONScalar: TypeAlias = str | int | float | bool | None
-JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
+JSONValue: TypeAlias = JsonValue
 
 _REDACTED = "[REDACTED]"
 _SENSITIVE_KEY_FRAGMENTS = ("api_key", "authorization", "token", "secret", "password")
