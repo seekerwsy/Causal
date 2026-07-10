@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sys
-import tomllib
+from importlib.metadata import entry_points
 from pathlib import Path
 
 
@@ -26,13 +26,17 @@ def _run_module(module: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_project_registers_cli_entry_points() -> None:
-    with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject_file:
-        pyproject = tomllib.load(pyproject_file)
-
-    assert pyproject["project"]["scripts"] == {
+    expected_scripts = {
         "secaware": "secaware.cli:app",
         "secaware-oracle": "secaware.oracle.cli:app",
     }
+    installed_scripts = {
+        entry_point.name: entry_point.value
+        for entry_point in entry_points(group="console_scripts")
+        if entry_point.name in expected_scripts
+    }
+
+    assert installed_scripts == expected_scripts
 
 
 def test_python_m_secaware_shows_pipeline_help() -> None:
