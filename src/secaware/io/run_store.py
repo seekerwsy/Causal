@@ -52,10 +52,28 @@ class RunStore:
             self.path(part).mkdir(parents=True, exist_ok=True)
 
     def prepare(self) -> None:
-        self.mkdirs()
+        try:
+            self.mkdirs()
+        except OSError:
+            raise self._prepare_error(self.root) from None
         prompts_src = Path(self.config.data.prompts_path)
-        shutil.copyfile(prompts_src, self.path("inputs", "prompts.jsonl"))
-        write_resolved_config(self.config, self.path("config.resolved.yaml"))
+        try:
+            shutil.copyfile(prompts_src, self.path("inputs", "prompts.jsonl"))
+        except OSError:
+            raise self._prepare_error(prompts_src) from None
+        resolved_config_path = self.path("config.resolved.yaml")
+        try:
+            write_resolved_config(self.config, resolved_config_path)
+        except OSError:
+            raise self._prepare_error(resolved_config_path) from None
+
+    def _prepare_error(self, path: Path) -> SecAwareError:
+        return SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage="prepare",
+            message="run inputs could not be prepared",
+            details={"path": str(path)},
+        )
 
     def _contract_error(self, message: str, path: Path) -> SecAwareError:
         return SecAwareError(

@@ -33,7 +33,7 @@ def _load(config: Path, run_dir: Optional[Path]) -> tuple[AppConfig, RunStore]:
 
 
 def _prepare(config: AppConfig, store: RunStore) -> None:
-    del config
+    run_preflight(config)
     store.prepare()
 
 

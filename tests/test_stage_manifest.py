@@ -225,6 +225,18 @@ def test_manifest_allows_skip_rejects_missing_invalid_or_wrong_outputs(
     assert manifest_allows_skip(invalid_manifest, "expected", [expected_output]) is False
 
 
+def test_manifest_allows_skip_rejects_output_directory(tmp_path: Path) -> None:
+    output = tmp_path / "artifact.jsonl"
+    output.mkdir()
+    manifest_path = tmp_path / "manifest.json"
+    write_stage_manifest(
+        manifest_path,
+        _manifest(fingerprint="expected", outputs=[output]),
+    )
+
+    assert manifest_allows_skip(manifest_path, "expected", [output]) is False
+
+
 def test_manifest_allows_skip_rejects_an_empty_output_path_list(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

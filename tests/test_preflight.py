@@ -1,11 +1,13 @@
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+import yaml
+from typer.testing import CliRunner, Result
 
 from secaware.cli import app
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.generation.providers import get_provider
 from secaware.io.jsonl import write_jsonl
 from secaware.pipeline.preflight import PreflightReport, run_preflight
 from secaware.schema.records import PromptRecord
@@ -58,6 +60,50 @@ def _config(
             },
         }
     )
+
+
+def _write_valid_prompts(path: Path) -> None:
+    write_jsonl(path, [_prompt("prompt-1", "discover", "write a safe helper")])
+
+
+def _write_provider_config(
+    tmp_path: Path,
+    prompts_path: Path,
+    *,
+    provider: str,
+    file_provider_dir: Path | None = None,
+) -> Path:
+    config = AppConfig.model_validate(
+        {
+            "run": {"name": "provider-test", "output_dir": str(tmp_path / "run")},
+            "data": {"prompts_path": str(prompts_path)},
+            "generation": {
+                "provider": provider,
+                "models": ["model-a"],
+                "seeds": [7],
+                "file_provider_dir": (
+                    None if file_provider_dir is None else str(file_provider_dir)
+                ),
+            },
+        }
+    )
+    config_path = tmp_path / "config.yaml"
+    write_resolved_config(config, config_path)
+    return config_path
+
+
+def _assert_safe_cli_error(
+    result: Result,
+    code: ErrorCode,
+    *forbidden: str,
+) -> None:
+    assert result.exit_code == int(code)
+    assert f"[{code.name}]" in result.stderr
+    rendered = result.output + result.stderr
+    assert "Traceback" not in rendered
+    assert "details" not in rendered.lower()
+    for value in forbidden:
+        assert value not in rendered
 
 
 def test_demo_preflight_returns_expected_counts() -> None:
@@ -281,3 +327,95 @@ def test_cli_command_help_preserves_declared_signature(command: str) -> None:
     assert result.exit_code == 0, result.output
     assert "--config" in result.output
     assert "--run-dir" in result.output
+
+
+def test_unknown_secret_provider_is_a_safe_config_error(tmp_path: Path) -> None:
+    secret = "top-secret-provider"
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "run": {"name": "unknown-provider", "output_dir": str(tmp_path / "run")},
+                "data": {"prompts_path": str(prompts_path)},
+                "generation": {"provider": secret},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["preflight", "--config", str(config_path)])
+
+    _assert_safe_cli_error(result, ErrorCode.CONFIG, secret, str(config_path))
+
+
+def test_get_provider_rejects_unknown_name_without_echoing_it() -> None:
+    secret = "top-secret-provider"
+
+    with pytest.raises(SecAwareError) as exc_info:
+        get_provider(secret)
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    assert exc_info.value.stage == "generation"
+    assert secret not in str(exc_info.value)
+
+
+def test_run_all_missing_secret_prompts_is_a_safe_contract_error(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "top-secret-prompts.jsonl"
+    config_path = tmp_path / "config.yaml"
+    write_resolved_config(_config(tmp_path, prompts_path), config_path)
+
+    result = CliRunner().invoke(app, ["run-all", "--config", str(config_path)])
+
+    _assert_safe_cli_error(result, ErrorCode.CONTRACT, str(prompts_path))
+
+
+def test_file_provider_missing_directory_fails_preflight_safely(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    provider_dir = tmp_path / "top-secret-missing-provider"
+    config_path = _write_provider_config(
+        tmp_path,
+        prompts_path,
+        provider="file",
+        file_provider_dir=provider_dir,
+    )
+
+    result = CliRunner().invoke(app, ["preflight", "--config", str(config_path)])
+
+    _assert_safe_cli_error(result, ErrorCode.CONTRACT, str(provider_dir))
+
+
+def test_file_provider_missing_generated_file_is_a_safe_contract_error(
+    tmp_path: Path,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    provider_dir = tmp_path / "top-secret-empty-provider"
+    provider_dir.mkdir()
+    config_path = _write_provider_config(
+        tmp_path,
+        prompts_path,
+        provider="file",
+        file_provider_dir=provider_dir,
+    )
+
+    result = CliRunner().invoke(app, ["generate-observed", "--config", str(config_path)])
+
+    _assert_safe_cli_error(
+        result,
+        ErrorCode.CONTRACT,
+        str(provider_dir),
+        "model-a_7.py",
+    )
+
+
+def test_api_provider_stub_is_a_safe_config_error(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config_path = _write_provider_config(tmp_path, prompts_path, provider="api")
+
+    result = CliRunner().invoke(app, ["generate-observed", "--config", str(config_path)])
+
+    _assert_safe_cli_error(result, ErrorCode.CONFIG, "RuntimeError")

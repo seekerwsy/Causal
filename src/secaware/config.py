@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import Field, ValidationError
@@ -38,7 +38,7 @@ class InterventionConfig(StrictModel):
 
 
 class GenerationConfig(StrictModel):
-    provider: str = "mock"
+    provider: Literal["mock", "file", "api"] = "mock"
     models: list[str] = Field(default_factory=lambda: ["mock-secaware-v0"])
     seeds: list[int] = Field(default_factory=lambda: [1])
     file_provider_dir: str | None = None

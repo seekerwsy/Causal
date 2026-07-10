@@ -7,6 +7,7 @@ from secaware import __version__
 from secaware.cli import generate_observed_stage
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.io import run_store as run_store_module
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
@@ -82,6 +83,34 @@ def test_mkdirs_creates_private_stage_manifest_directory(tmp_path: Path) -> None
     store = _store(tmp_path)
 
     assert store.path(".stages").is_dir()
+
+
+@pytest.mark.parametrize("failure", ["copy", "write_config"])
+def test_prepare_wraps_expected_filesystem_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    store = _store(tmp_path)
+    prompts_path = Path(store.config.data.prompts_path)
+    prompts_path.write_text("source\n", encoding="utf-8")
+
+    def fail_with_private_error(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("top-secret filesystem detail")
+
+    if failure == "copy":
+        monkeypatch.setattr(run_store_module.shutil, "copyfile", fail_with_private_error)
+    else:
+        monkeypatch.setattr(run_store_module, "write_resolved_config", fail_with_private_error)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.prepare()
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.stage == "prepare"
+    assert set(exc_info.value.details) == {"path"}
+    assert "top-secret" not in str(exc_info.value)
 
 
 def test_stage_is_skippable_only_after_matching_manifest_is_recorded(tmp_path: Path) -> None:

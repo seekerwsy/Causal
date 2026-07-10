@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Protocol
 
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.api_provider_stub import APIProviderStub
 from secaware.generation.file_provider import FileProvider
 from secaware.generation.mock_provider import MockProvider
@@ -16,8 +17,16 @@ def get_provider(provider_name: str, *, file_provider_dir: str | None = None) ->
         return MockProvider()
     if provider_name == "file":
         if file_provider_dir is None:
-            raise ValueError("file_provider_dir is required when generation.provider=file")
+            raise SecAwareError(
+                code=ErrorCode.CONFIG,
+                stage="generation",
+                message="generation provider configuration is invalid",
+            )
         return FileProvider(Path(file_provider_dir))
     if provider_name == "api":
         return APIProviderStub()
-    raise ValueError(f"Unknown generation provider: {provider_name}")
+    raise SecAwareError(
+        code=ErrorCode.CONFIG,
+        stage="generation",
+        message="generation provider configuration is invalid",
+    )

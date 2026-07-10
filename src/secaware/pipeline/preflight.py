@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
@@ -64,6 +65,22 @@ def run_preflight(config: AppConfig) -> PreflightReport:
         raise _error(ErrorCode.CONFIG, "generation.seeds must not be empty")
     if len(set(seeds)) != len(seeds):
         raise _error(ErrorCode.CONFIG, "generation.seeds must not contain duplicates")
+
+    if config.generation.provider == "file":
+        provider_dir = config.generation.file_provider_dir
+        if provider_dir is None or not provider_dir.strip():
+            raise _error(
+                ErrorCode.CONFIG,
+                "generation.file_provider_dir is required for the file provider",
+            )
+        provider_path = Path(provider_dir)
+        if not provider_path.is_dir():
+            raise SecAwareError(
+                code=ErrorCode.CONTRACT,
+                stage="preflight",
+                message="file provider directory is unavailable",
+                details={"path": str(provider_path)},
+            )
 
     return PreflightReport(
         prompt_count=len(prompts),

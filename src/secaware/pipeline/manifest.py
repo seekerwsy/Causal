@@ -94,4 +94,4 @@ def manifest_allows_skip(
         return False
     if manifest.outputs != normalized_outputs:
         return False
-    return all(Path(path).exists() for path in output_paths)
+    return all(Path(path).is_file() for path in output_paths)
