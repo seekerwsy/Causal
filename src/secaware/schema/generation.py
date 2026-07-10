@@ -3,34 +3,63 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from secaware.errors import JSONValue, is_sensitive_key
+from secaware.errors import JSONValue
 from secaware.schema.common import StrictModel, VersionedModel
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
+_V1_PARAMETER_KEYS = frozenset(
+    {
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "seed",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "n",
+        "logprobs",
+        "top_logprobs",
+        "reasoning_effort",
+        "verbosity",
+    }
+)
+_NUMERIC_PARAMETER_KEYS = frozenset(
+    {
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "seed",
+        "frequency_penalty",
+        "presence_penalty",
+        "n",
+        "top_logprobs",
+    }
+)
+_INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical v1 contract"
 
 
-def _contains_provider_credential(value: JSONValue) -> bool:
-    if isinstance(value, dict):
-        for key, nested_value in value.items():
-            if is_sensitive_key(key):
-                return True
-            if _contains_provider_credential(nested_value):
-                return True
-    elif isinstance(value, list):
-        return any(_contains_provider_credential(item) for item in value)
-    return False
-
-
-def _contains_non_finite_number(value: JSONValue) -> bool:
+def _is_canonical_scalar(value: object) -> bool:
+    if value is None or isinstance(value, (str, bool, int)):
+        return True
     if isinstance(value, float):
-        return not math.isfinite(value)
-    if isinstance(value, dict):
-        return any(_contains_non_finite_number(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_non_finite_number(item) for item in value)
+        return math.isfinite(value)
     return False
+
+
+def _is_allowed_parameter_value(key: str, value: object) -> bool:
+    if key in _NUMERIC_PARAMETER_KEYS and isinstance(value, bool):
+        return False
+    if _is_canonical_scalar(value):
+        return True
+    return key == "stop" and isinstance(value, list) and all(
+        isinstance(item, str) for item in value
+    )
 
 
 class GenerationParameters(StrictModel):
@@ -38,15 +67,15 @@ class GenerationParameters(StrictModel):
 
     values: dict[str, JSONValue] = Field(default_factory=dict)
 
-    @field_validator("values")
+    @field_validator("values", mode="before")
     @classmethod
-    def reject_provider_credentials(
-        cls, values: dict[str, JSONValue]
-    ) -> dict[str, JSONValue]:
-        if _contains_provider_credential(values):
-            raise ValueError("generation parameters must not contain provider credentials")
-        if _contains_non_finite_number(values):
-            raise ValueError("generation parameters must contain canonical JSON values")
+    def validate_v1_parameters(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+        if any(not isinstance(key, str) or key not in _V1_PARAMETER_KEYS for key in values):
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
+        if any(not _is_allowed_parameter_value(key, value) for key, value in values.items()):
+            raise ValueError(_INVALID_PARAMETERS_MESSAGE)
         return values
 
 

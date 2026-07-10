@@ -115,6 +115,12 @@ def test_secaware_error_redacts_sensitive_detail_keys_recursively() -> None:
         "tokens",
         "api_token",
         "AUTH-TOKEN",
+        "tokenValue",
+        "apiTokenValue",
+        "accessTokenValue",
+        "auth",
+        "bearer",
+        "BearerToken",
         "secret",
         "Secret.Key",
         "password",
@@ -144,9 +150,34 @@ def test_sensitive_key_rule_and_error_detail_redaction_are_consistent(
     assert secret not in str(error.to_dict())
 
 
-@pytest.mark.parametrize("usage_key", ["max_tokens", "min_tokens", "token_count"])
+@pytest.mark.parametrize(
+    "usage_key",
+    [
+        "max_tokens",
+        "MaxTokens",
+        "min_tokens",
+        "input_tokens",
+        "InputTokens",
+        "output_tokens",
+        "completion_tokens",
+        "prompt_tokens",
+        "total_tokens",
+        "token_count",
+        "max_completion_tokens",
+        "MaxCompletionTokens",
+        "max_output_tokens",
+    ],
+)
 def test_sensitive_key_rule_allows_noncredential_token_usage_keys(usage_key: str) -> None:
     assert errors.is_sensitive_key(usage_key) is False
+    error = SecAwareError(
+        code=ErrorCode.API_TIMEOUT,
+        stage="generation",
+        message="provider request timed out",
+        details={usage_key: 42},
+    )
+
+    assert error.details == {usage_key: 42}
 
 
 def test_secaware_error_details_are_independent_snapshots() -> None:

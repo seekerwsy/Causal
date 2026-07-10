@@ -10,10 +10,26 @@ JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JsonValue
 
 _REDACTED = "[REDACTED]"
-_ALLOWED_TOKEN_USAGE_KEYS = frozenset({"max_tokens", "min_tokens", "token_count"})
+_ALLOWED_TOKEN_USAGE_KEYS = frozenset(
+    {
+        "max_tokens",
+        "min_tokens",
+        "input_tokens",
+        "output_tokens",
+        "completion_tokens",
+        "prompt_tokens",
+        "total_tokens",
+        "token_count",
+        "max_completion_tokens",
+        "max_output_tokens",
+    }
+)
 _SENSITIVE_COMPACT_FRAGMENTS = (
     "apikey",
     "authorization",
+    "auth",
+    "bearer",
+    "token",
     "secret",
     "password",
     "privatekey",
@@ -21,19 +37,21 @@ _SENSITIVE_COMPACT_FRAGMENTS = (
 )
 
 
+def _normalize_key(key: str) -> str:
+    with_acronym_boundaries = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    with_word_boundaries = re.sub(
+        r"([a-z0-9])([A-Z])", r"\1_\2", with_acronym_boundaries
+    )
+    return re.sub(r"[^a-z0-9]+", "_", with_word_boundaries.casefold()).strip("_")
+
+
 def is_sensitive_key(key: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+    normalized = _normalize_key(key)
     if normalized in _ALLOWED_TOKEN_USAGE_KEYS:
         return False
 
     compact = normalized.replace("_", "")
-    if any(fragment in compact for fragment in _SENSITIVE_COMPACT_FRAGMENTS):
-        return True
-
-    segments = normalized.split("_")
-    return "token" in segments or "tokens" in segments or compact.endswith(
-        ("token", "tokens")
-    )
+    return any(fragment in compact for fragment in _SENSITIVE_COMPACT_FRAGMENTS)
 
 
 _is_sensitive_key = is_sensitive_key

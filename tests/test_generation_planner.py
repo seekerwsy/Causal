@@ -73,6 +73,20 @@ def _record_values(**overrides: object) -> dict[str, object]:
     return values
 
 
+def _assert_parameters_rejected_without_echoing(
+    values: dict[str, object], *hidden_text: str
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        GenerationParameters.model_validate({"values": values})
+
+    rendered = (
+        str(exc_info.value),
+        "".join(traceback.format_exception(exc_info.value)),
+    )
+    for text in hidden_text:
+        assert all(text not in surface for surface in rendered)
+
+
 def test_generation_request_record_requires_explicit_supported_version() -> None:
     missing_version = _record_values()
     missing_version.pop("schema_version")
@@ -127,42 +141,87 @@ def test_generation_parameters_default_empty() -> None:
 
 
 @pytest.mark.parametrize(
-    "sensitive_key",
+    ("parameter_name", "parameter_value"),
     [
-        "api_key",
-        "api_token",
-        "auth_token",
-        "secret_key",
-        "private_key",
-        "credentials",
-        "client_credentials",
-        "API.Token",
-        "AUTH-TOKEN",
-        "Secret Key",
-        "PRIVATE.KEY",
-        "Client-Credentials",
+        ("temperature", 0.2),
+        ("top_p", 0.95),
+        ("max_tokens", 128),
+        ("max_completion_tokens", 128),
+        ("max_output_tokens", 128),
+        ("seed", 7),
+        ("stop", ["END", "DONE"]),
+        ("frequency_penalty", 0.0),
+        ("presence_penalty", 0.0),
+        ("n", 1),
+        ("logprobs", True),
+        ("top_logprobs", 5),
+        ("reasoning_effort", "medium"),
+        ("verbosity", "low"),
     ],
 )
-def test_generation_parameters_reject_nested_provider_credentials_without_leaking(
-    sensitive_key: str,
+def test_generation_parameters_allow_every_v1_parameter(
+    parameter_name: str, parameter_value: object
 ) -> None:
-    secret = f"sensitive-value-for-{sensitive_key}"
-    with pytest.raises(ValidationError) as exc_info:
-        GenerationParameters(
-            values={"outer": [{"nested": {sensitive_key: secret}}]}
-        )
+    parameters = GenerationParameters(values={parameter_name: parameter_value})
 
-    assert secret not in str(exc_info.value)
-    assert secret not in "".join(traceback.format_exception(exc_info.value))
+    assert parameters.values == {parameter_name: parameter_value}
 
 
-@pytest.mark.parametrize("usage_key", ["max_tokens", "min_tokens", "token_count"])
-def test_generation_parameters_allow_noncredential_token_usage_keys(
-    usage_key: str,
+@pytest.mark.parametrize(
+    "unknown_key",
+    [
+        "tokenValue",
+        "apiTokenValue",
+        "accessTokenValue",
+        "auth",
+        "bearer",
+        "arbitrary_unknown",
+    ],
+)
+def test_generation_parameters_reject_unknown_keys_without_echoing_input(
+    unknown_key: str,
 ) -> None:
-    parameters = GenerationParameters(values={usage_key: 42})
+    secret = "unknown-parameter-sensitive-value"
 
-    assert parameters.values == {usage_key: 42}
+    _assert_parameters_rejected_without_echoing({unknown_key: secret}, unknown_key, secret)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"temperature": {"nestedSecretValue": "provider-secret-material"}},
+        {"temperature": ["provider-secret-material"]},
+        {"stop": [{"nestedSecretValue": "provider-secret-material"}]},
+        {"stop": ["END", 7]},
+    ],
+)
+def test_generation_parameters_reject_nested_or_non_string_list_values_without_leaking(
+    values: dict[str, object],
+) -> None:
+    _assert_parameters_rejected_without_echoing(
+        values,
+        "nestedSecretValue",
+        "provider-secret-material",
+    )
+
+
+@pytest.mark.parametrize(
+    "numeric_key",
+    [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "seed",
+        "frequency_penalty",
+        "presence_penalty",
+        "n",
+        "top_logprobs",
+    ],
+)
+def test_generation_parameters_reject_boolean_numeric_values(numeric_key: str) -> None:
+    _assert_parameters_rejected_without_echoing({numeric_key: True}, "True")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -219,12 +278,8 @@ def test_observed_planning_is_independent_of_input_order() -> None:
 
 def test_parameter_mapping_order_does_not_change_request_id() -> None:
     prompt = _prompt("prompt-a")
-    first = GenerationParameters(
-        values={"temperature": 0, "metadata": {"b": 2, "a": 1}}
-    )
-    reordered = GenerationParameters(
-        values={"metadata": {"a": 1, "b": 2}, "temperature": 0}
-    )
+    first = GenerationParameters(values={"temperature": 0, "top_p": 1})
+    reordered = GenerationParameters(values={"top_p": 1, "temperature": 0})
 
     first_record = plan_observed_requests(
         [prompt], ["model-a"], [1], endpoint_type="chat_completions", parameters=first
