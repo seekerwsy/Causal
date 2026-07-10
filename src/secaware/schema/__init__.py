@@ -1,4 +1,9 @@
-from secaware.schema.generation import GenerationParameters, GenerationRequestRecord
+from secaware.schema.generation import (
+    GenerationParameters,
+    GenerationProvenance,
+    GenerationRequestRecord,
+    OfflineGenerationResultRecord,
+)
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
 from secaware.schema.interventions import FailureReason, InterventionRecord
 from secaware.schema.records import GeneratedCodeRecord, PromptRecord
@@ -11,12 +16,14 @@ __all__ = [
     "FactorType",
     "FailureReason",
     "GenerationParameters",
+    "GenerationProvenance",
     "GenerationRequestRecord",
     "GeneratedCodeRecord",
     "HypothesisRecord",
     "InterventionRecord",
     "NodeType",
     "OracleRecord",
+    "OfflineGenerationResultRecord",
     "PairResult",
     "PromptRecord",
     "SecurityLabel",

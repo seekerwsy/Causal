@@ -6,6 +6,7 @@ import math
 from typing import Any, ClassVar, Literal, TypeVar, cast
 
 from pydantic import (
+    BaseModel,
     ConfigDict,
     Field,
     StrictInt,
@@ -51,6 +52,8 @@ MAX_GENERATION_PARAMETER_ITEMS = len(_V1_PARAMETER_KEYS)
 MAX_STOP_PARAMETER_ITEMS = 64
 _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical v1 contract"
 _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation failed"
+_INVALID_PROVENANCE_MESSAGE = "generation provenance validation failed"
+_INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
 
 
 _SafeValidationModel = TypeVar(
@@ -293,6 +296,29 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+class GenerationProvenance(_SafeValidationMixin, StrictModel):
+    _safe_validation_message = _INVALID_PROVENANCE_MESSAGE
+
+    model_config = ConfigDict(
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    producer: str = Field(min_length=1)
+    producer_version: str | None = Field(default=None, min_length=1)
+    source_batch_id: str | None = Field(default=None, min_length=1)
+
+    @field_validator("producer", "producer_version", "source_batch_id")
+    @classmethod
+    def reject_blank_text(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError(_INVALID_PROVENANCE_MESSAGE)
+        return value
+
+
 class GenerationParameters(_SafeValidationMixin, StrictModel):
     _safe_validation_message = _INVALID_PARAMETERS_MESSAGE
 
@@ -440,3 +466,114 @@ class GenerationRequestRecord(_SafeValidationMixin, VersionedModel):
         if self.request_id != expected_request_id:
             raise ValueError(_INVALID_REQUEST_INTEGRITY_MESSAGE)
         return self
+
+
+class OfflineGenerationResultRecord(GenerationRequestRecord):
+    _safe_validation_message = _INVALID_OFFLINE_RESULT_MESSAGE
+
+    model_config = ConfigDict(
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    endpoint_type: Literal["offline"]
+    code: str = Field(min_length=1)
+    code_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
+    provenance: GenerationProvenance
+
+    @field_validator("code")
+    @classmethod
+    def reject_blank_code(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError(_INVALID_OFFLINE_RESULT_MESSAGE)
+        return value
+
+    @model_validator(mode="after")
+    def validate_code_integrity(self) -> "OfflineGenerationResultRecord":
+        if self.code_sha256 != sha256_text(self.code):
+            raise ValueError(_INVALID_OFFLINE_RESULT_MESSAGE)
+        return self
+
+
+def _declared_model_shape_is_intact(value: BaseModel) -> bool:
+    try:
+        declared_fields = set(type(value).model_fields)
+        if set(vars(value)) != declared_fields:
+            return False
+        if value.__pydantic_extra__:
+            return False
+        return all(
+            not isinstance(nested, BaseModel) or _declared_model_shape_is_intact(nested)
+            for nested in vars(value).values()
+        )
+    except Exception:
+        return False
+
+
+def revalidate_generation_request_envelope(
+    value: object,
+) -> GenerationRequestRecord:
+    """Snapshot and revalidate only the canonical request portion of a record."""
+
+    try:
+        if type(value) not in {GenerationRequestRecord, OfflineGenerationResultRecord}:
+            raise TypeError("unexpected generation request envelope")
+        if not _declared_model_shape_is_intact(value):
+            raise ValueError("unexpected generation request model state")
+        snapshot = value.model_dump(
+            mode="python",
+            round_trip=True,
+            warnings=False,
+        )
+        envelope = {
+            field_name: snapshot[field_name] for field_name in GenerationRequestRecord.model_fields
+        }
+        return GenerationRequestRecord.model_validate(envelope)
+    except Exception:
+        pass
+    raise GenerationRequestRecord._safe_error()
+
+
+def revalidate_offline_generation_result(
+    value: object,
+) -> OfflineGenerationResultRecord:
+    """Snapshot a result and reject undeclared state hidden by unsafe model APIs."""
+
+    try:
+        if type(value) is not OfflineGenerationResultRecord:
+            raise TypeError("unexpected offline generation result")
+        if not _declared_model_shape_is_intact(value):
+            raise ValueError("unexpected offline generation result model state")
+        snapshot = value.model_dump(
+            mode="python",
+            round_trip=True,
+            warnings=False,
+        )
+        return OfflineGenerationResultRecord.model_validate(snapshot)
+    except Exception:
+        pass
+    raise OfflineGenerationResultRecord._safe_error()
+
+
+def generation_request_envelopes_match(
+    expected: object,
+    received: object,
+) -> bool:
+    """Safely compare complete, independently revalidated request envelopes."""
+
+    try:
+        expected_envelope = revalidate_generation_request_envelope(expected)
+        received_envelope = revalidate_generation_request_envelope(received)
+        return expected_envelope.model_dump(
+            mode="json",
+            warnings=False,
+        ) == received_envelope.model_dump(
+            mode="json",
+            warnings=False,
+        )
+    except Exception:
+        pass
+    raise GenerationRequestRecord._safe_error()

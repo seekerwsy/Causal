@@ -1,0 +1,210 @@
+from collections.abc import Callable, Iterable
+from itertools import islice
+from typing import TypeVar
+
+from secaware.errors import ErrorCode, JSONValue, SecAwareError
+from secaware.schema.generation import (
+    GenerationRequestRecord,
+    OfflineGenerationResultRecord,
+    generation_request_envelopes_match,
+    revalidate_generation_request_envelope,
+    revalidate_offline_generation_result,
+)
+from secaware.schema.records import GeneratedCodeRecord
+
+
+MAX_OFFLINE_IMPORT_RECORDS = 100_000
+_STAGE = "generation-result-importer"
+
+_Input = TypeVar("_Input")
+_Snapshot = TypeVar("_Snapshot")
+
+
+def _import_error(
+    code: ErrorCode,
+    message: str,
+    *,
+    details: dict[str, JSONValue] | None = None,
+    retryable: bool = False,
+) -> SecAwareError:
+    return SecAwareError(
+        code=code,
+        stage=_STAGE,
+        message=message,
+        details=details,
+        retryable=retryable,
+    )
+
+
+def _bounded_snapshots(
+    values: Iterable[_Input],
+    *,
+    invalid_message: str,
+    limit_message: str,
+    snapshot: Callable[[_Input], _Snapshot],
+) -> list[_Snapshot]:
+    snapshots: list[_Snapshot] = []
+    exceeded = False
+    try:
+        for index, value in enumerate(islice(values, MAX_OFFLINE_IMPORT_RECORDS + 1)):
+            if index == MAX_OFFLINE_IMPORT_RECORDS:
+                exceeded = True
+                break
+            snapshots.append(snapshot(value))
+    except Exception:
+        pass
+    else:
+        if not exceeded:
+            return snapshots
+        raise _import_error(ErrorCode.CONTRACT, limit_message)
+    raise _import_error(ErrorCode.CONTRACT, invalid_message)
+
+
+def _expected_snapshot(value: object) -> GenerationRequestRecord:
+    if type(value) is not GenerationRequestRecord:
+        raise TypeError("unexpected expected generation request")
+    return revalidate_generation_request_envelope(value)
+
+
+def _received_snapshot(value: object) -> OfflineGenerationResultRecord:
+    return revalidate_offline_generation_result(value)
+
+
+def _validated_expected(
+    values: Iterable[GenerationRequestRecord],
+) -> list[GenerationRequestRecord]:
+    expected = _bounded_snapshots(
+        values,
+        invalid_message="offline generation expected ledger failed validation",
+        limit_message="offline generation expected ledger exceeds the safety limit",
+        snapshot=_expected_snapshot,
+    )
+    if not expected:
+        raise _import_error(
+            ErrorCode.CONTRACT,
+            "offline generation expected ledger must not be empty",
+        )
+    if any(request.endpoint_type != "offline" for request in expected):
+        raise _import_error(
+            ErrorCode.CONTRACT,
+            "offline generation expected ledger contains a non-offline request",
+        )
+    request_ids = [request.request_id for request in expected]
+    if len(set(request_ids)) != len(request_ids):
+        raise _import_error(
+            ErrorCode.CONTRACT,
+            "offline generation expected request ids must be unique",
+        )
+    return expected
+
+
+def _validated_received(
+    values: Iterable[OfflineGenerationResultRecord],
+) -> list[OfflineGenerationResultRecord]:
+    return _bounded_snapshots(
+        values,
+        invalid_message="offline generation result schema validation failed",
+        limit_message="offline generation result collection exceeds the safety limit",
+        snapshot=_received_snapshot,
+    )
+
+
+def _ensure_matching_envelopes(
+    expected_by_id: dict[str, GenerationRequestRecord],
+    received: list[OfflineGenerationResultRecord],
+) -> None:
+    mismatch = False
+    try:
+        for result in received:
+            if not generation_request_envelopes_match(
+                expected_by_id[result.request_id],
+                result,
+            ):
+                mismatch = True
+                break
+    except Exception:
+        pass
+    else:
+        if not mismatch:
+            return
+    raise _import_error(
+        ErrorCode.CONTRACT,
+        "offline generation result request envelope mismatch",
+    )
+
+
+def _canonical_record(
+    request: GenerationRequestRecord,
+    result: OfflineGenerationResultRecord,
+) -> GeneratedCodeRecord:
+    return GeneratedCodeRecord(
+        schema_version=request.schema_version,
+        code_id=f"code_{request.request_id.removeprefix('req_')}",
+        request_id=request.request_id,
+        prompt_id=request.prompt_id,
+        prompt_sha256=request.prompt_sha256,
+        condition=request.condition,
+        model_id=request.model_id,
+        seed_id=request.seed_id,
+        code=result.code,
+        code_sha256=result.code_sha256,
+        hypothesis_id=request.hypothesis_id,
+        intervention_id=request.intervention_id,
+        generation_provenance=result.provenance,
+    )
+
+
+def import_offline_results(
+    expected_requests: Iterable[GenerationRequestRecord],
+    received_results: Iterable[OfflineGenerationResultRecord],
+) -> list[GeneratedCodeRecord]:
+    """Validate and join offline results to their expected request ledger."""
+
+    expected = _validated_expected(expected_requests)
+    received = _validated_received(received_results)
+
+    received_ids = [result.request_id for result in received]
+    if len(set(received_ids)) != len(received_ids):
+        raise _import_error(
+            ErrorCode.CONTRACT,
+            "offline generation results contain duplicate request ids",
+        )
+
+    expected_by_id = {request.request_id: request for request in expected}
+    if any(request_id not in expected_by_id for request_id in received_ids):
+        raise _import_error(
+            ErrorCode.CONTRACT,
+            "offline generation results contain unexpected requests",
+        )
+
+    _ensure_matching_envelopes(expected_by_id, received)
+
+    received_by_id = {result.request_id: result for result in received}
+    missing_count = len(expected_by_id) - len(received_by_id)
+    if missing_count:
+        raise _import_error(
+            ErrorCode.EXTERNAL_INPUT_REQUIRED,
+            "offline generation results are incomplete",
+            details={
+                "expected_count": len(expected),
+                "received_count": len(received),
+                "missing_count": missing_count,
+            },
+            retryable=True,
+        )
+
+    try:
+        imported = [
+            _canonical_record(request, received_by_id[request.request_id]) for request in expected
+        ]
+    except Exception:
+        pass
+    else:
+        return imported
+    raise _import_error(
+        ErrorCode.CONTRACT,
+        "offline generation canonical record construction failed",
+    )
+
+
+__all__ = ["MAX_OFFLINE_IMPORT_RECORDS", "import_offline_results"]
