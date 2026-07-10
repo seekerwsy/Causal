@@ -25,6 +25,39 @@ def _contract_error(
     )
 
 
+def _decode_line(raw_line: str, *, path: Path, line: int, stage: str) -> object:
+    try:
+        return json.loads(raw_line)
+    except json.JSONDecodeError:
+        pass
+    raise _contract_error(
+        stage=stage,
+        message="JSONL artifact contains invalid JSON",
+        path=path,
+        line=line,
+    ) from None
+
+
+def _validate_record(
+    data: object,
+    model: type[T],
+    *,
+    path: Path,
+    line: int,
+    stage: str,
+) -> T:
+    try:
+        return model.model_validate(data)  # type: ignore[attr-defined,no-any-return]
+    except ValidationError:
+        pass
+    raise _contract_error(
+        stage=stage,
+        message="JSONL record failed schema validation",
+        path=path,
+        line=line,
+    ) from None
+
+
 def read_jsonl(
     path: str | Path,
     model: type[T] | None = None,
@@ -48,31 +81,28 @@ def read_jsonl(
             stripped_line = raw_line.strip()
             if not stripped_line:
                 continue
-            try:
-                data = json.loads(stripped_line)
-            except json.JSONDecodeError as exc:
-                raise _contract_error(
-                    stage=stage,
-                    message="JSONL artifact contains invalid JSON",
-                    path=path,
-                    line=line_number,
-                ) from exc
+            data = _decode_line(
+                stripped_line,
+                path=path,
+                line=line_number,
+                stage=stage,
+            )
             if model is None:
                 records.append(data)
                 continue
-            try:
-                records.append(model.model_validate(data))  # type: ignore[attr-defined]
-            except ValidationError as exc:
-                raise _contract_error(
-                    stage=stage,
-                    message="JSONL record failed schema validation",
+            records.append(
+                _validate_record(
+                    data,
+                    model,
                     path=path,
                     line=line_number,
-                ) from exc
-    if required and not allow_empty and not records:
+                    stage=stage,
+                )
+            )
+    if not allow_empty and not records:
         raise _contract_error(
             stage=stage,
-            message="required JSONL artifact is empty",
+            message="JSONL artifact is empty",
             path=path,
         )
     return records
@@ -84,6 +114,25 @@ def _dump_record(record: BaseModel | dict) -> str:
     return json.dumps(record, ensure_ascii=False, sort_keys=True)
 
 
+def _serialize_record(
+    record: BaseModel | dict,
+    *,
+    path: Path,
+    line: int,
+    stage: str,
+) -> str:
+    try:
+        return _dump_record(record)
+    except Exception:
+        pass
+    raise _contract_error(
+        stage=stage,
+        message="JSONL record could not be serialized",
+        path=path,
+        line=line,
+    ) from None
+
+
 def write_jsonl(
     path: str | Path,
     records: Iterable[BaseModel | dict],
@@ -92,6 +141,7 @@ def write_jsonl(
 ) -> None:
     path = Path(path)
     temp_path: Path | None = None
+    write_error: SecAwareError | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -105,31 +155,28 @@ def write_jsonl(
         ) as handle:
             temp_path = Path(handle.name)
             for line_number, record in enumerate(records, start=1):
-                try:
-                    serialized = _dump_record(record)
-                except Exception as exc:
-                    raise _contract_error(
-                        stage=stage,
-                        message="JSONL record could not be serialized",
-                        path=path,
-                        line=line_number,
-                    ) from exc
+                serialized = _serialize_record(
+                    record,
+                    path=path,
+                    line=line_number,
+                    stage=stage,
+                )
                 handle.write(serialized)
                 handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_path, path)
-    except OSError as exc:
-        raise _contract_error(
+    except OSError:
+        write_error = _contract_error(
             stage=stage,
             message="JSONL artifact could not be written",
             path=path,
-        ) from exc
-    except BaseException:
-        raise
+        )
     finally:
         if temp_path is not None:
             try:
                 temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
+    if write_error is not None:
+        raise write_error from None

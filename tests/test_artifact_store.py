@@ -1,4 +1,5 @@
 import json
+import traceback
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,11 @@ class ExampleRecord(BaseModel):
 
 
 def test_read_jsonl_keeps_missing_files_optional_by_default(tmp_path: Path) -> None:
-    assert read_jsonl(tmp_path / "missing.jsonl") == []
+    assert read_jsonl(
+        tmp_path / "missing.jsonl",
+        required=False,
+        allow_empty=False,
+    ) == []
 
 
 def test_read_jsonl_rejects_a_missing_required_artifact(tmp_path: Path) -> None:
@@ -43,12 +48,44 @@ def test_read_jsonl_rejects_a_required_empty_artifact(tmp_path: Path) -> None:
     assert error.details == {"path": str(path)}
 
 
+def test_read_jsonl_rejects_an_existing_empty_artifact_when_empty_is_disallowed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_text("\n  \n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        read_jsonl(path, required=False, allow_empty=False, stage="analysis")
+
+    error = exc_info.value
+    assert error.code is ErrorCode.CONTRACT
+    assert error.stage == "analysis"
+    assert error.details == {"path": str(path)}
+
+
+def _assert_error_surfaces_are_safe(
+    error: SecAwareError,
+    *,
+    sensitive_values: list[str],
+) -> None:
+    rendered_surfaces = (
+        "".join(traceback.format_exception(error)),
+        str(error),
+        json.dumps(error.to_dict(), ensure_ascii=False, sort_keys=True),
+    )
+    for sensitive_value in sensitive_values:
+        assert all(sensitive_value not in rendered for rendered in rendered_surfaces)
+    assert error.__cause__ is None
+    assert error.__context__ is None
+
+
 def test_read_jsonl_reports_the_physical_line_without_echoing_bad_json(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "records.jsonl"
     secret = "raw-secret-that-must-not-leak"
-    path.write_text(f'{{"value": 1}}\n\n{{"token": "{secret}"\n', encoding="utf-8")
+    raw_invalid_line = f'{{"token": "{secret}"'
+    path.write_text(f'{{"value": 1}}\n\n{raw_invalid_line}\n', encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
         read_jsonl(path, ExampleRecord, required=True, stage="generation")
@@ -57,8 +94,10 @@ def test_read_jsonl_reports_the_physical_line_without_echoing_bad_json(
     assert error.code is ErrorCode.CONTRACT
     assert error.stage == "generation"
     assert error.details == {"path": str(path), "line": 3}
-    assert secret not in error.message
-    assert secret not in str(error)
+    _assert_error_surfaces_are_safe(
+        error,
+        sensitive_values=[secret, raw_invalid_line, "JSONDecodeError"],
+    )
 
 
 def test_read_jsonl_wraps_pydantic_validation_with_the_line_number(
@@ -66,8 +105,9 @@ def test_read_jsonl_wraps_pydantic_validation_with_the_line_number(
 ) -> None:
     path = tmp_path / "records.jsonl"
     invalid_value = "invalid-sensitive-value"
+    raw_invalid_line = f'{{"value": "{invalid_value}", "secret": "private"}}'
     path.write_text(
-        f'{{"value": 1}}\n{{"value": "{invalid_value}"}}\n',
+        f'{{"value": 1}}\n{raw_invalid_line}\n',
         encoding="utf-8",
     )
 
@@ -78,8 +118,10 @@ def test_read_jsonl_wraps_pydantic_validation_with_the_line_number(
     assert error.code is ErrorCode.CONTRACT
     assert error.stage == "oracle"
     assert error.details == {"path": str(path), "line": 2}
-    assert invalid_value not in error.message
-    assert invalid_value not in str(error)
+    _assert_error_surfaces_are_safe(
+        error,
+        sensitive_values=[invalid_value, raw_invalid_line, "private", "ValidationError"],
+    )
 
 
 def test_write_jsonl_creates_parent_and_atomically_publishes_records(
