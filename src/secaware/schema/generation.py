@@ -1,45 +1,20 @@
 import math
-import re
 from typing import Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from secaware.errors import JSONValue
+from secaware.errors import JSONValue, is_sensitive_key
 from secaware.schema.common import StrictModel, VersionedModel
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
-_CREDENTIAL_KEYS = {
-    "api_key",
-    "apikey",
-    "authorization",
-    "client_secret",
-    "password",
-    "proxy_authorization",
-    "refresh_token",
-    "access_token",
-    "bearer_token",
-}
-_CREDENTIAL_SUFFIXES = (
-    "_api_key",
-    "_client_secret",
-    "_password",
-    "_refresh_token",
-    "_access_token",
-    "_bearer_token",
-)
-
-
-def _normalized_key(key: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
 
 
 def _contains_provider_credential(value: JSONValue) -> bool:
     if isinstance(value, dict):
         for key, nested_value in value.items():
-            normalized = _normalized_key(key)
-            if normalized in _CREDENTIAL_KEYS or normalized.endswith(_CREDENTIAL_SUFFIXES):
+            if is_sensitive_key(key):
                 return True
             if _contains_provider_credential(nested_value):
                 return True

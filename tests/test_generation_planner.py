@@ -1,4 +1,5 @@
 import hashlib
+import traceback
 
 import pytest
 from pydantic import ValidationError
@@ -121,15 +122,47 @@ def test_generation_request_record_rejects_invalid_contract_fields(
         GenerationRequestRecord.model_validate(_record_values(**{field: invalid_value}))
 
 
-def test_generation_parameters_default_empty_and_reject_provider_secrets() -> None:
+def test_generation_parameters_default_empty() -> None:
     assert GenerationParameters().values == {}
 
-    secret = "must-not-enter-the-ledger"
+
+@pytest.mark.parametrize(
+    "sensitive_key",
+    [
+        "api_key",
+        "api_token",
+        "auth_token",
+        "secret_key",
+        "private_key",
+        "credentials",
+        "client_credentials",
+        "API.Token",
+        "AUTH-TOKEN",
+        "Secret Key",
+        "PRIVATE.KEY",
+        "Client-Credentials",
+    ],
+)
+def test_generation_parameters_reject_nested_provider_credentials_without_leaking(
+    sensitive_key: str,
+) -> None:
+    secret = f"sensitive-value-for-{sensitive_key}"
     with pytest.raises(ValidationError) as exc_info:
-        GenerationParameters(values={"api_key": secret})
+        GenerationParameters(
+            values={"outer": [{"nested": {sensitive_key: secret}}]}
+        )
+
     assert secret not in str(exc_info.value)
-    with pytest.raises(ValidationError):
-        GenerationParameters(values={"headers": {"Authorization": "Bearer secret"}})
+    assert secret not in "".join(traceback.format_exception(exc_info.value))
+
+
+@pytest.mark.parametrize("usage_key", ["max_tokens", "min_tokens", "token_count"])
+def test_generation_parameters_allow_noncredential_token_usage_keys(
+    usage_key: str,
+) -> None:
+    parameters = GenerationParameters(values={usage_key: 42})
+
+    assert parameters.values == {usage_key: 42}
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

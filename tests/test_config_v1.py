@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import secaware.errors as errors
 from secaware.config import AppConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 
@@ -100,6 +101,52 @@ def test_secaware_error_redacts_sensitive_detail_keys_recursively() -> None:
 
     assert error.details == expected
     assert error.to_dict()["details"] == expected
+
+
+@pytest.mark.parametrize(
+    "sensitive_key",
+    [
+        "api_key",
+        "apikey",
+        "API.Key",
+        "authorization",
+        "Authorization-Header",
+        "token",
+        "tokens",
+        "api_token",
+        "AUTH-TOKEN",
+        "secret",
+        "Secret.Key",
+        "password",
+        "DB.Password",
+        "private_key",
+        "Private-Key",
+        "credential",
+        "credentials",
+        "client_credentials",
+        "Client-Credentials",
+    ],
+)
+def test_sensitive_key_rule_and_error_detail_redaction_are_consistent(
+    sensitive_key: str,
+) -> None:
+    secret = f"sensitive-value-for-{sensitive_key}"
+
+    assert errors.is_sensitive_key(sensitive_key) is True
+    error = SecAwareError(
+        code=ErrorCode.API_AUTH,
+        stage="generation",
+        message="provider authentication failed",
+        details={"nested": [{sensitive_key: secret}]},
+    )
+
+    assert error.details == {"nested": [{sensitive_key: "[REDACTED]"}]}
+    assert secret not in str(error.to_dict())
+
+
+@pytest.mark.parametrize("usage_key", ["max_tokens", "min_tokens", "token_count"])
+def test_sensitive_key_rule_allows_noncredential_token_usage_keys(usage_key: str) -> None:
+    assert errors.is_sensitive_key(usage_key) is False
 
 
 def test_secaware_error_details_are_independent_snapshots() -> None:

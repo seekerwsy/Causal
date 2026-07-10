@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from enum import IntEnum
+import re
 from typing import Any, TypeAlias
 
 from pydantic import JsonValue
@@ -9,12 +10,33 @@ JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JsonValue
 
 _REDACTED = "[REDACTED]"
-_SENSITIVE_KEY_FRAGMENTS = ("api_key", "authorization", "token", "secret", "password")
+_ALLOWED_TOKEN_USAGE_KEYS = frozenset({"max_tokens", "min_tokens", "token_count"})
+_SENSITIVE_COMPACT_FRAGMENTS = (
+    "apikey",
+    "authorization",
+    "secret",
+    "password",
+    "privatekey",
+    "credential",
+)
 
 
-def _is_sensitive_key(key: str) -> bool:
-    folded_key = key.casefold()
-    return any(fragment in folded_key for fragment in _SENSITIVE_KEY_FRAGMENTS)
+def is_sensitive_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+    if normalized in _ALLOWED_TOKEN_USAGE_KEYS:
+        return False
+
+    compact = normalized.replace("_", "")
+    if any(fragment in compact for fragment in _SENSITIVE_COMPACT_FRAGMENTS):
+        return True
+
+    segments = normalized.split("_")
+    return "token" in segments or "tokens" in segments or compact.endswith(
+        ("token", "tokens")
+    )
+
+
+_is_sensitive_key = is_sensitive_key
 
 
 def _normalize_json_value(value: object) -> JSONValue:
@@ -26,7 +48,7 @@ def _normalize_json_value(value: object) -> JSONValue:
             if not isinstance(key, str):
                 raise TypeError("structured error detail keys must be strings")
             normalized[key] = (
-                _REDACTED if _is_sensitive_key(key) else _normalize_json_value(nested_value)
+                _REDACTED if is_sensitive_key(key) else _normalize_json_value(nested_value)
             )
         return normalized
     if isinstance(value, (list, tuple)):
