@@ -1,24 +1,80 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Iterable, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+
+from secaware.errors import ErrorCode, SecAwareError
 
 T = TypeVar("T")
 
 
-def read_jsonl(path: str | Path, model: type[T] | None = None) -> list[T] | list[dict]:
+def _contract_error(
+    *, stage: str, message: str, path: Path, line: int | None = None
+) -> SecAwareError:
+    details: dict[str, str | int] = {"path": str(path)}
+    if line is not None:
+        details["line"] = line
+    return SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage=stage,
+        message=message,
+        details=details,
+    )
+
+
+def read_jsonl(
+    path: str | Path,
+    model: type[T] | None = None,
+    *,
+    required: bool = False,
+    allow_empty: bool = True,
+    stage: str = "io",
+) -> list[T] | list[dict]:
     records: list[T] | list[dict] = []
     path = Path(path)
     if not path.exists():
+        if required:
+            raise _contract_error(
+                stage=stage,
+                message="required JSONL artifact is missing",
+                path=path,
+            )
         return records
     with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
+        for line_number, raw_line in enumerate(handle, start=1):
+            stripped_line = raw_line.strip()
+            if not stripped_line:
                 continue
-            data = json.loads(line)
-            records.append(model.model_validate(data) if model else data)  # type: ignore[attr-defined]
+            try:
+                data = json.loads(stripped_line)
+            except json.JSONDecodeError as exc:
+                raise _contract_error(
+                    stage=stage,
+                    message="JSONL artifact contains invalid JSON",
+                    path=path,
+                    line=line_number,
+                ) from exc
+            if model is None:
+                records.append(data)
+                continue
+            try:
+                records.append(model.model_validate(data))  # type: ignore[attr-defined]
+            except ValidationError as exc:
+                raise _contract_error(
+                    stage=stage,
+                    message="JSONL record failed schema validation",
+                    path=path,
+                    line=line_number,
+                ) from exc
+    if required and not allow_empty and not records:
+        raise _contract_error(
+            stage=stage,
+            message="required JSONL artifact is empty",
+            path=path,
+        )
     return records
 
 
@@ -28,10 +84,52 @@ def _dump_record(record: BaseModel | dict) -> str:
     return json.dumps(record, ensure_ascii=False, sort_keys=True)
 
 
-def write_jsonl(path: str | Path, records: Iterable[BaseModel | dict]) -> None:
+def write_jsonl(
+    path: str | Path,
+    records: Iterable[BaseModel | dict],
+    *,
+    stage: str = "io",
+) -> None:
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(_dump_record(record))
-            handle.write("\n")
+    temp_path: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            for line_number, record in enumerate(records, start=1):
+                try:
+                    serialized = _dump_record(record)
+                except Exception as exc:
+                    raise _contract_error(
+                        stage=stage,
+                        message="JSONL record could not be serialized",
+                        path=path,
+                        line=line_number,
+                    ) from exc
+                handle.write(serialized)
+                handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except OSError as exc:
+        raise _contract_error(
+            stage=stage,
+            message="JSONL artifact could not be written",
+            path=path,
+        ) from exc
+    except BaseException:
+        raise
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass

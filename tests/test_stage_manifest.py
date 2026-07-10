@@ -1,0 +1,184 @@
+import hashlib
+import math
+from pathlib import Path
+
+import pytest
+
+from secaware.pipeline.artifact import canonical_sha256, sha256_file
+from secaware.pipeline.manifest import (
+    StageManifest,
+    build_stage_fingerprint,
+    manifest_allows_skip,
+    read_stage_manifest,
+    write_stage_manifest,
+)
+
+
+def _manifest(*, fingerprint: str, outputs: list[Path | str]) -> StageManifest:
+    return StageManifest(
+        schema_version="1.0",
+        stage="discovery",
+        fingerprint=fingerprint,
+        inputs={"inputs/prompts.jsonl": "input-sha"},
+        config_sha256="config-sha",
+        code_version="test-version",
+        outputs=outputs,
+    )
+
+
+def test_sha256_file_hashes_file_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    payload = "安全 artifact\n".encode()
+    path.write_bytes(payload)
+
+    assert sha256_file(path) == hashlib.sha256(payload).hexdigest()
+
+
+def test_canonical_sha256_is_stable_for_mapping_order() -> None:
+    first = {"outer": {"b": 2, "a": 1}, "name": "安全"}
+    reordered = {"name": "安全", "outer": {"a": 1, "b": 2}}
+
+    assert canonical_sha256(first) == canonical_sha256(reordered)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"path": Path("artifact.jsonl")},
+        {"tuple": (1, 2)},
+        {"set": {1, 2}},
+        {1: "non-string JSON key"},
+        {"not_finite": math.nan},
+    ],
+)
+def test_canonical_sha256_rejects_non_json_values(value: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        canonical_sha256(value)
+
+
+def test_stage_fingerprint_ignores_input_mapping_order() -> None:
+    first = build_stage_fingerprint(
+        "discovery",
+        {"a.jsonl": "sha-a", "b.jsonl": "sha-b"},
+        {"alpha": 1, "beta": 2},
+        policy_sha256="policy",
+        catalog_sha256="catalog",
+        code_version="v1",
+    )
+    reordered = build_stage_fingerprint(
+        "discovery",
+        {"b.jsonl": "sha-b", "a.jsonl": "sha-a"},
+        {"beta": 2, "alpha": 1},
+        policy_sha256="policy",
+        catalog_sha256="catalog",
+        code_version="v1",
+    )
+
+    assert first == reordered
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"stage": "analysis"},
+        {"inputs": {"a.jsonl": "changed"}},
+        {"config": {"alpha": 2}},
+        {"policy_sha256": "changed-policy"},
+        {"catalog_sha256": "changed-catalog"},
+        {"code_version": "v2"},
+    ],
+)
+def test_stage_fingerprint_changes_when_any_component_changes(
+    changes: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "stage": "discovery",
+        "inputs": {"a.jsonl": "sha-a"},
+        "config": {"alpha": 1},
+        "policy_sha256": "policy",
+        "catalog_sha256": "catalog",
+        "code_version": "v1",
+    }
+    baseline = build_stage_fingerprint(
+        values["stage"],
+        values["inputs"],
+        values["config"],
+        policy_sha256=values["policy_sha256"],
+        catalog_sha256=values["catalog_sha256"],
+        code_version=values["code_version"],
+    )
+    values.update(changes)
+
+    changed = build_stage_fingerprint(
+        values["stage"],
+        values["inputs"],
+        values["config"],
+        policy_sha256=values["policy_sha256"],
+        catalog_sha256=values["catalog_sha256"],
+        code_version=values["code_version"],
+    )
+
+    assert changed != baseline
+
+
+def test_stage_manifest_normalizes_input_and_output_paths() -> None:
+    manifest = _manifest(
+        fingerprint="fingerprint",
+        outputs=[Path("reports") / "." / "summary.json"],
+    )
+
+    assert manifest.inputs == {Path("inputs/prompts.jsonl").as_posix(): "input-sha"}
+    assert manifest.outputs == [Path("reports/summary.json").as_posix()]
+
+
+def test_stage_manifest_round_trips_through_atomic_write(tmp_path: Path) -> None:
+    output = tmp_path / "out.jsonl"
+    output.write_text("ready\n", encoding="utf-8")
+    manifest = _manifest(fingerprint="fingerprint", outputs=[output])
+    manifest_path = tmp_path / "manifests" / "discovery.json"
+
+    write_stage_manifest(manifest_path, manifest)
+
+    assert read_stage_manifest(manifest_path) == manifest
+    assert list(manifest_path.parent.glob("*.tmp")) == []
+
+
+def test_manifest_allows_skip_only_for_matching_manifest_and_existing_outputs(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "out.jsonl"
+    output.write_text("ready\n", encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    write_stage_manifest(
+        manifest_path,
+        _manifest(fingerprint="expected", outputs=[output]),
+    )
+
+    assert manifest_allows_skip(manifest_path, "expected", [output]) is True
+    assert manifest_allows_skip(manifest_path, "expected", [output], force=True) is False
+    assert manifest_allows_skip(manifest_path, "different", [output]) is False
+
+    output.unlink()
+    assert manifest_allows_skip(manifest_path, "expected", [output]) is False
+
+
+def test_manifest_allows_skip_rejects_missing_invalid_or_wrong_outputs(
+    tmp_path: Path,
+) -> None:
+    expected_output = tmp_path / "expected.jsonl"
+    expected_output.write_text("ready\n", encoding="utf-8")
+    missing_manifest = tmp_path / "missing.json"
+
+    assert manifest_allows_skip(missing_manifest, "expected", [expected_output]) is False
+
+    invalid_manifest = tmp_path / "invalid.json"
+    invalid_manifest.write_text("not-json", encoding="utf-8")
+    assert manifest_allows_skip(invalid_manifest, "expected", [expected_output]) is False
+
+    other_output = tmp_path / "other.jsonl"
+    other_output.write_text("ready\n", encoding="utf-8")
+    write_stage_manifest(
+        invalid_manifest,
+        _manifest(fingerprint="expected", outputs=[other_output]),
+    )
+    assert manifest_allows_skip(invalid_manifest, "expected", [expected_output]) is False
