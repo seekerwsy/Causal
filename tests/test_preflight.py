@@ -12,6 +12,19 @@ from secaware.schema.records import PromptRecord
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CLI_COMMANDS = [
+    "preflight",
+    "extract-prompt-tsg",
+    "generate-observed",
+    "extract-code-tsg",
+    "run-oracle",
+    "discover",
+    "intervene",
+    "generate-counterfactual",
+    "confirm",
+    "report",
+    "run-all",
+]
 
 
 def _prompt(prompt_id: str, split: str, prompt: str) -> PromptRecord:
@@ -232,3 +245,39 @@ def test_preflight_cli_maps_invalid_config_to_safe_config_error(
     assert str(config_path) not in rendered
     if secret:
         assert secret not in rendered
+
+
+@pytest.mark.parametrize("command", CLI_COMMANDS)
+def test_every_cli_command_uses_safe_error_boundary(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    secret = "top-secret-command-config"
+    config_path = tmp_path / "private-config.yaml"
+    config_path.write_text(
+        "run:\n"
+        "  name: private\n"
+        "data:\n"
+        "  prompts_path: prompts.jsonl\n"
+        f"unknown_field: {secret}\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, [command, "--config", str(config_path)])
+
+    assert result.exit_code == int(ErrorCode.CONFIG)
+    assert "[CONFIG] config:" in result.stderr
+    rendered = result.output + result.stderr
+    assert "Traceback" not in rendered
+    assert secret not in rendered
+    assert str(config_path) not in rendered
+    assert "details" not in rendered.lower()
+
+
+@pytest.mark.parametrize("command", CLI_COMMANDS)
+def test_cli_command_help_preserves_declared_signature(command: str) -> None:
+    result = CliRunner().invoke(app, [command, "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--config" in result.output
+    assert "--run-dir" in result.output

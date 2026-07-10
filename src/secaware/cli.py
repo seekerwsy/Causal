@@ -5,7 +5,7 @@ import typer
 
 from secaware.analysis.effects import estimate_effects
 from secaware.analysis.pairing import build_pairs
-from secaware.commands.common import run_cli_action
+from secaware.commands.common import cli_action
 from secaware.config import AppConfig, load_config
 from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
@@ -377,27 +377,26 @@ def main() -> None:
 
 
 @app.command("preflight")
+@cli_action
 def preflight_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
 ) -> None:
-    def action() -> None:
-        cfg, _store = _load(config, run_dir)
-        report = run_preflight(cfg)
-        typer.echo(
-            "Preflight OK: "
-            f"prompts={report.prompt_count} "
-            f"discover={report.discover_count} "
-            f"confirm={report.confirm_count} "
-            f"models={report.model_count} "
-            f"seeds={report.seed_count} "
-            f"output_dir={report.output_dir}"
-        )
-
-    run_cli_action(action)
+    cfg, _store = _load(config, run_dir)
+    report = run_preflight(cfg)
+    typer.echo(
+        "Preflight OK: "
+        f"prompts={report.prompt_count} "
+        f"discover={report.discover_count} "
+        f"confirm={report.confirm_count} "
+        f"models={report.model_count} "
+        f"seeds={report.seed_count} "
+        f"output_dir={report.output_dir}"
+    )
 
 
 @app.command("extract-prompt-tsg")
+@cli_action
 def extract_prompt_tsg_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -409,6 +408,7 @@ def extract_prompt_tsg_command(
 
 
 @app.command("generate-observed")
+@cli_action
 def generate_observed_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -420,6 +420,7 @@ def generate_observed_command(
 
 
 @app.command("extract-code-tsg")
+@cli_action
 def extract_code_tsg_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -431,6 +432,7 @@ def extract_code_tsg_command(
 
 
 @app.command("run-oracle")
+@cli_action
 def run_oracle_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -442,6 +444,7 @@ def run_oracle_command(
 
 
 @app.command("discover")
+@cli_action
 def discover_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -452,6 +455,7 @@ def discover_command(
 
 
 @app.command("intervene")
+@cli_action
 def intervene_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -462,6 +466,7 @@ def intervene_command(
 
 
 @app.command("generate-counterfactual")
+@cli_action
 def generate_counterfactual_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -472,6 +477,7 @@ def generate_counterfactual_command(
 
 
 @app.command("confirm")
+@cli_action
 def confirm_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -482,6 +488,7 @@ def confirm_command(
 
 
 @app.command("report")
+@cli_action
 def report_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
@@ -492,6 +499,7 @@ def report_command(
 
 
 @app.command("run-all")
+@cli_action
 def run_all_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),

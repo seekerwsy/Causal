@@ -38,6 +38,14 @@ def _input_and_output(store: RunStore) -> tuple[Path, Path]:
     return input_path, output_path
 
 
+def _record_report_stage(store: RunStore, input_path: Path, outputs: list[Path]) -> Path:
+    assert store.should_skip_stage("report", [input_path], outputs, force=False) is False
+    store.record_stage("report", [input_path], outputs)
+    manifest_path = store.path(".stages", "report.json")
+    assert manifest_path.is_file()
+    return manifest_path
+
+
 def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig, RunStore]:
     prompts_path = tmp_path / "source-prompts.jsonl"
     write_jsonl(
@@ -85,7 +93,9 @@ def test_stage_is_skippable_only_after_matching_manifest_is_recorded(tmp_path: P
     store.record_stage("report", [input_path], [output_path])
 
     assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
-    manifest = read_stage_manifest(store.path(".stages", "report.json"))
+    manifest_path = store.path(".stages", "report.json")
+    assert manifest_path.is_file()
+    manifest = read_stage_manifest(manifest_path)
     assert manifest.schema_version == "1.0"
     assert manifest.stage == "report"
     assert manifest.inputs == {"inputs/source.txt": sha256_file(input_path)}
@@ -195,6 +205,82 @@ def test_force_disables_stage_skip(tmp_path: Path) -> None:
     assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
     store.record_stage("report", [input_path], [output_path])
     assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
+
+
+@pytest.mark.parametrize("invalidation", ["force", "input", "config", "outputs"])
+def test_execution_decision_invalidates_previous_manifest(
+    tmp_path: Path,
+    invalidation: str,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    outputs = [output_path]
+    manifest_path = _record_report_stage(store, input_path, outputs)
+    force = invalidation == "force"
+    if invalidation == "input":
+        input_path.write_text("changed-input\n", encoding="utf-8")
+    elif invalidation == "config":
+        store.config.analysis.bootstrap_samples += 1
+    elif invalidation == "outputs":
+        second_output = store.path("reports", "second.txt")
+        second_output.write_text("second\n", encoding="utf-8")
+        outputs = [output_path, second_output]
+
+    assert store.should_skip_stage("report", [input_path], outputs, force=force) is False
+    assert not manifest_path.exists()
+
+
+def test_failed_stage_cannot_reuse_manifest_after_partial_output_overwrite(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+
+    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+    assert not manifest_path.exists()
+    output_path.write_text("partial-stage-output\n", encoding="utf-8")
+
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+
+def test_record_conflict_cannot_restore_stale_manifest_skip(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    original_input = input_path.read_text(encoding="utf-8")
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+    output_path.write_text("partial-stage-output\n", encoding="utf-8")
+    input_path.write_text("changed-during-stage\n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not manifest_path.exists()
+    input_path.write_text(original_input, encoding="utf-8")
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+
+def test_manifest_invalidation_wraps_unlink_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    _record_report_stage(store, input_path, [output_path])
+
+    def fail_unlink(path: Path, missing_ok: bool = False) -> None:
+        del path, missing_ok
+        raise OSError("private filesystem failure")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.should_skip_stage("report", [input_path], [output_path], force=True)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert "private filesystem failure" not in str(exc_info.value)
 
 
 def test_record_stage_rejects_a_missing_declared_output(tmp_path: Path) -> None:

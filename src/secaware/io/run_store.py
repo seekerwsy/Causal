@@ -98,6 +98,19 @@ class RunStore:
         safe_stage = re.sub(r"[^A-Za-z0-9._-]+", "-", stage).strip(".-_") or "stage"
         return self.path(".stages", f"{safe_stage}.json")
 
+    def _invalidate_stage_manifest(self, stage: str) -> None:
+        try:
+            self._manifest_path(stage).unlink(missing_ok=True)
+        except OSError:
+            raise self._manifest_conflict(
+                stage,
+                "stage manifest could not be invalidated",
+            ) from None
+
+    def _reject_stage_record(self, stage: str, message: str) -> None:
+        self._invalidate_stage_manifest(stage)
+        raise self._manifest_conflict(stage, message)
+
     def stage_inputs(self, paths: Sequence[str | Path]) -> dict[str, str]:
         inputs: dict[str, str] = {}
         for path_value in paths:
@@ -149,13 +162,21 @@ class RunStore:
             code_version=__version__,
             outputs=tuple(relative_outputs),
         )
-        return manifest_allows_skip(
+        allows_skip = manifest_allows_skip(
             self._manifest_path(stage),
             fingerprint,
             outputs,
             force=force,
             manifest_outputs=relative_outputs,
         )
+        if allows_skip:
+            return True
+        try:
+            self._invalidate_stage_manifest(stage)
+        except SecAwareError:
+            self._pending_snapshots.pop(stage, None)
+            raise
+        return False
 
     def record_stage(
         self,
@@ -172,17 +193,17 @@ class RunStore:
                 raise self._contract_error("declared stage output is missing", output)
         snapshot = self._pending_snapshots.pop(stage, None)
         if snapshot is None:
-            raise self._manifest_conflict(
+            self._reject_stage_record(
                 stage,
                 "stage was not preceded by an execution snapshot",
             )
         try:
             inputs = self.stage_inputs(input_paths)
         except SecAwareError:
-            raise self._manifest_conflict(
+            self._reject_stage_record(
                 stage,
                 "stage inputs changed during execution",
-            ) from None
+            )
         config = self.config.model_dump(mode="json")
         current_config_sha256 = canonical_sha256(config)
         current_fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
@@ -193,7 +214,7 @@ class RunStore:
             or snapshot.code_version != __version__
             or snapshot.outputs != tuple(relative_outputs)
         ):
-            raise self._manifest_conflict(
+            self._reject_stage_record(
                 stage,
                 "stage inputs or configuration changed during execution",
             )
