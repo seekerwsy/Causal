@@ -10,6 +10,7 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.generation import result_importer
 from secaware.generation.result_importer import import_offline_results
+from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.oracle.aggregator import run_oracle
 from secaware.schema.generation import (
     GenerationParameters,
@@ -19,12 +20,20 @@ from secaware.schema.generation import (
     build_generation_request_id,
     sha256_text,
 )
-from secaware.schema.records import GeneratedCodeRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, GeneratedCodeRecord
 
 
 _PRODUCER = "offline-worker-safe"
 _PRODUCER_VERSION = "worker-v1-safe"
 _SOURCE_BATCH_ID = "batch-safe"
+_CANONICAL_METADATA_FIELDS = (
+    "schema_version",
+    "request_id",
+    "prompt_sha256",
+    "code_sha256",
+    "generation_provenance",
+    "generation_request",
+)
 
 
 def _request(
@@ -325,6 +334,7 @@ def test_importer_restores_ledger_order_and_round_trips_canonical_metadata() -> 
     by_request_id = {result.request_id: result for result in received}
     for request, record in zip(expected, imported, strict=True):
         result = by_request_id[request.request_id]
+        assert type(record) is CanonicalGeneratedCodeRecord
         assert record.schema_version == "1.0"
         assert record.code_id == f"code_{request.request_id.removeprefix('req_')}"
         assert record.request_id == request.request_id
@@ -338,6 +348,14 @@ def test_importer_restores_ledger_order_and_round_trips_canonical_metadata() -> 
         assert record.seed_id == request.seed_id
         assert record.hypothesis_id == request.hypothesis_id
         assert record.intervention_id == request.intervention_id
+        assert record.generation_request == request
+        assert record.generation_request is not request
+
+
+def test_canonical_generated_code_record_has_schema_package_export() -> None:
+    from secaware.schema import CanonicalGeneratedCodeRecord as ExportedCanonicalRecord
+
+    assert ExportedCanonicalRecord is CanonicalGeneratedCodeRecord
 
 
 def test_legacy_generated_code_record_remains_valid_without_forged_metadata() -> None:
@@ -355,6 +373,63 @@ def test_legacy_generated_code_record_remains_valid_without_forged_metadata() ->
     assert legacy.prompt_sha256 is None
     assert legacy.code_sha256 is None
     assert legacy.generation_provenance is None
+    assert legacy.generation_request is None
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["constructor", "model_validate", "model_validate_json", "model_validate_strings"],
+)
+def test_generated_code_validation_surfaces_never_echo_code_or_metadata(
+    entrypoint: str,
+) -> None:
+    code_secret = "generated-code-validation-secret"
+    id_secret = "code_" + "a" * 64
+    metadata_secret = "generated-metadata-validation-secret"
+    payload = {
+        "code_id": id_secret,
+        "prompt_id": metadata_secret,
+        "condition": "observed",
+        "model_id": "model-validation-secret",
+        "seed_id": 1,
+        "code": code_secret,
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        if entrypoint == "constructor":
+            GeneratedCodeRecord(**payload)
+        elif entrypoint == "model_validate":
+            GeneratedCodeRecord.model_validate(payload)
+        elif entrypoint == "model_validate_json":
+            GeneratedCodeRecord.model_validate_json(json.dumps(payload))
+        else:
+            GeneratedCodeRecord.model_validate_strings(payload)
+
+    _assert_safe_validation_error(
+        exc_info.value,
+        code_secret,
+        id_secret,
+        metadata_secret,
+        "input_value",
+    )
+
+
+def test_generated_code_record_is_frozen_with_safe_assignment_errors() -> None:
+    legacy = GeneratedCodeRecord(
+        code_id="legacy-code-frozen",
+        prompt_id="legacy-prompt-frozen",
+        condition="observed",
+        model_id="legacy-model-frozen",
+        seed_id=2,
+        code="def original():\n    return True\n",
+    )
+    replacement_secret = "assignment-code-secret"
+
+    with pytest.raises(ValidationError) as exc_info:
+        legacy.code = replacement_secret
+
+    assert legacy.code == "def original():\n    return True\n"
+    _assert_safe_validation_error(exc_info.value, replacement_secret, "input_value")
 
 
 def test_legacy_generated_code_record_keeps_historically_permitted_coordinates() -> None:
@@ -384,6 +459,118 @@ def test_generated_code_record_rejects_partial_canonical_metadata() -> None:
             code="def legacy():\n    return True\n",
             schema_version="1.0",
         )
+
+
+@pytest.mark.parametrize("deletion", ["generation_request", "all_metadata"])
+def test_canonical_payload_cannot_downgrade_to_legacy(deletion: str) -> None:
+    request = _request()
+    canonical = import_offline_results([request], [_result(request)])[0]
+    payload = canonical.model_dump(mode="python")
+    if deletion == "generation_request":
+        payload.pop("generation_request")
+    else:
+        for field in _CANONICAL_METADATA_FIELDS:
+            payload.pop(field)
+
+    with pytest.raises(ValidationError) as exc_info:
+        GeneratedCodeRecord.model_validate(payload)
+
+    _assert_safe_validation_error(
+        exc_info.value,
+        canonical.code,
+        canonical.code_id,
+        canonical.request_id,
+    )
+
+
+def test_noncanonical_legacy_code_id_remains_valid() -> None:
+    legacy = GeneratedCodeRecord(
+        code_id="legacy-code-id",
+        prompt_id="legacy-prompt-id",
+        condition="observed",
+        model_id="legacy-model-id",
+        seed_id=3,
+        code="def legacy():\n    return True\n",
+    )
+
+    assert legacy.request_id is None
+
+
+def test_canonical_record_round_trips_through_canonical_jsonl_schema(tmp_path: Any) -> None:
+    request = _request()
+    canonical = import_offline_results([request], [_result(request)])[0]
+    path = tmp_path / "canonical-code.jsonl"
+
+    write_jsonl(path, [canonical], stage="canonical-code-test")
+    loaded = read_jsonl(
+        path,
+        CanonicalGeneratedCodeRecord,
+        required=True,
+        allow_empty=False,
+        stage="canonical-code-test",
+    )
+
+    assert loaded == [canonical]
+    assert type(loaded[0]) is CanonicalGeneratedCodeRecord
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("request_id", "req_" + "0" * 64),
+        ("prompt_id", "drifted-prompt"),
+        ("condition", "observed"),
+        ("model_id", "drifted-model"),
+        ("seed_id", 999),
+        ("hypothesis_id", "drifted-hypothesis"),
+        ("intervention_id", "drifted-intervention"),
+        ("prompt_sha256", "0" * 64),
+    ],
+)
+def test_canonical_top_level_coordinates_are_bound_to_full_request_envelope(
+    field: str,
+    replacement: object,
+) -> None:
+    request = _request(
+        "prompt-canonical",
+        prompt="Normalize a path before opening it.",
+        condition="counterfactual",
+        hypothesis_id="hyp-canonical",
+        intervention_id="int-canonical",
+    )
+    canonical = import_offline_results([request], [_result(request)])[0]
+    payload = canonical.model_dump(mode="python")
+    payload[field] = replacement
+
+    with pytest.raises(ValidationError) as exc_info:
+        CanonicalGeneratedCodeRecord.model_validate(payload)
+
+    _assert_safe_validation_error(
+        exc_info.value,
+        canonical.code,
+        canonical.code_id,
+        request.request_id,
+        request.prompt,
+    )
+
+
+def test_canonical_nested_request_is_revalidated_before_binding() -> None:
+    request = _request()
+    canonical = import_offline_results([request], [_result(request)])[0]
+    forged_request = request.model_copy(update={"model_id": "nested-coordinate-secret"})
+    payload = canonical.model_dump(mode="python")
+    payload["generation_request"] = forged_request
+
+    with pytest.raises(ValidationError) as exc_info:
+        CanonicalGeneratedCodeRecord.model_validate(payload)
+
+    _assert_safe_validation_error(
+        exc_info.value,
+        "nested-coordinate-secret",
+        request.request_id,
+        request.prompt,
+        canonical.code,
+    )
 
 
 @pytest.mark.parametrize(
@@ -440,6 +627,56 @@ def test_imported_record_is_directly_compatible_with_extractor_and_oracle() -> N
     assert tsg.features["code.parse_ok"] is True
     assert oracle.code_id == imported.code_id
     assert oracle.prompt_id == imported.prompt_id
+
+
+@pytest.mark.parametrize("consumer", [extract_code_tsg, run_oracle])
+@pytest.mark.parametrize(
+    ("forgery", "secret"),
+    [
+        ("model_copy_code", "forged-runtime-code-secret"),
+        ("model_copy_hash", "forged-runtime-hash-secret"),
+        ("model_copy_coordinate", "forged-runtime-coordinate-secret"),
+        ("model_construct_coordinate", "constructed-runtime-coordinate-secret"),
+        ("model_construct_downgrade", "constructed-runtime-downgrade-secret"),
+    ],
+)
+def test_downstream_consumers_revalidate_canonical_runtime_instances(
+    consumer: Callable[[GeneratedCodeRecord], object],
+    forgery: str,
+    secret: str,
+) -> None:
+    request = _request()
+    canonical = import_offline_results([request], [_result(request)])[0]
+    if forgery == "model_copy_code":
+        forged = canonical.model_copy(update={"code": secret})
+    elif forgery == "model_copy_hash":
+        forged = canonical.model_copy(update={"code_sha256": secret})
+    elif forgery == "model_copy_coordinate":
+        forged = canonical.model_copy(update={"model_id": secret})
+    else:
+        payload = canonical.model_dump(mode="python")
+        if forgery == "model_construct_coordinate":
+            payload["model_id"] = secret
+        else:
+            for field in _CANONICAL_METADATA_FIELDS:
+                payload.pop(field)
+            payload["prompt_id"] = secret
+        forged = CanonicalGeneratedCodeRecord.model_construct(**payload)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        consumer(forged)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.retryable is False
+    assert exc_info.value.details == {}
+    for hidden in (
+        secret,
+        canonical.code,
+        canonical.code_id,
+        canonical.request_id,
+        _PRODUCER,
+    ):
+        assert all(hidden not in surface for surface in _error_surfaces(exc_info.value))
 
 
 def test_different_interventions_produce_different_canonical_code_ids() -> None:

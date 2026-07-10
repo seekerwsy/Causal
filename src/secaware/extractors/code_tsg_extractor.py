@@ -1,13 +1,35 @@
 import ast
-from collections.abc import Iterable
 
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.python_ast_utils import call_has_keyword, full_name, is_list_like, names_in
-from secaware.schema.records import GeneratedCodeRecord
+from secaware.schema.records import GeneratedCodeRecord, revalidate_generated_code_record
 from secaware.schema.tsg import EdgeType, NodeType, TSGEdge, TSGNode, TSGRecord
 
 
 SAFE_PARAM_NAMES = {"base_dir", "config", "safe_dir", "cursor", "conn", "connection", "db"}
-SOURCE_NAME_HINTS = ("user", "input", "path", "filename", "query", "cmd", "command", "name", "option")
+SOURCE_NAME_HINTS = (
+    "user",
+    "input",
+    "path",
+    "filename",
+    "query",
+    "cmd",
+    "command",
+    "name",
+    "option",
+)
+
+
+def _validated_code_input(value: object) -> GeneratedCodeRecord:
+    try:
+        return revalidate_generated_code_record(value)
+    except Exception:
+        pass
+    raise SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage="code-tsg-extractor",
+        message="generated code input failed contract validation",
+    ) from None
 
 
 class _CodeGraphBuilder:
@@ -113,7 +135,10 @@ class _TaintVisitor(ast.NodeVisitor):
         } or name.endswith(".resolve")
 
     def _is_safe_deserialization(self, node: ast.AST) -> bool:
-        return isinstance(node, ast.Call) and full_name(node.func) in {"yaml.safe_load", "json.loads"}
+        return isinstance(node, ast.Call) and full_name(node.func) in {
+            "yaml.safe_load",
+            "json.loads",
+        }
 
     def _mark_guard(self, label: str) -> None:
         self.builder.node(NodeType.GUARD, label)
@@ -160,7 +185,11 @@ class _TaintVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        if isinstance(node.target, ast.Name) and node.value is not None and self._contains_tainted(node.value):
+        if (
+            isinstance(node.target, ast.Name)
+            and node.value is not None
+            and self._contains_tainted(node.value)
+        ):
             self.tainted.add(node.target.id)
         self.generic_visit(node)
 
@@ -243,6 +272,7 @@ class _TaintVisitor(ast.NodeVisitor):
 
 
 def extract_code_tsg(code: GeneratedCodeRecord) -> TSGRecord:
+    code = _validated_code_input(code)
     try:
         tree = ast.parse(code.code)
     except SyntaxError as exc:

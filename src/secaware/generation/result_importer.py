@@ -10,7 +10,7 @@ from secaware.schema.generation import (
     revalidate_generation_request_envelope,
     revalidate_offline_generation_result,
 )
-from secaware.schema.records import GeneratedCodeRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 
 MAX_OFFLINE_IMPORT_RECORDS = 100_000
@@ -136,8 +136,8 @@ def _ensure_matching_envelopes(
 def _canonical_record(
     request: GenerationRequestRecord,
     result: OfflineGenerationResultRecord,
-) -> GeneratedCodeRecord:
-    return GeneratedCodeRecord(
+) -> CanonicalGeneratedCodeRecord:
+    return CanonicalGeneratedCodeRecord(
         schema_version=request.schema_version,
         code_id=f"code_{request.request_id.removeprefix('req_')}",
         request_id=request.request_id,
@@ -151,13 +151,14 @@ def _canonical_record(
         hypothesis_id=request.hypothesis_id,
         intervention_id=request.intervention_id,
         generation_provenance=result.provenance,
+        generation_request=request,
     )
 
 
 def import_offline_results(
     expected_requests: Iterable[GenerationRequestRecord],
     received_results: Iterable[OfflineGenerationResultRecord],
-) -> list[GeneratedCodeRecord]:
+) -> list[CanonicalGeneratedCodeRecord]:
     """Validate and join offline results to their expected request ledger."""
 
     expected = _validated_expected(expected_requests)

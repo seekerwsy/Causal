@@ -1,11 +1,25 @@
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.oracle.functionality import evaluate_functionality
 from secaware.oracle.lightweight_rules import findings_from_tsg
-from secaware.schema.records import GeneratedCodeRecord
+from secaware.schema.records import GeneratedCodeRecord, revalidate_generated_code_record
 from secaware.schema.results import OracleRecord, SecurityLabel
 
 
+def _validated_code_input(value: object) -> GeneratedCodeRecord:
+    try:
+        return revalidate_generated_code_record(value)
+    except Exception:
+        pass
+    raise SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage="oracle",
+        message="generated code input failed contract validation",
+    ) from None
+
+
 def run_oracle(code: GeneratedCodeRecord) -> OracleRecord:
+    code = _validated_code_input(code)
     tsg = extract_code_tsg(code)
     functionality = evaluate_functionality(code.code)
     parse_ok = bool(tsg.features.get("code.parse_ok", False))

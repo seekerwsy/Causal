@@ -3,22 +3,24 @@ import hashlib
 from itertools import islice
 import json
 import math
-from typing import Any, ClassVar, Literal, TypeVar, cast
+from typing import Literal, cast
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     StrictInt,
-    ValidationError,
     field_serializer,
     field_validator,
     model_validator,
 )
-from pydantic_core import PydanticCustomError
 
 from secaware.errors import JSONValue
-from secaware.schema.common import StrictModel, VersionedModel
+from secaware.schema.common import (
+    SafeValidationMixin,
+    StrictModel,
+    VersionedModel,
+    model_shape_is_intact,
+)
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -54,92 +56,6 @@ _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical 
 _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation failed"
 _INVALID_PROVENANCE_MESSAGE = "generation provenance validation failed"
 _INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
-
-
-_SafeValidationModel = TypeVar(
-    "_SafeValidationModel",
-    bound="_SafeValidationMixin",
-)
-
-
-def _sanitized_validation_error(
-    model_name: str,
-    message: str,
-    *,
-    input_type: Literal["python", "json"] = "python",
-) -> ValidationError:
-    return ValidationError.from_exception_data(
-        model_name,
-        [
-            {
-                "type": PydanticCustomError("generation_validation", message),
-                "loc": (),
-                "input": None,
-            }
-        ],
-        input_type=input_type,
-        hide_input=True,
-    )
-
-
-class _SafeValidationMixin:
-    _safe_validation_message: ClassVar[str]
-
-    @classmethod
-    def _safe_error(
-        cls,
-        input_type: Literal["python", "json"] = "python",
-    ) -> ValidationError:
-        return _sanitized_validation_error(
-            cls.__name__,
-            cls._safe_validation_message,
-            input_type=input_type,
-        )
-
-    def __init__(self, /, **data: Any) -> None:
-        try:
-            super().__init__(**data)
-        except Exception:
-            pass
-        else:
-            return
-        raise type(self)._safe_error()
-
-    @classmethod
-    def model_validate(
-        cls: type[_SafeValidationModel],
-        obj: object,
-        **kwargs: Any,
-    ) -> _SafeValidationModel:
-        try:
-            return super().model_validate(obj, **kwargs)
-        except Exception:
-            pass
-        raise cls._safe_error()
-
-    @classmethod
-    def model_validate_json(
-        cls: type[_SafeValidationModel],
-        json_data: str | bytes | bytearray,
-        **kwargs: Any,
-    ) -> _SafeValidationModel:
-        try:
-            return super().model_validate_json(json_data, **kwargs)
-        except Exception:
-            pass
-        raise cls._safe_error("json")
-
-    @classmethod
-    def model_validate_strings(
-        cls: type[_SafeValidationModel],
-        obj: object,
-        **kwargs: Any,
-    ) -> _SafeValidationModel:
-        try:
-            return super().model_validate_strings(obj, **kwargs)
-        except Exception:
-            pass
-        raise cls._safe_error()
 
 
 class _FrozenJSONSequence(Sequence[object]):
@@ -296,7 +212,7 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-class GenerationProvenance(_SafeValidationMixin, StrictModel):
+class GenerationProvenance(SafeValidationMixin, StrictModel):
     _safe_validation_message = _INVALID_PROVENANCE_MESSAGE
 
     model_config = ConfigDict(
@@ -319,7 +235,7 @@ class GenerationProvenance(_SafeValidationMixin, StrictModel):
         return value
 
 
-class GenerationParameters(_SafeValidationMixin, StrictModel):
+class GenerationParameters(SafeValidationMixin, StrictModel):
     _safe_validation_message = _INVALID_PARAMETERS_MESSAGE
 
     model_config = ConfigDict(
@@ -390,7 +306,7 @@ def build_generation_request_id(
     return f"req_{hashlib.sha256(payload).hexdigest()}"
 
 
-class GenerationRequestRecord(_SafeValidationMixin, VersionedModel):
+class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
     _safe_validation_message = _INVALID_REQUEST_INTEGRITY_MESSAGE
 
     model_config = ConfigDict(
@@ -498,21 +414,6 @@ class OfflineGenerationResultRecord(GenerationRequestRecord):
         return self
 
 
-def _declared_model_shape_is_intact(value: BaseModel) -> bool:
-    try:
-        declared_fields = set(type(value).model_fields)
-        if set(vars(value)) != declared_fields:
-            return False
-        if value.__pydantic_extra__:
-            return False
-        return all(
-            not isinstance(nested, BaseModel) or _declared_model_shape_is_intact(nested)
-            for nested in vars(value).values()
-        )
-    except Exception:
-        return False
-
-
 def revalidate_generation_request_envelope(
     value: object,
 ) -> GenerationRequestRecord:
@@ -521,7 +422,7 @@ def revalidate_generation_request_envelope(
     try:
         if type(value) not in {GenerationRequestRecord, OfflineGenerationResultRecord}:
             raise TypeError("unexpected generation request envelope")
-        if not _declared_model_shape_is_intact(value):
+        if not model_shape_is_intact(value):
             raise ValueError("unexpected generation request model state")
         snapshot = value.model_dump(
             mode="python",
@@ -545,7 +446,7 @@ def revalidate_offline_generation_result(
     try:
         if type(value) is not OfflineGenerationResultRecord:
             raise TypeError("unexpected offline generation result")
-        if not _declared_model_shape_is_intact(value):
+        if not model_shape_is_intact(value):
             raise ValueError("unexpected offline generation result model state")
         snapshot = value.model_dump(
             mode="python",
