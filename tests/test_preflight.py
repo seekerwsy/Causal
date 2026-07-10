@@ -72,6 +72,7 @@ def _write_provider_config(
     *,
     provider: str,
     file_provider_dir: Path | None = None,
+    models: list[str] | None = None,
 ) -> Path:
     config = AppConfig.model_validate(
         {
@@ -79,7 +80,7 @@ def _write_provider_config(
             "data": {"prompts_path": str(prompts_path)},
             "generation": {
                 "provider": provider,
-                "models": ["model-a"],
+                "models": ["model-a"] if models is None else models,
                 "seeds": [7],
                 "file_provider_dir": (
                     None if file_provider_dir is None else str(file_provider_dir)
@@ -419,3 +420,40 @@ def test_api_provider_stub_is_a_safe_config_error(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["generate-observed", "--config", str(config_path)])
 
     _assert_safe_cli_error(result, ErrorCode.CONFIG, "RuntimeError")
+
+
+@pytest.mark.parametrize("escape_kind", ["traversal", "absolute"])
+def test_file_generation_rejects_model_path_escape_safely(
+    tmp_path: Path,
+    escape_kind: str,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    provider_dir = tmp_path / "provider"
+    provider_dir.mkdir()
+    if escape_kind == "traversal":
+        model_id = "../private/model"
+        outside_path = tmp_path / "private" / "model_7.py"
+    else:
+        outside_stem = tmp_path / "private-absolute" / "model"
+        model_id = str(outside_stem)
+        outside_path = Path(f"{outside_stem}_7.py")
+    outside_path.parent.mkdir(parents=True)
+    outside_path.write_text("top-secret outside code\n", encoding="utf-8")
+    config_path = _write_provider_config(
+        tmp_path,
+        prompts_path,
+        provider="file",
+        file_provider_dir=provider_dir,
+        models=[model_id],
+    )
+
+    result = CliRunner().invoke(app, ["generate-observed", "--config", str(config_path)])
+
+    _assert_safe_cli_error(
+        result,
+        ErrorCode.CONTRACT,
+        model_id,
+        str(outside_path),
+        "top-secret",
+    )
