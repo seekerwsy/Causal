@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from secaware.pipeline import artifact as artifact_module
 from secaware.pipeline import manifest as manifest_module
-from secaware.pipeline.artifact import canonical_sha256, sha256_file
+from secaware.pipeline.artifact import canonical_sha256, sha256_file, sha256_path
 from secaware.pipeline.manifest import (
     StageManifest,
     build_stage_fingerprint,
@@ -17,7 +17,15 @@ from secaware.pipeline.manifest import (
 )
 
 
-def _manifest(*, fingerprint: str, outputs: list[Path | str]) -> StageManifest:
+def _manifest(
+    *,
+    fingerprint: str,
+    outputs: list[Path | str],
+    output_sha256: dict[Path | str, str] | None = None,
+) -> StageManifest:
+    hashes = output_sha256
+    if hashes is None:
+        hashes = {path: sha256_path(path) if Path(path).exists() else "a" * 64 for path in outputs}
     return StageManifest(
         schema_version="1.0",
         stage="discovery",
@@ -26,6 +34,7 @@ def _manifest(*, fingerprint: str, outputs: list[Path | str]) -> StageManifest:
         config_sha256="config-sha",
         code_version="test-version",
         outputs=outputs,
+        output_sha256=hashes,
     )
 
 
@@ -165,6 +174,55 @@ def test_stage_manifest_normalizes_input_and_output_paths() -> None:
 
     assert manifest.inputs == {Path("inputs/prompts.jsonl").as_posix(): "input-sha"}
     assert manifest.outputs == [Path("reports/summary.json").as_posix()]
+    assert manifest.output_sha256 == {Path("reports/summary.json").as_posix(): "a" * 64}
+
+
+def test_legacy_stage_manifest_without_output_hashes_is_readable_but_not_skippable(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "out.jsonl"
+    output.write_text("ready\n", encoding="utf-8")
+    manifest = StageManifest(
+        schema_version="1.0",
+        stage="discovery",
+        fingerprint="expected",
+        inputs={"inputs/prompts.jsonl": "input-sha"},
+        config_sha256="config-sha",
+        code_version="test-version",
+        outputs=[output],
+    )
+    manifest_path = tmp_path / "manifest.json"
+
+    write_stage_manifest(manifest_path, manifest)
+
+    assert read_stage_manifest(manifest_path).output_sha256 == {}
+    assert manifest_allows_skip(manifest_path, "expected", [output]) is False
+
+
+def test_stage_manifest_rejects_partial_output_hash_mapping() -> None:
+    with pytest.raises(ValidationError):
+        _manifest(
+            fingerprint="fingerprint",
+            outputs=["reports/first.json", "reports/second.json"],
+            output_sha256={"reports/first.json": "a" * 64},
+        )
+
+
+def test_stage_manifest_rejects_duplicate_normalized_outputs() -> None:
+    with pytest.raises(ValidationError):
+        _manifest(
+            fingerprint="fingerprint",
+            outputs=["reports/summary.json", "reports/./summary.json"],
+        )
+
+
+def test_stage_manifest_rejects_noncanonical_output_hash() -> None:
+    with pytest.raises(ValidationError):
+        _manifest(
+            fingerprint="fingerprint",
+            outputs=["reports/summary.json"],
+            output_sha256={"reports/summary.json": "A" * 64},
+        )
 
 
 def test_stage_manifest_requires_at_least_one_output() -> None:
@@ -199,6 +257,9 @@ def test_manifest_allows_skip_only_for_matching_manifest_and_existing_outputs(
     assert manifest_allows_skip(manifest_path, "expected", [output], force=True) is False
     assert manifest_allows_skip(manifest_path, "different", [output]) is False
 
+    output.write_text("tampered\n", encoding="utf-8")
+    assert manifest_allows_skip(manifest_path, "expected", [output]) is False
+
     output.unlink()
     assert manifest_allows_skip(manifest_path, "expected", [output]) is False
 
@@ -225,15 +286,19 @@ def test_manifest_allows_skip_rejects_missing_invalid_or_wrong_outputs(
     assert manifest_allows_skip(invalid_manifest, "expected", [expected_output]) is False
 
 
-def test_manifest_allows_skip_rejects_output_directory(tmp_path: Path) -> None:
-    output = tmp_path / "artifact.jsonl"
+def test_manifest_allows_skip_hashes_output_directory(tmp_path: Path) -> None:
+    output = tmp_path / "artifact-directory"
     output.mkdir()
+    (output / "artifact.jsonl").write_text("ready\n", encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
     write_stage_manifest(
         manifest_path,
         _manifest(fingerprint="expected", outputs=[output]),
     )
 
+    assert manifest_allows_skip(manifest_path, "expected", [output]) is True
+
+    (output / "artifact.jsonl").write_text("tampered\n", encoding="utf-8")
     assert manifest_allows_skip(manifest_path, "expected", [output]) is False
 
 
@@ -249,6 +314,7 @@ def test_manifest_allows_skip_rejects_an_empty_output_path_list(
         config_sha256="config-sha",
         code_version="test-version",
         outputs=[],
+        output_sha256={},
     )
     monkeypatch.setattr(
         manifest_module,

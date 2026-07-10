@@ -2,16 +2,19 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
-from secaware.pipeline.artifact import _atomic_write_text, canonical_sha256
+from secaware.pipeline.artifact import _atomic_write_text, canonical_sha256, sha256_path
 from secaware.schema.common import VersionedModel
 
 
 def _normalize_path(value: str | os.PathLike[str]) -> str:
     return Path(os.path.normpath(os.fspath(value))).as_posix()
+
+
+_SHA256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class StageManifest(VersionedModel):
@@ -21,6 +24,7 @@ class StageManifest(VersionedModel):
     config_sha256: str
     code_version: str
     outputs: list[str] = Field(min_length=1)
+    output_sha256: dict[str, _SHA256] = Field(default_factory=dict)
 
     @field_validator("inputs", mode="before")
     @classmethod
@@ -35,6 +39,21 @@ class StageManifest(VersionedModel):
         if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
             return value
         return [_normalize_path(path) for path in value]
+
+    @field_validator("output_sha256", mode="before")
+    @classmethod
+    def _normalize_output_hash_paths(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        return {_normalize_path(path): digest for path, digest in value.items()}
+
+    @model_validator(mode="after")
+    def _validate_output_hash_coverage(self) -> "StageManifest":
+        if len(set(self.outputs)) != len(self.outputs):
+            raise ValueError("stage manifest outputs must be unique")
+        if self.output_sha256 and set(self.output_sha256) != set(self.outputs):
+            raise ValueError("stage manifest output hashes must cover every output")
+        return self
 
 
 def build_stage_fingerprint(
@@ -94,4 +113,15 @@ def manifest_allows_skip(
         return False
     if manifest.outputs != normalized_outputs:
         return False
-    return all(Path(path).is_file() for path in output_paths)
+    try:
+        current_output_sha256 = {
+            normalized_path: sha256_path(path)
+            for normalized_path, path in zip(
+                normalized_outputs,
+                output_paths,
+                strict=True,
+            )
+        }
+    except (OSError, TypeError, ValueError):
+        return False
+    return manifest.output_sha256 == current_output_sha256

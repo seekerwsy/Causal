@@ -1,5 +1,7 @@
+import json
 import os
 from pathlib import Path
+import traceback
 
 import pytest
 
@@ -10,12 +12,25 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.io import run_store as run_store_module
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
-from secaware.pipeline.artifact import canonical_sha256, sha256_file
+from secaware.pipeline.artifact import canonical_sha256, sha256_file, sha256_path
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.records import GeneratedCodeRecord, PromptRecord
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _assert_manifest_error_is_safe(error: SecAwareError, *hidden: str) -> None:
+    surfaces = (
+        str(error),
+        "".join(traceback.format_exception(error)),
+        json.dumps(error.to_dict(), sort_keys=True),
+    )
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert error.details == {}
+    for value in hidden:
+        assert all(value not in surface for surface in surfaces)
 
 
 def _store(tmp_path: Path, *, bootstrap_samples: int = 200) -> RunStore:
@@ -129,9 +144,24 @@ def test_stage_is_skippable_only_after_matching_manifest_is_recorded(tmp_path: P
     assert manifest.stage == "report"
     assert manifest.inputs == {"inputs/source.txt": sha256_file(input_path)}
     assert manifest.outputs == ["reports/result.txt"]
+    assert manifest.output_sha256 == {"reports/result.txt": sha256_path(output_path)}
     assert manifest.config_sha256 == canonical_sha256(store.config.model_dump(mode="json"))
     assert manifest.code_version == __version__
     assert manifest.fingerprint == store.stage_fingerprint("report", [input_path])
+
+
+def test_successful_skip_does_not_authorize_a_later_stage_record(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
+    output_path.write_text("changed-without-execution\n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not manifest_path.exists()
 
 
 def test_stage_inputs_rejects_a_missing_required_input(tmp_path: Path) -> None:
@@ -225,6 +255,114 @@ def test_stage_skip_requires_every_declared_output(tmp_path: Path) -> None:
     second_output.unlink()
 
     assert store.should_skip_stage("report", [input_path], outputs, force=False) is False
+
+
+def test_stage_skip_is_invalidated_by_output_content_change(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+
+    output_path.write_text("tampered-output\n", encoding="utf-8")
+
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert not manifest_path.exists()
+
+
+def test_record_stage_hashes_directory_outputs(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path = store.path("inputs", "source.txt")
+    input_path.write_text("input\n", encoding="utf-8")
+    output_path = store.path("reports", "directory-output")
+    output_path.mkdir()
+    (output_path / "result.txt").write_text("output\n", encoding="utf-8")
+
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    store.record_stage("report", [input_path], [output_path])
+
+    manifest = read_stage_manifest(store.path(".stages", "report.json"))
+    assert manifest.output_sha256 == {"reports/directory-output": sha256_path(output_path)}
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
+
+
+def test_record_stage_rejects_output_changed_after_manifest_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = store.path(".stages", "report.json")
+    real_write = run_store_module.write_stage_manifest
+
+    def write_then_change(path: Path, manifest: object) -> None:
+        real_write(path, manifest)
+        output_path.write_text("changed-after-manifest-write\n", encoding="utf-8")
+
+    monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_change)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert exc_info.value.details == {}
+    assert not manifest_path.exists()
+
+
+def test_record_stage_wraps_manifest_publish_failure_without_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = store.path(".stages", "report.json")
+    real_write = run_store_module.write_stage_manifest
+    secret = "private-manifest-publish-error"
+
+    def write_then_fail(path: Path, manifest: object) -> None:
+        real_write(path, manifest)
+        raise OSError(secret)
+
+    monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_fail)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(
+        exc_info.value,
+        secret,
+        str(output_path),
+        "OSError",
+    )
+    assert not manifest_path.exists()
+
+
+def test_record_stage_wraps_output_hash_failure_without_path_or_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = store.path(".stages", "report.json")
+    real_sha256_path = run_store_module.sha256_path
+    secret = "private-output-hash-error"
+
+    def fail_output_hash(path: Path) -> str:
+        if Path(path) == output_path:
+            raise OSError(secret)
+        return real_sha256_path(path)
+
+    monkeypatch.setattr(run_store_module, "sha256_path", fail_output_hash)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    error = exc_info.value
+    assert error.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(error, secret, str(output_path), "OSError")
+    assert not manifest_path.exists()
 
 
 def test_force_disables_stage_skip(tmp_path: Path) -> None:
@@ -327,6 +465,12 @@ def test_record_stage_rejects_a_missing_declared_output(tmp_path: Path) -> None:
         )
 
     assert exc_info.value.code is ErrorCode.CONTRACT
+
+    output_path.write_text("late-output\n", encoding="utf-8")
+    with pytest.raises(SecAwareError) as retry_info:
+        store.record_stage("report", [input_path], [output_path])
+
+    assert retry_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
 def test_record_stage_requires_an_execution_snapshot(tmp_path: Path) -> None:

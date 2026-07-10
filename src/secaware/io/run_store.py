@@ -90,6 +90,13 @@ class RunStore:
             message=message,
         )
 
+    def _stage_contract_error(self, stage: str, message: str) -> SecAwareError:
+        return SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage=stage,
+            message=message,
+        )
+
     def _relative_path(
         self,
         path: str | Path,
@@ -128,6 +135,30 @@ class RunStore:
     def _reject_stage_record(self, stage: str, message: str) -> None:
         self._invalidate_stage_manifest(stage)
         raise self._manifest_conflict(stage, message)
+
+    def _stage_output_hashes(
+        self,
+        stage: str,
+        outputs: Sequence[Path],
+        relative_outputs: Sequence[str],
+    ) -> dict[str, str]:
+        try:
+            output_sha256 = {
+                relative_path: sha256_path(output)
+                for relative_path, output in zip(
+                    relative_outputs,
+                    outputs,
+                    strict=True,
+                )
+            }
+        except (OSError, TypeError, ValueError):
+            pass
+        else:
+            return output_sha256
+        self._reject_stage_record(
+            stage,
+            "stage outputs could not be verified",
+        )
 
     def stage_inputs(self, paths: Sequence[str | Path]) -> dict[str, str]:
         inputs: dict[str, str] = {}
@@ -188,6 +219,7 @@ class RunStore:
             manifest_outputs=relative_outputs,
         )
         if allows_skip:
+            self._pending_snapshots.pop(stage, None)
             return True
         try:
             self._invalidate_stage_manifest(stage)
@@ -203,13 +235,13 @@ class RunStore:
         output_paths: Sequence[str | Path],
     ) -> None:
         outputs = [Path(path) for path in output_paths]
+        snapshot = self._pending_snapshots.pop(stage, None)
         if not outputs:
             raise self._contract_error("stage must declare at least one output", self.root)
         relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
         for output in outputs:
-            if not output.is_file():
-                raise self._contract_error("declared stage output is missing", output)
-        snapshot = self._pending_snapshots.pop(stage, None)
+            if not output.exists():
+                raise self._stage_contract_error(stage, "declared stage output is missing")
         if snapshot is None:
             self._reject_stage_record(
                 stage,
@@ -236,15 +268,36 @@ class RunStore:
                 stage,
                 "stage inputs or configuration changed during execution",
             )
-        write_stage_manifest(
-            self._manifest_path(stage),
-            StageManifest(
-                schema_version=SCHEMA_VERSION,
-                stage=snapshot.stage,
-                fingerprint=snapshot.fingerprint,
-                inputs=dict(snapshot.inputs),
-                config_sha256=snapshot.config_sha256,
-                code_version=snapshot.code_version,
-                outputs=list(snapshot.outputs),
-            ),
+        output_sha256 = self._stage_output_hashes(stage, outputs, relative_outputs)
+        manifest_path = self._manifest_path(stage)
+        manifest_committed = False
+        try:
+            write_stage_manifest(
+                manifest_path,
+                StageManifest(
+                    schema_version=SCHEMA_VERSION,
+                    stage=snapshot.stage,
+                    fingerprint=snapshot.fingerprint,
+                    inputs=dict(snapshot.inputs),
+                    config_sha256=snapshot.config_sha256,
+                    code_version=snapshot.code_version,
+                    outputs=list(snapshot.outputs),
+                    output_sha256=output_sha256,
+                ),
+            )
+        except Exception:
+            pass
+        else:
+            manifest_committed = True
+        if not manifest_committed:
+            self._reject_stage_record(stage, "stage manifest could not be committed")
+        verified_output_sha256 = self._stage_output_hashes(
+            stage,
+            outputs,
+            relative_outputs,
         )
+        if verified_output_sha256 != output_sha256:
+            self._reject_stage_record(
+                stage,
+                "stage outputs changed while the manifest was committed",
+            )
