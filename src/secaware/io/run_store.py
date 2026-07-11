@@ -63,6 +63,7 @@ class _HeldDependencyLease:
 class StageCommitLease:
     stage: str
     owner: object
+    handle: BinaryIO
     released: bool = False
 
 
@@ -780,15 +781,20 @@ class RunStore:
         """Authorize manifest recording while retaining the owned execution lease."""
 
         snapshot = self._pending_snapshots.get(stage)
+        handle = self._owned_stage_lease(stage)
         if (
-            self._owned_stage_lease(stage) is None
+            handle is None
             or snapshot is None
             or not snapshot.preserve_committed
             or stage in self._stage_commit_leases
             or stage in self._recorded_stage_commits
         ):
             raise self._manifest_conflict(stage, "deferred stage commit authorization is invalid")
-        lease = StageCommitLease(stage=stage, owner=self._stage_commit_owner)
+        lease = StageCommitLease(
+            stage=stage,
+            owner=self._stage_commit_owner,
+            handle=handle,
+        )
         self._stage_commit_leases[stage] = lease
         return lease
 
@@ -801,18 +807,46 @@ class RunStore:
         trusted = self._require_stage_commit_owner(lease)
         if trusted.released:
             return trusted
-        if self._stage_commit_leases.get(trusted.stage) is not trusted:
+        current_handle = self._stage_leases.get(trusted.stage)
+        if self._stage_commit_leases.get(trusted.stage) is not trusted or (
+            current_handle is not trusted.handle
+            and not (current_handle is None and trusted.handle.closed)
+        ):
+            raise self._manifest_conflict("stage_commit", "stage commit lease is invalid")
+        return trusted
+
+    def _require_active_stage_commit_lease(
+        self,
+        lease: StageCommitLease,
+    ) -> StageCommitLease:
+        trusted = self._require_stage_commit_owner(lease)
+        snapshot = self._pending_snapshots.get(trusted.stage)
+        handle = self._stage_leases.get(trusted.stage)
+        if (
+            trusted.released
+            or self._stage_commit_leases.get(trusted.stage) is not trusted
+            or snapshot is None
+            or snapshot.stage != trusted.stage
+            or not snapshot.preserve_committed
+            or handle is not trusted.handle
+            or handle.closed
+        ):
             raise self._manifest_conflict("stage_commit", "stage commit lease is invalid")
         return trusted
 
     def _complete_stage_commit_release(self, lease: StageCommitLease) -> None:
-        handle = self._stage_leases.get(lease.stage)
-        if handle is not None and not handle.closed:
+        current_handle = self._stage_leases.get(lease.stage)
+        if current_handle is not None and current_handle is not lease.handle:
+            raise self._manifest_conflict(
+                lease.stage,
+                "stage commit lease is invalid",
+            )
+        if not lease.handle.closed:
             raise self._manifest_conflict(
                 lease.stage,
                 "stage commit lease is still active",
             )
-        if handle is not None:
+        if current_handle is lease.handle:
             self._stage_leases.pop(lease.stage, None)
         if self._stage_commit_leases.get(lease.stage) is lease:
             self._clear_stage_commit(lease.stage)
@@ -875,7 +909,7 @@ class RunStore:
     ) -> None:
         trusted_lease: StageCommitLease | None = None
         if lease is not None:
-            trusted_lease = self._require_stage_commit_lease(lease)
+            trusted_lease = self._require_active_stage_commit_lease(lease)
             if trusted_lease.stage != stage:
                 raise self._manifest_conflict(stage, "stage commit lease does not match")
         else:

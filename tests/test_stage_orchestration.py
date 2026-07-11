@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import threading
 import traceback
+from dataclasses import replace
 
 import pytest
 
@@ -13,7 +14,7 @@ from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io import run_store as run_store_module
 from secaware.io.jsonl import read_jsonl, write_jsonl
-from secaware.io.run_store import RunStore
+from secaware.io.run_store import RunStore, StageCommitLease
 from secaware.pipeline.artifact import canonical_sha256, sha256_file, sha256_path
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.records import GeneratedCodeRecord, PromptRecord
@@ -54,6 +55,26 @@ def _input_and_output(store: RunStore) -> tuple[Path, Path]:
     input_path.write_text("input-v1\n", encoding="utf-8")
     output_path.write_text("output-v1\n", encoding="utf-8")
     return input_path, output_path
+
+
+def _begin_deferred_stage_commit(
+    store: RunStore,
+    stage: str,
+    input_path: Path,
+    output_path: Path,
+) -> StageCommitLease:
+    assert (
+        store.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=True,
+            preserve_committed=True,
+        )
+        is False
+    )
+    store.seal_stage_outputs(stage, [output_path])
+    return store.begin_stage_commit(stage)
 
 
 def _record_report_stage(store: RunStore, input_path: Path, outputs: list[Path]) -> Path:
@@ -611,6 +632,109 @@ def test_deferred_stage_commit_rejects_missing_or_forged_owner(tmp_path: Path) -
     with pytest.raises(SecAwareError):
         RunStore(owner.config).finalize_stage_commit(lease)
     owner.abort_stage(stage)
+
+
+def test_record_stage_rejects_forged_released_commit_lease_without_releasing_owner(
+    tmp_path: Path,
+) -> None:
+    owner = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    lease = _begin_deferred_stage_commit(owner, stage, input_path, output_path)
+    forged = replace(lease, released=True)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        owner.record_stage(stage, [input_path], [output_path], lease=forged)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not owner.path(".stages", f"{stage}.json").exists()
+    assert owner._stage_commit_leases[stage] is lease
+    assert owner._stage_leases[stage] is not None
+    assert not owner._stage_leases[stage].closed
+    owner.record_stage(stage, [input_path], [output_path], lease=lease)
+    owner.finalize_stage_commit(lease)
+
+
+def test_record_stage_rejects_real_released_token_during_new_transaction(
+    tmp_path: Path,
+) -> None:
+    owner = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    old = _begin_deferred_stage_commit(owner, stage, input_path, output_path)
+    owner.record_stage(stage, [input_path], [output_path], lease=old)
+    owner.finalize_stage_commit(old)
+    assert old.released is True
+    manifest_path = owner.path(".stages", f"{stage}.json")
+    manifest_before = manifest_path.read_bytes()
+    current = _begin_deferred_stage_commit(owner, stage, input_path, output_path)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        owner.record_stage(stage, [input_path], [output_path], lease=old)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert manifest_path.read_bytes() == manifest_before
+    assert owner._stage_commit_leases[stage] is current
+    assert owner._pending_snapshots[stage].preserve_committed is True
+    assert not owner._stage_leases[stage].closed
+    owner.record_stage(stage, [input_path], [output_path], lease=current)
+    owner.finalize_stage_commit(current)
+
+
+def test_record_stage_rejects_released_token_from_another_store_and_keeps_new_owner(
+    tmp_path: Path,
+) -> None:
+    original = _store(tmp_path)
+    input_path, output_path = _input_and_output(original)
+    stage = "discover"
+    old = _begin_deferred_stage_commit(original, stage, input_path, output_path)
+    original.record_stage(stage, [input_path], [output_path], lease=old)
+    original.finalize_stage_commit(old)
+    contender = RunStore(original.config)
+    current = _begin_deferred_stage_commit(
+        contender,
+        stage,
+        input_path,
+        output_path,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        contender.record_stage(stage, [input_path], [output_path], lease=old)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert contender._stage_commit_leases[stage] is current
+    assert not contender._stage_leases[stage].closed
+    contender.record_stage(stage, [input_path], [output_path], lease=current)
+    contender.finalize_stage_commit(current)
+    original.close()
+    contender.close()
+
+
+def test_record_stage_rejects_commit_token_when_os_stage_handle_was_replaced(
+    tmp_path: Path,
+) -> None:
+    owner = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    lease = _begin_deferred_stage_commit(owner, stage, input_path, output_path)
+    original_handle = owner._stage_leases[stage]
+    replacement_handle = owner._open_stage_lease("confirm")
+    owner._stage_leases[stage] = replacement_handle
+
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            owner.record_stage(stage, [input_path], [output_path], lease=lease)
+
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert not owner.path(".stages", f"{stage}.json").exists()
+        assert owner._stage_commit_leases[stage] is lease
+        assert not original_handle.closed
+        assert not replacement_handle.closed
+    finally:
+        owner._stage_leases[stage] = original_handle
+        owner._release_stage_handle(replacement_handle)
+    owner.record_stage(stage, [input_path], [output_path], lease=lease)
+    owner.finalize_stage_commit(lease)
 
 
 @pytest.mark.parametrize("failures", [2, 100])
