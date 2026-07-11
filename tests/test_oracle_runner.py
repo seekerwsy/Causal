@@ -647,6 +647,262 @@ def test_linux_sealed_interpreter_preserves_venv_site_packages(tmp_path: Path) -
     assert result.stdout == b"venv-ok"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux supervisor bootstrap regression")
+def test_linux_supervisor_bootstrap_skips_late_venv_pth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_python = str(Path(sys.executable).resolve())
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    venv = tmp_path / "hostile-supervisor-venv"
+    bin_dir = venv / "bin"
+    site_packages = venv / "lib" / f"python{version}" / "site-packages"
+    bin_dir.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    (bin_dir / "python").symlink_to(original_python)
+    (venv / "pyvenv.cfg").write_text(
+        f"home = {Path(original_python).parent}\n"
+        "include-system-site-packages = false\n"
+        f"version = {version}\n",
+        encoding="utf-8",
+    )
+    pth_marker = tmp_path / "private-supervisor-pth.marker"
+    analyzer_marker = tmp_path / "private-real-analyzer.marker"
+    attack = (
+        f"open({str(pth_marker)!r},'w').write('pth')\n"
+        "for fd in range(3,256):\n"
+        " try: os.write(fd,b'R:0')\n"
+        " except OSError: pass\n"
+        "os._exit(0)"
+    )
+    (site_packages / "late_attack.pth").write_text(
+        f"import os;exec({attack!r})\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(runner_module.sys, "executable", str(bin_dir / "python"))
+
+    result = run_analyzer_process(
+        (
+            original_python,
+            "-c",
+            "import sys;from pathlib import Path;"
+            f"Path({str(analyzer_marker)!r}).write_text('ran');"
+            "sys.stdout.write('real')",
+        ),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+
+    assert result.stdout == b"real"
+    assert analyzer_marker.exists()
+    assert not pth_marker.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux supervisor bootstrap regression")
+def test_linux_supervisor_uses_sealed_isolated_bootstrap_argv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+    real_popen = runner_module.subprocess.Popen
+
+    def recording(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        observed["args"] = args
+        observed["kwargs"] = dict(kwargs)
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type,return-value]
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", recording)
+    result = run_analyzer_process(
+        _python_argv("print('real',end='')"),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+
+    popen_argv = observed["args"]
+    kwargs = observed["kwargs"]
+    assert isinstance(popen_argv, tuple) and isinstance(kwargs, dict)
+    internal_argv = popen_argv[0]
+    assert internal_argv[0] == os.path.abspath(sys.executable)
+    assert internal_argv[1:3] == ("-I", "-S")
+    assert internal_argv[3].startswith("/proc/self/fd/")
+    assert "_posix_supervisor.py" not in internal_argv
+    assert kwargs["executable"].startswith("/proc/self/fd/")
+    assert result.stdout == b"real"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux launch-owner regression")
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_linux_launch_owner_closes_sealed_bootstrap_on_prepare_return_control_flow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    signal = signal_type("private-prepare-return-control")
+    descriptors: list[int] = []
+    real_memfd_create = runner_module.os.memfd_create
+    real_pipe = runner_module.os.pipe
+
+    def tracking_memfd_create(*args: object, **kwargs: object) -> int:
+        descriptor = real_memfd_create(*args, **kwargs)  # type: ignore[arg-type]
+        descriptors.append(descriptor)
+        return descriptor
+
+    def tracking_pipe() -> tuple[int, int]:
+        pair = real_pipe()
+        descriptors.extend(pair)
+        return pair
+
+    def interrupt_return(frame: object, event: str, arg: object) -> object:
+        del arg
+        if (
+            event == "return"
+            and getattr(frame, "f_code", None) is runner_module._prepare_posix_launch.__code__
+        ):
+            raise signal
+        return interrupt_return
+
+    monkeypatch.setattr(runner_module.os, "memfd_create", tracking_memfd_create)
+    monkeypatch.setattr(runner_module.os, "pipe", tracking_pipe)
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(interrupt_return)
+        with pytest.raises(signal_type) as exc_info:
+            run_analyzer_process(
+                _python_argv("print('private-prepare-source')"),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+    finally:
+        sys.settrace(previous_trace)
+
+    assert exc_info.value is signal
+    assert descriptors
+    for descriptor in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    assert "private-prepare-source" not in "\n".join(_runner_frame_surfaces(signal))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux supervisor bootstrap regression")
+def test_linux_supervisor_source_swap_after_sealing_cannot_change_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = tmp_path / "_posix_supervisor.py"
+    supervisor.write_bytes(
+        Path(runner_module.__file__).with_name("_posix_supervisor.py").read_bytes()
+    )
+    fake_runner = tmp_path / "runner.py"
+    monkeypatch.setattr(runner_module, "__file__", str(fake_runner))
+    entered, release = threading.Event(), threading.Event()
+    real_popen = runner_module._popen_process
+    analyzer_marker = tmp_path / "private-source-swap-analyzer.marker"
+    outcome: list[object] = []
+
+    def gated(*args: object, **kwargs: object) -> None:
+        entered.set()
+        assert release.wait(5)
+        real_popen(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_popen_process", gated)
+    worker = threading.Thread(
+        target=lambda: outcome.append(
+            run_analyzer_process(
+                _python_argv(
+                    "import sys;from pathlib import Path;"
+                    f"Path({str(analyzer_marker)!r}).write_text('ran');"
+                    "sys.stdout.write('real')"
+                ),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+        )
+    )
+    worker.start()
+    assert entered.wait(3)
+    supervisor.write_text(
+        "import os,sys\nos.write(int(sys.argv[-1]),b'R:0')\nos._exit(0)\n",
+        encoding="utf-8",
+    )
+    release.set()
+    worker.join(5)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    assert outcome[0].stdout == b"real"  # type: ignore[union-attr]
+    assert analyzer_marker.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux supervisor bootstrap regression")
+def test_linux_supervisor_interpreter_swap_after_sealing_cannot_change_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_python = Path(sys.executable).resolve()
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    venv = tmp_path / "supervisor-venv"
+    bin_dir = venv / "bin"
+    bin_dir.mkdir(parents=True)
+    interpreter = bin_dir / "python"
+    shutil.copyfile(original_python, interpreter)
+    interpreter.chmod(0o700)
+    (venv / "pyvenv.cfg").write_text(
+        f"home = {original_python.parent}\n"
+        "include-system-site-packages = false\n"
+        f"version = {version}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner_module.sys, "executable", str(interpreter))
+    entered, release = threading.Event(), threading.Event()
+    real_popen = runner_module._popen_process
+    analyzer_marker = tmp_path / "private-interpreter-swap-analyzer.marker"
+    outcome: list[object] = []
+
+    def gated(*args: object, **kwargs: object) -> None:
+        entered.set()
+        assert release.wait(5)
+        real_popen(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_popen_process", gated)
+    worker = threading.Thread(
+        target=lambda: outcome.append(
+            run_analyzer_process(
+                (
+                    str(original_python),
+                    "-c",
+                    "import sys;from pathlib import Path;"
+                    f"Path({str(analyzer_marker)!r}).write_text('ran');"
+                    "sys.stdout.write('real')",
+                ),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+        )
+    )
+    worker.start()
+    assert entered.wait(3)
+    with interpreter.open("wb") as target, open("/bin/true", "rb") as replacement:
+        shutil.copyfileobj(replacement, target)
+    release.set()
+    worker.join(5)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    assert outcome[0].stdout == b"real"  # type: ignore[union-attr]
+    assert analyzer_marker.exists()
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux strict shebang regression")
 def test_linux_env_shebang_fails_closed_before_launch(tmp_path: Path) -> None:
     script = tmp_path / "script"
@@ -692,6 +948,42 @@ def test_linux_fingerprint_is_stable_and_binds_source_identity(tmp_path: Path) -
         max_stderr_bytes=1024,
     )
     assert changed.argv_sha256 != first.argv_sha256
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux fingerprint boundary regression")
+def test_linux_fingerprint_binds_direct_launch_objects_not_transitive_dependencies(
+    tmp_path: Path,
+) -> None:
+    dependency = tmp_path / "runtime_dependency.py"
+    dependency.write_text("VALUE='one'\n", encoding="utf-8")
+    script = tmp_path / "launcher"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        f"scope={{}};exec(compile(open({str(dependency)!r}).read(),"
+        f"{str(dependency)!r},'exec'),scope);print(scope['VALUE'],end='')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o700)
+
+    first = run_analyzer_process(
+        (str(script),),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+    dependency.write_text("VALUE='two'\n", encoding="utf-8")
+    second = run_analyzer_process(
+        (str(script),),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+
+    assert first.stdout == b"one"
+    assert second.stdout == b"two"
+    assert first.argv_sha256 == second.argv_sha256
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed short-write regression")

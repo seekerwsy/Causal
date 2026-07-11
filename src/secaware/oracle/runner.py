@@ -182,15 +182,33 @@ class _PosixPathLease:
             os.close(script_descriptor)
 
 
-@dataclass(slots=True, repr=False)
 class _PosixLaunch:
-    argv: tuple[str, ...]
-    pass_fds: tuple[int, ...]
-    cancel_read_fd: int
-    cancel_write_fd: int
-    config_file: BinaryIO
-    result_read_fd: int
-    result_write_fd: int
+    __slots__ = (
+        "argv",
+        "popen_executable",
+        "pass_fds",
+        "cancel_read_fd",
+        "cancel_write_fd",
+        "config_file",
+        "result_read_fd",
+        "result_write_fd",
+        "supervisor_interpreter",
+        "supervisor_source",
+        "prepared",
+    )
+
+    def __init__(self) -> None:
+        self.argv: tuple[str, ...] = ()
+        self.popen_executable: str | None = None
+        self.pass_fds: tuple[int, ...] = ()
+        self.cancel_read_fd = -1
+        self.cancel_write_fd = -1
+        self.config_file: BinaryIO | None = None
+        self.result_read_fd = -1
+        self.result_write_fd = -1
+        self.supervisor_interpreter = _PosixPathLease(-1, "", ())
+        self.supervisor_source = _PosixPathLease(-1, "", ())
+        self.prepared = False
 
 
 def _safe_error(code: ErrorCode) -> SecAwareError:
@@ -544,19 +562,119 @@ def _force_namespace_unavailable() -> bool:
     return False
 
 
+def _seal_posix_internal_file(
+    lease: _PosixPathLease,
+    path: Path,
+    *,
+    require_executable: bool,
+    no_follow: bool = True,
+) -> None:
+    if sys.platform != "linux" or lease.fd >= 0:
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    import fcntl
+
+    descriptor = -1
+    sealed_descriptor = -1
+    chunk = b""
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        if no_follow:
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        metadata = os.fstat(descriptor)
+        identity = (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size <= 0
+            or metadata.st_size > _MAX_EXECUTABLE_BYTES
+            or (require_executable and not metadata.st_mode & 0o111)
+        ):
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        sealed_descriptor = os.memfd_create(
+            "secaware-supervisor",
+            getattr(os, "MFD_CLOEXEC", 0x1) | getattr(os, "MFD_ALLOW_SEALING", 0x2),
+        )
+        lease.fd = sealed_descriptor
+        sealed_descriptor = -1
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            _write_all(lease.fd, chunk)
+        current = os.fstat(descriptor)
+        current_identity = (
+            current.st_dev,
+            current.st_ino,
+            current.st_mode,
+            current.st_size,
+            current.st_mtime_ns,
+            current.st_ctime_ns,
+        )
+        sealed_digest, sealed_size = _hash_fd(lease.fd)
+        if (
+            current_identity != identity
+            or sealed_digest != digest.hexdigest()
+            or sealed_size != metadata.st_size
+        ):
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        os.fchmod(lease.fd, 0o500 if require_executable else 0o400)
+        fcntl.fcntl(
+            lease.fd,
+            fcntl.F_ADD_SEALS,
+            fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL,
+        )
+        lease.sha256 = sealed_digest
+        lease.identity = identity
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if sealed_descriptor >= 0:
+            os.close(sealed_descriptor)
+        lease = None  # type: ignore[assignment]
+        path = None  # type: ignore[assignment]
+        chunk = b""
+
+
 def _prepare_posix_launch(
+    launch: _PosixLaunch,
     argv: tuple[str, ...],
     environment: dict[str, str],
     executable: _PosixPathLease,
     cwd: _PosixPathLease,
-) -> _PosixLaunch:
-    config_file = tempfile.TemporaryFile(mode="w+b")
-    cancel_read_fd = cancel_write_fd = -1
-    result_read_fd = result_write_fd = -1
+) -> None:
     payload = b""
+    supervisor_argv0 = ""
     try:
-        cancel_read_fd, cancel_write_fd = os.pipe()
-        result_read_fd, result_write_fd = os.pipe()
+        if launch.prepared:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        supervisor_argv0 = os.path.abspath(sys.executable)
+        if not Path(supervisor_argv0).is_absolute():
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        supervisor_interpreter_path = Path("/proc/self/exe")
+        supervisor_source_path = Path(__file__).with_name("_posix_supervisor.py")
+        _seal_posix_internal_file(
+            launch.supervisor_source,
+            supervisor_source_path,
+            require_executable=False,
+        )
+        _seal_posix_internal_file(
+            launch.supervisor_interpreter,
+            supervisor_interpreter_path,
+            require_executable=True,
+            no_follow=False,
+        )
+        launch.config_file = tempfile.TemporaryFile(mode="w+b")
+        launch.cancel_read_fd, launch.cancel_write_fd = os.pipe()
+        launch.result_read_fd, launch.result_write_fd = os.pipe()
         payload = json.dumps(
             {
                 "argv": argv,
@@ -570,64 +688,63 @@ def _prepare_posix_launch(
         ).encode("utf-8")
         if len(payload) > _MAX_ARG_BYTES:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        config_file.write(payload)
-        config_file.flush()
-        config_file.seek(0)
-        supervisor = (
-            sys.executable,
-            str(Path(__file__).with_name("_posix_supervisor.py")),
-            str(config_file.fileno()),
+        launch.config_file.write(payload)
+        launch.config_file.flush()
+        launch.config_file.seek(0)
+        launch.argv = (
+            supervisor_argv0,
+            "-I",
+            "-S",
+            f"/proc/self/fd/{launch.supervisor_source.fd}",
+            str(launch.config_file.fileno()),
             str(executable.fd),
             str(cwd.fd),
-            str(cancel_read_fd),
+            str(launch.cancel_read_fd),
             str(executable.script_fd),
-            str(result_write_fd),
+            str(launch.result_write_fd),
         )
         passed = [
-            config_file.fileno(),
+            launch.supervisor_interpreter.fd,
+            launch.supervisor_source.fd,
+            launch.config_file.fileno(),
             executable.fd,
             cwd.fd,
-            cancel_read_fd,
-            result_write_fd,
+            launch.cancel_read_fd,
+            launch.result_write_fd,
         ]
         if executable.script_fd >= 0:
             passed.append(executable.script_fd)
-        return _PosixLaunch(
-            argv=supervisor,
-            pass_fds=tuple(passed),
-            cancel_read_fd=cancel_read_fd,
-            cancel_write_fd=cancel_write_fd,
-            config_file=config_file,
-            result_read_fd=result_read_fd,
-            result_write_fd=result_write_fd,
-        )
+        launch.popen_executable = f"/proc/self/fd/{launch.supervisor_interpreter.fd}"
+        launch.pass_fds = tuple(passed)
+        launch.prepared = True
     except BaseException:
-        config_file.close()
-        for descriptor in (
-            cancel_read_fd,
-            cancel_write_fd,
-            result_read_fd,
-            result_write_fd,
-        ):
-            if descriptor >= 0:
-                os.close(descriptor)
+        try:
+            _close_posix_launch(launch)
+        except BaseException:
+            pass
         raise
     finally:
+        launch = None  # type: ignore[assignment]
         argv = ()
         environment = {}
         payload = b""
+        supervisor_argv0 = ""
+        supervisor_interpreter_path = None
+        supervisor_source_path = None
+        passed = []
         executable = None  # type: ignore[assignment]
         cwd = None  # type: ignore[assignment]
-        config_file = None  # type: ignore[assignment]
-        cancel_read_fd = -1
-        cancel_write_fd = -1
-        result_read_fd = -1
-        result_write_fd = -1
 
 
 def _close_posix_launch(launch: _PosixLaunch) -> None:
+    first_error: BaseException | None = None
     try:
-        launch.config_file.close()
+        if launch.config_file is not None:
+            try:
+                launch.config_file.close()
+            except BaseException as error:
+                first_error = error
+            launch.config_file = None
         for descriptor in (
             launch.cancel_read_fd,
             launch.cancel_write_fd,
@@ -635,12 +752,29 @@ def _close_posix_launch(launch: _PosixLaunch) -> None:
             launch.result_write_fd,
         ):
             if descriptor >= 0:
-                os.close(descriptor)
+                try:
+                    os.close(descriptor)
+                except BaseException as error:
+                    if first_error is None:
+                        first_error = error
         launch.cancel_read_fd = -1
         launch.cancel_write_fd = -1
         launch.result_read_fd = -1
         launch.result_write_fd = -1
+        for lease in (launch.supervisor_interpreter, launch.supervisor_source):
+            try:
+                lease.close()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        launch.argv = ()
+        launch.popen_executable = None
+        launch.pass_fds = ()
+        launch.prepared = False
+        if first_error is not None:
+            raise first_error
     finally:
+        first_error = None
         launch = None  # type: ignore[assignment]
 
 
@@ -669,6 +803,7 @@ def _popen_process(
         popen_kwargs = {
             "cwd": None if posix_launch is not None else str(cwd),
             "env": environment,
+            "executable": (posix_launch.popen_executable if posix_launch is not None else None),
             "shell": False,
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.PIPE,
@@ -1208,7 +1343,7 @@ def _run_resolved_process(
     cwd_lease: _WindowsPathLease | None = None
     posix_executable_lease: _PosixPathLease | None = None
     posix_cwd_lease: _PosixPathLease | None = None
-    posix_launch: _PosixLaunch | None = None
+    posix_launch = _PosixLaunch()
     executable_binding = ""
     try:
         executable_lease = _open_windows_path_lease(Path(argv[0]), directory=False)
@@ -1223,12 +1358,15 @@ def _run_resolved_process(
         stdout_file = tempfile.TemporaryFile(mode="w+b")
         stderr_file = tempfile.TemporaryFile(mode="w+b")
         if posix_executable_lease is not None and posix_cwd_lease is not None:
+            # This launch binding intentionally covers the direct executable and
+            # shebang interpreter, not transitive Python/runtime dependencies.
             executable_binding = (
                 posix_executable_lease.sha256
                 + ":"
                 + ":".join(map(str, posix_executable_lease.identity))
             )
-            posix_launch = _prepare_posix_launch(
+            _prepare_posix_launch(
+                posix_launch,
                 argv,
                 environment,
                 posix_executable_lease,
@@ -1239,7 +1377,7 @@ def _run_resolved_process(
             argv,
             cwd=cwd,
             environment=environment,
-            posix_launch=posix_launch,
+            posix_launch=(posix_launch if posix_launch.prepared else None),
         )
         process = process_owner.require()
         windows_job = _create_windows_job(process)
@@ -1314,8 +1452,7 @@ def _run_resolved_process(
             )
             if lease is not None
         ]
-        if posix_launch is not None:
-            lease_errors.append(_capture_cleanup_failure(_close_posix_launch, posix_launch))
+        lease_errors.append(_capture_cleanup_failure(_close_posix_launch, posix_launch))
         if not had_active_exception:
             if cleanup_control is None and isinstance(
                 capture_error, (KeyboardInterrupt, SystemExit)
