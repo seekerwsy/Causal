@@ -238,6 +238,7 @@ def _read_file_snapshot(path: Path, maximum_bytes: int) -> _FileSnapshot:
     flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     descriptor = os.open(path, flags)
     try:
         with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as handle:

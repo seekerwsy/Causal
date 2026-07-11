@@ -2,6 +2,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import traceback
 from collections.abc import Callable
@@ -781,6 +783,65 @@ def test_loader_rejects_posix_fifo_without_opening_it(tmp_path: Path) -> None:
     _assert_safe_policy_error(exc_info.value, str(target))
 
 
+def test_snapshot_open_uses_nonblocking_flag_when_supported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_path = _write_locked_policy(tmp_path)
+    synthetic_nonblocking = 1 << 29
+    observed_flags: list[int] = []
+
+    def recording_open(path: os.PathLike[str] | str, flags: int) -> int:
+        observed_flags.append(flags)
+        raise OSError("synthetic open stop")
+
+    monkeypatch.setattr(policy_module.os, "O_NONBLOCK", synthetic_nonblocking, raising=False)
+    monkeypatch.setattr(policy_module.os, "open", recording_open)
+
+    with pytest.raises(SecAwareError):
+        load_policy_bundle(lock_path)
+
+    assert len(observed_flags) == 1
+    assert observed_flags[0] & synthetic_nonblocking
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or not hasattr(os, "mkfifo") or not hasattr(os, "O_NONBLOCK"),
+    reason="POSIX regular-to-FIFO race regression",
+)
+def test_loader_rejects_regular_to_fifo_race_without_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_path = _write_locked_policy(tmp_path)
+    semgrep_path = (tmp_path / "semgrep.yml").resolve()
+    original_open = policy_module.os.open
+    observed_flags: list[int] = []
+    swapped = False
+
+    def fifo_swapping_open(path: os.PathLike[str] | str, flags: int) -> int:
+        nonlocal swapped
+        candidate = Path(path)
+        if not swapped and candidate == semgrep_path:
+            swapped = True
+            candidate.unlink()
+            os.mkfifo(candidate)
+            observed_flags.append(flags)
+            if not flags & os.O_NONBLOCK:
+                raise RuntimeError("blocking FIFO open prevented by regression test")
+        return original_open(path, flags)
+
+    monkeypatch.setattr(policy_module.os, "open", fifo_swapping_open)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        load_policy_bundle(lock_path)
+
+    assert swapped is True
+    assert len(observed_flags) == 1
+    assert observed_flags[0] & os.O_NONBLOCK
+    _assert_safe_policy_error(exc_info.value, str(semgrep_path), "FIFO")
+
+
 def test_loader_detects_inode_swap_between_lstat_and_open(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -970,3 +1031,87 @@ def test_checked_in_bandit_config_enables_bandit_native_tests_without_skips() ->
     assert document == {"exclude_dirs": []}
     assert "tests" not in document
     assert "skips" not in document
+
+
+def test_exact_semgrep_policy_distinguishes_safe_and_unsafe_yaml_loaders(
+    tmp_path: Path,
+) -> None:
+    configured_executable = os.environ.get("SECAWARE_TEST_SEMGREP")
+    if configured_executable is None:
+        pytest.skip("exact Semgrep policy integration is not enabled")
+    executable = shutil.which(configured_executable)
+    if executable is None:
+        pytest.fail("configured Semgrep executable is unavailable")
+
+    version = subprocess.run(
+        [executable, "--version"],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    assert version.returncode == 0
+    assert version.stdout.strip() == SEMGREP_VERSION
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    samples = {
+        "safe_loader.py": "yaml.load(payload, Loader=yaml.SafeLoader)",
+        "safe_c_loader.py": "yaml.load(payload, Loader=yaml.CSafeLoader)",
+        "safe_base_loader.py": "yaml.load(payload, Loader=yaml.BaseLoader)",
+        "safe_load.py": "yaml.safe_load(payload)",
+        "unsafe_default.py": "yaml.load(payload)",
+        "unsafe_loader.py": "yaml.load(payload, Loader=yaml.Loader)",
+        "unsafe_c_loader.py": "yaml.load(payload, Loader=yaml.CLoader)",
+        "unsafe_full_loader.py": "yaml.load(payload, Loader=yaml.FullLoader)",
+        "unsafe_c_full_loader.py": "yaml.load(payload, Loader=yaml.CFullLoader)",
+        "unsafe_unsafe_loader.py": "yaml.load(payload, Loader=yaml.UnsafeLoader)",
+        "unsafe_c_unsafe_loader.py": "yaml.load(payload, Loader=yaml.CUnsafeLoader)",
+    }
+    for filename, sink in samples.items():
+        corpus.joinpath(filename).write_text(
+            "import yaml\n\n"
+            "def parse_untrusted_yaml():\n"
+            "    payload = input()\n"
+            f"    return {sink}\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    completed = subprocess.run(
+        [
+            executable,
+            "scan",
+            "--json",
+            "--metrics=off",
+            "--disable-version-check",
+            "--no-git-ignore",
+            "--jobs=1",
+            "--config",
+            str(_CHECKED_IN_POLICY_DIRECTORY / "semgrep.yml"),
+            str(corpus),
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads(completed.stdout)
+    assert report["errors"] == []
+    unsafe_deserialization = {
+        Path(result["path"]).name
+        for result in report["results"]
+        if result["check_id"].endswith("secaware.python.unsafe-deserialization")
+    }
+    assert unsafe_deserialization == {
+        "unsafe_default.py",
+        "unsafe_loader.py",
+        "unsafe_c_loader.py",
+        "unsafe_full_loader.py",
+        "unsafe_c_full_loader.py",
+        "unsafe_unsafe_loader.py",
+        "unsafe_c_unsafe_loader.py",
+    }

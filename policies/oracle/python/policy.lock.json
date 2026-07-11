@@ -5,7 +5,7 @@
   "semgrep_version": "1.168.0",
   "bandit_version": "1.9.4",
   "semgrep_rules": "semgrep.yml",
-  "semgrep_sha256": "8b2a33f6530ef3b362bdffbe8ef9ed076a2887e27af4c1187522bfe3f7141892",
+  "semgrep_sha256": "c79fe8768e23368f26edaad8c42f6aed5c7fd14cfbe071d469a9ad8bf00a1aed",
   "bandit_config": "bandit.yml",
   "bandit_sha256": "0ee03e3824c3b4d993af538b46e200e66cd953af1c4063e25f1d7ad6cbc31f8a"
 }
