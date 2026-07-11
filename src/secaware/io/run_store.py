@@ -28,11 +28,19 @@ class _StageSnapshot:
     outputs: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _StageOutputSeal:
+    stage: str
+    outputs: tuple[str, ...]
+    output_sha256: tuple[tuple[str, str], ...]
+
+
 class RunStore:
     def __init__(self, config: AppConfig):
         self.config = config
         self.root = Path(config.run.output_dir)
         self._pending_snapshots: dict[str, _StageSnapshot] = {}
+        self._sealed_outputs: dict[str, _StageOutputSeal] = {}
 
     def path(self, *parts: str) -> Path:
         return self.root.joinpath(*parts)
@@ -135,12 +143,21 @@ class RunStore:
     def invalidate_stage(self, stage: str) -> None:
         """Remove any committed manifest and pending execution authorization."""
 
-        self._pending_snapshots.pop(stage, None)
+        self._clear_stage_state(stage)
         self._invalidate_stage_manifest(stage)
 
+    def _clear_stage_state(self, stage: str) -> None:
+        self._pending_snapshots.pop(stage, None)
+        self._sealed_outputs.pop(stage, None)
+
     def _reject_stage_record(self, stage: str, message: str) -> None:
+        self._clear_stage_state(stage)
         self._invalidate_stage_manifest(stage)
         raise self._manifest_conflict(stage, message)
+
+    @staticmethod
+    def _requires_output_seal(stage: str) -> bool:
+        return stage.startswith(("plan-generation-", "import-generation-"))
 
     def _stage_output_hashes(
         self,
@@ -197,6 +214,39 @@ class RunStore:
     def stage_fingerprint(self, stage: str, input_paths: Sequence[str | Path]) -> str:
         return self._fingerprint_from_inputs(stage, self.stage_inputs(input_paths))
 
+    def seal_stage_outputs(
+        self,
+        stage: str,
+        output_paths: Sequence[str | Path],
+    ) -> None:
+        """Bind one output snapshot to the pending execution before validation."""
+
+        snapshot = self._pending_snapshots.get(stage)
+        if snapshot is None:
+            self._reject_stage_record(
+                stage,
+                "stage outputs cannot be sealed without an execution snapshot",
+            )
+        if stage in self._sealed_outputs:
+            self._reject_stage_record(stage, "stage outputs were already sealed")
+        outputs = [Path(path) for path in output_paths]
+        relative_outputs: list[str] | None = None
+        try:
+            relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+        except SecAwareError:
+            pass
+        if relative_outputs is None or snapshot.outputs != tuple(relative_outputs):
+            self._reject_stage_record(
+                stage,
+                "sealed stage outputs do not match the execution snapshot",
+            )
+        output_sha256 = self._stage_output_hashes(stage, outputs, relative_outputs)
+        self._sealed_outputs[stage] = _StageOutputSeal(
+            stage=stage,
+            outputs=tuple(relative_outputs),
+            output_sha256=tuple(sorted(output_sha256.items())),
+        )
+
     def should_skip_stage(
         self,
         stage: str,
@@ -204,6 +254,7 @@ class RunStore:
         output_paths: Sequence[str | Path],
         force: bool,
     ) -> bool:
+        self._clear_stage_state(stage)
         outputs = [Path(path) for path in output_paths]
         relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
         inputs = self.stage_inputs(input_paths)
@@ -225,12 +276,12 @@ class RunStore:
             manifest_outputs=relative_outputs,
         )
         if allows_skip:
-            self._pending_snapshots.pop(stage, None)
+            self._clear_stage_state(stage)
             return True
         try:
             self._invalidate_stage_manifest(stage)
         except SecAwareError:
-            self._pending_snapshots.pop(stage, None)
+            self._clear_stage_state(stage)
             raise
         return False
 
@@ -242,11 +293,37 @@ class RunStore:
     ) -> None:
         outputs = [Path(path) for path in output_paths]
         snapshot = self._pending_snapshots.pop(stage, None)
+        output_seal = self._sealed_outputs.pop(stage, None)
+        seal_required = self._requires_output_seal(stage) or output_seal is not None
+        if seal_required and (snapshot is None or output_seal is None):
+            self._reject_stage_record(
+                stage,
+                "stage output seal is missing",
+            )
         if not outputs:
+            if seal_required:
+                self._reject_stage_record(stage, "sealed stage outputs are missing")
             raise self._contract_error("stage must declare at least one output", self.root)
-        relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+        relative_outputs: list[str] | None = None
+        try:
+            relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+        except SecAwareError:
+            if not seal_required:
+                raise
+        if relative_outputs is None:
+            self._reject_stage_record(stage, "sealed stage output paths are invalid")
+        if output_seal is not None and output_seal.outputs != tuple(relative_outputs):
+            self._reject_stage_record(
+                stage,
+                "sealed stage outputs changed before recording",
+            )
         for output in outputs:
             if not output.exists():
+                if seal_required:
+                    self._reject_stage_record(
+                        stage,
+                        "sealed stage output is missing",
+                    )
                 raise self._stage_contract_error(stage, "declared stage output is missing")
         if snapshot is None:
             self._reject_stage_record(
@@ -274,7 +351,17 @@ class RunStore:
                 stage,
                 "stage inputs or configuration changed during execution",
             )
-        output_sha256 = self._stage_output_hashes(stage, outputs, relative_outputs)
+        current_output_sha256 = self._stage_output_hashes(stage, outputs, relative_outputs)
+        output_sha256 = (
+            dict(output_seal.output_sha256)
+            if output_seal is not None
+            else current_output_sha256
+        )
+        if current_output_sha256 != output_sha256:
+            self._reject_stage_record(
+                stage,
+                "sealed stage outputs changed before the manifest was committed",
+            )
         manifest_path = self._manifest_path(stage)
         manifest_committed = False
         try:

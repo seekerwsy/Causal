@@ -284,6 +284,113 @@ def test_record_stage_hashes_directory_outputs(tmp_path: Path) -> None:
     assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
 
 
+def test_sealed_output_hash_is_committed_as_the_manifest_expectation(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    expected_hash = sha256_path(output_path)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+    store.seal_stage_outputs("report", [output_path])
+    store.record_stage("report", [input_path], [output_path])
+
+    manifest = read_stage_manifest(store.path(".stages", "report.json"))
+    assert manifest.output_sha256 == {"reports/result.txt": expected_hash}
+
+
+@pytest.mark.parametrize("misuse", ["without_pending", "duplicate", "paths_mismatch"])
+def test_output_seal_misuse_invalidates_all_stage_authorization(
+    tmp_path: Path,
+    misuse: str,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = store.path(".stages", "report.json")
+    if misuse == "without_pending":
+        manifest_path = _record_report_stage(store, input_path, [output_path])
+    else:
+        assert store.should_skip_stage(
+            "report", [input_path], [output_path], force=False
+        ) is False
+        if misuse == "duplicate":
+            store.seal_stage_outputs("report", [output_path])
+    seal_outputs = [output_path]
+    if misuse == "paths_mismatch":
+        other_output = store.path("reports", "other.txt")
+        other_output.write_text("other\n", encoding="utf-8")
+        seal_outputs = [other_output]
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.seal_stage_outputs("report", seal_outputs)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(exc_info.value)
+    assert not manifest_path.exists()
+    with pytest.raises(SecAwareError) as record_info:
+        store.record_stage("report", [input_path], [output_path])
+    assert record_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
+def test_output_seal_path_escape_is_a_safe_manifest_conflict(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    outside_output = tmp_path / "private-outside-output.txt"
+    outside_output.write_text("private output\n", encoding="utf-8")
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.seal_stage_outputs("report", [outside_output])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(
+        exc_info.value,
+        str(outside_output),
+        "private-outside-output",
+    )
+    with pytest.raises(SecAwareError):
+        store.record_stage("report", [input_path], [output_path])
+
+
+def test_output_seal_hash_failure_is_safe_and_clears_pending_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    secret = "private-seal-hash-failure"
+    real_sha256_path = run_store_module.sha256_path
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+
+    def fail_output_hash(path: Path) -> str:
+        if Path(path) == output_path:
+            raise OSError(secret)
+        return real_sha256_path(path)
+
+    monkeypatch.setattr(run_store_module, "sha256_path", fail_output_hash)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.seal_stage_outputs("report", [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(exc_info.value, secret, str(output_path), "OSError")
+    with pytest.raises(SecAwareError):
+        store.record_stage("report", [input_path], [output_path])
+
+
+def test_generation_stage_record_requires_a_prior_output_seal(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    stage = "plan-generation-observed"
+    assert store.should_skip_stage(stage, [input_path], [output_path], force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage(stage, [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not store.path(".stages", f"{stage}.json").exists()
+
+
 def test_record_stage_rejects_output_changed_after_manifest_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

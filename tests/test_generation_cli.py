@@ -217,6 +217,100 @@ def test_plan_reads_back_ledger_before_recording_manifest(
     assert record_error.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
+def test_plan_rejects_valid_ledger_replacement_after_output_seal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    output = store.path("generation", "observed_requests.jsonl")
+    manifest_path = store.path(".stages", "plan-generation-observed.json")
+    real_seal = store.seal_stage_outputs
+
+    def seal_then_reverse(stage: str, outputs: list[Path]) -> None:
+        real_seal(stage, outputs)
+        records = read_jsonl(
+            output,
+            GenerationRequestRecord,
+            required=True,
+            allow_empty=False,
+        )
+        write_jsonl(output, list(reversed(records)))
+
+    monkeypatch.setattr(store, "seal_stage_outputs", seal_then_reverse)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_generation_stage(config, store, condition="observed", force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert not manifest_path.exists()
+    with pytest.raises(SecAwareError) as record_info:
+        store.record_stage(
+            "plan-generation-observed",
+            [store.path("inputs", "prompts.jsonl")],
+            [output],
+        )
+    assert record_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
+@pytest.mark.parametrize("stage_kind", ["plan", "import"])
+def test_generation_stage_rejects_valid_output_reordered_at_record_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage_kind: str,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    if stage_kind == "plan":
+        stage = "plan-generation-observed"
+        output = store.path("generation", "observed_requests.jsonl")
+        inputs = [store.path("inputs", "prompts.jsonl")]
+        model: type[GenerationRequestRecord] | type[CanonicalGeneratedCodeRecord] = (
+            GenerationRequestRecord
+        )
+
+        def run_stage() -> None:
+            plan_generation_stage(config, store, condition="observed", force=False)
+
+    else:
+        ledger, requests = _plan_observed(config, store)
+        results_path = tmp_path / "external-results.jsonl"
+        write_jsonl(results_path, [_result(request) for request in requests])
+        stage = "import-generation-observed"
+        output = store.path("generation", "observed_code.jsonl")
+        inputs = [ledger, results_path]
+        model = CanonicalGeneratedCodeRecord
+
+        def run_stage() -> None:
+            import_generation_stage(
+                config,
+                store,
+                condition="observed",
+                results_path=results_path,
+                force=False,
+            )
+
+    manifest_path = store.path(".stages", f"{stage}.json")
+    real_record = store.record_stage
+
+    def reverse_then_record(
+        stage_name: str,
+        input_paths: list[Path],
+        output_paths: list[Path],
+    ) -> None:
+        records = read_jsonl(output, model, required=True, allow_empty=False)
+        write_jsonl(output, list(reversed(records)))
+        real_record(stage_name, input_paths, output_paths)
+
+    monkeypatch.setattr(store, "record_stage", reverse_then_record)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_stage()
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not manifest_path.exists()
+    assert store.should_skip_stage(stage, inputs, [output], force=False) is False
+    store.invalidate_stage(stage)
+
+
 def test_import_shuffled_results_writes_ledger_order_canonical_output(
     tmp_path: Path,
 ) -> None:

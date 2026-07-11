@@ -259,6 +259,7 @@ def plan_generation_stage(
                 endpoint_type="offline",
             )
         _write_generation_records(output, cast(list[object], records), stage=stage)
+        store.seal_stage_outputs(stage, outputs)
         validated = _read_generation_records(
             output,
             GenerationRequestRecord,
@@ -330,6 +331,7 @@ def import_generation_stage(
         )
         imported = import_offline_results(expected, received)
         _write_generation_records(output, cast(list[object], imported), stage=stage)
+        store.seal_stage_outputs(stage, outputs)
         validated = _read_generation_records(
             output,
             CanonicalGeneratedCodeRecord,
