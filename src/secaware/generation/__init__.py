@@ -4,10 +4,14 @@ from secaware.generation.request_planner import (
     plan_observed_requests,
     sha256_text,
 )
-from secaware.generation.result_importer import import_offline_results
+from secaware.generation.result_importer import (
+    canonical_generated_code_from_request,
+    import_offline_results,
+)
 
 __all__ = [
     "get_provider",
+    "canonical_generated_code_from_request",
     "import_offline_results",
     "plan_counterfactual_requests",
     "plan_observed_requests",

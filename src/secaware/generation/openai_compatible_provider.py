@@ -208,6 +208,7 @@ def _wire_parameters(parameters: Mapping[str, JSONValue]) -> dict[str, Any]:
 class OpenAICompatibleProvider:
     __slots__ = (
         "_client",
+        "_endpoint_sha256",
         "_initial_backoff_seconds",
         "_max_attempts",
         "_max_backoff_seconds",
@@ -249,6 +250,7 @@ class OpenAICompatibleProvider:
             sleeper = None  # type: ignore[assignment]
             raise initialization_error
         self._client = client
+        self._endpoint_sha256 = sha256_text(trusted.base_url)
         self._max_attempts = trusted.max_attempts
         self._initial_backoff_seconds = trusted.initial_backoff_seconds
         self._max_backoff_seconds = trusted.max_backoff_seconds
@@ -257,8 +259,8 @@ class OpenAICompatibleProvider:
     def __repr__(self) -> str:
         return "OpenAICompatibleProvider()"
 
-    @staticmethod
     def _request(
+        self,
         request: object,
         system_template: object,
     ) -> GenerationRequestRecord | None:
@@ -266,6 +268,8 @@ class OpenAICompatibleProvider:
         try:
             trusted = revalidate_generation_request_envelope(request)
             if trusted.endpoint_type != "chat_completions":
+                raise ValueError
+            if trusted.endpoint_sha256 != self._endpoint_sha256:
                 raise ValueError
             if type(system_template) is not str:
                 raise TypeError

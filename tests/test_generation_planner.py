@@ -106,6 +106,7 @@ def _expected_request_id(values: dict[str, object]) -> str:
         "hypothesis_id": values["hypothesis_id"],
         "intervention_id": values["intervention_id"],
         "endpoint_type": values["endpoint_type"],
+        "endpoint_sha256": values["endpoint_sha256"],
         "system_template_version": values["system_template_version"],
         "system_template_sha256": values["system_template_sha256"],
         "parameters": parameters,
@@ -126,6 +127,7 @@ def _record_values(**overrides: object) -> dict[str, object]:
         "hypothesis_id": None,
         "intervention_id": None,
         "endpoint_type": "mock",
+        "endpoint_sha256": sha256_text("mock"),
         "system_template_version": "none",
         "system_template_sha256": sha256_text(""),
         "parameters": GenerationParameters(),
@@ -342,6 +344,34 @@ def test_generation_request_record_requires_explicit_supported_version() -> None
 
     record = GenerationRequestRecord.model_validate(_record_values())
     assert record.schema_version == "1.0"
+
+
+def test_generation_request_record_requires_endpoint_hash_and_binds_it_to_identity() -> None:
+    missing = _record_values()
+    missing.pop("endpoint_sha256")
+    with pytest.raises(ValidationError):
+        GenerationRequestRecord.model_validate(missing)
+
+    original = GenerationRequestRecord.model_validate(_record_values())
+    changed_values = _record_values(endpoint_sha256=sha256_text("https://other.invalid/v1"))
+    changed = GenerationRequestRecord.model_validate(changed_values)
+
+    assert original.endpoint_sha256 == sha256_text("mock")
+    assert changed.request_id != original.request_id
+
+
+def test_planner_hashes_explicit_endpoint_identity_without_serializing_it() -> None:
+    endpoint = "https://provider-secret.invalid/v1"
+    record = plan_observed_requests(
+        [_prompt("prompt-endpoint")],
+        ["model-a"],
+        [1],
+        endpoint_type="chat_completions",
+        endpoint_identity=endpoint,
+    )[0]
+
+    assert record.endpoint_sha256 == sha256_text(endpoint)
+    assert endpoint not in record.model_dump_json()
 
 
 @pytest.mark.parametrize("field", ["hypothesis_id", "intervention_id"])

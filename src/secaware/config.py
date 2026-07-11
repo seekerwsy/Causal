@@ -1,13 +1,34 @@
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import yaml
 from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.generation import GenerationParameters
+
+
+MAX_SYSTEM_TEMPLATE_CHARS = 65_536
+
+
+def _normalized_base_url(parsed: SplitResult) -> str:
+    scheme = parsed.scheme.casefold()
+    hostname = parsed.hostname
+    if hostname is None:
+        raise ValueError("base URL hostname is unavailable")
+    normalized_host = hostname.casefold()
+    if ":" in normalized_host:
+        normalized_host = f"[{normalized_host}]"
+    port = parsed.port
+    if port is not None and not (
+        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    ):
+        normalized_host = f"{normalized_host}:{port}"
+    path = parsed.path.rstrip("/")
+    return urlunsplit((scheme, normalized_host, path, "", ""))
 
 
 class RunConfig(StrictModel):
@@ -63,6 +84,17 @@ class OpenAICompatibleConfig(SafeValidationMixin, StrictModel):
     max_attempts: int = Field(default=3, ge=1, le=10)
     initial_backoff_seconds: float = Field(default=1.0, ge=0.0, le=300.0)
     max_backoff_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
+    system_template: str = Field(
+        default="",
+        max_length=MAX_SYSTEM_TEMPLATE_CHARS,
+        repr=False,
+    )
+    system_template_version: str = Field(
+        default="none",
+        min_length=1,
+        max_length=128,
+    )
+    parameters: GenerationParameters = Field(default_factory=GenerationParameters)
 
     @field_validator("base_url")
     @classmethod
@@ -86,6 +118,26 @@ class OpenAICompatibleConfig(SafeValidationMixin, StrictModel):
                 raise ValueError
             port = parsed.port
             if port is not None and not 1 <= port <= 65535:
+                raise ValueError
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+        return _normalized_base_url(parsed)
+
+    @field_validator("system_template")
+    @classmethod
+    def validate_system_template(cls, value: str) -> str:
+        try:
+            if type(value) is not str:
+                raise TypeError
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+        return value
+
+    @field_validator("system_template_version")
+    @classmethod
+    def validate_system_template_version(cls, value: str) -> str:
+        try:
+            if type(value) is not str or not value.strip() or value != value.strip():
                 raise ValueError
         except Exception:
             raise ValueError(cls._safe_validation_message) from None

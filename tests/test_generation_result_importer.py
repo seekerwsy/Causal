@@ -9,7 +9,10 @@ from pydantic import ValidationError
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.generation import result_importer
-from secaware.generation.result_importer import import_offline_results
+from secaware.generation.result_importer import (
+    canonical_generated_code_from_request,
+    import_offline_results,
+)
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.oracle.aggregator import run_oracle
 from secaware.schema.generation import (
@@ -49,12 +52,14 @@ def _request(
     language: str = "python",
     system_template_version: str = "template-v1",
     system_template: str = "Return only code.",
+    endpoint_identity: str | None = None,
     parameters: GenerationParameters | None = None,
 ) -> GenerationRequestRecord:
     prompt_text = prompt or f"Read the path for {prompt_id}."
     parameter_values = parameters or GenerationParameters(values={"temperature": 0.2})
     prompt_sha256 = sha256_text(prompt_text)
     system_template_sha256 = sha256_text(system_template)
+    endpoint_sha256 = sha256_text(endpoint_identity or endpoint_type)
     request_id = build_generation_request_id(
         schema_version="1.0",
         condition=condition,
@@ -66,6 +71,7 @@ def _request(
         hypothesis_id=hypothesis_id,
         intervention_id=intervention_id,
         endpoint_type=endpoint_type,
+        endpoint_sha256=endpoint_sha256,
         system_template_version=system_template_version,
         system_template_sha256=system_template_sha256,
         parameters=parameter_values,
@@ -83,6 +89,7 @@ def _request(
         hypothesis_id=hypothesis_id,
         intervention_id=intervention_id,
         endpoint_type=endpoint_type,
+        endpoint_sha256=endpoint_sha256,
         system_template_version=system_template_version,
         system_template_sha256=system_template_sha256,
         parameters=parameter_values,
@@ -109,6 +116,19 @@ def _result(
         provenance=_provenance(),
     )
     return OfflineGenerationResultRecord.model_validate(payload)
+
+
+def test_canonical_bridge_helper_builds_provider_and_offline_records_identically() -> None:
+    request = _request(endpoint_type="chat_completions")
+    provenance = _provenance()
+    code = "def safe():\n    return True\n"
+
+    record = canonical_generated_code_from_request(request, code, provenance)
+
+    assert record.code_sha256 == sha256_text(code)
+    assert record.generation_request == request
+    assert record.generation_provenance == provenance
+    assert record.request_id == request.request_id
 
 
 def _validation_surfaces(error: ValidationError) -> tuple[str, ...]:

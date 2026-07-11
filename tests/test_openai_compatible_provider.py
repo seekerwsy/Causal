@@ -134,6 +134,7 @@ def _request(
         ["org/model-api"],
         [7],
         endpoint_type=endpoint_type,  # type: ignore[arg-type]
+        endpoint_identity=_BASE_URL if endpoint_type == "chat_completions" else None,
         parameters=GenerationParameters(values=parameter_values),
         system_template=system_template,
         system_template_version="system-v1",
@@ -296,6 +297,32 @@ def test_openai_config_repr_does_not_reveal_endpoint_or_environment_name() -> No
     assert _BASE_URL not in rendered
     assert _ENV_NAME not in rendered
     assert _API_KEY not in rendered
+
+
+def test_openai_config_owns_frozen_template_version_and_generation_parameters() -> None:
+    config = _config(
+        system_template="Return only source code.",
+        system_template_version="secure-v2",
+        parameters={"values": {"temperature": 0.1, "max_tokens": 256}},
+    )
+
+    assert config.system_template == "Return only source code."
+    assert config.system_template_version == "secure-v2"
+    assert config.parameters == GenerationParameters(
+        values={"temperature": 0.1, "max_tokens": 256}
+    )
+    assert config.system_template not in repr(config)
+    with pytest.raises(ValidationError):
+        config.system_template = "mutated"  # type: ignore[misc]
+    with pytest.raises(ValidationError):
+        _config(system_template_version="   ")
+
+
+def test_openai_config_normalizes_equivalent_base_urls_for_endpoint_identity() -> None:
+    first = _config(base_url="HTTPS://Provider.Invalid:443/v1/")
+    second = _config(base_url="https://provider.invalid/v1")
+
+    assert first.base_url == second.base_url == "https://provider.invalid/v1"
 
 
 def test_generation_config_accepts_new_provider_without_removing_legacy_api() -> None:
@@ -1288,6 +1315,27 @@ def test_provider_revalidates_model_copy_forged_requests(forgery: str) -> None:
 def test_provider_rejects_wrong_endpoint_system_hash_and_n_before_calling_client() -> None:
     cases = [
         (_request(endpoint_type="offline"), _SYSTEM),
+        (
+            plan_observed_requests(
+                [
+                    PromptRecord(
+                        prompt_id="wrong-endpoint",
+                        split="confirm",
+                        language="python",
+                        task_family="path_handling",
+                        cwe="CWE-22",
+                        prompt=_PROMPT,
+                    )
+                ],
+                ["org/model-api"],
+                [7],
+                endpoint_type="chat_completions",
+                endpoint_identity="https://different.invalid/v1",
+                system_template=_SYSTEM,
+                system_template_version="system-v1",
+            )[0],
+            _SYSTEM,
+        ),
         (_request(), "different system template secret"),
         (_request(parameters={"n": 2}), _SYSTEM),
     ]

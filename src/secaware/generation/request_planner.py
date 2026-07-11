@@ -263,6 +263,23 @@ def _parameters(value: ParameterInput) -> GenerationParameters:
     )
 
 
+def _endpoint_sha256(
+    endpoint_type: EndpointType,
+    endpoint_identity: str | None,
+) -> str:
+    try:
+        identity = endpoint_type if endpoint_identity is None else endpoint_identity
+        if type(identity) is not str or not identity:
+            raise ValueError("invalid endpoint identity")
+        return sha256_text(identity)
+    except Exception:
+        pass
+    raise _planner_error(
+        ErrorCode.CONFIG,
+        "generation endpoint identity failed validation",
+    )
+
+
 def _record(
     *,
     condition: Literal["observed", "counterfactual"],
@@ -274,6 +291,7 @@ def _record(
     hypothesis_id: str | None,
     intervention_id: str | None,
     endpoint_type: EndpointType,
+    endpoint_sha256: str,
     system_template_version: str,
     system_template_sha256: str,
     parameters: GenerationParameters,
@@ -292,6 +310,7 @@ def _record(
             hypothesis_id=hypothesis_id,
             intervention_id=intervention_id,
             endpoint_type=endpoint_type,
+            endpoint_sha256=endpoint_sha256,
             system_template_version=system_template_version,
             system_template_sha256=system_template_sha256,
             parameters=parameters,
@@ -306,6 +325,7 @@ def _record(
         hypothesis_id=hypothesis_id,
         intervention_id=intervention_id,
         endpoint_type=endpoint_type,
+        endpoint_sha256=endpoint_sha256,
         system_template_version=system_template_version,
         system_template_sha256=system_template_sha256,
         parameters=parameters,
@@ -340,6 +360,7 @@ def plan_observed_requests(
     seeds: Iterable[int],
     *,
     endpoint_type: EndpointType,
+    endpoint_identity: str | None = None,
     parameters: ParameterInput = None,
     system_template: str = "",
     system_template_version: str = "none",
@@ -352,6 +373,7 @@ def plan_observed_requests(
         len(seed_values),
     )
     parameter_values = _parameters(parameters)
+    endpoint_sha256 = _endpoint_sha256(endpoint_type, endpoint_identity)
     system_template_sha256 = sha256_text(system_template)
     records = [
         _record(
@@ -364,6 +386,7 @@ def plan_observed_requests(
             hypothesis_id=None,
             intervention_id=None,
             endpoint_type=endpoint_type,
+            endpoint_sha256=endpoint_sha256,
             system_template_version=system_template_version,
             system_template_sha256=system_template_sha256,
             parameters=parameter_values,
@@ -393,6 +416,7 @@ def plan_counterfactual_requests(
     seeds: Iterable[int],
     *,
     endpoint_type: EndpointType,
+    endpoint_identity: str | None = None,
     parameters: ParameterInput = None,
     system_template: str = "",
     system_template_version: str = "none",
@@ -406,6 +430,7 @@ def plan_counterfactual_requests(
         len(seed_values),
     )
     parameter_values = _parameters(parameters)
+    endpoint_sha256 = _endpoint_sha256(endpoint_type, endpoint_identity)
     system_template_sha256 = sha256_text(system_template)
     records: list[GenerationRequestRecord] = []
     for intervention in intervention_values:
@@ -428,6 +453,7 @@ def plan_counterfactual_requests(
                         hypothesis_id=intervention.hypothesis_id,
                         intervention_id=intervention.intervention_id,
                         endpoint_type=endpoint_type,
+                        endpoint_sha256=endpoint_sha256,
                         system_template_version=system_template_version,
                         system_template_sha256=system_template_sha256,
                         parameters=parameter_values,

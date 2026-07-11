@@ -300,6 +300,7 @@ def build_generation_request_id(
     hypothesis_id: str | None,
     intervention_id: str | None,
     endpoint_type: Literal["mock", "offline", "chat_completions"],
+    endpoint_sha256: str,
     system_template_version: str,
     system_template_sha256: str,
     parameters: GenerationParameters,
@@ -315,6 +316,7 @@ def build_generation_request_id(
         "hypothesis_id": hypothesis_id,
         "intervention_id": intervention_id,
         "endpoint_type": endpoint_type,
+        "endpoint_sha256": endpoint_sha256,
         "system_template_version": system_template_version,
         "system_template_sha256": system_template_sha256,
         "parameters": parameters.model_dump(mode="json"),
@@ -351,6 +353,7 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
     hypothesis_id: str | None = None
     intervention_id: str | None = None
     endpoint_type: Literal["mock", "offline", "chat_completions"]
+    endpoint_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     system_template_version: str = Field(min_length=1)
     system_template_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     parameters: GenerationParameters = Field(default_factory=GenerationParameters)
@@ -398,6 +401,7 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
             hypothesis_id=self.hypothesis_id,
             intervention_id=self.intervention_id,
             endpoint_type=self.endpoint_type,
+            endpoint_sha256=self.endpoint_sha256,
             system_template_version=self.system_template_version,
             system_template_sha256=self.system_template_sha256,
             parameters=self.parameters,

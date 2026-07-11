@@ -4,11 +4,13 @@ from typing import TypeVar
 
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
 from secaware.schema.generation import (
+    GenerationProvenance,
     GenerationRequestRecord,
     OfflineGenerationResultRecord,
     generation_request_envelopes_match,
     revalidate_generation_request_envelope,
     revalidate_offline_generation_result,
+    sha256_text,
 )
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
@@ -133,25 +135,39 @@ def _ensure_matching_envelopes(
     )
 
 
-def _canonical_record(
+def canonical_generated_code_from_request(
     request: GenerationRequestRecord,
-    result: OfflineGenerationResultRecord,
+    code: str,
+    provenance: GenerationProvenance,
 ) -> CanonicalGeneratedCodeRecord:
-    return CanonicalGeneratedCodeRecord(
-        schema_version=request.schema_version,
-        code_id=f"code_{request.request_id.removeprefix('req_')}",
-        request_id=request.request_id,
-        prompt_id=request.prompt_id,
-        prompt_sha256=request.prompt_sha256,
-        condition=request.condition,
-        model_id=request.model_id,
-        seed_id=request.seed_id,
-        code=result.code,
-        code_sha256=result.code_sha256,
-        hypothesis_id=request.hypothesis_id,
-        intervention_id=request.intervention_id,
-        generation_provenance=result.provenance,
-        generation_request=request,
+    """Build the canonical metadata bridge for any validated generation producer."""
+
+    try:
+        trusted_request = revalidate_generation_request_envelope(request)
+        trusted_provenance = GenerationProvenance.model_validate(provenance)
+        if type(code) is not str or not code.strip():
+            raise ValueError("generated code is unavailable")
+        return CanonicalGeneratedCodeRecord(
+            schema_version=trusted_request.schema_version,
+            code_id=f"code_{trusted_request.request_id.removeprefix('req_')}",
+            request_id=trusted_request.request_id,
+            prompt_id=trusted_request.prompt_id,
+            prompt_sha256=trusted_request.prompt_sha256,
+            condition=trusted_request.condition,
+            model_id=trusted_request.model_id,
+            seed_id=trusted_request.seed_id,
+            code=code,
+            code_sha256=sha256_text(code),
+            hypothesis_id=trusted_request.hypothesis_id,
+            intervention_id=trusted_request.intervention_id,
+            generation_provenance=trusted_provenance,
+            generation_request=trusted_request,
+        )
+    except Exception:
+        pass
+    raise _import_error(
+        ErrorCode.CONTRACT,
+        "canonical generation record construction failed",
     )
 
 
@@ -196,7 +212,12 @@ def import_offline_results(
 
     try:
         imported = [
-            _canonical_record(request, received_by_id[request.request_id]) for request in expected
+            canonical_generated_code_from_request(
+                request,
+                received_by_id[request.request_id].code,
+                received_by_id[request.request_id].provenance,
+            )
+            for request in expected
         ]
     except Exception:
         pass
@@ -208,4 +229,8 @@ def import_offline_results(
     )
 
 
-__all__ = ["MAX_OFFLINE_IMPORT_RECORDS", "import_offline_results"]
+__all__ = [
+    "MAX_OFFLINE_IMPORT_RECORDS",
+    "canonical_generated_code_from_request",
+    "import_offline_results",
+]
