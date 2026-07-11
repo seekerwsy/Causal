@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sys
-from importlib.metadata import entry_points
+from importlib.metadata import entry_points, metadata, requires
 from pathlib import Path
 
 
@@ -37,6 +37,17 @@ def test_project_registers_cli_entry_points() -> None:
     }
 
     assert installed_scripts == expected_scripts
+
+
+def test_project_declares_exact_oracle_extra_and_test_marker() -> None:
+    project = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    package_metadata = metadata("secaware")
+    package_requirements = requires("secaware") or []
+
+    assert "oracle" in (package_metadata.get_all("Provides-Extra") or [])
+    assert 'semgrep==1.168.0; extra == "oracle"' in package_requirements
+    assert 'bandit==1.9.4; extra == "oracle"' in package_requirements
+    assert '"oracle_tools: requires the exact locked Semgrep and Bandit executables"' in project
 
 
 def test_python_m_secaware_shows_pipeline_help() -> None:

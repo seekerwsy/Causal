@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import stat
-import sys
 import traceback
 
 import pytest
@@ -437,23 +436,6 @@ def test_any_analyzer_failure_returns_no_canonical_records(
     assert exc_info.value.code is code
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
-
-
-def test_lightweight_module_is_never_imported_or_called(
-    monkeypatch: pytest.MonkeyPatch,
-    policy: LoadedOraclePolicy,
-) -> None:
-    class Bomb:
-        def __getattr__(self, name: str) -> object:
-            raise AssertionError(name)
-
-    bomb = Bomb()
-    monkeypatch.setitem(sys.modules, "secaware.oracle.legacy", bomb)
-    monkeypatch.setitem(sys.modules, "secaware.oracle.lightweight_rules", bomb)
-
-    records = run_oracle_batch([_code()], policy, runner=FakeRunner())
-
-    assert records[0].security_label is SecurityLabel.SECURE
 
 
 @pytest.mark.parametrize(

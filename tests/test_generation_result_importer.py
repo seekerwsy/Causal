@@ -14,7 +14,6 @@ from secaware.generation.result_importer import (
     import_offline_results,
 )
 from secaware.io.jsonl import read_jsonl, write_jsonl
-from secaware.oracle.aggregator import run_oracle
 from secaware.schema.generation import (
     GENERATION_REQUEST_SCHEMA_VERSION,
     GenerationParameters,
@@ -663,21 +662,17 @@ def test_canonical_counterfactual_record_requires_both_identifiers(
         GeneratedCodeRecord.model_validate(payload)
 
 
-def test_imported_record_is_directly_compatible_with_extractor_and_oracle() -> None:
+def test_imported_record_is_directly_compatible_with_extractor() -> None:
     request = _request()
     imported = import_offline_results([request], [_result(request)])[0]
 
     tsg = extract_code_tsg(imported)
-    oracle = run_oracle(imported)
 
     assert tsg.code_id == imported.code_id
     assert tsg.prompt_id == imported.prompt_id
     assert tsg.features["code.parse_ok"] is True
-    assert oracle.code_id == imported.code_id
-    assert oracle.prompt_id == imported.prompt_id
 
 
-@pytest.mark.parametrize("consumer", [extract_code_tsg, run_oracle])
 @pytest.mark.parametrize(
     ("forgery", "secret"),
     [
@@ -688,8 +683,7 @@ def test_imported_record_is_directly_compatible_with_extractor_and_oracle() -> N
         ("model_construct_downgrade", "constructed-runtime-downgrade-secret"),
     ],
 )
-def test_downstream_consumers_revalidate_canonical_runtime_instances(
-    consumer: Callable[[GeneratedCodeRecord], object],
+def test_extractor_revalidates_canonical_runtime_instances(
     forgery: str,
     secret: str,
 ) -> None:
@@ -712,7 +706,7 @@ def test_downstream_consumers_revalidate_canonical_runtime_instances(
         forged = CanonicalGeneratedCodeRecord.model_construct(**payload)
 
     with pytest.raises(SecAwareError) as exc_info:
-        consumer(forged)
+        extract_code_tsg(forged)
 
     assert exc_info.value.code is ErrorCode.CONTRACT
     assert exc_info.value.retryable is False

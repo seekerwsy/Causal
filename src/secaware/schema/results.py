@@ -7,34 +7,6 @@ from secaware.schema.oracle import OracleRecord as OracleRecord
 from secaware.schema.oracle import SecurityLabel as SecurityLabel
 
 
-class LegacyFindingRecord(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    rule_id: str
-    cwe: str
-    message: str
-    sink: str
-    evidence: str
-    severity: str
-
-
-class LegacyOracleRecord(BaseModel):
-    model_config = ConfigDict(extra="forbid", protected_namespaces=())
-
-    code_id: str
-    parse_ok: bool
-    functional_ok: bool
-    security_label: SecurityLabel
-    severity: str
-    findings: list[LegacyFindingRecord] = Field(default_factory=list)
-    prompt_id: str | None = None
-    condition: str | None = None
-    model_id: str | None = None
-    seed_id: int | None = None
-    hypothesis_id: str | None = None
-    intervention_id: str | None = None
-
-
 class PairResult(BaseModel):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 

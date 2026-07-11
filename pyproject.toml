@@ -27,12 +27,19 @@ api = ["openai>=1.55.3,<3"]
 dev = [
   "pytest>=8",
 ]
+oracle = [
+  "semgrep==1.168.0",
+  "bandit==1.9.4",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "oracle_tools: requires the exact locked Semgrep and Bandit executables",
+]
 
 [tool.ruff]
 line-length = 100

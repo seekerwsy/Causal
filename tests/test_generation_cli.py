@@ -21,7 +21,6 @@ from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.oracle import aggregator as aggregator_module
-from secaware.oracle.aggregator import run_oracle
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.generation import (
@@ -572,7 +571,6 @@ def test_import_shuffled_results_writes_ledger_order_canonical_output(
         request.request_id for request in requests
     ]
     assert extract_code_tsg(records[0]).code_id == records[0].code_id
-    assert run_oracle(records[0]).code_id == records[0].code_id
     manifest = read_stage_manifest(store.path(".stages", "import-generation-observed.json"))
     assert "generation/observed_requests.jsonl" in manifest.inputs
     external_keys = [path for path in manifest.inputs if path.startswith("@external/")]

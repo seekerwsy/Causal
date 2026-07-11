@@ -465,7 +465,6 @@ def test_oracle_config_rejects_invalid_values(
     "legacy_key",
     [
         "policy_name",
-        "use_lightweight_rules",
         "use_bandit",
         "use_semgrep",
         "fail_on_parse_error",

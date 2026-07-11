@@ -1338,12 +1338,4 @@ def run_oracle_batch(
     return records
 
 
-def run_oracle(code: object) -> object:
-    """Temporary lazy shim for pre-Task-6 callers; never used by the batch engine."""
-
-    from secaware.oracle.legacy import run_legacy_oracle
-
-    return run_legacy_oracle(code)  # type: ignore[arg-type]
-
-
-__all__ = ["AnalyzerRunner", "run_oracle", "run_oracle_batch"]
+__all__ = ["AnalyzerRunner", "run_oracle_batch"]
