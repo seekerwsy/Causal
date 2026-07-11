@@ -15,7 +15,11 @@ from secaware.generation.request_planner import (
 )
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema import generation as generation_schema
-from secaware.schema.generation import GenerationParameters, GenerationRequestRecord
+from secaware.schema.generation import (
+    GENERATION_REQUEST_SCHEMA_VERSION,
+    GenerationParameters,
+    GenerationRequestRecord,
+)
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import PromptRecord
@@ -116,7 +120,7 @@ def _expected_request_id(values: dict[str, object]) -> str:
 
 def _record_values(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
-        "schema_version": "1.0",
+        "schema_version": GENERATION_REQUEST_SCHEMA_VERSION,
         "condition": "observed",
         "prompt_id": "prompt-1",
         "prompt": "Read a path.",
@@ -343,7 +347,7 @@ def test_generation_request_record_requires_explicit_supported_version() -> None
         GenerationRequestRecord.model_validate(_record_values(schema_version="2.0"))
 
     record = GenerationRequestRecord.model_validate(_record_values())
-    assert record.schema_version == "1.0"
+    assert record.schema_version == GENERATION_REQUEST_SCHEMA_VERSION
 
 
 def test_generation_request_record_requires_endpoint_hash_and_binds_it_to_identity() -> None:
@@ -1027,7 +1031,9 @@ def test_observed_grid_has_explicit_version_and_stable_coordinate_order() -> Non
     )
 
     assert len(records) == 8
-    assert all(record.schema_version == "1.0" for record in records)
+    assert all(
+        record.schema_version == GENERATION_REQUEST_SCHEMA_VERSION for record in records
+    )
     assert [
         (record.prompt_id, record.model_id, record.seed_id) for record in records
     ] == [

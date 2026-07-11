@@ -16,6 +16,7 @@ from secaware.generation.result_importer import (
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.oracle.aggregator import run_oracle
 from secaware.schema.generation import (
+    GENERATION_REQUEST_SCHEMA_VERSION,
     GenerationParameters,
     GenerationProvenance,
     GenerationRequestRecord,
@@ -61,7 +62,7 @@ def _request(
     system_template_sha256 = sha256_text(system_template)
     endpoint_sha256 = sha256_text(endpoint_identity or endpoint_type)
     request_id = build_generation_request_id(
-        schema_version="1.0",
+        schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
         condition=condition,
         prompt_id=prompt_id,
         prompt_sha256=prompt_sha256,
@@ -77,7 +78,7 @@ def _request(
         parameters=parameter_values,
     )
     return GenerationRequestRecord(
-        schema_version="1.0",
+        schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
         request_id=request_id,
         condition=condition,
         prompt_id=prompt_id,

@@ -3,6 +3,7 @@ from itertools import islice
 from typing import TypeVar
 
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
+from secaware.schema.common import SCHEMA_VERSION
 from secaware.schema.generation import (
     GenerationProvenance,
     GenerationRequestRecord,
@@ -150,7 +151,7 @@ def canonical_generated_code_from_request(
         if type(code) is not str or not code.strip():
             raise ValueError("generated code is unavailable")
         return CanonicalGeneratedCodeRecord(
-            schema_version=trusted_request.schema_version,
+            schema_version=SCHEMA_VERSION,
             code_id=f"code_{trusted_request.request_id.removeprefix('req_')}",
             request_id=trusted_request.request_id,
             prompt_id=trusted_request.prompt_id,

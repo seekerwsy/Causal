@@ -22,6 +22,12 @@ from secaware.generation.mock_provider import MockProvider
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.pipeline.manifest import read_stage_manifest
+from secaware.pipeline.artifact import canonical_sha256, sha256_path
+from secaware.pipeline.manifest import (
+    StageManifest,
+    build_stage_fingerprint,
+    write_stage_manifest,
+)
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.schema.generation import (
     GenerationAttemptRecord,
@@ -1040,3 +1046,89 @@ def test_missing_offline_results_attempts_to_revoke_every_generation_producer(
         "generate-observed",
         "generate-provider-observed",
     ]
+
+
+def test_old_code_manifest_and_v10_ledger_are_rerun_instead_of_skipped(
+    tmp_path: Path,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    stage = "plan-provider-generation-observed"
+    inputs = [store.path("inputs", "prompts.jsonl")]
+    ledger = store.path("generation", "observed_requests.jsonl")
+    current = cli_module.plan_observed_requests(
+        read_jsonl(inputs[0], PromptRecord, required=True, allow_empty=False),
+        config.generation.models,
+        config.generation.seeds,
+        endpoint_type="chat_completions",
+        endpoint_identity=_BASE_URL,
+        parameters=config.generation.openai_compatible.parameters,  # type: ignore[union-attr]
+        system_template=_SYSTEM_TEMPLATE,
+        system_template_version="python-secure-v1",
+    )
+    legacy: list[dict[str, object]] = []
+    for request in current:
+        payload = request.model_dump(mode="json")
+        payload["schema_version"] = "1.0"
+        payload.pop("endpoint_sha256")
+        identity = {
+            key: payload[key]
+            for key in (
+                "schema_version",
+                "condition",
+                "prompt_id",
+                "prompt_sha256",
+                "language",
+                "model_id",
+                "seed_id",
+                "hypothesis_id",
+                "intervention_id",
+                "endpoint_type",
+                "system_template_version",
+                "system_template_sha256",
+                "parameters",
+            )
+        }
+        payload["request_id"] = f"req_{canonical_sha256(identity)}"
+        legacy.append(payload)
+    write_jsonl(ledger, legacy)
+    stage_inputs = store.stage_inputs(inputs)
+    config_payload = config.model_dump(mode="json")
+    relative_output = "generation/observed_requests.jsonl"
+    write_stage_manifest(
+        store.path(".stages", f"{stage}.json"),
+        StageManifest(
+            schema_version=SCHEMA_VERSION,
+            stage=stage,
+            fingerprint=build_stage_fingerprint(
+                stage,
+                stage_inputs,
+                config_payload,
+                policy_sha256=None,
+                catalog_sha256=None,
+                code_version="0.1.0",
+            ),
+            inputs=stage_inputs,
+            config_sha256=canonical_sha256(config_payload),
+            code_version="0.1.0",
+            outputs=[relative_output],
+            output_sha256={relative_output: sha256_path(ledger)},
+        ),
+    )
+
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+
+    migrated = read_jsonl(
+        ledger,
+        GenerationRequestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert all(request.schema_version == "1.1" for request in migrated)
+    manifest = read_stage_manifest(store.path(".stages", f"{stage}.json"))
+    assert manifest.code_version == "0.2.0"

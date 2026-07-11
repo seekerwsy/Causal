@@ -1,4 +1,5 @@
 from secaware.schema.generation import (
+    GENERATION_REQUEST_SCHEMA_VERSION,
     GenerationParameters,
     GenerationProvenance,
     GenerationRequestRecord,
@@ -21,6 +22,7 @@ __all__ = [
     "FactorType",
     "FailureReason",
     "GenerationParameters",
+    "GENERATION_REQUEST_SCHEMA_VERSION",
     "GenerationProvenance",
     "GenerationRequestRecord",
     "GeneratedCodeRecord",

@@ -59,6 +59,7 @@ _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation fa
 _INVALID_PROVENANCE_MESSAGE = "generation provenance validation failed"
 _INVALID_ATTEMPT_MESSAGE = "generation attempt validation failed"
 _INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
+GENERATION_REQUEST_SCHEMA_VERSION = "1.1"
 
 
 class _FrozenJSONSequence(Sequence[object]):
@@ -341,7 +342,7 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
         revalidate_instances="always",
     )
 
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.1"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     condition: Literal["observed", "counterfactual"]
     prompt_id: str = Field(min_length=1)

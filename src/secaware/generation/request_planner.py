@@ -6,8 +6,8 @@ from typing import Literal, TypeVar
 from pydantic import BaseModel
 
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
-from secaware.schema.common import SCHEMA_VERSION
 from secaware.schema.generation import (
+    GENERATION_REQUEST_SCHEMA_VERSION,
     GenerationParameters,
     GenerationRequestRecord,
     build_generation_request_id,
@@ -298,9 +298,9 @@ def _record(
 ) -> GenerationRequestRecord:
     prompt_sha256 = sha256_text(prompt)
     return GenerationRequestRecord(
-        schema_version=SCHEMA_VERSION,
+        schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
         request_id=build_generation_request_id(
-            schema_version=SCHEMA_VERSION,
+            schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
             condition=condition,
             prompt_id=prompt_id,
             prompt_sha256=prompt_sha256,
