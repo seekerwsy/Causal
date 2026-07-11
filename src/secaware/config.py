@@ -1,12 +1,13 @@
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.common import StrictModel
+from secaware.schema.common import SafeValidationMixin, StrictModel
 
 
 class RunConfig(StrictModel):
@@ -37,11 +38,72 @@ class InterventionConfig(StrictModel):
     allow_side_effects_for_directional: bool = True
 
 
+class OpenAICompatibleConfig(SafeValidationMixin, StrictModel):
+    _safe_validation_message = (
+        "OpenAI-compatible provider configuration failed validation"
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    base_url: str = Field(min_length=1, max_length=2048, repr=False)
+    api_key_env: str = Field(
+        default="OPENAI_API_KEY",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+        repr=False,
+    )
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=3600.0)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    initial_backoff_seconds: float = Field(default=1.0, ge=0.0, le=300.0)
+    max_backoff_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        try:
+            if value != value.strip() or "\\" in value or "?" in value or "#" in value:
+                raise ValueError
+            if any(
+                character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+                for character in value
+            ):
+                raise ValueError
+            parsed = urlsplit(value)
+            if parsed.scheme.casefold() not in {"http", "https"}:
+                raise ValueError
+            if not parsed.netloc or parsed.hostname is None:
+                raise ValueError
+            if parsed.username is not None or parsed.password is not None:
+                raise ValueError
+            if parsed.query or parsed.fragment:
+                raise ValueError
+            port = parsed.port
+            if port is not None and not 1 <= port <= 65535:
+                raise ValueError
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+        return value
+
+    @model_validator(mode="after")
+    def validate_backoff_range(self) -> "OpenAICompatibleConfig":
+        if self.max_backoff_seconds < self.initial_backoff_seconds:
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class GenerationConfig(StrictModel):
-    provider: Literal["mock", "file", "api"] = "mock"
+    provider: Literal["mock", "file", "api", "openai_compatible"] = "mock"
     models: list[str] = Field(default_factory=lambda: ["mock-secaware-v0"])
     seeds: list[int] = Field(default_factory=lambda: [1])
     file_provider_dir: str | None = None
+    openai_compatible: OpenAICompatibleConfig | None = None
 
 
 class OracleConfig(StrictModel):
@@ -84,13 +146,18 @@ def _config_error(path: Path) -> SecAwareError:
 
 def load_config(path: str | Path, *, run_dir: str | Path | None = None) -> AppConfig:
     config_path = Path(path)
+    raw: Any = None
+    load_failed = False
     try:
         with config_path.open("r", encoding="utf-8") as handle:
-            raw: Any = yaml.safe_load(handle)
+            raw = yaml.safe_load(handle)
     except (OSError, UnicodeError, yaml.YAMLError):
+        load_failed = True
+    if load_failed:
         raise _config_error(config_path) from None
     if not isinstance(raw, Mapping):
         raise _config_error(config_path) from None
+    config: AppConfig | None = None
     try:
         config = AppConfig.model_validate(dict(raw))
         if run_dir is not None:
@@ -98,6 +165,9 @@ def load_config(path: str | Path, *, run_dir: str | Path | None = None) -> AppCo
             resolved["run"]["output_dir"] = str(run_dir)
             config = AppConfig.model_validate(resolved)
     except ValidationError:
+        config = None
+    if config is None:
+        raw = None
         raise _config_error(config_path) from None
     return config
 

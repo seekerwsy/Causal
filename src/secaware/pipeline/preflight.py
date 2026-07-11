@@ -1,7 +1,8 @@
 import hashlib
+import os
 from pathlib import Path
 
-from secaware.config import AppConfig
+from secaware.config import AppConfig, OpenAICompatibleConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
 from secaware.schema.common import StrictModel
@@ -80,6 +81,33 @@ def run_preflight(config: AppConfig) -> PreflightReport:
                 stage="preflight",
                 message="file provider directory is unavailable",
                 details={"path": str(provider_path)},
+            )
+
+    if config.generation.provider == "openai_compatible":
+        provider_config: OpenAICompatibleConfig | None = None
+        try:
+            provider_config = OpenAICompatibleConfig.model_validate(
+                config.generation.openai_compatible
+            )
+        except Exception:
+            pass
+        if provider_config is None:
+            raise _error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider configuration is unavailable",
+            ) from None
+        try:
+            credential = os.environ.get(provider_config.api_key_env)
+            credential_available = (
+                type(credential) is str and bool(credential.strip())
+            )
+        except Exception:
+            credential_available = False
+        credential = None
+        if not credential_available:
+            raise _error(
+                ErrorCode.API_AUTH,
+                "provider authentication is unavailable",
             )
 
     return PreflightReport(

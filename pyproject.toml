@@ -23,6 +23,7 @@ secaware = "secaware.cli:app"
 secaware-oracle = "secaware.oracle.cli:app"
 
 [project.optional-dependencies]
+api = ["openai>=1.40,<3"]
 dev = [
   "pytest>=8",
 ]

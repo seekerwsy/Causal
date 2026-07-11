@@ -8,6 +8,8 @@ from typing import Literal, cast
 from pydantic import (
     ConfigDict,
     Field,
+    FiniteFloat,
+    StrictBool,
     StrictInt,
     field_serializer,
     field_validator,
@@ -55,6 +57,7 @@ MAX_STOP_PARAMETER_ITEMS = 64
 _INVALID_PARAMETERS_MESSAGE = "generation parameters do not match the canonical v1 contract"
 _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation failed"
 _INVALID_PROVENANCE_MESSAGE = "generation provenance validation failed"
+_INVALID_ATTEMPT_MESSAGE = "generation attempt validation failed"
 _INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
 
 
@@ -233,6 +236,26 @@ class GenerationProvenance(SafeValidationMixin, StrictModel):
         if value is not None and not value.strip():
             raise ValueError(_INVALID_PROVENANCE_MESSAGE)
         return value
+
+
+class GenerationAttemptRecord(SafeValidationMixin, VersionedModel):
+    _safe_validation_message = _INVALID_ATTEMPT_MESSAGE
+
+    model_config = ConfigDict(
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    schema_version: Literal["1.0"]
+    request_id: str = Field(pattern=_REQUEST_ID_PATTERN, repr=False)
+    attempt: StrictInt = Field(ge=1)
+    outcome: Literal["success", "retry", "failure"]
+    error_code: StrictInt | None
+    retryable: StrictBool
+    backoff_seconds: FiniteFloat = Field(ge=0.0)
 
 
 class GenerationParameters(SafeValidationMixin, StrictModel):
