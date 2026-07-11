@@ -13,10 +13,22 @@ import time
 _MAX_CONFIG_BYTES = 1024 * 1024
 
 
+def _write_result(descriptor: int, payload: bytes) -> None:
+    if descriptor < 0 or len(payload) > 32:
+        return
+    offset = 0
+    while offset < len(payload):
+        try:
+            written = os.write(descriptor, payload[offset:])
+        except InterruptedError:
+            continue
+        if written <= 0:
+            return
+        offset += written
+
+
 def _children() -> tuple[int, ...]:
-    raw = Path(f"/proc/self/task/{os.getpid()}/children").read_text(
-        encoding="ascii"
-    ).strip()
+    raw = Path(f"/proc/self/task/{os.getpid()}/children").read_text(encoding="ascii").strip()
     return tuple(int(value) for value in raw.split()) if raw else ()
 
 
@@ -46,10 +58,21 @@ def _cleanup() -> bool:
 
 
 def main() -> None:
+    result_fd = -1
     try:
-        if sys.platform != "linux" or len(sys.argv) != 6:
+        if sys.platform != "linux" or len(sys.argv) != 8:
             os._exit(125)
-        config_fd, executable_fd, cwd_fd, cancel_fd, script_fd = map(int, sys.argv[1:])
+        (
+            config_fd,
+            executable_fd,
+            cwd_fd,
+            cancel_fd,
+            script_fd,
+            result_fd,
+            tracking_fd,
+        ) = map(int, sys.argv[1:])
+        os.set_inheritable(result_fd, False)
+        os.set_inheritable(tracking_fd, True)
         if not Path(f"/proc/self/task/{os.getpid()}/children").is_file():
             os._exit(125)
         if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
@@ -68,7 +91,9 @@ def main() -> None:
             or not all(type(value) is str for value in analyzer_argv)
             or not isinstance(environment, dict)
             or type(exec_argv0) is not str
-            or not all(type(key) is str and type(value) is str for key, value in environment.items())
+            or not all(
+                type(key) is str and type(value) is str for key, value in environment.items()
+            )
         ):
             os._exit(125)
         status_read_fd, status_write_fd = os.pipe2(os.O_CLOEXEC)
@@ -105,8 +130,8 @@ def main() -> None:
         os.close(status_read_fd)
         if launch_status:
             _cleanup()
-            os.kill(os.getpid(), signal.SIGUSR1)
-            os._exit(125)
+            _write_result(result_fd, b"I")
+            os._exit(1)
         cancelled = False
         status: int | None = None
         while status is None:
@@ -123,17 +148,24 @@ def main() -> None:
             except ProcessLookupError:
                 pass
         if not _cleanup():
+            _write_result(result_fd, b"I")
             os._exit(125)
         if cancelled:
+            _write_result(result_fd, b"I")
             os._exit(124)
         if status is None:
             os._exit(125)
         if os.WIFEXITED(status):
-            os._exit(os.WEXITSTATUS(status))
-        if os.WIFSIGNALED(status):
-            os.kill(os.getpid(), os.WTERMSIG(status))
-        os._exit(125)
+            analyzer_returncode = os.WEXITSTATUS(status)
+        elif os.WIFSIGNALED(status):
+            analyzer_returncode = -os.WTERMSIG(status)
+        else:
+            _write_result(result_fd, b"I")
+            os._exit(125)
+        _write_result(result_fd, f"R:{analyzer_returncode}".encode("ascii"))
+        os._exit(0)
     except BaseException:
+        _write_result(result_fd, b"I")
         os._exit(125)
 
 

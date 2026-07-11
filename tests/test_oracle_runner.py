@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -67,9 +68,7 @@ def _contains_identity(value: object, forbidden_ids: set[int], seen: set[int]) -
     seen.add(identity)
     if isinstance(value, dict):
         return any(
-            _contains_identity(item, forbidden_ids, seen)
-            for pair in value.items()
-            for item in pair
+            _contains_identity(item, forbidden_ids, seen) for pair in value.items() for item in pair
         )
     if isinstance(value, (list, tuple, set, frozenset)):
         return any(_contains_identity(item, forbidden_ids, seen) for item in value)
@@ -158,9 +157,7 @@ def test_runner_passes_safe_popen_contract_and_minimal_environment(
     monkeypatch.setattr(runner_module.subprocess, "Popen", recording_popen)
 
     result = run_analyzer_process(
-        _python_argv(
-            "import json,os; print(json.dumps(dict(os.environ), sort_keys=True))"
-        ),
+        _python_argv("import json,os; print(json.dumps(dict(os.environ), sort_keys=True))"),
         cwd=tmp_path,
         timeout_seconds=2.0,
         max_stdout_bytes=8192,
@@ -601,8 +598,11 @@ def test_linux_script_interpreter_is_sealed_against_in_place_overwrite(
     worker = threading.Thread(
         target=lambda: outcome.append(
             run_analyzer_process(
-                (str(script),), cwd=tmp_path, timeout_seconds=3,
-                max_stdout_bytes=1024, max_stderr_bytes=1024,
+                (str(script),),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
             )
         )
     )
@@ -637,8 +637,11 @@ def test_linux_sealed_interpreter_preserves_venv_site_packages(tmp_path: Path) -
     )
     script.chmod(0o700)
     result = run_analyzer_process(
-        (str(script),), cwd=tmp_path, timeout_seconds=3,
-        max_stdout_bytes=1024, max_stderr_bytes=1024,
+        (str(script),),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
     )
     assert result.stdout == b"venv-ok"
 
@@ -650,9 +653,90 @@ def test_linux_env_shebang_fails_closed_before_launch(tmp_path: Path) -> None:
     script.chmod(0o700)
     with pytest.raises(SecAwareError) as exc_info:
         run_analyzer_process(
-            (str(script),), cwd=tmp_path, timeout_seconds=2,
-            max_stdout_bytes=1024, max_stderr_bytes=1024,
+            (str(script),),
+            cwd=tmp_path,
+            timeout_seconds=2,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
         )
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux stable fingerprint regression")
+def test_linux_fingerprint_is_stable_and_binds_source_identity(tmp_path: Path) -> None:
+    executable = tmp_path / "echo"
+    shutil.copyfile("/bin/echo", executable)
+    executable.chmod(0o700)
+    first = run_analyzer_process(
+        (str(executable), "x"),
+        cwd=tmp_path,
+        timeout_seconds=2,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+    second = run_analyzer_process(
+        (str(executable), "x"),
+        cwd=tmp_path,
+        timeout_seconds=2,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+    assert first.argv_sha256 == second.argv_sha256
+    executable.chmod(0o755)
+    changed = run_analyzer_process(
+        (str(executable), "x"),
+        cwd=tmp_path,
+        timeout_seconds=2,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+    assert changed.argv_sha256 != first.argv_sha256
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed short-write regression")
+def test_linux_sealed_copy_handles_short_writes_and_verifies_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "echo"
+    shutil.copyfile("/bin/echo", executable)
+    executable.chmod(0o700)
+    real_write = runner_module.os.write
+
+    def short_write(descriptor: int, payload: bytes) -> int:
+        return real_write(descriptor, payload[:7])
+
+    monkeypatch.setattr(runner_module.os, "write", short_write)
+    lease = runner_module._open_posix_path_lease(executable, directory=False)
+    assert lease is not None
+    try:
+        assert lease.sha256 == hashlib.sha256(executable.read_bytes()).hexdigest()
+        assert os.fstat(lease.fd).st_size == executable.stat().st_size
+    finally:
+        lease.close()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed verification regression")
+def test_linux_sealed_copy_rejects_same_length_corruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "echo"
+    shutil.copyfile("/bin/echo", executable)
+    executable.chmod(0o700)
+    real_write = runner_module.os.write
+    corrupted = False
+
+    def corrupt_write(descriptor: int, payload: bytes) -> int:
+        nonlocal corrupted
+        if payload and not corrupted:
+            payload = bytes([payload[0] ^ 1]) + payload[1:]
+            corrupted = True
+        return real_write(descriptor, payload)
+
+    monkeypatch.setattr(runner_module.os, "write", corrupt_write)
+    with pytest.raises(runner_module._RunnerFailure) as exc_info:
+        runner_module._open_posix_path_lease(executable, directory=False)
     assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
 
 
@@ -699,6 +783,89 @@ def test_linux_exec_failure_is_analyzer_failed_not_returncode_126(tmp_path: Path
     assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux result-protocol regression")
+@pytest.mark.parametrize("returncode", [125, 126])
+def test_linux_analyzer_may_legitimately_return_supervisor_reserved_codes(
+    tmp_path: Path,
+    returncode: int,
+) -> None:
+    result = run_analyzer_process(
+        _python_argv(f"import sys;sys.exit({returncode})"),
+        cwd=tmp_path,
+        timeout_seconds=2,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+
+    assert result.returncode == returncode
+
+
+@pytest.mark.parametrize("frame", [b"", b"I", b"R:0125", b"R:999", b"R:not-an-int"])
+def test_supervisor_result_protocol_rejects_missing_or_malformed_frames(frame: bytes) -> None:
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, frame)
+    os.close(write_fd)
+
+    class Process:
+        _secaware_result_fd = read_fd
+
+    process = Process()
+    with pytest.raises(runner_module._RunnerFailure) as exc_info:
+        runner_module._read_posix_result(process, 0)  # type: ignore[arg-type]
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    assert process._secaware_result_fd == -1
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux main-subreaper regression")
+def test_linux_main_subreaper_reaps_tree_when_analyzer_kills_supervisor(
+    tmp_path: Path,
+) -> None:
+    import ctypes
+
+    ready = tmp_path / "private-main-subreaper-ready.marker"
+    escaped = tmp_path / "private-main-subreaper-escaped.marker"
+    unrelated = subprocess.Popen(
+        [sys.executable, "-c", "import time;time.sleep(10)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    state_before = ctypes.c_int()
+    libc = ctypes.CDLL(None, use_errno=True)
+    assert libc.prctl(37, ctypes.byref(state_before), 0, 0, 0) == 0
+    source = (
+        "import os,signal,sys,time\nfrom pathlib import Path\n"
+        "pid=os.fork()\n"
+        "if pid==0:\n"
+        " os.setsid(); Path(sys.argv[1]).write_text('ready'); time.sleep(0.8); "
+        "Path(sys.argv[2]).write_text('escaped'); os._exit(0)\n"
+        "deadline=time.time()+2\n"
+        "while not Path(sys.argv[1]).exists() and time.time()<deadline: time.sleep(0.01)\n"
+        "os.kill(os.getppid(), signal.SIGKILL); time.sleep(10)\n"
+    )
+
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_analyzer_process(
+                _python_argv(source, str(ready), str(escaped)),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+        assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+        assert ready.exists()
+        time.sleep(1.0)
+        assert not escaped.exists()
+        assert unrelated.poll() is None
+        state_after = ctypes.c_int()
+        assert libc.prctl(37, ctypes.byref(state_after), 0, 0, 0) == 0
+        assert state_after.value == state_before.value
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=3)
+
+
 @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
 def test_process_handoff_control_flow_cleans_created_process_and_preserves_identity(
     tmp_path: Path,
@@ -731,6 +898,37 @@ def test_process_handoff_control_flow_cleans_created_process_and_preserves_ident
     assert exc_info.value is signal
     assert len(processes) == 1 and processes[0].poll() is not None
     assert "time.sleep(10)" not in "\n".join(_runner_frame_surfaces(signal))
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_popen_init_control_flow_after_child_creation_is_owned_and_cleaned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    signal = signal_type("private-popen-init-control")
+    processes: list[subprocess.Popen[bytes]] = []
+    real_init = _POPEN_TYPE.__init__
+
+    def interrupt_after_child_created(
+        process: subprocess.Popen[bytes], *args: object, **kwargs: object
+    ) -> None:
+        real_init(process, *args, **kwargs)  # type: ignore[arg-type]
+        processes.append(process)
+        raise signal
+
+    monkeypatch.setattr(_POPEN_TYPE, "__init__", interrupt_after_child_created)
+    with pytest.raises(signal_type) as exc_info:
+        run_analyzer_process(
+            _python_argv("import time;time.sleep(10)"),
+            cwd=tmp_path,
+            timeout_seconds=2,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value is signal
+    assert len(processes) == 1 and processes[0].poll() is not None
 
 
 @pytest.mark.parametrize(
@@ -801,10 +999,7 @@ def test_capture_backing_never_exceeds_limit_plus_one_for_large_writer(
         )
 
     monkeypatch.setattr(runner_module.tempfile, "TemporaryFile", tracked_temporary_file)
-    source = (
-        "import os; chunk=b'x'*(1024*1024); "
-        "[(os.write(1, chunk)) for _ in range(50)]"
-    )
+    source = "import os; chunk=b'x'*(1024*1024); [(os.write(1, chunk)) for _ in range(50)]"
     started = time.monotonic()
 
     with pytest.raises(SecAwareError) as exc_info:
@@ -1277,6 +1472,7 @@ def test_input_preparation_helpers_release_sensitive_references_on_control_flow(
         monkeypatch.setattr(runner_module.shutil, "which", interrupt_which)
         action = partial(runner_module._resolve_analyzer_executable, sensitive)  # type: ignore[arg-type]
     else:
+
         class InterruptingEnvironment(dict[str, str]):
             def get(self, key: str, default: str | None = None) -> str | None:
                 del key, default

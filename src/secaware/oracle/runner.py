@@ -33,6 +33,45 @@ _POLL_INTERVAL_SECONDS = 0.01
 _CLEANUP_WAIT_SECONDS = 5.0
 _CAPTURE_CHUNK_BYTES = 64 * 1024
 _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
+_POPEN_CLASS = subprocess.Popen
+_LINUX_SUBREAPER_LOCK = threading.RLock()
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    offset = 0
+    try:
+        while offset < len(payload):
+            try:
+                written = os.write(descriptor, payload[offset:])
+            except InterruptedError:
+                continue
+            if written <= 0:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            offset += written
+    finally:
+        descriptor = -1
+        payload = b""
+        offset = 0
+
+
+def _hash_fd(descriptor: int) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    total = 0
+    chunk = b""
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return digest.hexdigest(), total
+    finally:
+        descriptor = -1
+        digest = None  # type: ignore[assignment]
+        chunk = b""
 
 
 def _kill_linux_descendants(root_pid: int) -> None:
@@ -78,6 +117,41 @@ class _RunnerFailure(Exception):
         self.code = code
 
 
+def _acquire_linux_subreaper(marker_fd: int) -> _LinuxSubreaperLease:
+    if sys.platform != "linux" or marker_fd < 0:
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    import ctypes
+
+    descriptor = -1
+    acquired = False
+    changed = False
+    libc: object | None = None
+    original_value = 0
+    try:
+        _LINUX_SUBREAPER_LOCK.acquire()
+        acquired = True
+        libc = ctypes.CDLL(None, use_errno=True)
+        original = ctypes.c_int()
+        if libc.prctl(37, ctypes.byref(original), 0, 0, 0) != 0:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        if libc.prctl(36, 1, 0, 0, 0) != 0:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        changed = True
+        original_value = original.value
+        descriptor = os.dup(marker_fd)
+        lease = _LinuxSubreaperLease(descriptor, libc, original_value)
+        descriptor = -1
+        acquired = False
+        return lease
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if acquired:
+            if changed and libc is not None:
+                libc.prctl(36, original_value, 0, 0, 0)  # type: ignore[attr-defined]
+            _LINUX_SUBREAPER_LOCK.release()
+
+
 class _WindowsJob:
     __slots__ = ("_handle", "_kernel32")
 
@@ -91,6 +165,102 @@ class _WindowsJob:
             return
         self._handle = None
         self._kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+
+
+class _LinuxSubreaperLease:
+    __slots__ = ("_descriptor", "_libc", "_original", "_active")
+
+    def __init__(self, descriptor: int, libc: object, original: int) -> None:
+        self._descriptor = descriptor
+        self._libc = libc
+        self._original = original
+        self._active = True
+
+    def _marked_processes(self) -> set[int]:
+        try:
+            marker = os.readlink(f"/proc/self/fd/{self._descriptor}")
+        except OSError:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
+        marked: set[int] = set()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit() or int(entry.name) == os.getpid():
+                continue
+            try:
+                descriptors = entry.joinpath("fd").iterdir()
+                if any(os.readlink(item) == marker for item in descriptors):
+                    marked.add(int(entry.name))
+            except (OSError, PermissionError):
+                continue
+        return marked
+
+    def close(self) -> None:
+        if not self._active:
+            return
+        self._active = False
+        cleanup_failed = False
+        control: KeyboardInterrupt | SystemExit | None = None
+        owned: set[int] = set()
+        try:
+            deadline = time.monotonic() + _CLEANUP_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                marked = self._marked_processes()
+                owned.update(marked)
+                for pid in marked:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                for pid in tuple(owned):
+                    try:
+                        waited, _ = os.waitpid(pid, os.WNOHANG)
+                        if waited == pid:
+                            owned.discard(pid)
+                    except ChildProcessError:
+                        if not Path(f"/proc/{pid}").exists():
+                            owned.discard(pid)
+                    except ProcessLookupError:
+                        owned.discard(pid)
+                if not marked and not owned:
+                    break
+                time.sleep(0.001)
+            else:
+                cleanup_failed = True
+        except (KeyboardInterrupt, SystemExit) as error:
+            control = error
+        except Exception:
+            cleanup_failed = True
+        finally:
+            try:
+                try:
+                    os.close(self._descriptor)
+                except (KeyboardInterrupt, SystemExit) as error:
+                    if control is None:
+                        control = error
+                except OSError:
+                    cleanup_failed = True
+                self._descriptor = -1
+            finally:
+                try:
+                    try:
+                        if (
+                            self._libc.prctl(  # type: ignore[attr-defined]
+                                36, self._original, 0, 0, 0
+                            )
+                            != 0
+                        ):
+                            cleanup_failed = True
+                    except (KeyboardInterrupt, SystemExit) as error:
+                        if control is None:
+                            control = error
+                    except Exception:
+                        cleanup_failed = True
+                finally:
+                    self._libc = None
+                    _LINUX_SUBREAPER_LOCK.release()
+        if control is not None:
+            raise control
+        if cleanup_failed:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
 
 
 @dataclass(slots=True, repr=False)
@@ -145,6 +315,10 @@ class _PosixLaunch:
     cancel_read_fd: int
     cancel_write_fd: int
     config_file: BinaryIO
+    result_read_fd: int
+    result_write_fd: int
+    tracking_read_fd: int
+    tracking_write_fd: int
 
 
 def _safe_error(code: ErrorCode) -> SecAwareError:
@@ -393,6 +567,14 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
     script_descriptor = -1
     try:
         metadata = os.fstat(descriptor)
+        source_identity = (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
         if directory:
             if not stat.S_ISDIR(metadata.st_mode):
                 raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
@@ -414,20 +596,20 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
                 if not chunk:
                     break
                 digest_hash.update(chunk)
-                os.write(sealed_descriptor, chunk)
+                _write_all(sealed_descriptor, chunk)
                 if len(prefix) < 4096:
                     prefix += chunk[: 4096 - len(prefix)]
             digest = digest_hash.hexdigest()
             if os.fstat(descriptor) != metadata:
                 raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            sealed_digest, sealed_size = _hash_fd(sealed_descriptor)
+            if sealed_digest != digest or sealed_size != metadata.st_size:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
             os.fchmod(sealed_descriptor, metadata.st_mode & 0o777)
             fcntl.fcntl(
                 sealed_descriptor,
                 fcntl.F_ADD_SEALS,
-                fcntl.F_SEAL_WRITE
-                | fcntl.F_SEAL_GROW
-                | fcntl.F_SEAL_SHRINK
-                | fcntl.F_SEAL_SEAL,
+                fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL,
             )
             os.close(descriptor)
             descriptor = sealed_descriptor
@@ -461,25 +643,14 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
                 lease = _PosixPathLease(
                     fd=interpreter_lease.fd,
                     sha256=combined,
-                    identity=interpreter_lease.identity + (
-                        metadata.st_dev,
-                        metadata.st_ino,
-                        metadata.st_size,
-                    ),
+                    identity=interpreter_lease.identity + (*source_identity,),
                     script_fd=script_descriptor,
                     exec_argv0=shebang,
                 )
                 script_descriptor = -1
                 interpreter_lease.fd = -1
                 return lease
-        identity = (
-            metadata.st_dev,
-            metadata.st_ino,
-            metadata.st_mode,
-            metadata.st_size,
-            metadata.st_mtime_ns,
-            metadata.st_ctime_ns,
-        )
+        identity = source_identity
         lease = _PosixPathLease(descriptor, digest, identity)
         return lease
     finally:
@@ -504,9 +675,14 @@ def _prepare_posix_launch(
     cwd: _PosixPathLease,
 ) -> _PosixLaunch:
     config_file = tempfile.TemporaryFile(mode="w+b")
-    cancel_read_fd, cancel_write_fd = os.pipe()
+    cancel_read_fd = cancel_write_fd = -1
+    result_read_fd = result_write_fd = -1
+    tracking_read_fd = tracking_write_fd = -1
     payload = b""
     try:
+        cancel_read_fd, cancel_write_fd = os.pipe()
+        result_read_fd, result_write_fd = os.pipe()
+        tracking_read_fd, tracking_write_fd = os.pipe()
         payload = json.dumps(
             {
                 "argv": argv,
@@ -530,8 +706,17 @@ def _prepare_posix_launch(
             str(cwd.fd),
             str(cancel_read_fd),
             str(executable.script_fd),
+            str(result_write_fd),
+            str(tracking_write_fd),
         )
-        passed = [config_file.fileno(), executable.fd, cwd.fd, cancel_read_fd]
+        passed = [
+            config_file.fileno(),
+            executable.fd,
+            cwd.fd,
+            cancel_read_fd,
+            result_write_fd,
+            tracking_write_fd,
+        ]
         if executable.script_fd >= 0:
             passed.append(executable.script_fd)
         return _PosixLaunch(
@@ -540,11 +725,23 @@ def _prepare_posix_launch(
             cancel_read_fd=cancel_read_fd,
             cancel_write_fd=cancel_write_fd,
             config_file=config_file,
+            result_read_fd=result_read_fd,
+            result_write_fd=result_write_fd,
+            tracking_read_fd=tracking_read_fd,
+            tracking_write_fd=tracking_write_fd,
         )
     except BaseException:
         config_file.close()
-        os.close(cancel_read_fd)
-        os.close(cancel_write_fd)
+        for descriptor in (
+            cancel_read_fd,
+            cancel_write_fd,
+            result_read_fd,
+            result_write_fd,
+            tracking_read_fd,
+            tracking_write_fd,
+        ):
+            if descriptor >= 0:
+                os.close(descriptor)
         raise
     finally:
         argv = ()
@@ -555,16 +752,31 @@ def _prepare_posix_launch(
         config_file = None  # type: ignore[assignment]
         cancel_read_fd = -1
         cancel_write_fd = -1
+        result_read_fd = -1
+        result_write_fd = -1
+        tracking_read_fd = -1
+        tracking_write_fd = -1
 
 
 def _close_posix_launch(launch: _PosixLaunch) -> None:
     try:
         launch.config_file.close()
-        for descriptor in (launch.cancel_read_fd, launch.cancel_write_fd):
+        for descriptor in (
+            launch.cancel_read_fd,
+            launch.cancel_write_fd,
+            launch.result_read_fd,
+            launch.result_write_fd,
+            launch.tracking_read_fd,
+            launch.tracking_write_fd,
+        ):
             if descriptor >= 0:
                 os.close(descriptor)
         launch.cancel_read_fd = -1
         launch.cancel_write_fd = -1
+        launch.result_read_fd = -1
+        launch.result_write_fd = -1
+        launch.tracking_read_fd = -1
+        launch.tracking_write_fd = -1
     finally:
         launch = None  # type: ignore[assignment]
 
@@ -578,6 +790,7 @@ def _popen_process(
 ) -> subprocess.Popen[bytes]:
     platform_options: dict[str, object]
     process: subprocess.Popen[bytes] | None = None
+    popen_factory = subprocess.Popen
     if os.name == "nt":
         platform_options = {
             "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x4,
@@ -589,24 +802,39 @@ def _popen_process(
             else {"start_new_session": True}
         )
     try:
-        process = subprocess.Popen(
-            posix_launch.argv if posix_launch is not None else argv,
-            cwd=None if posix_launch is not None else str(cwd),
-            env=environment,
-            shell=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            close_fds=True,
+        popen_args = (posix_launch.argv if posix_launch is not None else argv,)
+        popen_kwargs = {
+            "cwd": None if posix_launch is not None else str(cwd),
+            "env": environment,
+            "shell": False,
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "close_fds": True,
             **platform_options,
-        )
+        }
         try:
+            if isinstance(popen_factory, type) and issubclass(popen_factory, _POPEN_CLASS):
+                process = popen_factory.__new__(popen_factory)
+                popen_factory.__init__(process, *popen_args, **popen_kwargs)
+            else:
+                process = popen_factory(*popen_args, **popen_kwargs)
             _finalize_process_handoff(process, posix_launch)
         except BaseException:
-            _terminate_and_wait(process, None)
-            for pipe in (process.stdout, process.stderr):
-                if pipe is not None:
-                    pipe.close()
+            if process is not None and getattr(process, "_child_created", False):
+                try:
+                    _terminate_and_wait(process, None)
+                except BaseException:
+                    pass
+                for pipe in (
+                    getattr(process, "stdout", None),
+                    getattr(process, "stderr", None),
+                ):
+                    if pipe is not None:
+                        try:
+                            pipe.close()
+                        except BaseException:
+                            pass
             raise
         return process
     finally:
@@ -614,6 +842,9 @@ def _popen_process(
         cwd = None  # type: ignore[assignment]
         environment = {}
         platform_options = {}
+        popen_args = ()
+        popen_kwargs = {}
+        popen_factory = None  # type: ignore[assignment]
         posix_launch = None
         process = None
 
@@ -626,8 +857,16 @@ def _finalize_process_handoff(
         if posix_launch is not None:
             setattr(process, "_secaware_cancel_fd", posix_launch.cancel_write_fd)
             posix_launch.cancel_write_fd = -1
+            setattr(process, "_secaware_result_fd", posix_launch.result_read_fd)
+            posix_launch.result_read_fd = -1
             os.close(posix_launch.cancel_read_fd)
             posix_launch.cancel_read_fd = -1
+            os.close(posix_launch.result_write_fd)
+            posix_launch.result_write_fd = -1
+            os.close(posix_launch.tracking_read_fd)
+            posix_launch.tracking_read_fd = -1
+            os.close(posix_launch.tracking_write_fd)
+            posix_launch.tracking_write_fd = -1
     finally:
         process = None  # type: ignore[assignment]
         posix_launch = None
@@ -924,6 +1163,41 @@ def _monitor_process(
         captures = ()
 
 
+def _read_posix_result(process: subprocess.Popen[bytes], supervisor_returncode: int) -> int:
+    descriptor = getattr(process, "_secaware_result_fd", -1)
+    if descriptor < 0:
+        return supervisor_returncode
+    frame = b""
+    try:
+        while len(frame) <= 32:
+            try:
+                chunk = os.read(descriptor, 33 - len(frame))
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            frame += chunk
+        if supervisor_returncode != 0 or len(frame) > 32 or not frame.startswith(b"R:"):
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        encoded_returncode = frame[2:]
+        if not encoded_returncode or encoded_returncode in (b"+0", b"-0"):
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        try:
+            returncode = int(encoded_returncode.decode("ascii"))
+        except (UnicodeError, ValueError):
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
+        if str(returncode).encode("ascii") != encoded_returncode or not -255 <= returncode <= 255:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        return returncode
+    finally:
+        os.close(descriptor)
+        setattr(process, "_secaware_result_fd", -1)
+        process = None  # type: ignore[assignment]
+        frame = b""
+        chunk = b""
+        encoded_returncode = b""
+
+
 def _signal_process_group(process: subprocess.Popen[bytes]) -> None:
     try:
         if os.name == "nt":
@@ -983,6 +1257,10 @@ def _terminate_and_wait(
                 pass
             process.wait(timeout=_CLEANUP_WAIT_SECONDS)
     finally:
+        result_fd = getattr(process, "_secaware_result_fd", -1)
+        if result_fd >= 0:
+            os.close(result_fd)
+            setattr(process, "_secaware_result_fd", -1)
         process = None  # type: ignore[assignment]
         windows_job = None
 
@@ -1089,6 +1367,7 @@ def _run_resolved_process(
     posix_executable_lease: _PosixPathLease | None = None
     posix_cwd_lease: _PosixPathLease | None = None
     posix_launch: _PosixLaunch | None = None
+    subreaper_lease: _LinuxSubreaperLease | None = None
     executable_binding = ""
     try:
         executable_lease = _open_windows_path_lease(Path(argv[0]), directory=False)
@@ -1114,6 +1393,7 @@ def _run_resolved_process(
                 posix_executable_lease,
                 posix_cwd_lease,
             )
+            subreaper_lease = _acquire_linux_subreaper(posix_launch.tracking_read_fd)
         process = _popen_process(
             argv,
             cwd=cwd,
@@ -1128,7 +1408,7 @@ def _run_resolved_process(
             _start_capture(process.stderr, stderr_file, max_stderr_bytes),
         )
         _resume_windows_process(process)
-        returncode = _monitor_process(
+        supervisor_returncode = _monitor_process(
             process,
             stdout_file,
             stderr_file,
@@ -1137,7 +1417,11 @@ def _run_resolved_process(
             max_stdout_bytes=max_stdout_bytes,
             max_stderr_bytes=max_stderr_bytes,
         )
+        returncode = _read_posix_result(process, supervisor_returncode)
         _terminate_and_wait(process, windows_job)
+        if subreaper_lease is not None:
+            subreaper_lease.close()
+            subreaper_lease = None
         tree_cleaned = True
         overflow = _finish_captures(captures)
         captures = ()
@@ -1165,9 +1449,11 @@ def _run_resolved_process(
             None,
             suppress_failures=had_active_exception,
         )
-        capture_error = (
-            _capture_cleanup_failure(_finish_captures, captures) if captures else None
+        subreaper_error = (
+            _capture_cleanup_failure(subreaper_lease.close) if subreaper_lease is not None else None
         )
+        subreaper_lease = None
+        capture_error = _capture_cleanup_failure(_finish_captures, captures) if captures else None
         file_control, file_failed = _cleanup_resources(
             None,
             None,
@@ -1194,10 +1480,20 @@ def _run_resolved_process(
                 cleanup_control = capture_error
             if cleanup_control is None:
                 cleanup_control = file_control
-            cleanup_failed = cleanup_failed or file_failed or (
-                capture_error is not None
-                and not isinstance(capture_error, (KeyboardInterrupt, SystemExit))
+            cleanup_failed = (
+                cleanup_failed
+                or file_failed
+                or (
+                    capture_error is not None
+                    and not isinstance(capture_error, (KeyboardInterrupt, SystemExit))
+                )
             )
+            if cleanup_control is None and isinstance(
+                subreaper_error, (KeyboardInterrupt, SystemExit)
+            ):
+                cleanup_control = subreaper_error
+            elif subreaper_error is not None:
+                cleanup_failed = True
             for lease_error in lease_errors:
                 if cleanup_control is None and isinstance(
                     lease_error, (KeyboardInterrupt, SystemExit)
@@ -1220,6 +1516,7 @@ def _run_resolved_process(
         posix_cwd_lease = None
         posix_launch = None
         executable_binding = ""
+        supervisor_returncode = 0
         lease_errors = []
         tree_cleaned = False
         if cleanup_control is not None:
