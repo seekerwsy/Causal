@@ -133,6 +133,41 @@ def _write_generation_records(
     )
 
 
+def _read_verified_generation_records(
+    store: RunStore,
+    path: Path,
+    model: type[_Record],
+    expected: list[_Record],
+    outputs: list[Path],
+    *,
+    stage: str,
+    max_records: int,
+    mismatch_message: str,
+) -> list[_Record]:
+    readback_error: SecAwareError | None = None
+    try:
+        validated = _read_generation_records(
+            path,
+            model,
+            stage=stage,
+            allow_empty=False,
+            max_records=max_records,
+        )
+    except SecAwareError as error:
+        readback_error = error
+    if readback_error is not None:
+        store.verify_sealed_outputs(stage, outputs)
+        raise readback_error from None
+    if validated != expected:
+        store.verify_sealed_outputs(stage, outputs)
+        raise _generation_stage_error(
+            ErrorCode.CONTRACT,
+            stage,
+            mismatch_message,
+        )
+    return validated
+
+
 def _generation_stage_should_skip(
     store: RunStore,
     stage: str,
@@ -260,19 +295,16 @@ def plan_generation_stage(
             )
         _write_generation_records(output, cast(list[object], records), stage=stage)
         store.seal_stage_outputs(stage, outputs)
-        validated = _read_generation_records(
+        _read_verified_generation_records(
+            store,
             output,
             GenerationRequestRecord,
+            records,
+            outputs,
             stage=stage,
-            allow_empty=False,
             max_records=MAX_GENERATION_REQUESTS,
+            mismatch_message="generation request ledger changed during publication",
         )
-        if validated != records:
-            raise _generation_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "generation request ledger changed during publication",
-            )
         store.record_stage(stage, inputs, outputs)
 
     _execute_generation_stage(store, stage, execute)
@@ -332,19 +364,16 @@ def import_generation_stage(
         imported = import_offline_results(expected, received)
         _write_generation_records(output, cast(list[object], imported), stage=stage)
         store.seal_stage_outputs(stage, outputs)
-        validated = _read_generation_records(
+        _read_verified_generation_records(
+            store,
             output,
             CanonicalGeneratedCodeRecord,
+            imported,
+            outputs,
             stage=stage,
-            allow_empty=False,
             max_records=MAX_OFFLINE_IMPORT_RECORDS,
+            mismatch_message="canonical generation output changed during publication",
         )
-        if validated != imported:
-            raise _generation_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "canonical generation output changed during publication",
-            )
         store.record_stage(stage, inputs, outputs)
 
     _execute_generation_stage(store, stage, execute)

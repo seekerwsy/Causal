@@ -247,6 +247,36 @@ class RunStore:
             output_sha256=tuple(sorted(output_sha256.items())),
         )
 
+    def verify_sealed_outputs(
+        self,
+        stage: str,
+        output_paths: Sequence[str | Path],
+    ) -> None:
+        """Verify the current outputs against a seal without consuming it."""
+
+        snapshot = self._pending_snapshots.get(stage)
+        output_seal = self._sealed_outputs.get(stage)
+        if snapshot is None or output_seal is None or output_seal.stage != stage:
+            self._reject_stage_record(stage, "stage output seal is unavailable")
+        outputs = [Path(path) for path in output_paths]
+        relative_outputs: list[str] | None = None
+        try:
+            relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+        except SecAwareError:
+            pass
+        if (
+            relative_outputs is None
+            or snapshot.outputs != tuple(relative_outputs)
+            or output_seal.outputs != tuple(relative_outputs)
+        ):
+            self._reject_stage_record(
+                stage,
+                "sealed stage outputs do not match the execution snapshot",
+            )
+        current_output_sha256 = self._stage_output_hashes(stage, outputs, relative_outputs)
+        if current_output_sha256 != dict(output_seal.output_sha256):
+            self._reject_stage_record(stage, "sealed stage outputs changed after sealing")
+
     def should_skip_stage(
         self,
         stage: str,
@@ -291,6 +321,8 @@ class RunStore:
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
     ) -> None:
+        if self._requires_output_seal(stage) or stage in self._sealed_outputs:
+            self.verify_sealed_outputs(stage, output_paths)
         outputs = [Path(path) for path in output_paths]
         snapshot = self._pending_snapshots.pop(stage, None)
         output_seal = self._sealed_outputs.pop(stage, None)

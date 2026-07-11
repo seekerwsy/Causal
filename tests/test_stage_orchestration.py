@@ -293,10 +293,33 @@ def test_sealed_output_hash_is_committed_as_the_manifest_expectation(
     assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
 
     store.seal_stage_outputs("report", [output_path])
+    store.verify_sealed_outputs("report", [output_path])
+    assert not store.path(".stages", "report.json").exists()
     store.record_stage("report", [input_path], [output_path])
 
     manifest = read_stage_manifest(store.path(".stages", "report.json"))
     assert manifest.output_sha256 == {"reports/result.txt": expected_hash}
+
+
+def test_sealed_output_verification_rejects_mutation_and_clears_stage_state(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = store.path(".stages", "report.json")
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    store.seal_stage_outputs("report", [output_path])
+    output_path.write_text("changed-after-seal\n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.verify_sealed_outputs("report", [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(exc_info.value)
+    assert not manifest_path.exists()
+    with pytest.raises(SecAwareError) as record_info:
+        store.record_stage("report", [input_path], [output_path])
+    assert record_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
 @pytest.mark.parametrize("misuse", ["without_pending", "duplicate", "paths_mismatch"])
