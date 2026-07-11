@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from functools import partial
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -341,7 +342,7 @@ def test_windows_process_cannot_run_before_job_assignment_and_detached_child_can
     assert not detached_marker.exists()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux subreaper regression")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
 def test_linux_setsid_descendant_is_reaped_before_normal_return(tmp_path: Path) -> None:
     ready_marker = tmp_path / "private-setsid-ready.marker"
     escaped_marker = tmp_path / "private-setsid-escaped.marker"
@@ -740,15 +741,15 @@ def test_linux_sealed_copy_rejects_same_length_corruption(
     assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux stopped-supervisor regression")
-def test_linux_stopped_supervisor_is_resumed_to_reap_setsid_child(tmp_path: Path) -> None:
-    marker = tmp_path / "private-stopped-supervisor-escaped.marker"
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux stopped namespace-init regression")
+def test_linux_stopped_namespace_init_is_destroyed_with_setsid_child(tmp_path: Path) -> None:
+    marker = tmp_path / "private-stopped-namespace-init-escaped.marker"
     source = (
         "import os,signal,sys,time\nfrom pathlib import Path\n"
-        "supervisor=os.getppid()\n"
+        "namespace_init=os.getppid()\n"
         "stopper=os.fork()\n"
         "if stopper==0:\n"
-        "\n for _ in range(200):\n  os.kill(supervisor,signal.SIGSTOP);time.sleep(.005)\n"
+        "\n for _ in range(200):\n  os.kill(namespace_init,signal.SIGSTOP);time.sleep(.005)\n"
         "\n os._exit(0)\n"
         "pid=os.fork()\n"
         "if pid==0:\n os.setsid();time.sleep(.5);Path(sys.argv[1]).write_text('x');os._exit(0)\n"
@@ -816,23 +817,19 @@ def test_supervisor_result_protocol_rejects_missing_or_malformed_frames(frame: b
     assert process._secaware_result_fd == -1
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux main-subreaper regression")
-def test_linux_main_subreaper_reaps_tree_when_analyzer_kills_supervisor(
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
+def test_linux_analyzer_cannot_kill_namespace_init_or_reach_outer_supervisor(
     tmp_path: Path,
 ) -> None:
-    import ctypes
-
-    ready = tmp_path / "private-main-subreaper-ready.marker"
-    escaped = tmp_path / "private-main-subreaper-escaped.marker"
+    ready = tmp_path / "private-namespace-parent-ready.marker"
+    escaped = tmp_path / "private-namespace-parent-escaped.marker"
+    kill_returned = tmp_path / "private-namespace-init-kill-returned.marker"
     unrelated = subprocess.Popen(
         [sys.executable, "-c", "import time;time.sleep(10)"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    state_before = ctypes.c_int()
-    libc = ctypes.CDLL(None, use_errno=True)
-    assert libc.prctl(37, ctypes.byref(state_before), 0, 0, 0) == 0
     source = (
         "import os,signal,sys,time\nfrom pathlib import Path\n"
         "pid=os.fork()\n"
@@ -841,33 +838,51 @@ def test_linux_main_subreaper_reaps_tree_when_analyzer_kills_supervisor(
         "Path(sys.argv[2]).write_text('escaped'); os._exit(0)\n"
         "deadline=time.time()+2\n"
         "while not Path(sys.argv[1]).exists() and time.time()<deadline: time.sleep(0.01)\n"
-        "os.kill(os.getppid(), signal.SIGKILL); time.sleep(10)\n"
+        "os.kill(os.getppid(), signal.SIGKILL);"
+        "Path(sys.argv[3]).write_text('signal-not-delivered');time.sleep(10)\n"
     )
 
     try:
         with pytest.raises(SecAwareError) as exc_info:
             run_analyzer_process(
-                _python_argv(source, str(ready), str(escaped)),
+                _python_argv(source, str(ready), str(escaped), str(kill_returned)),
                 cwd=tmp_path,
-                timeout_seconds=3,
+                timeout_seconds=0.2,
                 max_stdout_bytes=1024,
                 max_stderr_bytes=1024,
             )
         assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
         assert ready.exists()
+        assert kill_returned.exists()
         time.sleep(1.0)
         assert not escaped.exists()
         assert unrelated.poll() is None
-        state_after = ctypes.c_int()
-        assert libc.prctl(37, ctypes.byref(state_after), 0, 0, 0) == 0
-        assert state_after.value == state_before.value
     finally:
         unrelated.kill()
         unrelated.wait(timeout=3)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux markerless-descendant regression")
-def test_linux_main_subreaper_reaps_close_fds_descendant_without_killing_baseline(
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
+def test_linux_analyzer_sees_only_namespace_init_as_parent(tmp_path: Path) -> None:
+    source = (
+        "import json,os\n"
+        "print(json.dumps({'pid':os.getpid(),'ppid':os.getppid(),"
+        "'visible':sorted(int(x) for x in os.listdir('/proc') if x.isdigit())}))\n"
+    )
+
+    result = run_analyzer_process(
+        _python_argv(source),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=4096,
+        max_stderr_bytes=1024,
+    )
+    visible = json.loads(result.stdout)
+    assert visible == {"pid": 2, "ppid": 1, "visible": [1, 2]}
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
+def test_linux_pid_namespace_reaps_close_fds_descendant_without_killing_baseline(
     tmp_path: Path,
 ) -> None:
     ready = tmp_path / "private-close-fds-ready.marker"
@@ -897,7 +912,7 @@ def test_linux_main_subreaper_reaps_close_fds_descendant_without_killing_baselin
             run_analyzer_process(
                 _python_argv(source, child_source, str(ready), str(escaped)),
                 cwd=tmp_path,
-                timeout_seconds=3,
+                timeout_seconds=0.2,
                 max_stdout_bytes=1024,
                 max_stderr_bytes=1024,
             )
@@ -911,24 +926,149 @@ def test_linux_main_subreaper_reaps_close_fds_descendant_without_killing_baselin
         baseline.wait(timeout=3)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID identity regression")
-def test_linux_process_identity_uses_starttime_to_reject_reused_pid() -> None:
-    process = subprocess.Popen(
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
+def test_linux_pid_namespace_reaps_close_fds_setsid_double_fork(tmp_path: Path) -> None:
+    ready = tmp_path / "private-double-fork-ready.marker"
+    escaped = tmp_path / "private-double-fork-escaped.marker"
+    child_source = (
+        "import os,sys,time\nfrom pathlib import Path\n"
+        "if os.fork(): os._exit(0)\n"
+        "os.setsid()\n"
+        "if os.fork(): os._exit(0)\n"
+        "Path(sys.argv[1]).write_text('ready');time.sleep(.8);"
+        "Path(sys.argv[2]).write_text('escaped')\n"
+    )
+    source = (
+        "import subprocess,sys,time\nfrom pathlib import Path\n"
+        "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2],sys.argv[3]],"
+        "close_fds=True)\n"
+        "deadline=time.time()+2\n"
+        "while not Path(sys.argv[2]).exists() and time.time()<deadline: time.sleep(.01)\n"
+    )
+
+    result = run_analyzer_process(
+        _python_argv(source, child_source, str(ready), str(escaped)),
+        cwd=tmp_path,
+        timeout_seconds=3,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+
+    assert result.returncode == 0
+    assert ready.exists()
+    time.sleep(1)
+    assert not escaped.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
+def test_linux_outer_supervisor_death_uses_pdeathsig_to_destroy_namespace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = tmp_path / "private-pdeathsig-ready.marker"
+    escaped = tmp_path / "private-pdeathsig-escaped.marker"
+    source = (
+        "import sys,time\nfrom pathlib import Path\n"
+        "Path(sys.argv[1]).write_text('ready');time.sleep(.8);"
+        "Path(sys.argv[2]).write_text('escaped')\n"
+    )
+    real_monitor = runner_module._monitor_process
+
+    def kill_outer_supervisor(
+        process: subprocess.Popen[bytes], *args: object, **kwargs: object
+    ) -> int:
+        deadline = time.monotonic() + 2
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists()
+        os.kill(process.pid, signal.SIGKILL)
+        return real_monitor(process, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_monitor_process", kill_outer_supervisor)
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            _python_argv(source, str(ready), str(escaped)),
+            cwd=tmp_path,
+            timeout_seconds=3,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    time.sleep(1)
+    assert not escaped.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID namespace regression")
+def test_linux_namespace_unavailable_fails_before_analyzer_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = tmp_path / "private-namespace-unavailable.marker"
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: True)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            _python_argv(f"from pathlib import Path;Path({str(marker)!r}).write_text('ran')"),
+            cwd=tmp_path,
+            timeout_seconds=3,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux unrelated-child regression")
+def test_linux_timeout_does_not_kill_or_reap_unrelated_child_started_during_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launched = threading.Event()
+    real_popen_process = runner_module._popen_process
+    outcome: list[object] = []
+
+    def observe_launch(*args: object, **kwargs: object) -> None:
+        real_popen_process(*args, **kwargs)  # type: ignore[arg-type]
+        launched.set()
+
+    monkeypatch.setattr(runner_module, "_popen_process", observe_launch)
+
+    def invoke() -> None:
+        try:
+            outcome.append(
+                run_analyzer_process(
+                    _python_argv("import time;time.sleep(10)"),
+                    cwd=tmp_path,
+                    timeout_seconds=0.3,
+                    max_stdout_bytes=1024,
+                    max_stderr_bytes=1024,
+                )
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    assert launched.wait(timeout=3)
+    unrelated = subprocess.Popen(
         [sys.executable, "-c", "import time;time.sleep(10)"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     try:
-        snapshot = runner_module._linux_process_snapshot()
-        identity = snapshot[process.pid].identity
-        assert identity.pid == process.pid
-        assert identity.starttime > 0
-        stale = runner_module._LinuxProcessIdentity(identity.pid, identity.starttime - 1)
-        assert not runner_module._linux_identity_is_live(stale)
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], SecAwareError)
+        assert unrelated.poll() is None
+        unrelated.kill()
+        assert unrelated.wait(timeout=3) < 0
     finally:
-        process.kill()
-        process.wait(timeout=3)
+        if unrelated.poll() is None:
+            unrelated.kill()
+            unrelated.wait(timeout=3)
 
 
 @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
@@ -1037,66 +1177,6 @@ def test_popen_return_event_control_flow_is_owned_by_caller(
     assert exc_info.value is signal
     assert len(processes) == 1 and processes[0].poll() is not None
     assert "time.sleep(10)" not in "\n".join(_runner_frame_surfaces(signal))
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux subreaper ownership regression")
-@pytest.mark.parametrize("boundary", ["lock_acquired", "subreaper_set", "return_event"])
-def test_linux_subreaper_owner_restores_state_across_control_flow_boundaries(
-    monkeypatch: pytest.MonkeyPatch,
-    boundary: str,
-) -> None:
-    import ctypes
-
-    signal = KeyboardInterrupt(f"private-subreaper-{boundary}")
-    read_fd, write_fd = os.pipe()
-    lease = runner_module._LinuxSubreaperLease()
-    libc = ctypes.CDLL(None, use_errno=True)
-    before = ctypes.c_int()
-    assert libc.prctl(37, ctypes.byref(before), 0, 0, 0) == 0
-
-    def interrupt(name: str) -> None:
-        if name == boundary:
-            raise signal
-
-    def interrupt_return(frame: object, event: str, arg: object) -> object:
-        del arg
-        if (
-            boundary == "return_event"
-            and event == "return"
-            and getattr(frame, "f_code", None) is lease.acquire.__func__.__code__
-        ):
-            raise signal
-        return interrupt_return
-
-    monkeypatch.setattr(runner_module, "_subreaper_acquire_boundary", interrupt)
-    previous_trace = sys.gettrace()
-    try:
-        sys.settrace(interrupt_return)
-        with pytest.raises(KeyboardInterrupt) as exc_info:
-            try:
-                lease.acquire(read_fd)
-            finally:
-                lease.close()
-    finally:
-        sys.settrace(previous_trace)
-        os.close(read_fd)
-        os.close(write_fd)
-
-    assert exc_info.value is signal
-    _assert_runner_frames_release_objects(signal, lease)
-    after = ctypes.c_int()
-    assert libc.prctl(37, ctypes.byref(after), 0, 0, 0) == 0
-    assert after.value == before.value
-    acquired_elsewhere = threading.Event()
-
-    def acquire_elsewhere() -> None:
-        with runner_module._LINUX_SUBREAPER_LOCK:
-            acquired_elsewhere.set()
-
-    worker = threading.Thread(target=acquire_elsewhere)
-    worker.start()
-    worker.join(timeout=2)
-    assert acquired_elsewhere.is_set()
 
 
 @pytest.mark.parametrize(
