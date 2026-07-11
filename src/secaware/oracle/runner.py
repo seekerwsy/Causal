@@ -117,39 +117,60 @@ class _RunnerFailure(Exception):
         self.code = code
 
 
-def _acquire_linux_subreaper(marker_fd: int) -> _LinuxSubreaperLease:
-    if sys.platform != "linux" or marker_fd < 0:
-        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-    import ctypes
+@dataclass(frozen=True, slots=True)
+class _LinuxProcessIdentity:
+    pid: int
+    starttime: int
 
-    descriptor = -1
-    acquired = False
-    changed = False
-    libc: object | None = None
-    original_value = 0
+
+@dataclass(frozen=True, slots=True)
+class _LinuxProcessInfo:
+    identity: _LinuxProcessIdentity
+    parent_pid: int
+
+
+def _linux_process_info(pid: int) -> _LinuxProcessInfo | None:
     try:
-        _LINUX_SUBREAPER_LOCK.acquire()
-        acquired = True
-        libc = ctypes.CDLL(None, use_errno=True)
-        original = ctypes.c_int()
-        if libc.prctl(37, ctypes.byref(original), 0, 0, 0) != 0:
-            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        if libc.prctl(36, 1, 0, 0, 0) != 0:
-            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        changed = True
-        original_value = original.value
-        descriptor = os.dup(marker_fd)
-        lease = _LinuxSubreaperLease(descriptor, libc, original_value)
-        descriptor = -1
-        acquired = False
-        return lease
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        if acquired:
-            if changed and libc is not None:
-                libc.prctl(36, original_value, 0, 0, 0)  # type: ignore[attr-defined]
-            _LINUX_SUBREAPER_LOCK.release()
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        closing = raw.rfind(")")
+        fields = raw[closing + 2 :].split()
+        if closing < 1 or len(fields) <= 19:
+            return None
+        return _LinuxProcessInfo(
+            identity=_LinuxProcessIdentity(pid, int(fields[19])),
+            parent_pid=int(fields[1]),
+        )
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _linux_process_snapshot() -> dict[int, _LinuxProcessInfo]:
+    snapshot: dict[int, _LinuxProcessInfo] = {}
+    if sys.platform != "linux":
+        return snapshot
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        info = _linux_process_info(int(entry.name))
+        if info is not None:
+            snapshot[info.identity.pid] = info
+    return snapshot
+
+
+def _linux_identity_is_live(identity: _LinuxProcessIdentity) -> bool:
+    info = _linux_process_info(identity.pid)
+    return info is not None and info.identity == identity
+
+
+def _subreaper_acquire_boundary(name: str) -> None:
+    del name
+
+
+def _rlock_depth() -> int:
+    counter = getattr(_LINUX_SUBREAPER_LOCK, "_recursion_count", None)
+    if counter is None:
+        return int(bool(getattr(_LINUX_SUBREAPER_LOCK, "_is_owned")()))
+    return int(counter())
 
 
 class _WindowsJob:
@@ -167,80 +188,231 @@ class _WindowsJob:
         self._kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
 
 
+class _ProcessOwner:
+    __slots__ = ("process", "_terminated")
+
+    def __init__(self) -> None:
+        self.process: subprocess.Popen[bytes] | None = None
+        self._terminated = False
+
+    def require(self) -> subprocess.Popen[bytes]:
+        if self.process is None:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        return self.process
+
+    def terminate(self, windows_job: _WindowsJob | None) -> None:
+        if self.process is None or self._terminated:
+            return
+        _terminate_and_wait(self.process, windows_job)
+        self._terminated = True
+
+    def release(self) -> None:
+        process = self.process
+        self.process = None
+        self._terminated = False
+        if process is None:
+            return
+        for pipe in (getattr(process, "stdout", None), getattr(process, "stderr", None)):
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except BaseException:
+                    pass
+        process = None
+
+
 class _LinuxSubreaperLease:
-    __slots__ = ("_descriptor", "_libc", "_original", "_active")
+    __slots__ = (
+        "_descriptor",
+        "_libc",
+        "_original",
+        "_original_known",
+        "_lock_depth_before",
+        "_started",
+        "_closed",
+        "_baseline",
+        "_known",
+        "_launch_seen",
+    )
 
-    def __init__(self, descriptor: int, libc: object, original: int) -> None:
-        self._descriptor = descriptor
-        self._libc = libc
-        self._original = original
-        self._active = True
+    def __init__(self) -> None:
+        self._descriptor = -1
+        self._libc: object | None = None
+        self._original = 0
+        self._original_known = False
+        self._lock_depth_before = 0
+        self._started = False
+        self._closed = False
+        self._baseline: set[_LinuxProcessIdentity] = set()
+        self._known: set[_LinuxProcessIdentity] = set()
+        self._launch_seen = False
 
-    def _marked_processes(self) -> set[int]:
+    def acquire(self, marker_fd: int) -> None:
+        import ctypes
+
+        libc: object | None = None
+        original: object | None = None
+        snapshot: dict[int, _LinuxProcessInfo] = {}
+        try:
+            if self._started or self._closed or sys.platform != "linux" or marker_fd < 0:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            self._started = True
+            self._descriptor = marker_fd
+            self._lock_depth_before = _rlock_depth()
+            _LINUX_SUBREAPER_LOCK.acquire()
+            _subreaper_acquire_boundary("lock_acquired")
+            libc = ctypes.CDLL(None, use_errno=True)
+            original = ctypes.c_int()
+            if libc.prctl(37, ctypes.byref(original), 0, 0, 0) != 0:  # type: ignore[arg-type]
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            self._libc = libc
+            self._original = original.value  # type: ignore[union-attr]
+            self._original_known = True
+            if libc.prctl(36, 1, 0, 0, 0) != 0:  # type: ignore[union-attr]
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            _subreaper_acquire_boundary("subreaper_set")
+            snapshot = _linux_process_snapshot()
+            self._baseline = {
+                info.identity for info in snapshot.values() if info.parent_pid == os.getpid()
+            }
+        finally:
+            self = None  # type: ignore[assignment]
+            marker_fd = -1
+            libc = None
+            original = None
+            snapshot = {}
+
+    def register_root(self, pid: int) -> None:
+        if pid <= 0:
+            return
+        self._launch_seen = True
+        snapshot = _linux_process_snapshot()
+        root = snapshot.get(pid)
+        if root is not None:
+            self._known.add(root.identity)
+            self._expand_known(snapshot)
+
+    def observe(self) -> None:
+        if not self._started or not self._launch_seen or self._closed:
+            return
+        snapshot = _linux_process_snapshot()
+        self._observe_owned(snapshot, include_new_adoptees=False)
+
+    def _marked_processes(
+        self, snapshot: dict[int, _LinuxProcessInfo]
+    ) -> set[_LinuxProcessIdentity]:
         try:
             marker = os.readlink(f"/proc/self/fd/{self._descriptor}")
         except OSError:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
-        marked: set[int] = set()
-        for entry in Path("/proc").iterdir():
-            if not entry.name.isdigit() or int(entry.name) == os.getpid():
+        marked: set[_LinuxProcessIdentity] = set()
+        for pid, info in snapshot.items():
+            if pid == os.getpid():
                 continue
             try:
-                descriptors = entry.joinpath("fd").iterdir()
+                descriptors = Path(f"/proc/{pid}/fd").iterdir()
                 if any(os.readlink(item) == marker for item in descriptors):
-                    marked.add(int(entry.name))
+                    marked.add(info.identity)
             except (OSError, PermissionError):
                 continue
         return marked
 
-    def close(self) -> None:
-        if not self._active:
+    def _expand_known(self, snapshot: dict[int, _LinuxProcessInfo]) -> None:
+        known_pids = {
+            identity.pid
+            for identity in self._known
+            if snapshot.get(identity.pid) is not None
+            and snapshot[identity.pid].identity == identity
+        }
+        changed = True
+        while changed:
+            changed = False
+            for info in snapshot.values():
+                if info.parent_pid in known_pids and info.identity not in self._known:
+                    self._known.add(info.identity)
+                    known_pids.add(info.identity.pid)
+                    changed = True
+
+    def _observe_owned(
+        self,
+        snapshot: dict[int, _LinuxProcessInfo],
+        *,
+        include_new_adoptees: bool,
+        adoptee_starttime_cutoff: int | None = None,
+    ) -> None:
+        self._known.update(self._marked_processes(snapshot))
+        if include_new_adoptees:
+            # This fallback is enabled only after an abnormal analyzer run.  A host
+            # orphan first adopted during the same launch-to-cleanup window is not
+            # distinguishable in /proc, so baseline and cutoff bound that side effect.
+            self._known.update(
+                info.identity
+                for info in snapshot.values()
+                if info.parent_pid == os.getpid()
+                and info.identity not in self._baseline
+                and (
+                    adoptee_starttime_cutoff is None
+                    or info.identity.starttime <= adoptee_starttime_cutoff
+                )
+            )
+        self._expand_known(snapshot)
+
+    def close(self, include_new_adoptees: bool = True) -> None:
+        if self._closed:
             return
-        self._active = False
+        self._closed = True
         cleanup_failed = False
         control: KeyboardInterrupt | SystemExit | None = None
-        owned: set[int] = set()
         try:
-            deadline = time.monotonic() + _CLEANUP_WAIT_SECONDS
-            while time.monotonic() < deadline:
-                marked = self._marked_processes()
-                owned.update(marked)
-                for pid in marked:
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                for pid in tuple(owned):
-                    try:
-                        waited, _ = os.waitpid(pid, os.WNOHANG)
-                        if waited == pid:
-                            owned.discard(pid)
-                    except ChildProcessError:
-                        if not Path(f"/proc/{pid}").exists():
-                            owned.discard(pid)
-                    except ProcessLookupError:
-                        owned.discard(pid)
-                if not marked and not owned:
-                    break
-                time.sleep(0.001)
-            else:
-                cleanup_failed = True
+            if self._started and self._launch_seen:
+                deadline = time.monotonic() + _CLEANUP_WAIT_SECONDS
+                adoptee_starttime_cutoff: int | None = None
+                while time.monotonic() < deadline:
+                    snapshot = _linux_process_snapshot()
+                    if adoptee_starttime_cutoff is None:
+                        adoptee_starttime_cutoff = max(
+                            (info.identity.starttime for info in snapshot.values()),
+                            default=0,
+                        )
+                    self._observe_owned(
+                        snapshot,
+                        include_new_adoptees=include_new_adoptees,
+                        adoptee_starttime_cutoff=adoptee_starttime_cutoff,
+                    )
+                    live = {
+                        identity
+                        for identity in self._known
+                        if snapshot.get(identity.pid) is not None
+                        and snapshot[identity.pid].identity == identity
+                    }
+                    for identity in live:
+                        try:
+                            os.kill(identity.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    for identity in tuple(self._known):
+                        try:
+                            waited, _ = os.waitpid(identity.pid, os.WNOHANG)
+                            if waited == identity.pid:
+                                self._known.discard(identity)
+                        except ChildProcessError:
+                            if not _linux_identity_is_live(identity):
+                                self._known.discard(identity)
+                        except ProcessLookupError:
+                            self._known.discard(identity)
+                    if not live and not self._known:
+                        break
+                    time.sleep(0.001)
+                else:
+                    cleanup_failed = True
         except (KeyboardInterrupt, SystemExit) as error:
             control = error
         except Exception:
             cleanup_failed = True
         finally:
+            self._descriptor = -1
             try:
-                try:
-                    os.close(self._descriptor)
-                except (KeyboardInterrupt, SystemExit) as error:
-                    if control is None:
-                        control = error
-                except OSError:
-                    cleanup_failed = True
-                self._descriptor = -1
-            finally:
-                try:
+                if self._original_known and self._libc is not None:
                     try:
                         if (
                             self._libc.prctl(  # type: ignore[attr-defined]
@@ -254,9 +426,18 @@ class _LinuxSubreaperLease:
                             control = error
                     except Exception:
                         cleanup_failed = True
-                finally:
-                    self._libc = None
-                    _LINUX_SUBREAPER_LOCK.release()
+            finally:
+                self._libc = None
+                try:
+                    while _rlock_depth() > self._lock_depth_before:
+                        _LINUX_SUBREAPER_LOCK.release()
+                except (KeyboardInterrupt, SystemExit) as error:
+                    if control is None:
+                        control = error
+                except Exception:
+                    cleanup_failed = True
+                self._baseline.clear()
+                self._known.clear()
         if control is not None:
             raise control
         if cleanup_failed:
@@ -782,14 +963,14 @@ def _close_posix_launch(launch: _PosixLaunch) -> None:
 
 
 def _popen_process(
+    owner: _ProcessOwner,
     argv: tuple[str, ...],
     *,
     cwd: Path,
     environment: dict[str, str],
     posix_launch: _PosixLaunch | None = None,
-) -> subprocess.Popen[bytes]:
+) -> None:
     platform_options: dict[str, object]
-    process: subprocess.Popen[bytes] | None = None
     popen_factory = subprocess.Popen
     if os.name == "nt":
         platform_options = {
@@ -813,31 +994,16 @@ def _popen_process(
             "close_fds": True,
             **platform_options,
         }
-        try:
-            if isinstance(popen_factory, type) and issubclass(popen_factory, _POPEN_CLASS):
-                process = popen_factory.__new__(popen_factory)
-                popen_factory.__init__(process, *popen_args, **popen_kwargs)
-            else:
-                process = popen_factory(*popen_args, **popen_kwargs)
-            _finalize_process_handoff(process, posix_launch)
-        except BaseException:
-            if process is not None and getattr(process, "_child_created", False):
-                try:
-                    _terminate_and_wait(process, None)
-                except BaseException:
-                    pass
-                for pipe in (
-                    getattr(process, "stdout", None),
-                    getattr(process, "stderr", None),
-                ):
-                    if pipe is not None:
-                        try:
-                            pipe.close()
-                        except BaseException:
-                            pass
-            raise
-        return process
+        if owner.process is not None:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        if isinstance(popen_factory, type) and issubclass(popen_factory, _POPEN_CLASS):
+            owner.process = popen_factory.__new__(popen_factory)
+            popen_factory.__init__(owner.process, *popen_args, **popen_kwargs)
+        else:
+            owner.process = popen_factory(*popen_args, **popen_kwargs)
+        _finalize_process_handoff(owner.require(), posix_launch)
     finally:
+        owner = None  # type: ignore[assignment]
         argv = ()
         cwd = None  # type: ignore[assignment]
         environment = {}
@@ -846,7 +1012,6 @@ def _popen_process(
         popen_kwargs = {}
         popen_factory = None  # type: ignore[assignment]
         posix_launch = None
-        process = None
 
 
 def _finalize_process_handoff(
@@ -863,8 +1028,6 @@ def _finalize_process_handoff(
             posix_launch.cancel_read_fd = -1
             os.close(posix_launch.result_write_fd)
             posix_launch.result_write_fd = -1
-            os.close(posix_launch.tracking_read_fd)
-            posix_launch.tracking_read_fd = -1
             os.close(posix_launch.tracking_write_fd)
             posix_launch.tracking_write_fd = -1
     finally:
@@ -1136,10 +1299,13 @@ def _monitor_process(
     timeout_seconds: float,
     max_stdout_bytes: int,
     max_stderr_bytes: int,
+    subreaper_lease: _LinuxSubreaperLease | None = None,
 ) -> int:
     deadline = time.monotonic() + timeout_seconds
     try:
         while True:
+            if subreaper_lease is not None:
+                subreaper_lease.observe()
             if any(capture.overflow.is_set() for capture in captures):
                 raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
             if not _outputs_within_limits(
@@ -1161,6 +1327,7 @@ def _monitor_process(
         stdout_file = None  # type: ignore[assignment]
         stderr_file = None  # type: ignore[assignment]
         captures = ()
+        subreaper_lease = None
 
 
 def _read_posix_result(process: subprocess.Popen[bytes], supervisor_returncode: int) -> int:
@@ -1351,6 +1518,8 @@ def _run_resolved_process(
     max_stdout_bytes: int,
     max_stderr_bytes: int,
 ) -> AnalyzerProcessResult:
+    process_owner = _ProcessOwner()
+    subreaper_lease = _LinuxSubreaperLease()
     process: subprocess.Popen[bytes] | None = None
     windows_job: _WindowsJob | None = None
     stdout_file: BinaryIO | None = None
@@ -1367,7 +1536,6 @@ def _run_resolved_process(
     posix_executable_lease: _PosixPathLease | None = None
     posix_cwd_lease: _PosixPathLease | None = None
     posix_launch: _PosixLaunch | None = None
-    subreaper_lease: _LinuxSubreaperLease | None = None
     executable_binding = ""
     try:
         executable_lease = _open_windows_path_lease(Path(argv[0]), directory=False)
@@ -1393,13 +1561,17 @@ def _run_resolved_process(
                 posix_executable_lease,
                 posix_cwd_lease,
             )
-            subreaper_lease = _acquire_linux_subreaper(posix_launch.tracking_read_fd)
-        process = _popen_process(
+            subreaper_lease.acquire(posix_launch.tracking_read_fd)
+        _popen_process(
+            process_owner,
             argv,
             cwd=cwd,
             environment=environment,
             posix_launch=posix_launch,
         )
+        process = process_owner.require()
+        if posix_launch is not None:
+            subreaper_lease.register_root(process.pid)
         windows_job = _create_windows_job(process)
         if process.stdout is None or process.stderr is None:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
@@ -1416,15 +1588,16 @@ def _run_resolved_process(
             timeout_seconds=timeout_seconds,
             max_stdout_bytes=max_stdout_bytes,
             max_stderr_bytes=max_stderr_bytes,
+            subreaper_lease=(subreaper_lease if posix_launch is not None else None),
         )
         returncode = _read_posix_result(process, supervisor_returncode)
-        _terminate_and_wait(process, windows_job)
-        if subreaper_lease is not None:
-            subreaper_lease.close()
-            subreaper_lease = None
+        process_owner.terminate(windows_job)
+        subreaper_lease.close(include_new_adoptees=False)
         tree_cleaned = True
         overflow = _finish_captures(captures)
         captures = ()
+        process_owner.release()
+        process = None
         if overflow:
             raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
         if returncode < 0:
@@ -1442,18 +1615,23 @@ def _run_resolved_process(
         )
     finally:
         had_active_exception = sys_exc_info_active()
+        if process_owner.process is not None and not tree_cleaned:
+            subreaper_lease.register_root(process_owner.process.pid)
+        owner_error = (
+            _capture_cleanup_failure(process_owner.terminate, windows_job)
+            if not tree_cleaned
+            else None
+        )
         cleanup_control, cleanup_failed = _cleanup_resources(
-            None if tree_cleaned else process,
-            windows_job,
+            None,
+            None,
             None,
             None,
             suppress_failures=had_active_exception,
         )
-        subreaper_error = (
-            _capture_cleanup_failure(subreaper_lease.close) if subreaper_lease is not None else None
-        )
-        subreaper_lease = None
+        subreaper_error = _capture_cleanup_failure(subreaper_lease.close, not tree_cleaned)
         capture_error = _capture_cleanup_failure(_finish_captures, captures) if captures else None
+        process_owner.release()
         file_control, file_failed = _cleanup_resources(
             None,
             None,
@@ -1480,6 +1658,10 @@ def _run_resolved_process(
                 cleanup_control = capture_error
             if cleanup_control is None:
                 cleanup_control = file_control
+            if cleanup_control is None and isinstance(owner_error, (KeyboardInterrupt, SystemExit)):
+                cleanup_control = owner_error
+            elif owner_error is not None:
+                cleanup_failed = True
             cleanup_failed = (
                 cleanup_failed
                 or file_failed
@@ -1506,6 +1688,7 @@ def _run_resolved_process(
         environment = {}
         payload = b""
         process = None
+        process_owner = None  # type: ignore[assignment]
         windows_job = None
         stdout_file = None
         stderr_file = None
@@ -1515,6 +1698,7 @@ def _run_resolved_process(
         posix_executable_lease = None
         posix_cwd_lease = None
         posix_launch = None
+        subreaper_lease = None  # type: ignore[assignment]
         executable_binding = ""
         supervisor_returncode = 0
         lease_errors = []

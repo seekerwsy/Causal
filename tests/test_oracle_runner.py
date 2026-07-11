@@ -866,6 +866,71 @@ def test_linux_main_subreaper_reaps_tree_when_analyzer_kills_supervisor(
         unrelated.wait(timeout=3)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux markerless-descendant regression")
+def test_linux_main_subreaper_reaps_close_fds_descendant_without_killing_baseline(
+    tmp_path: Path,
+) -> None:
+    ready = tmp_path / "private-close-fds-ready.marker"
+    escaped = tmp_path / "private-close-fds-escaped.marker"
+    baseline = subprocess.Popen(
+        [sys.executable, "-c", "import time;time.sleep(10)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    child_source = (
+        "import os,sys,time\nfrom pathlib import Path\n"
+        "os.setsid();Path(sys.argv[1]).write_text('ready');time.sleep(.8);"
+        "Path(sys.argv[2]).write_text('escaped')\n"
+    )
+    source = (
+        "import os,signal,subprocess,sys,time\nfrom pathlib import Path\n"
+        "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2],sys.argv[3]],"
+        "close_fds=True)\n"
+        "deadline=time.time()+2\n"
+        "while not Path(sys.argv[2]).exists() and time.time()<deadline: time.sleep(.01)\n"
+        "os.kill(os.getppid(),signal.SIGKILL);time.sleep(10)\n"
+    )
+
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_analyzer_process(
+                _python_argv(source, child_source, str(ready), str(escaped)),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+        assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+        assert ready.exists()
+        time.sleep(1)
+        assert not escaped.exists()
+        assert baseline.poll() is None
+    finally:
+        baseline.kill()
+        baseline.wait(timeout=3)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux PID identity regression")
+def test_linux_process_identity_uses_starttime_to_reject_reused_pid() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time;time.sleep(10)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        snapshot = runner_module._linux_process_snapshot()
+        identity = snapshot[process.pid].identity
+        assert identity.pid == process.pid
+        assert identity.starttime > 0
+        stale = runner_module._LinuxProcessIdentity(identity.pid, identity.starttime - 1)
+        assert not runner_module._linux_identity_is_live(stale)
+    finally:
+        process.kill()
+        process.wait(timeout=3)
+
+
 @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
 def test_process_handoff_control_flow_cleans_created_process_and_preserves_identity(
     tmp_path: Path,
@@ -929,6 +994,109 @@ def test_popen_init_control_flow_after_child_creation_is_owned_and_cleaned(
 
     assert exc_info.value is signal
     assert len(processes) == 1 and processes[0].poll() is not None
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_popen_return_event_control_flow_is_owned_by_caller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    signal = signal_type("private-popen-return-control")
+    processes: list[subprocess.Popen[bytes]] = []
+    real_init = _POPEN_TYPE.__init__
+
+    def recording_init(process: subprocess.Popen[bytes], *args: object, **kwargs: object) -> None:
+        real_init(process, *args, **kwargs)  # type: ignore[arg-type]
+        processes.append(process)
+
+    def interrupt_return(frame: object, event: str, arg: object) -> object:
+        del arg
+        if (
+            event == "return"
+            and getattr(frame, "f_code", None) is runner_module._popen_process.__code__
+        ):
+            raise signal
+        return interrupt_return
+
+    monkeypatch.setattr(_POPEN_TYPE, "__init__", recording_init)
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(interrupt_return)
+        with pytest.raises(signal_type) as exc_info:
+            run_analyzer_process(
+                _python_argv("import time;time.sleep(10)"),
+                cwd=tmp_path,
+                timeout_seconds=2,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+    finally:
+        sys.settrace(previous_trace)
+
+    assert exc_info.value is signal
+    assert len(processes) == 1 and processes[0].poll() is not None
+    assert "time.sleep(10)" not in "\n".join(_runner_frame_surfaces(signal))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux subreaper ownership regression")
+@pytest.mark.parametrize("boundary", ["lock_acquired", "subreaper_set", "return_event"])
+def test_linux_subreaper_owner_restores_state_across_control_flow_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    import ctypes
+
+    signal = KeyboardInterrupt(f"private-subreaper-{boundary}")
+    read_fd, write_fd = os.pipe()
+    lease = runner_module._LinuxSubreaperLease()
+    libc = ctypes.CDLL(None, use_errno=True)
+    before = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(before), 0, 0, 0) == 0
+
+    def interrupt(name: str) -> None:
+        if name == boundary:
+            raise signal
+
+    def interrupt_return(frame: object, event: str, arg: object) -> object:
+        del arg
+        if (
+            boundary == "return_event"
+            and event == "return"
+            and getattr(frame, "f_code", None) is lease.acquire.__func__.__code__
+        ):
+            raise signal
+        return interrupt_return
+
+    monkeypatch.setattr(runner_module, "_subreaper_acquire_boundary", interrupt)
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(interrupt_return)
+        with pytest.raises(KeyboardInterrupt) as exc_info:
+            try:
+                lease.acquire(read_fd)
+            finally:
+                lease.close()
+    finally:
+        sys.settrace(previous_trace)
+        os.close(read_fd)
+        os.close(write_fd)
+
+    assert exc_info.value is signal
+    _assert_runner_frames_release_objects(signal, lease)
+    after = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(after), 0, 0, 0) == 0
+    assert after.value == before.value
+    acquired_elsewhere = threading.Event()
+
+    def acquire_elsewhere() -> None:
+        with runner_module._LINUX_SUBREAPER_LOCK:
+            acquired_elsewhere.set()
+
+    worker = threading.Thread(target=acquire_elsewhere)
+    worker.start()
+    worker.join(timeout=2)
+    assert acquired_elsewhere.is_set()
 
 
 @pytest.mark.parametrize(
