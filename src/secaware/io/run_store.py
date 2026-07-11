@@ -854,23 +854,23 @@ class RunStore:
                 "sealed stage outputs changed before the manifest was committed",
             )
         manifest_path = self._manifest_path(stage)
+        expected_manifest = StageManifest(
+            schema_version=SCHEMA_VERSION,
+            stage=snapshot.stage,
+            fingerprint=snapshot.fingerprint,
+            inputs=dict(snapshot.inputs),
+            config_sha256=snapshot.config_sha256,
+            code_version=snapshot.code_version,
+            policy_sha256=snapshot.policy_sha256,
+            outputs=list(snapshot.outputs),
+            output_sha256=output_sha256,
+        )
         manifest_committed = False
         try:
-            write_stage_manifest(
-                manifest_path,
-                StageManifest(
-                    schema_version=SCHEMA_VERSION,
-                    stage=snapshot.stage,
-                    fingerprint=snapshot.fingerprint,
-                    inputs=dict(snapshot.inputs),
-                    config_sha256=snapshot.config_sha256,
-                    code_version=snapshot.code_version,
-                    policy_sha256=snapshot.policy_sha256,
-                    outputs=list(snapshot.outputs),
-                    output_sha256=output_sha256,
-                ),
-            )
-        except Exception:
+            write_stage_manifest(manifest_path, expected_manifest)
+            if read_stage_manifest(manifest_path) != expected_manifest:
+                raise ValueError("stage manifest readback mismatch")
+        except (OSError, SecAwareError, TypeError, UnicodeError, ValueError):
             pass
         else:
             manifest_committed = True

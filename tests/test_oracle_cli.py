@@ -1216,3 +1216,358 @@ def test_discover_holds_committed_oracle_snapshot_against_force_rerun(
         runner=_OracleRunner(finding="semgrep"),
         runtime_validator=lambda: None,
     )
+
+
+@pytest.mark.parametrize(
+    ("target", "failures"),
+    [("second_output", 1), ("second_output", 100), ("manifest", 100)],
+)
+def test_downstream_postcommit_cleanup_failure_keeps_new_commit_and_retries_later(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    failures: int,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    inputs = [
+        store.path("inputs", "prompts.jsonl"),
+        store.path("tsg", "prompt_tsg.jsonl"),
+        store.path("tsg", "observed_code_tsg.jsonl"),
+        store.path("oracle", "observed_oracle.jsonl"),
+    ]
+    outputs = [
+        store.path("discovery", "hypotheses_all.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
+    previous = [path.read_bytes() for path in outputs]
+    real_unlink = Path.unlink
+    attempts = 0
+
+    def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal attempts
+        selected = (
+            target == "second_output"
+            and path.name.endswith(".stage.backup")
+            and path.name.startswith(f".{outputs[1].name}.")
+            and path.exists()
+            and path.stat().st_size > 0
+        ) or (
+            target == "manifest"
+            and path.name.endswith(".manifest.backup")
+            and path.name.startswith(".discover.json.")
+            and path.exists()
+            and path.stat().st_size > 0
+        )
+        if selected and attempts < failures:
+            attempts += 1
+            raise OSError("private-cleanup-failure")
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        pipeline_cli,
+        "discover_hypotheses",
+        lambda *args, **kwargs: ([], []),
+    )
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+    discover_stage(config, store, force=True)
+
+    assert [path.read_bytes() for path in outputs] != previous
+    assert store.require_committed_stage("discover", inputs, outputs)
+    leftovers = [
+        *outputs[1].parent.glob(f".{outputs[1].name}.*.stage.backup"),
+        *store.path(".stages").glob(".discover.json.*.manifest.backup"),
+    ]
+    if failures == 1:
+        assert leftovers == []
+    else:
+        assert leftovers
+        assert all(path not in outputs for path in leftovers)
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    discover_stage(config, store, force=True)
+
+    assert store.require_committed_stage("discover", inputs, outputs)
+    assert not list(outputs[1].parent.glob(f".{outputs[1].name}.*.stage.backup"))
+    assert not list(store.path(".stages").glob(".discover.json.*.manifest.backup"))
+
+
+@pytest.mark.parametrize("control", [KeyboardInterrupt("postcommit"), SystemExit("postcommit")])
+def test_downstream_postcommit_control_keeps_new_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    control: KeyboardInterrupt | SystemExit,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    inputs = [
+        store.path("inputs", "prompts.jsonl"),
+        store.path("tsg", "prompt_tsg.jsonl"),
+        store.path("tsg", "observed_code_tsg.jsonl"),
+        store.path("oracle", "observed_oracle.jsonl"),
+    ]
+    outputs = [
+        store.path("discovery", "hypotheses_all.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
+    previous = [path.read_bytes() for path in outputs]
+    real_unlink = Path.unlink
+
+    def interrupt_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if (
+            path.name.endswith(".stage.backup")
+            and path.exists()
+            and path.stat().st_size > 0
+        ):
+            raise control
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        pipeline_cli,
+        "discover_hypotheses",
+        lambda *args, **kwargs: ([], []),
+    )
+    monkeypatch.setattr(Path, "unlink", interrupt_cleanup)
+
+    with pytest.raises(type(control)) as exc_info:
+        discover_stage(config, store, force=True)
+
+    assert exc_info.value is control
+    assert [path.read_bytes() for path in outputs] != previous
+    assert store.require_committed_stage("discover", inputs, outputs)
+
+
+def test_downstream_manifest_postverify_failure_rolls_back_before_commit_point(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    outputs = [
+        store.path("discovery", "hypotheses_all.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
+    manifest = store.path(".stages", "discover.json")
+    previous = ([path.read_bytes() for path in outputs], manifest.read_bytes())
+    real_write = run_store_module.write_stage_manifest
+
+    def write_then_corrupt(path: Path, value: object) -> None:
+        real_write(path, value)  # type: ignore[arg-type]
+        path.write_bytes(b"{\"corrupt\":true}\n")
+
+    monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_corrupt)
+    monkeypatch.setattr(
+        pipeline_cli,
+        "discover_hypotheses",
+        lambda *args, **kwargs: ([], []),
+    )
+
+    with pytest.raises(SecAwareError):
+        discover_stage(config, store, force=True)
+
+    assert [path.read_bytes() for path in outputs] == previous[0]
+    assert manifest.read_bytes() == previous[1]
+
+
+def test_pipeline_oracle_postcommit_cleanup_failure_keeps_new_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _prepared_canonical_store(tmp_path)
+    run_oracle_stage(
+        config,
+        store,
+        condition="observed",
+        force=False,
+        runner=_OracleRunner(),
+        runtime_validator=lambda: None,
+    )
+    output = store.path("oracle", "observed_oracle.jsonl")
+    real_unlink = Path.unlink
+
+    def fail_backup_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if (
+            path.name.endswith(".oracle.backup")
+            and path.exists()
+            and path.stat().st_size > 0
+        ):
+            raise OSError("private-cleanup-failure")
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", fail_backup_cleanup)
+    run_oracle_stage(
+        config,
+        store,
+        condition="observed",
+        force=True,
+        runner=_OracleRunner(finding="semgrep"),
+        runtime_validator=lambda: None,
+    )
+
+    records = read_jsonl(output, OracleRecord, required=True, allow_empty=False)
+    assert records[0].security_label is SecurityLabel.INSECURE  # type: ignore[index,union-attr]
+    assert store.require_committed_output("run-oracle-observed", [output])
+    assert list(output.parent.glob(f".{output.name}.*.oracle.backup"))
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    run_oracle_stage(
+        config,
+        store,
+        condition="observed",
+        force=True,
+        runner=_OracleRunner(finding="semgrep"),
+        runtime_validator=lambda: None,
+    )
+    assert not list(output.parent.glob(f".{output.name}.*.oracle.backup"))
+
+
+def test_standalone_postcommit_cleanup_failure_keeps_new_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _config_value, store = _prepared_canonical_store(tmp_path)
+    input_path = store.path("generation", "observed_code.jsonl")
+    output = tmp_path / "standalone-oracle.jsonl"
+    kwargs = {
+        "input_path": input_path,
+        "output": output,
+        "policy_lock": POLICY_LOCK,
+        "semgrep": "semgrep-private",
+        "bandit": "bandit-private",
+        "runtime_validator": lambda: None,
+    }
+    run_standalone_oracle(force=False, runner=_OracleRunner(), **kwargs)
+    real_unlink = Path.unlink
+
+    def fail_backup_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if (
+            path.name.endswith(".output.backup")
+            and path.exists()
+            and path.stat().st_size > 0
+        ):
+            raise OSError("private-cleanup-failure")
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", fail_backup_cleanup)
+    run_standalone_oracle(
+        force=True,
+        runner=_OracleRunner(finding="semgrep"),
+        **kwargs,
+    )
+
+    records = read_jsonl(output, OracleRecord, required=True, allow_empty=False)
+    assert records[0].security_label is SecurityLabel.INSECURE  # type: ignore[index,union-attr]
+    assert list(output.parent.glob(f".{output.name}.*.output.backup"))
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    run_standalone_oracle(force=False, runner=_OracleRunner(), **kwargs)
+    assert not list(output.parent.glob(f".{output.name}.*.output.backup"))
+
+
+@pytest.mark.parametrize("control", [KeyboardInterrupt("precommit"), SystemExit("precommit")])
+def test_downstream_precommit_control_rolls_back_old_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    control: KeyboardInterrupt | SystemExit,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    outputs = [
+        store.path("discovery", "hypotheses_all.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
+    manifest = store.path(".stages", "discover.json")
+    previous = ([path.read_bytes() for path in outputs], manifest.read_bytes())
+
+    def interrupt_build(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise control
+
+    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", interrupt_build)
+
+    with pytest.raises(type(control)) as exc_info:
+        discover_stage(config, store, force=True)
+
+    assert exc_info.value is control
+    assert [path.read_bytes() for path in outputs] == previous[0]
+    assert manifest.read_bytes() == previous[1]
+
+
+@pytest.mark.parametrize("surface", ["pipeline", "standalone"])
+@pytest.mark.parametrize("control", [KeyboardInterrupt("cleanup"), SystemExit("cleanup")])
+def test_oracle_postcommit_control_keeps_new_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    control: KeyboardInterrupt | SystemExit,
+) -> None:
+    config, store = _prepared_canonical_store(tmp_path)
+    input_path = store.path("generation", "observed_code.jsonl")
+    real_unlink = Path.unlink
+
+    if surface == "pipeline":
+        output = store.path("oracle", "observed_oracle.jsonl")
+        run_oracle_stage(
+            config,
+            store,
+            condition="observed",
+            force=False,
+            runner=_OracleRunner(),
+            runtime_validator=lambda: None,
+        )
+        suffix = ".oracle.backup"
+    else:
+        output = tmp_path / "standalone-oracle.jsonl"
+        run_standalone_oracle(
+            input_path=input_path,
+            output=output,
+            policy_lock=POLICY_LOCK,
+            semgrep="semgrep-private",
+            bandit="bandit-private",
+            force=False,
+            runner=_OracleRunner(),
+            runtime_validator=lambda: None,
+        )
+        suffix = ".output.backup"
+
+    def interrupt_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if (
+            path.name.endswith(suffix)
+            and path.exists()
+            and path.stat().st_size > 0
+        ):
+            raise control
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", interrupt_cleanup)
+    with pytest.raises(type(control)) as exc_info:
+        if surface == "pipeline":
+            run_oracle_stage(
+                config,
+                store,
+                condition="observed",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+        else:
+            run_standalone_oracle(
+                input_path=input_path,
+                output=output,
+                policy_lock=POLICY_LOCK,
+                semgrep="semgrep-private",
+                bandit="bandit-private",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+
+    assert exc_info.value is control
+    records = read_jsonl(output, OracleRecord, required=True, allow_empty=False)
+    assert records[0].security_label is SecurityLabel.INSECURE  # type: ignore[index,union-attr]
+    if surface == "pipeline":
+        assert store.require_committed_output("run-oracle-observed", [output])
+    else:
+        seal = json.loads(output.with_name(output.name + ".sha256").read_text())
+        assert seal["output_sha256"] == sha256_path(output)

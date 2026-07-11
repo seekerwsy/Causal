@@ -69,6 +69,7 @@ MAX_GENERATION_JSONL_LINE_CHARS = 8 * 1024 * 1024
 MAX_GENERATION_JSONL_TOTAL_CHARS = 512 * 1024 * 1024
 MAX_PROVIDER_ATTEMPT_RECORDS = MAX_GENERATION_REQUESTS * 10
 MAX_ORACLE_RECORDS = MAX_GENERATION_REQUESTS
+TRANSACTION_CLEANUP_ATTEMPTS = 3
 
 
 def _load(config: Path, run_dir: Optional[Path]) -> tuple[AppConfig, RunStore]:
@@ -672,6 +673,38 @@ def _cleanup_failed_oracle_stage(store: RunStore, stage: str) -> None:
         pass
 
 
+def _cleanup_transaction_paths(
+    paths: Sequence[Path | None],
+) -> KeyboardInterrupt | SystemExit | None:
+    pending = list(dict.fromkeys(path for path in paths if path is not None))
+    control: KeyboardInterrupt | SystemExit | None = None
+    for _ in range(TRANSACTION_CLEANUP_ATTEMPTS):
+        remaining: list[Path] = []
+        for path in pending:
+            try:
+                path.unlink(missing_ok=True)
+            except (KeyboardInterrupt, SystemExit) as error:
+                if control is None:
+                    control = error
+                remaining.append(path)
+            except Exception:
+                remaining.append(path)
+        pending = remaining
+        if not pending:
+            break
+    return control
+
+
+def _stale_transaction_paths(path: Path, *suffixes: str) -> list[Path]:
+    stale: list[Path] = []
+    for suffix in suffixes:
+        try:
+            stale.extend(path.parent.glob(f".{path.name}.*{suffix}"))
+        except OSError:
+            pass
+    return stale
+
+
 def _read_jsonl_output(
     path: Path,
     model: type[_Record],
@@ -725,7 +758,23 @@ def _execute_jsonl_stage_transaction(
     backups: list[Path | None] = [None] * len(outputs)
     installed = [False] * len(outputs)
     backed_up = [False] * len(outputs)
+    commit_point = False
     try:
+        stale_paths: list[Path] = []
+        for output in outputs:
+            stale_paths.extend(
+                _stale_transaction_paths(
+                    output,
+                    ".stage.candidate",
+                    ".stage.backup",
+                )
+            )
+        stale_paths.extend(
+            _stale_transaction_paths(manifest_path, ".manifest.backup")
+        )
+        stale_control = _cleanup_transaction_paths(stale_paths)
+        if stale_control is not None:
+            raise stale_control
         if had_manifest:
             if manifest_path.is_symlink() or not manifest_path.is_file():
                 raise _oracle_stage_error(
@@ -800,46 +849,40 @@ def _execute_jsonl_stage_transaction(
                 )
         store.verify_sealed_outputs(stage, outputs)
         store.record_stage(stage, inputs, outputs)
+        commit_point = True
 
-        for index, backup in enumerate(backups):
-            if backed_up[index] and backup is not None:
-                backup.unlink(missing_ok=True)
-                backed_up[index] = False
-        if manifest_backup is not None:
-            manifest_backup.unlink(missing_ok=True)
-            manifest_backup = None
+        cleanup_control = _cleanup_transaction_paths([*backups, manifest_backup])
+        if cleanup_control is not None:
+            raise cleanup_control
     except BaseException:
-        for index in reversed(range(len(outputs))):
-            output = outputs[index]
-            if installed[index]:
-                try:
-                    output.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            backup = backups[index]
-            if backed_up[index] and backup is not None:
-                try:
-                    os.replace(backup, output)
-                    backed_up[index] = False
-                except OSError:
-                    pass
-        _cleanup_failed_oracle_stage(store, stage)
-        try:
-            if had_manifest and manifest_backup is not None:
-                os.replace(manifest_backup, manifest_path)
-                manifest_backup = None
-            elif not had_manifest:
-                manifest_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if not commit_point:
+            for index in reversed(range(len(outputs))):
+                output = outputs[index]
+                if installed[index]:
+                    try:
+                        output.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                backup = backups[index]
+                if backed_up[index] and backup is not None:
+                    try:
+                        os.replace(backup, output)
+                        backed_up[index] = False
+                    except OSError:
+                        pass
+            _cleanup_failed_oracle_stage(store, stage)
+            try:
+                if had_manifest and manifest_backup is not None:
+                    os.replace(manifest_backup, manifest_path)
+                    manifest_backup = None
+                elif not had_manifest:
+                    manifest_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise
     finally:
-        for transaction_path in [*candidates, *backups, manifest_backup]:
-            if transaction_path is not None:
-                try:
-                    transaction_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        if not commit_point:
+            _cleanup_transaction_paths([*candidates, *backups, manifest_backup])
 
 
 def plan_generation_stage(
@@ -1362,6 +1405,7 @@ def _run_oracle_stage(
     manifest_backup: Path | None = None
     manifest_transaction = False
     had_manifest = False
+    commit_point = False
     try:
         with _hold_committed_generation_code(
             store,
@@ -1383,6 +1427,17 @@ def _run_oracle_stage(
                 preserve_committed=True,
             ):
                 return
+            stale_paths = [
+                *_stale_transaction_paths(
+                    output,
+                    ".oracle.candidate",
+                    ".oracle.backup",
+                ),
+                *_stale_transaction_paths(manifest_path, ".manifest.backup"),
+            ]
+            stale_control = _cleanup_transaction_paths(stale_paths)
+            if stale_control is not None:
+                raise stale_control
             had_manifest = manifest_path.exists()
             if had_manifest:
                 if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -1505,27 +1560,28 @@ def _run_oracle_stage(
                 outputs,
                 policy_sha256=execution_policy.combined_sha256,
             )
-            if output_backed_up and backup_output is not None:
-                backup_output.unlink(missing_ok=True)
-                output_backed_up = False
-            if manifest_backup is not None:
-                manifest_backup.unlink(missing_ok=True)
-                manifest_backup = None
+            commit_point = True
             manifest_transaction = False
+            cleanup_control = _cleanup_transaction_paths(
+                [backup_output, manifest_backup]
+            )
+            if cleanup_control is not None:
+                raise cleanup_control
     except BaseException:
-        if output_installed:
-            try:
-                output.unlink(missing_ok=True)
-            except OSError:
-                pass
-        if output_backed_up and backup_output is not None:
-            try:
-                os.replace(backup_output, output)
-                output_backed_up = False
-            except OSError:
-                pass
-        _cleanup_failed_oracle_stage(store, stage)
-        if manifest_transaction:
+        if not commit_point:
+            if output_installed:
+                try:
+                    output.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            if output_backed_up and backup_output is not None:
+                try:
+                    os.replace(backup_output, output)
+                    output_backed_up = False
+                except OSError:
+                    pass
+            _cleanup_failed_oracle_stage(store, stage)
+        if not commit_point and manifest_transaction:
             try:
                 if had_manifest and manifest_backup is not None:
                     os.replace(manifest_backup, manifest_path)
@@ -1536,12 +1592,10 @@ def _run_oracle_stage(
                 pass
         raise
     finally:
-        for transaction_path in (candidate_output, backup_output, manifest_backup):
-            if transaction_path is not None:
-                try:
-                    transaction_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        if not commit_point:
+            _cleanup_transaction_paths(
+                [candidate_output, backup_output, manifest_backup]
+            )
         runner = None
         runtime_validator = None
 

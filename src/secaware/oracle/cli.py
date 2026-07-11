@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 import tempfile
 from typing import BinaryIO
@@ -28,6 +28,7 @@ MAX_ORACLE_RECORDS = 1_000_000
 MAX_JSONL_LINE_CHARS = 8 * 1024 * 1024
 MAX_JSONL_TOTAL_CHARS = 512 * 1024 * 1024
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+TRANSACTION_CLEANUP_ATTEMPTS = 3
 
 
 class StandaloneOracleSeal(SafeValidationMixin, VersionedModel):
@@ -128,6 +129,43 @@ def _temporary_path(output: Path, suffix: str) -> Path:
                 handle.close()
             except OSError:
                 pass
+
+
+def _cleanup_transaction_paths(
+    paths: Sequence[Path | None],
+) -> KeyboardInterrupt | SystemExit | None:
+    pending = list(dict.fromkeys(path for path in paths if path is not None))
+    control: KeyboardInterrupt | SystemExit | None = None
+    for _ in range(TRANSACTION_CLEANUP_ATTEMPTS):
+        remaining: list[Path] = []
+        for path in pending:
+            try:
+                path.unlink(missing_ok=True)
+            except (KeyboardInterrupt, SystemExit) as error:
+                if control is None:
+                    control = error
+                remaining.append(path)
+            except Exception:
+                remaining.append(path)
+        pending = remaining
+        if not pending:
+            break
+    return control
+
+
+def _stale_transaction_paths(output: Path) -> list[Path]:
+    stale: list[Path] = []
+    for suffix in (
+        ".oracle.candidate",
+        ".seal.candidate",
+        ".output.backup",
+        ".seal.backup",
+    ):
+        try:
+            stale.extend(output.parent.glob(f".{output.name}.*{suffix}"))
+        except OSError:
+            pass
+    return stale
 
 
 class _OutputLease:
@@ -357,6 +395,7 @@ def _run_standalone_oracle(
     candidate_seal: Path | None = None
     backup_output: Path | None = None
     backup_seal: Path | None = None
+    commit_point = False
     try:
         if input_path.is_symlink():
             raise _error(ErrorCode.CONTRACT, "standalone Oracle paths are invalid")
@@ -383,6 +422,11 @@ def _run_standalone_oracle(
             max_stderr_bytes=max_stderr_bytes,
         )
         with _OutputLease(lock_path):
+            stale_control = _cleanup_transaction_paths(
+                _stale_transaction_paths(output)
+            )
+            if stale_control is not None:
+                raise stale_control
             initial_policy = run_oracle_preflight(
                 config,
                 runner=runner,
@@ -464,11 +508,12 @@ def _run_standalone_oracle(
                 backup_output = None
                 backup_seal = None
                 raise
-            for backup in (backup_output, backup_seal):
-                if backup is not None:
-                    backup.unlink(missing_ok=True)
-            backup_output = None
-            backup_seal = None
+            commit_point = True
+            cleanup_control = _cleanup_transaction_paths(
+                [backup_output, backup_seal]
+            )
+            if cleanup_control is not None:
+                raise cleanup_control
     except (KeyboardInterrupt, SystemExit):
         raise
     except SecAwareError:
@@ -476,12 +521,10 @@ def _run_standalone_oracle(
     except Exception:
         raise _error(ErrorCode.CONTRACT, "standalone Oracle execution failed") from None
     finally:
-        for path in (candidate_output, candidate_seal, backup_output, backup_seal):
-            if path is not None:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        if not commit_point:
+            _cleanup_transaction_paths(
+                [candidate_output, candidate_seal, backup_output, backup_seal]
+            )
         runner = None
         validator = None
 
