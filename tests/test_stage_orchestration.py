@@ -82,6 +82,33 @@ def _hold_stage_lease_until_process_exit(
     release.wait(timeout=10)  # type: ignore[attr-defined]
 
 
+def _probe_held_committed_stage_from_process(
+    config_payload: dict[str, object],
+    input_path: str,
+    output_path: str,
+    sender: object,
+) -> None:
+    store = RunStore(AppConfig.model_validate(config_payload))
+    source = Path(input_path)
+    output = Path(output_path)
+    outcomes: list[int | str] = []
+    for operation in (
+        lambda: store.should_skip_stage("report", [source], [output], force=True),
+        lambda: store.invalidate_stage("report"),
+        lambda: store.require_committed_stage("report", [source], [output]),
+    ):
+        try:
+            operation()
+        except SecAwareError as error:
+            outcomes.append(int(error.code))
+        except BaseException as error:
+            outcomes.append(type(error).__name__)
+        else:
+            outcomes.append("success")
+    sender.send(outcomes)  # type: ignore[attr-defined]
+    sender.close()  # type: ignore[attr-defined]
+
+
 def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig, RunStore]:
     prompts_path = tmp_path / "source-prompts.jsonl"
     write_jsonl(
@@ -195,6 +222,178 @@ def test_committed_gates_return_defensive_output_hash_copies(tmp_path: Path) -> 
 
     assert store.require_committed_stage("report", [input_path], [output_path]) == expected
     assert store.require_committed_output("report", [output_path]) == expected
+
+
+def test_held_committed_stage_blocks_mutation_and_allows_holder_revalidation(
+    tmp_path: Path,
+) -> None:
+    holder = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(holder)
+    manifest_path = _record_report_stage(holder, input_path, [output_path])
+    manifest_bytes = manifest_path.read_bytes()
+    expected = {"reports/result.txt": sha256_path(output_path)}
+
+    with holder.hold_committed_stage("report", [input_path], [output_path]) as hashes:
+        hashes["reports/result.txt"] = "0" * 64
+        assert holder.require_committed_stage("report", [input_path], [output_path]) == expected
+        for operation in (
+            lambda: holder.should_skip_stage(
+                "report", [input_path], [output_path], force=True
+            ),
+            lambda: holder.invalidate_stage("report"),
+            lambda: holder.abort_stage("report"),
+            lambda: contender.should_skip_stage(
+                "report", [input_path], [output_path], force=True
+            ),
+            lambda: contender.invalidate_stage("report"),
+            lambda: contender.require_committed_stage(
+                "report", [input_path], [output_path]
+            ),
+        ):
+            with pytest.raises(SecAwareError) as exc_info:
+                operation()
+            assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert manifest_path.read_bytes() == manifest_bytes
+
+    assert contender.require_committed_stage("report", [input_path], [output_path]) == expected
+    assert manifest_path.read_bytes() == manifest_bytes
+
+
+def test_held_committed_stage_blocks_other_process_operations(tmp_path: Path) -> None:
+    holder = _store(tmp_path)
+    input_path, output_path = _input_and_output(holder)
+    manifest_path = _record_report_stage(holder, input_path, [output_path])
+    manifest_bytes = manifest_path.read_bytes()
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+
+    with holder.hold_committed_stage("report", [input_path], [output_path]):
+        process = context.Process(
+            target=_probe_held_committed_stage_from_process,
+            args=(
+                holder.config.model_dump(mode="python"),
+                str(input_path),
+                str(output_path),
+                sender,
+            ),
+        )
+        process.start()
+        sender.close()
+        try:
+            assert receiver.poll(10)
+            assert receiver.recv() == [
+                int(ErrorCode.MANIFEST_CONFLICT),
+                int(ErrorCode.MANIFEST_CONFLICT),
+                int(ErrorCode.MANIFEST_CONFLICT),
+            ]
+        finally:
+            process.join(timeout=10)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+            receiver.close()
+        assert process.exitcode == 0
+        assert manifest_path.read_bytes() == manifest_bytes
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_held_committed_stage_releases_on_control_flow_exit(
+    tmp_path: Path,
+    signal_type: type[BaseException],
+) -> None:
+    holder = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(holder)
+    _record_report_stage(holder, input_path, [output_path])
+    signal = signal_type("private-held-dependency-control-flow")
+
+    with pytest.raises(signal_type) as exc_info:
+        with holder.hold_committed_stage("report", [input_path], [output_path]):
+            raise signal
+
+    assert exc_info.value is signal
+    assert contender.require_committed_stage("report", [input_path], [output_path])
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_held_committed_stage_closes_handle_when_lock_acquisition_is_interrupted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    holder = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(holder)
+    _record_report_stage(holder, input_path, [output_path])
+    signal = signal_type("private-held-dependency-acquisition-control-flow")
+    real_lock = RunStore._lock_stage_handle
+    handles: list[object] = []
+
+    def interrupt_after_lock(handle: object) -> None:
+        real_lock(handle)  # type: ignore[arg-type]
+        handles.append(handle)
+        raise signal
+
+    monkeypatch.setattr(
+        RunStore,
+        "_lock_stage_handle",
+        staticmethod(interrupt_after_lock),
+    )
+    with pytest.raises(signal_type) as exc_info:
+        with holder.hold_committed_stage("report", [input_path], [output_path]):
+            pytest.fail("interrupted lease acquisition must not enter the context")
+
+    assert exc_info.value is signal
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert len(handles) == 1
+    handle = handles[0]
+    was_closed = handle.closed  # type: ignore[attr-defined]
+    monkeypatch.setattr(RunStore, "_lock_stage_handle", staticmethod(real_lock))
+    if not was_closed:
+        RunStore._release_stage_handle(handle)  # type: ignore[arg-type]
+    assert was_closed
+    assert contender.require_committed_stage("report", [input_path], [output_path])
+
+
+def test_run_store_close_releases_held_dependency_without_deleting_manifest(
+    tmp_path: Path,
+) -> None:
+    holder = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(holder)
+    manifest_path = _record_report_stage(holder, input_path, [output_path])
+    guard = holder.hold_committed_stage("report", [input_path], [output_path])
+    guard.__enter__()
+
+    holder.close()
+
+    assert manifest_path.exists()
+    assert contender.require_committed_stage("report", [input_path], [output_path])
+    guard.__exit__(None, None, None)
+
+
+def test_stale_held_context_cannot_release_a_reacquired_dependency_lease(
+    tmp_path: Path,
+) -> None:
+    holder = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(holder)
+    _record_report_stage(holder, input_path, [output_path])
+    stale_guard = holder.hold_committed_stage("report", [input_path], [output_path])
+    stale_guard.__enter__()
+    holder.close()
+    current_guard = holder.hold_committed_stage("report", [input_path], [output_path])
+    current_guard.__enter__()
+
+    stale_guard.__exit__(None, None, None)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        contender.require_committed_stage("report", [input_path], [output_path])
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    current_guard.__exit__(None, None, None)
+    assert contender.require_committed_stage("report", [input_path], [output_path])
 
 
 @pytest.mark.parametrize(

@@ -780,6 +780,82 @@ def test_two_run_stores_serialize_provider_generation_with_one_api_call(
     assert factory_calls == 1
 
 
+def test_provider_generation_holds_plan_authorization_through_every_api_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    ledger = store.path("generation", "observed_requests.jsonl")
+    original_bytes = ledger.read_bytes()
+    original_requests = read_jsonl(
+        ledger,
+        GenerationRequestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    changed_payload = config.model_dump(mode="python")
+    changed_payload["generation"]["models"] = ["unauthorized-replanned-model"]  # type: ignore[index]
+    changed_config = AppConfig.model_validate(changed_payload)
+    contender = RunStore(changed_config)
+    first_api = threading.Event()
+    replan_finished = threading.Event()
+    replan_errors: list[SecAwareError] = []
+
+    class ReplanBarrierProvider(FakeProvider):
+        def generate(
+            self,
+            request: GenerationRequestRecord,
+            system_template: str,
+        ) -> OpenAICompatibleGenerationResult:
+            if not self.calls:
+                first_api.set()
+                assert replan_finished.wait(timeout=5)
+            return super().generate(request, system_template)
+
+    provider = ReplanBarrierProvider()
+
+    def replan() -> None:
+        assert first_api.wait(timeout=5)
+        try:
+            plan_generation_stage(
+                changed_config,
+                contender,
+                condition="observed",
+                mode="provider",
+                force=True,
+            )
+        except SecAwareError as error:
+            replan_errors.append(error)
+        finally:
+            replan_finished.set()
+
+    thread = threading.Thread(target=replan)
+    thread.start()
+    monkeypatch.setattr(
+        cli_module,
+        "create_openai_compatible_provider",
+        lambda provider_config: provider,
+    )
+    try:
+        generate_provider_stage(config, store, condition="observed", force=False)
+    finally:
+        replan_finished.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(replan_errors) == 1
+    assert replan_errors[0].code is ErrorCode.MANIFEST_CONFLICT
+    assert len(provider.calls) == len(original_requests)
+    assert ledger.read_bytes() == original_bytes
+
+
 def test_alternate_producer_cannot_invalidate_active_provider_generation(
     tmp_path: Path,
 ) -> None:

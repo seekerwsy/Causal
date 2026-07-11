@@ -2,7 +2,8 @@ import hashlib
 import os
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
@@ -51,6 +52,11 @@ class _StageOutputSeal:
     output_sha256: tuple[tuple[str, str], ...]
 
 
+@dataclass(frozen=True)
+class _HeldDependencyLease:
+    handle: BinaryIO
+
+
 class RunStore:
     def __init__(self, config: AppConfig):
         self.config = config
@@ -58,6 +64,7 @@ class RunStore:
         self._pending_snapshots: dict[str, _StageSnapshot] = {}
         self._sealed_outputs: dict[str, _StageOutputSeal] = {}
         self._stage_leases: dict[str, BinaryIO] = {}
+        self._held_dependency_leases: dict[str, _HeldDependencyLease] = {}
         self._state_lock = threading.RLock()
 
     def path(self, *parts: str) -> Path:
@@ -224,6 +231,10 @@ class RunStore:
                     handle.close()
                 except OSError:
                     pass
+        except BaseException:
+            if handle is not None:
+                self._release_stage_handle(handle)
+            raise
         raise self._manifest_conflict(
             stage,
             "stage execution lease is unavailable",
@@ -236,8 +247,19 @@ class RunStore:
             return None
         return handle
 
+    def _owned_dependency_lease(self, stage: str) -> _HeldDependencyLease | None:
+        lease = self._held_dependency_leases.get(stage)
+        if lease is not None and lease.handle.closed:
+            if self._held_dependency_leases.get(stage) is lease:
+                self._held_dependency_leases.pop(stage, None)
+            return None
+        return lease
+
     def _acquire_stage_lease(self, stage: str) -> None:
-        if self._owned_stage_lease(stage) is not None:
+        if (
+            self._owned_stage_lease(stage) is not None
+            or self._owned_dependency_lease(stage) is not None
+        ):
             raise self._manifest_conflict(stage, "stage execution is already active")
         self._stage_leases[stage] = self._open_stage_lease(stage)
 
@@ -246,8 +268,23 @@ class RunStore:
         if handle is not None:
             self._release_stage_handle(handle)
 
+    def _release_dependency_lease(
+        self,
+        stage: str,
+        *,
+        expected: _HeldDependencyLease | None = None,
+    ) -> None:
+        lease = self._held_dependency_leases.get(stage)
+        if lease is None or (expected is not None and lease is not expected):
+            return
+        self._held_dependency_leases.pop(stage, None)
+        self._release_stage_handle(lease.handle)
+
     def _temporary_stage_lease(self, stage: str) -> BinaryIO | None:
-        if self._owned_stage_lease(stage) is not None:
+        if (
+            self._owned_stage_lease(stage) is not None
+            or self._owned_dependency_lease(stage) is not None
+        ):
             return None
         return self._open_stage_lease(stage)
 
@@ -264,6 +301,11 @@ class RunStore:
     def invalidate_stage(self, stage: str) -> None:
         """Remove any committed manifest and pending execution authorization."""
 
+        if self._owned_dependency_lease(stage) is not None:
+            raise self._manifest_conflict(
+                stage,
+                "held committed stage cannot be invalidated",
+            )
         owned = self._owned_stage_lease(stage) is not None
         temporary = None if owned else self._temporary_stage_lease(stage)
         try:
@@ -279,6 +321,17 @@ class RunStore:
         """Abort one stage execution and release its lease after invalidation."""
 
         self.invalidate_stage(stage)
+
+    @_synchronized
+    def close(self) -> None:
+        """Release every locally owned execution and dependency lease."""
+
+        self._pending_snapshots.clear()
+        self._sealed_outputs.clear()
+        for stage in list(self._stage_leases):
+            self._release_stage_lease(stage)
+        for stage in list(self._held_dependency_leases):
+            self._release_dependency_lease(stage)
 
     def _clear_stage_state(self, stage: str) -> None:
         self._pending_snapshots.pop(stage, None)
@@ -452,6 +505,37 @@ class RunStore:
 
         return self._require_committed(stage, output_paths, input_paths=None)
 
+    @contextmanager
+    def hold_committed_stage(
+        self,
+        stage: str,
+        input_paths: Sequence[str | Path],
+        output_paths: Sequence[str | Path],
+    ) -> Iterator[dict[str, str]]:
+        """Hold a committed producer lease while a dependent stage consumes it."""
+
+        with self._state_lock:
+            if (
+                self._owned_stage_lease(stage) is not None
+                or self._owned_dependency_lease(stage) is not None
+            ):
+                raise self._manifest_conflict(
+                    stage,
+                    "stage lease is already owned by this run store",
+                )
+            lease = _HeldDependencyLease(handle=self._open_stage_lease(stage))
+            self._held_dependency_leases[stage] = lease
+        try:
+            output_sha256 = self.require_committed_stage(
+                stage,
+                input_paths,
+                output_paths,
+            )
+            yield dict(output_sha256)
+        finally:
+            with self._state_lock:
+                self._release_dependency_lease(stage, expected=lease)
+
     @_synchronized
     def seal_stage_outputs(
         self,
@@ -529,6 +613,7 @@ class RunStore:
             stage in self._pending_snapshots
             or stage in self._sealed_outputs
             or self._owned_stage_lease(stage) is not None
+            or self._owned_dependency_lease(stage) is not None
         ):
             raise self._manifest_conflict(stage, "stage execution is already active")
         self._acquire_stage_lease(stage)

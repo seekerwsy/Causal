@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import os
 from pathlib import Path
 from typing import Literal, Optional, TypeVar, cast
@@ -440,6 +441,45 @@ def _require_committed_provider_generation_plan(
     )
 
 
+@contextmanager
+def _hold_committed_provider_generation_plan(
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    generation_stage: str,
+    ledger: Path,
+) -> Iterator[str]:
+    plan_stage = f"plan-provider-generation-{condition}"
+    plan_inputs = [store.path("inputs", "prompts.jsonl")]
+    if condition == "counterfactual":
+        plan_inputs.append(store.path("interventions", "interventions.jsonl"))
+    entered = False
+    try:
+        with store.hold_committed_stage(plan_stage, plan_inputs, [ledger]) as output_sha256:
+            entered = True
+            if len(output_sha256) != 1:
+                raise _generation_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    generation_stage,
+                    "provider generation request ledger authorization is invalid",
+                )
+            yield next(iter(output_sha256.values()))
+    except SecAwareError:
+        if entered:
+            raise
+        try:
+            store.invalidate_stage(generation_stage)
+        except SecAwareError:
+            message = "provider generation plan trust failure could not be cleaned up"
+        else:
+            message = "provider generation request ledger is not committed"
+        raise _generation_stage_error(
+            ErrorCode.MANIFEST_CONFLICT,
+            generation_stage,
+            message,
+        ) from None
+
+
 def _require_committed_generation_code(
     store: RunStore,
     *,
@@ -678,151 +718,154 @@ def generate_provider_stage(
             f"generate-{condition}",
         ),
     )
-    expected_ledger_sha256 = _require_committed_provider_generation_plan(
+    with _hold_committed_provider_generation_plan(
         store,
         condition=condition,
         generation_stage=stage,
         ledger=ledger,
-    )
-    inputs = [ledger]
-    if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
-        return
+    ) as expected_ledger_sha256:
+        inputs = [ledger]
+        if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
+            return
 
-    def execute() -> None:
-        requests: list[GenerationRequestRecord] = []
-        code_records: list[CanonicalGeneratedCodeRecord] = []
-        attempt_records: list[GenerationAttemptRecord] = []
-        request: GenerationRequestRecord | None = None
-        result: OpenAICompatibleGenerationResult | None = None
-        provider: object | None = None
-        failure: SecAwareError | None = None
-        try:
-            requests = _read_generation_records(
-                ledger,
-                GenerationRequestRecord,
-                stage=stage,
-                allow_empty=False,
-                max_records=MAX_GENERATION_REQUESTS,
-            )
-            if canonical_jsonl_sha256(requests, stage=stage) != expected_ledger_sha256:
-                raise _generation_stage_error(
-                    ErrorCode.MANIFEST_CONFLICT,
-                    stage,
-                    "provider generation request ledger changed after authorization",
+        def execute() -> None:
+            requests: list[GenerationRequestRecord] = []
+            code_records: list[CanonicalGeneratedCodeRecord] = []
+            attempt_records: list[GenerationAttemptRecord] = []
+            request: GenerationRequestRecord | None = None
+            result: OpenAICompatibleGenerationResult | None = None
+            provider: object | None = None
+            failure: SecAwareError | None = None
+            try:
+                requests = _read_generation_records(
+                    ledger,
+                    GenerationRequestRecord,
+                    stage=stage,
+                    allow_empty=False,
+                    max_records=MAX_GENERATION_REQUESTS,
                 )
-            current_ledger_sha256 = _require_committed_provider_generation_plan(
-                store,
-                condition=condition,
-                generation_stage=stage,
-                ledger=ledger,
-            )
-            if current_ledger_sha256 != expected_ledger_sha256:
-                raise _generation_stage_error(
-                    ErrorCode.MANIFEST_CONFLICT,
-                    stage,
-                    "provider generation request authorization changed during execution",
+                if canonical_jsonl_sha256(requests, stage=stage) != expected_ledger_sha256:
+                    raise _generation_stage_error(
+                        ErrorCode.MANIFEST_CONFLICT,
+                        stage,
+                        "provider generation request ledger changed after authorization",
+                    )
+                current_ledger_sha256 = _require_committed_provider_generation_plan(
+                    store,
+                    condition=condition,
+                    generation_stage=stage,
+                    ledger=ledger,
                 )
-            if any(
-                candidate.condition != condition
-                or candidate.endpoint_type != "chat_completions"
-                or candidate.endpoint_sha256 != sha256_text(provider_config.base_url)
-                for candidate in requests
-            ):
-                raise _generation_stage_error(
+                if current_ledger_sha256 != expected_ledger_sha256:
+                    raise _generation_stage_error(
+                        ErrorCode.MANIFEST_CONFLICT,
+                        stage,
+                        "provider generation request authorization changed during execution",
+                    )
+                if any(
+                    candidate.condition != condition
+                    or candidate.endpoint_type != "chat_completions"
+                    or candidate.endpoint_sha256 != sha256_text(provider_config.base_url)
+                    for candidate in requests
+                ):
+                    raise _generation_stage_error(
+                        ErrorCode.CONTRACT,
+                        stage,
+                        "provider generation request ledger is incompatible",
+                    )
+                provider = create_openai_compatible_provider(provider_config)
+                for request in requests:
+                    api_ledger_sha256 = _require_committed_provider_generation_plan(
+                        store,
+                        condition=condition,
+                        generation_stage=stage,
+                        ledger=ledger,
+                    )
+                    if api_ledger_sha256 != expected_ledger_sha256:
+                        raise _generation_stage_error(
+                            ErrorCode.MANIFEST_CONFLICT,
+                            stage,
+                            "provider generation request authorization changed before API use",
+                        )
+                    candidate = provider.generate(  # type: ignore[attr-defined]
+                        request,
+                        provider_config.system_template,
+                    )
+                    if type(candidate) is not OpenAICompatibleGenerationResult:
+                        raise _generation_stage_error(
+                            ErrorCode.CONTRACT,
+                            stage,
+                            "provider generation result failed validation",
+                        )
+                    result = candidate
+                    if any(
+                        attempt.request_id != request.request_id
+                        for attempt in result.attempts
+                    ):
+                        raise _generation_stage_error(
+                            ErrorCode.CONTRACT,
+                            stage,
+                            "provider generation attempt journal failed validation",
+                        )
+                    code_records.append(
+                        canonical_generated_code_from_request(
+                            request,
+                            result.code,
+                            result.provenance,
+                        )
+                    )
+                    attempt_records.extend(result.attempts)
+                _write_generation_records(
+                    code_output,
+                    cast(list[object], code_records),
+                    stage=stage,
+                )
+                _write_generation_records(
+                    attempts_output,
+                    cast(list[object], attempt_records),
+                    stage=stage,
+                )
+                store.seal_stage_outputs(stage, outputs)
+                _read_verified_generation_records(
+                    store,
+                    code_output,
+                    CanonicalGeneratedCodeRecord,
+                    code_records,
+                    outputs,
+                    stage=stage,
+                    max_records=MAX_GENERATION_REQUESTS,
+                    mismatch_message="provider generation code changed during publication",
+                )
+                _read_verified_generation_records(
+                    store,
+                    attempts_output,
+                    GenerationAttemptRecord,
+                    attempt_records,
+                    outputs,
+                    stage=stage,
+                    max_records=MAX_PROVIDER_ATTEMPT_RECORDS,
+                    mismatch_message="provider generation journal changed during publication",
+                )
+                store.record_stage(stage, inputs, outputs)
+            except SecAwareError as error:
+                failure = error
+            except Exception:
+                failure = _generation_stage_error(
                     ErrorCode.CONTRACT,
                     stage,
-                    "provider generation request ledger is incompatible",
+                    "provider generation failed validation",
                 )
-            provider = create_openai_compatible_provider(provider_config)
-            api_ledger_sha256 = _require_committed_provider_generation_plan(
-                store,
-                condition=condition,
-                generation_stage=stage,
-                ledger=ledger,
-            )
-            if api_ledger_sha256 != expected_ledger_sha256:
-                raise _generation_stage_error(
-                    ErrorCode.MANIFEST_CONFLICT,
-                    stage,
-                    "provider generation request authorization changed before API use",
-                )
-            for request in requests:
-                candidate = provider.generate(  # type: ignore[attr-defined]
-                    request,
-                    provider_config.system_template,
-                )
-                if type(candidate) is not OpenAICompatibleGenerationResult:
-                    raise _generation_stage_error(
-                        ErrorCode.CONTRACT,
-                        stage,
-                        "provider generation result failed validation",
-                    )
-                result = candidate
-                if any(attempt.request_id != request.request_id for attempt in result.attempts):
-                    raise _generation_stage_error(
-                        ErrorCode.CONTRACT,
-                        stage,
-                        "provider generation attempt journal failed validation",
-                    )
-                code_records.append(
-                    canonical_generated_code_from_request(
-                        request,
-                        result.code,
-                        result.provenance,
-                    )
-                )
-                attempt_records.extend(result.attempts)
-            _write_generation_records(
-                code_output,
-                cast(list[object], code_records),
-                stage=stage,
-            )
-            _write_generation_records(
-                attempts_output,
-                cast(list[object], attempt_records),
-                stage=stage,
-            )
-            store.seal_stage_outputs(stage, outputs)
-            _read_verified_generation_records(
-                store,
-                code_output,
-                CanonicalGeneratedCodeRecord,
-                code_records,
-                outputs,
-                stage=stage,
-                max_records=MAX_GENERATION_REQUESTS,
-                mismatch_message="provider generation code changed during publication",
-            )
-            _read_verified_generation_records(
-                store,
-                attempts_output,
-                GenerationAttemptRecord,
-                attempt_records,
-                outputs,
-                stage=stage,
-                max_records=MAX_PROVIDER_ATTEMPT_RECORDS,
-                mismatch_message="provider generation journal changed during publication",
-            )
-            store.record_stage(stage, inputs, outputs)
-        except SecAwareError as error:
-            failure = error
-        except Exception:
-            failure = _generation_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "provider generation failed validation",
-            )
-        finally:
-            requests.clear()
-            code_records.clear()
-            attempt_records.clear()
-            request = None
-            result = None
-            provider = None
-        if failure is not None:
-            raise failure from None
+            finally:
+                requests.clear()
+                code_records.clear()
+                attempt_records.clear()
+                request = None
+                result = None
+                provider = None
+            if failure is not None:
+                raise failure from None
 
-    _execute_generation_stage(store, stage, execute)
+        _execute_generation_stage(store, stage, execute)
 
 
 def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:

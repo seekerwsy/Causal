@@ -939,7 +939,13 @@ def test_factory_safely_wraps_final_provider_constructor_failure(
     )
 
 
-def test_factory_maps_missing_key_to_safe_auth_error() -> None:
+def test_factory_maps_missing_key_to_safe_auth_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_openai = ModuleType("openai")
+    fake_openai.OpenAI = lambda **_kwargs: object()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
     with pytest.raises(SecAwareError) as exc_info:
         create_openai_compatible_provider(_config(), environ={})
 
@@ -1012,6 +1018,127 @@ def test_factory_does_not_retain_secrets_when_sdk_client_creation_fails(
     retained = _secaware_traceback_locals(exc_info.value)
     for value in (_API_KEY, _BASE_URL, _ENV_NAME, "hostile-sdk-constructor-secret"):
         assert value not in retained
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("boundary", ["import", "environment", "client", "provider"])
+def test_factory_control_flow_signals_clear_frames_and_import_precedes_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+    boundary: str,
+) -> None:
+    signal = signal_type(f"factory-{boundary}-control-flow")
+    environment_sentinel = f"{boundary}-environment-frame-sentinel"
+    client_sentinel = f"{boundary}-client-frame-sentinel"
+    sleeper_sentinel = f"{boundary}-sleeper-frame-sentinel"
+    environment_accesses = 0
+    client_factory_calls = 0
+    provider_factory_calls = 0
+
+    class HostileEnvironment:
+        def __getitem__(self, key: str) -> str:
+            nonlocal environment_accesses
+            assert key == _ENV_NAME
+            environment_accesses += 1
+            if boundary == "environment":
+                raise signal
+            return _API_KEY
+
+        def __repr__(self) -> str:
+            return f"{environment_sentinel}:{_API_KEY}:{_BASE_URL}"
+
+    class ClientSentinel:
+        def __repr__(self) -> str:
+            return f"{client_sentinel}:{_API_KEY}:{_BASE_URL}"
+
+    class SleeperSentinel:
+        def __call__(self, delay: float) -> None:
+            del delay
+
+        def __repr__(self) -> str:
+            return f"{sleeper_sentinel}:{_API_KEY}:{_BASE_URL}"
+
+    fake_openai = ModuleType("openai")
+    client = ClientSentinel()
+
+    def sdk_factory(**kwargs: object) -> object:
+        nonlocal client_factory_calls
+        client_factory_calls += 1
+        if boundary == "client":
+            raise signal
+        assert kwargs["api_key"] == _API_KEY
+        return client
+
+    if boundary == "import":
+        def interrupt_import(name: str) -> object:
+            if name == "OpenAI":
+                raise signal
+            raise AttributeError(name)
+
+        fake_openai.__getattr__ = interrupt_import  # type: ignore[attr-defined]
+    else:
+        fake_openai.OpenAI = sdk_factory  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    real_provider = provider_module.OpenAICompatibleProvider
+
+    def provider_factory(*args: object, **kwargs: object) -> object:
+        nonlocal provider_factory_calls
+        provider_factory_calls += 1
+        if boundary == "provider":
+            raise signal
+        return real_provider(*args, **kwargs)
+
+    monkeypatch.setattr(provider_module, "OpenAICompatibleProvider", provider_factory)
+    config = _config()
+    environment = HostileEnvironment()
+    sleeper = SleeperSentinel()
+
+    with pytest.raises(signal_type) as exc_info:
+        create_openai_compatible_provider(
+            config,
+            environ=environment,  # type: ignore[arg-type]
+            sleeper=sleeper,
+        )
+
+    error = exc_info.value
+    assert error is signal
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    if boundary == "import":
+        assert environment_accesses == 0
+        assert client_factory_calls == 0
+        assert provider_factory_calls == 0
+    elif boundary == "environment":
+        assert environment_accesses == 1
+        assert client_factory_calls == 0
+        assert provider_factory_calls == 0
+    elif boundary == "client":
+        assert environment_accesses == 1
+        assert client_factory_calls == 1
+        assert provider_factory_calls == 0
+    else:
+        assert environment_accesses == 1
+        assert client_factory_calls == 1
+        assert provider_factory_calls == 1
+    forbidden_ids = {id(config), id(environment), id(client), id(sleeper)}
+    frames = _secaware_traceback_frames(error)
+    assert any(name == "create_openai_compatible_provider" for name, _ in frames)
+    for _, frame_locals in frames:
+        retained = repr(frame_locals)
+        assert all(id(value) not in forbidden_ids for value in frame_locals.values())
+        assert all(
+            type(value) is not OpenAICompatibleConfig for value in frame_locals.values()
+        )
+        for secret in (
+            _API_KEY,
+            _BASE_URL,
+            _ENV_NAME,
+            environment_sentinel,
+            client_sentinel,
+            sleeper_sentinel,
+        ):
+            assert secret not in retained
 
 
 @pytest.mark.parametrize(

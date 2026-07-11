@@ -527,118 +527,111 @@ def create_openai_compatible_provider(
 ) -> OpenAICompatibleProvider:
     trusted: OpenAICompatibleConfig | None = None
     config_error: SecAwareError | None = None
-    try:
-        trusted = _trusted_config(config)
-    except SecAwareError as error:
-        config_error = error
-    if config_error is not None or trusted is None:
-        config = None  # type: ignore[assignment]
-        environ = None
-        if config_error is not None:
-            raise config_error
-        raise _provider_error(
-            ErrorCode.CONFIG,
-            "OpenAI-compatible provider configuration is unavailable",
-        )
-    if not callable(sleeper):
-        factory_error = _provider_error(
-            ErrorCode.CONFIG,
-            "OpenAI-compatible provider configuration is unavailable",
-        )
-        config = None  # type: ignore[assignment]
-        trusted = None
-        environ = None
-        sleeper = None  # type: ignore[assignment]
-        raise factory_error
-    environment = os.environ if environ is None else environ
+    factory_error: SecAwareError | None = None
+    sdk_factory: Callable[..., object] | None = None
+    openai_factory: Callable[..., object] | None = None
+    environment: Mapping[str, str] | None = None
     api_key: str | None = None
     candidate: object = None
-    try:
-        candidate = environment[trusted.api_key_env]
-        if type(candidate) is str and candidate.strip():
-            api_key = candidate
-    except Exception:
-        pass
-    candidate = None
-    if api_key is None:
-        config = None  # type: ignore[assignment]
-        trusted = None  # type: ignore[assignment]
-        environment = None  # type: ignore[assignment]
-        environ = None
-        raise _provider_error(
-            ErrorCode.API_AUTH,
-            "provider authentication is unavailable",
-        ) from None
-
-    openai_factory: Callable[..., object] | None = None
-    try:
-        from openai import OpenAI
-
-        openai_factory = OpenAI
-    except Exception:
-        pass
-    if openai_factory is None:
-        api_key = ""
-        config = None  # type: ignore[assignment]
-        trusted = None  # type: ignore[assignment]
-        environment = None  # type: ignore[assignment]
-        environ = None
-        raise _provider_error(
-            ErrorCode.CONFIG,
-            "OpenAI-compatible provider SDK is unavailable",
-        ) from None
-
     client: object | None = None
     client_creation_failed = False
-    try:
-        client = openai_factory(
-            api_key=api_key,
-            base_url=trusted.base_url,
-            timeout=trusted.timeout_seconds,
-            max_retries=0,
-        )
-    except Exception:
-        client_creation_failed = True
-    finally:
-        api_key = ""
-        candidate = None
-        environment = None  # type: ignore[assignment]
-        environ = None
-        config = None  # type: ignore[assignment]
-    if client_creation_failed or client is None:
-        trusted = None  # type: ignore[assignment]
-        raise _provider_error(
-            ErrorCode.CONFIG,
-            "OpenAI-compatible provider client could not be created",
-        ) from None
-
     provider: OpenAICompatibleProvider | None = None
     provider_error: SecAwareError | None = None
     try:
-        provider = OpenAICompatibleProvider(
-            trusted,
-            client=client,
-            sleeper=sleeper,
-        )
-    except SecAwareError as error:
-        provider_error = error
-    except Exception:
-        provider_error = _provider_error(
-            ErrorCode.CONFIG,
-            "OpenAI-compatible provider could not be created",
-        )
-    if provider_error is not None or provider is None:
-        if provider_error is None:
+        try:
+            trusted = _trusted_config(config)
+        except SecAwareError as error:
+            config_error = error
+        if config_error is not None or trusted is None:
+            if config_error is not None:
+                raise config_error
+            raise _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider configuration is unavailable",
+            )
+        if not callable(sleeper):
+            factory_error = _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider configuration is unavailable",
+            )
+            raise factory_error
+
+        try:
+            from openai import OpenAI as sdk_factory
+        except Exception:
+            pass
+        openai_factory = sdk_factory
+        if openai_factory is None:
+            raise _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider SDK is unavailable",
+            ) from None
+
+        environment = os.environ if environ is None else environ
+        try:
+            candidate = environment[trusted.api_key_env]
+            if type(candidate) is str and candidate.strip():
+                api_key = candidate
+        except Exception:
+            pass
+        candidate = None
+        if api_key is None:
+            raise _provider_error(
+                ErrorCode.API_AUTH,
+                "provider authentication is unavailable",
+            ) from None
+
+        try:
+            client = openai_factory(
+                api_key=api_key,
+                base_url=trusted.base_url,
+                timeout=trusted.timeout_seconds,
+                max_retries=0,
+            )
+        except Exception:
+            client_creation_failed = True
+        if client_creation_failed or client is None:
+            raise _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider client could not be created",
+            ) from None
+
+        try:
+            provider = OpenAICompatibleProvider(
+                trusted,
+                client=client,
+                sleeper=sleeper,
+            )
+        except SecAwareError as error:
+            provider_error = error
+        except Exception:
             provider_error = _provider_error(
                 ErrorCode.CONFIG,
                 "OpenAI-compatible provider could not be created",
             )
+        if provider_error is not None or provider is None:
+            if provider_error is None:
+                provider_error = _provider_error(
+                    ErrorCode.CONFIG,
+                    "OpenAI-compatible provider could not be created",
+                )
+            raise provider_error
+        return provider
+    finally:
+        api_key = ""
+        candidate = None
+        environment = None
+        environ = None
+        config = None  # type: ignore[assignment]
         trusted = None  # type: ignore[assignment]
         client = None
         sleeper = None  # type: ignore[assignment]
+        sdk_factory = None
         openai_factory = None
-        raise provider_error
-    return provider
+        provider = None
+        config_error = None
+        factory_error = None
+        provider_error = None
 
 
 __all__ = [
