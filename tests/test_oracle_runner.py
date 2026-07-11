@@ -220,6 +220,10 @@ def test_windows_runtime_probe_failure_reaps_helper_without_analyzer_marker(
         def close(self) -> None:
             cleanup.append("job")
 
+    class ProbeLease:
+        def close(self) -> None:
+            cleanup.append("lease")
+
     process = ProbeProcess()
     job = ProbeJob()
     monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
@@ -246,6 +250,11 @@ def test_windows_runtime_probe_failure_reaps_helper_without_analyzer_marker(
         process.returncode = 1
 
     monkeypatch.setattr(runner_module, "_popen_process", launch)
+    monkeypatch.setattr(
+        runner_module,
+        "_open_windows_path_lease",
+        lambda path, directory: ProbeLease(),
+    )
     monkeypatch.setattr(runner_module, "_create_windows_job", assign)
     monkeypatch.setattr(runner_module, "_resume_windows_process", resume)
     monkeypatch.setattr(runner_module, "_terminate_and_wait", terminate)
@@ -257,6 +266,7 @@ def test_windows_runtime_probe_failure_reaps_helper_without_analyzer_marker(
     assert process.returncode == 1
     assert not analyzer_marker.exists()
     assert any(isinstance(item, tuple) and item[0] is process for item in cleanup)
+    assert "lease" in cleanup
 
 
 def test_windows_runtime_probe_preserves_keyboard_interrupt_and_scrubs_resources(
@@ -281,8 +291,16 @@ def test_windows_runtime_probe_preserves_keyboard_interrupt_and_scrubs_resources
         def close(self) -> None:
             return None
 
+    class ProbeLease:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
     process = ProbeProcess()
     job = ProbeJob()
+    lease = ProbeLease()
     monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
 
     def launch(owner: object, argv: tuple[str, ...], **kwargs: object) -> None:
@@ -296,6 +314,11 @@ def test_windows_runtime_probe_preserves_keyboard_interrupt_and_scrubs_resources
         raise OSError("private-cleanup-failure")
 
     monkeypatch.setattr(runner_module, "_popen_process", launch)
+    monkeypatch.setattr(
+        runner_module,
+        "_open_windows_path_lease",
+        lambda path, directory: lease,
+    )
     monkeypatch.setattr(runner_module, "_create_windows_job", lambda candidate: job)
     monkeypatch.setattr(runner_module, "_resume_windows_process", lambda candidate: None)
     monkeypatch.setattr(runner_module, "_terminate_and_wait", terminate)
@@ -305,7 +328,8 @@ def test_windows_runtime_probe_preserves_keyboard_interrupt_and_scrubs_resources
 
     assert exc_info.value is signal
     assert process.returncode == 1
-    _assert_runner_frames_release_objects(signal, process, job)
+    assert lease.closed
+    _assert_runner_frames_release_objects(signal, process, job, lease)
 
 
 def test_linux_runtime_probe_source_requires_sealed_memfd_and_proc_fd() -> None:
