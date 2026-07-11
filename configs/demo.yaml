@@ -37,11 +37,12 @@ generation:
 
 oracle:
   language: python
-  policy_name: python_static_v0
-  use_lightweight_rules: true
-  use_bandit: false
-  use_semgrep: false
-  fail_on_parse_error: true
+  policy_lock_path: policies/oracle/python/policy.lock.json
+  semgrep_executable: semgrep
+  bandit_executable: bandit
+  timeout_seconds: 120.0
+  max_stdout_bytes: 67108864
+  max_stderr_bytes: 4194304
 
 analysis:
   bootstrap_samples: 200

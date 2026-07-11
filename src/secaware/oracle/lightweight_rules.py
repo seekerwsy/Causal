@@ -1,4 +1,4 @@
-from secaware.schema.results import FindingRecord
+from secaware.schema.results import LegacyFindingRecord as FindingRecord
 from secaware.schema.tsg import TSGRecord
 
 

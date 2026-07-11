@@ -158,13 +158,63 @@ class GenerationConfig(StrictModel):
     openai_compatible: OpenAICompatibleConfig | None = None
 
 
-class OracleConfig(StrictModel):
-    language: str = "python"
-    policy_name: str = "python_static_v0"
-    use_lightweight_rules: bool = True
-    use_bandit: bool = False
-    use_semgrep: bool = False
-    fail_on_parse_error: bool = True
+class OracleConfig(SafeValidationMixin, StrictModel):
+    _safe_validation_message = "oracle configuration failed validation"
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    language: Literal["python"] = "python"
+    policy_lock_path: str = Field(
+        default="policies/oracle/python/policy.lock.json",
+        min_length=1,
+        max_length=4096,
+        repr=False,
+    )
+    semgrep_executable: str = Field(
+        default="semgrep",
+        min_length=1,
+        max_length=1024,
+        repr=False,
+    )
+    bandit_executable: str = Field(
+        default="bandit",
+        min_length=1,
+        max_length=1024,
+        repr=False,
+    )
+    timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
+    max_stdout_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1024,
+        le=256 * 1024 * 1024,
+    )
+    max_stderr_bytes: int = Field(
+        default=4 * 1024 * 1024,
+        ge=1024,
+        le=64 * 1024 * 1024,
+    )
+
+    @field_validator(
+        "policy_lock_path",
+        "semgrep_executable",
+        "bandit_executable",
+    )
+    @classmethod
+    def validate_nonempty_path(cls, value: str) -> str:
+        try:
+            if value != value.strip() or not value.strip():
+                raise ValueError
+            if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+                raise ValueError
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+        return value
 
 
 class AnalysisConfig(StrictModel):

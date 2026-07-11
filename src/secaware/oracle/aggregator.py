@@ -3,7 +3,7 @@ from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.oracle.functionality import evaluate_functionality
 from secaware.oracle.lightweight_rules import findings_from_tsg
 from secaware.schema.records import GeneratedCodeRecord, revalidate_generated_code_record
-from secaware.schema.results import OracleRecord, SecurityLabel
+from secaware.schema.results import LegacyOracleRecord, SecurityLabel
 
 
 def _validated_code_input(value: object) -> GeneratedCodeRecord:
@@ -18,7 +18,7 @@ def _validated_code_input(value: object) -> GeneratedCodeRecord:
     ) from None
 
 
-def run_oracle(code: GeneratedCodeRecord) -> OracleRecord:
+def run_oracle(code: GeneratedCodeRecord) -> LegacyOracleRecord:
     code = _validated_code_input(code)
     tsg = extract_code_tsg(code)
     functionality = evaluate_functionality(code.code)
@@ -35,7 +35,7 @@ def run_oracle(code: GeneratedCodeRecord) -> OracleRecord:
         label = SecurityLabel.SECURE
         severity = "none"
 
-    return OracleRecord(
+    return LegacyOracleRecord(
         code_id=code.code_id,
         parse_ok=parse_ok,
         functional_ok=bool(functionality["functional_ok"]),

@@ -50,7 +50,7 @@ from secaware.schema.records import (
     GeneratedCodeRecord,
     PromptRecord,
 )
-from secaware.schema.results import EffectRecord, OracleRecord, PairResult
+from secaware.schema.results import EffectRecord, LegacyOracleRecord, PairResult
 from secaware.schema.tsg import TSGRecord
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
@@ -980,8 +980,6 @@ def run_oracle_stage(
     condition: str,
     force: bool,
 ) -> None:
-    if not config.oracle.use_lightweight_rules:
-        raise typer.BadParameter("The engineering v0 requires oracle.use_lightweight_rules=true.")
     stage = f"run-oracle-{condition}"
     source_name = "observed_code.jsonl" if condition == "observed" else "counterfactual_code.jsonl"
     output_name = "observed_oracle.jsonl" if condition == "observed" else "counterfactual_oracle.jsonl"
@@ -1027,7 +1025,9 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     ]
     oracles = [
         record
-        for record in read_jsonl(store.path("oracle", "observed_oracle.jsonl"), OracleRecord)  # type: ignore[arg-type]
+        for record in read_jsonl(
+            store.path("oracle", "observed_oracle.jsonl"), LegacyOracleRecord
+        )  # type: ignore[arg-type]
         if record.prompt_id in {prompt.prompt_id for prompt in prompts}
     ]
     all_h, selected_h = discover_hypotheses(
@@ -1186,8 +1186,12 @@ def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     interventions = read_jsonl(
         store.path("interventions", "interventions.jsonl"), InterventionRecord
     )
-    observed = read_jsonl(store.path("oracle", "observed_oracle.jsonl"), OracleRecord)
-    counterfactual = read_jsonl(store.path("oracle", "counterfactual_oracle.jsonl"), OracleRecord)
+    observed = read_jsonl(
+        store.path("oracle", "observed_oracle.jsonl"), LegacyOracleRecord
+    )
+    counterfactual = read_jsonl(
+        store.path("oracle", "counterfactual_oracle.jsonl"), LegacyOracleRecord
+    )
     pairs = build_pairs(interventions, observed, counterfactual)  # type: ignore[arg-type]
     effects = estimate_effects(
         pairs,

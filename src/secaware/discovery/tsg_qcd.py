@@ -9,7 +9,7 @@ from secaware.discovery.scoring import (
 )
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.records import PromptRecord
-from secaware.schema.results import OracleRecord
+from secaware.schema.results import LegacyOracleRecord
 from secaware.schema.tsg import TSGRecord
 
 
@@ -22,8 +22,10 @@ DEFAULT_WEIGHTS = {
 }
 
 
-def _oracle_by_prompt(records: list[OracleRecord]) -> dict[str, list[OracleRecord]]:
-    grouped: dict[str, list[OracleRecord]] = defaultdict(list)
+def _oracle_by_prompt(
+    records: list[LegacyOracleRecord],
+) -> dict[str, list[LegacyOracleRecord]]:
+    grouped: dict[str, list[LegacyOracleRecord]] = defaultdict(list)
     for record in records:
         if record.prompt_id:
             grouped[record.prompt_id].append(record)
@@ -46,7 +48,7 @@ def discover_hypotheses(
     prompts: list[PromptRecord],
     prompt_tsgs: list[TSGRecord],
     code_tsgs: list[TSGRecord],
-    oracle_records: list[OracleRecord],
+    oracle_records: list[LegacyOracleRecord],
     *,
     min_support_total: int = 4,
     min_support_each_side: int = 1,

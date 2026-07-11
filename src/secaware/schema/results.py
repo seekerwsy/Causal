@@ -1,16 +1,13 @@
-from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class SecurityLabel(str, Enum):
-    SECURE = "secure"
-    INSECURE = "insecure"
-    UNKNOWN = "unknown"
+from secaware.schema.oracle import FindingRecord as FindingRecord
+from secaware.schema.oracle import OracleRecord as OracleRecord
+from secaware.schema.oracle import SecurityLabel as SecurityLabel
 
 
-class FindingRecord(BaseModel):
+class LegacyFindingRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rule_id: str
@@ -21,7 +18,7 @@ class FindingRecord(BaseModel):
     severity: str
 
 
-class OracleRecord(BaseModel):
+class LegacyOracleRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     code_id: str
@@ -29,7 +26,7 @@ class OracleRecord(BaseModel):
     functional_ok: bool
     security_label: SecurityLabel
     severity: str
-    findings: list[FindingRecord] = Field(default_factory=list)
+    findings: list[LegacyFindingRecord] = Field(default_factory=list)
     prompt_id: str | None = None
     condition: str | None = None
     model_id: str | None = None

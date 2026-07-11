@@ -3,11 +3,11 @@ from collections import Counter, defaultdict
 
 from secaware.discovery.candidate_enum import FactorSpec
 from secaware.schema.records import PromptRecord
-from secaware.schema.results import OracleRecord, SecurityLabel
+from secaware.schema.results import LegacyOracleRecord, SecurityLabel
 from secaware.schema.tsg import TSGRecord
 
 
-def _risk_rate(records: list[OracleRecord]) -> float:
+def _risk_rate(records: list[LegacyOracleRecord]) -> float:
     known = [record for record in records if record.security_label != SecurityLabel.UNKNOWN]
     if not known:
         return 0.0
@@ -18,7 +18,7 @@ def _risk_rate(records: list[OracleRecord]) -> float:
 def association_score(
     spec: FactorSpec,
     prompt_tsgs: list[TSGRecord],
-    oracle_by_prompt: dict[str, list[OracleRecord]],
+    oracle_by_prompt: dict[str, list[LegacyOracleRecord]],
 ) -> tuple[float, float, dict[str, int]]:
     present_ids = [tsg.prompt_id for tsg in prompt_tsgs if bool(tsg.features.get(spec.prompt_factor))]
     absent_ids = [tsg.prompt_id for tsg in prompt_tsgs if not bool(tsg.features.get(spec.prompt_factor))]
@@ -43,7 +43,7 @@ def path_score(
     spec: FactorSpec,
     prompt_tsgs: list[TSGRecord],
     code_tsg_by_prompt: dict[str, list[TSGRecord]],
-    oracle_by_prompt: dict[str, list[OracleRecord]],
+    oracle_by_prompt: dict[str, list[LegacyOracleRecord]],
 ) -> float:
     absent = [tsg for tsg in prompt_tsgs if not bool(tsg.features.get(spec.prompt_factor))]
     if not absent:
@@ -71,7 +71,7 @@ def stability_score(
     spec: FactorSpec,
     prompts: list[PromptRecord],
     prompt_tsg_by_id: dict[str, TSGRecord],
-    oracle_by_prompt: dict[str, list[OracleRecord]],
+    oracle_by_prompt: dict[str, list[LegacyOracleRecord]],
 ) -> float:
     groups: dict[str, list[TSGRecord]] = defaultdict(list)
     for prompt in prompts:
@@ -100,9 +100,12 @@ def nuisance_penalty(
     else:
         mean_v = sum(values) / len(values)
         mean_l = sum(lengths) / len(lengths)
-        cov = sum((v - mean_v) * (l - mean_l) for v, l in zip(values, lengths, strict=True))
+        cov = sum(
+            (value - mean_v) * (length - mean_l)
+            for value, length in zip(values, lengths, strict=True)
+        )
         var_v = sum((v - mean_v) ** 2 for v in values)
-        var_l = sum((l - mean_l) ** 2 for l in lengths)
+        var_l = sum((length - mean_l) ** 2 for length in lengths)
         length_corr_abs = abs(cov / math.sqrt(var_v * var_l)) if var_v and var_l else 0.0
     family_counts = Counter(p.task_family for p, value in zip(prompts, values, strict=True) if value)
     present_count = sum(family_counts.values())
