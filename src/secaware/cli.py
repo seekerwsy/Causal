@@ -795,6 +795,7 @@ def _execute_jsonl_stage_transaction(
 
     candidates: list[Path | None] = [None] * len(outputs)
     transaction: ArtifactTransaction | None = None
+    stage_commit_lease = None
     commit_point = False
     try:
         try:
@@ -856,7 +857,8 @@ def _execute_jsonl_stage_transaction(
                     "stage artifact failed canonical readback",
                 )
         store.verify_sealed_outputs(stage, outputs)
-        store.record_stage(stage, inputs, outputs)
+        stage_commit_lease = store.begin_stage_commit(stage)
+        store.record_stage(stage, inputs, outputs, lease=stage_commit_lease)
         try:
             transaction.mark_postcommit()
         except (KeyboardInterrupt, SystemExit):
@@ -868,6 +870,8 @@ def _execute_jsonl_stage_transaction(
                 "stage commit verification failed",
             ) from None
         commit_point = True
+        store.finalize_stage_commit(stage_commit_lease)
+        stage_commit_lease = None
         try:
             cleanup_committed_transaction(transaction)
         except (KeyboardInterrupt, SystemExit):
@@ -1430,6 +1434,7 @@ def _run_oracle_stage(
             "Oracle output transaction is invalid",
         ) from None
     transaction: ArtifactTransaction | None = None
+    stage_commit_lease = None
     commit_point = False
 
     def recover_or_cleanup_transaction() -> None:
@@ -1567,11 +1572,13 @@ def _run_oracle_stage(
                     "oracle artifact failed canonical readback",
                 )
             store.verify_sealed_outputs(stage, outputs)
+            stage_commit_lease = store.begin_stage_commit(stage)
             store.record_stage(
                 stage,
                 inputs,
                 outputs,
                 policy_sha256=execution_policy.combined_sha256,
+                lease=stage_commit_lease,
             )
             try:
                 transaction.mark_postcommit()
@@ -1584,6 +1591,8 @@ def _run_oracle_stage(
                     "Oracle stage commit verification failed",
                 ) from None
             commit_point = True
+            store.finalize_stage_commit(stage_commit_lease)
+            stage_commit_lease = None
             try:
                 cleanup_committed_transaction(transaction)
             except (KeyboardInterrupt, SystemExit):

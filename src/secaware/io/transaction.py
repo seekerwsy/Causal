@@ -550,10 +550,13 @@ def _cleanup_postcommit(
         return
     try:
         journal_path.unlink(missing_ok=True)
-    except (KeyboardInterrupt, SystemExit):
-        raise
+    except (KeyboardInterrupt, SystemExit) as error:
+        if control is None:
+            control = error
     except Exception:
-        return
+        pass
+    if control is not None:
+        raise control
 
 
 def resolve_pending_transaction(

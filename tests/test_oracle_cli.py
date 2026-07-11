@@ -1219,6 +1219,219 @@ def test_discover_holds_committed_oracle_snapshot_against_force_rerun(
     )
 
 
+def test_oracle_mark_failure_keeps_lease_until_old_commit_is_restored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, owner = _prepared_observed_pipeline(tmp_path)
+    contender = RunStore(config)
+    oracle_output = owner.path("oracle", "observed_oracle.jsonl")
+    oracle_manifest = owner.path(".stages", "run-oracle-observed.json")
+    previous = (oracle_output.read_bytes(), oracle_manifest.read_bytes())
+    entered = threading.Event()
+    release = threading.Event()
+    errors: list[BaseException] = []
+    real_mark = pipeline_cli.ArtifactTransaction.mark_postcommit
+
+    def blocked_failure(transaction: object) -> None:
+        journal_path = getattr(transaction, "journal_path")
+        if journal_path.name == ".run-oracle-observed.transaction.json":
+            entered.set()
+            assert release.wait(timeout=5)
+            raise pipeline_cli.TransactionStateError
+        real_mark(transaction)  # type: ignore[arg-type]
+
+    def force_oracle() -> None:
+        try:
+            run_oracle_stage(
+                config,
+                owner,
+                condition="observed",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(pipeline_cli.ArtifactTransaction, "mark_postcommit", blocked_failure)
+    thread = threading.Thread(target=force_oracle)
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            discover_stage(config, contender, force=False)
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], SecAwareError)
+    assert (oracle_output.read_bytes(), oracle_manifest.read_bytes()) == previous
+    monkeypatch.setattr(pipeline_cli.ArtifactTransaction, "mark_postcommit", real_mark)
+    discover_stage(config, contender, force=False)
+
+
+@pytest.mark.parametrize("stage_name", ["discover", "confirm"])
+def test_multioutput_mark_failure_holds_stage_lease_through_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage_name: str,
+) -> None:
+    if stage_name == "discover":
+        config, owner = _prepared_observed_pipeline(tmp_path)
+        discover_stage(config, owner, force=False)
+        inputs = [
+            owner.path("inputs", "prompts.jsonl"),
+            owner.path("tsg", "prompt_tsg.jsonl"),
+            owner.path("tsg", "observed_code_tsg.jsonl"),
+            owner.path("oracle", "observed_oracle.jsonl"),
+        ]
+        outputs = [
+            owner.path("discovery", "hypotheses_all.jsonl"),
+            owner.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+
+        def run_stage() -> None:
+            discover_stage(config, owner, force=True)
+    else:
+        config, owner = _prepared_confirmation_pipeline(tmp_path)
+        confirm_stage(config, owner, force=False)
+        inputs = [
+            owner.path("interventions", "interventions.jsonl"),
+            owner.path("oracle", "observed_oracle.jsonl"),
+            owner.path("oracle", "counterfactual_oracle.jsonl"),
+            owner.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+        outputs = [
+            owner.path("analysis", "pair_results.jsonl"),
+            owner.path("analysis", "hypothesis_effects.jsonl"),
+        ]
+
+        def run_stage() -> None:
+            confirm_stage(config, owner, force=True)
+
+    contender = RunStore(config)
+    manifest = owner.path(".stages", f"{stage_name}.json")
+    previous = ([path.read_bytes() for path in outputs], manifest.read_bytes())
+    entered = threading.Event()
+    release = threading.Event()
+    errors: list[BaseException] = []
+    real_mark = pipeline_cli.ArtifactTransaction.mark_postcommit
+
+    def blocked_failure(transaction: object) -> None:
+        journal_path = getattr(transaction, "journal_path")
+        if journal_path.name == f".{stage_name}.transaction.json":
+            entered.set()
+            assert release.wait(timeout=5)
+            raise pipeline_cli.TransactionStateError
+        real_mark(transaction)  # type: ignore[arg-type]
+
+    def force_stage() -> None:
+        try:
+            run_stage()
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(pipeline_cli.ArtifactTransaction, "mark_postcommit", blocked_failure)
+    thread = threading.Thread(target=force_stage)
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            contender.should_skip_stage(
+                stage_name,
+                inputs,
+                outputs,
+                force=True,
+                preserve_committed=True,
+            )
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], SecAwareError)
+    assert [path.read_bytes() for path in outputs] == previous[0]
+    assert manifest.read_bytes() == previous[1]
+    assert contender.should_skip_stage(
+        stage_name,
+        inputs,
+        outputs,
+        force=False,
+        preserve_committed=True,
+    )
+
+
+@pytest.mark.parametrize("surface", ["oracle", "discover", "confirm"])
+@pytest.mark.parametrize("control", [KeyboardInterrupt("mark"), SystemExit("mark")])
+def test_mark_postcommit_control_rolls_back_and_releases_stage_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    control: KeyboardInterrupt | SystemExit,
+) -> None:
+    if surface == "oracle":
+        config, owner = _prepared_observed_pipeline(tmp_path)
+        stage = "run-oracle-observed"
+        outputs = [owner.path("oracle", "observed_oracle.jsonl")]
+
+        def run_stage() -> None:
+            run_oracle_stage(
+                config,
+                owner,
+                condition="observed",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+
+    elif surface == "discover":
+        config, owner = _prepared_observed_pipeline(tmp_path)
+        discover_stage(config, owner, force=False)
+        stage = "discover"
+        outputs = [
+            owner.path("discovery", "hypotheses_all.jsonl"),
+            owner.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+
+        def run_stage() -> None:
+            discover_stage(config, owner, force=True)
+
+    else:
+        config, owner = _prepared_confirmation_pipeline(tmp_path)
+        confirm_stage(config, owner, force=False)
+        stage = "confirm"
+        outputs = [
+            owner.path("analysis", "pair_results.jsonl"),
+            owner.path("analysis", "hypothesis_effects.jsonl"),
+        ]
+
+        def run_stage() -> None:
+            confirm_stage(config, owner, force=True)
+
+    manifest = owner.path(".stages", f"{stage}.json")
+    previous = ([path.read_bytes() for path in outputs], manifest.read_bytes())
+    real_mark = pipeline_cli.ArtifactTransaction.mark_postcommit
+
+    def interrupt_mark(transaction: object) -> None:
+        journal_path = getattr(transaction, "journal_path")
+        if journal_path.name == f".{stage}.transaction.json":
+            raise control
+        real_mark(transaction)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pipeline_cli.ArtifactTransaction, "mark_postcommit", interrupt_mark)
+    with pytest.raises(type(control)) as exc_info:
+        run_stage()
+
+    assert exc_info.value is control
+    assert [path.read_bytes() for path in outputs] == previous[0]
+    assert manifest.read_bytes() == previous[1]
+    assert not owner.stage_is_active(stage)
+
+
 @pytest.mark.parametrize(
     ("target", "failures"),
     [("second_output", 1), ("second_output", 100), ("manifest", 100)],
@@ -1568,6 +1781,85 @@ def test_oracle_postcommit_control_keeps_new_commit(
     else:
         seal = json.loads(output.with_name(output.name + ".sha256").read_text())
         assert seal["output_sha256"] == sha256_path(output)
+
+
+@pytest.mark.parametrize("surface", ["pipeline", "standalone"])
+@pytest.mark.parametrize("control", [KeyboardInterrupt("once"), SystemExit("once")])
+@pytest.mark.parametrize("ordinary_first", [False, True])
+def test_oracle_postcommit_transient_control_is_rethrown_after_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    control: KeyboardInterrupt | SystemExit,
+    ordinary_first: bool,
+) -> None:
+    config, store = _prepared_canonical_store(tmp_path)
+    input_path = store.path("generation", "observed_code.jsonl")
+    real_unlink = Path.unlink
+    if surface == "pipeline":
+        output = store.path("oracle", "observed_oracle.jsonl")
+        run_oracle_stage(
+            config,
+            store,
+            condition="observed",
+            force=False,
+            runner=_OracleRunner(),
+            runtime_validator=lambda: None,
+        )
+        suffix = ".oracle.recovery.backup"
+    else:
+        output = tmp_path / "standalone-oracle.jsonl"
+        run_standalone_oracle(
+            input_path=input_path,
+            output=output,
+            policy_lock=POLICY_LOCK,
+            semgrep="semgrep-private",
+            bandit="bandit-private",
+            force=False,
+            runner=_OracleRunner(),
+            runtime_validator=lambda: None,
+        )
+        suffix = ".output.recovery.backup"
+    attempts = 0
+
+    def transient_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal attempts
+        if path.name.endswith(suffix):
+            attempts += 1
+            if ordinary_first and attempts == 1:
+                raise OSError("private-transient-cleanup")
+            if attempts == (2 if ordinary_first else 1):
+                raise control
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", transient_cleanup)
+    with pytest.raises(type(control)) as exc_info:
+        if surface == "pipeline":
+            run_oracle_stage(
+                config,
+                store,
+                condition="observed",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+        else:
+            run_standalone_oracle(
+                input_path=input_path,
+                output=output,
+                policy_lock=POLICY_LOCK,
+                semgrep="semgrep-private",
+                bandit="bandit-private",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+
+    assert exc_info.value is control
+    assert attempts == (3 if ordinary_first else 2)
+    assert not list(output.parent.glob(f".{output.name}.*{suffix}"))
+    records = read_jsonl(output, OracleRecord, required=True, allow_empty=False)
+    assert records[0].security_label is SecurityLabel.INSECURE  # type: ignore[index,union-attr]
 
 
 @pytest.mark.parametrize("surface", ["pipeline_oracle", "discover", "confirm"])

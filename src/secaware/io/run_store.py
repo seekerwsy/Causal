@@ -59,6 +59,12 @@ class _HeldDependencyLease:
     handle: BinaryIO
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class StageCommitLease:
+    stage: str
+    nonce: object
+
+
 class RunStore:
     def __init__(self, config: AppConfig):
         self.config = config
@@ -67,6 +73,8 @@ class RunStore:
         self._sealed_outputs: dict[str, _StageOutputSeal] = {}
         self._stage_leases: dict[str, BinaryIO] = {}
         self._held_dependency_leases: dict[str, _HeldDependencyLease] = {}
+        self._stage_commit_leases: dict[str, StageCommitLease] = {}
+        self._recorded_stage_commits: set[str] = set()
         self._state_lock = threading.RLock()
 
     def path(self, *parts: str) -> Path:
@@ -156,9 +164,7 @@ class RunStore:
         if relative is not None:
             return relative.as_posix()
         if allow_outside:
-            normalized = Path(
-                os.path.normcase(os.path.normpath(str(resolved)))
-            ).as_posix()
+            normalized = Path(os.path.normcase(os.path.normpath(str(resolved)))).as_posix()
             digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
             return f"@external/{digest}"
         raise self._contract_error(
@@ -303,6 +309,11 @@ class RunStore:
     def invalidate_stage(self, stage: str) -> None:
         """Remove any committed manifest and pending execution authorization."""
 
+        if stage in self._stage_commit_leases:
+            raise self._manifest_conflict(
+                stage,
+                "deferred stage commit must be finalized or aborted",
+            )
         if self._owned_dependency_lease(stage) is not None:
             raise self._manifest_conflict(
                 stage,
@@ -323,6 +334,11 @@ class RunStore:
         """Abort one stage execution and release its lease after invalidation."""
 
         with self._state_lock:
+            if stage in self._stage_commit_leases:
+                self._clear_stage_state(stage)
+                self._clear_stage_commit(stage)
+                self._release_stage_lease(stage)
+                return
             snapshot = self._pending_snapshots.get(stage)
             if snapshot is not None and snapshot.preserve_committed:
                 self._clear_stage_state(stage)
@@ -336,6 +352,8 @@ class RunStore:
 
         self._pending_snapshots.clear()
         self._sealed_outputs.clear()
+        self._stage_commit_leases.clear()
+        self._recorded_stage_commits.clear()
         for stage in list(self._stage_leases):
             self._release_stage_lease(stage)
         for stage in list(self._held_dependency_leases):
@@ -344,6 +362,10 @@ class RunStore:
     def _clear_stage_state(self, stage: str) -> None:
         self._pending_snapshots.pop(stage, None)
         self._sealed_outputs.pop(stage, None)
+
+    def _clear_stage_commit(self, stage: str) -> None:
+        self._stage_commit_leases.pop(stage, None)
+        self._recorded_stage_commits.discard(stage)
 
     @_synchronized
     def stage_is_active(self, stage: str) -> bool:
@@ -356,6 +378,9 @@ class RunStore:
         )
 
     def _reject_stage_record(self, stage: str, message: str) -> None:
+        if stage in self._stage_commit_leases:
+            self._clear_stage_state(stage)
+            raise self._manifest_conflict(stage, message)
         snapshot = self._pending_snapshots.get(stage)
         if snapshot is not None and snapshot.preserve_committed:
             self._clear_stage_state(stage)
@@ -383,8 +408,7 @@ class RunStore:
 
     def _policy_binding(self, stage: str, policy_sha256: str | None) -> str | None:
         valid_digest = (
-            type(policy_sha256) is str
-            and re.fullmatch(r"[0-9a-f]{64}", policy_sha256) is not None
+            type(policy_sha256) is str and re.fullmatch(r"[0-9a-f]{64}", policy_sha256) is not None
         )
         if stage.startswith("run-oracle-"):
             if not valid_digest:
@@ -493,16 +517,10 @@ class RunStore:
         try:
             try:
                 outputs = [Path(path) for path in output_paths]
-                relative_outputs = [
-                    self._relative_path(path, kind="output") for path in outputs
-                ]
+                relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
                 manifest = read_stage_manifest(self._manifest_path(stage))
                 config = self.config.model_dump(mode="json")
-                inputs = (
-                    manifest.inputs
-                    if input_paths is None
-                    else self.stage_inputs(input_paths)
-                )
+                inputs = manifest.inputs if input_paths is None else self.stage_inputs(input_paths)
                 current_output_sha256 = {
                     relative_path: sha256_path(output)
                     for relative_path, output in zip(
@@ -694,9 +712,7 @@ class RunStore:
             "discover",
             "confirm",
         }
-        if type(preserve_committed) is not bool or (
-            preserve_committed and not transactional_stage
-        ):
+        if type(preserve_committed) is not bool or (preserve_committed and not transactional_stage):
             raise self._manifest_conflict(stage, "stage transaction mode is invalid")
         if after_lease_acquired is not None and not callable(after_lease_acquired):
             raise self._manifest_conflict(stage, "stage lease action is invalid")
@@ -752,6 +768,46 @@ class RunStore:
         return False
 
     @_synchronized
+    def begin_stage_commit(self, stage: str) -> StageCommitLease:
+        """Authorize manifest recording while retaining the owned execution lease."""
+
+        snapshot = self._pending_snapshots.get(stage)
+        if (
+            self._owned_stage_lease(stage) is None
+            or snapshot is None
+            or not snapshot.preserve_committed
+            or stage in self._stage_commit_leases
+            or stage in self._recorded_stage_commits
+        ):
+            raise self._manifest_conflict(stage, "deferred stage commit authorization is invalid")
+        lease = StageCommitLease(stage=stage, nonce=object())
+        self._stage_commit_leases[stage] = lease
+        return lease
+
+    def _require_stage_commit_lease(self, lease: StageCommitLease) -> StageCommitLease:
+        if (
+            type(lease) is not StageCommitLease
+            or self._stage_commit_leases.get(lease.stage) is not lease
+            or self._owned_stage_lease(lease.stage) is None
+        ):
+            raise self._manifest_conflict("stage_commit", "stage commit lease is invalid")
+        return lease
+
+    @_synchronized
+    def finalize_stage_commit(self, lease: StageCommitLease) -> None:
+        """Release one recorded transactional stage only after its external commit point."""
+
+        trusted = self._require_stage_commit_lease(lease)
+        if trusted.stage not in self._recorded_stage_commits:
+            raise self._manifest_conflict(
+                trusted.stage,
+                "deferred stage commit was not recorded",
+            )
+        stage = trusted.stage
+        self._clear_stage_commit(stage)
+        self._release_stage_lease(stage)
+
+    @_synchronized
     def record_stage(
         self,
         stage: str,
@@ -759,7 +815,23 @@ class RunStore:
         output_paths: Sequence[str | Path],
         *,
         policy_sha256: str | None = None,
+        lease: StageCommitLease | None = None,
     ) -> None:
+        trusted_lease: StageCommitLease | None = None
+        if lease is not None:
+            trusted_lease = self._require_stage_commit_lease(lease)
+            if trusted_lease.stage != stage:
+                raise self._manifest_conflict(stage, "stage commit lease does not match")
+        else:
+            snapshot = self._pending_snapshots.get(stage)
+            if stage in self._stage_commit_leases or (
+                snapshot is not None and snapshot.preserve_committed
+            ):
+                raise self._manifest_conflict(
+                    stage,
+                    "transactional stage recording requires an owned commit lease",
+                )
+        recorded = False
         try:
             self._record_stage(
                 stage,
@@ -767,8 +839,14 @@ class RunStore:
                 output_paths,
                 policy_sha256=policy_sha256,
             )
+            recorded = True
+            if trusted_lease is not None:
+                self._recorded_stage_commits.add(stage)
         finally:
-            self._release_stage_lease(stage)
+            if trusted_lease is None:
+                if not recorded:
+                    self._clear_stage_state(stage)
+                self._release_stage_lease(stage)
 
     def _record_stage(
         self,
@@ -782,8 +860,8 @@ class RunStore:
         if self._requires_output_seal(stage) or stage in self._sealed_outputs:
             self.verify_sealed_outputs(stage, output_paths)
         outputs = [Path(path) for path in output_paths]
-        snapshot = self._pending_snapshots.pop(stage, None)
-        output_seal = self._sealed_outputs.pop(stage, None)
+        snapshot = self._pending_snapshots.get(stage)
+        output_seal = self._sealed_outputs.get(stage)
         seal_required = self._requires_output_seal(stage) or output_seal is not None
         if seal_required and (snapshot is None or output_seal is None):
             self._reject_stage_record(
@@ -849,9 +927,7 @@ class RunStore:
             )
         current_output_sha256 = self._stage_output_hashes(stage, outputs, relative_outputs)
         output_sha256 = (
-            dict(output_seal.output_sha256)
-            if output_seal is not None
-            else current_output_sha256
+            dict(output_seal.output_sha256) if output_seal is not None else current_output_sha256
         )
         if current_output_sha256 != output_sha256:
             self._reject_stage_record(
@@ -891,3 +967,5 @@ class RunStore:
                 stage,
                 "stage outputs changed while the manifest was committed",
             )
+        self._pending_snapshots.pop(stage, None)
+        self._sealed_outputs.pop(stage, None)

@@ -238,18 +238,12 @@ def test_held_committed_stage_blocks_mutation_and_allows_holder_revalidation(
         hashes["reports/result.txt"] = "0" * 64
         assert holder.require_committed_stage("report", [input_path], [output_path]) == expected
         for operation in (
-            lambda: holder.should_skip_stage(
-                "report", [input_path], [output_path], force=True
-            ),
+            lambda: holder.should_skip_stage("report", [input_path], [output_path], force=True),
             lambda: holder.invalidate_stage("report"),
             lambda: holder.abort_stage("report"),
-            lambda: contender.should_skip_stage(
-                "report", [input_path], [output_path], force=True
-            ),
+            lambda: contender.should_skip_stage("report", [input_path], [output_path], force=True),
             lambda: contender.invalidate_stage("report"),
-            lambda: contender.require_committed_stage(
-                "report", [input_path], [output_path]
-            ),
+            lambda: contender.require_committed_stage("report", [input_path], [output_path]),
         ):
             with pytest.raises(SecAwareError) as exc_info:
                 operation()
@@ -412,9 +406,7 @@ def test_committed_stage_gate_rejects_forged_manifest_without_mutating_it(
         payload["stage"] = "private-forged-stage"
     elif forged_field == "outputs":
         payload["outputs"] = ["reports/private-forged-output.txt"]
-        payload["output_sha256"] = {
-            "reports/private-forged-output.txt": sha256_path(output_path)
-        }
+        payload["output_sha256"] = {"reports/private-forged-output.txt": sha256_path(output_path)}
     elif forged_field == "output_hash":
         payload["output_sha256"]["reports/result.txt"] = "0" * 64
     else:
@@ -562,6 +554,65 @@ def test_cross_instance_stage_lease_blocks_without_clearing_owner_state(
     assert lock_path.stat().st_ino == inode
 
 
+def test_deferred_stage_commit_keeps_lease_until_explicit_finalize(tmp_path: Path) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    assert (
+        owner.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            preserve_committed=True,
+        )
+        is False
+    )
+    owner.seal_stage_outputs(stage, [output_path])
+
+    lease = owner.begin_stage_commit(stage)
+    owner.record_stage(
+        stage,
+        [input_path],
+        [output_path],
+        lease=lease,
+    )
+
+    assert owner.stage_is_active(stage)
+    with pytest.raises(SecAwareError) as exc_info:
+        contender.should_skip_stage(stage, [input_path], [output_path], force=False)
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+    owner.finalize_stage_commit(lease)
+    assert not owner.stage_is_active(stage)
+    assert contender.should_skip_stage(stage, [input_path], [output_path], force=False)
+
+
+def test_deferred_stage_commit_rejects_missing_or_forged_owner(tmp_path: Path) -> None:
+    owner = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    assert (
+        owner.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            preserve_committed=True,
+        )
+        is False
+    )
+    owner.seal_stage_outputs(stage, [output_path])
+
+    with pytest.raises(SecAwareError):
+        owner.record_stage(stage, [input_path], [output_path])
+    lease = owner.begin_stage_commit(stage)
+    with pytest.raises(SecAwareError):
+        RunStore(owner.config).finalize_stage_commit(lease)
+    owner.abort_stage(stage)
+
+
 def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -626,9 +677,7 @@ def test_stage_lease_is_released_on_every_terminal_path(
         _record_report_stage(owner, input_path, [output_path])
         assert owner.should_skip_stage("report", [input_path], [output_path], force=False)
     else:
-        assert owner.should_skip_stage(
-            "report", [input_path], [output_path], force=False
-        ) is False
+        assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
         if release_path == "record":
             owner.record_stage("report", [input_path], [output_path])
         elif release_path == "reject":
@@ -660,9 +709,7 @@ def test_closed_stage_lease_handle_allows_another_store_to_recover(
     assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
     owner._stage_leases["report"].close()
 
-    assert contender.should_skip_stage(
-        "report", [input_path], [output_path], force=False
-    ) is False
+    assert contender.should_skip_stage("report", [input_path], [output_path], force=False) is False
     contender.abort_stage("report")
     owner.abort_stage("report")
 
@@ -687,9 +734,7 @@ def test_stage_decision_baseexception_releases_lease_and_pending_state(
 
     monkeypatch.setattr(run_store_module, "manifest_allows_skip", real_allows_skip)
     assert not owner.stage_is_active("report")
-    assert contender.should_skip_stage(
-        "report", [input_path], [output_path], force=False
-    ) is False
+    assert contender.should_skip_stage("report", [input_path], [output_path], force=False) is False
     contender.abort_stage("report")
 
 
@@ -1007,9 +1052,7 @@ def test_output_seal_misuse_invalidates_all_stage_authorization(
     if misuse == "without_pending":
         manifest_path = _record_report_stage(store, input_path, [output_path])
     else:
-        assert store.should_skip_stage(
-            "report", [input_path], [output_path], force=False
-        ) is False
+        assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
         if misuse == "duplicate":
             store.seal_stage_outputs("report", [output_path])
     seal_outputs = [output_path]
@@ -1094,13 +1137,16 @@ def test_oracle_stage_snapshot_commit_and_skip_are_policy_bound(tmp_path: Path) 
     stage = "run-oracle-observed"
     policy = "b" * 64
 
-    assert store.should_skip_stage(
-        stage,
-        [input_path],
-        [output_path],
-        force=False,
-        policy_sha256=policy,
-    ) is False
+    assert (
+        store.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            policy_sha256=policy,
+        )
+        is False
+    )
     store.seal_stage_outputs(stage, [output_path])
     store.record_stage(
         stage,
@@ -1111,20 +1157,26 @@ def test_oracle_stage_snapshot_commit_and_skip_are_policy_bound(tmp_path: Path) 
 
     manifest = read_stage_manifest(store.path(".stages", f"{stage}.json"))
     assert manifest.policy_sha256 == policy
-    assert store.should_skip_stage(
-        stage,
-        [input_path],
-        [output_path],
-        force=False,
-        policy_sha256=policy,
-    ) is True
-    assert store.should_skip_stage(
-        stage,
-        [input_path],
-        [output_path],
-        force=False,
-        policy_sha256="c" * 64,
-    ) is False
+    assert (
+        store.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            policy_sha256=policy,
+        )
+        is True
+    )
+    assert (
+        store.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            policy_sha256="c" * 64,
+        )
+        is False
+    )
     store.abort_stage(stage)
 
 
