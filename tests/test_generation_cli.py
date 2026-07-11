@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import traceback
 
@@ -6,7 +7,13 @@ import pytest
 from typer.testing import CliRunner
 
 from secaware import cli as cli_module
-from secaware.cli import app, import_generation_stage, plan_generation_stage
+from secaware.cli import (
+    app,
+    extract_code_tsg_stage,
+    import_generation_stage,
+    plan_generation_stage,
+    run_oracle_stage,
+)
 from secaware.config import AppConfig, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
@@ -157,6 +164,55 @@ def test_plan_observed_writes_deterministic_fixed_path_ledger_and_manifest(
     assert output.read_bytes() == baseline
     plan_generation_stage(config, store, condition="observed", force=True)
     assert output.read_bytes() == baseline
+
+
+def test_generation_artifact_reads_apply_central_character_budgets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    real_read = cli_module.read_jsonl
+    read_limits: list[tuple[object, object]] = []
+
+    def capture_limits(*args: object, **kwargs: object) -> object:
+        read_limits.append(
+            (kwargs.get("max_line_chars"), kwargs.get("max_total_chars"))
+        )
+        return real_read(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli_module, "read_jsonl", capture_limits)
+
+    plan_generation_stage(config, store, condition="observed", force=False)
+
+    assert read_limits
+    assert set(read_limits) == {(8 * 1024 * 1024, 512 * 1024 * 1024)}
+
+
+def test_generation_skip_wrapper_preserves_an_active_stage_on_reentry(
+    tmp_path: Path,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    del config
+    stage = "plan-generation-observed"
+    inputs = [store.path("inputs", "prompts.jsonl")]
+    output = store.path("generation", "observed_requests.jsonl")
+    outputs = [output]
+    assert store.should_skip_stage(stage, inputs, outputs, force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        cli_module._generation_stage_should_skip(
+            store,
+            stage,
+            inputs,
+            outputs,
+            force=False,
+        )
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    output.write_text("active execution output\n", encoding="utf-8")
+    store.seal_stage_outputs(stage, outputs)
+    store.record_stage(stage, inputs, outputs)
+    assert store.path(".stages", f"{stage}.json").exists()
 
 
 def test_plan_counterfactual_uses_fixed_inputs_and_preserves_coordinates(
@@ -476,7 +532,13 @@ def test_import_shuffled_results_writes_ledger_order_canonical_output(
     assert run_oracle(records[0]).code_id == records[0].code_id
     manifest = read_stage_manifest(store.path(".stages", "import-generation-observed.json"))
     assert "generation/observed_requests.jsonl" in manifest.inputs
-    assert any("external-results.jsonl" in path for path in manifest.inputs)
+    external_keys = [path for path in manifest.inputs if path.startswith("@external/")]
+    assert len(external_keys) == 1
+    rendered_manifest = store.path(
+        ".stages", "import-generation-observed.json"
+    ).read_text(encoding="utf-8")
+    assert str(results_path) not in rendered_manifest
+    assert results_path.name not in rendered_manifest
     assert manifest.outputs == ["generation/observed_code.jsonl"]
     assert ledger.is_file()
 
@@ -596,7 +658,7 @@ def test_import_invalidates_old_manifest_when_input_snapshot_cannot_be_created(
             force=False,
         )
 
-    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert output.read_bytes() == baseline
     assert not manifest_path.exists()
 
@@ -682,6 +744,168 @@ def test_missing_results_is_retryable_and_invalidates_previous_import_manifest(
     _assert_safe_error(error, str(results_path), "private-external-results")
     assert output.read_bytes() == baseline
     assert not manifest_path.exists()
+
+
+@pytest.mark.parametrize("alias_kind", ["output", "ledger", "hardlink"])
+def test_import_rejects_results_alias_before_touching_run_artifacts(
+    tmp_path: Path,
+    alias_kind: str,
+) -> None:
+    config, store, prompts = _prepared_store(tmp_path)
+    ledger, requests = _plan_observed(config, store)
+    external_results = tmp_path / "external-results.jsonl"
+    write_jsonl(external_results, [_result(request) for request in requests])
+    import_generation_stage(
+        config,
+        store,
+        condition="observed",
+        results_path=external_results,
+        force=False,
+    )
+    output = store.path("generation", "observed_code.jsonl")
+    import_manifest = store.path(".stages", "import-generation-observed.json")
+    plan_manifest = store.path(".stages", "plan-generation-observed.json")
+    protected_paths = [
+        ledger,
+        output,
+        import_manifest,
+        plan_manifest,
+        store.path("config.resolved.yaml"),
+        store.path("inputs", "prompts.jsonl"),
+    ]
+    before = {path: path.read_bytes() for path in protected_paths}
+    if alias_kind == "output":
+        alias = output
+    elif alias_kind == "ledger":
+        alias = ledger
+    else:
+        alias = tmp_path / "private-hardlink-results.jsonl"
+        os.link(output, alias)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        import_generation_stage(
+            config,
+            store,
+            condition="observed",
+            results_path=alias,
+            force=False,
+        )
+
+    assert exc_info.value.code in {ErrorCode.CONTRACT, ErrorCode.CONFIG}
+    _assert_safe_error(
+        exc_info.value,
+        str(alias),
+        prompts[0].prompt,
+        requests[0].request_id,
+    )
+    assert {path: path.read_bytes() for path in protected_paths} == before
+
+
+def test_import_rejects_a_schema_valid_ledger_without_committed_plan_provenance(
+    tmp_path: Path,
+) -> None:
+    config, store, prompts = _prepared_store(tmp_path)
+    ledger, requests = _plan_observed(config, store)
+    results_path = tmp_path / "external-results.jsonl"
+    write_jsonl(results_path, [_result(request) for request in requests])
+    import_generation_stage(
+        config,
+        store,
+        condition="observed",
+        results_path=results_path,
+        force=False,
+    )
+    output = store.path("generation", "observed_code.jsonl")
+    output_bytes = output.read_bytes()
+    plan_manifest = store.path(".stages", "plan-generation-observed.json")
+    plan_manifest_bytes = plan_manifest.read_bytes()
+    import_manifest = store.path(".stages", "import-generation-observed.json")
+    assert import_manifest.exists()
+    write_jsonl(ledger, list(reversed(requests)))
+
+    with pytest.raises(SecAwareError) as exc_info:
+        import_generation_stage(
+            config,
+            store,
+            condition="observed",
+            results_path=results_path,
+            force=False,
+        )
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_safe_error(
+        exc_info.value,
+        str(ledger),
+        prompts[0].prompt,
+        requests[0].request_id,
+    )
+    assert output.read_bytes() == output_bytes
+    assert plan_manifest.read_bytes() == plan_manifest_bytes
+    assert not import_manifest.exists()
+
+
+@pytest.mark.parametrize("consumer", ["extract", "oracle"])
+def test_downstream_rejects_old_code_after_partial_import_invalidates_producers(
+    tmp_path: Path,
+    consumer: str,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    _, requests = _plan_observed(config, store)
+    results_path = tmp_path / "external-results.jsonl"
+    write_jsonl(results_path, [_result(request) for request in requests])
+    import_generation_stage(
+        config,
+        store,
+        condition="observed",
+        results_path=results_path,
+        force=False,
+    )
+    if consumer == "extract":
+        consumer_stage = "extract-code-tsg-observed"
+        consumer_output = store.path("tsg", "observed_code_tsg.jsonl")
+        run_consumer = lambda: extract_code_tsg_stage(  # noqa: E731
+            config,
+            store,
+            condition="observed",
+            force=False,
+        )
+    else:
+        consumer_stage = "run-oracle-observed"
+        consumer_output = store.path("oracle", "observed_oracle.jsonl")
+        run_consumer = lambda: run_oracle_stage(  # noqa: E731
+            config,
+            store,
+            condition="observed",
+            force=False,
+        )
+    run_consumer()
+    consumer_manifest = store.path(".stages", f"{consumer_stage}.json")
+    assert consumer_manifest.exists()
+    consumer_bytes = consumer_output.read_bytes()
+    code_output = store.path("generation", "observed_code.jsonl")
+    code_bytes = code_output.read_bytes()
+    write_jsonl(results_path, [_result(request) for request in requests[:-1]])
+
+    with pytest.raises(SecAwareError) as import_error:
+        import_generation_stage(
+            config,
+            store,
+            condition="observed",
+            results_path=results_path,
+            force=False,
+        )
+    assert import_error.value.code is ErrorCode.EXTERNAL_INPUT_REQUIRED
+    assert not store.path(".stages", "import-generation-observed.json").exists()
+    assert not store.path(".stages", "generate-observed.json").exists()
+
+    with pytest.raises(SecAwareError) as consumer_error:
+        run_consumer()
+
+    assert consumer_error.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_safe_error(consumer_error.value, str(code_output), requests[0].request_id)
+    assert code_output.read_bytes() == code_bytes
+    assert consumer_output.read_bytes() == consumer_bytes
+    assert not consumer_manifest.exists()
 
 
 def test_partial_results_then_append_completes_without_reordering(

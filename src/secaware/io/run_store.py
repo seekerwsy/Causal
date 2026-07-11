@@ -1,9 +1,13 @@
+import hashlib
 import os
 import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
+import threading
+from typing import Any, Callable, TypeVar
 
 from secaware import __version__
 from secaware.config import AppConfig, write_resolved_config
@@ -13,9 +17,21 @@ from secaware.pipeline.manifest import (
     StageManifest,
     build_stage_fingerprint,
     manifest_allows_skip,
+    read_stage_manifest,
     write_stage_manifest,
 )
 from secaware.schema.common import SCHEMA_VERSION
+
+_Result = TypeVar("_Result")
+
+
+def _synchronized(method: Callable[..., _Result]) -> Callable[..., _Result]:
+    @wraps(method)
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> _Result:
+        with self._state_lock:
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -41,6 +57,7 @@ class RunStore:
         self.root = Path(config.run.output_dir)
         self._pending_snapshots: dict[str, _StageSnapshot] = {}
         self._sealed_outputs: dict[str, _StageOutputSeal] = {}
+        self._state_lock = threading.RLock()
 
     def path(self, *parts: str) -> Path:
         return self.root.joinpath(*parts)
@@ -116,16 +133,28 @@ class RunStore:
         try:
             resolved = candidate.resolve()
             resolved_root = self.root.resolve()
-            if allow_outside:
-                relative = Path(os.path.relpath(resolved, resolved_root))
-            else:
-                relative = resolved.relative_to(resolved_root)
         except (OSError, ValueError):
             raise self._contract_error(
                 f"{kind} path must remain within the run directory",
                 candidate,
             ) from None
-        return relative.as_posix()
+        relative: Path | None = None
+        try:
+            relative = resolved.relative_to(resolved_root)
+        except ValueError:
+            pass
+        if relative is not None:
+            return relative.as_posix()
+        if allow_outside:
+            normalized = Path(
+                os.path.normcase(os.path.normpath(str(resolved)))
+            ).as_posix()
+            digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            return f"@external/{digest}"
+        raise self._contract_error(
+            f"{kind} path must remain within the run directory",
+            candidate,
+        )
 
     def _manifest_path(self, stage: str) -> Path:
         safe_stage = re.sub(r"[^A-Za-z0-9._-]+", "-", stage).strip(".-_") or "stage"
@@ -140,6 +169,7 @@ class RunStore:
                 "stage manifest could not be invalidated",
             ) from None
 
+    @_synchronized
     def invalidate_stage(self, stage: str) -> None:
         """Remove any committed manifest and pending execution authorization."""
 
@@ -149,6 +179,12 @@ class RunStore:
     def _clear_stage_state(self, stage: str) -> None:
         self._pending_snapshots.pop(stage, None)
         self._sealed_outputs.pop(stage, None)
+
+    @_synchronized
+    def stage_is_active(self, stage: str) -> bool:
+        """Return whether this store has an active execution for the stage."""
+
+        return stage in self._pending_snapshots or stage in self._sealed_outputs
 
     def _reject_stage_record(self, stage: str, message: str) -> None:
         self._clear_stage_state(stage)
@@ -187,13 +223,30 @@ class RunStore:
         inputs: dict[str, str] = {}
         for path_value in paths:
             path = Path(path_value)
+            try:
+                relative_path = self._relative_path(path, kind="input", allow_outside=True)
+            except SecAwareError:
+                raise SecAwareError(
+                    code=ErrorCode.CONTRACT,
+                    stage="run_store",
+                    message="required stage input path could not be resolved",
+                ) from None
             if not path.exists():
-                raise self._contract_error("required stage input is missing", path)
-            relative_path = self._relative_path(path, kind="input", allow_outside=True)
+                raise SecAwareError(
+                    code=ErrorCode.CONTRACT,
+                    stage="run_store",
+                    message="required stage input is missing",
+                    details={"path": relative_path},
+                )
             try:
                 inputs[relative_path] = sha256_path(path)
             except (OSError, ValueError):
-                raise self._contract_error("required stage input could not be read", path) from None
+                raise SecAwareError(
+                    code=ErrorCode.CONTRACT,
+                    stage="run_store",
+                    message="required stage input could not be read",
+                    details={"path": relative_path},
+                ) from None
         return inputs
 
     def _fingerprint_from_inputs(
@@ -214,6 +267,67 @@ class RunStore:
     def stage_fingerprint(self, stage: str, input_paths: Sequence[str | Path]) -> str:
         return self._fingerprint_from_inputs(stage, self.stage_inputs(input_paths))
 
+    @_synchronized
+    def _require_committed(
+        self,
+        stage: str,
+        output_paths: Sequence[str | Path],
+        *,
+        input_paths: Sequence[str | Path] | None,
+    ) -> None:
+        valid = False
+        try:
+            outputs = [Path(path) for path in output_paths]
+            relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+            manifest = read_stage_manifest(self._manifest_path(stage))
+            config = self.config.model_dump(mode="json")
+            inputs = (
+                manifest.inputs
+                if input_paths is None
+                else self.stage_inputs(input_paths)
+            )
+            current_output_sha256 = {
+                relative_path: sha256_path(output)
+                for relative_path, output in zip(
+                    relative_outputs,
+                    outputs,
+                    strict=True,
+                )
+            }
+            valid = (
+                manifest.stage == stage
+                and manifest.inputs == inputs
+                and manifest.config_sha256 == canonical_sha256(config)
+                and manifest.code_version == __version__
+                and manifest.fingerprint == self._fingerprint_from_inputs(stage, inputs, config)
+                and manifest.outputs == relative_outputs
+                and manifest.output_sha256 == current_output_sha256
+            )
+        except (OSError, SecAwareError, TypeError, UnicodeError, ValueError):
+            pass
+        if not valid:
+            raise self._manifest_conflict(stage, "committed stage output verification failed")
+
+    def require_committed_stage(
+        self,
+        stage: str,
+        input_paths: Sequence[str | Path],
+        output_paths: Sequence[str | Path],
+    ) -> None:
+        """Require a complete committed stage with current inputs and outputs."""
+
+        self._require_committed(stage, output_paths, input_paths=input_paths)
+
+    def require_committed_output(
+        self,
+        stage: str,
+        output_paths: Sequence[str | Path],
+    ) -> None:
+        """Require a committed output without re-reading producer inputs."""
+
+        self._require_committed(stage, output_paths, input_paths=None)
+
+    @_synchronized
     def seal_stage_outputs(
         self,
         stage: str,
@@ -247,6 +361,7 @@ class RunStore:
             output_sha256=tuple(sorted(output_sha256.items())),
         )
 
+    @_synchronized
     def verify_sealed_outputs(
         self,
         stage: str,
@@ -277,6 +392,7 @@ class RunStore:
         if current_output_sha256 != dict(output_seal.output_sha256):
             self._reject_stage_record(stage, "sealed stage outputs changed after sealing")
 
+    @_synchronized
     def should_skip_stage(
         self,
         stage: str,
@@ -284,7 +400,8 @@ class RunStore:
         output_paths: Sequence[str | Path],
         force: bool,
     ) -> bool:
-        self._clear_stage_state(stage)
+        if stage in self._pending_snapshots or stage in self._sealed_outputs:
+            raise self._manifest_conflict(stage, "stage execution is already active")
         outputs = [Path(path) for path in output_paths]
         relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
         inputs = self.stage_inputs(input_paths)
@@ -315,6 +432,7 @@ class RunStore:
             raise
         return False
 
+    @_synchronized
     def record_stage(
         self,
         stage: str,

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import os
 from pathlib import Path
 from typing import Literal, Optional, TypeVar, cast
 
@@ -45,6 +46,8 @@ app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pip
 GenerationCondition = Literal["observed", "counterfactual"]
 _Record = TypeVar("_Record")
 _ActionResult = TypeVar("_ActionResult")
+MAX_GENERATION_JSONL_LINE_CHARS = 8 * 1024 * 1024
+MAX_GENERATION_JSONL_TOTAL_CHARS = 512 * 1024 * 1024
 
 
 def _load(config: Path, run_dir: Optional[Path]) -> tuple[AppConfig, RunStore]:
@@ -101,6 +104,8 @@ def _read_generation_records(
             required=True,
             allow_empty=allow_empty,
             max_records=max_records,
+            max_line_chars=MAX_GENERATION_JSONL_LINE_CHARS,
+            max_total_chars=MAX_GENERATION_JSONL_TOTAL_CHARS,
             stage=stage,
         )
     except (OSError, SecAwareError, UnicodeError):
@@ -181,6 +186,13 @@ def _generation_stage_should_skip(
     except SecAwareError as error:
         code = error.code
         retryable = error.retryable
+    if store.stage_is_active(stage):
+        raise _generation_stage_error(
+            code,
+            stage,
+            "generation stage execution is already active",
+            retryable=retryable,
+        )
     try:
         store.invalidate_stage(stage)
     except SecAwareError as error:
@@ -220,6 +232,47 @@ def _invalidate_alternate_generation_stage(
     )
 
 
+def _validate_offline_results_path(
+    store: RunStore,
+    *,
+    stage: str,
+    condition: GenerationCondition,
+    results: Path,
+) -> None:
+    protected = [
+        store.path("generation", f"{condition}_requests.jsonl"),
+        store.path("generation", f"{condition}_code.jsonl"),
+        store.path(".stages", f"plan-generation-{condition}.json"),
+        store.path(".stages", f"import-generation-{condition}.json"),
+        store.path(".stages", f"generate-{condition}.json"),
+        store.path("config.resolved.yaml"),
+        store.path("inputs", "prompts.jsonl"),
+        store.path("interventions", "interventions.jsonl"),
+        Path(store.config.data.prompts_path),
+    ]
+    invalid = False
+    try:
+        resolved_results = results.resolve()
+        for protected_path in protected:
+            if resolved_results == protected_path.resolve():
+                invalid = True
+                break
+            if results.exists() and protected_path.exists() and os.path.samefile(
+                results,
+                protected_path,
+            ):
+                invalid = True
+                break
+    except (OSError, TypeError, ValueError):
+        invalid = True
+    if invalid:
+        raise _generation_stage_error(
+            ErrorCode.CONTRACT,
+            stage,
+            "offline generation results path conflicts with run artifacts",
+        )
+
+
 def _execute_generation_stage(
     store: RunStore,
     stage: str,
@@ -242,6 +295,69 @@ def _execute_generation_stage(
         stage,
         "failed generation stage could not be invalidated",
         retryable=retryable,
+    )
+
+
+def _require_committed_generation_plan(
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    import_stage: str,
+    legacy_stage: str,
+    ledger: Path,
+) -> None:
+    plan_stage = f"plan-generation-{condition}"
+    plan_inputs = [store.path("inputs", "prompts.jsonl")]
+    if condition == "counterfactual":
+        plan_inputs.append(store.path("interventions", "interventions.jsonl"))
+    try:
+        store.require_committed_stage(plan_stage, plan_inputs, [ledger])
+    except SecAwareError:
+        pass
+    else:
+        return
+    cleanup_failed = False
+    for stage in (import_stage, legacy_stage):
+        try:
+            store.invalidate_stage(stage)
+        except SecAwareError:
+            cleanup_failed = True
+    message = (
+        "generation producer trust failure could not be cleaned up"
+        if cleanup_failed
+        else "generation request ledger is not committed"
+    )
+    raise _generation_stage_error(
+        ErrorCode.MANIFEST_CONFLICT,
+        import_stage,
+        message,
+    )
+
+
+def _require_committed_generation_code(
+    store: RunStore,
+    *,
+    condition: str,
+    consumer_stage: str,
+    code_output: Path,
+) -> None:
+    for producer_stage in (
+        f"import-generation-{condition}",
+        f"generate-{condition}",
+    ):
+        try:
+            store.require_committed_output(producer_stage, [code_output])
+        except SecAwareError:
+            continue
+        return
+    try:
+        store.invalidate_stage(consumer_stage)
+    except SecAwareError:
+        pass
+    raise _generation_stage_error(
+        ErrorCode.MANIFEST_CONFLICT,
+        consumer_stage,
+        "generation code does not have a committed producer",
     )
 
 
@@ -327,6 +443,13 @@ def import_generation_stage(
     outputs = [output]
     results = Path(results_path)
 
+    _validate_offline_results_path(
+        store,
+        stage=stage,
+        condition=condition,
+        results=results,
+    )
+
     if not results.is_file():
         store.invalidate_stage(stage)
         store.invalidate_stage(legacy_stage)
@@ -337,6 +460,13 @@ def import_generation_stage(
             retryable=True,
         )
 
+    _require_committed_generation_plan(
+        store,
+        condition=condition,
+        import_stage=stage,
+        legacy_stage=legacy_stage,
+        ledger=ledger,
+    )
     _invalidate_alternate_generation_stage(
         store,
         stage=stage,
@@ -444,6 +574,12 @@ def extract_code_tsg_stage(
     inputs = [store.path("generation", source_name)]
     output = store.path("tsg", output_name)
     outputs = [output]
+    _require_committed_generation_code(
+        store,
+        condition=condition,
+        consumer_stage=stage,
+        code_output=inputs[0],
+    )
     if store.should_skip_stage(stage, inputs, outputs, force):
         return
     codes = read_jsonl(inputs[0], GeneratedCodeRecord)
@@ -466,6 +602,12 @@ def run_oracle_stage(
     inputs = [store.path("generation", source_name)]
     output = store.path("oracle", output_name)
     outputs = [output]
+    _require_committed_generation_code(
+        store,
+        condition=condition,
+        consumer_stage=stage,
+        code_output=inputs[0],
+    )
     if store.should_skip_stage(stage, inputs, outputs, force):
         return
     codes = read_jsonl(inputs[0], GeneratedCodeRecord)

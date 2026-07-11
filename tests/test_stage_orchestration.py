@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import threading
 import traceback
 
 import pytest
@@ -150,6 +151,75 @@ def test_stage_is_skippable_only_after_matching_manifest_is_recorded(tmp_path: P
     assert manifest.fingerprint == store.stage_fingerprint("report", [input_path])
 
 
+def test_committed_stage_and_output_gates_accept_a_valid_manifest(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+    before = manifest_path.read_bytes()
+
+    store.require_committed_stage("report", [input_path], [output_path])
+    store.require_committed_output("report", [output_path])
+
+    assert manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "forged_field",
+    ["stage", "fingerprint", "config_sha256", "code_version", "outputs", "output_hash"],
+)
+def test_committed_stage_gate_rejects_forged_manifest_without_mutating_it(
+    tmp_path: Path,
+    forged_field: str,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if forged_field == "stage":
+        payload["stage"] = "private-forged-stage"
+    elif forged_field == "outputs":
+        payload["outputs"] = ["reports/private-forged-output.txt"]
+        payload["output_sha256"] = {
+            "reports/private-forged-output.txt": sha256_path(output_path)
+        }
+    elif forged_field == "output_hash":
+        payload["output_sha256"]["reports/result.txt"] = "0" * 64
+    else:
+        payload[forged_field] = "private-forged-value"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    forged_bytes = manifest_path.read_bytes()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.require_committed_stage("report", [input_path], [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(
+        exc_info.value,
+        "private-forged",
+        str(manifest_path),
+        str(output_path),
+    )
+    assert manifest_path.read_bytes() == forged_bytes
+
+
+def test_committed_output_gate_rejects_tampering_without_mutating_manifest(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+    manifest_bytes = manifest_path.read_bytes()
+    secret = "private-uncommitted-output"
+    output_path.write_text(secret, encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.require_committed_output("report", [output_path])
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(exc_info.value, secret, str(output_path))
+    assert manifest_path.read_bytes() == manifest_bytes
+
+
 def test_successful_skip_does_not_authorize_a_later_stage_record(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
@@ -164,6 +234,64 @@ def test_successful_skip_does_not_authorize_a_later_stage_record(tmp_path: Path)
     assert not manifest_path.exists()
 
 
+@pytest.mark.parametrize("state", ["pending", "sealed"])
+def test_same_stage_reentry_is_rejected_without_destroying_active_execution(
+    tmp_path: Path,
+    state: str,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    if state == "sealed":
+        store.seal_stage_outputs("report", [output_path])
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.should_skip_stage("report", [input_path], [output_path], force=False)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(exc_info.value)
+    store.record_stage("report", [input_path], [output_path])
+    assert store.path(".stages", "report.json").exists()
+
+
+def test_same_stage_concurrent_decision_has_one_executor_and_one_conflict(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    start = threading.Barrier(3)
+    result_lock = threading.Lock()
+    outcomes: list[str] = []
+
+    def decide() -> None:
+        start.wait()
+        try:
+            should_skip = store.should_skip_stage(
+                "report",
+                [input_path],
+                [output_path],
+                force=False,
+            )
+        except SecAwareError as error:
+            outcome = f"error-{int(error.code)}"
+        else:
+            outcome = f"skip-{should_skip}"
+        with result_lock:
+            outcomes.append(outcome)
+
+    threads = [threading.Thread(target=decide) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(outcomes) == ["error-40", "skip-False"]
+    store.record_stage("report", [input_path], [output_path])
+    assert store.path(".stages", "report.json").exists()
+
+
 def test_stage_inputs_rejects_a_missing_required_input(tmp_path: Path) -> None:
     store = _store(tmp_path)
 
@@ -171,6 +299,69 @@ def test_stage_inputs_rejects_a_missing_required_input(tmp_path: Path) -> None:
         store.stage_inputs([store.path("inputs", "missing.jsonl")])
 
     assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+def test_external_stage_input_uses_a_stable_private_key_without_relpath(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    external = tmp_path / "private-external-provider" / "result.txt"
+    external.parent.mkdir()
+    external.write_text("private external bytes\n", encoding="utf-8")
+
+    def reject_relpath(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise ValueError("cross-volume relpath must not be used")
+
+    monkeypatch.setattr(os.path, "relpath", reject_relpath)
+
+    first = store.stage_inputs([external])
+    second = store.stage_inputs([external])
+
+    assert first == second
+    key = next(iter(first))
+    assert key.startswith("@external/")
+    assert len(key.removeprefix("@external/")) == 64
+    assert str(external) not in key
+    assert external.name not in key
+
+
+def test_missing_external_stage_input_error_does_not_disclose_its_path(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    external = tmp_path / "private-missing-external" / "results.jsonl"
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.stage_inputs([external])
+
+    error = exc_info.value
+    surfaces = (
+        str(error),
+        "".join(traceback.format_exception(error)),
+        json.dumps(error.to_dict(), sort_keys=True),
+    )
+    assert error.code is ErrorCode.CONTRACT
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert all(str(external) not in surface for surface in surfaces)
+    assert all("private-missing-external" not in surface for surface in surfaces)
+    assert str(error.details.get("path", "")).startswith("@external/")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive semantics")
+def test_external_path_key_handles_a_different_windows_drive_without_leaking_it(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    private_path = Path("Z:/private-cross-volume/results.jsonl")
+
+    key = store._relative_path(private_path, kind="input", allow_outside=True)
+
+    assert key.startswith("@external/")
+    assert "private-cross-volume" not in key
+    assert "Z:" not in key
 
 
 def test_file_provider_directory_change_invalidates_generation_stage(tmp_path: Path) -> None:
@@ -183,8 +374,10 @@ def test_file_provider_directory_change_invalidates_generation_stage(tmp_path: P
     generate_observed_stage(config, store, force=False)
 
     manifest = read_stage_manifest(store.path(".stages", "generate-observed.json"))
-    relative_provider_dir = Path(os.path.relpath(provider_dir, store.root)).as_posix()
-    assert relative_provider_dir in manifest.inputs
+    external_keys = [key for key in manifest.inputs if key.startswith("@external/")]
+    assert len(external_keys) == 1
+    assert str(provider_dir) not in json.dumps(manifest.inputs)
+    assert provider_dir.name not in json.dumps(manifest.inputs)
     generated_path.write_text("result = 'second'\n", encoding="utf-8")
 
     generate_observed_stage(config, store, force=False)
@@ -538,6 +731,10 @@ def test_failed_stage_cannot_reuse_manifest_after_partial_output_overwrite(
     assert not manifest_path.exists()
     output_path.write_text("partial-stage-output\n", encoding="utf-8")
 
+    with pytest.raises(SecAwareError) as reentry_info:
+        store.should_skip_stage("report", [input_path], [output_path], force=False)
+    assert reentry_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    store.invalidate_stage("report")
     assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
 
 

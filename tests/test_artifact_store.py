@@ -114,6 +114,100 @@ def test_read_jsonl_rejects_records_beyond_the_materialization_limit(
     assert "limit" in error.message
 
 
+def test_read_jsonl_bounds_first_read_for_a_giant_line_even_when_max_records_is_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "private-giant-line.jsonl"
+    path.write_text("x" * (16 * 1024 * 1024), encoding="utf-8")
+    real_open = Path.open
+    read_sizes: list[int | None] = []
+
+    class TrackingHandle:
+        def __init__(self, handle: object) -> None:
+            self.handle = handle
+
+        def __enter__(self) -> "TrackingHandle":
+            self.handle.__enter__()  # type: ignore[attr-defined]
+            return self
+
+        def __exit__(self, *args: object) -> object:
+            return self.handle.__exit__(*args)  # type: ignore[attr-defined,no-any-return]
+
+        def __iter__(self) -> "TrackingHandle":
+            return self
+
+        def __next__(self) -> str:
+            read_sizes.append(None)
+            return next(self.handle)  # type: ignore[arg-type]
+
+        def readline(self, size: int = -1) -> str:
+            read_sizes.append(size)
+            return self.handle.readline(size)  # type: ignore[attr-defined,no-any-return]
+
+    def tracking_open(candidate: Path, *args: object, **kwargs: object) -> object:
+        handle = real_open(candidate, *args, **kwargs)  # type: ignore[arg-type]
+        return TrackingHandle(handle) if candidate == path else handle
+
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        read_jsonl(
+            path,
+            ExampleRecord,
+            max_records=0,
+            max_line_chars=64,
+            max_total_chars=1024,
+            stage="bounded-read",
+        )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert read_sizes == [65]
+
+
+def test_read_jsonl_total_character_limit_counts_blank_lines(tmp_path: Path) -> None:
+    path = tmp_path / "private-blank-flood.jsonl"
+    path.write_text("\n" * 101, encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        read_jsonl(
+            path,
+            max_line_chars=8,
+            max_total_chars=100,
+            stage="bounded-read",
+        )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.details == {"path": str(path), "line": 101}
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"max_line_chars": 0},
+        {"max_line_chars": -1},
+        {"max_line_chars": True},
+        {"max_total_chars": -1},
+        {"max_total_chars": True},
+    ],
+)
+def test_read_jsonl_rejects_invalid_character_limits_safely(
+    tmp_path: Path,
+    limits: dict[str, object],
+) -> None:
+    path = tmp_path / "private-invalid-limits.jsonl"
+    path.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        read_jsonl(path, stage="bounded-read", **limits)  # type: ignore[arg-type]
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    _assert_error_surfaces_are_safe(
+        exc_info.value,
+        sensitive_values=[str(path), "private-invalid-limits"],
+    )
+
+
 def _assert_error_surfaces_are_safe(
     error: SecAwareError,
     *,

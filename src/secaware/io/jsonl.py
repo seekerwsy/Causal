@@ -25,6 +25,14 @@ def _contract_error(
     )
 
 
+def _limit_error(*, stage: str, message: str) -> SecAwareError:
+    return SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage=stage,
+        message=message,
+    )
+
+
 def _decode_line(raw_line: str, *, path: Path, line: int, stage: str) -> object:
     try:
         return json.loads(raw_line)
@@ -65,6 +73,8 @@ def read_jsonl(
     required: bool = False,
     allow_empty: bool = True,
     max_records: int | None = None,
+    max_line_chars: int | None = None,
+    max_total_chars: int | None = None,
     stage: str = "io",
 ) -> list[T] | list[dict]:
     records: list[T] | list[dict] = []
@@ -75,6 +85,20 @@ def read_jsonl(
             message="JSONL record limit is invalid",
             path=path,
         )
+    if max_line_chars is not None and (
+        type(max_line_chars) is not int or max_line_chars <= 0
+    ):
+        raise _limit_error(
+            stage=stage,
+            message="JSONL line character limit is invalid",
+        )
+    if max_total_chars is not None and (
+        type(max_total_chars) is not int or max_total_chars < 0
+    ):
+        raise _limit_error(
+            stage=stage,
+            message="JSONL total character limit is invalid",
+        )
     if not path.exists():
         if required:
             raise _contract_error(
@@ -83,8 +107,34 @@ def read_jsonl(
                 path=path,
             )
         return records
+    total_chars = 0
+    line_number = 0
     with path.open("r", encoding="utf-8") as handle:
-        for line_number, raw_line in enumerate(handle, start=1):
+        while True:
+            read_limits: list[int] = []
+            if max_line_chars is not None:
+                read_limits.append(max_line_chars + 1)
+            if max_total_chars is not None:
+                read_limits.append(max_total_chars - total_chars + 1)
+            raw_line = handle.readline(min(read_limits)) if read_limits else handle.readline()
+            if raw_line == "":
+                break
+            line_number += 1
+            total_chars += len(raw_line)
+            if max_total_chars is not None and total_chars > max_total_chars:
+                raise _contract_error(
+                    stage=stage,
+                    message="JSONL artifact exceeds the total character limit",
+                    path=path,
+                    line=line_number,
+                )
+            if max_line_chars is not None and len(raw_line) > max_line_chars:
+                raise _contract_error(
+                    stage=stage,
+                    message="JSONL line exceeds the character limit",
+                    path=path,
+                    line=line_number,
+                )
             stripped_line = raw_line.strip()
             if not stripped_line:
                 continue
