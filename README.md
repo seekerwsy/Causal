@@ -19,8 +19,8 @@ stages and therefore has the same Oracle requirements.
 The Oracle extra pins the only supported analyzer versions:
 
 ```bash
-uv sync --extra oracle
-# Equivalent editable pip install: pip install -e ".[oracle]"
+uv sync --extra dev --extra oracle
+# Equivalent editable pip install: pip install -e ".[dev,oracle]"
 ```
 
 The finite Semgrep rules, Bandit configuration, Bandit metadata, and their authenticated lock are
@@ -52,7 +52,7 @@ secaware-oracle run \
 Run the checked-in real-tool release gate with:
 
 ```bash
-pytest -m oracle_tools
+uv run pytest -m oracle_tools
 ```
 
 Without the exact optional dependencies and executable commands, this marked integration test is

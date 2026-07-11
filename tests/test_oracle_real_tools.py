@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 import shutil
@@ -26,31 +28,119 @@ POLICY_LOCK = PROJECT_ROOT / "policies" / "oracle" / "python" / "policy.lock.jso
 EXACT_TOOLS = {"semgrep": "1.168.0", "bandit": "1.9.4"}
 
 
-def _exact_tools_unavailable_reason() -> str | None:
-    unavailable: list[str] = []
-    for tool, expected_distribution in EXACT_TOOLS.items():
+@dataclass(frozen=True)
+class _OracleToolGate:
+    skip_reason: str | None
+    error: str | None
+    executables: dict[str, str]
+
+
+def _inspect_oracle_tool_gate(
+    *,
+    version_getter: Callable[[str], str] = metadata.version,
+    executable_resolver: Callable[[str], str | None] = shutil.which,
+) -> _OracleToolGate:
+    versions: dict[str, str | None] = {}
+    executables: dict[str, str | None] = {}
+    for tool in EXACT_TOOLS:
         try:
-            distribution_version = metadata.version(tool)
+            versions[tool] = version_getter(tool)
         except metadata.PackageNotFoundError:
-            distribution_version = None
-        executable = shutil.which(tool)
-        if distribution_version != expected_distribution or executable is None:
-            unavailable.append(
-                f"{tool} distribution={distribution_version!r} executable={executable!r}"
+            versions[tool] = None
+        executables[tool] = executable_resolver(tool)
+
+    if all(version is None for version in versions.values()):
+        commands = "; ".join(f"{tool} executable={executables[tool]!r}" for tool in EXACT_TOOLS)
+        return _OracleToolGate(
+            skip_reason=(
+                "exact Oracle tools unavailable in core environment: both distributions "
+                f"are absent; {commands}"
+            ),
+            error=None,
+            executables={},
+        )
+
+    failures: list[str] = []
+    resolved: dict[str, str] = {}
+    for tool, expected_version in EXACT_TOOLS.items():
+        actual_version = versions[tool]
+        executable = executables[tool]
+        if actual_version != expected_version:
+            failures.append(
+                f"{tool} distribution={actual_version!r}, expected={expected_version!r}"
             )
-    if unavailable:
-        return "exact Oracle tools unavailable: " + "; ".join(unavailable)
-    return None
+        if executable is None:
+            failures.append(f"{tool} executable is missing from PATH")
+        else:
+            resolved[tool] = executable
+    if failures:
+        return _OracleToolGate(
+            skip_reason=None,
+            error="invalid Oracle tool installation: " + "; ".join(failures),
+            executables=resolved,
+        )
+    return _OracleToolGate(skip_reason=None, error=None, executables=resolved)
 
 
-EXACT_TOOLS_UNAVAILABLE = _exact_tools_unavailable_reason()
-pytestmark = [
-    pytest.mark.oracle_tools,
-    pytest.mark.skipif(
-        EXACT_TOOLS_UNAVAILABLE is not None,
-        reason=EXACT_TOOLS_UNAVAILABLE or "exact Oracle tools unavailable",
-    ),
-]
+ORACLE_TOOL_GATE = _inspect_oracle_tool_gate()
+
+
+@pytest.mark.parametrize(
+    ("case", "versions", "executables", "expects_skip", "expects_error"),
+    [
+        ("none", {}, {}, True, False),
+        (
+            "partial",
+            {"semgrep": "1.168.0"},
+            {"semgrep": "/tools/semgrep"},
+            False,
+            True,
+        ),
+        (
+            "wrong",
+            {"semgrep": "1.167.0", "bandit": "1.9.4"},
+            {"semgrep": "/tools/semgrep", "bandit": "/tools/bandit"},
+            False,
+            True,
+        ),
+        (
+            "exact-missing-command",
+            EXACT_TOOLS,
+            {"semgrep": "/tools/semgrep"},
+            False,
+            True,
+        ),
+        (
+            "exact-good",
+            EXACT_TOOLS,
+            {"semgrep": "/tools/semgrep", "bandit": "/tools/bandit"},
+            False,
+            False,
+        ),
+    ],
+)
+def test_oracle_tool_gate_only_skips_when_both_distributions_are_absent(
+    case: str,
+    versions: dict[str, str],
+    executables: dict[str, str],
+    expects_skip: bool,
+    expects_error: bool,
+) -> None:
+    def version_getter(tool: str) -> str:
+        try:
+            return versions[tool]
+        except KeyError:
+            raise metadata.PackageNotFoundError(tool) from None
+
+    gate = _inspect_oracle_tool_gate(
+        version_getter=version_getter,
+        executable_resolver=executables.get,
+    )
+
+    assert (gate.skip_reason is not None) is expects_skip, case
+    assert (gate.error is not None) is expects_error, case
+    if case == "exact-good":
+        assert gate.executables == executables
 
 
 def _request(prompt_id: str, seed_id: int) -> GenerationRequestRecord:
@@ -114,9 +204,31 @@ def _corpus_records() -> list[CanonicalGeneratedCodeRecord]:
     return records
 
 
+@pytest.mark.oracle_tools
+@pytest.mark.skipif(
+    ORACLE_TOOL_GATE.skip_reason is not None,
+    reason=ORACLE_TOOL_GATE.skip_reason or "exact Oracle tools unavailable",
+)
 def test_locked_real_tools_classify_checked_in_corpus() -> None:
-    policy = run_oracle_preflight(OracleConfig(policy_lock_path=str(POLICY_LOCK)))
-    secure, insecure = run_oracle_batch(_corpus_records(), policy)
+    if ORACLE_TOOL_GATE.error is not None:
+        pytest.fail(ORACLE_TOOL_GATE.error, pytrace=False)
+    semgrep_executable = ORACLE_TOOL_GATE.executables.get("semgrep")
+    bandit_executable = ORACLE_TOOL_GATE.executables.get("bandit")
+    assert semgrep_executable is not None
+    assert bandit_executable is not None
+    policy = run_oracle_preflight(
+        OracleConfig(
+            policy_lock_path=str(POLICY_LOCK),
+            semgrep_executable=semgrep_executable,
+            bandit_executable=bandit_executable,
+        )
+    )
+    secure, insecure = run_oracle_batch(
+        _corpus_records(),
+        policy,
+        semgrep_executable=semgrep_executable,
+        bandit_executable=bandit_executable,
+    )
 
     assert [secure.security_label, insecure.security_label] == [
         SecurityLabel.SECURE,
