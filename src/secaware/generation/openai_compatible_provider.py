@@ -95,6 +95,7 @@ def _trusted_config(value: object) -> OpenAICompatibleConfig:
     except Exception:
         pass
     if trusted is None:
+        value = None
         raise _provider_error(
             ErrorCode.CONFIG,
             "OpenAI-compatible provider configuration is unavailable",
@@ -423,7 +424,21 @@ def create_openai_compatible_provider(
     environ: Mapping[str, str] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> OpenAICompatibleProvider:
-    trusted = _trusted_config(config)
+    trusted: OpenAICompatibleConfig | None = None
+    config_error: SecAwareError | None = None
+    try:
+        trusted = _trusted_config(config)
+    except SecAwareError as error:
+        config_error = error
+    if config_error is not None or trusted is None:
+        config = None  # type: ignore[assignment]
+        environ = None
+        if config_error is not None:
+            raise config_error
+        raise _provider_error(
+            ErrorCode.CONFIG,
+            "OpenAI-compatible provider configuration is unavailable",
+        )
     environment = os.environ if environ is None else environ
     api_key: str | None = None
     candidate: object = None

@@ -71,6 +71,11 @@ class SafeValidationMixin:
             pass
         else:
             return
+        data.clear()
+        try:
+            vars(self).clear()
+        except Exception:
+            pass
         raise type(self)._safe_error()
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -80,6 +85,8 @@ class SafeValidationMixin:
             pass
         else:
             return
+        name = ""
+        value = None
         raise type(self)._safe_error()
 
     @classmethod
@@ -94,6 +101,8 @@ class SafeValidationMixin:
             return super().model_validate(obj, **kwargs)
         except Exception:
             pass
+        obj = None
+        kwargs.clear()
         raise cls._safe_error()
 
     @classmethod
@@ -106,6 +115,8 @@ class SafeValidationMixin:
             return super().model_validate_json(json_data, **kwargs)
         except Exception:
             pass
+        json_data = b""
+        kwargs.clear()
         raise cls._safe_error("json")
 
     @classmethod
@@ -118,6 +129,8 @@ class SafeValidationMixin:
             return super().model_validate_strings(obj, **kwargs)
         except Exception:
             pass
+        obj = None
+        kwargs.clear()
         raise cls._safe_error()
 
 

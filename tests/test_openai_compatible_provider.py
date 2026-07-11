@@ -72,10 +72,12 @@ def _assert_safe_validation_error(error: ValidationError, *hidden: str) -> None:
     assert structured[0]["loc"] == ()
     assert structured[0].get("input") is None
     assert "ctx" not in structured[0]
+    retained = _secaware_traceback_locals(error)  # type: ignore[arg-type]
     for value in hidden:
         if not value or value.isspace():
             continue
         assert all(value not in surface for surface in _validation_surfaces(error))
+        assert value not in retained
 
 
 def _assert_safe_provider_error(error: SecAwareError, *hidden: str) -> None:
@@ -449,6 +451,43 @@ def test_preflight_requires_nonempty_openai_credential_only_when_selected(
     _assert_safe_provider_error(exc_info.value, credential or "missing")
 
 
+def test_preflight_checks_credentials_before_retaining_prompt_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt_secret = "preflight-prompt-frame-sentinel"
+    config = _write_prompt_config(
+        tmp_path,
+        provider="openai_compatible",
+        include_openai_config=True,
+    )
+    write_jsonl(
+        config.data.prompts_path,
+        [
+            PromptRecord(
+                prompt_id="prompt-sensitive-preflight",
+                split="discover",
+                language="python",
+                task_family="path_handling",
+                cwe="CWE-22",
+                prompt=prompt_secret,
+            )
+        ],
+    )
+    monkeypatch.delenv(_ENV_NAME, raising=False)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(config)
+
+    assert exc_info.value.code is ErrorCode.API_AUTH
+    _assert_safe_provider_error(
+        exc_info.value,
+        prompt_secret,
+        _API_KEY,
+        _BASE_URL,
+    )
+
+
 def test_preflight_does_not_require_openai_credentials_for_other_providers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -576,6 +615,30 @@ def test_factory_maps_missing_key_to_safe_auth_error() -> None:
 
     assert exc_info.value.code is ErrorCode.API_AUTH
     _assert_safe_provider_error(exc_info.value)
+
+
+def test_factory_rejects_raw_config_mapping_without_retaining_inputs() -> None:
+    sentinel = "invalid-factory-config-frame-sentinel"
+    raw_config = {
+        "base_url": f"https://{sentinel}.invalid/v1",
+        "api_key": sentinel,
+        "wrapper": {"token": sentinel},
+    }
+
+    with pytest.raises(SecAwareError) as exc_info:
+        create_openai_compatible_provider(
+            raw_config,  # type: ignore[arg-type]
+            environ={_ENV_NAME: _API_KEY},
+        )
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    _assert_safe_provider_error(
+        exc_info.value,
+        sentinel,
+        raw_config["base_url"],
+        _API_KEY,
+        _BASE_URL,
+    )
 
 
 def test_factory_maps_missing_sdk_to_safe_config_error(
