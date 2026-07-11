@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -9,11 +10,17 @@ from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.providers import get_provider
 from secaware.io.jsonl import write_jsonl
-from secaware.pipeline.preflight import PreflightReport, run_preflight
+from secaware.oracle.runner import AnalyzerProcessResult
+from secaware.pipeline.preflight import (
+    PreflightReport,
+    run_oracle_preflight,
+    run_preflight,
+)
 from secaware.schema.records import PromptRecord
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+POLICY_LOCK = PROJECT_ROOT / "policies" / "oracle" / "python" / "policy.lock.json"
 CLI_COMMANDS = [
     "preflight",
     "extract-prompt-tsg",
@@ -66,6 +73,179 @@ def _config(
 
 def _write_valid_prompts(path: Path) -> None:
     write_jsonl(path, [_prompt("prompt-1", "discover", "write a safe helper")])
+
+
+class _VersionRunner:
+    def __init__(
+        self,
+        *,
+        semgrep: bytes = b"1.168.0\n",
+        bandit: bytes = (
+            b"bandit 1.9.4\n"
+            b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
+        ),
+    ) -> None:
+        self.semgrep = semgrep
+        self.bandit = bandit
+        self.calls: list[tuple[str, ...]] = []
+        self.cwds: list[Path] = []
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        timeout_seconds: float,
+        max_stdout_bytes: int,
+        max_stderr_bytes: int,
+    ) -> AnalyzerProcessResult:
+        del timeout_seconds, max_stdout_bytes, max_stderr_bytes
+        call = tuple(argv)
+        self.calls.append(call)
+        self.cwds.append(cwd)
+        assert call[1:] == ("--version",)
+        stdout = self.semgrep if "semgrep" in call[0] else self.bandit
+        return AnalyzerProcessResult(returncode=0, stdout=stdout, argv_sha256="a" * 64)
+
+
+def _oracle_config(tmp_path: Path, prompts_path: Path) -> AppConfig:
+    config = _config(tmp_path, prompts_path)
+    payload = config.model_dump(mode="python")
+    payload["oracle"].update(
+        policy_lock_path=str(POLICY_LOCK),
+        semgrep_executable="semgrep-private",
+        bandit_executable="bandit-private",
+    )
+    return AppConfig.model_validate(payload)
+
+
+def test_oracle_preflight_validates_runtime_before_analyzer_resolution(
+    tmp_path: Path,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+    runner = _VersionRunner()
+
+    def unsupported_runtime() -> None:
+        raise SecAwareError(
+            code=ErrorCode.ANALYZER_FAILED,
+            stage="oracle_analyzer",
+            message="analyzer runtime is unavailable",
+        )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_preflight(
+            config.oracle,
+            runner=runner,
+            runtime_validator=unsupported_runtime,
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    assert runner.calls == []
+
+
+def test_oracle_preflight_authenticates_policy_and_exact_versions(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+    runner = _VersionRunner()
+    runtime_calls = 0
+
+    def supported_runtime() -> None:
+        nonlocal runtime_calls
+        runtime_calls += 1
+
+    policy = run_oracle_preflight(
+        config.oracle,
+        runner=runner,
+        runtime_validator=supported_runtime,
+    )
+
+    assert runtime_calls == 1
+    assert policy.semgrep_version == "1.168.0"
+    assert policy.bandit_version == "1.9.4"
+    assert len(runner.calls) == 2
+    assert all(cwd != POLICY_LOCK.parent for cwd in runner.cwds)
+    assert all(not cwd.exists() for cwd in runner.cwds)
+
+
+def test_oracle_preflight_accepts_locked_bandit_1_9_4_version_shape(
+    tmp_path: Path,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+    runner = _VersionRunner(
+        bandit=(
+            b"bandit 1.9.4\n"
+            b"  python version = 3.12.13 (main, Mar  3 2026, 15:01:35) "
+            b"[MSC v.1944 64 bit (AMD64)]\n"
+        )
+    )
+
+    policy = run_oracle_preflight(
+        config.oracle,
+        runner=runner,
+        runtime_validator=lambda: None,
+    )
+
+    assert policy.bandit_version == "1.9.4"
+
+
+@pytest.mark.parametrize(
+    ("semgrep", "bandit"),
+    [
+        (
+            b"1.167.0\n",
+            b"bandit 1.9.4\n  python version = 3.12.13 (main) [MSC v.1944]\n",
+        ),
+        (
+            b"1.168.0\n",
+            b"bandit 1.9.3\n  python version = 3.12.13 (main) [MSC v.1944]\n",
+        ),
+    ],
+)
+def test_oracle_preflight_rejects_version_drift_without_raw_output(
+    tmp_path: Path,
+    semgrep: bytes,
+    bandit: bytes,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+    secret = b"PRIVATE-VERSION-OUTPUT"
+    runner = _VersionRunner(semgrep=semgrep + secret, bandit=bandit + secret)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_preflight(
+            config.oracle,
+            runner=runner,
+            runtime_validator=lambda: None,
+        )
+
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
+    assert secret.decode() not in str(exc_info.value)
+    assert exc_info.value.details == {}
+
+
+def test_oracle_preflight_rejects_unrecognized_trailing_version_output(
+    tmp_path: Path,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+    runner = _VersionRunner(semgrep=b"1.168.0\nPRIVATE-TRAILING-OUTPUT\n")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_preflight(
+            config.oracle,
+            runner=runner,
+            runtime_validator=lambda: None,
+        )
+
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
+    assert "PRIVATE-TRAILING-OUTPUT" not in str(exc_info.value)
 
 
 def _write_provider_config(

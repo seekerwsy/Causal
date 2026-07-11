@@ -3,22 +3,21 @@ from collections import Counter, defaultdict
 
 from secaware.discovery.candidate_enum import FactorSpec
 from secaware.schema.records import PromptRecord
-from secaware.schema.results import LegacyOracleRecord, SecurityLabel
+from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.tsg import TSGRecord
 
 
-def _risk_rate(records: list[LegacyOracleRecord]) -> float:
-    known = [record for record in records if record.security_label != SecurityLabel.UNKNOWN]
-    if not known:
+def _risk_rate(records: list[OracleRecord]) -> float:
+    if not records:
         return 0.0
-    insecure = sum(1 for record in known if record.security_label == SecurityLabel.INSECURE)
-    return insecure / len(known)
+    insecure = sum(1 for record in records if record.security_label == SecurityLabel.INSECURE)
+    return insecure / len(records)
 
 
 def association_score(
     spec: FactorSpec,
     prompt_tsgs: list[TSGRecord],
-    oracle_by_prompt: dict[str, list[LegacyOracleRecord]],
+    oracle_by_prompt: dict[str, list[OracleRecord]],
 ) -> tuple[float, float, dict[str, int]]:
     present_ids = [tsg.prompt_id for tsg in prompt_tsgs if bool(tsg.features.get(spec.prompt_factor))]
     absent_ids = [tsg.prompt_id for tsg in prompt_tsgs if not bool(tsg.features.get(spec.prompt_factor))]
@@ -43,7 +42,7 @@ def path_score(
     spec: FactorSpec,
     prompt_tsgs: list[TSGRecord],
     code_tsg_by_prompt: dict[str, list[TSGRecord]],
-    oracle_by_prompt: dict[str, list[LegacyOracleRecord]],
+    oracle_by_prompt: dict[str, list[OracleRecord]],
 ) -> float:
     absent = [tsg for tsg in prompt_tsgs if not bool(tsg.features.get(spec.prompt_factor))]
     if not absent:
@@ -71,7 +70,7 @@ def stability_score(
     spec: FactorSpec,
     prompts: list[PromptRecord],
     prompt_tsg_by_id: dict[str, TSGRecord],
-    oracle_by_prompt: dict[str, list[LegacyOracleRecord]],
+    oracle_by_prompt: dict[str, list[OracleRecord]],
 ) -> float:
     groups: dict[str, list[TSGRecord]] = defaultdict(list)
     for prompt in prompts:

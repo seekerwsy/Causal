@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import json
 import os
 from pathlib import Path
@@ -19,7 +20,9 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
+from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.aggregator import run_oracle
+from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.generation import (
     GenerationProvenance,
@@ -30,6 +33,46 @@ from secaware.schema.generation import (
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+
+
+def _clean_oracle_runner(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout_seconds: float,
+    max_stdout_bytes: int,
+    max_stderr_bytes: int,
+) -> AnalyzerProcessResult:
+    del timeout_seconds, max_stdout_bytes, max_stderr_bytes
+    call = tuple(argv)
+    analyzer = "semgrep" if "semgrep" in call[0] else "bandit"
+    if call[1:] == ("--version",):
+        output = (
+            b"1.168.0\n"
+            if analyzer == "semgrep"
+            else (
+                b"bandit 1.9.4\n"
+                b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
+            )
+        )
+        return AnalyzerProcessResult(0, output, "a" * 64)
+    files = sorted(path.name for path in cwd.iterdir() if path.suffix == ".py")
+    if analyzer == "semgrep":
+        payload = {
+            "version": "1.168.0",
+            "results": [],
+            "errors": [],
+            "paths": {"scanned": files},
+            "skipped_rules": [],
+        }
+    else:
+        metrics = {
+            filename: {"loc": 2, "nosec": 0, "skipped_tests": 0}
+            for filename in files
+        }
+        metrics["_totals"] = {"loc": 2, "nosec": 0, "skipped_tests": 0}
+        payload = {"errors": [], "metrics": metrics, "results": []}
+    return AnalyzerProcessResult(0, json.dumps(payload).encode(), "a" * 64)
 
 
 def _prompt(prompt_id: str, split: str, text: str) -> PromptRecord:
@@ -848,6 +891,7 @@ def test_import_rejects_a_schema_valid_ledger_without_committed_plan_provenance(
 def test_downstream_rejects_old_code_after_partial_import_invalidates_producers(
     tmp_path: Path,
     consumer: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, store, _ = _prepared_store(tmp_path)
     _, requests = _plan_observed(config, store)
@@ -870,6 +914,7 @@ def test_downstream_rejects_old_code_after_partial_import_invalidates_producers(
             force=False,
         )
     else:
+        monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
         consumer_stage = "run-oracle-observed"
         consumer_output = store.path("oracle", "observed_oracle.jsonl")
         run_consumer = lambda: run_oracle_stage(  # noqa: E731
@@ -877,6 +922,8 @@ def test_downstream_rejects_old_code_after_partial_import_invalidates_producers(
             store,
             condition="observed",
             force=False,
+            runner=_clean_oracle_runner,
+            runtime_validator=lambda: None,
         )
     run_consumer()
     consumer_manifest = store.path(".stages", f"{consumer_stage}.json")

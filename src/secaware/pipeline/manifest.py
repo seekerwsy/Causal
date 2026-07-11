@@ -23,6 +23,7 @@ class StageManifest(VersionedModel):
     inputs: dict[str, str]
     config_sha256: str
     code_version: str
+    policy_sha256: _SHA256 | None = None
     outputs: list[str] = Field(min_length=1)
     output_sha256: dict[str, _SHA256] = Field(default_factory=dict)
 
@@ -49,6 +50,9 @@ class StageManifest(VersionedModel):
 
     @model_validator(mode="after")
     def _validate_output_hash_coverage(self) -> "StageManifest":
+        oracle_stage = self.stage.startswith("run-oracle-")
+        if oracle_stage != (self.policy_sha256 is not None):
+            raise ValueError("stage manifest policy binding is invalid")
         if len(set(self.outputs)) != len(self.outputs):
             raise ValueError("stage manifest outputs must be unique")
         if self.output_sha256 and set(self.output_sha256) != set(self.outputs):
@@ -97,6 +101,7 @@ def manifest_allows_skip(
     output_paths: Sequence[str | Path],
     *,
     force: bool = False,
+    policy_sha256: str | None = None,
     manifest_outputs: Sequence[str | Path] | None = None,
 ) -> bool:
     if force or not output_paths:
@@ -110,6 +115,8 @@ def manifest_allows_skip(
     except (OSError, UnicodeError, TypeError, ValueError):
         return False
     if manifest.fingerprint != expected_fingerprint:
+        return False
+    if manifest.policy_sha256 != policy_sha256:
         return False
     if manifest.outputs != normalized_outputs:
         return False

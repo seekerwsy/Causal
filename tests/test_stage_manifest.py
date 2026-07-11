@@ -242,6 +242,76 @@ def test_stage_manifest_round_trips_through_atomic_write(tmp_path: Path) -> None
     assert list(manifest_path.parent.glob("*.tmp")) == []
 
 
+def test_oracle_stage_manifest_requires_and_round_trips_policy_digest(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "oracle.jsonl"
+    output.write_text("ready\n", encoding="utf-8")
+    manifest = StageManifest(
+        schema_version="1.0",
+        stage="run-oracle-observed",
+        fingerprint="fingerprint",
+        inputs={"generation/observed_code.jsonl": "input-sha"},
+        config_sha256="config-sha",
+        code_version="test-version",
+        policy_sha256="b" * 64,
+        outputs=[output],
+        output_sha256={output: sha256_path(output)},
+    )
+    manifest_path = tmp_path / "oracle-manifest.json"
+
+    write_stage_manifest(manifest_path, manifest)
+
+    assert read_stage_manifest(manifest_path).policy_sha256 == "b" * 64
+
+
+def test_oracle_manifest_rejects_missing_or_noncanonical_policy_digest() -> None:
+    payload = _manifest(
+        fingerprint="fingerprint",
+        outputs=["oracle/observed_oracle.jsonl"],
+    ).model_dump(mode="python")
+    payload["stage"] = "run-oracle-observed"
+
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(payload)
+
+    payload["policy_sha256"] = "B" * 64
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(payload)
+
+
+def test_non_oracle_manifest_rejects_policy_digest() -> None:
+    payload = _manifest(
+        fingerprint="fingerprint",
+        outputs=["reports/summary.json"],
+    ).model_dump(mode="python")
+    payload["policy_sha256"] = "b" * 64
+
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(payload)
+
+
+def test_legacy_non_oracle_manifest_without_policy_digest_remains_readable(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy.json"
+    path.write_text(
+        """{
+  "schema_version": "1.0",
+  "stage": "report",
+  "fingerprint": "fingerprint",
+  "inputs": {},
+  "config_sha256": "config-sha",
+  "code_version": "test-version",
+  "outputs": ["reports/summary.json"],
+  "output_sha256": {}
+}\n""",
+        encoding="utf-8",
+    )
+
+    assert read_stage_manifest(path).policy_sha256 is None
+
+
 def test_manifest_allows_skip_only_for_matching_manifest_and_existing_outputs(
     tmp_path: Path,
 ) -> None:
@@ -262,6 +332,37 @@ def test_manifest_allows_skip_only_for_matching_manifest_and_existing_outputs(
 
     output.unlink()
     assert manifest_allows_skip(manifest_path, "expected", [output]) is False
+
+
+def test_manifest_skip_requires_matching_oracle_policy_digest(tmp_path: Path) -> None:
+    output = tmp_path / "oracle.jsonl"
+    output.write_text("ready\n", encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest = StageManifest(
+        schema_version="1.0",
+        stage="run-oracle-observed",
+        fingerprint="expected",
+        inputs={"generation/observed_code.jsonl": "input-sha"},
+        config_sha256="config-sha",
+        code_version="test-version",
+        policy_sha256="b" * 64,
+        outputs=[output],
+        output_sha256={output: sha256_path(output)},
+    )
+    write_stage_manifest(manifest_path, manifest)
+
+    assert manifest_allows_skip(
+        manifest_path,
+        "expected",
+        [output],
+        policy_sha256="b" * 64,
+    )
+    assert not manifest_allows_skip(
+        manifest_path,
+        "expected",
+        [output],
+        policy_sha256="c" * 64,
+    )
 
 
 def test_manifest_allows_skip_rejects_missing_invalid_or_wrong_outputs(

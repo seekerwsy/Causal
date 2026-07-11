@@ -2,6 +2,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Literal, Optional, TypeVar, cast
 
 import typer
@@ -34,12 +36,15 @@ from secaware.intervention.operators import apply_intervention
 from secaware.io.jsonl import canonical_jsonl_sha256, read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.logging_utils import console
-from secaware.oracle.aggregator import run_oracle as run_code_oracle
-from secaware.pipeline.preflight import run_preflight
+from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
+from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
+from secaware.pipeline.artifact import sha256_path
+from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.generation import (
     GenerationAttemptRecord,
+    GenerationProvenance,
     GenerationRequestRecord,
     OfflineGenerationResultRecord,
     sha256_text,
@@ -50,7 +55,8 @@ from secaware.schema.records import (
     GeneratedCodeRecord,
     PromptRecord,
 )
-from secaware.schema.results import EffectRecord, LegacyOracleRecord, PairResult
+from secaware.schema.oracle import OracleRecord
+from secaware.schema.results import EffectRecord, PairResult
 from secaware.schema.tsg import TSGRecord
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
@@ -61,6 +67,7 @@ _ActionResult = TypeVar("_ActionResult")
 MAX_GENERATION_JSONL_LINE_CHARS = 8 * 1024 * 1024
 MAX_GENERATION_JSONL_TOTAL_CHARS = 512 * 1024 * 1024
 MAX_PROVIDER_ATTEMPT_RECORDS = MAX_GENERATION_REQUESTS * 10
+MAX_ORACLE_RECORDS = MAX_GENERATION_REQUESTS
 
 
 def _load(config: Path, run_dir: Optional[Path]) -> tuple[AppConfig, RunStore]:
@@ -511,6 +518,144 @@ def _require_committed_generation_code(
     )
 
 
+@contextmanager
+def _hold_committed_generation_code(
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    consumer_stage: str,
+    code_output: Path,
+) -> Iterator[dict[str, str]]:
+    producer_stage: str | None = None
+    producer_outputs: list[Path] = []
+    for candidate in (
+        f"import-generation-{condition}",
+        f"generate-provider-{condition}",
+        f"generate-{condition}",
+    ):
+        outputs = [code_output]
+        if candidate.startswith("generate-provider-"):
+            outputs.append(store.path("generation", f"{condition}_attempts.jsonl"))
+        try:
+            store.require_committed_output(candidate, outputs)
+        except SecAwareError:
+            continue
+        producer_stage = candidate
+        producer_outputs = outputs
+        break
+    if producer_stage is None:
+        try:
+            store.invalidate_stage(consumer_stage)
+        except SecAwareError:
+            pass
+        raise _generation_stage_error(
+            ErrorCode.MANIFEST_CONFLICT,
+            consumer_stage,
+            "generation code does not have a committed producer",
+        )
+    try:
+        with store.hold_committed_output(producer_stage, producer_outputs) as hashes:
+            yield hashes
+    finally:
+        producer_stage = None
+        producer_outputs.clear()
+        producer_outputs = []
+
+
+def _oracle_stage_error(code: ErrorCode, stage: str, message: str) -> SecAwareError:
+    return SecAwareError(
+        code=code,
+        stage=stage,
+        message=message,
+        details={},
+        retryable=False,
+    )
+
+
+def _read_canonical_oracle_input(path: Path, *, stage: str) -> list[CanonicalGeneratedCodeRecord]:
+    try:
+        records = read_jsonl(
+            path,
+            CanonicalGeneratedCodeRecord,
+            required=True,
+            allow_empty=False,
+            max_records=MAX_ORACLE_RECORDS,
+            max_line_chars=MAX_GENERATION_JSONL_LINE_CHARS,
+            max_total_chars=MAX_GENERATION_JSONL_TOTAL_CHARS,
+            stage=stage,
+        )
+    except (OSError, SecAwareError, UnicodeError):
+        pass
+    else:
+        return cast(list[CanonicalGeneratedCodeRecord], records)
+    raise _oracle_stage_error(
+        ErrorCode.CONTRACT,
+        stage,
+        "generated code artifact failed canonical validation",
+    ) from None
+
+
+def _read_oracle_output(path: Path, *, stage: str) -> list[OracleRecord]:
+    try:
+        records = read_jsonl(
+            path,
+            OracleRecord,
+            required=True,
+            allow_empty=False,
+            max_records=MAX_ORACLE_RECORDS,
+            max_line_chars=MAX_GENERATION_JSONL_LINE_CHARS,
+            max_total_chars=MAX_GENERATION_JSONL_TOTAL_CHARS,
+            stage=stage,
+        )
+    except (OSError, SecAwareError, UnicodeError):
+        pass
+    else:
+        return cast(list[OracleRecord], records)
+    raise _oracle_stage_error(
+        ErrorCode.CONTRACT,
+        stage,
+        "oracle artifact failed canonical validation",
+    ) from None
+
+
+def _oracle_transaction_path(output: Path, suffix: str) -> Path:
+    handle = None
+    try:
+        handle = tempfile.NamedTemporaryFile(
+            mode="w+b",
+            prefix=f".{output.name}.",
+            suffix=suffix,
+            dir=output.parent,
+            delete=False,
+        )
+        path = Path(handle.name)
+        handle.close()
+        handle = None
+        path.unlink()
+        return path
+    except OSError:
+        raise _oracle_stage_error(
+            ErrorCode.CONTRACT,
+            "oracle",
+            "Oracle output transaction is unavailable",
+        ) from None
+    finally:
+        if handle is not None:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
+
+def _cleanup_failed_oracle_stage(store: RunStore, stage: str) -> None:
+    if not store.stage_is_active(stage):
+        return
+    try:
+        store.abort_stage(stage)
+    except SecAwareError:
+        pass
+
+
 def plan_generation_stage(
     config: AppConfig,
     store: RunStore,
@@ -920,27 +1065,57 @@ def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) 
             config.generation.provider,
             file_provider_dir=config.generation.file_provider_dir,
         )
-        records: list[GeneratedCodeRecord] = []
-        for prompt in prompts:
-            for model_id in config.generation.models:
-                for seed in config.generation.seeds:
-                    code_id = f"observed_{prompt.prompt_id}_{_safe_id(model_id)}_{seed}"
-                    records.append(
-                        GeneratedCodeRecord(
-                            code_id=code_id,
-                            prompt_id=prompt.prompt_id,
-                            condition="observed",
-                            model_id=model_id,
-                            seed_id=seed,
-                            code=provider.generate(
-                                prompt.prompt,
-                                model_id=model_id,
-                                seed=seed,
-                                language=prompt.language,
-                            ),
-                        )
-                    )
+        if config.generation.provider == "mock":
+            requests = plan_observed_requests(
+                prompts,
+                config.generation.models,
+                config.generation.seeds,
+                endpoint_type="mock",
+            )
+            producer = "mock"
+        elif config.generation.provider == "file":
+            requests = plan_observed_requests(
+                prompts,
+                config.generation.models,
+                config.generation.seeds,
+                endpoint_type="offline",
+                endpoint_identity=config.generation.file_provider_dir,
+            )
+            producer = "file_provider"
+        else:
+            raise _generation_stage_error(
+                ErrorCode.CONFIG,
+                stage,
+                "generation provider is unavailable",
+            )
+        records = [
+            canonical_generated_code_from_request(
+                request,
+                provider.generate(
+                    request.prompt,
+                    model_id=request.model_id,
+                    seed=request.seed_id,
+                    language=request.language,
+                ),
+                GenerationProvenance(
+                    producer=producer,
+                    producer_version="compatibility-v1",
+                ),
+            )
+            for request in requests
+        ]
         write_jsonl(output, records)
+        store.seal_stage_outputs(stage, outputs)
+        _read_verified_generation_records(
+            store,
+            output,
+            CanonicalGeneratedCodeRecord,
+            records,
+            outputs,
+            stage=stage,
+            max_records=MAX_GENERATION_REQUESTS,
+            mismatch_message="generated code artifact failed canonical readback",
+        )
         store.record_stage(stage, inputs, outputs)
 
     _execute_generation_stage(store, stage, execute)
@@ -973,30 +1148,260 @@ def extract_code_tsg_stage(
     store.record_stage(stage, inputs, outputs)
 
 
+def _run_oracle_stage(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    condition: str,
+    force: bool,
+    runner: AnalyzerRunner | None = None,
+    runtime_validator: Callable[[], object] | None = None,
+) -> None:
+    validated_condition = _generation_condition(condition)
+    runner = run_analyzer_process if runner is None else runner
+    runtime_validator = (
+        validate_analyzer_runtime if runtime_validator is None else runtime_validator
+    )
+    stage = f"run-oracle-{validated_condition}"
+    source_name = f"{validated_condition}_code.jsonl"
+    output_name = f"{validated_condition}_oracle.jsonl"
+    inputs = [store.path("generation", source_name)]
+    output = store.path("oracle", output_name)
+    outputs = [output]
+    candidate_output: Path | None = None
+    backup_output: Path | None = None
+    output_installed = False
+    output_backed_up = False
+    manifest_path = store.path(".stages", f"{stage}.json")
+    manifest_backup: Path | None = None
+    manifest_transaction = False
+    had_manifest = False
+    try:
+        with _hold_committed_generation_code(
+            store,
+            condition=validated_condition,
+            consumer_stage=stage,
+            code_output=inputs[0],
+        ) as producer_hashes:
+            initial_policy = run_oracle_preflight(
+                config.oracle,
+                runner=runner,
+                runtime_validator=runtime_validator,
+            )
+            if store.should_skip_stage(
+                stage,
+                inputs,
+                outputs,
+                force,
+                policy_sha256=initial_policy.combined_sha256,
+                preserve_committed=True,
+            ):
+                return
+            had_manifest = manifest_path.exists()
+            if had_manifest:
+                if manifest_path.is_symlink() or not manifest_path.is_file():
+                    raise _oracle_stage_error(
+                        ErrorCode.MANIFEST_CONFLICT,
+                        stage,
+                        "Oracle stage manifest is invalid",
+                    )
+                manifest_backup = _oracle_transaction_path(
+                    manifest_path,
+                    ".manifest.backup",
+                )
+                try:
+                    shutil.copyfile(manifest_path, manifest_backup)
+                except OSError:
+                    raise _oracle_stage_error(
+                        ErrorCode.MANIFEST_CONFLICT,
+                        stage,
+                        "Oracle stage manifest could not be preserved",
+                    ) from None
+            manifest_transaction = True
+            codes = _read_canonical_oracle_input(inputs[0], stage=stage)
+            if any(code.condition != validated_condition for code in codes):
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "generated code condition does not match the Oracle stage",
+                )
+            input_digest = sha256_path(inputs[0])
+            expected_input_digest = producer_hashes.get(
+                f"generation/{validated_condition}_code.jsonl"
+            )
+            if input_digest != expected_input_digest:
+                raise _oracle_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "generation producer output changed before Oracle execution",
+                )
+            execution_policy = run_oracle_preflight(
+                config.oracle,
+                runner=runner,
+                runtime_validator=runtime_validator,
+            )
+            if execution_policy.combined_sha256 != initial_policy.combined_sha256:
+                raise _oracle_stage_error(
+                    ErrorCode.POLICY_MISMATCH,
+                    stage,
+                    "Oracle policy changed before execution",
+                )
+            records = run_oracle_batch(
+                codes,
+                execution_policy,
+                semgrep_executable=config.oracle.semgrep_executable,
+                bandit_executable=config.oracle.bandit_executable,
+                timeout_seconds=config.oracle.timeout_seconds,
+                max_stdout_bytes=config.oracle.max_stdout_bytes,
+                max_stderr_bytes=config.oracle.max_stderr_bytes,
+                runner=runner,
+            )
+            if sha256_path(inputs[0]) != input_digest:
+                raise _oracle_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "generation producer output changed during Oracle execution",
+                )
+            candidate_output = _oracle_transaction_path(output, ".oracle.candidate")
+            write_jsonl(candidate_output, records, stage=stage)
+            if _read_oracle_output(candidate_output, stage=stage) != records:
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "oracle artifact failed canonical readback",
+                )
+            backup_output = _oracle_transaction_path(output, ".oracle.backup")
+            try:
+                if output.exists():
+                    os.replace(output, backup_output)
+                    output_backed_up = True
+                os.replace(candidate_output, output)
+                output_installed = True
+                candidate_output = None
+            except OSError:
+                if output_backed_up:
+                    try:
+                        os.replace(backup_output, output)
+                        output_backed_up = False
+                    except OSError:
+                        pass
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "oracle artifact could not be committed",
+                ) from None
+            store.seal_stage_outputs(stage, outputs)
+            if _read_oracle_output(output, stage=stage) != records:
+                store.verify_sealed_outputs(stage, outputs)
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "oracle artifact failed canonical readback",
+                )
+            store.verify_sealed_outputs(stage, outputs)
+            store.record_stage(
+                stage,
+                inputs,
+                outputs,
+                policy_sha256=execution_policy.combined_sha256,
+            )
+            if output_backed_up and backup_output is not None:
+                backup_output.unlink(missing_ok=True)
+                output_backed_up = False
+            if manifest_backup is not None:
+                manifest_backup.unlink(missing_ok=True)
+                manifest_backup = None
+            manifest_transaction = False
+    except BaseException:
+        if output_installed:
+            try:
+                output.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if output_backed_up and backup_output is not None:
+            try:
+                os.replace(backup_output, output)
+                output_backed_up = False
+            except OSError:
+                pass
+        _cleanup_failed_oracle_stage(store, stage)
+        if manifest_transaction:
+            try:
+                if had_manifest and manifest_backup is not None:
+                    os.replace(manifest_backup, manifest_path)
+                    manifest_backup = None
+                elif not had_manifest:
+                    manifest_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+    finally:
+        for transaction_path in (candidate_output, backup_output, manifest_backup):
+            if transaction_path is not None:
+                try:
+                    transaction_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        runner = None
+        runtime_validator = None
+
+
+def _public_oracle_error(code: ErrorCode, stage: str) -> SecAwareError:
+    messages = {
+        ErrorCode.CONFIG: "Oracle stage configuration is invalid",
+        ErrorCode.CONTRACT: "Oracle stage artifact validation failed",
+        ErrorCode.ANALYZER_MISSING: "analyzer executable is unavailable",
+        ErrorCode.ANALYZER_FAILED: "analyzer execution failed",
+        ErrorCode.ANALYZER_INVALID_OUTPUT: "analyzer output is invalid",
+        ErrorCode.POLICY_MISMATCH: "analyzer policy or version does not match",
+        ErrorCode.MANIFEST_CONFLICT: "Oracle stage trust verification failed",
+    }
+    if code not in messages:
+        code = ErrorCode.ANALYZER_FAILED
+    return _oracle_stage_error(code, stage, messages[code])
+
+
 def run_oracle_stage(
     config: AppConfig,
     store: RunStore,
     *,
     condition: str,
     force: bool,
+    runner: AnalyzerRunner | None = None,
+    runtime_validator: Callable[[], object] | None = None,
 ) -> None:
-    stage = f"run-oracle-{condition}"
-    source_name = "observed_code.jsonl" if condition == "observed" else "counterfactual_code.jsonl"
-    output_name = "observed_oracle.jsonl" if condition == "observed" else "counterfactual_oracle.jsonl"
-    inputs = [store.path("generation", source_name)]
-    output = store.path("oracle", output_name)
-    outputs = [output]
-    _require_committed_generation_code(
-        store,
-        condition=condition,
-        consumer_stage=stage,
-        code_output=inputs[0],
-    )
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    codes = read_jsonl(inputs[0], GeneratedCodeRecord)
-    write_jsonl(output, [run_code_oracle(code) for code in codes])  # type: ignore[arg-type]
-    store.record_stage(stage, inputs, outputs)
+    failure_code: ErrorCode | None = None
+    control: KeyboardInterrupt | SystemExit | None = None
+    stage = "oracle"
+    try:
+        stage = f"run-oracle-{condition}" if condition in {"observed", "counterfactual"} else "oracle"
+        _run_oracle_stage(
+            config,
+            store,
+            condition=condition,
+            force=force,
+            runner=runner,
+            runtime_validator=runtime_validator,
+        )
+    except (KeyboardInterrupt, SystemExit) as error:
+        control = error
+    except SecAwareError as error:
+        failure_code = error.code
+    except Exception:
+        failure_code = ErrorCode.ANALYZER_FAILED
+    finally:
+        config = None  # type: ignore[assignment]
+        store = None  # type: ignore[assignment]
+        condition = ""
+        runner = None
+        runtime_validator = None
+    if control is not None:
+        control.__traceback__ = None
+        raised_control = control
+        control = None
+        raise raised_control
+    if failure_code is not None:
+        raise _public_oracle_error(failure_code, stage) from None
 
 
 def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
@@ -1026,7 +1431,7 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     oracles = [
         record
         for record in read_jsonl(
-            store.path("oracle", "observed_oracle.jsonl"), LegacyOracleRecord
+            store.path("oracle", "observed_oracle.jsonl"), OracleRecord
         )  # type: ignore[arg-type]
         if record.prompt_id in {prompt.prompt_id for prompt in prompts}
     ]
@@ -1138,33 +1543,59 @@ def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: 
             config.generation.provider,
             file_provider_dir=config.generation.file_provider_dir,
         )
-        records: list[GeneratedCodeRecord] = []
-        for intervention in interventions:  # type: ignore[assignment]
-            prompt = prompts[intervention.prompt_id]
-            for model_id in config.generation.models:
-                for seed in config.generation.seeds:
-                    code_id = (
-                        f"counterfactual_{intervention.prompt_id}_{intervention.hypothesis_id}_"
-                        f"{_safe_id(model_id)}_{seed}"
-                    )
-                    records.append(
-                        GeneratedCodeRecord(
-                            code_id=code_id,
-                            prompt_id=intervention.prompt_id,
-                            condition="counterfactual",
-                            model_id=model_id,
-                            seed_id=seed,
-                            hypothesis_id=intervention.hypothesis_id,
-                            intervention_id=intervention.intervention_id,
-                            code=provider.generate(
-                                intervention.counterfactual_prompt,
-                                model_id=model_id,
-                                seed=seed,
-                                language=prompt.language,
-                            ),
-                        )
-                    )
+        if config.generation.provider == "mock":
+            requests = plan_counterfactual_requests(
+                prompts,
+                interventions,  # type: ignore[arg-type]
+                config.generation.models,
+                config.generation.seeds,
+                endpoint_type="mock",
+            )
+            producer = "mock"
+        elif config.generation.provider == "file":
+            requests = plan_counterfactual_requests(
+                prompts,
+                interventions,  # type: ignore[arg-type]
+                config.generation.models,
+                config.generation.seeds,
+                endpoint_type="offline",
+                endpoint_identity=config.generation.file_provider_dir,
+            )
+            producer = "file_provider"
+        else:
+            raise _generation_stage_error(
+                ErrorCode.CONFIG,
+                stage,
+                "generation provider is unavailable",
+            )
+        records = [
+            canonical_generated_code_from_request(
+                request,
+                provider.generate(
+                    request.prompt,
+                    model_id=request.model_id,
+                    seed=request.seed_id,
+                    language=request.language,
+                ),
+                GenerationProvenance(
+                    producer=producer,
+                    producer_version="compatibility-v1",
+                ),
+            )
+            for request in requests
+        ]
         write_jsonl(output, records)
+        store.seal_stage_outputs(stage, outputs)
+        _read_verified_generation_records(
+            store,
+            output,
+            CanonicalGeneratedCodeRecord,
+            records,
+            outputs,
+            stage=stage,
+            max_records=MAX_GENERATION_REQUESTS,
+            mismatch_message="generated code artifact failed canonical readback",
+        )
         store.record_stage(stage, inputs, outputs)
 
     _execute_generation_stage(store, stage, execute)
@@ -1187,10 +1618,10 @@ def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         store.path("interventions", "interventions.jsonl"), InterventionRecord
     )
     observed = read_jsonl(
-        store.path("oracle", "observed_oracle.jsonl"), LegacyOracleRecord
+        store.path("oracle", "observed_oracle.jsonl"), OracleRecord
     )
     counterfactual = read_jsonl(
-        store.path("oracle", "counterfactual_oracle.jsonl"), LegacyOracleRecord
+        store.path("oracle", "counterfactual_oracle.jsonl"), OracleRecord
     )
     pairs = build_pairs(interventions, observed, counterfactual)  # type: ignore[arg-type]
     effects = estimate_effects(
@@ -1404,8 +1835,9 @@ def run_oracle_command(
     condition: str = typer.Option("observed", "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
+    validated_condition = _generation_condition(condition)
     cfg, store = _load(config, run_dir)
-    run_oracle_stage(cfg, store, condition=condition, force=force)
+    run_oracle_stage(cfg, store, condition=validated_condition, force=force)
 
 
 @app.command("discover")

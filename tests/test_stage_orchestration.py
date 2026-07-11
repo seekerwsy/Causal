@@ -839,6 +839,47 @@ def test_missing_file_provider_directory_is_a_contract_error(tmp_path: Path) -> 
     assert exc_info.value.code is ErrorCode.CONTRACT
 
 
+def test_compatibility_generation_seals_canonical_output_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts_path = tmp_path / "source-prompts.jsonl"
+    write_jsonl(
+        prompts_path,
+        [
+            PromptRecord(
+                prompt_id="prompt-a",
+                split="discover",
+                language="python",
+                task_family="path_handling",
+                cwe="CWE-22",
+                prompt="Return a Python function.",
+            )
+        ],
+    )
+    config = AppConfig.model_validate(
+        {
+            "run": {"name": "compat", "output_dir": str(tmp_path / "run")},
+            "data": {"prompts_path": str(prompts_path)},
+            "generation": {"provider": "mock", "models": ["model-a"], "seeds": [1]},
+        }
+    )
+    store = RunStore(config)
+    store.prepare()
+    real_seal = store.seal_stage_outputs
+    sealed: list[str] = []
+
+    def observe_seal(stage: str, outputs: list[Path]) -> None:
+        sealed.append(stage)
+        real_seal(stage, outputs)
+
+    monkeypatch.setattr(store, "seal_stage_outputs", observe_seal)
+
+    generate_observed_stage(config, store, force=False)
+
+    assert sealed == ["generate-observed"]
+
+
 def test_stage_skip_is_invalidated_by_input_content_change(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
@@ -1045,6 +1086,61 @@ def test_generation_stage_record_requires_a_prior_output_seal(tmp_path: Path) ->
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert not store.path(".stages", f"{stage}.json").exists()
+
+
+def test_oracle_stage_snapshot_commit_and_skip_are_policy_bound(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    stage = "run-oracle-observed"
+    policy = "b" * 64
+
+    assert store.should_skip_stage(
+        stage,
+        [input_path],
+        [output_path],
+        force=False,
+        policy_sha256=policy,
+    ) is False
+    store.seal_stage_outputs(stage, [output_path])
+    store.record_stage(
+        stage,
+        [input_path],
+        [output_path],
+        policy_sha256=policy,
+    )
+
+    manifest = read_stage_manifest(store.path(".stages", f"{stage}.json"))
+    assert manifest.policy_sha256 == policy
+    assert store.should_skip_stage(
+        stage,
+        [input_path],
+        [output_path],
+        force=False,
+        policy_sha256=policy,
+    ) is True
+    assert store.should_skip_stage(
+        stage,
+        [input_path],
+        [output_path],
+        force=False,
+        policy_sha256="c" * 64,
+    ) is False
+    store.abort_stage(stage)
+
+
+def test_oracle_stage_rejects_execution_without_policy_binding(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.should_skip_stage(
+            "run-oracle-observed",
+            [input_path],
+            [output_path],
+            force=False,
+        )
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
 def test_record_stage_rejects_output_changed_after_manifest_write(

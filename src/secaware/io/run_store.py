@@ -42,6 +42,8 @@ class _StageSnapshot:
     config_sha256: str
     fingerprint: str
     code_version: str
+    policy_sha256: str | None
+    preserve_committed: bool
     outputs: tuple[str, ...]
 
 
@@ -320,6 +322,12 @@ class RunStore:
     def abort_stage(self, stage: str) -> None:
         """Abort one stage execution and release its lease after invalidation."""
 
+        with self._state_lock:
+            snapshot = self._pending_snapshots.get(stage)
+            if snapshot is not None and snapshot.preserve_committed:
+                self._clear_stage_state(stage)
+                self._release_stage_lease(stage)
+                return
         self.invalidate_stage(stage)
 
     @_synchronized
@@ -348,19 +356,38 @@ class RunStore:
         )
 
     def _reject_stage_record(self, stage: str, message: str) -> None:
+        snapshot = self._pending_snapshots.get(stage)
+        if snapshot is not None and snapshot.preserve_committed:
+            self._clear_stage_state(stage)
+            self._release_stage_lease(stage)
+            raise self._manifest_conflict(stage, message)
         self.invalidate_stage(stage)
         raise self._manifest_conflict(stage, message)
 
     @staticmethod
     def _requires_output_seal(stage: str) -> bool:
-        return stage.startswith(
+        return stage in {"generate-observed", "generate-counterfactual"} or stage.startswith(
             (
                 "plan-generation-",
                 "plan-provider-generation-",
                 "import-generation-",
                 "generate-provider-",
+                "run-oracle-",
             )
         )
+
+    def _policy_binding(self, stage: str, policy_sha256: str | None) -> str | None:
+        valid_digest = (
+            type(policy_sha256) is str
+            and re.fullmatch(r"[0-9a-f]{64}", policy_sha256) is not None
+        )
+        if stage.startswith("run-oracle-"):
+            if not valid_digest:
+                raise self._manifest_conflict(stage, "stage policy binding is invalid")
+            return policy_sha256
+        if policy_sha256 is not None:
+            raise self._manifest_conflict(stage, "stage policy binding is invalid")
+        return None
 
     def _stage_output_hashes(
         self,
@@ -421,18 +448,31 @@ class RunStore:
         stage: str,
         inputs: dict[str, str],
         config: dict[str, object] | None = None,
+        *,
+        policy_sha256: str | None = None,
     ) -> str:
+        policy_sha256 = self._policy_binding(stage, policy_sha256)
         return build_stage_fingerprint(
             stage,
             inputs,
             self.config.model_dump(mode="json") if config is None else config,
-            policy_sha256=None,
+            policy_sha256=policy_sha256,
             catalog_sha256=None,
             code_version=__version__,
         )
 
-    def stage_fingerprint(self, stage: str, input_paths: Sequence[str | Path]) -> str:
-        return self._fingerprint_from_inputs(stage, self.stage_inputs(input_paths))
+    def stage_fingerprint(
+        self,
+        stage: str,
+        input_paths: Sequence[str | Path],
+        *,
+        policy_sha256: str | None = None,
+    ) -> str:
+        return self._fingerprint_from_inputs(
+            stage,
+            self.stage_inputs(input_paths),
+            policy_sha256=policy_sha256,
+        )
 
     @_synchronized
     def _require_committed(
@@ -472,7 +512,12 @@ class RunStore:
                     and manifest.config_sha256 == canonical_sha256(config)
                     and manifest.code_version == __version__
                     and manifest.fingerprint
-                    == self._fingerprint_from_inputs(stage, inputs, config)
+                    == self._fingerprint_from_inputs(
+                        stage,
+                        inputs,
+                        config,
+                        policy_sha256=manifest.policy_sha256,
+                    )
                     and manifest.outputs == relative_outputs
                     and manifest.output_sha256 == current_output_sha256
                 )
@@ -531,6 +576,32 @@ class RunStore:
                 input_paths,
                 output_paths,
             )
+            yield dict(output_sha256)
+        finally:
+            with self._state_lock:
+                self._release_dependency_lease(stage, expected=lease)
+
+    @contextmanager
+    def hold_committed_output(
+        self,
+        stage: str,
+        output_paths: Sequence[str | Path],
+    ) -> Iterator[dict[str, str]]:
+        """Hold a producer lease while consuming its committed output snapshot."""
+
+        with self._state_lock:
+            if (
+                self._owned_stage_lease(stage) is not None
+                or self._owned_dependency_lease(stage) is not None
+            ):
+                raise self._manifest_conflict(
+                    stage,
+                    "stage lease is already owned by this run store",
+                )
+            lease = _HeldDependencyLease(handle=self._open_stage_lease(stage))
+            self._held_dependency_leases[stage] = lease
+        try:
+            output_sha256 = self.require_committed_output(stage, output_paths)
             yield dict(output_sha256)
         finally:
             with self._state_lock:
@@ -608,7 +679,15 @@ class RunStore:
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
         force: bool,
+        *,
+        policy_sha256: str | None = None,
+        preserve_committed: bool = False,
     ) -> bool:
+        policy_sha256 = self._policy_binding(stage, policy_sha256)
+        if type(preserve_committed) is not bool or (
+            preserve_committed and not stage.startswith("run-oracle-")
+        ):
+            raise self._manifest_conflict(stage, "stage transaction mode is invalid")
         if (
             stage in self._pending_snapshots
             or stage in self._sealed_outputs
@@ -622,13 +701,20 @@ class RunStore:
             relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
             inputs = self.stage_inputs(input_paths)
             config = self.config.model_dump(mode="json")
-            fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
+            fingerprint = self._fingerprint_from_inputs(
+                stage,
+                inputs,
+                config,
+                policy_sha256=policy_sha256,
+            )
             self._pending_snapshots[stage] = _StageSnapshot(
                 stage=stage,
                 inputs=tuple(sorted(inputs.items())),
                 config_sha256=canonical_sha256(config),
                 fingerprint=fingerprint,
                 code_version=__version__,
+                policy_sha256=policy_sha256,
+                preserve_committed=preserve_committed,
                 outputs=tuple(relative_outputs),
             )
             allows_skip = manifest_allows_skip(
@@ -636,13 +722,15 @@ class RunStore:
                 fingerprint,
                 outputs,
                 force=force,
+                policy_sha256=policy_sha256,
                 manifest_outputs=relative_outputs,
             )
             if allows_skip:
                 self._clear_stage_state(stage)
                 self._release_stage_lease(stage)
                 return True
-            self._invalidate_stage_manifest(stage)
+            if not preserve_committed:
+                self._invalidate_stage_manifest(stage)
         except BaseException:
             self._clear_stage_state(stage)
             self._release_stage_lease(stage)
@@ -655,9 +743,16 @@ class RunStore:
         stage: str,
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
+        *,
+        policy_sha256: str | None = None,
     ) -> None:
         try:
-            self._record_stage(stage, input_paths, output_paths)
+            self._record_stage(
+                stage,
+                input_paths,
+                output_paths,
+                policy_sha256=policy_sha256,
+            )
         finally:
             self._release_stage_lease(stage)
 
@@ -666,7 +761,10 @@ class RunStore:
         stage: str,
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
+        *,
+        policy_sha256: str | None,
     ) -> None:
+        policy_sha256 = self._policy_binding(stage, policy_sha256)
         if self._requires_output_seal(stage) or stage in self._sealed_outputs:
             self.verify_sealed_outputs(stage, output_paths)
         outputs = [Path(path) for path in output_paths]
@@ -717,12 +815,18 @@ class RunStore:
             )
         config = self.config.model_dump(mode="json")
         current_config_sha256 = canonical_sha256(config)
-        current_fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
+        current_fingerprint = self._fingerprint_from_inputs(
+            stage,
+            inputs,
+            config,
+            policy_sha256=policy_sha256,
+        )
         if (
             snapshot.inputs != tuple(sorted(inputs.items()))
             or snapshot.config_sha256 != current_config_sha256
             or snapshot.fingerprint != current_fingerprint
             or snapshot.code_version != __version__
+            or snapshot.policy_sha256 != policy_sha256
             or snapshot.outputs != tuple(relative_outputs)
         ):
             self._reject_stage_record(
@@ -752,6 +856,7 @@ class RunStore:
                     inputs=dict(snapshot.inputs),
                     config_sha256=snapshot.config_sha256,
                     code_version=snapshot.code_version,
+                    policy_sha256=snapshot.policy_sha256,
                     outputs=list(snapshot.outputs),
                     output_sha256=output_sha256,
                 ),

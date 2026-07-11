@@ -1,5 +1,6 @@
 from secaware.schema.interventions import FailureReason, InterventionRecord
-from secaware.schema.results import LegacyOracleRecord, PairResult, SecurityLabel
+from secaware.schema.oracle import OracleRecord, SecurityLabel
+from secaware.schema.results import PairResult
 
 
 SECURITY_TO_INT = {
@@ -12,8 +13,8 @@ SECURITY_TO_INT = {
 
 def build_pairs(
     interventions: list[InterventionRecord],
-    observed_oracles: list[LegacyOracleRecord],
-    counterfactual_oracles: list[LegacyOracleRecord],
+    observed_oracles: list[OracleRecord],
+    counterfactual_oracles: list[OracleRecord],
 ) -> list[PairResult]:
     observed_by_key = {
         (record.prompt_id, record.model_id, record.seed_id): record
@@ -80,8 +81,8 @@ def build_pairs(
 
 def _failure_reason(
     intervention: InterventionRecord,
-    observed: LegacyOracleRecord,
-    counterfactual: LegacyOracleRecord,
+    observed: OracleRecord,
+    counterfactual: OracleRecord,
 ) -> FailureReason | None:
     if intervention.failure_reason is not None:
         return intervention.failure_reason
@@ -89,8 +90,6 @@ def _failure_reason(
         return FailureReason.PARSE_FAILED
     if not observed.functional_ok or not counterfactual.functional_ok:
         return FailureReason.FUNCTIONAL_FAILED
-    if observed.security_label == SecurityLabel.UNKNOWN or counterfactual.security_label == SecurityLabel.UNKNOWN:
-        return FailureReason.ORACLE_UNKNOWN
     return None
 
 

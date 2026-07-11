@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+import json
 from pathlib import Path
 import threading
 import time
@@ -23,6 +25,8 @@ from secaware.generation.openai_compatible_provider import (
 from secaware.generation.mock_provider import MockProvider
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
+from secaware.oracle import aggregator as aggregator_module
+from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline.artifact import canonical_sha256, sha256_path
 from secaware.pipeline.manifest import (
@@ -41,6 +45,46 @@ from secaware.schema.generation import (
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+
+
+def _clean_oracle_runner(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout_seconds: float,
+    max_stdout_bytes: int,
+    max_stderr_bytes: int,
+) -> AnalyzerProcessResult:
+    del timeout_seconds, max_stdout_bytes, max_stderr_bytes
+    call = tuple(argv)
+    analyzer = "semgrep" if "semgrep" in call[0] else "bandit"
+    if call[1:] == ("--version",):
+        output = (
+            b"1.168.0\n"
+            if analyzer == "semgrep"
+            else (
+                b"bandit 1.9.4\n"
+                b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
+            )
+        )
+        return AnalyzerProcessResult(0, output, "a" * 64)
+    files = sorted(path.name for path in cwd.iterdir() if path.suffix == ".py")
+    if analyzer == "semgrep":
+        payload = {
+            "version": "1.168.0",
+            "results": [],
+            "errors": [],
+            "paths": {"scanned": files},
+            "skipped_rules": [],
+        }
+    else:
+        metrics = {
+            filename: {"loc": 2, "nosec": 0, "skipped_tests": 0}
+            for filename in files
+        }
+        metrics["_totals"] = {"loc": 2, "nosec": 0, "skipped_tests": 0}
+        payload = {"errors": [], "metrics": metrics, "results": []}
+    return AnalyzerProcessResult(0, json.dumps(payload).encode(), "a" * 64)
 
 
 _BASE_URL = "https://provider.private.invalid/v1"
@@ -955,7 +999,15 @@ def test_provider_output_is_accepted_by_both_committed_downstream_gates(
     generate_provider_stage(config, store, condition="observed", force=False)
 
     extract_code_tsg_stage(config, store, condition="observed", force=False)
-    run_oracle_stage(config, store, condition="observed", force=False)
+    monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
+    run_oracle_stage(
+        config,
+        store,
+        condition="observed",
+        force=False,
+        runner=_clean_oracle_runner,
+        runtime_validator=lambda: None,
+    )
 
     assert store.path(".stages", "extract-code-tsg-observed.json").exists()
     assert store.path(".stages", "run-oracle-observed.json").exists()
@@ -1461,6 +1513,9 @@ def test_run_all_dispatches_both_conditions_through_provider_without_network(
         return provider
 
     monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+    monkeypatch.setattr(cli_module, "run_analyzer_process", _clean_oracle_runner)
+    monkeypatch.setattr(cli_module, "validate_analyzer_runtime", lambda: None)
+    monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
 
     result = CliRunner().invoke(app, ["run-all", "--config", str(config_path), "--force"])
 
