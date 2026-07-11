@@ -55,14 +55,23 @@ def _error_surfaces(error: SecAwareError) -> tuple[str, ...]:
     )
 
 
-def _secaware_traceback_locals(error: SecAwareError) -> str:
-    snapshots: list[str] = []
+def _secaware_traceback_frames(
+    error: BaseException,
+) -> list[tuple[str, dict[str, object]]]:
+    frames: list[tuple[str, dict[str, object]]] = []
     current = error.__traceback__
     while current is not None:
         filename = current.tb_frame.f_code.co_filename.replace("\\", "/")
         if "/src/secaware/" in filename:
-            snapshots.append(repr(current.tb_frame.f_locals))
+            frames.append((current.tb_frame.f_code.co_name, dict(current.tb_frame.f_locals)))
         current = current.tb_next
+    return frames
+
+
+def _secaware_traceback_locals(error: BaseException) -> str:
+    snapshots: list[str] = []
+    for _, frame_locals in _secaware_traceback_frames(error):
+        snapshots.append(repr(frame_locals))
     return "\n".join(snapshots)
 
 
@@ -1289,6 +1298,87 @@ def test_hostile_sleeper_exception_is_safely_wrapped() -> None:
     assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
     assert len(client.completions.calls) == 1
     _assert_safe_provider_error(exc_info.value, secret, "RuntimeError")
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("boundary", ["client", "response", "sleeper"])
+def test_provider_control_flow_signals_clear_every_secaware_traceback_frame(
+    signal_type: type[BaseException],
+    boundary: str,
+) -> None:
+    signal = signal_type(f"provider-{boundary}-control-flow")
+    client_sentinel = f"{boundary}-client-frame-sentinel"
+
+    class SentinelClient(FakeClient):
+        def __repr__(self) -> str:
+            return client_sentinel
+
+    class InterruptingResponse:
+        @property
+        def choices(self) -> object:
+            raise signal
+
+        def __repr__(self) -> str:
+            return f"{client_sentinel}:{_CODE}:{_API_KEY}:{_BASE_URL}"
+
+    class InterruptingSleeper:
+        def __call__(self, delay: float) -> None:
+            del delay
+            raise signal
+
+        def __repr__(self) -> str:
+            return f"{client_sentinel}:{_API_KEY}:{_BASE_URL}"
+
+    def no_sleep(delay: float) -> None:
+        del delay
+
+    response: object | None = None
+    sleeper: object = no_sleep
+    if boundary == "client":
+        client = SentinelClient([signal])
+    elif boundary == "response":
+        response = InterruptingResponse()
+        client = SentinelClient([response])
+    else:
+        client = SentinelClient([StatusFailure(429)])
+        sleeper = InterruptingSleeper()
+    request = _request()
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=client,
+        sleeper=sleeper,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(signal_type) as exc_info:
+        provider.generate(request, system_template=_SYSTEM)
+
+    error = exc_info.value
+    assert error is signal
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert len(client.completions.calls) == 1
+    frames = _secaware_traceback_frames(error)
+    names = [name for name, _ in frames]
+    assert "generate" in names
+    assert "_generate" in names
+    if boundary == "response":
+        assert "_response_code" in names
+        assert "_member" in names
+    forbidden_values = {id(provider), id(client), id(request), id(sleeper)}
+    if response is not None:
+        forbidden_values.add(id(response))
+    for _, frame_locals in frames:
+        retained = repr(frame_locals)
+        assert all(id(value) not in forbidden_values for value in frame_locals.values())
+        for secret in (
+            _PROMPT,
+            _SYSTEM,
+            _CODE,
+            _API_KEY,
+            _BASE_URL,
+            client_sentinel,
+        ):
+            assert secret not in retained
 
 
 @pytest.mark.parametrize("forgery", ["prompt", "model", "extra"])

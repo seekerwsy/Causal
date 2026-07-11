@@ -150,42 +150,67 @@ def _classify_failure(error: Exception) -> _FailureClassification:
 
 
 def _member(value: object, name: str, *, default: object = _NO_DEFAULT) -> object:
-    if isinstance(value, Mapping):
+    try:
+        if isinstance(value, Mapping):
+            if default is _NO_DEFAULT:
+                return value[name]
+            return value.get(name, default)
         if default is _NO_DEFAULT:
-            return value[name]
-        return value.get(name, default)
-    if default is _NO_DEFAULT:
-        return getattr(value, name)
-    return getattr(value, name, default)
+            return getattr(value, name)
+        return getattr(value, name, default)
+    finally:
+        value = None
+        name = ""
+        default = None
 
 
 def _validate_usage(usage: object) -> None:
-    if usage is _MISSING or usage is None:
-        return
-    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = _member(usage, name)
-        if type(value) is not int or value < 0:
-            raise ValueError("invalid token usage")
+    name = ""
+    value: object = None
+    try:
+        if usage is _MISSING or usage is None:
+            return
+        for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = _member(usage, name)
+            if type(value) is not int or value < 0:
+                raise ValueError("invalid token usage")
+    finally:
+        usage = None
+        name = ""
+        value = None
 
 
 def _response_code(response: object) -> str:
-    choices = _member(response, "choices")
-    if (
-        isinstance(choices, (str, bytes))
-        or not isinstance(choices, Sequence)
-        or len(choices) != 1
-    ):
-        raise ValueError("invalid choices")
-    choice = choices[0]
-    finish_reason = _member(choice, "finish_reason")
-    if type(finish_reason) is not str or finish_reason != "stop":
-        raise ValueError("invalid finish reason")
-    message = _member(choice, "message")
-    content = _member(message, "content")
-    if type(content) is not str or not content.strip():
-        raise ValueError("invalid message content")
-    _validate_usage(_member(response, "usage", default=_MISSING))
-    return content
+    choices: object = None
+    choice: object = None
+    finish_reason: object = None
+    message: object = None
+    content: object = None
+    try:
+        choices = _member(response, "choices")
+        if (
+            isinstance(choices, (str, bytes))
+            or not isinstance(choices, Sequence)
+            or len(choices) != 1
+        ):
+            raise ValueError("invalid choices")
+        choice = choices[0]
+        finish_reason = _member(choice, "finish_reason")
+        if type(finish_reason) is not str or finish_reason != "stop":
+            raise ValueError("invalid finish reason")
+        message = _member(choice, "message")
+        content = _member(message, "content")
+        if type(content) is not str or not content.strip():
+            raise ValueError("invalid message content")
+        _validate_usage(_member(response, "usage", default=_MISSING))
+        return content
+    finally:
+        response = None
+        choices = None
+        choice = None
+        finish_reason = None
+        message = None
+        content = None
 
 
 def _wire_parameters(parameters: Mapping[str, JSONValue]) -> dict[str, Any]:
@@ -335,143 +360,163 @@ class OpenAICompatibleProvider:
         request: GenerationRequestRecord,
         system_template: str = "",
     ) -> OpenAICompatibleGenerationResult | SecAwareError:
-        trusted = self._request(request, system_template)
-        if trusted is None:
-            return _provider_error(
-                ErrorCode.CONTRACT,
-                "generation request is incompatible with the provider",
-            )
+        trusted: GenerationRequestRecord | None = None
         attempts: list[GenerationAttemptRecord] = []
+        payload: dict[str, Any] = {}
+        response: object = None
+        classification: _FailureClassification | None = None
+        code: str | None = None
+        try:
+            trusted = self._request(request, system_template)
+            if trusted is None:
+                return _provider_error(
+                    ErrorCode.CONTRACT,
+                    "generation request is incompatible with the provider",
+                )
 
-        for attempt_number in range(1, self._max_attempts + 1):
-            payload = self._payload(trusted, system_template)
-            response: object = _MISSING
-            classification: _FailureClassification | None = None
-            try:
-                response = self._client.chat.completions.create(**payload)  # type: ignore[attr-defined]
-            except Exception as error:
-                classification = _classify_failure(error)
-            if classification is not None:
-                if not classification.retryable:
+            for attempt_number in range(1, self._max_attempts + 1):
+                payload = self._payload(trusted, system_template)
+                response = _MISSING
+                classification = None
+                try:
+                    response = self._client.chat.completions.create(**payload)  # type: ignore[attr-defined]
+                except Exception as error:
+                    classification = _classify_failure(error)
+                if classification is not None:
+                    if not classification.retryable:
+                        attempts.append(
+                            self._attempt(
+                                trusted.request_id,
+                                attempt_number,
+                                "failure",
+                                error_code=classification.code,
+                                retryable=False,
+                                backoff_seconds=0.0,
+                            )
+                        )
+                        return _provider_error(
+                            classification.code,
+                            "provider request failed",
+                            attempts=attempts,
+                        )
+                    if attempt_number == self._max_attempts:
+                        attempts.append(
+                            self._attempt(
+                                trusted.request_id,
+                                attempt_number,
+                                "failure",
+                                error_code=classification.code,
+                                retryable=True,
+                                backoff_seconds=0.0,
+                            )
+                        )
+                        return _provider_error(
+                            ErrorCode.API_RETRIES_EXHAUSTED,
+                            "provider retry budget was exhausted",
+                            attempts=attempts,
+                        )
+
+                    backoff_seconds = min(
+                        self._initial_backoff_seconds * (2 ** (attempt_number - 1)),
+                        self._max_backoff_seconds,
+                    )
+                    attempts.append(
+                        self._attempt(
+                            trusted.request_id,
+                            attempt_number,
+                            "retry",
+                            error_code=classification.code,
+                            retryable=True,
+                            backoff_seconds=backoff_seconds,
+                        )
+                    )
+                    sleep_failed = False
+                    try:
+                        self._sleeper(backoff_seconds)
+                    except Exception:
+                        sleep_failed = True
+                    if sleep_failed:
+                        return _provider_error(
+                            ErrorCode.API_INVALID_RESPONSE,
+                            "provider retry scheduling failed",
+                            attempts=attempts,
+                        )
+                    continue
+
+                code = None
+                response_invalid = False
+                try:
+                    code = _response_code(response)
+                except Exception:
+                    response_invalid = True
+                if response_invalid or code is None:
                     attempts.append(
                         self._attempt(
                             trusted.request_id,
                             attempt_number,
                             "failure",
-                            error_code=classification.code,
+                            error_code=ErrorCode.API_INVALID_RESPONSE,
                             retryable=False,
                             backoff_seconds=0.0,
                         )
                     )
                     return _provider_error(
-                        classification.code,
-                        "provider request failed",
-                        attempts=attempts,
-                    )
-                if attempt_number == self._max_attempts:
-                    attempts.append(
-                        self._attempt(
-                            trusted.request_id,
-                            attempt_number,
-                            "failure",
-                            error_code=classification.code,
-                            retryable=True,
-                            backoff_seconds=0.0,
-                        )
-                    )
-                    return _provider_error(
-                        ErrorCode.API_RETRIES_EXHAUSTED,
-                        "provider retry budget was exhausted",
-                        attempts=attempts,
-                    )
-
-                backoff_seconds = min(
-                    self._initial_backoff_seconds * (2 ** (attempt_number - 1)),
-                    self._max_backoff_seconds,
-                )
-                attempts.append(
-                    self._attempt(
-                        trusted.request_id,
-                        attempt_number,
-                        "retry",
-                        error_code=classification.code,
-                        retryable=True,
-                        backoff_seconds=backoff_seconds,
-                    )
-                )
-                sleep_failed = False
-                try:
-                    self._sleeper(backoff_seconds)
-                except Exception:
-                    sleep_failed = True
-                if sleep_failed:
-                    return _provider_error(
                         ErrorCode.API_INVALID_RESPONSE,
-                        "provider retry scheduling failed",
+                        "provider returned an invalid response",
                         attempts=attempts,
                     )
-                continue
 
-            code: str | None = None
-            response_invalid = False
-            try:
-                code = _response_code(response)
-            except Exception:
-                response_invalid = True
-            if response_invalid or code is None:
                 attempts.append(
                     self._attempt(
                         trusted.request_id,
                         attempt_number,
-                        "failure",
-                        error_code=ErrorCode.API_INVALID_RESPONSE,
+                        "success",
+                        error_code=None,
                         retryable=False,
                         backoff_seconds=0.0,
                     )
                 )
-                return _provider_error(
-                    ErrorCode.API_INVALID_RESPONSE,
-                    "provider returned an invalid response",
-                    attempts=attempts,
+                return OpenAICompatibleGenerationResult(
+                    code=code,
+                    provenance=GenerationProvenance(
+                        producer=_PRODUCER,
+                        producer_version=_PRODUCER_VERSION,
+                    ),
+                    attempts=tuple(attempts),
                 )
 
-            attempts.append(
-                self._attempt(
-                    trusted.request_id,
-                    attempt_number,
-                    "success",
-                    error_code=None,
-                    retryable=False,
-                    backoff_seconds=0.0,
-                )
+            return _provider_error(
+                ErrorCode.API_RETRIES_EXHAUSTED,
+                "provider retry budget was exhausted",
+                attempts=attempts,
             )
-            return OpenAICompatibleGenerationResult(
-                code=code,
-                provenance=GenerationProvenance(
-                    producer=_PRODUCER,
-                    producer_version=_PRODUCER_VERSION,
-                ),
-                attempts=tuple(attempts),
-            )
-
-        return _provider_error(
-            ErrorCode.API_RETRIES_EXHAUSTED,
-            "provider retry budget was exhausted",
-            attempts=attempts,
-        )
+        finally:
+            trusted = None
+            attempts = []
+            payload = {}
+            response = None
+            classification = None
+            code = None
+            request = None  # type: ignore[assignment]
+            system_template = ""
+            self = None  # type: ignore[assignment]
 
     def generate(
         self,
         request: GenerationRequestRecord,
         system_template: str = "",
     ) -> OpenAICompatibleGenerationResult:
-        outcome = self._generate(request, system_template)
-        if isinstance(outcome, SecAwareError):
+        outcome: OpenAICompatibleGenerationResult | SecAwareError | None = None
+        try:
+            outcome = self._generate(request, system_template)
+            if isinstance(outcome, SecAwareError):
+                raise outcome
+            return outcome
+        finally:
+            outcome = None
             self = None  # type: ignore[assignment]
             request = None  # type: ignore[assignment]
             system_template = ""
-            raise outcome
-        return outcome
 
 
 def create_openai_compatible_provider(
