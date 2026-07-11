@@ -59,10 +59,11 @@ class _HeldDependencyLease:
     handle: BinaryIO
 
 
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
 class StageCommitLease:
     stage: str
-    nonce: object
+    owner: object
+    released: bool = False
 
 
 class RunStore:
@@ -75,6 +76,7 @@ class RunStore:
         self._held_dependency_leases: dict[str, _HeldDependencyLease] = {}
         self._stage_commit_leases: dict[str, StageCommitLease] = {}
         self._recorded_stage_commits: set[str] = set()
+        self._stage_commit_owner = object()
         self._state_lock = threading.RLock()
 
     def path(self, *parts: str) -> Path:
@@ -272,9 +274,11 @@ class RunStore:
         self._stage_leases[stage] = self._open_stage_lease(stage)
 
     def _release_stage_lease(self, stage: str) -> None:
-        handle = self._stage_leases.pop(stage, None)
+        handle = self._stage_leases.get(stage)
         if handle is not None:
             self._release_stage_handle(handle)
+            if handle.closed and self._stage_leases.get(stage) is handle:
+                self._stage_leases.pop(stage, None)
 
     def _release_dependency_lease(
         self,
@@ -336,8 +340,10 @@ class RunStore:
         with self._state_lock:
             if stage in self._stage_commit_leases:
                 self._clear_stage_state(stage)
-                self._clear_stage_commit(stage)
-                self._release_stage_lease(stage)
+                self._ensure_stage_commit_released(
+                    self._stage_commit_leases[stage],
+                    require_recorded=False,
+                )
                 return
             snapshot = self._pending_snapshots.get(stage)
             if snapshot is not None and snapshot.preserve_committed:
@@ -352,10 +358,12 @@ class RunStore:
 
         self._pending_snapshots.clear()
         self._sealed_outputs.clear()
-        self._stage_commit_leases.clear()
-        self._recorded_stage_commits.clear()
         for stage in list(self._stage_leases):
             self._release_stage_lease(stage)
+        for stage, lease in list(self._stage_commit_leases.items()):
+            handle = self._stage_leases.get(stage)
+            if handle is None or handle.closed:
+                self._complete_stage_commit_release(lease)
         for stage in list(self._held_dependency_leases):
             self._release_dependency_lease(stage)
 
@@ -780,32 +788,80 @@ class RunStore:
             or stage in self._recorded_stage_commits
         ):
             raise self._manifest_conflict(stage, "deferred stage commit authorization is invalid")
-        lease = StageCommitLease(stage=stage, nonce=object())
+        lease = StageCommitLease(stage=stage, owner=self._stage_commit_owner)
         self._stage_commit_leases[stage] = lease
         return lease
 
-    def _require_stage_commit_lease(self, lease: StageCommitLease) -> StageCommitLease:
-        if (
-            type(lease) is not StageCommitLease
-            or self._stage_commit_leases.get(lease.stage) is not lease
-            or self._owned_stage_lease(lease.stage) is None
-        ):
+    def _require_stage_commit_owner(self, lease: StageCommitLease) -> StageCommitLease:
+        if type(lease) is not StageCommitLease or lease.owner is not self._stage_commit_owner:
             raise self._manifest_conflict("stage_commit", "stage commit lease is invalid")
         return lease
+
+    def _require_stage_commit_lease(self, lease: StageCommitLease) -> StageCommitLease:
+        trusted = self._require_stage_commit_owner(lease)
+        if trusted.released:
+            return trusted
+        if self._stage_commit_leases.get(trusted.stage) is not trusted:
+            raise self._manifest_conflict("stage_commit", "stage commit lease is invalid")
+        return trusted
+
+    def _complete_stage_commit_release(self, lease: StageCommitLease) -> None:
+        handle = self._stage_leases.get(lease.stage)
+        if handle is not None and not handle.closed:
+            raise self._manifest_conflict(
+                lease.stage,
+                "stage commit lease is still active",
+            )
+        if handle is not None:
+            self._stage_leases.pop(lease.stage, None)
+        if self._stage_commit_leases.get(lease.stage) is lease:
+            self._clear_stage_commit(lease.stage)
+        object.__setattr__(lease, "released", True)
+
+    def _ensure_stage_commit_released(
+        self,
+        lease: StageCommitLease,
+        *,
+        require_recorded: bool,
+    ) -> None:
+        trusted = self._require_stage_commit_lease(lease)
+        if trusted.released:
+            return
+        if require_recorded and trusted.stage not in self._recorded_stage_commits:
+            raise self._manifest_conflict(
+                trusted.stage,
+                "deferred stage commit was not recorded",
+            )
+        for _ in range(3):
+            handle = self._stage_leases.get(trusted.stage)
+            if handle is None or handle.closed:
+                self._complete_stage_commit_release(trusted)
+                return
+            try:
+                self._release_stage_handle(handle)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                continue
+            if handle.closed:
+                self._complete_stage_commit_release(trusted)
+                return
+        raise self._manifest_conflict(
+            trusted.stage,
+            "stage commit lease could not be released",
+        )
 
     @_synchronized
     def finalize_stage_commit(self, lease: StageCommitLease) -> None:
         """Release one recorded transactional stage only after its external commit point."""
 
-        trusted = self._require_stage_commit_lease(lease)
-        if trusted.stage not in self._recorded_stage_commits:
-            raise self._manifest_conflict(
-                trusted.stage,
-                "deferred stage commit was not recorded",
-            )
-        stage = trusted.stage
-        self._clear_stage_commit(stage)
-        self._release_stage_lease(stage)
+        self._ensure_stage_commit_released(lease, require_recorded=True)
+
+    @_synchronized
+    def ensure_stage_commit_released(self, lease: StageCommitLease) -> None:
+        """Idempotently finish a recorded commit release after interrupted finalization."""
+
+        self._ensure_stage_commit_released(lease, require_recorded=True)
 
     @_synchronized
     def record_stage(

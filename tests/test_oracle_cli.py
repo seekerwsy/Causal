@@ -6,6 +6,7 @@ import hashlib
 from importlib import metadata
 import json
 from pathlib import Path
+import shutil
 import threading
 import traceback
 
@@ -1430,6 +1431,185 @@ def test_mark_postcommit_control_rolls_back_and_releases_stage_lease(
     assert [path.read_bytes() for path in outputs] == previous[0]
     assert manifest.read_bytes() == previous[1]
     assert not owner.stage_is_active(stage)
+
+
+@pytest.mark.parametrize("surface", ["oracle", "discover", "confirm"])
+@pytest.mark.parametrize("fault_point", ["before_call", "before_release", "after_release"])
+@pytest.mark.parametrize("control", [KeyboardInterrupt("finalize"), SystemExit("finalize")])
+def test_postcommit_finalize_control_keeps_commit_and_ensures_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    fault_point: str,
+    control: KeyboardInterrupt | SystemExit,
+) -> None:
+    if surface == "oracle":
+        config, owner = _prepared_observed_pipeline(tmp_path)
+        stage = "run-oracle-observed"
+        inputs = [owner.path("generation", "observed_code.jsonl")]
+        outputs = [owner.path("oracle", "observed_oracle.jsonl")]
+
+        def run_stage() -> None:
+            run_oracle_stage(
+                config,
+                owner,
+                condition="observed",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+
+    elif surface == "discover":
+        config, owner = _prepared_observed_pipeline(tmp_path)
+        discover_stage(config, owner, force=False)
+        stage = "discover"
+        inputs = [
+            owner.path("inputs", "prompts.jsonl"),
+            owner.path("tsg", "prompt_tsg.jsonl"),
+            owner.path("tsg", "observed_code_tsg.jsonl"),
+            owner.path("oracle", "observed_oracle.jsonl"),
+        ]
+        outputs = [
+            owner.path("discovery", "hypotheses_all.jsonl"),
+            owner.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+
+        def run_stage() -> None:
+            discover_stage(config, owner, force=True)
+
+    else:
+        config, owner = _prepared_confirmation_pipeline(tmp_path)
+        confirm_stage(config, owner, force=False)
+        stage = "confirm"
+        inputs = [
+            owner.path("interventions", "interventions.jsonl"),
+            owner.path("oracle", "observed_oracle.jsonl"),
+            owner.path("oracle", "counterfactual_oracle.jsonl"),
+            owner.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+        outputs = [
+            owner.path("analysis", "pair_results.jsonl"),
+            owner.path("analysis", "hypothesis_effects.jsonl"),
+        ]
+
+        def run_stage() -> None:
+            confirm_stage(config, owner, force=True)
+
+    if fault_point == "before_call":
+
+        def interrupt_finalize(_lease: object) -> None:
+            raise control
+
+        monkeypatch.setattr(owner, "finalize_stage_commit", interrupt_finalize)
+    else:
+        real_release = owner._release_stage_handle
+        injected = False
+
+        def interrupt_release(handle: object) -> None:
+            nonlocal injected
+            target = owner._stage_leases.get(stage)
+            if handle is target and not injected:
+                injected = True
+                if fault_point == "after_release":
+                    real_release(handle)  # type: ignore[arg-type]
+                raise control
+            real_release(handle)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(owner, "_release_stage_handle", interrupt_release)
+
+    with pytest.raises(type(control)) as exc_info:
+        run_stage()
+
+    assert exc_info.value is control
+    assert not owner.stage_is_active(stage)
+    if surface == "oracle":
+        assert owner.require_committed_output(stage, outputs)
+    else:
+        assert owner.require_committed_stage(stage, inputs, outputs)
+
+    contender = RunStore(config)
+    manifest = read_stage_manifest(owner.path(".stages", f"{stage}.json"))
+    assert (
+        contender.should_skip_stage(
+            stage,
+            inputs,
+            outputs,
+            force=True,
+            preserve_committed=True,
+            policy_sha256=manifest.policy_sha256,
+        )
+        is False
+    )
+    contender.abort_stage(stage)
+    owner.close()
+    contender.close()
+    shutil.rmtree(owner.root)
+    assert not owner.root.exists()
+
+
+def test_postcommit_finalize_release_failure_keeps_commit_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, owner = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, owner, force=False)
+    stage = "discover"
+    inputs = [
+        owner.path("inputs", "prompts.jsonl"),
+        owner.path("tsg", "prompt_tsg.jsonl"),
+        owner.path("tsg", "observed_code_tsg.jsonl"),
+        owner.path("oracle", "observed_oracle.jsonl"),
+    ]
+    outputs = [
+        owner.path("discovery", "hypotheses_all.jsonl"),
+        owner.path("discovery", "hypotheses_selected.jsonl"),
+    ]
+    real_release = owner._release_stage_handle
+    attempts = 0
+
+    def fail_target_release(handle: object) -> None:
+        nonlocal attempts
+        if handle is owner._stage_leases.get(stage):
+            attempts += 1
+            raise OSError("private-release-failure")
+        real_release(handle)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(owner, "_release_stage_handle", fail_target_release)
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_stage(config, owner, force=True)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert attempts == 6
+    assert owner.stage_is_active(stage)
+    assert owner.require_committed_stage(stage, inputs, outputs)
+    contender = RunStore(config)
+    with pytest.raises(SecAwareError) as contender_exc:
+        contender.should_skip_stage(
+            stage,
+            inputs,
+            outputs,
+            force=True,
+            preserve_committed=True,
+        )
+    assert contender_exc.value.code is ErrorCode.MANIFEST_CONFLICT
+
+    monkeypatch.setattr(owner, "_release_stage_handle", real_release)
+    owner.abort_stage(stage)
+    assert not owner.stage_is_active(stage)
+    assert owner.require_committed_stage(stage, inputs, outputs)
+    assert (
+        contender.should_skip_stage(
+            stage,
+            inputs,
+            outputs,
+            force=True,
+            preserve_committed=True,
+        )
+        is False
+    )
+    contender.abort_stage(stage)
+    owner.close()
+    contender.close()
 
 
 @pytest.mark.parametrize(

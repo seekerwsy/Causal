@@ -34,7 +34,7 @@ from secaware.generation.result_importer import (
 )
 from secaware.intervention.operators import apply_intervention
 from secaware.io.jsonl import canonical_jsonl_sha256, read_jsonl, write_jsonl
-from secaware.io.run_store import RunStore
+from secaware.io.run_store import RunStore, StageCommitLease
 from secaware.io.transaction import (
     ArtifactTransaction,
     TransactionArtifact,
@@ -682,6 +682,28 @@ def _cleanup_failed_oracle_stage(store: RunStore, stage: str) -> None:
         pass
 
 
+def _finalize_stage_commit(
+    store: RunStore,
+    lease: StageCommitLease,
+) -> None:
+    failure: BaseException | None = None
+    try:
+        store.finalize_stage_commit(lease)
+    except BaseException as error:
+        failure = error
+    finally:
+        try:
+            store.ensure_stage_commit_released(lease)
+        except BaseException as error:
+            if failure is None or (
+                isinstance(error, (KeyboardInterrupt, SystemExit))
+                and not isinstance(failure, (KeyboardInterrupt, SystemExit))
+            ):
+                failure = error
+    if failure is not None:
+        raise failure
+
+
 def _cleanup_transaction_paths(
     paths: Sequence[Path | None],
 ) -> KeyboardInterrupt | SystemExit | None:
@@ -870,7 +892,7 @@ def _execute_jsonl_stage_transaction(
                 "stage commit verification failed",
             ) from None
         commit_point = True
-        store.finalize_stage_commit(stage_commit_lease)
+        _finalize_stage_commit(store, stage_commit_lease)
         stage_commit_lease = None
         try:
             cleanup_committed_transaction(transaction)
@@ -1591,7 +1613,7 @@ def _run_oracle_stage(
                     "Oracle stage commit verification failed",
                 ) from None
             commit_point = True
-            store.finalize_stage_commit(stage_commit_lease)
+            _finalize_stage_commit(store, stage_commit_lease)
             stage_commit_lease = None
             try:
                 cleanup_committed_transaction(transaction)

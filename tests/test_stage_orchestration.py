@@ -613,6 +613,85 @@ def test_deferred_stage_commit_rejects_missing_or_forged_owner(tmp_path: Path) -
     owner.abort_stage(stage)
 
 
+@pytest.mark.parametrize("failures", [2, 100])
+def test_deferred_stage_commit_release_retries_and_remains_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failures: int,
+) -> None:
+    owner = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    assert (
+        owner.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            preserve_committed=True,
+        )
+        is False
+    )
+    owner.seal_stage_outputs(stage, [output_path])
+    lease = owner.begin_stage_commit(stage)
+    owner.record_stage(stage, [input_path], [output_path], lease=lease)
+    real_release = owner._release_stage_handle
+    attempts = 0
+
+    def flaky_release(handle: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= failures:
+            raise OSError("private-release-failure")
+        real_release(handle)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(owner, "_release_stage_handle", flaky_release)
+    if failures < 3:
+        owner.finalize_stage_commit(lease)
+        assert attempts == failures + 1
+    else:
+        with pytest.raises(SecAwareError) as exc_info:
+            owner.finalize_stage_commit(lease)
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert attempts == 3
+        assert owner.stage_is_active(stage)
+        monkeypatch.setattr(owner, "_release_stage_handle", real_release)
+        owner.ensure_stage_commit_released(lease)
+
+    owner.finalize_stage_commit(lease)
+    owner.ensure_stage_commit_released(lease)
+    assert lease.released is True
+    assert not owner.stage_is_active(stage)
+
+
+def test_deferred_stage_commit_resumes_after_closed_handle_was_observed(
+    tmp_path: Path,
+) -> None:
+    owner = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    stage = "discover"
+    assert (
+        owner.should_skip_stage(
+            stage,
+            [input_path],
+            [output_path],
+            force=False,
+            preserve_committed=True,
+        )
+        is False
+    )
+    owner.seal_stage_outputs(stage, [output_path])
+    lease = owner.begin_stage_commit(stage)
+    owner.record_stage(stage, [input_path], [output_path], lease=lease)
+
+    owner._release_stage_handle(owner._stage_leases[stage])
+    assert not owner.stage_is_active(stage)
+    owner.ensure_stage_commit_released(lease)
+
+    assert lease.released is True
+    owner.finalize_stage_commit(lease)
+
+
 def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
