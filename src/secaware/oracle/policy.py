@@ -1,0 +1,372 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+import stat
+from typing import Any, Literal
+
+from pydantic import ConfigDict, Field, field_validator, model_validator
+
+from secaware.errors import ErrorCode, SecAwareError
+from secaware.pipeline.artifact import canonical_sha256
+from secaware.schema.common import SafeValidationMixin, VersionedModel
+
+
+ORACLE_POLICY_SCHEMA_VERSION = "1.0"
+SEMGREP_VERSION = "1.168.0"
+BANDIT_VERSION = "1.9.4"
+MAX_POLICY_LOCK_BYTES = 64 * 1024
+MAX_POLICY_FILE_BYTES = 1024 * 1024
+
+_SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_INVALID_LOCK_MESSAGE = "oracle policy lock validation failed"
+_INVALID_LOADED_POLICY_MESSAGE = "loaded oracle policy validation failed"
+_POLICY_STAGE = "oracle_policy"
+_POLICY_MESSAGE = "oracle policy bundle could not be authenticated"
+
+
+def _canonical_policy_path(value: str, message: str) -> str:
+    parts = value.split("/")
+    path = PurePosixPath(value)
+    if (
+        value != value.strip()
+        or "\\" in value
+        or ":" in value
+        or value.startswith("/")
+        or value.endswith("/")
+        or "//" in value
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in parts)
+        or any(
+            ord(character) < 0x20 or ord(character) == 0x7F
+            for character in value
+        )
+        or path.as_posix() != value
+    ):
+        raise ValueError(message)
+    return value
+
+
+class OraclePolicyLock(SafeValidationMixin, VersionedModel):
+    _safe_validation_message = _INVALID_LOCK_MESSAGE
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    schema_version: Literal["1.0"]
+    policy_name: str = Field(min_length=1, max_length=256)
+    language: Literal["python"]
+    semgrep_version: Literal["1.168.0"]
+    bandit_version: Literal["1.9.4"]
+    semgrep_rules: str = Field(min_length=1, max_length=4096, repr=False)
+    semgrep_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+    bandit_config: str = Field(min_length=1, max_length=4096, repr=False)
+    bandit_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+
+    @field_validator("policy_name")
+    @classmethod
+    def validate_policy_name(cls, value: str) -> str:
+        if value != value.strip() or any(
+            ord(character) < 0x20 or ord(character) == 0x7F for character in value
+        ):
+            raise ValueError(_INVALID_LOCK_MESSAGE)
+        return value
+
+    @field_validator("semgrep_rules", "bandit_config")
+    @classmethod
+    def validate_policy_path(cls, value: str) -> str:
+        return _canonical_policy_path(value, _INVALID_LOCK_MESSAGE)
+
+    @model_validator(mode="after")
+    def validate_distinct_policy_paths(self) -> "OraclePolicyLock":
+        if self.semgrep_rules == self.bandit_config:
+            raise ValueError(_INVALID_LOCK_MESSAGE)
+        return self
+
+    def __repr__(self) -> str:
+        return "OraclePolicyLock()"
+
+
+class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
+    _safe_validation_message = _INVALID_LOADED_POLICY_MESSAGE
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+        arbitrary_types_allowed=False,
+    )
+
+    schema_version: Literal["1.0"]
+    policy_name: str = Field(min_length=1, max_length=256)
+    language: Literal["python"]
+    semgrep_version: Literal["1.168.0"]
+    bandit_version: Literal["1.9.4"]
+    semgrep_rules: str = Field(min_length=1, max_length=4096, repr=False)
+    semgrep_rules_path: Path = Field(repr=False)
+    semgrep_rules_bytes: bytes = Field(min_length=1, max_length=MAX_POLICY_FILE_BYTES, repr=False)
+    semgrep_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+    bandit_config: str = Field(min_length=1, max_length=4096, repr=False)
+    bandit_config_path: Path = Field(repr=False)
+    bandit_config_bytes: bytes = Field(min_length=1, max_length=MAX_POLICY_FILE_BYTES, repr=False)
+    bandit_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+    combined_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("policy_name")
+    @classmethod
+    def validate_policy_name(cls, value: str) -> str:
+        if value != value.strip() or any(
+            ord(character) < 0x20 or ord(character) == 0x7F for character in value
+        ):
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        return value
+
+    @field_validator("semgrep_rules", "bandit_config")
+    @classmethod
+    def validate_policy_path(cls, value: str) -> str:
+        return _canonical_policy_path(value, _INVALID_LOADED_POLICY_MESSAGE)
+
+    @property
+    def lock_payload(self) -> dict[str, str]:
+        return {
+            "schema_version": self.schema_version,
+            "policy_name": self.policy_name,
+            "language": self.language,
+            "semgrep_version": self.semgrep_version,
+            "bandit_version": self.bandit_version,
+            "semgrep_rules": self.semgrep_rules,
+            "semgrep_sha256": self.semgrep_sha256,
+            "bandit_config": self.bandit_config,
+            "bandit_sha256": self.bandit_sha256,
+        }
+
+    @model_validator(mode="after")
+    def validate_loaded_policy(self) -> "LoadedOraclePolicy":
+        if not self.semgrep_rules_path.is_absolute() or not self.bandit_config_path.is_absolute():
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        if self.semgrep_rules_path == self.bandit_config_path:
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        if hashlib.sha256(self.semgrep_rules_bytes).hexdigest() != self.semgrep_sha256:
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        if hashlib.sha256(self.bandit_config_bytes).hexdigest() != self.bandit_sha256:
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        if canonical_sha256(self.lock_payload) != self.combined_sha256:
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        return self
+
+    def __repr__(self) -> str:
+        return "LoadedOraclePolicy()"
+
+
+def _policy_mismatch() -> SecAwareError:
+    return SecAwareError(
+        code=ErrorCode.POLICY_MISMATCH,
+        stage=_POLICY_STAGE,
+        message=_POLICY_MESSAGE,
+        details={},
+        retryable=False,
+    )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _FileSnapshot:
+    path: Path
+    payload: bytes
+    fingerprint: tuple[int, int, int, int, int, int, int]
+
+    @property
+    def identity(self) -> tuple[int, int]:
+        return self.fingerprint[0], self.fingerprint[1]
+
+
+def _fingerprint(value: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _same_open_file_identity(before: Any, opened: Any) -> bool:
+    return (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_nlink,
+        before.st_size,
+        before.st_mtime_ns,
+    ) == (
+        opened.st_dev,
+        opened.st_ino,
+        opened.st_mode,
+        opened.st_nlink,
+        opened.st_size,
+        opened.st_mtime_ns,
+    )
+
+
+def _require_regular(value: os.stat_result, maximum_bytes: int) -> None:
+    if (
+        not stat.S_ISREG(value.st_mode)
+        or value.st_nlink != 1
+        or value.st_size < 1
+        or value.st_size > maximum_bytes
+    ):
+        raise ValueError(_POLICY_MESSAGE)
+
+
+def _read_file_snapshot(path: Path, maximum_bytes: int) -> _FileSnapshot:
+    before = path.lstat()
+    _require_regular(before, maximum_bytes)
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as handle:
+            opened = os.fstat(handle.fileno())
+            _require_regular(opened, maximum_bytes)
+            if not _same_open_file_identity(before, opened):
+                raise ValueError(_POLICY_MESSAGE)
+            payload = handle.read(maximum_bytes + 1)
+            after_read = os.fstat(handle.fileno())
+            _require_regular(after_read, maximum_bytes)
+            if _fingerprint(opened) != _fingerprint(after_read):
+                raise ValueError(_POLICY_MESSAGE)
+    finally:
+        os.close(descriptor)
+    if len(payload) > maximum_bytes or len(payload) != opened.st_size:
+        raise ValueError(_POLICY_MESSAGE)
+    after_path = path.lstat()
+    if not _same_open_file_identity(after_read, after_path):
+        raise ValueError(_POLICY_MESSAGE)
+    return _FileSnapshot(
+        path=path.resolve(strict=True),
+        payload=payload,
+        fingerprint=_fingerprint(after_read),
+    )
+
+
+def _require_plain_components(root: Path, relative_path: str) -> Path:
+    current = root
+    for part in relative_path.split("/"):
+        current = current / part
+        metadata = current.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ValueError(_POLICY_MESSAGE)
+    return current
+
+
+def _require_contained_snapshot(
+    root: Path,
+    relative_path: str,
+    snapshot: _FileSnapshot,
+) -> None:
+    snapshot.path.relative_to(root)
+    current = _require_plain_components(root, relative_path).resolve(strict=True)
+    if current != snapshot.path:
+        raise ValueError(_POLICY_MESSAGE)
+
+
+def _reject_json_constant(value: str) -> None:
+    del value
+    raise ValueError(_POLICY_MESSAGE)
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(_POLICY_MESSAGE)
+        result[key] = value
+    return result
+
+
+def _parse_lock(payload: bytes) -> OraclePolicyLock:
+    text = payload.decode("utf-8", errors="strict")
+    raw = json.loads(
+        text,
+        object_pairs_hook=_strict_json_object,
+        parse_constant=_reject_json_constant,
+    )
+    return OraclePolicyLock.model_validate(raw)
+
+
+def _load_policy_bundle(lock_path: str | Path) -> LoadedOraclePolicy:
+    path = Path(os.path.abspath(os.fspath(lock_path)))
+    lock_snapshot = _read_file_snapshot(path, MAX_POLICY_LOCK_BYTES)
+    lock = _parse_lock(lock_snapshot.payload)
+    root = path.parent.resolve(strict=True)
+    semgrep_path = _require_plain_components(root, lock.semgrep_rules)
+    bandit_path = _require_plain_components(root, lock.bandit_config)
+    semgrep_snapshot = _read_file_snapshot(semgrep_path, MAX_POLICY_FILE_BYTES)
+    bandit_snapshot = _read_file_snapshot(bandit_path, MAX_POLICY_FILE_BYTES)
+    _require_contained_snapshot(root, lock.semgrep_rules, semgrep_snapshot)
+    _require_contained_snapshot(root, lock.bandit_config, bandit_snapshot)
+    identities = {
+        lock_snapshot.identity,
+        semgrep_snapshot.identity,
+        bandit_snapshot.identity,
+    }
+    if len(identities) != 3:
+        raise ValueError(_POLICY_MESSAGE)
+    return LoadedOraclePolicy(
+        schema_version=lock.schema_version,
+        policy_name=lock.policy_name,
+        language=lock.language,
+        semgrep_version=lock.semgrep_version,
+        bandit_version=lock.bandit_version,
+        semgrep_rules=lock.semgrep_rules,
+        semgrep_rules_path=semgrep_snapshot.path,
+        semgrep_rules_bytes=semgrep_snapshot.payload,
+        semgrep_sha256=lock.semgrep_sha256,
+        bandit_config=lock.bandit_config,
+        bandit_config_path=bandit_snapshot.path,
+        bandit_config_bytes=bandit_snapshot.payload,
+        bandit_sha256=lock.bandit_sha256,
+        combined_sha256=canonical_sha256(lock.model_dump(mode="json")),
+    )
+
+
+def load_policy_bundle(lock_path: str | Path) -> LoadedOraclePolicy:
+    loaded: LoadedOraclePolicy | None = None
+    failed = False
+    try:
+        loaded = _load_policy_bundle(lock_path)
+    except Exception:
+        failed = True
+    finally:
+        lock_path = None  # type: ignore[assignment]
+    if failed or loaded is None:
+        loaded = None
+        raise _policy_mismatch() from None
+    return loaded
+
+
+__all__ = [
+    "BANDIT_VERSION",
+    "LoadedOraclePolicy",
+    "MAX_POLICY_FILE_BYTES",
+    "MAX_POLICY_LOCK_BYTES",
+    "ORACLE_POLICY_SCHEMA_VERSION",
+    "OraclePolicyLock",
+    "SEMGREP_VERSION",
+    "load_policy_bundle",
+]

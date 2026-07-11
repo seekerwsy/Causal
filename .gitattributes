@@ -1,0 +1,2 @@
+policies/oracle/python/*.json text eol=lf
+policies/oracle/python/*.yml text eol=lf
