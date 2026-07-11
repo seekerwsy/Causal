@@ -5,9 +5,11 @@ import math
 import os
 from pathlib import Path
 from functools import partial
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from collections.abc import Iterator, Sequence
@@ -171,8 +173,8 @@ def test_runner_passes_safe_popen_contract_and_minimal_environment(
     assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["close_fds"] is True
     assert kwargs["cwd"] == str(tmp_path.resolve())
-    assert kwargs["stdout"] is not subprocess.PIPE
-    assert kwargs["stderr"] is not subprocess.PIPE
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.PIPE
     environment = json.loads(result.stdout)
     assert "SECAWARE_PRIVATE_PARENT_VALUE" not in environment
     assert environment["PYTHONHASHSEED"] == "0"
@@ -280,6 +282,240 @@ def test_windows_runner_terminates_descendant_process_tree(tmp_path: Path) -> No
     assert still_active is False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows suspended-launch regression")
+def test_windows_process_cannot_run_before_job_assignment_and_detached_child_cannot_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    immediate_marker = tmp_path / "private-immediate.marker"
+    detached_marker = tmp_path / "private-detached.marker"
+    entered_assignment = threading.Event()
+    release_assignment = threading.Event()
+    real_create_job = runner_module._create_windows_job
+    outcome: list[object] = []
+
+    def gated_create_job(process: subprocess.Popen[bytes]) -> object:
+        entered_assignment.set()
+        assert release_assignment.wait(timeout=5.0)
+        return real_create_job(process)
+
+    monkeypatch.setattr(runner_module, "_create_windows_job", gated_create_job)
+    child_source = (
+        "import time; from pathlib import Path; time.sleep(0.4); "
+        f"Path({str(detached_marker)!r}).write_text('escaped')"
+    )
+    source = (
+        "import subprocess,sys; from pathlib import Path; "
+        f"Path({str(immediate_marker)!r}).write_text('ran'); "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[1]], "
+        "creationflags=0x00000008|0x00000200, close_fds=True)"
+    )
+
+    def invoke() -> None:
+        try:
+            outcome.append(
+                run_analyzer_process(
+                    _python_argv(source, child_source),
+                    cwd=tmp_path,
+                    timeout_seconds=3.0,
+                    max_stdout_bytes=1024,
+                    max_stderr_bytes=1024,
+                )
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    assert entered_assignment.wait(timeout=3.0)
+    try:
+        deadline = time.monotonic() + 0.5
+        while not immediate_marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not immediate_marker.exists()
+    finally:
+        release_assignment.set()
+        worker.join(timeout=5.0)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    time.sleep(0.8)
+    assert not detached_marker.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux subreaper regression")
+def test_linux_setsid_descendant_is_reaped_before_normal_return(tmp_path: Path) -> None:
+    ready_marker = tmp_path / "private-setsid-ready.marker"
+    escaped_marker = tmp_path / "private-setsid-escaped.marker"
+    source = (
+        "import os,sys,time\nfrom pathlib import Path\n"
+        "pid=os.fork()\n"
+        "if pid==0:\n"
+        " os.setsid(); Path(sys.argv[1]).write_text('ready'); time.sleep(0.5); "
+        "Path(sys.argv[2]).write_text('escaped'); os._exit(0)\n"
+        "deadline=time.time()+2\n"
+        "while not Path(sys.argv[1]).exists() and time.time()<deadline: time.sleep(0.01)\n"
+    )
+
+    result = run_analyzer_process(
+        _python_argv(source, str(ready_marker), str(escaped_marker)),
+        cwd=tmp_path,
+        timeout_seconds=3.0,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+
+    assert result.returncode == 0
+    assert ready_marker.exists()
+    time.sleep(0.8)
+    assert not escaped_marker.exists()
+
+
+@pytest.mark.skipif(os.name != "posix" or sys.platform == "linux", reason="unsupported POSIX")
+def test_non_linux_posix_fails_closed_before_launch(tmp_path: Path) -> None:
+    marker = tmp_path / "private-unsupported-posix.marker"
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            _python_argv(f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"),
+            cwd=tmp_path,
+            timeout_seconds=2.0,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    assert not marker.exists()
+
+
+def test_executable_replacement_window_cannot_change_launched_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / ("analyzer.exe" if os.name == "nt" else "analyzer")
+    replacement = tmp_path / "private-replacement"
+    source_executable = shutil.which("cmd.exe") if os.name == "nt" else sys.executable
+    assert source_executable is not None
+    shutil.copyfile(source_executable, executable)
+    executable.chmod(0o700)
+    replacement.write_bytes(b"private-invalid-replacement")
+    entered_launch = threading.Event()
+    release_launch = threading.Event()
+    real_popen = runner_module._popen_process
+    outcome: list[object] = []
+
+    def gated_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        entered_launch.set()
+        assert release_launch.wait(timeout=5.0)
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_popen_process", gated_popen)
+
+    def invoke() -> None:
+        try:
+            outcome.append(
+                run_analyzer_process(
+                    (
+                        (str(executable), "/d", "/c", "<nul set /p =original")
+                        if os.name == "nt"
+                        else (
+                            str(executable),
+                            "-c",
+                            "import sys; sys.stdout.buffer.write(b'original')",
+                        )
+                    ),
+                    cwd=tmp_path,
+                    timeout_seconds=3.0,
+                    max_stdout_bytes=1024,
+                    max_stderr_bytes=1024,
+                )
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    assert entered_launch.wait(timeout=3.0)
+    replacement_denied = False
+    try:
+        os.replace(replacement, executable)
+    except OSError:
+        replacement_denied = True
+    finally:
+        release_launch.set()
+        worker.join(timeout=5.0)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    if os.name == "nt":
+        assert replacement_denied is True
+    else:
+        assert outcome[0].stdout == b"original"  # type: ignore[union-attr]
+
+
+def test_cwd_replacement_window_cannot_change_launched_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    working = tmp_path / "working"
+    replacement = tmp_path / "private-replacement-working"
+    moved = tmp_path / "private-moved-working"
+    working.mkdir()
+    replacement.mkdir()
+    working.joinpath("identity.txt").write_text("old", encoding="utf-8")
+    replacement.joinpath("identity.txt").write_text("new", encoding="utf-8")
+    entered_launch = threading.Event()
+    release_launch = threading.Event()
+    real_popen = runner_module._popen_process
+    outcome: list[object] = []
+
+    def gated_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        entered_launch.set()
+        assert release_launch.wait(timeout=5.0)
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_popen_process", gated_popen)
+
+    def invoke() -> None:
+        try:
+            outcome.append(
+                run_analyzer_process(
+                    _python_argv(
+                        "import sys; from pathlib import Path; "
+                        "sys.stdout.buffer.write(Path('identity.txt').read_bytes())"
+                    ),
+                    cwd=working,
+                    timeout_seconds=3.0,
+                    max_stdout_bytes=1024,
+                    max_stderr_bytes=1024,
+                )
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    assert entered_launch.wait(timeout=3.0)
+    replacement_denied = False
+    try:
+        os.replace(working, moved)
+        os.replace(replacement, working)
+    except OSError:
+        replacement_denied = True
+    finally:
+        release_launch.set()
+        worker.join(timeout=5.0)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    assert outcome[0].stdout == b"old"  # type: ignore[union-attr]
+    if os.name == "nt":
+        assert replacement_denied is True
+
+
 @pytest.mark.parametrize(
     ("stream", "source"),
     [
@@ -310,6 +546,63 @@ def test_runner_rejects_oversized_output_without_reading_or_retaining_it(
         str(tmp_path),
         sys.executable,
     )
+
+
+def test_capture_backing_never_exceeds_limit_plus_one_for_large_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_temporary_file = runner_module.tempfile.TemporaryFile
+    observed_sizes: list[int] = []
+    handles_created = 0
+
+    class BoundedStorageProbe:
+        def __init__(self, handle: object, *, tracked: bool) -> None:
+            self._handle = handle
+            self._tracked = tracked
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._handle, name)
+
+        def write(self, payload: bytes) -> int:
+            written = self._handle.write(payload)  # type: ignore[attr-defined]
+            if self._tracked:
+                observed_sizes.append(os.fstat(self._handle.fileno()).st_size)  # type: ignore[attr-defined]
+            return written  # type: ignore[no-any-return]
+
+        def close(self) -> None:
+            if self._tracked:
+                observed_sizes.append(os.fstat(self._handle.fileno()).st_size)  # type: ignore[attr-defined]
+            self._handle.close()  # type: ignore[attr-defined]
+
+    def tracked_temporary_file(*args: object, **kwargs: object) -> BoundedStorageProbe:
+        nonlocal handles_created
+        handles_created += 1
+        return BoundedStorageProbe(
+            real_temporary_file(*args, **kwargs),
+            tracked=handles_created <= 2,
+        )
+
+    monkeypatch.setattr(runner_module.tempfile, "TemporaryFile", tracked_temporary_file)
+    source = (
+        "import os; chunk=b'x'*(1024*1024); "
+        "[(os.write(1, chunk)) for _ in range(50)]"
+    )
+    started = time.monotonic()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            _python_argv(source),
+            cwd=tmp_path,
+            timeout_seconds=5.0,
+            max_stdout_bytes=64,
+            max_stderr_bytes=64,
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_INVALID_OUTPUT
+    assert observed_sizes
+    assert max(observed_sizes) <= 65
+    assert time.monotonic() - started < 3.0
 
 
 def test_runner_accepts_output_exactly_at_the_limit(tmp_path: Path) -> None:
