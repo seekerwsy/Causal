@@ -15,7 +15,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import BinaryIO
+from typing import BinaryIO, Literal
 
 from secaware.errors import ErrorCode, SecAwareError
 
@@ -33,7 +33,72 @@ _POLL_INTERVAL_SECONDS = 0.01
 _CLEANUP_WAIT_SECONDS = 5.0
 _CAPTURE_CHUNK_BYTES = 64 * 1024
 _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
+_RUNTIME_PROBE_TIMEOUT_SECONDS = 5.0
 _POPEN_CLASS = subprocess.Popen
+
+_LINUX_RUNTIME_PROBE_SOURCE = r"""
+import ctypes
+import os
+import signal
+
+CLONE_NEWNS = 0x00020000
+CLONE_NEWUSER = 0x10000000
+CLONE_NEWPID = 0x20000000
+MS_NOSUID = 0x2
+MS_NODEV = 0x4
+MS_NOEXEC = 0x8
+MS_REC = 0x4000
+MS_PRIVATE = 0x40000
+PR_SET_PDEATHSIG = 1
+
+
+def check(call):
+    if call != 0:
+        raise OSError(ctypes.get_errno(), "runtime capability unavailable")
+
+
+def write(path, value):
+    descriptor = os.open(path, os.O_WRONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        payload = value.encode("ascii")
+        while payload:
+            written = os.write(descriptor, payload)
+            if written <= 0:
+                raise OSError("runtime capability unavailable")
+            payload = payload[written:]
+    finally:
+        os.close(descriptor)
+
+
+libc = ctypes.CDLL(None, use_errno=True)
+host_uid = os.getuid()
+host_gid = os.getgid()
+check(libc.unshare(CLONE_NEWUSER))
+try:
+    write("/proc/self/setgroups", "deny\n")
+except FileNotFoundError:
+    pass
+write("/proc/self/uid_map", f"0 {host_uid} 1\n")
+write("/proc/self/gid_map", f"0 {host_gid} 1\n")
+os.setresgid(0, 0, 0)
+os.setresuid(0, 0, 0)
+check(libc.unshare(CLONE_NEWPID))
+child = os.fork()
+if child == 0:
+    try:
+        check(libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0))
+        check(libc.unshare(CLONE_NEWNS))
+        check(libc.mount(None, b"/", None, MS_REC | MS_PRIVATE, None))
+        check(libc.mount(b"proc", b"/proc", b"proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, None))
+        if os.getpid() != 1:
+            raise OSError("PID namespace unavailable")
+        os.stat("/proc/self/stat")
+        os._exit(0)
+    except BaseException:
+        os._exit(1)
+_, status = os.waitpid(child, 0)
+os._exit(0 if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0 else 1)
+"""
 
 
 def _write_all(descriptor: int, payload: bytes) -> None:
@@ -81,6 +146,17 @@ class AnalyzerProcessResult:
 
     def __repr__(self) -> str:
         return "AnalyzerProcessResult()"
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyzerRuntimeCapabilities:
+    platform: Literal["windows", "linux"]
+    job_object: bool
+    toolhelp_snapshot: bool
+    user_namespace: bool
+    pid_namespace: bool
+    mount_namespace: bool
+    private_proc: bool
 
 
 class _RunnerFailure(Exception):
@@ -560,6 +636,204 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
 
 def _force_namespace_unavailable() -> bool:
     return False
+
+
+def _detect_runtime_platform() -> Literal["windows", "linux"] | None:
+    if os.name == "nt" and sys.platform == "win32":
+        return "windows"
+    if os.name == "posix" and sys.platform == "linux":
+        return "linux"
+    return None
+
+
+def _probe_windows_runtime_capabilities() -> None:
+    if _detect_runtime_platform() != "windows":
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    import ctypes
+    from ctypes import wintypes
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("read_operations", ctypes.c_ulonglong),
+            ("write_operations", ctypes.c_ulonglong),
+            ("other_operations", ctypes.c_ulonglong),
+            ("read_bytes", ctypes.c_ulonglong),
+            ("write_bytes", ctypes.c_ulonglong),
+            ("other_bytes", ctypes.c_ulonglong),
+        ]
+
+    class _BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("process_time", ctypes.c_longlong),
+            ("job_time", ctypes.c_longlong),
+            ("flags", wintypes.DWORD),
+            ("minimum_working_set", ctypes.c_size_t),
+            ("maximum_working_set", ctypes.c_size_t),
+            ("active_process_limit", wintypes.DWORD),
+            ("affinity", ctypes.c_size_t),
+            ("priority", wintypes.DWORD),
+            ("scheduling", wintypes.DWORD),
+        ]
+
+    class _ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("basic", _BasicLimitInformation),
+            ("io", _IoCounters),
+            ("process_memory", ctypes.c_size_t),
+            ("job_memory", ctypes.c_size_t),
+            ("peak_process_memory", ctypes.c_size_t),
+            ("peak_job_memory", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    kernel32.Thread32First.restype = wintypes.BOOL
+    kernel32.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    kernel32.Thread32Next.restype = wintypes.BOOL
+    kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenThread.restype = wintypes.HANDLE
+    kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+    kernel32.ResumeThread.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    job = kernel32.CreateJobObjectW(None, None)
+    snapshot: object | None = None
+    cleanup_failed = False
+    try:
+        if not job:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        information = _ExtendedLimitInformation()
+        information.basic.flags = 0x00002000
+        if not kernel32.SetInformationJobObject(
+            job,
+            9,
+            ctypes.byref(information),
+            ctypes.sizeof(information),
+        ):
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        snapshot = kernel32.CreateToolhelp32Snapshot(0x4, 0)
+        if not snapshot or int(snapshot) == -1:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    finally:
+        if snapshot and int(snapshot) != -1:
+            cleanup_failed = not bool(kernel32.CloseHandle(snapshot))
+        if job:
+            cleanup_failed = not bool(kernel32.CloseHandle(job)) or cleanup_failed
+        snapshot = None
+        job = None
+        kernel32 = None
+        if cleanup_failed and not sys_exc_info_active():
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+
+
+def _probe_linux_runtime_capabilities() -> None:
+    if (
+        _detect_runtime_platform() != "linux"
+        or not Path("/proc/self/exe").is_file()
+        or not Path("/proc/self/task").is_dir()
+    ):
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    process: subprocess.Popen[bytes] | None = None
+    argv0 = ""
+    environment: dict[str, str] = {}
+    cleanup_failed = False
+    had_active_exception = False
+    try:
+        argv0 = os.path.abspath(sys.executable)
+        if not Path(argv0).is_absolute():
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        environment = {
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": "",
+            "PYTHONHASHSEED": "0",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        }
+        process = subprocess.Popen(
+            (argv0, "-I", "-S", "-c", _LINUX_RUNTIME_PROBE_SOURCE),
+            executable="/proc/self/exe",
+            env=environment,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
+        returncode = process.wait(timeout=_RUNTIME_PROBE_TIMEOUT_SECONDS)
+        if returncode != 0:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    finally:
+        had_active_exception = sys_exc_info_active()
+        if process is not None and process.poll() is None:
+            try:
+                _terminate_and_wait(process, None)
+            except (KeyboardInterrupt, SystemExit):
+                if not had_active_exception:
+                    raise
+            except BaseException:
+                cleanup_failed = True
+        process = None
+        argv0 = ""
+        environment = {}
+        if cleanup_failed and not had_active_exception:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+
+
+def validate_analyzer_runtime() -> AnalyzerRuntimeCapabilities:
+    capabilities: AnalyzerRuntimeCapabilities | None = None
+    failed = False
+    platform: Literal["windows", "linux"] | None = None
+    try:
+        platform = _detect_runtime_platform()
+        if platform == "windows":
+            _probe_windows_runtime_capabilities()
+            capabilities = AnalyzerRuntimeCapabilities(
+                platform="windows",
+                job_object=True,
+                toolhelp_snapshot=True,
+                user_namespace=False,
+                pid_namespace=False,
+                mount_namespace=False,
+                private_proc=False,
+            )
+        elif platform == "linux":
+            if _force_namespace_unavailable():
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            _probe_linux_runtime_capabilities()
+            capabilities = AnalyzerRuntimeCapabilities(
+                platform="linux",
+                job_object=False,
+                toolhelp_snapshot=False,
+                user_namespace=True,
+                pid_namespace=True,
+                mount_namespace=True,
+                private_proc=True,
+            )
+        else:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        failed = True
+    finally:
+        platform = None
+    if failed or capabilities is None:
+        capabilities = None
+        raise _safe_error(ErrorCode.ANALYZER_FAILED) from None
+    return capabilities
 
 
 def _seal_posix_internal_file(
@@ -1563,5 +1837,7 @@ def run_analyzer_process(
 
 __all__ = [
     "AnalyzerProcessResult",
+    "AnalyzerRuntimeCapabilities",
     "run_analyzer_process",
+    "validate_analyzer_runtime",
 ]

@@ -20,7 +20,12 @@ import pytest
 
 import secaware.oracle.runner as runner_module
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.oracle.runner import AnalyzerProcessResult, run_analyzer_process
+from secaware.oracle.runner import (
+    AnalyzerProcessResult,
+    AnalyzerRuntimeCapabilities,
+    run_analyzer_process,
+    validate_analyzer_runtime,
+)
 
 
 _POPEN_TYPE = subprocess.Popen
@@ -28,6 +33,174 @@ _POPEN_TYPE = subprocess.Popen
 
 def _python_argv(source: str, *arguments: str) -> tuple[str, ...]:
     return (sys.executable, "-c", source, *arguments)
+
+
+def test_runtime_preflight_rejects_unsupported_platform_without_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe_calls: list[str] = []
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: None)
+    monkeypatch.setattr(
+        runner_module,
+        "_probe_windows_runtime_capabilities",
+        lambda: probe_calls.append("windows"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "_probe_linux_runtime_capabilities",
+        lambda: probe_calls.append("linux"),
+        raising=False,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_analyzer_runtime()
+
+    _assert_safe_error(exc_info.value, ErrorCode.ANALYZER_FAILED)
+    assert probe_calls == []
+
+
+def test_runtime_preflight_fails_closed_when_linux_namespaces_are_forced_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe_calls: list[str] = []
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: True)
+    monkeypatch.setattr(
+        runner_module,
+        "_probe_linux_runtime_capabilities",
+        lambda: probe_calls.append("linux"),
+        raising=False,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_analyzer_runtime()
+
+    _assert_safe_error(exc_info.value, ErrorCode.ANALYZER_FAILED)
+    assert probe_calls == []
+
+
+def test_runtime_preflight_hides_capability_probe_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_path = "/private/runtime/probe/capability"
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: False)
+
+    def failed_probe() -> None:
+        raise OSError(private_path)
+
+    monkeypatch.setattr(runner_module, "_probe_linux_runtime_capabilities", failed_probe)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_analyzer_runtime()
+
+    _assert_safe_error(exc_info.value, ErrorCode.ANALYZER_FAILED, private_path)
+
+
+def test_runtime_preflight_reports_windows_job_and_toolhelp_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
+    monkeypatch.setattr(
+        runner_module,
+        "_probe_windows_runtime_capabilities",
+        lambda: None,
+        raising=False,
+    )
+
+    capabilities = validate_analyzer_runtime()
+
+    assert capabilities == AnalyzerRuntimeCapabilities(
+        platform="windows",
+        job_object=True,
+        toolhelp_snapshot=True,
+        user_namespace=False,
+        pid_namespace=False,
+        mount_namespace=False,
+        private_proc=False,
+    )
+
+
+def test_runtime_preflight_reports_linux_namespace_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: False)
+    monkeypatch.setattr(
+        runner_module,
+        "_probe_linux_runtime_capabilities",
+        lambda: None,
+        raising=False,
+    )
+
+    capabilities = validate_analyzer_runtime()
+
+    assert capabilities == AnalyzerRuntimeCapabilities(
+        platform="linux",
+        job_object=False,
+        toolhelp_snapshot=False,
+        user_namespace=True,
+        pid_namespace=True,
+        mount_namespace=True,
+        private_proc=True,
+    )
+
+
+def test_runtime_preflight_never_resolves_or_starts_analyzer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analyzer_marker_path = tmp_path / "private-analyzer-started.marker"
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: False)
+    monkeypatch.setattr(
+        runner_module,
+        "_probe_linux_runtime_capabilities",
+        lambda: None,
+        raising=False,
+    )
+
+    def analyzer_marker(*args: object, **kwargs: object) -> None:
+        analyzer_marker_path.write_text("started", encoding="utf-8")
+        raise AssertionError("analyzer resolution must not run during runtime preflight")
+
+    monkeypatch.setattr(runner_module, "_resolve_analyzer_executable", analyzer_marker)
+
+    validate_analyzer_runtime()
+    assert not analyzer_marker_path.exists()
+
+
+def test_linux_runtime_probe_preserves_control_flow_after_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_calls: list[object] = []
+
+    class InterruptedProbe:
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == runner_module._RUNTIME_PROBE_TIMEOUT_SECONDS
+            raise KeyboardInterrupt
+
+        def poll(self) -> None:
+            return None
+
+    probe = InterruptedProbe()
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: False)
+    monkeypatch.setattr(runner_module.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(runner_module.Path, "is_dir", lambda self: True)
+    monkeypatch.setattr(runner_module.subprocess, "Popen", lambda *args, **kwargs: probe)
+
+    def failing_cleanup(process: object, windows_job: object) -> None:
+        cleanup_calls.append((process, windows_job))
+        raise OSError("private cleanup failure")
+
+    monkeypatch.setattr(runner_module, "_terminate_and_wait", failing_cleanup)
+
+    with pytest.raises(KeyboardInterrupt):
+        validate_analyzer_runtime()
+
+    assert cleanup_calls == [(probe, None)]
 
 
 def _error_surfaces(error: BaseException) -> tuple[str, ...]:

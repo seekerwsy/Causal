@@ -412,6 +412,20 @@ def test_second_analyzer_failure_leaves_no_committed_oracle(oracle_stage_fixture
         )
     assert error.value.code is ErrorCode.ANALYZER_FAILED
     assert not store.path(".stages", "run-oracle-observed.json").exists()
+
+
+def test_oracle_preflight_fails_closed_before_analyzer_resolution(
+    oracle_stage_fixture, monkeypatch
+):
+    config, store, _, _ = oracle_stage_fixture
+    monkeypatch.setattr(
+        "secaware.oracle.runner.validate_analyzer_runtime",
+        forced_unsupported_runtime,
+    )
+    with pytest.raises(SecAwareError) as error:
+        run_oracle_stage(config, store, condition="observed", force=False)
+    assert error.value.code is ErrorCode.ANALYZER_FAILED
+    assert analyzer_launches == []
 ```
 
 Add CLI tests for missing binaries, version mismatch, policy mismatch, invalid output, condition validation, standalone input/output, force/skip, producer manifest checks, output tampering, and safe error surfaces.
@@ -424,7 +438,7 @@ Expected: FAIL because policy-aware manifests and the real Oracle CLI do not exi
 
 - [ ] **Step 3: Bind policy digests and integrate the engine**
 
-Add `policy_sha256: str | None` to `StageManifest` and `_StageSnapshot`; include it in fingerprint construction, skip validation, record validation, and readback. `run_oracle_stage` authenticates the committed generated-code producer, loads the policy, verifies versions, runs the batch engine, atomically writes and seals Oracle JSONL, strictly reads it back, and records the policy-bound manifest.
+Add `policy_sha256: str | None` to `StageManifest` and `_StageSnapshot`; include it in fingerprint construction, skip validation, record validation, and readback. The Oracle-specific preflight calls `validate_analyzer_runtime()` before resolving or version-checking analyzers. `run_oracle_stage` calls it again immediately before execution, authenticates the committed generated-code producer, loads the policy, verifies versions, runs the batch engine, atomically writes and seals Oracle JSONL, strictly reads it back, and records the policy-bound manifest. Unsupported Windows/Linux capabilities, non-Linux POSIX systems, and all other platforms fail closed with `ANALYZER_FAILED`; the general package preflight remains platform-independent.
 
 The standalone command shape is:
 

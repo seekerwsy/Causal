@@ -35,6 +35,8 @@ generation:
     - 1
     - 2
 
+# Used only by Oracle stages. Oracle execution additionally requires the runtime
+# capabilities documented in README.md; unsupported runtimes fail closed.
 oracle:
   language: python
   policy_lock_path: policies/oracle/python/policy.lock.json

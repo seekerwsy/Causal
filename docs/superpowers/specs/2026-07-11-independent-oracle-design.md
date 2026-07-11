@@ -54,6 +54,19 @@ The subprocess runner is injectable for tests and enforces:
 - no network-dependent policy lookup;
 - safe cleanup on normal exceptions and control-flow exceptions.
 
+### Runtime support matrix
+
+Oracle execution is supported on Windows only when a capability preflight verifies the Job Object
+and Toolhelp APIs required for suspended launch, process-tree containment, and controlled resume.
+It is supported on Linux only when a short-lived, analyzer-free probe can create an unprivileged
+user namespace, PID namespace, mount namespace, and private `/proc` mount. The probe is isolated,
+bounded, and fully reaped before preflight returns.
+
+macOS, BSD, other non-Linux POSIX systems, and Linux hosts where any required namespace or mount
+capability is disabled fail closed with `ANALYZER_FAILED` before analyzer launch. They never select
+a weaker execution mode. These restrictions apply only to the independent Oracle execution path;
+the Python package, generation, TSG extraction, and other non-Oracle components remain portable.
+
 Semgrep must return a successful JSON report with no parse or engine errors. Bandit exit code 0
 means no findings and exit code 1 means findings; any other code is failure. Both reports must be
 strictly parsed, must reference only the opaque submitted files, and together must cover the entire
@@ -110,6 +123,10 @@ and output limits. Python is the only v1 language; any other language is a confi
 `secaware run-oracle --condition ...` uses this implementation. `secaware-oracle run` exposes the
 same engine for a committed code JSONL input and canonical output. Both entry points share the same
 policy loader, runner, parser, aggregator, and error mapping.
+
+Both entry points run `validate_analyzer_runtime()` during their Oracle-specific preflight and
+again immediately before starting the Oracle stage. The existing package-wide preflight is not
+made platform-dependent before those Oracle entry points exist.
 
 ## Test and release gates
 
