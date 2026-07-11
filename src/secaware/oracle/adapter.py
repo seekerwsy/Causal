@@ -13,6 +13,8 @@ AnalyzerName = Literal["semgrep", "bandit"]
 class LocatedAnalyzerFinding:
     opaque_file: str
     record: AnalyzerFindingRecord
+    start_offset: int | None = None
+    end_offset: int | None = None
 
     @property
     def analyzer(self) -> Literal["semgrep", "bandit"]:
@@ -67,6 +69,8 @@ class LocatedAnalyzerFinding:
             self.severity,
             self.confidence,
             self.message,
+            self.start_offset,
+            self.end_offset,
         )
 
     def identity_key(self) -> tuple[object, ...]:

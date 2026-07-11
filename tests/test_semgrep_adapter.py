@@ -144,6 +144,8 @@ def test_semgrep_normalizes_findings_and_requires_full_coverage() -> None:
         7,
         24,
     )
+    assert located.start_offset == 80
+    assert located.end_offset == 95
     assert located.record is report.canonical_findings[0]
     rendered = repr(report) + repr(located) + repr(located.record)
     assert "private source snippet" not in rendered

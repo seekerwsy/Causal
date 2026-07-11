@@ -14,6 +14,7 @@ import pytest
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.result_importer import canonical_generated_code_from_request
+from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.aggregator import run_oracle_batch
 from secaware.oracle.policy import LoadedOraclePolicy, load_policy_bundle
 from secaware.oracle.runner import AnalyzerProcessResult
@@ -137,11 +138,17 @@ class FakeRunner:
         finding: str | None = None,
         failure: str | None = None,
         control: KeyboardInterrupt | SystemExit | None = None,
+        control_analyzer: str = "semgrep",
+        mutation: str | None = None,
+        coordinate_case: str | None = None,
         inspect_batch: Callable[[Sequence[str], Path], None] | None = None,
     ) -> None:
         self.finding = finding
         self.failure = failure
         self.control = control
+        self.control_analyzer = control_analyzer
+        self.mutation = mutation
+        self.coordinate_case = coordinate_case
         self.inspect_batch = inspect_batch
         self.calls: list[tuple[tuple[str, ...], Path, float, int, int]] = []
         self.batch_dirs: list[Path] = []
@@ -163,8 +170,17 @@ class FakeRunner:
         if self.inspect_batch is not None:
             self.inspect_batch(argv, cwd)
         analyzer = "semgrep" if "scan" in argv else "bandit"
-        if analyzer == "semgrep" and self.control is not None:
+        if analyzer == self.control_analyzer and self.control is not None:
             raise self.control
+        if self.mutation == f"{analyzer}_source":
+            self._rewrite(cwd / _source_names(cwd)[0], restore=False)
+        if self.mutation == f"{analyzer}_source_aba":
+            self._rewrite(cwd / _source_names(cwd)[0], restore=True)
+        if self.mutation == f"{analyzer}_policy":
+            option = "--config" if analyzer == "semgrep" else "-c"
+            self._rewrite(cwd / argv[argv.index(option) + 1], restore=False)
+        if self.mutation == "bandit_metadata" and analyzer == "bandit":
+            self._rewrite(cwd / ".bandit-metadata.json", restore=False)
         if self.failure == analyzer:
             raise SecAwareError(
                 ErrorCode.ANALYZER_FAILED,
@@ -175,6 +191,8 @@ class FakeRunner:
         covered = files[:-1] if self.failure == f"{analyzer}_partial" else files
         if analyzer == "semgrep":
             results = [_semgrep_result(files[0])] if self.finding == analyzer else []
+            if results:
+                self._mutate_coordinates(analyzer, results[0])
             payload = {
                 "version": "1.168.0",
                 "results": results,
@@ -192,6 +210,8 @@ class FakeRunner:
                 argv_sha256="a" * 64,
             )
         results = [_bandit_result(files[0])] if self.finding == analyzer else []
+        if results:
+            self._mutate_coordinates(analyzer, results[0])
         metrics = {
             filename: {"loc": 3, "nosec": 0, "skipped_tests": 0}
             for filename in covered
@@ -203,6 +223,80 @@ class FakeRunner:
             stdout=json.dumps(payload).encode("utf-8"),
             argv_sha256="b" * 64,
         )
+
+    @staticmethod
+    def _rewrite(path: Path, *, restore: bool) -> None:
+        original = path.read_bytes()
+        metadata = path.stat()
+        os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+        path.write_bytes(b"X" * len(original))
+        if restore:
+            path.write_bytes(original)
+            os.chmod(path, stat.S_IREAD)
+            os.utime(
+                path,
+                ns=(metadata.st_atime_ns, metadata.st_mtime_ns),
+            )
+
+    def _mutate_coordinates(self, analyzer: str, result: dict[str, object]) -> None:
+        case = self.coordinate_case
+        if case is None:
+            return
+        if analyzer == "semgrep":
+            start = result["start"]
+            end = result["end"]
+            assert isinstance(start, dict) and isinstance(end, dict)
+            if case == "line":
+                start.update(line=999, col=1, offset=0)
+                end.update(line=999, col=2, offset=1)
+            elif case == "column":
+                start.update(line=1, col=999, offset=998)
+                end.update(line=1, col=1000, offset=999)
+            elif case == "unicode_boundary":
+                start.update(line=1, col=2, offset=1)
+                end.update(line=1, col=4, offset=3)
+            elif case == "crlf_offset":
+                start.update(line=2, col=1, offset=1)
+                end.update(line=2, col=2, offset=2)
+            elif case == "empty_line":
+                start.update(line=2, col=2, offset=5)
+                end.update(line=2, col=3, offset=6)
+            elif case == "trailing_line":
+                start.update(line=2, col=1, offset=4)
+                end.update(line=2, col=1, offset=4)
+            elif case == "valid_unicode":
+                start.update(line=1, col=1, offset=0)
+                end.update(line=1, col=4, offset=3)
+            elif case == "valid_crlf":
+                start.update(line=2, col=1, offset=5)
+                end.update(line=2, col=2, offset=6)
+            elif case == "valid_tab":
+                start.update(line=2, col=1, offset=9)
+                end.update(line=2, col=2, offset=10)
+            else:  # pragma: no cover - test fixture guard
+                raise AssertionError(case)
+        else:
+            if case == "line":
+                result.update(line_number=999, line_range=[999], col_offset=0, end_col_offset=1)
+            elif case == "column":
+                result.update(col_offset=998, end_col_offset=999)
+            elif case == "unicode_boundary":
+                result.update(col_offset=1, end_col_offset=3)
+            elif case == "empty_line":
+                result.update(line_number=2, line_range=[2], col_offset=1, end_col_offset=2)
+            elif case == "trailing_line":
+                result.update(line_number=2, line_range=[2], col_offset=0, end_col_offset=0)
+            elif case == "valid_unicode":
+                result.update(col_offset=0, end_col_offset=3)
+            elif case == "valid_tab":
+                result.update(
+                    line_number=2,
+                    line_range=[2],
+                    col_offset=0,
+                    end_col_offset=1,
+                )
+            else:  # pragma: no cover - test fixture guard
+                raise AssertionError(case)
 
 
 @pytest.fixture
@@ -246,7 +340,7 @@ def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
     assert supported_runtime == ["validated"]
     assert len(runner.calls) == 2
     assert ["scan" in call[0] for call in runner.calls] == [True, False]
-    assert all(call[1] == runner.calls[0][1] for call in runner.calls)
+    assert runner.calls[0][1] != runner.calls[1][1]
     assert all(call[2:] == (7.5, 8192, 2048) for call in runner.calls)
     assert runner.calls[0][0][-1] == "."
     assert runner.calls[1][0][2] == "."
@@ -293,15 +387,18 @@ def test_batch_materializes_authenticated_policy_and_opaque_deterministic_source
         observed_names.append(names)
         assert all(name.startswith("src_") and len(name) == 71 for name in names)
         assert all("prompt" not in name and "req_" not in name for name in names)
-        assert (cwd / ".bandit-metadata.json").read_bytes() == policy.bandit_metadata_bytes
         if "scan" in argv:
             config = Path(argv[argv.index("--config") + 1])
             assert not config.is_absolute()
             assert (cwd / config).read_bytes() == policy.semgrep_rules_bytes
+            assert not (cwd / ".bandit-policy.json").exists()
+            assert not (cwd / ".bandit-metadata.json").exists()
         else:
             config = Path(argv[argv.index("-c") + 1])
             assert not config.is_absolute()
             assert (cwd / config).read_bytes() == policy.bandit_config_bytes
+            assert (cwd / ".bandit-metadata.json").read_bytes() == policy.bandit_metadata_bytes
+            assert not (cwd / ".semgrep-policy.yml").exists()
         if os.name != "nt":
             for path in cwd.iterdir():
                 assert stat.S_IMODE(path.stat().st_mode) & 0o022 == 0
@@ -455,11 +552,13 @@ def test_comment_only_source_is_structurally_nonfunctional_but_still_analyzed(
     "control",
     [KeyboardInterrupt("private-control"), SystemExit("private-control")],
 )
+@pytest.mark.parametrize("control_analyzer", ["semgrep", "bandit"])
 def test_control_flow_identity_is_preserved_and_batch_is_removed(
     control: KeyboardInterrupt | SystemExit,
+    control_analyzer: str,
     policy: LoadedOraclePolicy,
 ) -> None:
-    runner = FakeRunner(control=control)
+    runner = FakeRunner(control=control, control_analyzer=control_analyzer)
 
     with pytest.raises(type(control)) as exc_info:
         run_oracle_batch([_code()], policy, runner=runner)
@@ -518,6 +617,150 @@ def test_materialized_source_matches_canonical_digest(
     run_oracle_batch([code], policy, runner=FakeRunner(inspect_batch=inspect))
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "semgrep_source",
+        "semgrep_source_aba",
+        "semgrep_policy",
+        "bandit_source",
+        "bandit_source_aba",
+        "bandit_policy",
+        "bandit_metadata",
+    ],
+)
+def test_material_drift_never_produces_an_oracle_record(
+    mutation: str,
+    policy: LoadedOraclePolicy,
+) -> None:
+    runner = FakeRunner(mutation=mutation)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_batch([_code()], policy, runner=runner)
+
+    assert exc_info.value.code in {
+        ErrorCode.ANALYZER_FAILED,
+        ErrorCode.ANALYZER_INVALID_OUTPUT,
+    }
+    assert all(not path.exists() for path in runner.batch_dirs)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows ABA is prevented by material leases")
+def test_linux_post_seal_detects_byte_and_mtime_restored_aba(
+    monkeypatch: pytest.MonkeyPatch,
+    policy: LoadedOraclePolicy,
+) -> None:
+    monkeypatch.setattr(
+        aggregator_module,
+        "_open_windows_material_leases",
+        lambda batch: aggregator_module._WindowsMaterialLeases([], None),
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_batch(
+            [_code()],
+            policy,
+            runner=FakeRunner(mutation="semgrep_source_aba"),
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_INVALID_OUTPUT
+
+
+def test_coordinate_failure_does_not_leak_source(
+    policy: LoadedOraclePolicy,
+) -> None:
+    secret = "PRIVATE-COORDINATE-SOURCE"
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_batch(
+            [_code(code=f"前 = '{secret}'\n")],
+            policy,
+            runner=FakeRunner(finding="semgrep", coordinate_case="unicode_boundary"),
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_INVALID_OUTPUT
+    assert secret not in _safe_surfaces(exc_info.value)
+
+
+def test_analyzers_receive_independent_batches_with_identical_sources(
+    policy: LoadedOraclePolicy,
+) -> None:
+    code = _code()
+    batch_roots: list[Path] = []
+
+    def inspect(argv: Sequence[str], cwd: Path) -> None:
+        batch_roots.append(cwd)
+        assert (cwd / _source_names(cwd)[0]).read_text(encoding="utf-8") == code.code
+
+    records = run_oracle_batch(
+        [code],
+        policy,
+        runner=FakeRunner(inspect_batch=inspect),
+    )
+
+    assert records[0].security_label is SecurityLabel.SECURE
+    assert len(batch_roots) == 2
+    assert batch_roots[0] != batch_roots[1]
+    assert all(not root.exists() for root in batch_roots)
+
+
+@pytest.mark.parametrize(
+    ("analyzer", "case", "source"),
+    [
+        ("semgrep", "line", "x = 1\n"),
+        ("bandit", "line", "x = 1\n"),
+        ("semgrep", "column", "x = 1\n"),
+        ("bandit", "column", "x = 1\n"),
+        ("semgrep", "unicode_boundary", "前 = 1\n"),
+        ("bandit", "unicode_boundary", "前 = 1\n"),
+        ("semgrep", "crlf_offset", "x=1\r\ny=2\r\n"),
+        ("semgrep", "empty_line", "x=1\n\nz=2\n"),
+        ("bandit", "empty_line", "x=1\n\nz=2\n"),
+        ("semgrep", "trailing_line", "x=1\n"),
+        ("bandit", "trailing_line", "x=1\n"),
+    ],
+)
+def test_findings_must_be_real_utf8_source_boundaries(
+    analyzer: str,
+    case: str,
+    source: str,
+    policy: LoadedOraclePolicy,
+) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_batch(
+            [_code(code=source)],
+            policy,
+            runner=FakeRunner(finding=analyzer, coordinate_case=case),
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_INVALID_OUTPUT
+
+
+@pytest.mark.parametrize(
+    ("analyzer", "case", "source"),
+    [
+        ("semgrep", "valid_unicode", "前 = 1\n"),
+        ("bandit", "valid_unicode", "前 = 1\n"),
+        ("semgrep", "valid_crlf", "x=1\r\ny=2\r\n"),
+        ("bandit", "valid_tab", "if True:\n\tvalue = 1\n"),
+    ],
+)
+def test_valid_unicode_crlf_and_tab_boundaries_are_accepted(
+    analyzer: str,
+    case: str | None,
+    source: str,
+    policy: LoadedOraclePolicy,
+) -> None:
+    record = run_oracle_batch(
+        [_code(code=source)],
+        policy,
+        runner=FakeRunner(finding=analyzer, coordinate_case=case),
+    )[0]
+
+    assert record.security_label is SecurityLabel.INSECURE
+    assert record.findings[0].analyzer == analyzer
+
+
 def _has_exact_analyzers() -> bool:
     try:
         return (
@@ -540,7 +783,11 @@ def test_exact_analyzers_classify_one_real_batch(
     insecure = _code(
         prompt_id="insecure-prompt",
         seed_id=2,
-        code="import os\ncommand = input()\nos.system(command)\n",
+        code=(
+            "import os\r\n"
+            "command = input()\r\n"
+            '前缀 = "值"; os.system(command)\r\n'
+        ),
     )
 
     records = run_oracle_batch([secure, insecure], policy)

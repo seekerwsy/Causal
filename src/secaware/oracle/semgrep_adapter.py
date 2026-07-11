@@ -185,7 +185,12 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
             "message": _CANONICAL_MESSAGE,
         }
         record = AnalyzerFindingRecord.model_validate(finding_payload)
-        located = LocatedAnalyzerFinding(path, record)
+        located = LocatedAnalyzerFinding(
+            path,
+            record,
+            start_offset=start[2],
+            end_offset=end[2],
+        )
         return located
     except Exception:
         return None
