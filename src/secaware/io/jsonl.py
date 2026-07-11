@@ -64,10 +64,17 @@ def read_jsonl(
     *,
     required: bool = False,
     allow_empty: bool = True,
+    max_records: int | None = None,
     stage: str = "io",
 ) -> list[T] | list[dict]:
     records: list[T] | list[dict] = []
     path = Path(path)
+    if max_records is not None and (type(max_records) is not int or max_records < 0):
+        raise _contract_error(
+            stage=stage,
+            message="JSONL record limit is invalid",
+            path=path,
+        )
     if not path.exists():
         if required:
             raise _contract_error(
@@ -81,6 +88,13 @@ def read_jsonl(
             stripped_line = raw_line.strip()
             if not stripped_line:
                 continue
+            if max_records is not None and len(records) >= max_records:
+                raise _contract_error(
+                    stage=stage,
+                    message="JSONL artifact exceeds the record limit",
+                    path=path,
+                    line=line_number,
+                )
             data = _decode_line(
                 stripped_line,
                 path=path,

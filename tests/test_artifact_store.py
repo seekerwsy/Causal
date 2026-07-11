@@ -98,6 +98,22 @@ def test_read_jsonl_rejects_an_existing_empty_artifact_when_empty_is_disallowed(
     assert error.details == {"path": str(path)}
 
 
+def test_read_jsonl_rejects_records_beyond_the_materialization_limit(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bounded.jsonl"
+    write_jsonl(path, [ExampleRecord(value=1), ExampleRecord(value=2), ExampleRecord(value=3)])
+
+    with pytest.raises(SecAwareError) as exc_info:
+        read_jsonl(path, ExampleRecord, max_records=2, stage="bounded-read")
+
+    error = exc_info.value
+    assert error.code is ErrorCode.CONTRACT
+    assert error.stage == "bounded-read"
+    assert error.details == {"path": str(path), "line": 3}
+    assert "limit" in error.message
+
+
 def _assert_error_surfaces_are_safe(
     error: SecAwareError,
     *,

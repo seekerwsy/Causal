@@ -18,6 +18,8 @@ CLI_COMMANDS = [
     "preflight",
     "extract-prompt-tsg",
     "generate-observed",
+    "plan-generation",
+    "import-generation",
     "extract-code-tsg",
     "run-oracle",
     "discover",
@@ -310,7 +312,10 @@ def test_every_cli_command_uses_safe_error_boundary(
         encoding="utf-8",
     )
 
-    result = CliRunner().invoke(app, [command, "--config", str(config_path)])
+    args = [command, "--config", str(config_path)]
+    if command == "import-generation":
+        args.extend(["--results", str(tmp_path / "unused-results.jsonl")])
+    result = CliRunner().invoke(app, args)
 
     assert result.exit_code == int(ErrorCode.CONFIG)
     assert "[CONFIG] config:" in result.stderr

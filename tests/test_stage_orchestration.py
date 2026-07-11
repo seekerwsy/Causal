@@ -450,6 +450,22 @@ def test_manifest_invalidation_wraps_unlink_failure(
     assert "private filesystem failure" not in str(exc_info.value)
 
 
+def test_public_stage_invalidation_clears_manifest_and_pending_snapshot(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    manifest_path = _record_report_stage(store, input_path, [output_path])
+    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+
+    store.invalidate_stage("report")
+
+    assert not manifest_path.exists()
+    with pytest.raises(SecAwareError) as exc_info:
+        store.record_stage("report", [input_path], [output_path])
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
 def test_record_stage_rejects_a_missing_declared_output(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path = store.path("inputs", "source.txt")

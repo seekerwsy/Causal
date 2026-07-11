@@ -132,6 +132,12 @@ class RunStore:
                 "stage manifest could not be invalidated",
             ) from None
 
+    def invalidate_stage(self, stage: str) -> None:
+        """Remove any committed manifest and pending execution authorization."""
+
+        self._pending_snapshots.pop(stage, None)
+        self._invalidate_stage_manifest(stage)
+
     def _reject_stage_record(self, stage: str, message: str) -> None:
         self._invalidate_stage_manifest(stage)
         raise self._manifest_conflict(stage, message)

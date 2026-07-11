@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, TypeVar, cast
 
 import typer
 
@@ -8,9 +9,20 @@ from secaware.analysis.pairing import build_pairs
 from secaware.commands.common import cli_action
 from secaware.config import AppConfig, load_config
 from secaware.discovery.tsg_qcd import discover_hypotheses
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.generation.providers import get_provider
+from secaware.generation.request_planner import (
+    MAX_GENERATION_AXIS_ITEMS,
+    MAX_GENERATION_REQUESTS,
+    plan_counterfactual_requests,
+    plan_observed_requests,
+)
+from secaware.generation.result_importer import (
+    MAX_OFFLINE_IMPORT_RECORDS,
+    import_offline_results,
+)
 from secaware.intervention.operators import apply_intervention
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
@@ -19,12 +31,20 @@ from secaware.oracle.aggregator import run_oracle as run_code_oracle
 from secaware.pipeline.preflight import run_preflight
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
+from secaware.schema.generation import GenerationRequestRecord, OfflineGenerationResultRecord
 from secaware.schema.interventions import InterventionRecord
-from secaware.schema.records import GeneratedCodeRecord, PromptRecord
+from secaware.schema.records import (
+    CanonicalGeneratedCodeRecord,
+    GeneratedCodeRecord,
+    PromptRecord,
+)
 from secaware.schema.results import EffectRecord, OracleRecord, PairResult
 from secaware.schema.tsg import TSGRecord
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
+GenerationCondition = Literal["observed", "counterfactual"]
+_Record = TypeVar("_Record")
+_ActionResult = TypeVar("_ActionResult")
 
 
 def _load(config: Path, run_dir: Optional[Path]) -> tuple[AppConfig, RunStore]:
@@ -39,6 +59,293 @@ def _prepare(config: AppConfig, store: RunStore) -> None:
 
 def _prompt_records(store: RunStore) -> list[PromptRecord]:
     return read_jsonl(store.path("inputs", "prompts.jsonl"), PromptRecord)  # type: ignore[return-value]
+
+
+def _generation_condition(value: str) -> GenerationCondition:
+    if value == "observed" or value == "counterfactual":
+        return cast(GenerationCondition, value)
+    raise SecAwareError(
+        code=ErrorCode.CONFIG,
+        stage="generation",
+        message="generation condition is invalid",
+    )
+
+
+def _generation_stage_error(
+    code: ErrorCode,
+    stage: str,
+    message: str,
+    *,
+    retryable: bool = False,
+) -> SecAwareError:
+    return SecAwareError(
+        code=code,
+        stage=stage,
+        message=message,
+        retryable=retryable,
+    )
+
+
+def _read_generation_records(
+    path: Path,
+    model: type[_Record],
+    *,
+    stage: str,
+    allow_empty: bool,
+    max_records: int,
+) -> list[_Record]:
+    try:
+        records = read_jsonl(
+            path,
+            model,
+            required=True,
+            allow_empty=allow_empty,
+            max_records=max_records,
+            stage=stage,
+        )
+    except (OSError, SecAwareError, UnicodeError):
+        pass
+    else:
+        return cast(list[_Record], records)
+    raise _generation_stage_error(
+        ErrorCode.CONTRACT,
+        stage,
+        "generation artifact failed validation",
+    )
+
+
+def _write_generation_records(
+    path: Path,
+    records: list[object],
+    *,
+    stage: str,
+) -> None:
+    try:
+        write_jsonl(path, records, stage=stage)
+    except (OSError, SecAwareError, UnicodeError):
+        pass
+    else:
+        return
+    raise _generation_stage_error(
+        ErrorCode.CONTRACT,
+        stage,
+        "generation artifact could not be published",
+    )
+
+
+def _generation_stage_should_skip(
+    store: RunStore,
+    stage: str,
+    inputs: list[Path],
+    outputs: list[Path],
+    *,
+    force: bool,
+) -> bool:
+    try:
+        return store.should_skip_stage(stage, inputs, outputs, force)
+    except SecAwareError as error:
+        code = error.code
+        retryable = error.retryable
+    try:
+        store.invalidate_stage(stage)
+    except SecAwareError as error:
+        code = error.code
+        retryable = error.retryable
+    raise _generation_stage_error(
+        code,
+        stage,
+        "generation stage inputs could not be verified",
+        retryable=retryable,
+    )
+
+
+def _invalidate_alternate_generation_stage(
+    store: RunStore,
+    *,
+    stage: str,
+    alternate_stage: str,
+) -> None:
+    try:
+        store.invalidate_stage(alternate_stage)
+    except SecAwareError as error:
+        code = error.code
+        retryable = error.retryable
+    else:
+        return
+    try:
+        store.invalidate_stage(stage)
+    except SecAwareError as error:
+        code = error.code
+        retryable = error.retryable
+    raise _generation_stage_error(
+        code,
+        stage,
+        "generation stage manifest could not be invalidated",
+        retryable=retryable,
+    )
+
+
+def _execute_generation_stage(
+    store: RunStore,
+    stage: str,
+    action: Callable[[], _ActionResult],
+) -> _ActionResult:
+    failure: Exception
+    try:
+        return action()
+    except Exception as error:
+        failure = error
+    try:
+        store.invalidate_stage(stage)
+    except SecAwareError as error:
+        code = error.code
+        retryable = error.retryable
+    else:
+        raise failure from None
+    raise _generation_stage_error(
+        code,
+        stage,
+        "failed generation stage could not be invalidated",
+        retryable=retryable,
+    )
+
+
+def plan_generation_stage(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    force: bool,
+) -> None:
+    condition = _generation_condition(condition)
+    stage = f"plan-generation-{condition}"
+    prompts_path = store.path("inputs", "prompts.jsonl")
+    inputs = [prompts_path]
+    if condition == "counterfactual":
+        inputs.append(store.path("interventions", "interventions.jsonl"))
+    output = store.path("generation", f"{condition}_requests.jsonl")
+    outputs = [output]
+    if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
+        return
+
+    def execute() -> None:
+        prompts = _read_generation_records(
+            prompts_path,
+            PromptRecord,
+            stage=stage,
+            allow_empty=False,
+            max_records=MAX_GENERATION_AXIS_ITEMS,
+        )
+        if condition == "observed":
+            records = plan_observed_requests(
+                prompts,
+                config.generation.models,
+                config.generation.seeds,
+                endpoint_type="offline",
+            )
+        else:
+            interventions = _read_generation_records(
+                inputs[1],
+                InterventionRecord,
+                stage=stage,
+                allow_empty=False,
+                max_records=MAX_GENERATION_AXIS_ITEMS,
+            )
+            records = plan_counterfactual_requests(
+                {prompt.prompt_id: prompt for prompt in prompts},
+                interventions,
+                config.generation.models,
+                config.generation.seeds,
+                endpoint_type="offline",
+            )
+        _write_generation_records(output, cast(list[object], records), stage=stage)
+        validated = _read_generation_records(
+            output,
+            GenerationRequestRecord,
+            stage=stage,
+            allow_empty=False,
+            max_records=MAX_GENERATION_REQUESTS,
+        )
+        if validated != records:
+            raise _generation_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "generation request ledger changed during publication",
+            )
+        store.record_stage(stage, inputs, outputs)
+
+    _execute_generation_stage(store, stage, execute)
+
+
+def import_generation_stage(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    results_path: Path,
+    force: bool,
+) -> None:
+    del config
+    condition = _generation_condition(condition)
+    stage = f"import-generation-{condition}"
+    legacy_stage = f"generate-{condition}"
+    ledger = store.path("generation", f"{condition}_requests.jsonl")
+    output = store.path("generation", f"{condition}_code.jsonl")
+    outputs = [output]
+    results = Path(results_path)
+
+    if not results.is_file():
+        store.invalidate_stage(stage)
+        store.invalidate_stage(legacy_stage)
+        raise _generation_stage_error(
+            ErrorCode.EXTERNAL_INPUT_REQUIRED,
+            stage,
+            "offline generation results are required",
+            retryable=True,
+        )
+
+    _invalidate_alternate_generation_stage(
+        store,
+        stage=stage,
+        alternate_stage=legacy_stage,
+    )
+    inputs = [ledger, results]
+    if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
+        return
+
+    def execute() -> None:
+        expected = _read_generation_records(
+            ledger,
+            GenerationRequestRecord,
+            stage=stage,
+            allow_empty=False,
+            max_records=MAX_OFFLINE_IMPORT_RECORDS,
+        )
+        received = _read_generation_records(
+            results,
+            OfflineGenerationResultRecord,
+            stage=stage,
+            allow_empty=True,
+            max_records=MAX_OFFLINE_IMPORT_RECORDS,
+        )
+        imported = import_offline_results(expected, received)
+        _write_generation_records(output, cast(list[object], imported), stage=stage)
+        validated = _read_generation_records(
+            output,
+            CanonicalGeneratedCodeRecord,
+            stage=stage,
+            allow_empty=False,
+            max_records=MAX_OFFLINE_IMPORT_RECORDS,
+        )
+        if validated != imported:
+            raise _generation_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "canonical generation output changed during publication",
+            )
+        store.record_stage(stage, inputs, outputs)
+
+    _execute_generation_stage(store, stage, execute)
 
 
 def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
@@ -417,6 +724,45 @@ def generate_observed_command(
     cfg, store = _load(config, run_dir)
     _prepare(cfg, store)
     generate_observed_stage(cfg, store, force=force)
+
+
+@app.command("plan-generation")
+@cli_action
+def plan_generation_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    condition: str = typer.Option("observed", "--condition"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    validated_condition = _generation_condition(condition)
+    cfg, store = _load(config, run_dir)
+    _prepare(cfg, store)
+    plan_generation_stage(
+        cfg,
+        store,
+        condition=validated_condition,
+        force=force,
+    )
+
+
+@app.command("import-generation")
+@cli_action
+def import_generation_command(
+    config: Path = typer.Option(..., "--config"),
+    results: Path = typer.Option(..., "--results"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    condition: str = typer.Option("observed", "--condition"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    validated_condition = _generation_condition(condition)
+    cfg, store = _load(config, run_dir)
+    import_generation_stage(
+        cfg,
+        store,
+        condition=validated_condition,
+        results_path=results,
+        force=force,
+    )
 
 
 @app.command("extract-code-tsg")
