@@ -687,6 +687,7 @@ class RunStore:
         *,
         policy_sha256: str | None = None,
         preserve_committed: bool = False,
+        after_lease_acquired: Callable[[], None] | None = None,
     ) -> bool:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
         transactional_stage = stage.startswith("run-oracle-") or stage in {
@@ -697,6 +698,8 @@ class RunStore:
             preserve_committed and not transactional_stage
         ):
             raise self._manifest_conflict(stage, "stage transaction mode is invalid")
+        if after_lease_acquired is not None and not callable(after_lease_acquired):
+            raise self._manifest_conflict(stage, "stage lease action is invalid")
         if (
             stage in self._pending_snapshots
             or stage in self._sealed_outputs
@@ -706,6 +709,8 @@ class RunStore:
             raise self._manifest_conflict(stage, "stage execution is already active")
         self._acquire_stage_lease(stage)
         try:
+            if after_lease_acquired is not None:
+                after_lease_acquired()
             outputs = [Path(path) for path in output_paths]
             relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
             inputs = self.stage_inputs(input_paths)

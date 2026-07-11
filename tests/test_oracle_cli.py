@@ -1571,3 +1571,166 @@ def test_oracle_postcommit_control_keeps_new_commit(
     else:
         seal = json.loads(output.with_name(output.name + ".sha256").read_text())
         assert seal["output_sha256"] == sha256_path(output)
+
+
+@pytest.mark.parametrize("surface", ["pipeline_oracle", "discover", "confirm"])
+@pytest.mark.parametrize(
+    "cleanup_state",
+    ["success", "persistent", "keyboard", "systemexit"],
+)
+def test_pipeline_skip_cleans_stale_backup_without_reexecution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    cleanup_state: str,
+) -> None:
+    if surface == "pipeline_oracle":
+        config, store = _prepared_canonical_store(tmp_path)
+        run_oracle_stage(
+            config,
+            store,
+            condition="observed",
+            force=False,
+            runner=_OracleRunner(),
+            runtime_validator=lambda: None,
+        )
+        outputs = [store.path("oracle", "observed_oracle.jsonl")]
+        manifest = store.path(".stages", "run-oracle-observed.json")
+        backup_suffix = ".oracle.backup"
+    elif surface == "discover":
+        config, store = _prepared_observed_pipeline(tmp_path)
+        discover_stage(config, store, force=False)
+        outputs = [
+            store.path("discovery", "hypotheses_all.jsonl"),
+            store.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+        manifest = store.path(".stages", "discover.json")
+        backup_suffix = ".stage.backup"
+    else:
+        config, store = _prepared_confirmation_pipeline(tmp_path)
+        confirm_stage(config, store, force=False)
+        outputs = [
+            store.path("analysis", "pair_results.jsonl"),
+            store.path("analysis", "hypothesis_effects.jsonl"),
+        ]
+        manifest = store.path(".stages", "confirm.json")
+        backup_suffix = ".stage.backup"
+
+    target = outputs[-1]
+    real_unlink = Path.unlink
+
+    def leave_postcommit_backup(
+        path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if (
+            path.name.endswith(backup_suffix)
+            and path.name.startswith(f".{target.name}.")
+            and path.exists()
+            and path.stat().st_size > 0
+        ):
+            raise OSError("private-postcommit-cleanup-failure")
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", leave_postcommit_backup)
+    if surface == "pipeline_oracle":
+        run_oracle_stage(
+            config,
+            store,
+            condition="observed",
+            force=True,
+            runner=_OracleRunner(finding="semgrep"),
+            runtime_validator=lambda: None,
+        )
+    elif surface == "discover":
+        monkeypatch.setattr(
+            pipeline_cli,
+            "discover_hypotheses",
+            lambda *args, **kwargs: ([], []),
+        )
+        discover_stage(config, store, force=True)
+    else:
+        confirm_stage(config, store, force=True)
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+
+    stale_pattern = f".{target.name}.*{backup_suffix}"
+    assert list(target.parent.glob(stale_pattern))
+    committed = ([path.read_bytes() for path in outputs], manifest.read_bytes())
+    cleanup_attempts = 0
+    control: KeyboardInterrupt | SystemExit | None = None
+    if cleanup_state == "keyboard":
+        control = KeyboardInterrupt("private-skip-cleanup")
+    elif cleanup_state == "systemexit":
+        control = SystemExit("private-skip-cleanup")
+
+    def cleanup_state_unlink(
+        path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal cleanup_attempts
+        if path.name.endswith(backup_suffix) and path.name.startswith(
+            f".{target.name}."
+        ):
+            cleanup_attempts += 1
+            if cleanup_state == "persistent":
+                raise OSError("private-persistent-cleanup-failure")
+            if control is not None:
+                raise control
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", cleanup_state_unlink)
+    oracle_runner = _OracleRunner()
+
+    def forbidden_compute(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("valid committed stage must skip computation")
+
+    if surface == "discover":
+        monkeypatch.setattr(pipeline_cli, "discover_hypotheses", forbidden_compute)
+    elif surface == "confirm":
+        monkeypatch.setattr(pipeline_cli, "build_pairs", forbidden_compute)
+
+    def skip_stage() -> None:
+        if surface == "pipeline_oracle":
+            run_oracle_stage(
+                config,
+                store,
+                condition="observed",
+                force=False,
+                runner=oracle_runner,
+                runtime_validator=lambda: None,
+            )
+        elif surface == "discover":
+            discover_stage(config, store, force=False)
+        else:
+            confirm_stage(config, store, force=False)
+
+    if control is None:
+        skip_stage()
+    else:
+        with pytest.raises(type(control)) as exc_info:
+            skip_stage()
+        assert exc_info.value is control
+
+    assert [path.read_bytes() for path in outputs] == committed[0]
+    assert manifest.read_bytes() == committed[1]
+    assert not store.stage_is_active(
+        "run-oracle-observed" if surface == "pipeline_oracle" else surface
+    )
+    assert not [
+        call for call in oracle_runner.calls if call[1:] != ("--version",)
+    ]
+    if cleanup_state == "success":
+        assert cleanup_attempts == 1
+        assert not list(target.parent.glob(stale_pattern))
+    else:
+        assert cleanup_attempts == 3
+        assert list(target.parent.glob(stale_pattern))
+
+        monkeypatch.setattr(Path, "unlink", real_unlink)
+        skip_stage()
+        assert not list(target.parent.glob(stale_pattern))
+        assert [path.read_bytes() for path in outputs] == committed[0]
+        assert manifest.read_bytes() == committed[1]

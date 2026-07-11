@@ -742,24 +742,9 @@ def _execute_jsonl_stage_transaction(
             stage,
             "stage output transaction is invalid",
         )
-    if store.should_skip_stage(
-        stage,
-        inputs,
-        outputs,
-        force,
-        preserve_committed=True,
-    ):
-        return
-
     manifest_path = store.path(".stages", f"{stage}.json")
-    manifest_backup: Path | None = None
-    had_manifest = manifest_path.exists()
-    candidates: list[Path | None] = [None] * len(outputs)
-    backups: list[Path | None] = [None] * len(outputs)
-    installed = [False] * len(outputs)
-    backed_up = [False] * len(outputs)
-    commit_point = False
-    try:
+
+    def cleanup_stale_transaction_paths() -> None:
         stale_paths: list[Path] = []
         for output in outputs:
             stale_paths.extend(
@@ -775,6 +760,25 @@ def _execute_jsonl_stage_transaction(
         stale_control = _cleanup_transaction_paths(stale_paths)
         if stale_control is not None:
             raise stale_control
+
+    if store.should_skip_stage(
+        stage,
+        inputs,
+        outputs,
+        force,
+        preserve_committed=True,
+        after_lease_acquired=cleanup_stale_transaction_paths,
+    ):
+        return
+
+    manifest_backup: Path | None = None
+    had_manifest = manifest_path.exists()
+    candidates: list[Path | None] = [None] * len(outputs)
+    backups: list[Path | None] = [None] * len(outputs)
+    installed = [False] * len(outputs)
+    backed_up = [False] * len(outputs)
+    commit_point = False
+    try:
         if had_manifest:
             if manifest_path.is_symlink() or not manifest_path.is_file():
                 raise _oracle_stage_error(
@@ -1406,6 +1410,20 @@ def _run_oracle_stage(
     manifest_transaction = False
     had_manifest = False
     commit_point = False
+
+    def cleanup_stale_transaction_paths() -> None:
+        stale_paths = [
+            *_stale_transaction_paths(
+                output,
+                ".oracle.candidate",
+                ".oracle.backup",
+            ),
+            *_stale_transaction_paths(manifest_path, ".manifest.backup"),
+        ]
+        stale_control = _cleanup_transaction_paths(stale_paths)
+        if stale_control is not None:
+            raise stale_control
+
     try:
         with _hold_committed_generation_code(
             store,
@@ -1425,19 +1443,9 @@ def _run_oracle_stage(
                 force,
                 policy_sha256=initial_policy.combined_sha256,
                 preserve_committed=True,
+                after_lease_acquired=cleanup_stale_transaction_paths,
             ):
                 return
-            stale_paths = [
-                *_stale_transaction_paths(
-                    output,
-                    ".oracle.candidate",
-                    ".oracle.backup",
-                ),
-                *_stale_transaction_paths(manifest_path, ".manifest.backup"),
-            ]
-            stale_control = _cleanup_transaction_paths(stale_paths)
-            if stale_control is not None:
-                raise stale_control
             had_manifest = manifest_path.exists()
             if had_manifest:
                 if manifest_path.is_symlink() or not manifest_path.is_file():
