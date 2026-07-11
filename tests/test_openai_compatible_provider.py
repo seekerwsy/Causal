@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+import inspect
 import json
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -109,6 +110,7 @@ def _request(
     endpoint_type: str = "chat_completions",
     system_template: str = _SYSTEM,
     parameters: dict[str, object] | None = None,
+    include_default_max_tokens: bool = True,
 ) -> GenerationRequestRecord:
     prompt = PromptRecord(
         prompt_id="prompt-api",
@@ -118,20 +120,20 @@ def _request(
         cwe="CWE-22",
         prompt=_PROMPT,
     )
+    parameter_values: dict[str, object] = {
+        "temperature": 0.2,
+        "seed": 7,
+        "n": 1,
+    }
+    if include_default_max_tokens:
+        parameter_values["max_tokens"] = 128
+    parameter_values.update(parameters or {})
     return plan_observed_requests(
         [prompt],
         ["org/model-api"],
         [7],
         endpoint_type=endpoint_type,  # type: ignore[arg-type]
-        parameters=GenerationParameters(
-            values={
-                "temperature": 0.2,
-                "max_tokens": 128,
-                "seed": 7,
-                "n": 1,
-                **(parameters or {}),
-            }
-        ),
+        parameters=GenerationParameters(values=parameter_values),
         system_template=system_template,
         system_template_version="system-v1",
     )[0]
@@ -547,6 +549,140 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_cod
         result.code = "mutated"  # type: ignore[misc]
 
 
+def test_compatibility_parameters_use_extra_body_and_translate_max_output_tokens() -> None:
+    class ExplicitCompletions:
+        def __init__(self) -> None:
+            self.call: dict[str, object] | None = None
+
+        def create(
+            self,
+            *,
+            model: str,
+            messages: list[dict[str, str]],
+            temperature: float,
+            seed: int,
+            n: int,
+            extra_body: dict[str, object],
+        ) -> object:
+            self.call = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "seed": seed,
+                "n": n,
+                "extra_body": extra_body,
+            }
+            return _response()
+
+    completions = ExplicitCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    result = provider.generate(
+        _request(
+            include_default_max_tokens=False,
+            parameters={
+                "max_output_tokens": 256,
+                "reasoning_effort": "medium",
+                "verbosity": "low",
+            },
+        ),
+        system_template=_SYSTEM,
+    )
+
+    assert result.code == _CODE
+    assert completions.call == {
+        "model": "org/model-api",
+        "messages": [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": _PROMPT},
+        ],
+        "temperature": 0.2,
+        "seed": 7,
+        "n": 1,
+        "extra_body": {
+            "max_completion_tokens": 256,
+            "reasoning_effort": "medium",
+            "verbosity": "low",
+        },
+    }
+
+
+def test_max_completion_tokens_is_sent_through_extra_body() -> None:
+    client = FakeClient([_response()])
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    provider.generate(
+        _request(
+            include_default_max_tokens=False,
+            parameters={"max_completion_tokens": 192},
+        ),
+        system_template=_SYSTEM,
+    )
+
+    call = client.completions.calls[0]
+    assert call["extra_body"] == {"max_completion_tokens": 192}
+    assert "max_completion_tokens" not in {
+        key for key in call if key != "extra_body"
+    }
+
+
+def test_translated_payload_matches_installed_official_sdk_signature() -> None:
+    pytest.importorskip("openai")
+    from openai.resources.chat.completions import Completions
+
+    client = FakeClient([_response()])
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+    provider.generate(
+        _request(
+            include_default_max_tokens=False,
+            parameters={
+                "max_output_tokens": 64,
+                "reasoning_effort": "low",
+                "verbosity": "high",
+            },
+        ),
+        system_template=_SYSTEM,
+    )
+
+    supported = set(inspect.signature(Completions.create).parameters)
+    assert set(client.completions.calls[0]) <= supported
+    assert "max_output_tokens" not in client.completions.calls[0]
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"max_tokens": 64, "max_completion_tokens": 64},
+        {"max_tokens": 64, "max_output_tokens": 64},
+        {"max_completion_tokens": 64, "max_output_tokens": 64},
+        {
+            "max_tokens": 64,
+            "max_completion_tokens": 64,
+            "max_output_tokens": 64,
+        },
+    ],
+)
+def test_conflicting_max_token_parameters_fail_before_client_call(
+    parameters: dict[str, object],
+) -> None:
+    client = FakeClient([_response()])
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(
+            _request(
+                include_default_max_tokens=False,
+                parameters=parameters,
+            ),
+            system_template=_SYSTEM,
+        )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert client.completions.calls == []
+    _assert_safe_provider_error(exc_info.value)
+
+
 def test_empty_system_template_is_not_sent() -> None:
     request = _request(system_template="")
     client = FakeClient([_response()])
@@ -574,6 +710,69 @@ def test_optional_usage_may_be_absent_from_a_valid_response() -> None:
     result = provider.generate(_request(), system_template=_SYSTEM)
 
     assert result.code == _CODE
+
+
+def test_provider_constructor_clears_inputs_after_invalid_config() -> None:
+    config_sentinel = "constructor-invalid-config-sentinel"
+    client_sentinel = "constructor-invalid-client-sentinel"
+    sleeper_sentinel = "constructor-invalid-sleeper-sentinel"
+
+    class HostileClient:
+        def __repr__(self) -> str:
+            return client_sentinel
+
+    class HostileSleeper:
+        def __call__(self, delay: float) -> None:
+            del delay
+
+        def __repr__(self) -> str:
+            return sleeper_sentinel
+
+    raw_config = {
+        "base_url": f"https://{config_sentinel}.invalid/v1",
+        "api_key": config_sentinel,
+    }
+    with pytest.raises(SecAwareError) as exc_info:
+        OpenAICompatibleProvider(
+            raw_config,  # type: ignore[arg-type]
+            client=HostileClient(),
+            sleeper=HostileSleeper(),
+        )
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    _assert_safe_provider_error(
+        exc_info.value,
+        config_sentinel,
+        client_sentinel,
+        sleeper_sentinel,
+        raw_config["base_url"],
+    )
+
+
+def test_provider_constructor_clears_client_and_hostile_noncallable_sleeper() -> None:
+    client_sentinel = "constructor-client-frame-sentinel"
+    sleeper_sentinel = "constructor-sleeper-frame-sentinel"
+
+    class HostileValue:
+        def __init__(self, rendered: str) -> None:
+            self.rendered = rendered
+
+        def __repr__(self) -> str:
+            return self.rendered
+
+    with pytest.raises(SecAwareError) as exc_info:
+        OpenAICompatibleProvider(
+            _config(),
+            client=HostileValue(client_sentinel),
+            sleeper=HostileValue(sleeper_sentinel),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    _assert_safe_provider_error(
+        exc_info.value,
+        client_sentinel,
+        sleeper_sentinel,
+    )
 
 
 def test_provider_factory_uses_official_sdk_with_retries_disabled_and_keeps_no_key(
@@ -919,6 +1118,19 @@ def test_hostile_client_exception_is_wrapped_without_rendering_it() -> None:
 
     assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
     _assert_safe_provider_error(exc_info.value, secret, "HostileFailure")
+
+
+def test_unknown_client_type_error_is_a_safe_remote_failure() -> None:
+    secret = "unknown-client-type-error-sentinel"
+    client = FakeClient([TypeError(secret)])
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(_request(), system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+    assert len(client.completions.calls) == 1
+    _assert_safe_provider_error(exc_info.value, secret, "TypeError")
 
 
 def test_hostile_response_access_is_wrapped_without_leaking_body() -> None:

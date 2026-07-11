@@ -21,6 +21,12 @@ _PRODUCER = "openai_compatible"
 _PRODUCER_VERSION = "chat_completions-v1"
 _MISSING = object()
 _NO_DEFAULT = object()
+_MAX_TOKEN_PARAMETER_KEYS = frozenset(
+    {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+)
+_EXTRA_BODY_PARAMETER_KEYS = frozenset(
+    {"max_completion_tokens", "reasoning_effort", "verbosity"}
+)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -182,6 +188,23 @@ def _response_code(response: object) -> str:
     return content
 
 
+def _wire_parameters(parameters: Mapping[str, JSONValue]) -> dict[str, Any]:
+    remaining: dict[str, Any] = dict(parameters)
+    extra_body: dict[str, Any] = {}
+
+    max_output_tokens = remaining.pop("max_output_tokens", _MISSING)
+    if max_output_tokens is not _MISSING:
+        extra_body["max_completion_tokens"] = max_output_tokens
+    for key in _EXTRA_BODY_PARAMETER_KEYS:
+        value = remaining.pop(key, _MISSING)
+        if value is not _MISSING:
+            extra_body[key] = value
+
+    if extra_body:
+        remaining["extra_body"] = extra_body
+    return remaining
+
+
 class OpenAICompatibleProvider:
     __slots__ = (
         "_client",
@@ -198,12 +221,33 @@ class OpenAICompatibleProvider:
         client: object,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        trusted = _trusted_config(config)
+        trusted: OpenAICompatibleConfig | None = None
+        initialization_error: SecAwareError | None = None
+        try:
+            trusted = _trusted_config(config)
+        except SecAwareError as error:
+            initialization_error = error
+        if initialization_error is not None or trusted is None:
+            if initialization_error is None:
+                initialization_error = _provider_error(
+                    ErrorCode.CONFIG,
+                    "OpenAI-compatible provider configuration is unavailable",
+                )
+            config = None  # type: ignore[assignment]
+            trusted = None
+            client = None
+            sleeper = None  # type: ignore[assignment]
+            raise initialization_error
         if not callable(sleeper):
-            raise _provider_error(
+            initialization_error = _provider_error(
                 ErrorCode.CONFIG,
                 "OpenAI-compatible provider configuration is unavailable",
             )
+            config = None  # type: ignore[assignment]
+            trusted = None
+            client = None
+            sleeper = None  # type: ignore[assignment]
+            raise initialization_error
         self._client = client
         self._max_attempts = trusted.max_attempts
         self._initial_backoff_seconds = trusted.initial_backoff_seconds
@@ -229,6 +273,14 @@ class OpenAICompatibleProvider:
                 raise ValueError
             if trusted.parameters.values.get("n", 1) != 1:
                 raise ValueError
+            if (
+                sum(
+                    key in trusted.parameters.values
+                    for key in _MAX_TOKEN_PARAMETER_KEYS
+                )
+                > 1
+            ):
+                raise ValueError
         except Exception:
             trusted = None
         return trusted
@@ -242,7 +294,7 @@ class OpenAICompatibleProvider:
         if system_template:
             messages.append({"role": "system", "content": system_template})
         messages.append({"role": "user", "content": request.prompt})
-        parameters = request.parameters.model_dump(
+        parameter_snapshot = request.parameters.model_dump(
             mode="json",
             warnings=False,
         )["values"]
@@ -250,7 +302,7 @@ class OpenAICompatibleProvider:
             "model": request.model_id,
             "messages": messages,
         }
-        payload.update(parameters)
+        payload.update(_wire_parameters(parameter_snapshot))
         payload["seed"] = request.seed_id
         return payload
 
