@@ -1,3 +1,3 @@
-from secaware.oracle.aggregator import run_oracle
+from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
 
-__all__ = ["run_oracle"]
+__all__ = ["AnalyzerRunner", "run_oracle_batch"]
