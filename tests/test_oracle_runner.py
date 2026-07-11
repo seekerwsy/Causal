@@ -516,6 +516,223 @@ def test_cwd_replacement_window_cannot_change_launched_directory(
         assert replacement_denied is True
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed executable regression")
+def test_linux_in_place_executable_overwrite_runs_sealed_original(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "analyzer"
+    shutil.copyfile("/bin/echo", executable)
+    executable.chmod(0o700)
+    entered = threading.Event()
+    release = threading.Event()
+    real_popen = runner_module._popen_process
+
+    def gated(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        entered.set()
+        assert release.wait(5)
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_popen_process", gated)
+    outcome: list[object] = []
+    worker = threading.Thread(
+        target=lambda: outcome.append(
+            run_analyzer_process(
+                (str(executable), "sealed-original"),
+                cwd=tmp_path,
+                timeout_seconds=3,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+        )
+    )
+    worker.start()
+    assert entered.wait(3)
+    with executable.open("wb") as target, open("/bin/true", "rb") as replacement:
+        shutil.copyfileobj(replacement, target)
+    release.set()
+    worker.join(5)
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    assert outcome[0].stdout == b"sealed-original\n"  # type: ignore[union-attr]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed script regression")
+def test_linux_sealed_memfd_preserves_shebang_script_execution(tmp_path: Path) -> None:
+    script = tmp_path / "analyzer-script"
+    script.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write(b'sealed-script')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o700)
+    result = run_analyzer_process(
+        (str(script),),
+        cwd=tmp_path,
+        timeout_seconds=2,
+        max_stdout_bytes=1024,
+        max_stderr_bytes=1024,
+    )
+    assert result.stdout == b"sealed-script"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed interpreter regression")
+def test_linux_script_interpreter_is_sealed_against_in_place_overwrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    interpreter = tmp_path / "python"
+    shutil.copyfile(Path(sys.executable).resolve(), interpreter)
+    interpreter.chmod(0o700)
+    script = tmp_path / "script"
+    script.write_text(
+        f"#!{interpreter}\nimport sys\nsys.stdout.buffer.write(b'bound-interpreter')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o700)
+    entered, release = threading.Event(), threading.Event()
+    real_popen = runner_module._popen_process
+
+    def gated(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        entered.set()
+        assert release.wait(5)
+        return real_popen(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_popen_process", gated)
+    outcome: list[object] = []
+    worker = threading.Thread(
+        target=lambda: outcome.append(
+            run_analyzer_process(
+                (str(script),), cwd=tmp_path, timeout_seconds=3,
+                max_stdout_bytes=1024, max_stderr_bytes=1024,
+            )
+        )
+    )
+    worker.start()
+    assert entered.wait(3)
+    with interpreter.open("wb") as target, open("/bin/true", "rb") as replacement:
+        shutil.copyfileobj(replacement, target)
+    release.set()
+    worker.join(5)
+    assert isinstance(outcome[0], AnalyzerProcessResult)
+    assert outcome[0].stdout == b"bound-interpreter"  # type: ignore[union-attr]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux sealed venv regression")
+def test_linux_sealed_interpreter_preserves_venv_site_packages(tmp_path: Path) -> None:
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    venv = tmp_path / "venv"
+    bin_dir = venv / "bin"
+    site_packages = venv / "lib" / f"python{version}" / "site-packages"
+    bin_dir.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    (bin_dir / "python").symlink_to(Path(sys.executable).resolve())
+    (venv / "pyvenv.cfg").write_text(
+        f"home = /usr/bin\ninclude-system-site-packages = false\nversion = {version}\n",
+        encoding="utf-8",
+    )
+    (site_packages / "venv_only.py").write_text("VALUE='venv-ok'\n", encoding="utf-8")
+    script = tmp_path / "launcher"
+    script.write_text(
+        f"#!{bin_dir / 'python'}\nimport sys,venv_only\nsys.stdout.write(venv_only.VALUE)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o700)
+    result = run_analyzer_process(
+        (str(script),), cwd=tmp_path, timeout_seconds=3,
+        max_stdout_bytes=1024, max_stderr_bytes=1024,
+    )
+    assert result.stdout == b"venv-ok"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux strict shebang regression")
+def test_linux_env_shebang_fails_closed_before_launch(tmp_path: Path) -> None:
+    script = tmp_path / "script"
+    script.write_text("#!/usr/bin/env python3\nprint('unsafe')\n", encoding="utf-8")
+    script.chmod(0o700)
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            (str(script),), cwd=tmp_path, timeout_seconds=2,
+            max_stdout_bytes=1024, max_stderr_bytes=1024,
+        )
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux stopped-supervisor regression")
+def test_linux_stopped_supervisor_is_resumed_to_reap_setsid_child(tmp_path: Path) -> None:
+    marker = tmp_path / "private-stopped-supervisor-escaped.marker"
+    source = (
+        "import os,signal,sys,time\nfrom pathlib import Path\n"
+        "supervisor=os.getppid()\n"
+        "stopper=os.fork()\n"
+        "if stopper==0:\n"
+        "\n for _ in range(200):\n  os.kill(supervisor,signal.SIGSTOP);time.sleep(.005)\n"
+        "\n os._exit(0)\n"
+        "pid=os.fork()\n"
+        "if pid==0:\n os.setsid();time.sleep(.5);Path(sys.argv[1]).write_text('x');os._exit(0)\n"
+        "time.sleep(10)\n"
+    )
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            _python_argv(source, str(marker)),
+            cwd=tmp_path,
+            timeout_seconds=0.2,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    time.sleep(0.8)
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux exec-status regression")
+def test_linux_exec_failure_is_analyzer_failed_not_returncode_126(tmp_path: Path) -> None:
+    executable = tmp_path / "invalid-analyzer"
+    executable.write_bytes(b"not-an-executable")
+    executable.chmod(0o700)
+    with pytest.raises(SecAwareError) as exc_info:
+        run_analyzer_process(
+            (str(executable),),
+            cwd=tmp_path,
+            timeout_seconds=2,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_process_handoff_control_flow_cleans_created_process_and_preserves_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    signal = signal_type("private-handoff-control")
+    processes: list[subprocess.Popen[bytes]] = []
+    real_popen = runner_module.subprocess.Popen
+
+    def recording(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+        processes.append(process)
+        return process  # type: ignore[return-value]
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise signal
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", recording)
+    monkeypatch.setattr(runner_module, "_finalize_process_handoff", interrupt)
+    with pytest.raises(signal_type) as exc_info:
+        run_analyzer_process(
+            _python_argv("import time;time.sleep(10)"),
+            cwd=tmp_path,
+            timeout_seconds=2,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+    assert exc_info.value is signal
+    assert len(processes) == 1 and processes[0].poll() is not None
+    assert "time.sleep(10)" not in "\n".join(_runner_frame_surfaces(signal))
+
+
 @pytest.mark.parametrize(
     ("stream", "source"),
     [

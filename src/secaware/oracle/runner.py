@@ -32,6 +32,34 @@ _MAX_ARG_BYTES = 1024 * 1024
 _POLL_INTERVAL_SECONDS = 0.01
 _CLEANUP_WAIT_SECONDS = 5.0
 _CAPTURE_CHUNK_BYTES = 64 * 1024
+_MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
+
+
+def _kill_linux_descendants(root_pid: int) -> None:
+    if sys.platform != "linux":
+        return
+    parents: dict[int, int] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = entry.joinpath("stat").read_text(encoding="ascii").split()
+            parents[int(entry.name)] = int(fields[3])
+        except (OSError, ValueError, IndexError):
+            continue
+    descendants: set[int] = set()
+    changed = True
+    while changed:
+        changed = False
+        for pid, parent in parents.items():
+            if pid not in descendants and (parent == root_pid or parent in descendants):
+                descendants.add(pid)
+                changed = True
+    for pid in descendants:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -95,6 +123,8 @@ class _PosixPathLease:
     fd: int
     sha256: str
     identity: tuple[int, ...]
+    script_fd: int = -1
+    exec_argv0: str = ""
 
     def close(self) -> None:
         descriptor = self.fd
@@ -102,6 +132,10 @@ class _PosixPathLease:
             return
         self.fd = -1
         os.close(descriptor)
+        if self.script_fd >= 0:
+            script_descriptor = self.script_fd
+            self.script_fd = -1
+            os.close(script_descriptor)
 
 
 @dataclass(slots=True, repr=False)
@@ -351,8 +385,12 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
     if directory:
         flags |= getattr(os, "O_DIRECTORY", 0)
     descriptor = os.open(path, flags)
+    sealed_descriptor = -1
     lease: _PosixPathLease | None = None
     chunk = b""
+    prefix = b""
+    interpreter_lease: _PosixPathLease | None = None
+    script_descriptor = -1
     try:
         metadata = os.fstat(descriptor)
         if directory:
@@ -362,16 +400,78 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
         else:
             if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & 0o111:
                 raise _RunnerFailure(ErrorCode.ANALYZER_MISSING)
+            if metadata.st_size <= 0 or metadata.st_size > _MAX_EXECUTABLE_BYTES:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            import fcntl
+
+            sealed_descriptor = os.memfd_create(
+                "secaware-analyzer",
+                getattr(os, "MFD_CLOEXEC", 0x1) | getattr(os, "MFD_ALLOW_SEALING", 0x2),
+            )
             digest_hash = hashlib.sha256()
             while True:
                 chunk = os.read(descriptor, 1024 * 1024)
                 if not chunk:
                     break
                 digest_hash.update(chunk)
-            os.lseek(descriptor, 0, os.SEEK_SET)
+                os.write(sealed_descriptor, chunk)
+                if len(prefix) < 4096:
+                    prefix += chunk[: 4096 - len(prefix)]
             digest = digest_hash.hexdigest()
             if os.fstat(descriptor) != metadata:
                 raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            os.fchmod(sealed_descriptor, metadata.st_mode & 0o777)
+            fcntl.fcntl(
+                sealed_descriptor,
+                fcntl.F_ADD_SEALS,
+                fcntl.F_SEAL_WRITE
+                | fcntl.F_SEAL_GROW
+                | fcntl.F_SEAL_SHRINK
+                | fcntl.F_SEAL_SEAL,
+            )
+            os.close(descriptor)
+            descriptor = sealed_descriptor
+            sealed_descriptor = -1
+            metadata = os.fstat(descriptor)
+            if prefix.startswith(b"#!"):
+                first_line = prefix.split(b"\n", 1)[0]
+                if len(first_line) < 3 or len(first_line) > 4096:
+                    raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+                try:
+                    shebang = first_line[2:].decode("utf-8", errors="strict")
+                except UnicodeError:
+                    raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
+                if (
+                    not shebang.startswith("/")
+                    or shebang != shebang.strip()
+                    or any(character.isspace() for character in shebang)
+                    or shebang.endswith("/env")
+                ):
+                    raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+                script_descriptor = descriptor
+                descriptor = -1
+                interpreter_lease = _open_posix_path_lease(
+                    Path(shebang).resolve(strict=True), directory=False
+                )
+                if interpreter_lease is None or interpreter_lease.script_fd >= 0:
+                    raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+                combined = hashlib.sha256(
+                    (digest + ":" + interpreter_lease.sha256).encode("ascii")
+                ).hexdigest()
+                lease = _PosixPathLease(
+                    fd=interpreter_lease.fd,
+                    sha256=combined,
+                    identity=interpreter_lease.identity + (
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                    ),
+                    script_fd=script_descriptor,
+                    exec_argv0=shebang,
+                )
+                script_descriptor = -1
+                interpreter_lease.fd = -1
+                return lease
         identity = (
             metadata.st_dev,
             metadata.st_ino,
@@ -383,10 +483,18 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
         lease = _PosixPathLease(descriptor, digest, identity)
         return lease
     finally:
-        if lease is None:
+        if lease is None and descriptor >= 0:
             os.close(descriptor)
+        if sealed_descriptor >= 0:
+            os.close(sealed_descriptor)
+        if script_descriptor >= 0:
+            os.close(script_descriptor)
         path = None  # type: ignore[assignment]
         chunk = b""
+        prefix = b""
+        if interpreter_lease is not None:
+            interpreter_lease.close()
+        interpreter_lease = None
 
 
 def _prepare_posix_launch(
@@ -400,7 +508,12 @@ def _prepare_posix_launch(
     payload = b""
     try:
         payload = json.dumps(
-            {"argv": argv, "environment": environment},
+            {
+                "argv": argv,
+                "environment": environment,
+                "script_fd": executable.script_fd,
+                "exec_argv0": executable.exec_argv0,
+            },
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -416,10 +529,14 @@ def _prepare_posix_launch(
             str(executable.fd),
             str(cwd.fd),
             str(cancel_read_fd),
+            str(executable.script_fd),
         )
+        passed = [config_file.fileno(), executable.fd, cwd.fd, cancel_read_fd]
+        if executable.script_fd >= 0:
+            passed.append(executable.script_fd)
         return _PosixLaunch(
             argv=supervisor,
-            pass_fds=(config_file.fileno(), executable.fd, cwd.fd, cancel_read_fd),
+            pass_fds=tuple(passed),
             cancel_read_fd=cancel_read_fd,
             cancel_write_fd=cancel_write_fd,
             config_file=config_file,
@@ -452,106 +569,6 @@ def _close_posix_launch(launch: _PosixLaunch) -> None:
         launch = None  # type: ignore[assignment]
 
 
-def _posix_supervisor_children() -> tuple[int, ...]:
-    path = Path(f"/proc/self/task/{os.getpid()}/children")
-    raw = path.read_text(encoding="ascii").strip()
-    return tuple(int(value) for value in raw.split()) if raw else ()
-
-
-def _posix_supervisor_cleanup() -> bool:
-    for _ in range(1000):
-        children = _posix_supervisor_children()
-        if not children:
-            try:
-                while True:
-                    os.waitpid(-1, os.WNOHANG)
-            except ChildProcessError:
-                return True
-        for pid in children:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        try:
-            while True:
-                waited, _ = os.waitpid(-1, os.WNOHANG)
-                if waited == 0:
-                    break
-        except ChildProcessError:
-            return True
-        time.sleep(0.001)
-    return False
-
-
-def _posix_supervisor_main() -> None:
-    import ctypes
-    import select
-
-    try:
-        if sys.platform != "linux" or len(sys.argv) != 5:
-            os._exit(125)
-        config_fd, executable_fd, cwd_fd, cancel_fd = map(int, sys.argv[1:])
-        children_path = Path(f"/proc/self/task/{os.getpid()}/children")
-        if not children_path.is_file():
-            os._exit(125)
-        libc = ctypes.CDLL(None, use_errno=True)
-        if libc.prctl(36, 1, 0, 0, 0) != 0:
-            os._exit(125)
-        os.lseek(config_fd, 0, os.SEEK_SET)
-        payload = os.read(config_fd, _MAX_ARG_BYTES + 1)
-        if len(payload) > _MAX_ARG_BYTES:
-            os._exit(125)
-        config = json.loads(payload.decode("utf-8"))
-        analyzer_argv = config["argv"]
-        environment = config["environment"]
-        if not isinstance(analyzer_argv, list) or not all(
-            type(value) is str for value in analyzer_argv
-        ) or not isinstance(environment, dict):
-            os._exit(125)
-        analyzer_pid = os.fork()
-        if analyzer_pid == 0:
-            try:
-                os.setsid()
-                os.fchdir(cwd_fd)
-                devnull = os.open(os.devnull, os.O_RDONLY)
-                os.dup2(devnull, 0)
-                os.set_inheritable(executable_fd, True)
-                os.execve(
-                    f"/proc/self/fd/{executable_fd}",
-                    analyzer_argv,
-                    environment,
-                )
-            except BaseException:
-                os._exit(126)
-        cancelled = False
-        status: int | None = None
-        while status is None:
-            ready, _, _ = select.select([cancel_fd], [], [], 0.01)
-            if ready:
-                cancelled = True
-                break
-            waited, candidate = os.waitpid(analyzer_pid, os.WNOHANG)
-            if waited == analyzer_pid:
-                status = candidate
-        if cancelled:
-            try:
-                os.kill(analyzer_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if not _posix_supervisor_cleanup():
-            os._exit(125)
-        if cancelled:
-            os._exit(124)
-        assert status is not None
-        if os.WIFEXITED(status):
-            os._exit(os.WEXITSTATUS(status))
-        if os.WIFSIGNALED(status):
-            os.kill(os.getpid(), os.WTERMSIG(status))
-        os._exit(125)
-    except BaseException:
-        os._exit(125)
-
-
 def _popen_process(
     argv: tuple[str, ...],
     *,
@@ -560,6 +577,7 @@ def _popen_process(
     posix_launch: _PosixLaunch | None = None,
 ) -> subprocess.Popen[bytes]:
     platform_options: dict[str, object]
+    process: subprocess.Popen[bytes] | None = None
     if os.name == "nt":
         platform_options = {
             "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x4,
@@ -582,17 +600,36 @@ def _popen_process(
             close_fds=True,
             **platform_options,
         )
-        if posix_launch is not None:
-            os.close(posix_launch.cancel_read_fd)
-            posix_launch.cancel_read_fd = -1
-            setattr(process, "_secaware_cancel_fd", posix_launch.cancel_write_fd)
-            posix_launch.cancel_write_fd = -1
+        try:
+            _finalize_process_handoff(process, posix_launch)
+        except BaseException:
+            _terminate_and_wait(process, None)
+            for pipe in (process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
+            raise
         return process
     finally:
         argv = ()
         cwd = None  # type: ignore[assignment]
         environment = {}
         platform_options = {}
+        posix_launch = None
+        process = None
+
+
+def _finalize_process_handoff(
+    process: subprocess.Popen[bytes],
+    posix_launch: _PosixLaunch | None,
+) -> None:
+    try:
+        if posix_launch is not None:
+            setattr(process, "_secaware_cancel_fd", posix_launch.cancel_write_fd)
+            posix_launch.cancel_write_fd = -1
+            os.close(posix_launch.cancel_read_fd)
+            posix_launch.cancel_read_fd = -1
+    finally:
+        process = None  # type: ignore[assignment]
         posix_launch = None
 
 
@@ -914,10 +951,16 @@ def _terminate_and_wait(
         if cancel_fd >= 0:
             try:
                 if process.poll() is None:
+                    if os.name == "posix":
+                        _kill_linux_descendants(process.pid)
+                        os.kill(process.pid, signal.SIGCONT)
                     os.write(cancel_fd, b"x")
-                    process.wait(timeout=_CLEANUP_WAIT_SECONDS)
-            except subprocess.TimeoutExpired:
-                pass
+                    deadline = time.monotonic() + _CLEANUP_WAIT_SECONDS
+                    while process.poll() is None and time.monotonic() < deadline:
+                        if os.name == "posix":
+                            _kill_linux_descendants(process.pid)
+                            os.kill(process.pid, signal.SIGCONT)
+                        time.sleep(0.01)
             finally:
                 os.close(cancel_fd)
                 setattr(process, "_secaware_cancel_fd", -1)

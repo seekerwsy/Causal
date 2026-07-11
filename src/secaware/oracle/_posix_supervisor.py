@@ -47,9 +47,9 @@ def _cleanup() -> bool:
 
 def main() -> None:
     try:
-        if sys.platform != "linux" or len(sys.argv) != 5:
+        if sys.platform != "linux" or len(sys.argv) != 6:
             os._exit(125)
-        config_fd, executable_fd, cwd_fd, cancel_fd = map(int, sys.argv[1:])
+        config_fd, executable_fd, cwd_fd, cancel_fd, script_fd = map(int, sys.argv[1:])
         if not Path(f"/proc/self/task/{os.getpid()}/children").is_file():
             os._exit(125)
         if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
@@ -61,29 +61,52 @@ def main() -> None:
         config = json.loads(payload.decode("utf-8"))
         analyzer_argv = config["argv"]
         environment = config["environment"]
+        exec_argv0 = config.get("exec_argv0", "")
         if (
             not isinstance(analyzer_argv, list)
             or not analyzer_argv
             or not all(type(value) is str for value in analyzer_argv)
             or not isinstance(environment, dict)
+            or type(exec_argv0) is not str
             or not all(type(key) is str and type(value) is str for key, value in environment.items())
         ):
             os._exit(125)
+        status_read_fd, status_write_fd = os.pipe2(os.O_CLOEXEC)
         analyzer_pid = os.fork()
         if analyzer_pid == 0:
             try:
+                os.close(status_read_fd)
                 os.setsid()
                 os.fchdir(cwd_fd)
                 devnull = os.open(os.devnull, os.O_RDONLY)
                 os.dup2(devnull, 0)
                 os.set_inheritable(executable_fd, True)
+                launch_argv = analyzer_argv
+                if script_fd >= 0:
+                    os.set_inheritable(script_fd, True)
+                    launch_argv = [
+                        exec_argv0,
+                        f"/proc/self/fd/{script_fd}",
+                        *analyzer_argv[1:],
+                    ]
                 os.execve(
                     f"/proc/self/fd/{executable_fd}",
-                    analyzer_argv,
+                    launch_argv,
                     environment,
                 )
             except BaseException:
+                try:
+                    os.write(status_write_fd, b"F")
+                except BaseException:
+                    pass
                 os._exit(126)
+        os.close(status_write_fd)
+        launch_status = os.read(status_read_fd, 2)
+        os.close(status_read_fd)
+        if launch_status:
+            _cleanup()
+            os.kill(os.getpid(), signal.SIGUSR1)
+            os._exit(125)
         cancelled = False
         status: int | None = None
         while status is None:
