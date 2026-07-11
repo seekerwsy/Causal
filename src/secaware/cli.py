@@ -2,7 +2,6 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 import os
 from pathlib import Path
-import shutil
 import tempfile
 from typing import Any, Literal, Optional, TypeVar, cast
 
@@ -36,6 +35,14 @@ from secaware.generation.result_importer import (
 from secaware.intervention.operators import apply_intervention
 from secaware.io.jsonl import canonical_jsonl_sha256, read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
+from secaware.io.transaction import (
+    ArtifactTransaction,
+    TransactionArtifact,
+    TransactionStateError,
+    cleanup_committed_transaction,
+    recover_transaction,
+    resolve_pending_transaction,
+)
 from secaware.logging_utils import console
 from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
@@ -326,9 +333,13 @@ def _validate_offline_results_path(
             if resolved_results == protected_path.resolve():
                 invalid = True
                 break
-            if results.exists() and protected_path.exists() and os.path.samefile(
-                results,
-                protected_path,
+            if (
+                results.exists()
+                and protected_path.exists()
+                and os.path.samefile(
+                    results,
+                    protected_path,
+                )
             ):
                 invalid = True
                 break
@@ -618,9 +629,7 @@ def _read_oracle_output(
         pass
     else:
         validated = cast(list[OracleRecord], records)
-        if condition is not None and any(
-            record.condition != condition for record in validated
-        ):
+        if condition is not None and any(record.condition != condition for record in validated):
             pass
         elif len({record.request_id for record in validated}) != len(validated):
             pass
@@ -743,20 +752,33 @@ def _execute_jsonl_stage_transaction(
             "stage output transaction is invalid",
         )
     manifest_path = store.path(".stages", f"{stage}.json")
+    journal_path = store.path(".stages", f".{stage}.transaction.json")
+    try:
+        artifacts = tuple(
+            [TransactionArtifact(output, f"output{index}") for index, output in enumerate(outputs)]
+            + [TransactionArtifact(manifest_path, "manifest")]
+        )
+    except TransactionStateError:
+        raise _oracle_stage_error(
+            ErrorCode.CONTRACT,
+            stage,
+            "stage output transaction is invalid",
+        ) from None
 
-    def cleanup_stale_transaction_paths() -> None:
+    def recover_or_cleanup_transaction() -> None:
+        try:
+            resolve_pending_transaction(journal_path, artifacts)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except TransactionStateError:
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage output transaction recovery failed",
+            ) from None
         stale_paths: list[Path] = []
         for output in outputs:
-            stale_paths.extend(
-                _stale_transaction_paths(
-                    output,
-                    ".stage.candidate",
-                    ".stage.backup",
-                )
-            )
-        stale_paths.extend(
-            _stale_transaction_paths(manifest_path, ".manifest.backup")
-        )
+            stale_paths.extend(_stale_transaction_paths(output, ".stage.candidate"))
         stale_control = _cleanup_transaction_paths(stale_paths)
         if stale_control is not None:
             raise stale_control
@@ -767,37 +789,25 @@ def _execute_jsonl_stage_transaction(
         outputs,
         force,
         preserve_committed=True,
-        after_lease_acquired=cleanup_stale_transaction_paths,
+        after_lease_acquired=recover_or_cleanup_transaction,
     ):
         return
 
-    manifest_backup: Path | None = None
-    had_manifest = manifest_path.exists()
     candidates: list[Path | None] = [None] * len(outputs)
-    backups: list[Path | None] = [None] * len(outputs)
-    installed = [False] * len(outputs)
-    backed_up = [False] * len(outputs)
+    transaction: ArtifactTransaction | None = None
     commit_point = False
     try:
-        if had_manifest:
-            if manifest_path.is_symlink() or not manifest_path.is_file():
-                raise _oracle_stage_error(
-                    ErrorCode.MANIFEST_CONFLICT,
-                    stage,
-                    "stage manifest is invalid",
-                )
-            manifest_backup = _oracle_transaction_path(
-                manifest_path,
-                ".manifest.backup",
-            )
-            try:
-                shutil.copyfile(manifest_path, manifest_backup)
-            except OSError:
-                raise _oracle_stage_error(
-                    ErrorCode.MANIFEST_CONFLICT,
-                    stage,
-                    "stage manifest could not be preserved",
-                ) from None
+        try:
+            transaction = ArtifactTransaction.begin(journal_path, artifacts)
+            transaction.backup(len(outputs))
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except TransactionStateError:
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage output transaction could not be started",
+            ) from None
 
         record_groups = list(build())
         if len(record_groups) != len(outputs):
@@ -820,20 +830,16 @@ def _execute_jsonl_stage_transaction(
                     "stage artifact failed canonical readback",
                 )
 
-        for index, output in enumerate(outputs):
-            backup = _oracle_transaction_path(output, ".stage.backup")
-            backups[index] = backup
+        for index, _output in enumerate(outputs):
             try:
-                if output.exists():
-                    os.replace(output, backup)
-                    backed_up[index] = True
                 candidate = candidates[index]
                 if candidate is None:
-                    raise OSError
-                os.replace(candidate, output)
-                installed[index] = True
+                    raise TransactionStateError
+                transaction.install(index, candidate)
                 candidates[index] = None
-            except OSError:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
                 raise _oracle_stage_error(
                     ErrorCode.CONTRACT,
                     stage,
@@ -841,9 +847,7 @@ def _execute_jsonl_stage_transaction(
                 ) from None
 
         store.seal_stage_outputs(stage, outputs)
-        for output, model, expected in zip(
-            outputs, models, expected_groups, strict=True
-        ):
+        for output, model, expected in zip(outputs, models, expected_groups, strict=True):
             if _read_jsonl_output(output, model, stage=stage) != expected:
                 store.verify_sealed_outputs(stage, outputs)
                 raise _oracle_stage_error(
@@ -853,40 +857,51 @@ def _execute_jsonl_stage_transaction(
                 )
         store.verify_sealed_outputs(stage, outputs)
         store.record_stage(stage, inputs, outputs)
+        try:
+            transaction.mark_postcommit()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except TransactionStateError:
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage commit verification failed",
+            ) from None
         commit_point = True
-
-        cleanup_control = _cleanup_transaction_paths([*backups, manifest_backup])
-        if cleanup_control is not None:
-            raise cleanup_control
-    except BaseException:
-        if not commit_point:
-            for index in reversed(range(len(outputs))):
-                output = outputs[index]
-                if installed[index]:
-                    try:
-                        output.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-                backup = backups[index]
-                if backed_up[index] and backup is not None:
-                    try:
-                        os.replace(backup, output)
-                        backed_up[index] = False
-                    except OSError:
-                        pass
-            _cleanup_failed_oracle_stage(store, stage)
+        try:
+            cleanup_committed_transaction(transaction)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except TransactionStateError:
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage commit verification failed",
+            ) from None
+    except BaseException as error:
+        if transaction is not None and not commit_point:
             try:
-                if had_manifest and manifest_backup is not None:
-                    os.replace(manifest_backup, manifest_path)
-                    manifest_backup = None
-                elif not had_manifest:
-                    manifest_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+                recover_transaction(transaction)
+            except (KeyboardInterrupt, SystemExit):
+                _cleanup_failed_oracle_stage(store, stage)
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
+                raise
+            except TransactionStateError:
+                _cleanup_failed_oracle_stage(store, stage)
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "stage output transaction rollback failed",
+                ) from None
+        if not commit_point:
+            _cleanup_failed_oracle_stage(store, stage)
         raise
     finally:
         if not commit_point:
-            _cleanup_transaction_paths([*candidates, *backups, manifest_backup])
+            _cleanup_transaction_paths(candidates)
 
 
 def plan_generation_stage(
@@ -1176,10 +1191,7 @@ def generate_provider_stage(
                             "provider generation result failed validation",
                         )
                     result = candidate
-                    if any(
-                        attempt.request_id != request.request_id
-                        for attempt in result.attempts
-                    ):
+                    if any(attempt.request_id != request.request_id for attempt in result.attempts):
                         raise _generation_stage_error(
                             ErrorCode.CONTRACT,
                             stage,
@@ -1364,7 +1376,9 @@ def extract_code_tsg_stage(
     del config
     stage = f"extract-code-tsg-{condition}"
     source_name = "observed_code.jsonl" if condition == "observed" else "counterfactual_code.jsonl"
-    output_name = "observed_code_tsg.jsonl" if condition == "observed" else "counterfactual_code_tsg.jsonl"
+    output_name = (
+        "observed_code_tsg.jsonl" if condition == "observed" else "counterfactual_code_tsg.jsonl"
+    )
     inputs = [store.path("generation", source_name)]
     output = store.path("tsg", output_name)
     outputs = [output]
@@ -1402,24 +1416,34 @@ def _run_oracle_stage(
     output = store.path("oracle", output_name)
     outputs = [output]
     candidate_output: Path | None = None
-    backup_output: Path | None = None
-    output_installed = False
-    output_backed_up = False
     manifest_path = store.path(".stages", f"{stage}.json")
-    manifest_backup: Path | None = None
-    manifest_transaction = False
-    had_manifest = False
+    journal_path = store.path(".stages", f".{stage}.transaction.json")
+    try:
+        artifacts = (
+            TransactionArtifact(output, "oracle"),
+            TransactionArtifact(manifest_path, "manifest"),
+        )
+    except TransactionStateError:
+        raise _oracle_stage_error(
+            ErrorCode.CONTRACT,
+            stage,
+            "Oracle output transaction is invalid",
+        ) from None
+    transaction: ArtifactTransaction | None = None
     commit_point = False
 
-    def cleanup_stale_transaction_paths() -> None:
-        stale_paths = [
-            *_stale_transaction_paths(
-                output,
-                ".oracle.candidate",
-                ".oracle.backup",
-            ),
-            *_stale_transaction_paths(manifest_path, ".manifest.backup"),
-        ]
+    def recover_or_cleanup_transaction() -> None:
+        try:
+            resolve_pending_transaction(journal_path, artifacts)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except TransactionStateError:
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "Oracle output transaction recovery failed",
+            ) from None
+        stale_paths = _stale_transaction_paths(output, ".oracle.candidate")
         stale_control = _cleanup_transaction_paths(stale_paths)
         if stale_control is not None:
             raise stale_control
@@ -1443,30 +1467,20 @@ def _run_oracle_stage(
                 force,
                 policy_sha256=initial_policy.combined_sha256,
                 preserve_committed=True,
-                after_lease_acquired=cleanup_stale_transaction_paths,
+                after_lease_acquired=recover_or_cleanup_transaction,
             ):
                 return
-            had_manifest = manifest_path.exists()
-            if had_manifest:
-                if manifest_path.is_symlink() or not manifest_path.is_file():
-                    raise _oracle_stage_error(
-                        ErrorCode.MANIFEST_CONFLICT,
-                        stage,
-                        "Oracle stage manifest is invalid",
-                    )
-                manifest_backup = _oracle_transaction_path(
-                    manifest_path,
-                    ".manifest.backup",
-                )
-                try:
-                    shutil.copyfile(manifest_path, manifest_backup)
-                except OSError:
-                    raise _oracle_stage_error(
-                        ErrorCode.MANIFEST_CONFLICT,
-                        stage,
-                        "Oracle stage manifest could not be preserved",
-                    ) from None
-            manifest_transaction = True
+            try:
+                transaction = ArtifactTransaction.begin(journal_path, artifacts)
+                transaction.backup(1)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "Oracle output transaction could not be started",
+                ) from None
             codes = _read_canonical_oracle_input(inputs[0], stage=stage)
             if any(code.condition != validated_condition for code in codes):
                 raise _oracle_stage_error(
@@ -1526,21 +1540,12 @@ def _run_oracle_stage(
                     stage,
                     "oracle artifact failed canonical readback",
                 )
-            backup_output = _oracle_transaction_path(output, ".oracle.backup")
             try:
-                if output.exists():
-                    os.replace(output, backup_output)
-                    output_backed_up = True
-                os.replace(candidate_output, output)
-                output_installed = True
+                transaction.install(0, candidate_output)
                 candidate_output = None
-            except OSError:
-                if output_backed_up:
-                    try:
-                        os.replace(backup_output, output)
-                        output_backed_up = False
-                    except OSError:
-                        pass
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
                 raise _oracle_stage_error(
                     ErrorCode.CONTRACT,
                     stage,
@@ -1568,42 +1573,51 @@ def _run_oracle_stage(
                 outputs,
                 policy_sha256=execution_policy.combined_sha256,
             )
-            commit_point = True
-            manifest_transaction = False
-            cleanup_control = _cleanup_transaction_paths(
-                [backup_output, manifest_backup]
-            )
-            if cleanup_control is not None:
-                raise cleanup_control
-    except BaseException:
-        if not commit_point:
-            if output_installed:
-                try:
-                    output.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            if output_backed_up and backup_output is not None:
-                try:
-                    os.replace(backup_output, output)
-                    output_backed_up = False
-                except OSError:
-                    pass
-            _cleanup_failed_oracle_stage(store, stage)
-        if not commit_point and manifest_transaction:
             try:
-                if had_manifest and manifest_backup is not None:
-                    os.replace(manifest_backup, manifest_path)
-                    manifest_backup = None
-                elif not had_manifest:
-                    manifest_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+                transaction.mark_postcommit()
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "Oracle stage commit verification failed",
+                ) from None
+            commit_point = True
+            try:
+                cleanup_committed_transaction(transaction)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "Oracle stage commit verification failed",
+                ) from None
+    except BaseException as error:
+        if transaction is not None and not commit_point:
+            try:
+                recover_transaction(transaction)
+            except (KeyboardInterrupt, SystemExit):
+                _cleanup_failed_oracle_stage(store, stage)
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
+                raise
+            except TransactionStateError:
+                _cleanup_failed_oracle_stage(store, stage)
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "Oracle output transaction rollback failed",
+                ) from None
+        if not commit_point:
+            _cleanup_failed_oracle_stage(store, stage)
         raise
     finally:
         if not commit_point:
-            _cleanup_transaction_paths(
-                [candidate_output, backup_output, manifest_backup]
-            )
+            _cleanup_transaction_paths([candidate_output])
         runner = None
         runtime_validator = None
 
@@ -1636,7 +1650,9 @@ def run_oracle_stage(
     control: KeyboardInterrupt | SystemExit | None = None
     stage = "oracle"
     try:
-        stage = f"run-oracle-{condition}" if condition in {"observed", "counterfactual"} else "oracle"
+        stage = (
+            f"run-oracle-{condition}" if condition in {"observed", "counterfactual"} else "oracle"
+        )
         _run_oracle_stage(
             config,
             store,
@@ -1680,22 +1696,16 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     oracle_output = store.path("oracle", "observed_oracle.jsonl")
 
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        prompts = [
-            prompt for prompt in _prompt_records(store) if prompt.split == "discover"
-        ]
+        prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "discover"]
         prompt_ids = {prompt.prompt_id for prompt in prompts}
         prompt_tsgs = [
             tsg
-            for tsg in read_jsonl(
-                store.path("tsg", "prompt_tsg.jsonl"), TSGRecord
-            )  # type: ignore[arg-type]
+            for tsg in read_jsonl(store.path("tsg", "prompt_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
             if tsg.prompt_id in prompt_ids
         ]
         code_tsgs = [
             tsg
-            for tsg in read_jsonl(
-                store.path("tsg", "observed_code_tsg.jsonl"), TSGRecord
-            )  # type: ignore[arg-type]
+            for tsg in read_jsonl(store.path("tsg", "observed_code_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
             if tsg.prompt_id in prompt_ids
         ]
         oracles = [
@@ -1753,9 +1763,7 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         for tsg in read_jsonl(store.path("tsg", "prompt_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
         if tsg.prompt_id in prompt_by_id
     }
-    hypotheses = read_jsonl(
-        store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord
-    )
+    hypotheses = read_jsonl(store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord)
     interventions: list[InterventionRecord] = []
     for hypothesis in hypotheses:  # type: ignore[assignment]
         if "risk_down" not in config.intervention.enabled_directions:
@@ -1763,7 +1771,9 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         for prompt in prompts:
             if not _matches_scope(prompt, hypothesis):
                 continue
-            interventions.append(apply_intervention(prompt, prompt_tsgs[prompt.prompt_id], hypothesis))
+            interventions.append(
+                apply_intervention(prompt, prompt_tsgs[prompt.prompt_id], hypothesis)
+            )
     write_jsonl(output, interventions)
     write_jsonl(
         paired_output,
@@ -1940,9 +1950,7 @@ def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         return [pairs, effects]
 
     with ExitStack() as stack:
-        stack.enter_context(
-            store.hold_committed_output("run-oracle-observed", [observed_output])
-        )
+        stack.enter_context(store.hold_committed_output("run-oracle-observed", [observed_output]))
         stack.enter_context(
             store.hold_committed_output(
                 "run-oracle-counterfactual",
@@ -1993,9 +2001,7 @@ def report_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             store.path("interventions", "interventions.jsonl"), InterventionRecord
         ),  # type: ignore[arg-type]
         pairs=read_jsonl(store.path("analysis", "pair_results.jsonl"), PairResult),  # type: ignore[arg-type]
-        effects=read_jsonl(
-            store.path("analysis", "hypothesis_effects.jsonl"), EffectRecord
-        ),  # type: ignore[arg-type]
+        effects=read_jsonl(store.path("analysis", "hypothesis_effects.jsonl"), EffectRecord),  # type: ignore[arg-type]
     )
     store.record_stage(stage, inputs, outputs)
 

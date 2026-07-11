@@ -81,8 +81,7 @@ class _VersionRunner:
         *,
         semgrep: bytes = b"1.168.0\n",
         bandit: bytes = (
-            b"bandit 1.9.4\n"
-            b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
+            b"bandit 1.9.4\n  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
         ),
     ) -> None:
         self.semgrep = semgrep
@@ -214,8 +213,7 @@ def test_oracle_preflight_rejects_version_drift_without_raw_output(
     prompts_path = tmp_path / "prompts.jsonl"
     _write_valid_prompts(prompts_path)
     config = _oracle_config(tmp_path, prompts_path)
-    secret = b"PRIVATE-VERSION-OUTPUT"
-    runner = _VersionRunner(semgrep=semgrep + secret, bandit=bandit + secret)
+    runner = _VersionRunner(semgrep=semgrep, bandit=bandit)
 
     with pytest.raises(SecAwareError) as exc_info:
         run_oracle_preflight(
@@ -225,7 +223,8 @@ def test_oracle_preflight_rejects_version_drift_without_raw_output(
         )
 
     assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
-    assert secret.decode() not in str(exc_info.value)
+    assert semgrep.decode().strip() not in str(exc_info.value)
+    assert bandit.decode().splitlines()[0] not in str(exc_info.value)
     assert exc_info.value.details == {}
 
 
@@ -244,8 +243,68 @@ def test_oracle_preflight_rejects_unrecognized_trailing_version_output(
             runtime_validator=lambda: None,
         )
 
-    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
+    assert exc_info.value.code is ErrorCode.ANALYZER_INVALID_OUTPUT
     assert "PRIVATE-TRAILING-OUTPUT" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"\xff\n",
+        b"1.168.0\x00\n",
+        b"1.168.0\x01\n",
+        b" 1.168.0\n",
+        b"1.168.0\ntrailing\n",
+    ],
+)
+def test_oracle_preflight_classifies_malformed_version_output_as_invalid(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_preflight(
+            config.oracle,
+            runner=_VersionRunner(semgrep=payload),
+            runtime_validator=lambda: None,
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_INVALID_OUTPUT
+
+
+@pytest.mark.parametrize(
+    ("semgrep", "bandit"),
+    [
+        (
+            b"1.167.0\n",
+            b"bandit 1.9.4\n  python version = 3.12.13 (main) [MSC v.1944]\n",
+        ),
+        (
+            b"1.168.0\n",
+            b"bandit 1.9.3\n  python version = 3.12.13 (main) [MSC v.1944]\n",
+        ),
+    ],
+)
+def test_oracle_preflight_classifies_structurally_valid_version_drift_as_policy_mismatch(
+    tmp_path: Path,
+    semgrep: bytes,
+    bandit: bytes,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    config = _oracle_config(tmp_path, prompts_path)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_preflight(
+            config.oracle,
+            runner=_VersionRunner(semgrep=semgrep, bandit=bandit),
+            runtime_validator=lambda: None,
+        )
+
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
 
 
 def _write_provider_config(
@@ -484,11 +543,7 @@ def test_every_cli_command_uses_safe_error_boundary(
     secret = "top-secret-command-config"
     config_path = tmp_path / "private-config.yaml"
     config_path.write_text(
-        "run:\n"
-        "  name: private\n"
-        "data:\n"
-        "  prompts_path: prompts.jsonl\n"
-        f"unknown_field: {secret}\n",
+        f"run:\n  name: private\ndata:\n  prompts_path: prompts.jsonl\nunknown_field: {secret}\n",
         encoding="utf-8",
     )
 

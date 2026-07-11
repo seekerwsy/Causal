@@ -73,8 +73,7 @@ def _version_lines(payload: bytes) -> tuple[str, ...] | None:
             return None
         decoded = payload.decode("utf-8", errors="strict")
         if "\x00" in decoded or any(
-            ord(character) < 0x20 and character not in "\r\n\t"
-            for character in decoded
+            ord(character) < 0x20 and character not in "\r\n\t" for character in decoded
         ):
             return None
         lines = decoded.splitlines()
@@ -117,11 +116,13 @@ def _probe_exact_version(
             failed_code = ErrorCode.ANALYZER_FAILED
         else:
             lines = _version_lines(result.stdout)
-            if expected_line.startswith("bandit "):
+            if lines is None:
+                failed_code = ErrorCode.ANALYZER_INVALID_OUTPUT
+            elif expected_line.startswith("bandit "):
                 bandit_runtime = (
-                    lines is not None
-                    and len(lines) == 2
-                    and lines[0] == expected_line
+                    len(lines) == 2
+                    and re.fullmatch(r"bandit [0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*", lines[0])
+                    is not None
                     and re.fullmatch(
                         r"  python version = [0-9]+\.[0-9]+\.[0-9]+"
                         r"[A-Za-z0-9.+-]* \([^()\r\n]{1,256}\)"
@@ -131,8 +132,19 @@ def _probe_exact_version(
                     is not None
                 )
                 if not bandit_runtime:
+                    failed_code = ErrorCode.ANALYZER_INVALID_OUTPUT
+                elif lines[0] != expected_line:
                     failed_code = ErrorCode.POLICY_MISMATCH
-            elif lines != (expected_line,):
+            elif (
+                len(lines) != 1
+                or re.fullmatch(
+                    r"[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*",
+                    lines[0],
+                )
+                is None
+            ):
+                failed_code = ErrorCode.ANALYZER_INVALID_OUTPUT
+            elif lines[0] != expected_line:
                 failed_code = ErrorCode.POLICY_MISMATCH
     except (KeyboardInterrupt, SystemExit):
         raise
@@ -239,9 +251,7 @@ def run_preflight(config: AppConfig) -> PreflightReport:
             ) from None
         try:
             credential = os.environ.get(provider_config.api_key_env)
-            credential_available = (
-                type(credential) is str and bool(credential.strip())
-            )
+            credential_available = type(credential) is str and bool(credential.strip())
         except Exception:
             credential_available = False
         credential = None
@@ -263,14 +273,10 @@ def run_preflight(config: AppConfig) -> PreflightReport:
         raise _error(ErrorCode.CONTRACT, "prompt_id values must be unique")
 
     discover_hashes = {
-        _normalized_prompt_sha256(prompt.prompt)
-        for prompt in prompts
-        if prompt.split == "discover"
+        _normalized_prompt_sha256(prompt.prompt) for prompt in prompts if prompt.split == "discover"
     }
     confirm_hashes = {
-        _normalized_prompt_sha256(prompt.prompt)
-        for prompt in prompts
-        if prompt.split == "confirm"
+        _normalized_prompt_sha256(prompt.prompt) for prompt in prompts if prompt.split == "confirm"
     }
     if discover_hashes & confirm_hashes:
         raise _error(

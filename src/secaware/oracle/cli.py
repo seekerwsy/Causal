@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+import stat
 import tempfile
 from typing import BinaryIO
 
@@ -14,6 +17,14 @@ from secaware.commands.common import cli_action
 from secaware.config import OracleConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl, write_jsonl
+from secaware.io.transaction import (
+    ArtifactTransaction,
+    TransactionArtifact,
+    TransactionStateError,
+    cleanup_committed_transaction,
+    recover_transaction,
+    resolve_pending_transaction,
+)
 from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.oracle.strict_json import load_strict_json_bytes
@@ -27,6 +38,7 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord
 MAX_ORACLE_RECORDS = 1_000_000
 MAX_JSONL_LINE_CHARS = 8 * 1024 * 1024
 MAX_JSONL_TOTAL_CHARS = 512 * 1024 * 1024
+MAX_JSONL_TOTAL_BYTES = 512 * 1024 * 1024
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 TRANSACTION_CLEANUP_ATTEMPTS = 3
 
@@ -60,23 +72,129 @@ def _error(code: ErrorCode, message: str) -> SecAwareError:
     )
 
 
-def _read_codes(path: Path) -> list[CanonicalGeneratedCodeRecord]:
+@dataclass(frozen=True, slots=True, repr=False)
+class _CanonicalInputSnapshot:
+    payload_sha256: str
+    records: tuple[CanonicalGeneratedCodeRecord, ...]
+
+
+def _input_fingerprint(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+    )
+
+
+def _parse_codes_snapshot(payload: bytes) -> tuple[CanonicalGeneratedCodeRecord, ...]:
+    records: list[CanonicalGeneratedCodeRecord] = []
+    request_ids: set[str] = set()
+    code_ids: set[str] = set()
+    conditions: set[str] = set()
+    text = ""
     try:
-        records = read_jsonl(
-            path,
-            CanonicalGeneratedCodeRecord,
-            required=True,
-            allow_empty=False,
-            max_records=MAX_ORACLE_RECORDS,
-            max_line_chars=MAX_JSONL_LINE_CHARS,
-            max_total_chars=MAX_JSONL_TOTAL_CHARS,
-            stage="standalone_oracle",
-        )
-    except (OSError, SecAwareError, UnicodeError):
-        pass
-    else:
-        return list(records)  # type: ignore[arg-type]
-    raise _error(ErrorCode.CONTRACT, "standalone Oracle input is not canonical") from None
+        if type(payload) is not bytes or not payload or len(payload) > MAX_JSONL_TOTAL_BYTES:
+            raise ValueError
+        text = payload.decode("utf-8", errors="strict")
+        if len(text) > MAX_JSONL_TOTAL_CHARS:
+            raise ValueError
+        for line in text.splitlines():
+            if len(line) > MAX_JSONL_LINE_CHARS:
+                raise ValueError
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if len(records) >= MAX_ORACLE_RECORDS:
+                raise ValueError
+            value = load_strict_json_bytes(stripped.encode("utf-8", errors="strict"))
+            record = CanonicalGeneratedCodeRecord.model_validate(value)
+            if record.request_id in request_ids or record.code_id in code_ids:
+                raise ValueError
+            request_ids.add(record.request_id)
+            code_ids.add(record.code_id)
+            conditions.add(record.condition)
+            records.append(record)
+        if not records or len(conditions) != 1:
+            raise ValueError
+        return tuple(records)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _error(
+            ErrorCode.CONTRACT,
+            "standalone Oracle input is not canonical",
+        ) from None
+    finally:
+        payload = b""
+        text = ""
+        request_ids.clear()
+        code_ids.clear()
+        conditions.clear()
+
+
+def _read_codes_snapshot(path: Path) -> _CanonicalInputSnapshot:
+    descriptor = -1
+    payload = b""
+    payload_buffer = bytearray()
+    chunk = b""
+    try:
+        before = path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size < 1
+            or before.st_size > MAX_JSONL_TOTAL_BYTES
+        ):
+            raise ValueError
+        flags = os.O_RDONLY
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if _input_fingerprint(opened) != _input_fingerprint(before):
+            raise ValueError
+        digest = hashlib.sha256()
+        remaining = opened.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise ValueError
+            payload_buffer.extend(chunk)
+            digest.update(chunk)
+            remaining -= len(chunk)
+        payload = bytes(payload_buffer)
+        after = os.fstat(descriptor)
+        if (
+            _input_fingerprint(after) != _input_fingerprint(opened)
+            or len(payload) != opened.st_size
+            or len(payload) > MAX_JSONL_TOTAL_BYTES
+        ):
+            raise ValueError
+        records = _parse_codes_snapshot(payload)
+        return _CanonicalInputSnapshot(payload_sha256=digest.hexdigest(), records=records)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _error(
+            ErrorCode.CONTRACT,
+            "standalone Oracle input is not canonical",
+        ) from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        payload = b""
+        payload_buffer.clear()
+        chunk = b""
 
 
 def _read_records(path: Path) -> list[OracleRecord]:
@@ -104,6 +222,10 @@ def _seal_path(output: Path) -> Path:
 
 def _lock_path(output: Path) -> Path:
     return output.with_name(output.name + ".lock")
+
+
+def _transaction_journal_path(output: Path) -> Path:
+    return output.with_name(f".{output.name}.transaction.json")
 
 
 def _temporary_path(output: Path, suffix: str) -> Path:
@@ -158,8 +280,6 @@ def _stale_transaction_paths(output: Path) -> list[Path]:
     for suffix in (
         ".oracle.candidate",
         ".seal.candidate",
-        ".output.backup",
-        ".seal.backup",
     ):
         try:
             stale.extend(output.parent.glob(f".{output.name}.*{suffix}"))
@@ -241,7 +361,6 @@ def _load_existing_seal(path: Path) -> StandaloneOracleSeal:
 
 
 def _verify_existing_pair(
-    input_path: Path,
     output: Path,
     seal_path: Path,
     *,
@@ -255,8 +374,6 @@ def _verify_existing_pair(
     if not output_exists or not seal_exists or output.is_symlink() or seal_path.is_symlink():
         raise _error(ErrorCode.CONTRACT, "existing standalone Oracle commit is incomplete")
     try:
-        if os.path.samefile(input_path, output):
-            raise ValueError
         seal = _load_existing_seal(seal_path)
         if (
             seal.input_sha256 != input_sha256
@@ -272,6 +389,34 @@ def _verify_existing_pair(
     return True
 
 
+def _standalone_transaction_artifacts(
+    output: Path,
+    seal_path: Path,
+) -> tuple[TransactionArtifact, ...]:
+    try:
+        return (
+            TransactionArtifact(output, "output"),
+            TransactionArtifact(seal_path, "seal"),
+        )
+    except TransactionStateError:
+        raise _error(ErrorCode.CONTRACT, "standalone Oracle transaction is invalid") from None
+
+
+def _resolve_standalone_transaction(
+    journal_path: Path,
+    artifacts: tuple[TransactionArtifact, ...],
+) -> None:
+    try:
+        resolve_pending_transaction(journal_path, artifacts)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except TransactionStateError:
+        raise _error(
+            ErrorCode.CONTRACT,
+            "standalone Oracle transaction recovery failed",
+        ) from None
+
+
 def _write_seal(path: Path, seal: StandaloneOracleSeal) -> None:
     try:
         content = json.dumps(
@@ -283,90 +428,6 @@ def _write_seal(path: Path, seal: StandaloneOracleSeal) -> None:
         _atomic_write_text(path, content + "\n")
     except (OSError, TypeError, ValueError):
         raise _error(ErrorCode.CONTRACT, "standalone Oracle seal could not be written") from None
-
-
-def _replace_committed_pair(
-    candidate_output: Path,
-    candidate_seal: Path,
-    output: Path,
-    seal_path: Path,
-    *,
-    had_existing: bool,
-) -> tuple[Path | None, Path | None]:
-    backup_output = _temporary_path(output, ".output.backup")
-    backup_seal = _temporary_path(output, ".seal.backup")
-    output_backed_up = False
-    seal_backed_up = False
-    output_installed = False
-    seal_installed = False
-    try:
-        if had_existing:
-            os.replace(output, backup_output)
-            output_backed_up = True
-            os.replace(seal_path, backup_seal)
-            seal_backed_up = True
-        os.replace(candidate_output, output)
-        output_installed = True
-        os.replace(candidate_seal, seal_path)
-        seal_installed = True
-        if had_existing:
-            return backup_output, backup_seal
-        return None, None
-    except OSError:
-        if seal_installed:
-            try:
-                seal_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        if output_installed:
-            try:
-                output.unlink(missing_ok=True)
-            except OSError:
-                pass
-        if seal_backed_up:
-            try:
-                os.replace(backup_seal, seal_path)
-            except OSError:
-                pass
-        if output_backed_up:
-            try:
-                os.replace(backup_output, output)
-            except OSError:
-                pass
-        raise _error(ErrorCode.CONTRACT, "standalone Oracle commit could not be replaced") from None
-    finally:
-        cleanup_paths = [candidate_output, candidate_seal]
-        if not (seal_installed and had_existing):
-            cleanup_paths.extend((backup_output, backup_seal))
-        for path in cleanup_paths:
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                pass
-
-
-def _restore_committed_pair(
-    output: Path,
-    seal_path: Path,
-    backup_output: Path | None,
-    backup_seal: Path | None,
-) -> None:
-    try:
-        output.unlink(missing_ok=True)
-        seal_path.unlink(missing_ok=True)
-        if backup_output is not None:
-            os.replace(backup_output, output)
-        if backup_seal is not None:
-            os.replace(backup_seal, seal_path)
-    except OSError:
-        raise _error(ErrorCode.CONTRACT, "standalone Oracle rollback failed") from None
-    finally:
-        for path in (backup_output, backup_seal):
-            if path is not None:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
 
 def _run_standalone_oracle(
@@ -393,8 +454,7 @@ def _run_standalone_oracle(
     validator = validate_analyzer_runtime if runtime_validator is None else runtime_validator
     candidate_output: Path | None = None
     candidate_seal: Path | None = None
-    backup_output: Path | None = None
-    backup_seal: Path | None = None
+    transaction: ArtifactTransaction | None = None
     commit_point = False
     try:
         if input_path.is_symlink():
@@ -422,29 +482,26 @@ def _run_standalone_oracle(
             max_stderr_bytes=max_stderr_bytes,
         )
         with _OutputLease(lock_path):
-            stale_control = _cleanup_transaction_paths(
-                _stale_transaction_paths(output)
-            )
+            journal_path = _transaction_journal_path(output)
+            artifacts = _standalone_transaction_artifacts(output, seal_path)
+            _resolve_standalone_transaction(journal_path, artifacts)
+            stale_control = _cleanup_transaction_paths(_stale_transaction_paths(output))
             if stale_control is not None:
                 raise stale_control
+            snapshot = _read_codes_snapshot(input_path)
             initial_policy = run_oracle_preflight(
                 config,
                 runner=runner,
                 runtime_validator=validator,  # type: ignore[arg-type]
             )
-            input_sha256 = sha256_path(input_path)
             had_existing = _verify_existing_pair(
-                input_path,
                 output,
                 seal_path,
-                input_sha256=input_sha256,
+                input_sha256=snapshot.payload_sha256,
                 policy_sha256=initial_policy.combined_sha256,
             )
             if had_existing and not force:
                 return
-            codes = _read_codes(input_path)
-            if sha256_path(input_path) != input_sha256:
-                raise _error(ErrorCode.CONTRACT, "standalone Oracle input changed before analysis")
             execution_policy = run_oracle_preflight(
                 config,
                 runner=runner,
@@ -453,7 +510,7 @@ def _run_standalone_oracle(
             if execution_policy.combined_sha256 != initial_policy.combined_sha256:
                 raise _error(ErrorCode.POLICY_MISMATCH, "Oracle policy changed before execution")
             records = run_oracle_batch(
-                codes,
+                snapshot.records,
                 execution_policy,
                 semgrep_executable=semgrep,
                 bandit_executable=bandit,
@@ -462,8 +519,6 @@ def _run_standalone_oracle(
                 max_stderr_bytes=max_stderr_bytes,
                 runner=runner,
             )
-            if sha256_path(input_path) != input_sha256:
-                raise _error(ErrorCode.CONTRACT, "standalone Oracle input changed during analysis")
             candidate_output = _temporary_path(output, ".oracle.candidate")
             candidate_seal = _temporary_path(output, ".seal.candidate")
             write_jsonl(candidate_output, records, stage="standalone_oracle")
@@ -471,22 +526,26 @@ def _run_standalone_oracle(
                 raise _error(ErrorCode.CONTRACT, "standalone Oracle readback failed")
             seal = StandaloneOracleSeal(
                 schema_version="1.0",
-                input_sha256=input_sha256,
+                input_sha256=snapshot.payload_sha256,
                 output_sha256=sha256_path(candidate_output),
                 policy_sha256=execution_policy.combined_sha256,
                 semgrep_version=execution_policy.semgrep_version,
                 bandit_version=execution_policy.bandit_version,
             )
             _write_seal(candidate_seal, seal)
-            backup_output, backup_seal = _replace_committed_pair(
-                candidate_output,
-                candidate_seal,
-                output,
-                seal_path,
-                had_existing=had_existing,
-            )
-            candidate_output = None
-            candidate_seal = None
+            try:
+                transaction = ArtifactTransaction.begin(journal_path, artifacts)
+                transaction.install(0, candidate_output)
+                candidate_output = None
+                transaction.install(1, candidate_seal)
+                candidate_seal = None
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
+                raise _error(
+                    ErrorCode.CONTRACT,
+                    "standalone Oracle commit could not be replaced",
+                ) from None
             try:
                 committed = _load_existing_seal(seal_path)
                 if (
@@ -499,32 +558,45 @@ def _run_standalone_oracle(
                         "standalone Oracle commit verification failed",
                     )
             except BaseException:
-                _restore_committed_pair(
-                    output,
-                    seal_path,
-                    backup_output,
-                    backup_seal,
-                )
-                backup_output = None
-                backup_seal = None
                 raise
+            try:
+                transaction.mark_postcommit()
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
+                raise _error(
+                    ErrorCode.CONTRACT,
+                    "standalone Oracle commit verification failed",
+                ) from None
             commit_point = True
-            cleanup_control = _cleanup_transaction_paths(
-                [backup_output, backup_seal]
-            )
-            if cleanup_control is not None:
-                raise cleanup_control
-    except (KeyboardInterrupt, SystemExit):
+            try:
+                cleanup_committed_transaction(transaction)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except TransactionStateError:
+                raise _error(
+                    ErrorCode.CONTRACT,
+                    "standalone Oracle commit verification failed",
+                ) from None
+    except BaseException as error:
+        if transaction is not None and not commit_point:
+            try:
+                recover_transaction(transaction)
+            except (KeyboardInterrupt, SystemExit):
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
+                raise
+            except TransactionStateError:
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
+                raise _error(
+                    ErrorCode.CONTRACT,
+                    "standalone Oracle rollback failed",
+                ) from None
         raise
-    except SecAwareError:
-        raise
-    except Exception:
-        raise _error(ErrorCode.CONTRACT, "standalone Oracle execution failed") from None
     finally:
         if not commit_point:
-            _cleanup_transaction_paths(
-                [candidate_output, candidate_seal, backup_output, backup_seal]
-            )
+            _cleanup_transaction_paths([candidate_output, candidate_seal])
         runner = None
         validator = None
 
