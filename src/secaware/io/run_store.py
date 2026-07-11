@@ -366,7 +366,12 @@ class RunStore:
 
     @staticmethod
     def _requires_output_seal(stage: str) -> bool:
-        return stage in {"generate-observed", "generate-counterfactual"} or stage.startswith(
+        return stage in {
+            "generate-observed",
+            "generate-counterfactual",
+            "discover",
+            "confirm",
+        } or stage.startswith(
             (
                 "plan-generation-",
                 "plan-provider-generation-",
@@ -684,8 +689,12 @@ class RunStore:
         preserve_committed: bool = False,
     ) -> bool:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
+        transactional_stage = stage.startswith("run-oracle-") or stage in {
+            "discover",
+            "confirm",
+        }
         if type(preserve_committed) is not bool or (
-            preserve_committed and not stage.startswith("run-oracle-")
+            preserve_committed and not transactional_stage
         ):
             raise self._manifest_conflict(stage, "stage transaction mode is invalid")
         if (

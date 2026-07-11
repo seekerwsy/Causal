@@ -6,6 +6,7 @@ import hashlib
 from importlib import metadata
 import json
 from pathlib import Path
+import threading
 import traceback
 
 import pytest
@@ -13,8 +14,19 @@ from typer.testing import CliRunner
 
 from secaware import cli as pipeline_cli
 from secaware.cli import app as pipeline_app
-from secaware.cli import import_generation_stage, plan_generation_stage, run_oracle_stage
-from secaware.config import AppConfig, write_resolved_config
+from secaware.cli import (
+    confirm_stage,
+    discover_stage,
+    extract_code_tsg_stage,
+    extract_prompt_tsg_stage,
+    generate_counterfactual_stage,
+    generate_observed_stage,
+    import_generation_stage,
+    intervene_stage,
+    plan_generation_stage,
+    run_oracle_stage,
+)
+from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io import run_store as run_store_module
@@ -26,7 +38,10 @@ from secaware.oracle.cli import run_standalone_oracle
 from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.artifact import sha256_path
-from secaware.pipeline.manifest import read_stage_manifest
+from secaware.pipeline.manifest import (
+    read_stage_manifest,
+    write_stage_manifest,
+)
 from secaware.schema.generation import (
     GenerationProvenance,
     GenerationRequestRecord,
@@ -148,6 +163,41 @@ def _prepared_canonical_store(
         condition="observed",
         results_path=results_path,
         force=False,
+    )
+    return config, store
+
+
+def _prepared_observed_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore]:
+    config = load_config("configs/demo.yaml", run_dir=tmp_path / "run")
+    store = RunStore(config)
+    store.prepare()
+    extract_prompt_tsg_stage(config, store, force=False)
+    generate_observed_stage(config, store, force=False)
+    extract_code_tsg_stage(config, store, condition="observed", force=False)
+    run_oracle_stage(
+        config,
+        store,
+        condition="observed",
+        force=False,
+        runner=_OracleRunner(),
+        runtime_validator=lambda: None,
+    )
+    return config, store
+
+
+def _prepared_confirmation_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore]:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    intervene_stage(config, store, force=False)
+    generate_counterfactual_stage(config, store, force=False)
+    extract_code_tsg_stage(config, store, condition="counterfactual", force=False)
+    run_oracle_stage(
+        config,
+        store,
+        condition="counterfactual",
+        force=False,
+        runner=_OracleRunner(),
+        runtime_validator=lambda: None,
     )
     return config, store
 
@@ -957,4 +1007,212 @@ def test_exact_analyzers_run_through_pipeline_and_standalone_cli(tmp_path: Path)
         OracleRecord,
         required=True,
         allow_empty=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing_manifest", "stale_output", "policy_manifest", "empty", "duplicate"],
+)
+def test_discover_requires_a_strict_committed_observed_oracle(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    output = store.path("oracle", "observed_oracle.jsonl")
+    manifest_path = store.path(".stages", "run-oracle-observed.json")
+    if mutation == "missing_manifest":
+        manifest_path.unlink()
+    elif mutation == "stale_output":
+        output.write_bytes(output.read_bytes() + b"\n")
+    elif mutation == "policy_manifest":
+        manifest = read_stage_manifest(manifest_path)
+        write_stage_manifest(
+            manifest_path,
+            manifest.model_copy(update={"policy_sha256": "c" * 64}),
+        )
+    else:
+        if mutation == "empty":
+            output.write_bytes(b"")
+        else:
+            payload = output.read_bytes()
+            output.write_bytes(payload + payload)
+        manifest = read_stage_manifest(manifest_path)
+        write_stage_manifest(
+            manifest_path,
+            manifest.model_copy(
+                update={
+                    "output_sha256": {
+                        "oracle/observed_oracle.jsonl": sha256_path(output)
+                    }
+                }
+            ),
+        )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_stage(config, store, force=False)
+
+    assert exc_info.value.code in {ErrorCode.CONTRACT, ErrorCode.MANIFEST_CONFLICT}
+    assert not store.path("discovery", "hypotheses_all.jsonl").exists()
+    assert not store.path("discovery", "hypotheses_selected.jsonl").exists()
+    assert not store.path(".stages", "discover.json").exists()
+
+
+def test_confirm_requires_both_committed_oracles(tmp_path: Path) -> None:
+    config, store = _prepared_confirmation_pipeline(tmp_path)
+    store.path(".stages", "run-oracle-counterfactual.json").unlink()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        confirm_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert not store.path("analysis", "pair_results.jsonl").exists()
+    assert not store.path("analysis", "hypothesis_effects.jsonl").exists()
+    assert not store.path(".stages", "confirm.json").exists()
+
+
+def test_confirm_holds_both_oracle_leases_in_fixed_order_through_computation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _prepared_confirmation_pipeline(tmp_path)
+    real_hold = store.hold_committed_output
+    active: list[str] = []
+    entered: list[str] = []
+    checked = False
+    real_build_pairs = pipeline_cli.build_pairs
+
+    @contextmanager
+    def tracked_hold(stage: str, outputs: Sequence[Path]) -> object:
+        with real_hold(stage, outputs) as hashes:
+            active.append(stage)
+            entered.append(stage)
+            try:
+                yield hashes
+            finally:
+                active.remove(stage)
+
+    def checked_build_pairs(*args: object, **kwargs: object) -> object:
+        nonlocal checked
+        checked = active == [
+            "run-oracle-observed",
+            "run-oracle-counterfactual",
+        ]
+        return real_build_pairs(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store, "hold_committed_output", tracked_hold)
+    monkeypatch.setattr(pipeline_cli, "build_pairs", checked_build_pairs)
+
+    confirm_stage(config, store, force=False)
+
+    assert entered == ["run-oracle-observed", "run-oracle-counterfactual"]
+    assert checked is True
+    assert active == []
+
+
+@pytest.mark.parametrize("stage_name", ["discover", "confirm"])
+def test_downstream_force_failure_preserves_previous_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage_name: str,
+) -> None:
+    if stage_name == "discover":
+        config, store = _prepared_observed_pipeline(tmp_path)
+        discover_stage(config, store, force=False)
+        outputs = [
+            store.path("discovery", "hypotheses_all.jsonl"),
+            store.path("discovery", "hypotheses_selected.jsonl"),
+        ]
+        monkeypatch.setattr(
+            pipeline_cli,
+            "discover_hypotheses",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("private-failure")),
+        )
+    else:
+        config, store = _prepared_confirmation_pipeline(tmp_path)
+        confirm_stage(config, store, force=False)
+        outputs = [
+            store.path("analysis", "pair_results.jsonl"),
+            store.path("analysis", "hypothesis_effects.jsonl"),
+        ]
+        monkeypatch.setattr(
+            pipeline_cli,
+            "build_pairs",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("private-failure")),
+        )
+    manifest = store.path(".stages", f"{stage_name}.json")
+    previous = ([path.read_bytes() for path in outputs], manifest.read_bytes())
+
+    def run() -> None:
+        if stage_name == "discover":
+            discover_stage(config, store, force=True)
+        else:
+            confirm_stage(config, store, force=True)
+
+    with pytest.raises(RuntimeError):
+        run()
+
+    assert [path.read_bytes() for path in outputs] == previous[0]
+    assert manifest.read_bytes() == previous[1]
+    assert not store.stage_is_active(stage_name)
+
+
+def test_discover_holds_committed_oracle_snapshot_against_force_rerun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    contender = RunStore(config)
+    oracle_output = store.path("oracle", "observed_oracle.jsonl")
+    oracle_manifest = store.path(".stages", "run-oracle-observed.json")
+    previous = (oracle_output.read_bytes(), oracle_manifest.read_bytes())
+    entered = threading.Event()
+    release = threading.Event()
+    errors: list[BaseException] = []
+    real_discover = pipeline_cli.discover_hypotheses
+
+    def blocked_discover(*args: object, **kwargs: object) -> object:
+        assert oracle_output.read_bytes() == previous[0]
+        entered.set()
+        assert release.wait(timeout=5)
+        assert oracle_output.read_bytes() == previous[0]
+        return real_discover(*args, **kwargs)  # type: ignore[arg-type]
+
+    def consume_snapshot() -> None:
+        try:
+            discover_stage(config, store, force=False)
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", blocked_discover)
+    thread = threading.Thread(target=consume_snapshot)
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_oracle_stage(
+                config,
+                contender,
+                condition="observed",
+                force=True,
+                runner=_OracleRunner(finding="semgrep"),
+                runtime_validator=lambda: None,
+            )
+
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert (oracle_output.read_bytes(), oracle_manifest.read_bytes()) == previous
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert store.path(".stages", "discover.json").exists()
+    run_oracle_stage(
+        config,
+        contender,
+        condition="observed",
+        force=True,
+        runner=_OracleRunner(finding="semgrep"),
+        runtime_validator=lambda: None,
     )

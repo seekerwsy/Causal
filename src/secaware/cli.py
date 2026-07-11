@@ -1,12 +1,13 @@
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import ExitStack, contextmanager
 import os
 from pathlib import Path
 import shutil
 import tempfile
-from typing import Literal, Optional, TypeVar, cast
+from typing import Any, Literal, Optional, TypeVar, cast
 
 import typer
+from pydantic import BaseModel
 
 from secaware.analysis.effects import estimate_effects
 from secaware.analysis.pairing import build_pairs
@@ -595,7 +596,12 @@ def _read_canonical_oracle_input(path: Path, *, stage: str) -> list[CanonicalGen
     ) from None
 
 
-def _read_oracle_output(path: Path, *, stage: str) -> list[OracleRecord]:
+def _read_oracle_output(
+    path: Path,
+    *,
+    stage: str,
+    condition: GenerationCondition | None = None,
+) -> list[OracleRecord]:
     try:
         records = read_jsonl(
             path,
@@ -610,7 +616,17 @@ def _read_oracle_output(path: Path, *, stage: str) -> list[OracleRecord]:
     except (OSError, SecAwareError, UnicodeError):
         pass
     else:
-        return cast(list[OracleRecord], records)
+        validated = cast(list[OracleRecord], records)
+        if condition is not None and any(
+            record.condition != condition for record in validated
+        ):
+            pass
+        elif len({record.request_id for record in validated}) != len(validated):
+            pass
+        elif len({record.code_id for record in validated}) != len(validated):
+            pass
+        else:
+            return validated
     raise _oracle_stage_error(
         ErrorCode.CONTRACT,
         stage,
@@ -654,6 +670,176 @@ def _cleanup_failed_oracle_stage(store: RunStore, stage: str) -> None:
         store.abort_stage(stage)
     except SecAwareError:
         pass
+
+
+def _read_jsonl_output(
+    path: Path,
+    model: type[_Record],
+    *,
+    stage: str,
+) -> list[_Record]:
+    return cast(
+        list[_Record],
+        read_jsonl(
+            path,
+            model,
+            required=True,
+            allow_empty=True,
+            max_records=MAX_GENERATION_REQUESTS,
+            max_line_chars=MAX_GENERATION_JSONL_LINE_CHARS,
+            max_total_chars=MAX_GENERATION_JSONL_TOTAL_CHARS,
+            stage=stage,
+        ),
+    )
+
+
+def _execute_jsonl_stage_transaction(
+    store: RunStore,
+    *,
+    stage: str,
+    inputs: Sequence[Path],
+    outputs: Sequence[Path],
+    models: Sequence[type[Any]],
+    force: bool,
+    build: Callable[[], Sequence[Sequence[BaseModel | dict[Any, Any]]]],
+) -> None:
+    if len(outputs) != len(models):
+        raise _oracle_stage_error(
+            ErrorCode.CONTRACT,
+            stage,
+            "stage output transaction is invalid",
+        )
+    if store.should_skip_stage(
+        stage,
+        inputs,
+        outputs,
+        force,
+        preserve_committed=True,
+    ):
+        return
+
+    manifest_path = store.path(".stages", f"{stage}.json")
+    manifest_backup: Path | None = None
+    had_manifest = manifest_path.exists()
+    candidates: list[Path | None] = [None] * len(outputs)
+    backups: list[Path | None] = [None] * len(outputs)
+    installed = [False] * len(outputs)
+    backed_up = [False] * len(outputs)
+    try:
+        if had_manifest:
+            if manifest_path.is_symlink() or not manifest_path.is_file():
+                raise _oracle_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "stage manifest is invalid",
+                )
+            manifest_backup = _oracle_transaction_path(
+                manifest_path,
+                ".manifest.backup",
+            )
+            try:
+                shutil.copyfile(manifest_path, manifest_backup)
+            except OSError:
+                raise _oracle_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "stage manifest could not be preserved",
+                ) from None
+
+        record_groups = list(build())
+        if len(record_groups) != len(outputs):
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage output transaction is invalid",
+            )
+        expected_groups = [list(records) for records in record_groups]
+        for index, (output, model, expected) in enumerate(
+            zip(outputs, models, expected_groups, strict=True)
+        ):
+            candidate = _oracle_transaction_path(output, ".stage.candidate")
+            candidates[index] = candidate
+            write_jsonl(candidate, expected, stage=stage)
+            if _read_jsonl_output(candidate, model, stage=stage) != expected:
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "stage artifact failed canonical readback",
+                )
+
+        for index, output in enumerate(outputs):
+            backup = _oracle_transaction_path(output, ".stage.backup")
+            backups[index] = backup
+            try:
+                if output.exists():
+                    os.replace(output, backup)
+                    backed_up[index] = True
+                candidate = candidates[index]
+                if candidate is None:
+                    raise OSError
+                os.replace(candidate, output)
+                installed[index] = True
+                candidates[index] = None
+            except OSError:
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "stage artifact could not be committed",
+                ) from None
+
+        store.seal_stage_outputs(stage, outputs)
+        for output, model, expected in zip(
+            outputs, models, expected_groups, strict=True
+        ):
+            if _read_jsonl_output(output, model, stage=stage) != expected:
+                store.verify_sealed_outputs(stage, outputs)
+                raise _oracle_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "stage artifact failed canonical readback",
+                )
+        store.verify_sealed_outputs(stage, outputs)
+        store.record_stage(stage, inputs, outputs)
+
+        for index, backup in enumerate(backups):
+            if backed_up[index] and backup is not None:
+                backup.unlink(missing_ok=True)
+                backed_up[index] = False
+        if manifest_backup is not None:
+            manifest_backup.unlink(missing_ok=True)
+            manifest_backup = None
+    except BaseException:
+        for index in reversed(range(len(outputs))):
+            output = outputs[index]
+            if installed[index]:
+                try:
+                    output.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            backup = backups[index]
+            if backed_up[index] and backup is not None:
+                try:
+                    os.replace(backup, output)
+                    backed_up[index] = False
+                except OSError:
+                    pass
+        _cleanup_failed_oracle_stage(store, stage)
+        try:
+            if had_manifest and manifest_backup is not None:
+                os.replace(manifest_backup, manifest_path)
+                manifest_backup = None
+            elif not had_manifest:
+                manifest_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    finally:
+        for transaction_path in [*candidates, *backups, manifest_backup]:
+            if transaction_path is not None:
+                try:
+                    transaction_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 def plan_generation_stage(
@@ -1264,7 +1450,14 @@ def _run_oracle_stage(
                 )
             candidate_output = _oracle_transaction_path(output, ".oracle.candidate")
             write_jsonl(candidate_output, records, stage=stage)
-            if _read_oracle_output(candidate_output, stage=stage) != records:
+            if (
+                _read_oracle_output(
+                    candidate_output,
+                    stage=stage,
+                    condition=validated_condition,
+                )
+                != records
+            ):
                 raise _oracle_stage_error(
                     ErrorCode.CONTRACT,
                     stage,
@@ -1291,7 +1484,14 @@ def _run_oracle_stage(
                     "oracle artifact could not be committed",
                 ) from None
             store.seal_stage_outputs(stage, outputs)
-            if _read_oracle_output(output, stage=stage) != records:
+            if (
+                _read_oracle_output(
+                    output,
+                    stage=stage,
+                    condition=validated_condition,
+                )
+                != records
+            ):
                 store.verify_sealed_outputs(stage, outputs)
                 raise _oracle_stage_error(
                     ErrorCode.CONTRACT,
@@ -1415,40 +1615,61 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     all_output = store.path("discovery", "hypotheses_all.jsonl")
     selected_output = store.path("discovery", "hypotheses_selected.jsonl")
     outputs = [all_output, selected_output]
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "discover"]
-    prompt_tsgs = [
-        tsg
-        for tsg in read_jsonl(store.path("tsg", "prompt_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
-        if tsg.prompt_id in {prompt.prompt_id for prompt in prompts}
-    ]
-    code_tsgs = [
-        tsg
-        for tsg in read_jsonl(store.path("tsg", "observed_code_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
-        if tsg.prompt_id in {prompt.prompt_id for prompt in prompts}
-    ]
-    oracles = [
-        record
-        for record in read_jsonl(
-            store.path("oracle", "observed_oracle.jsonl"), OracleRecord
-        )  # type: ignore[arg-type]
-        if record.prompt_id in {prompt.prompt_id for prompt in prompts}
-    ]
-    all_h, selected_h = discover_hypotheses(
-        prompts,
-        prompt_tsgs,
-        code_tsgs,
-        oracles,
-        min_support_total=config.discovery.min_support_total,
-        min_support_each_side=config.discovery.min_support_each_side,
-        top_k_per_scope=config.discovery.top_k_per_scope,
-        score_weights=config.discovery.score_weights,
-    )
-    selected_h = selected_h[: config.intervention.max_hypotheses]
-    write_jsonl(all_output, all_h)
-    write_jsonl(selected_output, selected_h)
-    store.record_stage(stage, inputs, outputs)
+    oracle_output = store.path("oracle", "observed_oracle.jsonl")
+
+    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
+        prompts = [
+            prompt for prompt in _prompt_records(store) if prompt.split == "discover"
+        ]
+        prompt_ids = {prompt.prompt_id for prompt in prompts}
+        prompt_tsgs = [
+            tsg
+            for tsg in read_jsonl(
+                store.path("tsg", "prompt_tsg.jsonl"), TSGRecord
+            )  # type: ignore[arg-type]
+            if tsg.prompt_id in prompt_ids
+        ]
+        code_tsgs = [
+            tsg
+            for tsg in read_jsonl(
+                store.path("tsg", "observed_code_tsg.jsonl"), TSGRecord
+            )  # type: ignore[arg-type]
+            if tsg.prompt_id in prompt_ids
+        ]
+        oracles = [
+            record
+            for record in _read_oracle_output(
+                oracle_output,
+                stage=stage,
+                condition="observed",
+            )
+            if record.prompt_id in prompt_ids
+        ]
+        all_h, selected_h = discover_hypotheses(
+            prompts,
+            prompt_tsgs,
+            code_tsgs,
+            oracles,
+            min_support_total=config.discovery.min_support_total,
+            min_support_each_side=config.discovery.min_support_each_side,
+            top_k_per_scope=config.discovery.top_k_per_scope,
+            score_weights=config.discovery.score_weights,
+        )
+        return [
+            all_h,
+            selected_h[: config.intervention.max_hypotheses],
+        ]
+
+    with store.hold_committed_output("run-oracle-observed", [oracle_output]):
+        _execute_jsonl_stage_transaction(
+            store,
+            stage=stage,
+            inputs=inputs,
+            outputs=outputs,
+            models=[HypothesisRecord, HypothesisRecord],
+            force=force,
+            build=build,
+        )
 
 
 def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
@@ -1612,41 +1833,69 @@ def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     pair_output = store.path("analysis", "pair_results.jsonl")
     effect_output = store.path("analysis", "hypothesis_effects.jsonl")
     outputs = [pair_output, effect_output]
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    interventions = read_jsonl(
-        store.path("interventions", "interventions.jsonl"), InterventionRecord
-    )
-    observed = read_jsonl(
-        store.path("oracle", "observed_oracle.jsonl"), OracleRecord
-    )
-    counterfactual = read_jsonl(
-        store.path("oracle", "counterfactual_oracle.jsonl"), OracleRecord
-    )
-    pairs = build_pairs(interventions, observed, counterfactual)  # type: ignore[arg-type]
-    effects = estimate_effects(
-        pairs,
-        bootstrap_samples=config.analysis.bootstrap_samples,
-        ci_level=config.analysis.ci_level,
-        min_eligible_pairs=config.analysis.min_eligible_pairs,
-        min_flip_rate=config.analysis.min_flip_rate,
-        max_side_effect_rate_confirmed=config.analysis.max_side_effect_rate_confirmed,
-        random_seed=config.run.random_seed,
-    )
-    hypotheses = {
-        hypothesis.hypothesis_id: hypothesis
-        for hypothesis in read_jsonl(
-            store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord
+    observed_output = store.path("oracle", "observed_oracle.jsonl")
+    counterfactual_output = store.path("oracle", "counterfactual_oracle.jsonl")
+
+    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
+        interventions = cast(
+            list[InterventionRecord],
+            read_jsonl(
+                store.path("interventions", "interventions.jsonl"),
+                InterventionRecord,
+            ),
         )
-    }
-    for effect in effects:
-        hypothesis = hypotheses.get(effect.hypothesis_id)
-        if hypothesis:
-            effect.scope_cwe = hypothesis.scope.get("cwe", "")
-            effect.scope_task_family = hypothesis.scope.get("task_family", "")
-    write_jsonl(pair_output, pairs)
-    write_jsonl(effect_output, effects)
-    store.record_stage(stage, inputs, outputs)
+        observed = _read_oracle_output(
+            observed_output,
+            stage=stage,
+            condition="observed",
+        )
+        counterfactual = _read_oracle_output(
+            counterfactual_output,
+            stage=stage,
+            condition="counterfactual",
+        )
+        pairs = build_pairs(interventions, observed, counterfactual)
+        effects = estimate_effects(
+            pairs,
+            bootstrap_samples=config.analysis.bootstrap_samples,
+            ci_level=config.analysis.ci_level,
+            min_eligible_pairs=config.analysis.min_eligible_pairs,
+            min_flip_rate=config.analysis.min_flip_rate,
+            max_side_effect_rate_confirmed=config.analysis.max_side_effect_rate_confirmed,
+            random_seed=config.run.random_seed,
+        )
+        hypotheses = {
+            hypothesis.hypothesis_id: hypothesis
+            for hypothesis in read_jsonl(
+                store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord
+            )
+        }
+        for effect in effects:
+            hypothesis = hypotheses.get(effect.hypothesis_id)
+            if hypothesis:
+                effect.scope_cwe = hypothesis.scope.get("cwe", "")
+                effect.scope_task_family = hypothesis.scope.get("task_family", "")
+        return [pairs, effects]
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            store.hold_committed_output("run-oracle-observed", [observed_output])
+        )
+        stack.enter_context(
+            store.hold_committed_output(
+                "run-oracle-counterfactual",
+                [counterfactual_output],
+            )
+        )
+        _execute_jsonl_stage_transaction(
+            store,
+            stage=stage,
+            inputs=inputs,
+            outputs=outputs,
+            models=[PairResult, EffectRecord],
+            force=force,
+            build=build,
+        )
 
 
 def report_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
