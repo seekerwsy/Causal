@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import stat
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.oracle.strict_json import load_strict_json_bytes
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema.common import SafeValidationMixin, VersionedModel
 
 
-ORACLE_POLICY_SCHEMA_VERSION = "1.0"
+ORACLE_POLICY_SCHEMA_VERSION = "1.1"
 SEMGREP_VERSION = "1.168.0"
 BANDIT_VERSION = "1.9.4"
 MAX_POLICY_LOCK_BYTES = 64 * 1024
@@ -24,6 +24,8 @@ MAX_POLICY_FILE_BYTES = 1024 * 1024
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _INVALID_LOCK_MESSAGE = "oracle policy lock validation failed"
 _INVALID_LOADED_POLICY_MESSAGE = "loaded oracle policy validation failed"
+_INVALID_BANDIT_CONSTRAINT_MESSAGE = "Bandit finding constraint validation failed"
+_INVALID_BANDIT_METADATA_MESSAGE = "Bandit policy metadata validation failed"
 _POLICY_STAGE = "oracle_policy"
 _POLICY_MESSAGE = "oracle policy bundle could not be authenticated"
 
@@ -62,7 +64,7 @@ class OraclePolicyLock(SafeValidationMixin, VersionedModel):
         strict=True,
     )
 
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.1"]
     policy_name: str = Field(min_length=1, max_length=256)
     language: Literal["python"]
     semgrep_version: Literal["1.168.0"]
@@ -71,6 +73,8 @@ class OraclePolicyLock(SafeValidationMixin, VersionedModel):
     semgrep_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
     bandit_config: str = Field(min_length=1, max_length=4096, repr=False)
     bandit_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+    bandit_metadata: str = Field(min_length=1, max_length=4096, repr=False)
+    bandit_metadata_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
 
     @field_validator("policy_name")
     @classmethod
@@ -81,19 +85,105 @@ class OraclePolicyLock(SafeValidationMixin, VersionedModel):
             raise ValueError(_INVALID_LOCK_MESSAGE)
         return value
 
-    @field_validator("semgrep_rules", "bandit_config")
+    @field_validator("semgrep_rules", "bandit_config", "bandit_metadata")
     @classmethod
     def validate_policy_path(cls, value: str) -> str:
         return _canonical_policy_path(value, _INVALID_LOCK_MESSAGE)
 
     @model_validator(mode="after")
     def validate_distinct_policy_paths(self) -> "OraclePolicyLock":
-        if self.semgrep_rules == self.bandit_config:
+        if len({self.semgrep_rules, self.bandit_config, self.bandit_metadata}) != 3:
             raise ValueError(_INVALID_LOCK_MESSAGE)
         return self
 
     def __repr__(self) -> str:
         return "OraclePolicyLock()"
+
+
+class BanditFindingConstraint(SafeValidationMixin, VersionedModel):
+    _safe_validation_message = _INVALID_BANDIT_CONSTRAINT_MESSAGE
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    schema_version: Literal["1.0"] = "1.0"
+    test_id: str = Field(pattern=r"^B[0-9]{3}$", repr=False)
+    cwe_ids: tuple[StrictInt, ...] = Field(min_length=1, max_length=16, repr=False)
+    severities: tuple[Literal["LOW", "MEDIUM", "HIGH"], ...] = Field(
+        min_length=1,
+        max_length=3,
+        repr=False,
+    )
+    confidences: tuple[Literal["LOW", "MEDIUM", "HIGH"], ...] = Field(
+        min_length=1,
+        max_length=3,
+        repr=False,
+    )
+
+    @model_validator(mode="after")
+    def validate_constraint(self) -> "BanditFindingConstraint":
+        if (
+            any(value < 1 for value in self.cwe_ids)
+            or self.cwe_ids != tuple(sorted(set(self.cwe_ids)))
+            or self.severities != tuple(sorted(set(self.severities)))
+            or self.confidences != tuple(sorted(set(self.confidences)))
+        ):
+            raise ValueError(_INVALID_BANDIT_CONSTRAINT_MESSAGE)
+        return self
+
+    def __repr__(self) -> str:
+        return "BanditFindingConstraint()"
+
+
+class BanditPolicyMetadata(SafeValidationMixin, VersionedModel):
+    _safe_validation_message = _INVALID_BANDIT_METADATA_MESSAGE
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    schema_version: Literal["1.0"]
+    bandit_version: Literal["1.9.4"]
+    findings: tuple[BanditFindingConstraint, ...] = Field(min_length=1, max_length=256)
+
+    @field_validator("findings", mode="before")
+    @classmethod
+    def snapshot_findings(cls, value: object) -> tuple[BanditFindingConstraint, ...]:
+        if type(value) not in {list, tuple}:
+            raise TypeError(_INVALID_BANDIT_METADATA_MESSAGE)
+        snapshots: list[BanditFindingConstraint] = []
+        for item in value:
+            if type(item) is not dict:
+                raise TypeError(_INVALID_BANDIT_METADATA_MESSAGE)
+            payload = dict(item)
+            for field in ("cwe_ids", "severities", "confidences"):
+                nested = payload.get(field)
+                if type(nested) is not list:
+                    raise TypeError(_INVALID_BANDIT_METADATA_MESSAGE)
+                payload[field] = tuple(nested)
+            snapshots.append(BanditFindingConstraint.model_validate(payload))
+        return tuple(snapshots)
+
+    @model_validator(mode="after")
+    def validate_findings(self) -> "BanditPolicyMetadata":
+        identifiers = tuple(item.test_id for item in self.findings)
+        if identifiers != tuple(sorted(set(identifiers))):
+            raise ValueError(_INVALID_BANDIT_METADATA_MESSAGE)
+        return self
+
+    def __repr__(self) -> str:
+        return "BanditPolicyMetadata()"
 
 
 class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
@@ -109,7 +199,7 @@ class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
         arbitrary_types_allowed=False,
     )
 
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.1"]
     policy_name: str = Field(min_length=1, max_length=256)
     language: Literal["python"]
     semgrep_version: Literal["1.168.0"]
@@ -122,6 +212,19 @@ class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
     bandit_config_path: Path = Field(repr=False)
     bandit_config_bytes: bytes = Field(min_length=1, max_length=MAX_POLICY_FILE_BYTES, repr=False)
     bandit_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+    bandit_metadata: str = Field(min_length=1, max_length=4096, repr=False)
+    bandit_metadata_path: Path = Field(repr=False)
+    bandit_metadata_bytes: bytes = Field(
+        min_length=1,
+        max_length=MAX_POLICY_FILE_BYTES,
+        repr=False,
+    )
+    bandit_metadata_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
+    bandit_constraints: tuple[BanditFindingConstraint, ...] = Field(
+        min_length=1,
+        max_length=256,
+        repr=False,
+    )
     combined_sha256: str = Field(pattern=_SHA256_PATTERN)
 
     @field_validator("policy_name")
@@ -133,7 +236,7 @@ class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         return value
 
-    @field_validator("semgrep_rules", "bandit_config")
+    @field_validator("semgrep_rules", "bandit_config", "bandit_metadata")
     @classmethod
     def validate_policy_path(cls, value: str) -> str:
         return _canonical_policy_path(value, _INVALID_LOADED_POLICY_MESSAGE)
@@ -150,19 +253,40 @@ class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
             "semgrep_sha256": self.semgrep_sha256,
             "bandit_config": self.bandit_config,
             "bandit_sha256": self.bandit_sha256,
+            "bandit_metadata": self.bandit_metadata,
+            "bandit_metadata_sha256": self.bandit_metadata_sha256,
         }
 
     @model_validator(mode="after")
     def validate_loaded_policy(self) -> "LoadedOraclePolicy":
-        if not self.semgrep_rules_path.is_absolute() or not self.bandit_config_path.is_absolute():
+        if (
+            not self.semgrep_rules_path.is_absolute()
+            or not self.bandit_config_path.is_absolute()
+            or not self.bandit_metadata_path.is_absolute()
+        ):
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
-        if self.semgrep_rules_path == self.bandit_config_path:
+        if len(
+            {self.semgrep_rules_path, self.bandit_config_path, self.bandit_metadata_path}
+        ) != 3:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         if hashlib.sha256(self.semgrep_rules_bytes).hexdigest() != self.semgrep_sha256:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         if hashlib.sha256(self.bandit_config_bytes).hexdigest() != self.bandit_sha256:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        if (
+            hashlib.sha256(self.bandit_metadata_bytes).hexdigest()
+            != self.bandit_metadata_sha256
+        ):
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         if canonical_sha256(self.lock_payload) != self.combined_sha256:
+            raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
+        if (
+            _parse_bandit_policy(
+                self.bandit_config_bytes,
+                self.bandit_metadata_bytes,
+            )
+            != self.bandit_constraints
+        ):
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         return self
 
@@ -286,28 +410,32 @@ def _require_contained_snapshot(
         raise ValueError(_POLICY_MESSAGE)
 
 
-def _reject_json_constant(value: str) -> None:
-    del value
-    raise ValueError(_POLICY_MESSAGE)
-
-
-def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(_POLICY_MESSAGE)
-        result[key] = value
-    return result
-
-
 def _parse_lock(payload: bytes) -> OraclePolicyLock:
-    text = payload.decode("utf-8", errors="strict")
-    raw = json.loads(
-        text,
-        object_pairs_hook=_strict_json_object,
-        parse_constant=_reject_json_constant,
-    )
+    raw = load_strict_json_bytes(payload)
     return OraclePolicyLock.model_validate(raw)
+
+
+def _parse_bandit_policy(
+    config_payload: bytes,
+    metadata_payload: bytes,
+) -> tuple[BanditFindingConstraint, ...]:
+    config = load_strict_json_bytes(config_payload)
+    metadata_raw = load_strict_json_bytes(metadata_payload)
+    if type(config) is not dict or set(config) != {"tests"}:
+        raise ValueError(_POLICY_MESSAGE)
+    tests = config.get("tests")
+    if type(tests) is not list or not tests:
+        raise ValueError(_POLICY_MESSAGE)
+    if any(type(item) is not str for item in tests):
+        raise ValueError(_POLICY_MESSAGE)
+    test_ids = tuple(tests)
+    if test_ids != tuple(sorted(set(test_ids))):
+        raise ValueError(_POLICY_MESSAGE)
+    metadata = BanditPolicyMetadata.model_validate(metadata_raw)
+    constraint_ids = tuple(item.test_id for item in metadata.findings)
+    if metadata.bandit_version != BANDIT_VERSION or constraint_ids != test_ids:
+        raise ValueError(_POLICY_MESSAGE)
+    return metadata.findings
 
 
 def _load_policy_bundle(lock_path: str | Path) -> LoadedOraclePolicy:
@@ -317,17 +445,28 @@ def _load_policy_bundle(lock_path: str | Path) -> LoadedOraclePolicy:
     root = path.parent.resolve(strict=True)
     semgrep_path = _require_plain_components(root, lock.semgrep_rules)
     bandit_path = _require_plain_components(root, lock.bandit_config)
+    bandit_metadata_path = _require_plain_components(root, lock.bandit_metadata)
     semgrep_snapshot = _read_file_snapshot(semgrep_path, MAX_POLICY_FILE_BYTES)
     bandit_snapshot = _read_file_snapshot(bandit_path, MAX_POLICY_FILE_BYTES)
+    bandit_metadata_snapshot = _read_file_snapshot(
+        bandit_metadata_path,
+        MAX_POLICY_FILE_BYTES,
+    )
     _require_contained_snapshot(root, lock.semgrep_rules, semgrep_snapshot)
     _require_contained_snapshot(root, lock.bandit_config, bandit_snapshot)
+    _require_contained_snapshot(root, lock.bandit_metadata, bandit_metadata_snapshot)
     identities = {
         lock_snapshot.identity,
         semgrep_snapshot.identity,
         bandit_snapshot.identity,
+        bandit_metadata_snapshot.identity,
     }
-    if len(identities) != 3:
+    if len(identities) != 4:
         raise ValueError(_POLICY_MESSAGE)
+    constraints = _parse_bandit_policy(
+        bandit_snapshot.payload,
+        bandit_metadata_snapshot.payload,
+    )
     return LoadedOraclePolicy(
         schema_version=lock.schema_version,
         policy_name=lock.policy_name,
@@ -342,6 +481,11 @@ def _load_policy_bundle(lock_path: str | Path) -> LoadedOraclePolicy:
         bandit_config_path=bandit_snapshot.path,
         bandit_config_bytes=bandit_snapshot.payload,
         bandit_sha256=lock.bandit_sha256,
+        bandit_metadata=lock.bandit_metadata,
+        bandit_metadata_path=bandit_metadata_snapshot.path,
+        bandit_metadata_bytes=bandit_metadata_snapshot.payload,
+        bandit_metadata_sha256=lock.bandit_metadata_sha256,
+        bandit_constraints=constraints,
         combined_sha256=canonical_sha256(lock.model_dump(mode="json")),
     )
 
@@ -363,6 +507,8 @@ def load_policy_bundle(lock_path: str | Path) -> LoadedOraclePolicy:
 
 __all__ = [
     "BANDIT_VERSION",
+    "BanditFindingConstraint",
+    "BanditPolicyMetadata",
     "LoadedOraclePolicy",
     "MAX_POLICY_FILE_BYTES",
     "MAX_POLICY_LOCK_BYTES",

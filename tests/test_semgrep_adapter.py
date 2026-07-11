@@ -38,6 +38,7 @@ def _semgrep_document(
         "results": results,
         "errors": [],
         "paths": {"scanned": list(files)},
+        "skipped_rules": [],
         "time": {"forward_compatible": True},
         "engine_requested": "OSS",
     }
@@ -112,6 +113,7 @@ def test_semgrep_argv_is_exact_and_shell_free() -> None:
         "--disable-version-check",
         "--no-git-ignore",
         "--jobs=1",
+        "--disable-nosem",
         "--config",
         str(policy),
         str(target),
@@ -134,6 +136,7 @@ def test_semgrep_normalizes_findings_and_requires_full_coverage() -> None:
     assert located.cwe == "CWE-78"
     assert located.severity == "high"
     assert located.confidence == "not_provided"
+    assert located.message == "Semgrep reported a policy finding."
     assert (located.line, located.column, located.end_line, located.end_column) == (
         7,
         9,
@@ -144,6 +147,20 @@ def test_semgrep_normalizes_findings_and_requires_full_coverage() -> None:
     rendered = repr(report) + repr(located) + repr(located.record)
     assert "private source snippet" not in rendered
     assert "private fingerprint" not in rendered
+    assert "Untrusted input reaches" not in located.message
+
+
+def test_semgrep_discards_arbitrary_report_message() -> None:
+    secret = "PRIVATE-SEMGREP-REPORT-MESSAGE"
+    document = _semgrep_document()
+    document["results"][0]["extra"]["message"] = secret  # type: ignore[index]
+
+    report = _parse(json.dumps(document).encode("utf-8"))
+
+    finding = report.findings[0]
+    assert finding.message == "Semgrep reported a policy finding."
+    surfaces = (repr(report), repr(finding), repr(finding.record), str(finding.record))
+    assert all(secret not in surface for surface in surfaces)
 
 
 def test_semgrep_accepts_clean_report_and_windows_dot_prefix() -> None:
@@ -232,6 +249,66 @@ def test_semgrep_rejects_analyzer_errors_without_leaking_them() -> None:
         _parse(json.dumps(document).encode("utf-8"))
 
     _assert_invalid(exc_info.value, sentinel)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"version":"1.168.0","version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[]}',
+        b'{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"],"scanned":["code_a.py"]},"skipped_rules":[]}',
+        b'{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[],"time":NaN}',
+        b'{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[],"time":Infinity}',
+        '{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[]}'.encode("utf-16"),
+    ],
+)
+def test_semgrep_requires_strict_utf8_json_without_duplicates_or_nonfinite_numbers(
+    payload: bytes,
+) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(payload)
+
+    _assert_invalid(exc_info.value)
+
+
+def test_strict_json_duplicate_key_does_not_leak_private_value_to_error_frames() -> None:
+    secret = "PRIVATE-DUPLICATE-JSON-VALUE"
+    payload = (
+        '{"version":"1.168.0","results":[],"errors":[],'
+        '"paths":{"scanned":["code_a.py"]},"skipped_rules":[],'
+        f'"private":"{secret}","private":"{secret}"}}'
+    ).encode("utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(payload)
+
+    _assert_invalid(exc_info.value, secret)
+
+
+@pytest.mark.parametrize(
+    ("location", "value"),
+    [
+        ("skipped_rules", [{"id": "private-rule"}]),
+        ("paths.skipped", [{"path": "code_a.py", "reason": "ignored"}]),
+        ("extra.is_ignored", True),
+    ],
+)
+def test_semgrep_rejects_any_suppression_or_skipped_indicator(
+    location: str,
+    value: object,
+) -> None:
+    document = _semgrep_document()
+    document["skipped_rules"] = []
+    if location == "skipped_rules":
+        document["skipped_rules"] = value
+    elif location == "paths.skipped":
+        document["paths"]["skipped"] = value  # type: ignore[index]
+    else:
+        document["results"][0]["extra"]["is_ignored"] = value  # type: ignore[index]
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(json.dumps(document).encode("utf-8"))
+
+    _assert_invalid(exc_info.value)
 
 
 @pytest.mark.parametrize(

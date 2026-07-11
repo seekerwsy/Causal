@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "policy_name": "secaware-python-v1",
   "language": "python",
   "semgrep_version": "1.168.0",
@@ -7,5 +7,7 @@
   "semgrep_rules": "semgrep.yml",
   "semgrep_sha256": "c79fe8768e23368f26edaad8c42f6aed5c7fd14cfbe071d469a9ad8bf00a1aed",
   "bandit_config": "bandit.yml",
-  "bandit_sha256": "0ee03e3824c3b4d993af538b46e200e66cd953af1c4063e25f1d7ad6cbc31f8a"
+  "bandit_sha256": "488d3a94d711b4ff8add8fd4f2a8476a4228a118925cb9fb763d0096117c28db",
+  "bandit_metadata": "bandit-metadata.json",
+  "bandit_metadata_sha256": "99f4ad248398cc7b4ee01eafe120a069ab06c2815f1354c43ebe2cff771e37ff"
 }

@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,8 +16,10 @@ import yaml
 
 import secaware.oracle.policy as policy_module
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.oracle.bandit_adapter import bandit_argv, parse_bandit_report
 from secaware.oracle.policy import (
     BANDIT_VERSION,
+    BanditFindingConstraint,
     LoadedOraclePolicy,
     MAX_POLICY_FILE_BYTES,
     MAX_POLICY_LOCK_BYTES,
@@ -25,11 +28,17 @@ from secaware.oracle.policy import (
     SEMGREP_VERSION,
     load_policy_bundle,
 )
+from secaware.oracle.semgrep_adapter import parse_semgrep_report, semgrep_argv
 from secaware.pipeline.artifact import canonical_sha256
 
 
 _SEMGREP_BYTES = b"rules: []\n"
-_BANDIT_BYTES = b"tests: [B101]\n"
+_BANDIT_BYTES = b'{"tests":["B603"]}\n'
+_BANDIT_METADATA_BYTES = (
+    b'{"schema_version":"1.0","bandit_version":"1.9.4","findings":'
+    b'[{"test_id":"B603","cwe_ids":[78],"severities":["LOW"],'
+    b'"confidences":["HIGH"]}]}\n'
+)
 _CHECKED_IN_POLICY_DIRECTORY = (
     Path(__file__).resolve().parents[1] / "policies" / "oracle" / "python"
 )
@@ -50,6 +59,8 @@ def _lock_payload(**overrides: object) -> dict[str, object]:
         "semgrep_sha256": _sha256(_SEMGREP_BYTES),
         "bandit_config": "bandit.yml",
         "bandit_sha256": _sha256(_BANDIT_BYTES),
+        "bandit_metadata": "bandit-metadata.json",
+        "bandit_metadata_sha256": _sha256(_BANDIT_METADATA_BYTES),
     }
     payload.update(overrides)
     return payload
@@ -63,6 +74,7 @@ def _write_locked_policy(
     directory.mkdir(parents=True, exist_ok=True)
     directory.joinpath("semgrep.yml").write_bytes(_SEMGREP_BYTES)
     directory.joinpath("bandit.yml").write_bytes(_BANDIT_BYTES)
+    directory.joinpath("bandit-metadata.json").write_bytes(_BANDIT_METADATA_BYTES)
     payload = _lock_payload(**(lock_overrides or {}))
     lock_path = directory / "policy.lock.json"
     lock_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -156,8 +168,18 @@ def test_policy_bundle_requires_exact_hashes_versions_and_byte_snapshots(
     assert bundle.bandit_version == BANDIT_VERSION
     assert bundle.semgrep_rules_bytes == _SEMGREP_BYTES
     assert bundle.bandit_config_bytes == _BANDIT_BYTES
+    assert bundle.bandit_metadata_bytes == _BANDIT_METADATA_BYTES
     assert bundle.semgrep_sha256 == _sha256(_SEMGREP_BYTES)
     assert bundle.bandit_sha256 == _sha256(_BANDIT_BYTES)
+    assert bundle.bandit_metadata_sha256 == _sha256(_BANDIT_METADATA_BYTES)
+    assert bundle.bandit_constraints == (
+        BanditFindingConstraint(
+            test_id="B603",
+            cwe_ids=(78,),
+            severities=("LOW",),
+            confidences=("HIGH",),
+        ),
+    )
     assert bundle.combined_sha256 == canonical_sha256(bundle.lock_payload)
 
 
@@ -171,6 +193,53 @@ def test_changed_policy_is_a_hard_failure(tmp_path: Path) -> None:
     assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
 
 
+def test_changed_bandit_metadata_is_a_hard_failure(tmp_path: Path) -> None:
+    lock_path = _write_locked_policy(tmp_path)
+    lock_path.parent.joinpath("bandit-metadata.json").write_bytes(b"{}\n")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        load_policy_bundle(lock_path)
+
+    _assert_safe_policy_error(exc_info.value)
+
+
+def test_bandit_config_and_authenticated_metadata_must_cover_identical_ids(
+    tmp_path: Path,
+) -> None:
+    lock_path = _write_locked_policy(tmp_path)
+    config = b'{"tests":["B101","B603"]}\n'
+    (tmp_path / "bandit.yml").write_bytes(config)
+    lock_path.write_text(
+        json.dumps(_lock_payload(bandit_sha256=_sha256(config))),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        load_policy_bundle(lock_path)
+
+    _assert_safe_policy_error(exc_info.value)
+
+
+def test_bandit_metadata_uses_strict_json_without_duplicate_keys(
+    tmp_path: Path,
+) -> None:
+    lock_path = _write_locked_policy(tmp_path)
+    metadata = _BANDIT_METADATA_BYTES.replace(
+        b'"bandit_version":"1.9.4"',
+        b'"bandit_version":"1.9.4","bandit_version":"1.9.4"',
+    )
+    (tmp_path / "bandit-metadata.json").write_bytes(metadata)
+    lock_path.write_text(
+        json.dumps(_lock_payload(bandit_metadata_sha256=_sha256(metadata))),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        load_policy_bundle(lock_path)
+
+    _assert_safe_policy_error(exc_info.value)
+
+
 def test_oracle_policy_lock_is_strict_frozen_and_repr_safe() -> None:
     payload = _lock_payload(
         policy_name="repr-private-policy",
@@ -178,11 +247,13 @@ def test_oracle_policy_lock_is_strict_frozen_and_repr_safe() -> None:
         semgrep_sha256="a" * 64,
         bandit_config="repr/private-bandit.yml",
         bandit_sha256="b" * 64,
+        bandit_metadata="repr/private-bandit-metadata.json",
+        bandit_metadata_sha256="c" * 64,
     )
 
     lock = OraclePolicyLock.model_validate(payload)
 
-    assert lock.schema_version == "1.0"
+    assert lock.schema_version == "1.1"
     assert lock.language == "python"
     assert repr(lock) == "OraclePolicyLock()"
     assert all(
@@ -193,6 +264,7 @@ def test_oracle_policy_lock_is_strict_frozen_and_repr_safe() -> None:
             "private-bandit",
             "a" * 64,
             "b" * 64,
+            "c" * 64,
         )
     )
     with pytest.raises(ValidationError):
@@ -297,7 +369,10 @@ def test_loaded_policy_is_frozen_repr_safe_and_returns_isolated_lock_payload(
     assert loaded.lock_payload["semgrep_rules"] == "semgrep.yml"
 
 
-@pytest.mark.parametrize("forgery", ["bytes_copy", "construct", "extra"])
+@pytest.mark.parametrize(
+    "forgery",
+    ["bytes_copy", "constraint_copy", "construct", "extra"],
+)
 def test_loaded_policy_revalidation_rejects_model_copy_and_construct_forgery(
     tmp_path: Path,
     forgery: str,
@@ -308,6 +383,12 @@ def test_loaded_policy_revalidation_rejects_model_copy_and_construct_forgery(
         forged: object = valid.model_copy(
             update={"semgrep_rules_bytes": hidden[0].encode("utf-8")}
         )
+    elif forgery == "constraint_copy":
+        hidden = ("forged-bandit-constraint",)
+        forged_constraint = valid.bandit_constraints[0].model_copy(
+            update={"cwe_ids": (999,)},
+        )
+        forged = valid.model_copy(update={"bandit_constraints": (forged_constraint,)})
     elif forgery == "construct":
         hidden = (str(tmp_path), "semgrep.yml", "bandit.yml")
         payload = valid.model_dump(mode="python")
@@ -356,7 +437,10 @@ def test_lock_accepts_nested_relative_posix_policy_paths() -> None:
         "policy.yml\x00suffix",
     ],
 )
-@pytest.mark.parametrize("field", ["semgrep_rules", "bandit_config"])
+@pytest.mark.parametrize(
+    "field",
+    ["semgrep_rules", "bandit_config", "bandit_metadata"],
+)
 def test_lock_rejects_noncanonical_or_escaping_policy_paths(
     field: str,
     invalid_path: str,
@@ -375,6 +459,7 @@ def test_loader_resolves_valid_nested_policy_paths(tmp_path: Path) -> None:
     bandit_path.parent.mkdir(parents=True)
     semgrep_path.write_bytes(_SEMGREP_BYTES)
     bandit_path.write_bytes(_BANDIT_BYTES)
+    (tmp_path / "bandit-metadata.json").write_bytes(_BANDIT_METADATA_BYTES)
     lock_path = _write_lock_document(
         tmp_path,
         _lock_payload(
@@ -411,7 +496,10 @@ def test_loader_rejects_duplicate_or_lock_policy_file(
     _assert_safe_policy_error(exc_info.value, str(lock_path), duplicate_path)
 
 
-@pytest.mark.parametrize("policy_name", ["semgrep.yml", "bandit.yml"])
+@pytest.mark.parametrize(
+    "policy_name",
+    ["semgrep.yml", "bandit.yml", "bandit-metadata.json"],
+)
 def test_loader_rejects_policy_directory(tmp_path: Path, policy_name: str) -> None:
     lock_path = _write_locked_policy(tmp_path)
     target = tmp_path / policy_name
@@ -424,7 +512,10 @@ def test_loader_rejects_policy_directory(tmp_path: Path, policy_name: str) -> No
     _assert_safe_policy_error(exc_info.value, str(target))
 
 
-@pytest.mark.parametrize("policy_name", ["semgrep.yml", "bandit.yml"])
+@pytest.mark.parametrize(
+    "policy_name",
+    ["semgrep.yml", "bandit.yml", "bandit-metadata.json"],
+)
 def test_loader_rejects_policy_symlink(tmp_path: Path, policy_name: str) -> None:
     lock_path = _write_locked_policy(tmp_path)
     target = tmp_path / policy_name
@@ -501,6 +592,7 @@ def test_loader_rejects_windows_device_policy(tmp_path: Path) -> None:
     [
         ("semgrep.yml", b"private-tampered-semgrep-policy"),
         ("bandit.yml", b"private-tampered-bandit-policy"),
+        ("bandit-metadata.json", b"private-tampered-bandit-metadata"),
     ],
 )
 def test_loader_rejects_each_tampered_policy_without_leaking_bytes_or_hashes(
@@ -509,9 +601,12 @@ def test_loader_rejects_each_tampered_policy_without_leaking_bytes_or_hashes(
     replacement: bytes,
 ) -> None:
     lock_path = _write_locked_policy(tmp_path)
-    expected_hash = _sha256(
-        _SEMGREP_BYTES if policy_name == "semgrep.yml" else _BANDIT_BYTES
-    )
+    expected_payloads = {
+        "semgrep.yml": _SEMGREP_BYTES,
+        "bandit.yml": _BANDIT_BYTES,
+        "bandit-metadata.json": _BANDIT_METADATA_BYTES,
+    }
+    expected_hash = _sha256(expected_payloads[policy_name])
     actual_hash = _sha256(replacement)
     target = tmp_path / policy_name
     target.write_bytes(replacement)
@@ -668,6 +763,7 @@ def test_combined_digest_is_stable_across_json_key_order_and_formatting(
     second.mkdir()
     second.joinpath("semgrep.yml").write_bytes(_SEMGREP_BYTES)
     second.joinpath("bandit.yml").write_bytes(_BANDIT_BYTES)
+    second.joinpath("bandit-metadata.json").write_bytes(_BANDIT_METADATA_BYTES)
     reverse_order = dict(reversed(tuple(_lock_payload().items())))
     second_lock = second / "policy.lock.json"
     second_lock.write_text(
@@ -692,20 +788,25 @@ def test_source_mutation_after_load_does_not_change_authenticated_snapshots(
     original = (
         loaded.semgrep_rules_bytes,
         loaded.bandit_config_bytes,
+        loaded.bandit_metadata_bytes,
         loaded.semgrep_sha256,
         loaded.bandit_sha256,
+        loaded.bandit_metadata_sha256,
         loaded.combined_sha256,
     )
 
     (tmp_path / "semgrep.yml").write_bytes(b"post-load-semgrep-mutation")
     (tmp_path / "bandit.yml").write_bytes(b"post-load-bandit-mutation")
+    (tmp_path / "bandit-metadata.json").write_bytes(b"post-load-metadata-mutation")
     lock_path.write_text("post-load-lock-mutation", encoding="utf-8")
 
     assert (
         loaded.semgrep_rules_bytes,
         loaded.bandit_config_bytes,
+        loaded.bandit_metadata_bytes,
         loaded.semgrep_sha256,
         loaded.bandit_sha256,
+        loaded.bandit_metadata_sha256,
         loaded.combined_sha256,
     ) == original
 
@@ -748,7 +849,10 @@ def test_loader_clears_hostile_path_object_from_error_frames() -> None:
         assert all(id(value) != id(candidate) for value in frame_locals.values())
 
 
-@pytest.mark.parametrize("policy_name", ["semgrep.yml", "bandit.yml"])
+@pytest.mark.parametrize(
+    "policy_name",
+    ["semgrep.yml", "bandit.yml", "bandit-metadata.json"],
+)
 def test_loader_rejects_policy_hardlink_to_file_outside_bundle(
     tmp_path: Path,
     policy_name: str,
@@ -945,6 +1049,7 @@ def test_loader_reads_policy_with_a_bounded_single_snapshot_call(
         MAX_POLICY_LOCK_BYTES + 1,
         MAX_POLICY_FILE_BYTES + 1,
         MAX_POLICY_FILE_BYTES + 1,
+        MAX_POLICY_FILE_BYTES + 1,
     ]
 
 
@@ -979,8 +1084,12 @@ def test_checked_in_policy_bundle_authenticates_exact_files_and_versions() -> No
     assert loaded.bandit_config_path == (
         _CHECKED_IN_POLICY_DIRECTORY / "bandit.yml"
     ).resolve()
+    assert loaded.bandit_metadata_path == (
+        _CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json"
+    ).resolve()
     assert loaded.semgrep_sha256 == _sha256(loaded.semgrep_rules_bytes)
     assert loaded.bandit_sha256 == _sha256(loaded.bandit_config_bytes)
+    assert loaded.bandit_metadata_sha256 == _sha256(loaded.bandit_metadata_bytes)
     assert loaded.combined_sha256 == canonical_sha256(loaded.lock_payload)
 
 
@@ -1028,9 +1137,37 @@ def test_checked_in_bandit_config_enables_bandit_native_tests_without_skips() ->
     config_path = _CHECKED_IN_POLICY_DIRECTORY / "bandit.yml"
     document = yaml.safe_load(config_path.read_bytes())
 
-    assert document == {"exclude_dirs": []}
-    assert "tests" not in document
+    metadata = json.loads(
+        (_CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json").read_bytes()
+    )
+
+    assert set(document) == {"tests"}
+    assert type(document["tests"]) is list
+    assert len(document["tests"]) == 75
+    assert document["tests"] == sorted(set(document["tests"]))
+    assert document["tests"] == [item["test_id"] for item in metadata["findings"]]
     assert "skips" not in document
+
+
+def test_exact_bandit_registry_regenerates_checked_in_metadata_byte_for_byte() -> None:
+    if importlib.util.find_spec("bandit") is None:
+        pytest.skip("exact Bandit metadata generation is not enabled")
+    script = Path(__file__).resolve().parents[1] / "scripts" / "generate_bandit_policy_metadata.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--check",
+            str(_CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json"),
+        ],
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == b""
+    assert completed.stderr == b""
 
 
 def test_exact_semgrep_policy_distinguishes_safe_and_unsafe_yaml_loaders(
@@ -1068,6 +1205,7 @@ def test_exact_semgrep_policy_distinguishes_safe_and_unsafe_yaml_loaders(
         "unsafe_c_full_loader.py": "yaml.load(payload, Loader=yaml.CFullLoader)",
         "unsafe_unsafe_loader.py": "yaml.load(payload, Loader=yaml.UnsafeLoader)",
         "unsafe_c_unsafe_loader.py": "yaml.load(payload, Loader=yaml.CUnsafeLoader)",
+        "unsafe_nosemgrep.py": "yaml.load(payload)  # nosemgrep",
     }
     for filename, sink in samples.items():
         corpus.joinpath(filename).write_text(
@@ -1088,6 +1226,7 @@ def test_exact_semgrep_policy_distinguishes_safe_and_unsafe_yaml_loaders(
             "--disable-version-check",
             "--no-git-ignore",
             "--jobs=1",
+            "--disable-nosem",
             "--config",
             str(_CHECKED_IN_POLICY_DIRECTORY / "semgrep.yml"),
             str(corpus),
@@ -1114,4 +1253,93 @@ def test_exact_semgrep_policy_distinguishes_safe_and_unsafe_yaml_loaders(
         "unsafe_c_full_loader.py",
         "unsafe_unsafe_loader.py",
         "unsafe_c_unsafe_loader.py",
+        "unsafe_nosemgrep.py",
     }
+
+
+def test_exact_semgrep_disable_nosem_still_reports_and_normalizes_finding(
+    tmp_path: Path,
+) -> None:
+    configured_executable = os.environ.get("SECAWARE_TEST_SEMGREP")
+    if configured_executable is None:
+        pytest.skip("exact Semgrep suppression integration is not enabled")
+    executable = shutil.which(configured_executable)
+    if executable is None:
+        pytest.fail("configured Semgrep executable is unavailable")
+    source = tmp_path / "code_a.py"
+    source.write_text(
+        "import os\ncommand = input()\nos.system(command)  # nosemgrep\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    loaded = load_policy_bundle(
+        _CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json"
+    )
+    completed = subprocess.run(
+        semgrep_argv(
+            Path(executable),
+            loaded.semgrep_rules_path,
+            Path("."),
+        ),
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        timeout=120,
+    )
+
+    report = parse_semgrep_report(
+        completed.stdout,
+        returncode=completed.returncode,
+        expected_files={"code_a.py"},
+        version=loaded.semgrep_version,
+        policy_sha256=loaded.semgrep_sha256,
+    )
+
+    assert [finding.rule_id for finding in report.findings] == [
+        "secaware.python.command-injection"
+    ]
+
+
+def test_exact_bandit_ignore_nosec_still_reports_without_retaining_literal(
+    tmp_path: Path,
+) -> None:
+    configured_executable = os.environ.get("SECAWARE_TEST_BANDIT")
+    if configured_executable is None:
+        pytest.skip("exact Bandit suppression integration is not enabled")
+    executable = shutil.which(configured_executable)
+    if executable is None:
+        pytest.fail("configured Bandit executable is unavailable")
+    secret = "PRIVATE-REAL-B105-LITERAL"
+    source = tmp_path / "code_a.py"
+    source.write_text(
+        f'password = "{secret}"  # nosec B105\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    loaded = load_policy_bundle(
+        _CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json"
+    )
+    completed = subprocess.run(
+        bandit_argv(
+            Path(executable),
+            loaded.bandit_config_path,
+            Path("."),
+        ),
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        timeout=120,
+    )
+
+    report = parse_bandit_report(
+        completed.stdout,
+        returncode=completed.returncode,
+        expected_files={"code_a.py"},
+        version=loaded.bandit_version,
+        policy_sha256=loaded.bandit_sha256,
+        constraints=loaded.bandit_constraints,
+    )
+
+    assert [finding.rule_id for finding in report.findings] == ["B105"]
+    assert report.findings[0].message == "Bandit reported a policy finding."
+    assert secret not in repr(report)

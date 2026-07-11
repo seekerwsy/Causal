@@ -6,9 +6,30 @@ import pytest
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.bandit_adapter import bandit_argv, parse_bandit_report
+from secaware.oracle.policy import BanditFindingConstraint
 
 
 _POLICY_SHA256 = "b" * 64
+_CONSTRAINTS = (
+    BanditFindingConstraint(
+        test_id="B101",
+        cwe_ids=(703,),
+        severities=("LOW",),
+        confidences=("HIGH",),
+    ),
+    BanditFindingConstraint(
+        test_id="B105",
+        cwe_ids=(259,),
+        severities=("LOW",),
+        confidences=("MEDIUM",),
+    ),
+    BanditFindingConstraint(
+        test_id="B603",
+        cwe_ids=(78,),
+        severities=("LOW",),
+        confidences=("HIGH",),
+    ),
+)
 
 
 def _bandit_result() -> dict[str, object]:
@@ -22,7 +43,7 @@ def _bandit_result() -> dict[str, object]:
             "id": 78,
             "link": "https://cwe.mitre.org/data/definitions/78.html",
         },
-        "issue_severity": "MEDIUM",
+        "issue_severity": "LOW",
         "issue_text": "subprocess call uses untrusted input.",
         "line_number": 7,
         "line_range": [7],
@@ -67,6 +88,7 @@ def _parse(payload: bytes, *, returncode: object = 1, **kwargs: object):
         expected_files={"code_a.py"},
         version="1.9.4",
         policy_sha256=_POLICY_SHA256,
+        constraints=_CONSTRAINTS,
         **kwargs,
     )
 
@@ -125,6 +147,7 @@ def test_bandit_argv_is_exact_and_shell_free() -> None:
         "json",
         "-c",
         str(config),
+        "--ignore-nosec",
     )
 
 
@@ -141,8 +164,9 @@ def test_bandit_exit_one_with_findings_is_success() -> None:
     assert located.analyzer == "bandit"
     assert located.rule_id == "B603"
     assert located.cwe == "CWE-78"
-    assert located.severity == "medium"
+    assert located.severity == "low"
     assert located.confidence == "high"
+    assert located.message == "Bandit reported a policy finding."
     assert (located.line, located.column, located.end_line, located.end_column) == (
         7,
         9,
@@ -152,6 +176,44 @@ def test_bandit_exit_one_with_findings_is_success() -> None:
     assert located.record is report.canonical_findings[0]
     rendered = repr(report) + repr(located) + repr(located.record)
     assert "private source snippet" not in rendered
+    assert "subprocess call uses untrusted input" not in located.message
+
+
+def test_bandit_discards_private_b105_literal_and_report_message() -> None:
+    secret = "PRIVATE-B105-CREDENTIAL-LITERAL"
+    result = _bandit_result()
+    result.update(
+        test_id="B105",
+        issue_cwe={"id": 259, "link": "https://example.invalid"},
+        issue_severity="LOW",
+        issue_confidence="MEDIUM",
+        issue_text=f"Possible hardcoded password: '{secret}'",
+        code=f'password = "{secret}"',
+    )
+    report = _parse(_bandit_json(results=[result]))
+
+    finding = report.findings[0]
+    assert finding.message == "Bandit reported a policy finding."
+    surfaces = (repr(report), repr(finding), repr(finding.record), str(finding.record))
+    assert all(secret not in surface for surface in surfaces)
+
+
+def test_invalid_b105_report_does_not_leak_private_literal_to_error_frames() -> None:
+    secret = "PRIVATE-B105-INVALID-CREDENTIAL-LITERAL"
+    result = _bandit_result()
+    result.update(
+        test_id="B105",
+        issue_cwe={"id": 999},
+        issue_severity="LOW",
+        issue_confidence="MEDIUM",
+        issue_text=f"Possible hardcoded password: '{secret}'",
+        code=f'password = "{secret}"',
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(_bandit_json(results=[result]))
+
+    _assert_invalid(exc_info.value, secret)
 
 
 def test_bandit_exit_zero_with_clean_report_is_success_and_covers_windows_path() -> None:
@@ -248,6 +310,39 @@ def test_bandit_rejects_analyzer_errors_without_leaking_them() -> None:
 
 
 @pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"errors":[],"errors":[],"metrics":{},"results":[]}',
+        b'{"errors":[],"metrics":{"_totals":{"nosec":0,"nosec":0,"skipped_tests":0}},"results":[]}',
+        b'{"errors":[],"metrics":{"_totals":{"nosec":NaN}},"results":[]}',
+        b'{"errors":[],"metrics":{"_totals":{"nosec":Infinity}},"results":[]}',
+        '{"errors":[],"metrics":{},"results":[]}'.encode("utf-16"),
+    ],
+)
+def test_bandit_requires_strict_utf8_json_without_duplicates_or_nonfinite_numbers(
+    payload: bytes,
+) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(payload, returncode=0)
+
+    _assert_invalid(exc_info.value)
+
+
+@pytest.mark.parametrize(("metric", "value"), [("nosec", 1), ("skipped_tests", 1)])
+def test_bandit_rejects_any_suppression_or_skipped_test_metric(
+    metric: str,
+    value: int,
+) -> None:
+    document = _bandit_document()
+    document["metrics"]["code_a.py"][metric] = value  # type: ignore[index]
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(json.dumps(document).encode("utf-8"))
+
+    _assert_invalid(exc_info.value)
+
+
+@pytest.mark.parametrize(
     "metrics",
     [
         {"_totals": {}},
@@ -285,7 +380,7 @@ def test_bandit_rejects_finding_for_foreign_file() -> None:
     ("field", "value"),
     [
         ("test_id", "X603"),
-        ("test_id", "B9999"),
+        ("test_id", "B999"),
         ("issue_severity", "CRITICAL"),
         ("issue_confidence", "UNDEFINED"),
         ("issue_cwe", {"id": 0}),
@@ -330,6 +425,7 @@ def test_bandit_rejects_invalid_locked_provenance() -> None:
             expected_files={"code_a.py"},
             version="1.9.3",
             policy_sha256=_POLICY_SHA256,
+            constraints=_CONSTRAINTS,
         )
     with pytest.raises(SecAwareError) as policy_error:
         parse_bandit_report(
@@ -338,10 +434,33 @@ def test_bandit_rejects_invalid_locked_provenance() -> None:
             expected_files={"code_a.py"},
             version="1.9.4",
             policy_sha256="B" * 64,
+            constraints=_CONSTRAINTS,
         )
 
     _assert_code(version_error.value, ErrorCode.POLICY_MISMATCH)
     _assert_code(policy_error.value, ErrorCode.POLICY_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("test_id", "B999"),
+        ("issue_cwe", {"id": 89}),
+        ("issue_severity", "MEDIUM"),
+        ("issue_confidence", "LOW"),
+    ],
+)
+def test_bandit_rejects_findings_outside_authenticated_constraints(
+    field: str,
+    value: object,
+) -> None:
+    document = _bandit_document()
+    document["results"][0][field] = value  # type: ignore[index]
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(json.dumps(document).encode("utf-8"))
+
+    _assert_invalid(exc_info.value)
 
 
 def test_bandit_rejects_direct_input_over_bound() -> None:

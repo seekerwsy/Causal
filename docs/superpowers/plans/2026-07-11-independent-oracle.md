@@ -23,6 +23,7 @@
 - `src/secaware/config.py`, `src/secaware/pipeline/preflight.py`, `src/secaware/cli.py`: fail-closed configuration and pipeline integration.
 - `src/secaware/io/run_store.py`, `src/secaware/pipeline/manifest.py`: policy digest binding.
 - `policies/oracle/python/*`: checked-in finite policy bundle and lock.
+- `scripts/generate_bandit_policy_metadata.py`: exact-version development-time metadata generator.
 - `tests/test_oracle_*.py`: schema, policy, runner, adapter, engine, CLI, and publication tests.
 
 ### Task 1: Strict Oracle schemas and configuration
@@ -142,7 +143,7 @@ Expected: FAIL because no policy loader or bundle exists.
 
 ```python
 class OraclePolicyLock(SafeValidationMixin, VersionedModel):
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.1"]
     policy_name: str
     language: Literal["python"]
     semgrep_version: Literal["1.168.0"]
@@ -151,6 +152,8 @@ class OraclePolicyLock(SafeValidationMixin, VersionedModel):
     semgrep_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     bandit_config: str
     bandit_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    bandit_metadata: str
+    bandit_metadata_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 ```
 
 Resolve both policy paths relative to the lock, reject absolute paths and symlinks, verify containment and exact file digests, and return only resolved paths plus typed metadata. The Semgrep file contains a finite reviewed Python policy for command injection, SQL injection, unsafe deserialization, and path traversal. The Bandit file configures Bandit's analyzer tests and excludes only the temporary output directory metadata, not security tests.
@@ -283,15 +286,21 @@ Expected: FAIL because both files are stubs.
 ```python
 def semgrep_argv(executable: Path, policy: Path, target: Path) -> tuple[str, ...]:
     return (str(executable), "scan", "--json", "--metrics=off",
-            "--disable-version-check", "--no-git-ignore", "--jobs=1",
+            "--disable-version-check", "--no-git-ignore", "--jobs=1", "--disable-nosem",
             "--config", str(policy), str(target))
 
 
 def bandit_argv(executable: Path, config: Path, target: Path) -> tuple[str, ...]:
-    return (str(executable), "-r", str(target), "-f", "json", "-c", str(config))
+    return (str(executable), "-r", str(target), "-f", "json", "-c", str(config),
+            "--ignore-nosec")
 ```
 
 Parse JSON from bytes with an explicit size already enforced by the runner. Do not retain raw snippets or analyzer output. Normalize and sort findings by analyzer, opaque file, location, and rule ID. Semgrep must have exit 0 and no errors. Bandit accepts only exit 0 or 1 and must have an empty `errors` list.
+
+Parsing uses strict UTF-8 JSON with duplicate-key and non-finite-number rejection. Suppression and
+skip counters must be zero. Bandit findings are accepted only when they match the authenticated
+finite constraints loaded from the policy sidecar; analyzer messages are replaced by fixed generic
+canonical text.
 
 - [ ] **Step 4: Re-run adapter tests**
 

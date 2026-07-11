@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import re
 from typing import AbstractSet, Any
@@ -8,6 +7,7 @@ from typing import AbstractSet, Any
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.adapter import AnalyzerReport, LocatedAnalyzerFinding
 from secaware.oracle.policy import SEMGREP_VERSION
+from secaware.oracle.strict_json import load_strict_json_bytes
 from secaware.schema.oracle import AnalyzerFindingRecord, AnalyzerProvenanceRecord
 
 
@@ -16,6 +16,7 @@ _STAGE = "oracle_semgrep"
 _MESSAGE = "Semgrep report validation failed"
 _FAILED_MESSAGE = "Semgrep execution failed"
 _POLICY_MESSAGE = "Semgrep metadata does not match the locked policy"
+_CANONICAL_MESSAGE = "Semgrep reported a policy finding."
 _CWE_PATTERN = re.compile(r"CWE-[1-9][0-9]{0,5}\Z")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _RULE_METADATA = {
@@ -118,6 +119,8 @@ def _coverage(document: dict[str, Any]) -> tuple[str, ...] | None:
     paths = document.get("paths")
     if type(paths) is not dict:
         return None
+    if paths.get("skipped", []) != []:
+        return None
     scanned = paths.get("scanned")
     if type(scanned) is not list or not scanned:
         return None
@@ -139,7 +142,6 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
     end: tuple[int, int, int] | None = None
     extra: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
-    message: str | None = None
     cwe: str | None = None
     severity_name: str | None = None
     try:
@@ -157,15 +159,15 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
         if type(metadata_value) is not dict:
             return None
         metadata = metadata_value
-        message = _strict_text(extra.get("message"), maximum=4096)
         cwe = _strict_text(metadata.get("cwe"), maximum=32)
         severity_name = _strict_text(extra.get("severity"), maximum=16)
+        report_message = _strict_text(extra.get("message"), maximum=4096)
         if (
             path is None
             or rule_id is None
             or start is None
             or end is None
-            or message is None
+            or report_message is None
             or cwe is None
             or severity_name not in _SEVERITY
             or _CWE_PATTERN.fullmatch(cwe) is None
@@ -185,7 +187,7 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
             "column": start[1],
             "end_line": end[0],
             "end_column": end[1],
-            "message": message,
+            "message": _CANONICAL_MESSAGE,
         }
         record = AnalyzerFindingRecord.model_validate(finding_payload)
         located = LocatedAnalyzerFinding(path, record)
@@ -203,9 +205,9 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
         end = None
         extra = None
         metadata = None
-        message = None
         cwe = None
         severity_name = None
+        report_message = None
         extra_value = None
         metadata_value = None
         record = None
@@ -248,18 +250,27 @@ def _parse_document(
         expected = _expected_file_tuple(expected_files)
         if expected is None:
             raise _AdapterFailure
-        decoded = json.loads(payload)
+        decoded = load_strict_json_bytes(payload)
         if type(decoded) is not dict:
             raise _AdapterFailure
         document = decoded
         if document.get("version") != version:
             raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
-        if document.get("errors") != [] or type(document.get("results")) is not list:
+        if (
+            document.get("errors") != []
+            or document.get("skipped_rules") != []
+            or type(document.get("results")) is not list
+        ):
             raise _AdapterFailure
         covered = _coverage(document)
         if covered != expected:
             raise _AdapterFailure
         for result in document["results"]:
+            if (
+                type(result) is not dict
+                or result.get("extra", {}).get("is_ignored", False) is not False
+            ):
+                raise _AdapterFailure
             located = _finding(result)
             if located is None or located.opaque_file not in expected:
                 raise _AdapterFailure
@@ -312,6 +323,7 @@ def semgrep_argv(executable: Path, policy: Path, target: Path) -> tuple[str, ...
         "--disable-version-check",
         "--no-git-ignore",
         "--jobs=1",
+        "--disable-nosem",
         "--config",
         str(policy),
         str(target),

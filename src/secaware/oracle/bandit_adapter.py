@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import re
 from typing import AbstractSet, Any
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.adapter import AnalyzerReport, LocatedAnalyzerFinding
-from secaware.oracle.policy import BANDIT_VERSION
+from secaware.oracle.policy import BANDIT_VERSION, BanditFindingConstraint
+from secaware.oracle.strict_json import load_strict_json_bytes
 from secaware.schema.oracle import AnalyzerFindingRecord, AnalyzerProvenanceRecord
 
 
@@ -16,6 +16,7 @@ _STAGE = "oracle_bandit"
 _MESSAGE = "Bandit report validation failed"
 _FAILED_MESSAGE = "Bandit execution failed"
 _POLICY_MESSAGE = "Bandit metadata does not match the locked policy"
+_CANONICAL_MESSAGE = "Bandit reported a policy finding."
 _TEST_ID_PATTERN = re.compile(r"B[0-9]{3}\Z")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _SEVERITY = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high"}
@@ -94,10 +95,17 @@ def _coverage(document: dict[str, Any]) -> tuple[str, ...] | None:
         return None
     normalized: list[str] = []
     for path, values in metrics.items():
-        if path == "_totals":
-            continue
         if type(values) is not dict:
             return None
+        if values.get("nosec") != 0 or type(values.get("nosec")) is not int:
+            return None
+        if (
+            values.get("skipped_tests") != 0
+            or type(values.get("skipped_tests")) is not int
+        ):
+            return None
+        if path == "_totals":
+            continue
         item = _opaque_file(path)
         if item is None or item in normalized:
             return None
@@ -121,7 +129,10 @@ def _line_range(value: object, line_number: int) -> tuple[int, int] | None:
     return lines[0], lines[-1]
 
 
-def _finding(result: object) -> LocatedAnalyzerFinding | None:
+def _finding(
+    result: object,
+    constraints: dict[str, BanditFindingConstraint],
+) -> LocatedAnalyzerFinding | None:
     finding_payload: dict[str, object] = {}
     located: LocatedAnalyzerFinding | None = None
     path: str | None = None
@@ -135,6 +146,7 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
     end_column: int | None = None
     cwe_data: dict[str, Any] | None = None
     cwe_id: int | None = None
+    constraint: BanditFindingConstraint | None = None
     try:
         if type(result) is not dict:
             return None
@@ -154,6 +166,7 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
             return None
         cwe_data = cwe_value
         cwe_id = _strict_int(cwe_data.get("id"), minimum=1)
+        constraint = constraints.get(rule_id or "")
         if (
             path is None
             or rule_id is None
@@ -165,6 +178,10 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
             or column is None
             or end_column is None
             or cwe_id is None
+            or constraint is None
+            or cwe_id not in constraint.cwe_ids
+            or severity_name not in constraint.severities
+            or confidence_name not in constraint.confidences
             or (lines[0] == lines[1] and end_column < column)
         ):
             return None
@@ -179,7 +196,7 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
             "column": column + 1,
             "end_line": lines[1],
             "end_column": end_column + 1,
-            "message": message,
+            "message": _CANONICAL_MESSAGE,
         }
         record = AnalyzerFindingRecord.model_validate(finding_payload)
         located = LocatedAnalyzerFinding(path, record)
@@ -202,6 +219,7 @@ def _finding(result: object) -> LocatedAnalyzerFinding | None:
         end_column = None
         cwe_data = None
         cwe_id = None
+        constraint = None
         cwe_value = None
         record = None
 
@@ -213,6 +231,7 @@ def _parse_document(
     expected_files: AbstractSet[str],
     version: str,
     policy_sha256: str,
+    constraints: tuple[BanditFindingConstraint, ...],
     max_output_bytes: int,
 ) -> AnalyzerReport:
     document: dict[str, Any] | None = None
@@ -222,6 +241,7 @@ def _parse_document(
     covered: tuple[str, ...] | None = None
     result: object = None
     report: AnalyzerReport | None = None
+    constraint_map: dict[str, BanditFindingConstraint] = {}
     try:
         if type(returncode) is not int:
             raise _AdapterFailure
@@ -232,6 +252,15 @@ def _parse_document(
             or _SHA256_PATTERN.fullmatch(policy_sha256) is None
         ):
             raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
+        if type(constraints) is not tuple or not constraints:
+            raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
+        for constraint in constraints:
+            if type(constraint) is not BanditFindingConstraint:
+                raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
+            validated = BanditFindingConstraint.model_validate(constraint)
+            if validated.test_id in constraint_map:
+                raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
+            constraint_map[validated.test_id] = validated
         if (
             type(payload) is not bytes
             or not payload
@@ -243,7 +272,7 @@ def _parse_document(
         expected = _expected_file_tuple(expected_files)
         if expected is None:
             raise _AdapterFailure
-        decoded = json.loads(payload)
+        decoded = load_strict_json_bytes(payload)
         if type(decoded) is not dict:
             raise _AdapterFailure
         document = decoded
@@ -253,7 +282,7 @@ def _parse_document(
         if covered != expected:
             raise _AdapterFailure
         for result in document["results"]:
-            located = _finding(result)
+            located = _finding(result, constraint_map)
             if located is None or located.opaque_file not in expected:
                 raise _AdapterFailure
             findings.append(located)
@@ -283,6 +312,7 @@ def _parse_document(
         expected_files = frozenset()
         version = ""
         policy_sha256 = ""
+        constraints = ()
         document = None
         findings.clear()
         findings = []
@@ -296,6 +326,10 @@ def _parse_document(
         located = None
         keys = []
         provenance = None
+        constraint_map.clear()
+        constraint_map = {}
+        constraint = None
+        validated = None
 
 
 def bandit_argv(executable: Path, config: Path, target: Path) -> tuple[str, ...]:
@@ -307,6 +341,7 @@ def bandit_argv(executable: Path, config: Path, target: Path) -> tuple[str, ...]
         "json",
         "-c",
         str(config),
+        "--ignore-nosec",
     )
 
 
@@ -317,6 +352,7 @@ def parse_bandit_report(
     expected_files: AbstractSet[str],
     version: str,
     policy_sha256: str,
+    constraints: tuple[BanditFindingConstraint, ...],
     max_output_bytes: int = 64 * 1024 * 1024,
 ) -> AnalyzerReport:
     report: AnalyzerReport | None = None
@@ -328,6 +364,7 @@ def parse_bandit_report(
             expected_files=expected_files,
             version=version,
             policy_sha256=policy_sha256,
+            constraints=constraints,
             max_output_bytes=max_output_bytes,
         )
     except (KeyboardInterrupt, SystemExit):
@@ -341,6 +378,7 @@ def parse_bandit_report(
         expected_files = frozenset()
         version = ""
         policy_sha256 = ""
+        constraints = ()
     if failure_code is not None or report is None:
         report = None
         raise _safe_error(failure_code or ErrorCode.ANALYZER_INVALID_OUTPUT) from None

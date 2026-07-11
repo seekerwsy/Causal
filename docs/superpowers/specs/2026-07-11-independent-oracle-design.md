@@ -27,6 +27,8 @@ Each language policy is a checked-in bundle containing:
 
 - a Semgrep policy file;
 - a Bandit configuration file;
+- an authenticated Bandit finding-metadata sidecar containing the finite test-ID,
+  CWE, severity, and confidence constraints for the exact locked Bandit release;
 - a strict lock document naming the policy, supported language, exact analyzer versions, and the
   SHA-256 digest of each policy file.
 
@@ -76,6 +78,11 @@ strictly parsed, must reference only the opaque submitted files, and together mu
 input batch. Unknown fields may be ignored only where the analyzer explicitly documents forward
 compatible metadata; required fields, types, locations, severities, and rule identifiers are
 strict.
+
+Both analyzer commands disable source-level suppression (`nosemgrep` and `nosec`). Any non-empty
+skipped/suppression indicator in a report is invalid. JSON decoding is strict UTF-8 and rejects
+duplicate object keys and non-finite numbers at every nesting level. Analyzer-provided source
+snippets and messages are discarded; canonical findings use fixed analyzer-generic messages.
 
 ## Canonical result contract
 
