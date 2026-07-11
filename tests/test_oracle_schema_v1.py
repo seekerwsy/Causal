@@ -6,7 +6,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from secaware.config import OracleConfig
+from secaware.config import OpenAICompatibleConfig, OracleConfig
+from secaware.schema.generation import (
+    GenerationAttemptRecord,
+    GenerationProvenance,
+)
 from secaware.schema.oracle import (
     AnalyzerFindingRecord,
     AnalyzerProvenanceRecord,
@@ -86,15 +90,26 @@ def _validation_surfaces(error: ValidationError) -> tuple[str, ...]:
     )
 
 
-def _secaware_traceback_locals(error: BaseException) -> str:
-    retained: list[str] = []
+def _secaware_traceback_frames(
+    error: BaseException,
+) -> list[tuple[str, dict[str, object]]]:
+    retained: list[tuple[str, dict[str, object]]] = []
     current = error.__traceback__
     while current is not None:
         filename = current.tb_frame.f_code.co_filename.replace("\\", "/")
         if "/src/secaware/" in filename:
-            retained.append(repr(current.tb_frame.f_locals))
+            retained.append(
+                (current.tb_frame.f_code.co_name, dict(current.tb_frame.f_locals))
+            )
         current = current.tb_next
-    return "\n".join(retained)
+    return retained
+
+
+def _secaware_traceback_locals(error: BaseException) -> str:
+    return "\n".join(
+        repr(frame_locals)
+        for _, frame_locals in _secaware_traceback_frames(error)
+    )
 
 
 def _assert_safe_validation_error(error: ValidationError, *hidden: str) -> None:
@@ -503,3 +518,256 @@ def test_oracle_contracts_reject_unknown_fields() -> None:
 
     with pytest.raises(ValidationError):
         OracleRecord.model_validate(payload)
+
+
+def _validate_at_entrypoint(
+    model: type[Any],
+    payload: dict[str, object],
+    entrypoint: str,
+) -> object:
+    if entrypoint == "constructor":
+        return model(**payload)
+    if entrypoint == "model_validate":
+        return model.model_validate(payload)
+    if entrypoint == "model_validate_json":
+        return model.model_validate_json(json.dumps(payload))
+    return model.model_validate_strings(payload, strict=False)
+
+
+def _stringly_finding_payload() -> dict[str, object]:
+    payload = _finding_payload()
+    for field in ("line", "column", "end_line", "end_column"):
+        payload[field] = str(payload[field])
+    return payload
+
+
+def _stringly_attempt_payload() -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "request_id": f"req_{_REQUEST_DIGEST}",
+        "attempt": "1",
+        "outcome": "retry",
+        "error_code": "22",
+        "retryable": "true",
+        "backoff_seconds": "1.0",
+    }
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["constructor", "model_validate", "model_validate_json", "model_validate_strings"],
+)
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        pytest.param(
+            AnalyzerFindingRecord,
+            _stringly_finding_payload(),
+            id="oracle-finding-int-strings",
+        ),
+        pytest.param(
+            OracleRecord,
+            {
+                **_canonical_oracle_payload(),
+                "seed_id": "7",
+                "parse_ok": "true",
+                "functional_ok": "true",
+            },
+            id="oracle-record-int-bool-strings",
+        ),
+        pytest.param(
+            OracleConfig,
+            {
+                "timeout_seconds": "120.0",
+                "max_stdout_bytes": "1024",
+                "max_stderr_bytes": "1024",
+            },
+            id="oracle-config-float-int-strings",
+        ),
+        pytest.param(
+            GenerationAttemptRecord,
+            _stringly_attempt_payload(),
+            id="existing-attempt-int-float-bool-strings",
+        ),
+        pytest.param(
+            OpenAICompatibleConfig,
+            {
+                "base_url": "https://provider.invalid/v1",
+                "timeout_seconds": "60.0",
+            },
+            id="existing-provider-config-float-string",
+        ),
+    ],
+)
+def test_safe_models_reject_stringly_typed_primitives_at_every_entrypoint(
+    model: type[Any],
+    payload: dict[str, object],
+    entrypoint: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        _validate_at_entrypoint(model, payload, entrypoint)
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        pytest.param(
+            AnalyzerFindingRecord,
+            _finding_payload(),
+            id="oracle-finding",
+        ),
+        pytest.param(
+            OracleRecord,
+            _canonical_oracle_payload(),
+            id="oracle-record",
+        ),
+        pytest.param(
+            OracleConfig,
+            {
+                "timeout_seconds": 120.0,
+                "max_stdout_bytes": 1024,
+                "max_stderr_bytes": 1024,
+            },
+            id="oracle-config",
+        ),
+        pytest.param(
+            GenerationAttemptRecord,
+            {
+                "schema_version": "1.0",
+                "request_id": f"req_{_REQUEST_DIGEST}",
+                "attempt": 1,
+                "outcome": "retry",
+                "error_code": 22,
+                "retryable": True,
+                "backoff_seconds": 1.0,
+            },
+            id="existing-attempt",
+        ),
+    ],
+)
+def test_model_validate_strings_uses_strict_python_semantics_for_valid_payloads(
+    model: type[Any],
+    payload: dict[str, object],
+) -> None:
+    expected = model.model_validate(payload)
+
+    actual = model.model_validate_strings(payload, strict=False)
+
+    assert actual == expected
+
+
+def test_model_validate_strings_keeps_valid_string_only_fields() -> None:
+    provenance = AnalyzerProvenanceRecord.model_validate_strings(
+        _provenance_payload("semgrep"),
+        strict=False,
+    )
+    generation = GenerationProvenance.model_validate_strings(
+        {
+            "producer": "offline-import",
+            "producer_version": "1.0",
+            "source_batch_id": "batch-a",
+        },
+        strict=False,
+    )
+
+    assert provenance.version == "1.168.0"
+    assert generation.producer == "offline-import"
+
+
+def _frozen_assignment_case(
+    case: str,
+) -> tuple[object, str, str, tuple[str, ...]]:
+    replacement = f"{case}-replacement-frame-sentinel"
+    if case == "finding":
+        payload = _finding_payload()
+        payload.update(
+            rule_id="finding-rule-frame-sentinel",
+            cwe="CWE-finding-frame-sentinel",
+            message="finding-message-frame-sentinel",
+        )
+        record: object = AnalyzerFindingRecord.model_validate(payload)
+        return record, "message", replacement, (
+            "finding-rule-frame-sentinel",
+            "CWE-finding-frame-sentinel",
+            "finding-message-frame-sentinel",
+            replacement,
+        )
+    if case == "provenance":
+        payload = _provenance_payload("semgrep")
+        payload["version"] = "provenance-version-frame-sentinel"
+        record = AnalyzerProvenanceRecord.model_validate(payload)
+        return record, "version", replacement, (
+            "provenance-version-frame-sentinel",
+            replacement,
+        )
+    if case == "oracle":
+        payload = _canonical_oracle_payload(security_label="secure")
+        payload["prompt_id"] = "oracle-prompt-frame-sentinel"
+        record = OracleRecord.model_validate(payload)
+        return record, "prompt_id", replacement, (
+            "oracle-prompt-frame-sentinel",
+            replacement,
+        )
+    record = OracleConfig(
+        semgrep_executable="config-executable-frame-sentinel"
+    )
+    return record, "semgrep_executable", replacement, (
+        "config-executable-frame-sentinel",
+        replacement,
+    )
+
+
+@pytest.mark.parametrize("case", ["finding", "provenance", "oracle", "config"])
+def test_frozen_assignment_errors_clear_models_values_and_analyzer_output_from_frames(
+    case: str,
+) -> None:
+    record, field, replacement, hidden = _frozen_assignment_case(case)
+    original = getattr(record, field)
+
+    with pytest.raises(ValidationError) as exc_info:
+        setattr(record, field, replacement)
+
+    error = exc_info.value
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert getattr(record, field) == original
+    frames = _secaware_traceback_frames(error)
+    assignment_frames = [locals_ for name, locals_ in frames if name == "__setattr__"]
+    assert len(assignment_frames) == 1
+    assignment_locals = assignment_frames[0]
+    assert assignment_locals.get("self") is None
+    assert assignment_locals.get("name") == ""
+    assert assignment_locals.get("value") is None
+    for _, frame_locals in frames:
+        assert all(id(value) != id(record) for value in frame_locals.values())
+        rendered = repr(frame_locals)
+        assert all(value not in rendered for value in hidden)
+
+
+def test_analyzer_finding_repr_hides_raw_analyzer_output() -> None:
+    payload = _finding_payload()
+    payload.update(
+        analyzer="bandit",
+        rule_id="repr-private-rule",
+        cwe="CWE-repr-private",
+        severity="medium",
+        confidence="low",
+        message="repr-private-message",
+    )
+    finding = AnalyzerFindingRecord.model_validate(payload)
+
+    rendered = repr(finding)
+
+    for hidden in (
+        "bandit",
+        "repr-private-rule",
+        "CWE-repr-private",
+        "medium",
+        "low",
+        "repr-private-message",
+        "line=",
+        "column=",
+        "end_line=",
+        "end_column=",
+    ):
+        assert hidden not in rendered

@@ -37,16 +37,18 @@ class AnalyzerFindingRecord(SafeValidationMixin, VersionedModel):
     )
 
     schema_version: Literal["1.0"]
-    analyzer: Literal["semgrep", "bandit"]
-    rule_id: str = Field(min_length=1, max_length=256)
-    cwe: str = Field(min_length=1, max_length=32)
-    severity: Literal["low", "medium", "high"]
-    confidence: Literal["low", "medium", "high", "not_provided"]
-    line: StrictInt = Field(ge=1)
-    column: StrictInt = Field(ge=1)
-    end_line: StrictInt = Field(ge=1)
-    end_column: StrictInt = Field(ge=1)
-    message: str = Field(min_length=1, max_length=4096)
+    analyzer: Literal["semgrep", "bandit"] = Field(repr=False)
+    rule_id: str = Field(min_length=1, max_length=256, repr=False)
+    cwe: str = Field(min_length=1, max_length=32, repr=False)
+    severity: Literal["low", "medium", "high"] = Field(repr=False)
+    confidence: Literal["low", "medium", "high", "not_provided"] = Field(
+        repr=False
+    )
+    line: StrictInt = Field(ge=1, repr=False)
+    column: StrictInt = Field(ge=1, repr=False)
+    end_line: StrictInt = Field(ge=1, repr=False)
+    end_column: StrictInt = Field(ge=1, repr=False)
+    message: str = Field(min_length=1, max_length=4096, repr=False)
 
     @field_validator("rule_id", "cwe", "message")
     @classmethod

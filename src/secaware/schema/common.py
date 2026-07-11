@@ -79,15 +79,17 @@ class SafeValidationMixin:
         raise type(self)._safe_error()
 
     def __setattr__(self, name: str, value: object) -> None:
+        model_type = type(self)
         try:
             super().__setattr__(name, value)
         except Exception:
             pass
         else:
             return
+        self = None
         name = ""
         value = None
-        raise type(self)._safe_error()
+        raise model_type._safe_error()
 
     @classmethod
     def model_validate(
@@ -126,7 +128,8 @@ class SafeValidationMixin:
         **kwargs: Any,
     ) -> _SafeValidationModel:
         try:
-            return super().model_validate_strings(obj, **kwargs)
+            kwargs["strict"] = True
+            return cls.model_validate(obj, **kwargs)
         except Exception:
             pass
         obj = None
