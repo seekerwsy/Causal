@@ -491,6 +491,16 @@ def create_openai_compatible_provider(
             ErrorCode.CONFIG,
             "OpenAI-compatible provider configuration is unavailable",
         )
+    if not callable(sleeper):
+        factory_error = _provider_error(
+            ErrorCode.CONFIG,
+            "OpenAI-compatible provider configuration is unavailable",
+        )
+        config = None  # type: ignore[assignment]
+        trusted = None
+        environ = None
+        sleeper = None  # type: ignore[assignment]
+        raise factory_error
     environment = os.environ if environ is None else environ
     api_key: str | None = None
     candidate: object = None
@@ -553,11 +563,33 @@ def create_openai_compatible_provider(
             "OpenAI-compatible provider client could not be created",
         ) from None
 
-    return OpenAICompatibleProvider(
-        trusted,
-        client=client,
-        sleeper=sleeper,
-    )
+    provider: OpenAICompatibleProvider | None = None
+    provider_error: SecAwareError | None = None
+    try:
+        provider = OpenAICompatibleProvider(
+            trusted,
+            client=client,
+            sleeper=sleeper,
+        )
+    except SecAwareError as error:
+        provider_error = error
+    except Exception:
+        provider_error = _provider_error(
+            ErrorCode.CONFIG,
+            "OpenAI-compatible provider could not be created",
+        )
+    if provider_error is not None or provider is None:
+        if provider_error is None:
+            provider_error = _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider could not be created",
+            )
+        trusted = None  # type: ignore[assignment]
+        client = None
+        sleeper = None  # type: ignore[assignment]
+        openai_factory = None
+        raise provider_error
+    return provider
 
 
 __all__ = [

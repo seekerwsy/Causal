@@ -9,6 +9,7 @@ import traceback
 import pytest
 from pydantic import ValidationError
 
+import secaware.generation.openai_compatible_provider as provider_module
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.openai_compatible_provider import (
@@ -808,6 +809,100 @@ def test_provider_factory_uses_official_sdk_with_retries_disabled_and_keeps_no_k
     provider.generate(_request(), system_template=_SYSTEM)
 
 
+def test_factory_rejects_hostile_sleeper_before_env_or_client_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeper_sentinel = "factory-preflight-sleeper-sentinel"
+    environment_sentinel = "factory-preflight-environment-sentinel"
+    created_clients = 0
+    fake_openai = ModuleType("openai")
+
+    class HostileSleeper:
+        def __repr__(self) -> str:
+            return sleeper_sentinel
+
+    class GuardedEnvironment(dict[str, str]):
+        def __getitem__(self, key: str) -> str:
+            del key
+            raise AssertionError(environment_sentinel)
+
+    def forbidden_openai_factory(**kwargs: object) -> object:
+        nonlocal created_clients
+        del kwargs
+        created_clients += 1
+        raise AssertionError("factory-created-client-before-sleeper-validation")
+
+    fake_openai.OpenAI = forbidden_openai_factory  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        create_openai_compatible_provider(
+            _config(),
+            environ=GuardedEnvironment({_ENV_NAME: _API_KEY}),
+            sleeper=HostileSleeper(),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    assert created_clients == 0
+    _assert_safe_provider_error(
+        exc_info.value,
+        sleeper_sentinel,
+        environment_sentinel,
+        "factory-created-client-before-sleeper-validation",
+    )
+
+
+def test_factory_safely_wraps_final_provider_constructor_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_sentinel = "factory-final-client-api-key-sentinel"
+    sleeper_sentinel = "factory-final-sleeper-sentinel"
+    constructor_sentinel = "factory-final-constructor-sentinel"
+    fake_openai = ModuleType("openai")
+
+    class HostileClient:
+        def __repr__(self) -> str:
+            return client_sentinel
+
+    class HostileSleeper:
+        def __call__(self, delay: float) -> None:
+            del delay
+
+        def __repr__(self) -> str:
+            return sleeper_sentinel
+
+    def openai_factory(**kwargs: object) -> HostileClient:
+        del kwargs
+        return HostileClient()
+
+    def failing_provider_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError(constructor_sentinel)
+
+    fake_openai.OpenAI = openai_factory  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    monkeypatch.setattr(
+        provider_module,
+        "OpenAICompatibleProvider",
+        failing_provider_constructor,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        create_openai_compatible_provider(
+            _config(),
+            environ={_ENV_NAME: _API_KEY},
+            sleeper=HostileSleeper(),
+        )
+
+    assert exc_info.value.code is ErrorCode.CONFIG
+    _assert_safe_provider_error(
+        exc_info.value,
+        client_sentinel,
+        sleeper_sentinel,
+        constructor_sentinel,
+    )
+
+
 def test_factory_maps_missing_key_to_safe_auth_error() -> None:
     with pytest.raises(SecAwareError) as exc_info:
         create_openai_compatible_provider(_config(), environ={})
@@ -1214,4 +1309,31 @@ def test_api_optional_dependency_is_declared() -> None:
 
     contents = pyproject.read_text(encoding="utf-8")
 
-    assert 'api = ["openai>=1.40,<3"]' in contents
+    assert 'api = ["openai>=1.55.3,<3"]' in contents
+
+
+def test_minimum_supported_sdk_constructs_with_current_httpx_without_network() -> None:
+    openai = pytest.importorskip("openai")
+    httpx = pytest.importorskip("httpx")
+    from openai import OpenAI
+    from openai.resources.chat.completions import Completions
+
+    def numeric_version(value: str) -> tuple[int, int, int]:
+        major, minor, patch = value.split(".")[:3]
+        return int(major), int(minor), int(patch)
+
+    assert numeric_version(openai.__version__) >= (1, 55, 3)
+    assert numeric_version(httpx.__version__) >= (0, 28, 1)
+    client = OpenAI(
+        api_key="minimum-sdk-construction-placeholder",
+        base_url="https://provider.invalid/v1",
+        timeout=1.0,
+        max_retries=0,
+    )
+    try:
+        assert client.max_retries == 0
+        signature = inspect.signature(Completions.create)
+        assert "extra_body" in signature.parameters
+        assert "max_output_tokens" not in signature.parameters
+    finally:
+        client.close()
