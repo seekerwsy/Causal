@@ -18,12 +18,13 @@ than the rest of the Python package:
 
 | Runtime | Oracle execution |
 | --- | --- |
-| Windows | Supported when Job Object and Toolhelp process-control capabilities pass preflight. |
-| Linux | Supported when unprivileged user, PID, and mount namespaces and a private `/proc` mount pass preflight. |
+| Windows | Supported when a suspended helper completes Job assignment, Toolhelp thread discovery, resume, wait, and reap during preflight. |
+| Linux | Supported when sealed memfd/proc-fd checks, unprivileged user, PID, and mount namespaces, and a private `/proc` mount pass preflight. |
 | macOS, BSD, other POSIX systems | Unsupported; Oracle preflight fails with `ANALYZER_FAILED`. |
 | Linux with namespaces disabled or blocked | Unsupported; Oracle preflight fails with `ANALYZER_FAILED`. |
 
-`validate_analyzer_runtime()` performs this capability preflight without starting an analyzer.
+`validate_analyzer_runtime()` performs this capability preflight with only a fixed, short-lived
+helper; it never resolves or starts an analyzer.
 Oracle entry points must call it before analyzer validation and again before starting the Oracle
 stage. The general SecAware preflight and non-Oracle package components remain available on other
 platforms; there is no reduced-security Oracle fallback.

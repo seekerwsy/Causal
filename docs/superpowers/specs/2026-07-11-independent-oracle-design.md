@@ -56,11 +56,14 @@ The subprocess runner is injectable for tests and enforces:
 
 ### Runtime support matrix
 
-Oracle execution is supported on Windows only when a capability preflight verifies the Job Object
-and Toolhelp APIs required for suspended launch, process-tree containment, and controlled resume.
-It is supported on Linux only when a short-lived, analyzer-free probe can create an unprivileged
-user namespace, PID namespace, mount namespace, and private `/proc` mount. The probe is isolated,
-bounded, and fully reaped before preflight returns.
+Oracle execution is supported on Windows only when a fixed short-lived helper is created suspended,
+configured and assigned to a Job Object, located through Toolhelp, opened and resumed, then waited
+and reaped successfully. This catches nested-Job, permission, thread-discovery, and resume failures
+through the same calls used by analyzer execution. It is supported on Linux only when a short-lived,
+analyzer-free probe can create and fully seal a memfd, read it through `/proc/self/fd`, verify its
+size and hash, reject post-seal writes, and create an unprivileged user namespace, PID namespace,
+mount namespace, and private `/proc` mount. Probe processes, handles, and descriptors are bounded
+and fully cleaned before preflight returns, including exceptional control flow.
 
 macOS, BSD, other non-Linux POSIX systems, and Linux hosts where any required namespace or mount
 capability is disabled fail closed with `ANALYZER_FAILED` before analyzer launch. They never select

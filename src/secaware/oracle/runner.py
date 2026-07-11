@@ -35,9 +35,13 @@ _CAPTURE_CHUNK_BYTES = 64 * 1024
 _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 _RUNTIME_PROBE_TIMEOUT_SECONDS = 5.0
 _POPEN_CLASS = subprocess.Popen
+_WINDOWS_RUNTIME_PROBE_SOURCE = "pass"
 
 _LINUX_RUNTIME_PROBE_SOURCE = r"""
 import ctypes
+import errno
+import fcntl
+import hashlib
 import os
 import signal
 
@@ -50,6 +54,8 @@ MS_NOEXEC = 0x8
 MS_REC = 0x4000
 MS_PRIVATE = 0x40000
 PR_SET_PDEATHSIG = 1
+MFD_CLOEXEC = 0x1
+MFD_ALLOW_SEALING = 0x2
 
 
 def check(call):
@@ -70,7 +76,60 @@ def write(path, value):
         os.close(descriptor)
 
 
+def check_memfd():
+    sealed_fd = -1
+    proc_fd = -1
+    payload = b"secaware-runtime-capability"
+    try:
+        sealed_fd = os.memfd_create(
+            "secaware-runtime-probe",
+            MFD_CLOEXEC | MFD_ALLOW_SEALING,
+        )
+        remaining = payload
+        while remaining:
+            written = os.write(sealed_fd, remaining)
+            if written <= 0:
+                raise OSError("runtime capability unavailable")
+            remaining = remaining[written:]
+        os.lseek(sealed_fd, 0, os.SEEK_SET)
+        proc_fd = os.open(
+            f"/proc/self/fd/{sealed_fd}",
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
+        )
+        observed = os.read(proc_fd, len(payload) + 1)
+        if observed != payload or hashlib.sha256(observed).digest() != hashlib.sha256(payload).digest():
+            raise OSError("runtime capability unavailable")
+        required_seals = (
+            fcntl.F_SEAL_WRITE
+            | fcntl.F_SEAL_GROW
+            | fcntl.F_SEAL_SHRINK
+            | fcntl.F_SEAL_SEAL
+        )
+        fcntl.fcntl(sealed_fd, fcntl.F_ADD_SEALS, required_seals)
+        if fcntl.fcntl(sealed_fd, fcntl.F_GET_SEALS) & required_seals != required_seals:
+            raise OSError("runtime capability unavailable")
+        os.lseek(sealed_fd, 0, os.SEEK_SET)
+        try:
+            os.write(sealed_fd, b"X")
+        except OSError as error:
+            if error.errno != errno.EPERM:
+                raise
+        else:
+            raise OSError("sealed memfd remained writable")
+        if os.fstat(sealed_fd).st_size != len(payload):
+            raise OSError("runtime capability unavailable")
+        os.lseek(proc_fd, 0, os.SEEK_SET)
+        if hashlib.sha256(os.read(proc_fd, len(payload) + 1)).digest() != hashlib.sha256(payload).digest():
+            raise OSError("runtime capability unavailable")
+    finally:
+        if proc_fd >= 0:
+            os.close(proc_fd)
+        if sealed_fd >= 0:
+            os.close(sealed_fd)
+
+
 libc = ctypes.CDLL(None, use_errno=True)
+check_memfd()
 host_uid = os.getuid()
 host_gid = os.getgid()
 check(libc.unshare(CLONE_NEWUSER))
@@ -649,91 +708,85 @@ def _detect_runtime_platform() -> Literal["windows", "linux"] | None:
 def _probe_windows_runtime_capabilities() -> None:
     if _detect_runtime_platform() != "windows":
         raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-    import ctypes
-    from ctypes import wintypes
-
-    class _IoCounters(ctypes.Structure):
-        _fields_ = [
-            ("read_operations", ctypes.c_ulonglong),
-            ("write_operations", ctypes.c_ulonglong),
-            ("other_operations", ctypes.c_ulonglong),
-            ("read_bytes", ctypes.c_ulonglong),
-            ("write_bytes", ctypes.c_ulonglong),
-            ("other_bytes", ctypes.c_ulonglong),
-        ]
-
-    class _BasicLimitInformation(ctypes.Structure):
-        _fields_ = [
-            ("process_time", ctypes.c_longlong),
-            ("job_time", ctypes.c_longlong),
-            ("flags", wintypes.DWORD),
-            ("minimum_working_set", ctypes.c_size_t),
-            ("maximum_working_set", ctypes.c_size_t),
-            ("active_process_limit", wintypes.DWORD),
-            ("affinity", ctypes.c_size_t),
-            ("priority", wintypes.DWORD),
-            ("scheduling", wintypes.DWORD),
-        ]
-
-    class _ExtendedLimitInformation(ctypes.Structure):
-        _fields_ = [
-            ("basic", _BasicLimitInformation),
-            ("io", _IoCounters),
-            ("process_memory", ctypes.c_size_t),
-            ("job_memory", ctypes.c_size_t),
-            ("peak_process_memory", ctypes.c_size_t),
-            ("peak_job_memory", ctypes.c_size_t),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    kernel32.SetInformationJobObject.argtypes = [
-        wintypes.HANDLE,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-    ]
-    kernel32.SetInformationJobObject.restype = wintypes.BOOL
-    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-    kernel32.Thread32First.restype = wintypes.BOOL
-    kernel32.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-    kernel32.Thread32Next.restype = wintypes.BOOL
-    kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenThread.restype = wintypes.HANDLE
-    kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
-    kernel32.ResumeThread.restype = wintypes.DWORD
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    job = kernel32.CreateJobObjectW(None, None)
-    snapshot: object | None = None
+    owner = _ProcessOwner()
+    process: subprocess.Popen[bytes] | None = None
+    windows_job: _WindowsJob | None = None
+    interpreter_lease: _WindowsPathLease | None = None
+    argv: tuple[str, ...] = ()
+    cwd: Path | None = None
+    environment: dict[str, str] = {}
+    cleanup_control: BaseException | None = None
     cleanup_failed = False
+    had_active_exception = False
     try:
-        if not job:
+        executable = os.path.abspath(sys.executable)
+        if not Path(executable).is_absolute():
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        information = _ExtendedLimitInformation()
-        information.basic.flags = 0x00002000
-        if not kernel32.SetInformationJobObject(
-            job,
-            9,
-            ctypes.byref(information),
-            ctypes.sizeof(information),
-        ):
+        interpreter_lease = _open_windows_path_lease(Path(executable), directory=False)
+        if interpreter_lease is None:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        snapshot = kernel32.CreateToolhelp32Snapshot(0x4, 0)
-        if not snapshot or int(snapshot) == -1:
+        cwd = Path.cwd().resolve(strict=True)
+        argv = (executable, "-I", "-S", "-c", _WINDOWS_RUNTIME_PROBE_SOURCE)
+        environment = _minimal_environment(Path(executable), cwd)
+        _popen_process(
+            owner,
+            argv,
+            cwd=cwd,
+            environment=environment,
+            posix_launch=None,
+        )
+        process = owner.require()
+        windows_job = _create_windows_job(process)
+        if windows_job is None:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        _resume_windows_process(process)
+        if process.wait(timeout=_RUNTIME_PROBE_TIMEOUT_SECONDS) != 0:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
     finally:
-        if snapshot and int(snapshot) != -1:
-            cleanup_failed = not bool(kernel32.CloseHandle(snapshot))
-        if job:
-            cleanup_failed = not bool(kernel32.CloseHandle(job)) or cleanup_failed
-        snapshot = None
-        job = None
-        kernel32 = None
-        if cleanup_failed and not sys_exc_info_active():
+        had_active_exception = sys_exc_info_active()
+        try:
+            owner.terminate(windows_job)
+        except (KeyboardInterrupt, SystemExit) as control:
+            cleanup_control = control
+        except BaseException:
+            cleanup_failed = True
+        if windows_job is not None:
+            try:
+                windows_job.close()
+            except (KeyboardInterrupt, SystemExit) as control:
+                if cleanup_control is None:
+                    cleanup_control = control
+            except BaseException:
+                cleanup_failed = True
+        try:
+            owner.release()
+        except (KeyboardInterrupt, SystemExit) as control:
+            if cleanup_control is None:
+                cleanup_control = control
+        except BaseException:
+            cleanup_failed = True
+        if interpreter_lease is not None:
+            try:
+                interpreter_lease.close()
+            except (KeyboardInterrupt, SystemExit) as control:
+                if cleanup_control is None:
+                    cleanup_control = control
+            except BaseException:
+                cleanup_failed = True
+        owner = None  # type: ignore[assignment]
+        process = None
+        windows_job = None
+        interpreter_lease = None
+        argv = ()
+        cwd = None
+        environment = {}
+        executable = ""
+        if cleanup_control is not None and not had_active_exception:
+            raised_control = cleanup_control
+            cleanup_control = None
+            raise raised_control
+        cleanup_control = None
+        if cleanup_failed and not had_active_exception:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
 
 

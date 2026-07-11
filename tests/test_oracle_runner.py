@@ -122,6 +122,243 @@ def test_runtime_preflight_reports_windows_job_and_toolhelp_capabilities(
     )
 
 
+def test_windows_runtime_probe_runs_suspended_helper_through_full_control_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class Pipe:
+        def close(self) -> None:
+            events.append("pipe-close")
+
+    class ProbeProcess:
+        pid = 4242
+        stdout = Pipe()
+        stderr = Pipe()
+        returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == runner_module._RUNTIME_PROBE_TIMEOUT_SECONDS
+            events.append("wait")
+            self.returncode = 0
+            return 0
+
+    class ProbeJob:
+        def close(self) -> None:
+            events.append("job-close")
+
+    class ProbeLease:
+        def close(self) -> None:
+            events.append("lease-close")
+
+    process = ProbeProcess()
+    job = ProbeJob()
+    launched: dict[str, object] = {}
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
+
+    def launch(owner: object, argv: tuple[str, ...], **kwargs: object) -> None:
+        launched["argv"] = argv
+        launched.update(kwargs)
+        owner.process = process  # type: ignore[attr-defined]
+        events.append("launch")
+
+    def assign(candidate: object) -> object:
+        assert candidate is process
+        events.append("assign")
+        return job
+
+    def resume(candidate: object) -> None:
+        assert candidate is process
+        events.append("toolhelp-open-resume")
+
+    monkeypatch.setattr(runner_module, "_popen_process", launch)
+    monkeypatch.setattr(
+        runner_module,
+        "_open_windows_path_lease",
+        lambda path, directory: ProbeLease(),
+    )
+    monkeypatch.setattr(runner_module, "_create_windows_job", assign)
+    monkeypatch.setattr(runner_module, "_resume_windows_process", resume)
+
+    runner_module._probe_windows_runtime_capabilities()
+
+    assert launched["argv"] == (
+        sys.executable,
+        "-I",
+        "-S",
+        "-c",
+        runner_module._WINDOWS_RUNTIME_PROBE_SOURCE,
+    )
+    assert events[:4] == ["launch", "assign", "toolhelp-open-resume", "wait"]
+    assert "job-close" in events
+    assert "lease-close" in events
+    assert events.count("pipe-close") == 2
+
+
+@pytest.mark.parametrize("failure_boundary", ["assign", "open", "resume"])
+def test_windows_runtime_probe_failure_reaps_helper_without_analyzer_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_boundary: str,
+) -> None:
+    analyzer_marker = tmp_path / "private-analyzer.marker"
+    cleanup: list[object] = []
+
+    class ProbeProcess:
+        pid = 4343
+        stdout = None
+        stderr = None
+        returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    class ProbeJob:
+        def close(self) -> None:
+            cleanup.append("job")
+
+    process = ProbeProcess()
+    job = ProbeJob()
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
+
+    def launch(owner: object, argv: tuple[str, ...], **kwargs: object) -> None:
+        del kwargs
+        assert argv[-1] == runner_module._WINDOWS_RUNTIME_PROBE_SOURCE
+        owner.process = process  # type: ignore[attr-defined]
+
+    def assign(candidate: object) -> object:
+        assert candidate is process
+        if failure_boundary == "assign":
+            raise runner_module._RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        return job
+
+    def resume(candidate: object) -> None:
+        assert candidate is process
+        if failure_boundary in {"open", "resume"}:
+            raise runner_module._RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        analyzer_marker.write_text("unexpected", encoding="utf-8")
+
+    def terminate(candidate: object, windows_job: object) -> None:
+        cleanup.append((candidate, windows_job))
+        process.returncode = 1
+
+    monkeypatch.setattr(runner_module, "_popen_process", launch)
+    monkeypatch.setattr(runner_module, "_create_windows_job", assign)
+    monkeypatch.setattr(runner_module, "_resume_windows_process", resume)
+    monkeypatch.setattr(runner_module, "_terminate_and_wait", terminate)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_analyzer_runtime()
+
+    _assert_safe_error(exc_info.value, ErrorCode.ANALYZER_FAILED)
+    assert process.returncode == 1
+    assert not analyzer_marker.exists()
+    assert any(isinstance(item, tuple) and item[0] is process for item in cleanup)
+
+
+def test_windows_runtime_probe_preserves_keyboard_interrupt_and_scrubs_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal = KeyboardInterrupt("private-windows-runtime-probe")
+
+    class ProbeProcess:
+        pid = 4444
+        stdout = None
+        stderr = None
+        returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == runner_module._RUNTIME_PROBE_TIMEOUT_SECONDS
+            raise signal
+
+    class ProbeJob:
+        def close(self) -> None:
+            return None
+
+    process = ProbeProcess()
+    job = ProbeJob()
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
+
+    def launch(owner: object, argv: tuple[str, ...], **kwargs: object) -> None:
+        del argv, kwargs
+        owner.process = process  # type: ignore[attr-defined]
+
+    def terminate(candidate: object, windows_job: object) -> None:
+        assert candidate is process
+        assert windows_job is job
+        process.returncode = 1
+        raise OSError("private-cleanup-failure")
+
+    monkeypatch.setattr(runner_module, "_popen_process", launch)
+    monkeypatch.setattr(runner_module, "_create_windows_job", lambda candidate: job)
+    monkeypatch.setattr(runner_module, "_resume_windows_process", lambda candidate: None)
+    monkeypatch.setattr(runner_module, "_terminate_and_wait", terminate)
+
+    with pytest.raises(KeyboardInterrupt) as exc_info:
+        validate_analyzer_runtime()
+
+    assert exc_info.value is signal
+    assert process.returncode == 1
+    _assert_runner_frames_release_objects(signal, process, job)
+
+
+def test_linux_runtime_probe_source_requires_sealed_memfd_and_proc_fd() -> None:
+    source = runner_module._LINUX_RUNTIME_PROBE_SOURCE
+
+    for required in (
+        "os.memfd_create",
+        "MFD_ALLOW_SEALING",
+        "fcntl.F_ADD_SEALS",
+        "fcntl.F_SEAL_WRITE",
+        "fcntl.F_SEAL_GROW",
+        "fcntl.F_SEAL_SHRINK",
+        "fcntl.F_SEAL_SEAL",
+        'f"/proc/self/fd/{sealed_fd}"',
+        "hashlib.sha256",
+    ):
+        assert required in source
+
+
+def test_linux_seal_probe_failure_is_safe_and_reaps_without_analyzer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launched_source: list[str] = []
+
+    class FailedSealProbe:
+        returncode = 1
+
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == runner_module._RUNTIME_PROBE_TIMEOUT_SECONDS
+            return 1
+
+        def poll(self) -> int:
+            return 1
+
+    def launch(argv: tuple[str, ...], **kwargs: object) -> FailedSealProbe:
+        del kwargs
+        launched_source.append(argv[-1])
+        return FailedSealProbe()
+
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module, "_force_namespace_unavailable", lambda: False)
+    monkeypatch.setattr(runner_module.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(runner_module.Path, "is_dir", lambda self: True)
+    monkeypatch.setattr(runner_module.subprocess, "Popen", launch)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_analyzer_runtime()
+
+    _assert_safe_error(exc_info.value, ErrorCode.ANALYZER_FAILED)
+    assert launched_source == [runner_module._LINUX_RUNTIME_PROBE_SOURCE]
+    assert "fcntl.F_ADD_SEALS" in launched_source[0]
+
+
 def test_runtime_preflight_reports_linux_namespace_capabilities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
