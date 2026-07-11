@@ -287,6 +287,7 @@ Expected: FAIL because both files are stubs.
 def semgrep_argv(executable: Path, policy: Path, target: Path) -> tuple[str, ...]:
     return (str(executable), "scan", "--json", "--metrics=off",
             "--disable-version-check", "--no-git-ignore", "--jobs=1", "--disable-nosem",
+            "--no-rewrite-rule-ids",
             "--config", str(policy), str(target))
 
 

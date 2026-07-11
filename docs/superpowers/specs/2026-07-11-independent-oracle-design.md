@@ -83,6 +83,8 @@ Both analyzer commands disable source-level suppression (`nosemgrep` and `nosec`
 skipped/suppression indicator in a report is invalid. JSON decoding is strict UTF-8 and rejects
 duplicate object keys and non-finite numbers at every nesting level. Analyzer-provided source
 snippets and messages are discarded; canonical findings use fixed analyzer-generic messages.
+Semgrep rule-ID rewriting is disabled, and report rule IDs must exactly equal IDs in the locked
+policy; path-prefixed or suffix-matched IDs are invalid.
 
 ## Canonical result contract
 

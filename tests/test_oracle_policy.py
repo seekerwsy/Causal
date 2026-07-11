@@ -1300,6 +1300,45 @@ def test_exact_semgrep_disable_nosem_still_reports_and_normalizes_finding(
     ]
 
 
+def test_exact_semgrep_preserves_canonical_rule_id_across_config_paths(
+    tmp_path: Path,
+) -> None:
+    configured_executable = os.environ.get("SECAWARE_TEST_SEMGREP")
+    if configured_executable is None:
+        pytest.skip("exact Semgrep rule-ID integration is not enabled")
+    executable = shutil.which(configured_executable)
+    if executable is None:
+        pytest.fail("configured Semgrep executable is unavailable")
+    loaded = load_policy_bundle(
+        _CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json"
+    )
+    source = tmp_path / "code_a.py"
+    source.write_text(
+        "import os\ncommand = input()\nos.system(command)\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    configs = (
+        tmp_path / "rules.yml",
+        tmp_path / "nested" / "deep" / "renamed-policy.yml",
+    )
+    for config in configs:
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_bytes(loaded.semgrep_rules_bytes)
+        completed = subprocess.run(
+            semgrep_argv(Path(executable), config, Path(".")),
+            cwd=tmp_path,
+            check=False,
+            capture_output=True,
+            timeout=120,
+        )
+        assert completed.returncode == 0, completed.stderr
+        raw = json.loads(completed.stdout)
+        assert [result["check_id"] for result in raw["results"]] == [
+            "secaware.python.command-injection"
+        ]
+
+
 def test_exact_bandit_ignore_nosec_still_reports_without_retaining_literal(
     tmp_path: Path,
 ) -> None:

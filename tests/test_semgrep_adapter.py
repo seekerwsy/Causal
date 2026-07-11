@@ -19,7 +19,7 @@ def _semgrep_document(
     if results is None:
         results = [
             {
-                "check_id": "semgrep.secaware.python.command-injection",
+                "check_id": "secaware.python.command-injection",
                 "path": "code_a.py",
                 "start": {"line": 7, "col": 9, "offset": 80},
                 "end": {"line": 7, "col": 24, "offset": 95},
@@ -114,6 +114,7 @@ def test_semgrep_argv_is_exact_and_shell_free() -> None:
         "--no-git-ignore",
         "--jobs=1",
         "--disable-nosem",
+        "--no-rewrite-rule-ids",
         "--config",
         str(policy),
         str(target),
@@ -348,6 +349,10 @@ def test_semgrep_rejects_finding_for_foreign_file() -> None:
     ("mutation", "value"),
     [
         ("unknown_rule", "vendor.python.unknown-rule"),
+        (
+            "unknown_rule",
+            "unlocked.attacker.secaware.python.command-injection",
+        ),
         ("blank_rule", " "),
         ("unknown_severity", "CRITICAL"),
         ("invalid_cwe", "CWE-0"),
@@ -394,6 +399,23 @@ def test_semgrep_rejects_duplicate_normalized_finding() -> None:
         _parse(json.dumps(document).encode("utf-8"))
 
     _assert_invalid(exc_info.value)
+
+
+def test_semgrep_rejects_two_distinct_raw_ids_that_share_a_canonical_suffix() -> None:
+    first = _semgrep_document()["results"][0]  # type: ignore[index]
+    first["check_id"] = "first.unlocked.secaware.python.command-injection"
+    second = json.loads(json.dumps(first))
+    second.update(
+        check_id="second.unlocked.secaware.python.command-injection",
+        start={"line": 9, "col": 2, "offset": 120},
+        end={"line": 9, "col": 10, "offset": 128},
+    )
+    document = _semgrep_document(results=[first, second])
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _parse(json.dumps(document).encode("utf-8"))
+
+    _assert_invalid(exc_info.value, "first.unlocked", "second.unlocked")
 
 
 def test_semgrep_rejects_report_version_drift_and_invalid_provenance() -> None:

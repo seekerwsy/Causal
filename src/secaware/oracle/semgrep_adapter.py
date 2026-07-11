@@ -96,12 +96,7 @@ def _expected_file_tuple(expected_files: AbstractSet[str]) -> tuple[str, ...] | 
 
 def _canonical_rule_id(value: object) -> str | None:
     text = _strict_text(value, maximum=256)
-    if text is None:
-        return None
-    for rule_id in _RULE_METADATA:
-        if text == rule_id or text.endswith(f".{rule_id}"):
-            return rule_id
-    return None
+    return text if text in _RULE_METADATA else None
 
 
 def _coordinate(value: object) -> tuple[int, int, int] | None:
@@ -324,6 +319,7 @@ def semgrep_argv(executable: Path, policy: Path, target: Path) -> tuple[str, ...
         "--no-git-ignore",
         "--jobs=1",
         "--disable-nosem",
+        "--no-rewrite-rule-ids",
         "--config",
         str(policy),
         str(target),
