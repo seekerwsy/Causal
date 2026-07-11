@@ -682,6 +682,284 @@ def test_coordinate_failure_does_not_leak_source(
     assert secret not in _safe_surfaces(exc_info.value)
 
 
+@pytest.mark.parametrize("first_failure", ["false", "raise"])
+def test_windows_material_lease_retains_failed_handles_for_idempotent_retry(
+    first_failure: str,
+) -> None:
+    class Kernel32:
+        def __init__(self) -> None:
+            self.calls: list[int] = []
+            self.closed: list[int] = []
+
+        def CloseHandle(self, handle: int) -> bool:
+            self.calls.append(handle)
+            if len(self.calls) == 1:
+                if first_failure == "raise":
+                    raise OSError("private-close-error")
+                return False
+            self.closed.append(handle)
+            return True
+
+    kernel32 = Kernel32()
+    leases = aggregator_module._WindowsMaterialLeases([101, 202], kernel32)
+
+    with pytest.raises(OSError):
+        leases.close()
+
+    assert leases.handles == [101]
+    assert leases.kernel32 is kernel32
+
+    leases.close()
+
+    assert leases.handles == []
+    assert leases.kernel32 is None
+    assert kernel32.closed == [202, 101]
+    leases.close()
+
+
+@pytest.mark.parametrize("first_failure", ["false", "raise"])
+@pytest.mark.parametrize("runner_outcome", ["ordinary", "keyboard", "system"])
+def test_bounded_lease_cleanup_retries_after_runner_failure_or_control(
+    first_failure: str,
+    runner_outcome: str,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: LoadedOraclePolicy,
+) -> None:
+    kernels: list[object] = []
+    leases_seen: list[object] = []
+
+    class Kernel32:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.closed: set[int] = set()
+
+        def CloseHandle(self, handle: int) -> bool:
+            self.calls += 1
+            if self.calls == 1:
+                if first_failure == "raise":
+                    raise OSError("private-close-error")
+                return False
+            self.closed.add(handle)
+            return True
+
+    def lease_factory(batch: object) -> object:
+        del batch
+        kernel = Kernel32()
+        leases = aggregator_module._WindowsMaterialLeases([101, 202], kernel)
+        kernels.append(kernel)
+        leases_seen.append(leases)
+        return leases
+
+    monkeypatch.setattr(
+        aggregator_module,
+        "_open_windows_material_leases",
+        lease_factory,
+    )
+    control: KeyboardInterrupt | SystemExit | None = None
+    if runner_outcome == "keyboard":
+        control = KeyboardInterrupt("private-runner-control")
+    elif runner_outcome == "system":
+        control = SystemExit("private-runner-control")
+    runner = FakeRunner(
+        failure="semgrep" if runner_outcome == "ordinary" else None,
+        control=control,
+    )
+
+    if control is None:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_oracle_batch([_code()], policy, runner=runner)
+        assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    else:
+        with pytest.raises(type(control)) as exc_info:
+            run_oracle_batch([_code()], policy, runner=runner)
+        assert exc_info.value is control
+
+    assert len(kernels) == 1
+    assert kernels[0].closed == {101, 202}  # type: ignore[attr-defined]
+    assert leases_seen[0].handles == []  # type: ignore[attr-defined]
+    assert all(not path.exists() for path in runner.batch_dirs)
+
+
+def test_persistent_lease_cleanup_is_bounded_and_returns_only_safe_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    policy: LoadedOraclePolicy,
+) -> None:
+    secret = "persistent-private-close-error"
+    leases_seen: list[object] = []
+
+    class Kernel32:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def CloseHandle(self, handle: int) -> bool:
+            del handle
+            self.calls += 1
+            raise OSError(secret)
+
+    kernel = Kernel32()
+
+    def lease_factory(batch: object) -> object:
+        del batch
+        leases = aggregator_module._WindowsMaterialLeases([101, 202], kernel)
+        leases_seen.append(leases)
+        return leases
+
+    monkeypatch.setattr(
+        aggregator_module,
+        "_open_windows_material_leases",
+        lease_factory,
+    )
+    runner = FakeRunner()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_oracle_batch([_code()], policy, runner=runner)
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    assert exc_info.value.details == {}
+    assert secret not in _safe_surfaces(exc_info.value)
+    assert kernel.calls == 2 * aggregator_module._MAX_CLEANUP_ATTEMPTS
+    assert leases_seen[0].handles == [101, 202]  # type: ignore[attr-defined]
+    assert all(not path.exists() for path in runner.batch_dirs)
+
+
+@pytest.mark.parametrize("cleanup_outcome", ["ordinary", "keyboard", "system"])
+def test_bounded_rmtree_cleanup_retries_and_preserves_control_identity(
+    cleanup_outcome: str,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: LoadedOraclePolicy,
+) -> None:
+    original_remove = aggregator_module._remove_batch_tree
+    cleanup_control: KeyboardInterrupt | SystemExit | None = None
+    if cleanup_outcome == "keyboard":
+        cleanup_control = KeyboardInterrupt("private-cleanup-control")
+    elif cleanup_outcome == "system":
+        cleanup_control = SystemExit("private-cleanup-control")
+    calls = 0
+
+    def flaky_remove(root: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            if cleanup_control is not None:
+                raise cleanup_control
+            raise OSError("private-rmtree-error")
+        original_remove(root)
+
+    monkeypatch.setattr(aggregator_module, "_remove_batch_tree", flaky_remove)
+    runner = FakeRunner()
+
+    if cleanup_control is None:
+        records = run_oracle_batch([_code()], policy, runner=runner)
+        assert records[0].security_label is SecurityLabel.SECURE
+    else:
+        with pytest.raises(type(cleanup_control)) as exc_info:
+            run_oracle_batch([_code()], policy, runner=runner)
+        assert exc_info.value is cleanup_control
+
+    assert calls >= 2
+    assert all(not path.exists() for path in runner.batch_dirs)
+
+
+@pytest.mark.parametrize("runner_control", [False, True])
+def test_persistent_rmtree_failure_is_bounded_and_fail_closed(
+    runner_control: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: LoadedOraclePolicy,
+) -> None:
+    original_remove = aggregator_module._remove_batch_tree
+    secret = "persistent-private-rmtree-error"
+    control = KeyboardInterrupt("private-runner-control") if runner_control else None
+    calls = 0
+
+    def failing_remove(root: Path) -> None:
+        nonlocal calls
+        del root
+        calls += 1
+        raise OSError(secret)
+
+    monkeypatch.setattr(aggregator_module, "_remove_batch_tree", failing_remove)
+    runner = FakeRunner(control=control)
+    try:
+        if control is None:
+            with pytest.raises(SecAwareError) as exc_info:
+                run_oracle_batch([_code()], policy, runner=runner)
+            assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+            assert exc_info.value.details == {}
+            assert secret not in _safe_surfaces(exc_info.value)
+        else:
+            with pytest.raises(KeyboardInterrupt) as exc_info:
+                run_oracle_batch([_code()], policy, runner=runner)
+            assert exc_info.value is control
+            cleanup_status = getattr(
+                control,
+                "__notes__",
+                getattr(control, aggregator_module._CLEANUP_STATUS_ATTRIBUTE, ()),
+            )
+            assert aggregator_module._CLEANUP_INCOMPLETE_NOTE in cleanup_status
+
+        assert calls == aggregator_module._MAX_CLEANUP_ATTEMPTS
+        assert runner.batch_dirs and all(path.exists() for path in runner.batch_dirs)
+    finally:
+        for root in runner.batch_dirs:
+            original_remove(root)
+
+
+def test_runner_control_wins_over_cleanup_control_and_cleanup_still_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+    policy: LoadedOraclePolicy,
+) -> None:
+    original_remove = aggregator_module._remove_batch_tree
+    runner_control = KeyboardInterrupt("private-runner-control")
+    cleanup_control = SystemExit("private-cleanup-control")
+    calls = 0
+
+    def flaky_remove(root: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise cleanup_control
+        original_remove(root)
+
+    monkeypatch.setattr(aggregator_module, "_remove_batch_tree", flaky_remove)
+    runner = FakeRunner(control=runner_control)
+
+    with pytest.raises(KeyboardInterrupt) as exc_info:
+        run_oracle_batch([_code()], policy, runner=runner)
+
+    assert exc_info.value is runner_control
+    cleanup_status = getattr(
+        runner_control,
+        "__notes__",
+        getattr(
+            runner_control,
+            aggregator_module._CLEANUP_STATUS_ATTRIBUTE,
+            (),
+        ),
+    )
+    assert aggregator_module._CLEANUP_CONTROL_NOTE in cleanup_status
+    assert calls >= 2
+    assert all(not path.exists() for path in runner.batch_dirs)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only deny-delete verification")
+def test_real_windows_material_lease_denies_delete_until_closed(
+    policy: LoadedOraclePolicy,
+) -> None:
+    validated = aggregator_module._snapshot_codes([_code()])
+    trusted_policy = aggregator_module._snapshot_policy(policy)
+    batch = aggregator_module._materialize_batch(validated, trusted_policy, "semgrep")
+    leases = aggregator_module._open_windows_material_leases(batch)
+    material = batch.root / batch.materials[0].name
+    try:
+        with pytest.raises(OSError):
+            material.unlink()
+    finally:
+        leases.close()
+        aggregator_module._remove_batch_tree(batch.root)
+
+    assert not batch.root.exists()
+
+
 def test_analyzers_receive_independent_batches_with_identical_sources(
     policy: LoadedOraclePolicy,
 ) -> None:

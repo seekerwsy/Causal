@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import stat
 import tempfile
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.adapter import AnalyzerReport, LocatedAnalyzerFinding
@@ -43,6 +43,10 @@ _MAX_STDOUT_BYTES = 256 * 1024 * 1024
 _MAX_STDERR_BYTES = 64 * 1024 * 1024
 _MAX_TIMEOUT_SECONDS = 3600.0
 _MAX_BATCH_RECORDS = 100_000
+_MAX_CLEANUP_ATTEMPTS = 3
+_CLEANUP_CONTROL_NOTE = "Oracle cleanup observed an additional control exception"
+_CLEANUP_INCOMPLETE_NOTE = "Oracle cleanup remained incomplete after bounded retries"
+_CLEANUP_STATUS_ATTRIBUTE = "_secaware_cleanup_status"
 
 
 class AnalyzerRunner(Protocol):
@@ -96,21 +100,126 @@ class _WindowsMaterialLeases:
 
     def close(self) -> None:
         kernel32 = self.kernel32
-        handles = self.handles
-        self.kernel32 = None
-        self.handles = []
-        if kernel32 is None:
+        handles = tuple(self.handles)
+        if not handles:
+            self.kernel32 = None
             return
+        if kernel32 is None:
+            raise OSError(_ENGINE_MESSAGE)
         first_error: BaseException | None = None
+        remaining: list[object] = []
         for handle in handles:
             try:
                 if not kernel32.CloseHandle(handle):  # type: ignore[attr-defined]
                     raise OSError(_ENGINE_MESSAGE)
             except BaseException as error:
+                remaining.append(handle)
                 if first_error is None:
                     first_error = error
+            finally:
+                handle = None
+        self.handles = remaining
+        if not remaining:
+            self.kernel32 = None
         if first_error is not None:
-            raise first_error
+            raised_error = first_error
+            first_error = None
+            raise raised_error
+
+
+def _add_safe_cleanup_note(
+    control: KeyboardInterrupt | SystemExit,
+    note: str,
+) -> None:
+    try:
+        add_note = getattr(control, "add_note", None)
+        if callable(add_note):
+            add_note(note)
+        else:
+            existing = getattr(control, _CLEANUP_STATUS_ATTRIBUTE, ())
+            if not isinstance(existing, tuple):
+                existing = ()
+            setattr(control, _CLEANUP_STATUS_ATTRIBUTE, (*existing, note))
+    except BaseException:
+        pass
+    finally:
+        control = None  # type: ignore[assignment]
+        note = ""
+        add_note = None
+        existing = ()
+
+
+def _bounded_cleanup(
+    action: Callable[[], None],
+    is_complete: Callable[[], bool],
+    control: KeyboardInterrupt | SystemExit | None,
+) -> tuple[KeyboardInterrupt | SystemExit | None, bool]:
+    """Best-effort cleanup with a fixed retry bound and control precedence.
+
+    A persistent ordinary OS failure is reported by the boolean result and is
+    later mapped to a safe ANALYZER_FAILED error.  A pre-existing control
+    exception retains identity; otherwise the first cleanup control exception
+    is propagated after all best-effort attempts have run.
+    """
+
+    cleanup_control: KeyboardInterrupt | SystemExit | None = None
+    complete = False
+    extra_control_noted = False
+    try:
+        for _attempt in range(_MAX_CLEANUP_ATTEMPTS):
+            try:
+                complete = bool(is_complete())
+            except (KeyboardInterrupt, SystemExit) as caught:
+                if control is None and cleanup_control is None:
+                    cleanup_control = caught
+                elif not extra_control_noted:
+                    _add_safe_cleanup_note(
+                        control or cleanup_control or caught,
+                        _CLEANUP_CONTROL_NOTE,
+                    )
+                    extra_control_noted = True
+                complete = False
+            except Exception:
+                complete = False
+            if complete:
+                break
+            try:
+                action()
+            except (KeyboardInterrupt, SystemExit) as caught:
+                if control is None and cleanup_control is None:
+                    cleanup_control = caught
+                elif not extra_control_noted:
+                    _add_safe_cleanup_note(
+                        control or cleanup_control or caught,
+                        _CLEANUP_CONTROL_NOTE,
+                    )
+                    extra_control_noted = True
+            except Exception:
+                pass
+        try:
+            complete = bool(is_complete())
+        except (KeyboardInterrupt, SystemExit) as caught:
+            if control is None and cleanup_control is None:
+                cleanup_control = caught
+            elif not extra_control_noted:
+                _add_safe_cleanup_note(
+                    control or cleanup_control or caught,
+                    _CLEANUP_CONTROL_NOTE,
+                )
+            complete = False
+        except Exception:
+            complete = False
+        effective_control = control or cleanup_control
+        if not complete and effective_control is not None:
+            _add_safe_cleanup_note(effective_control, _CLEANUP_INCOMPLETE_NOTE)
+        return effective_control, not complete
+    finally:
+        action = None  # type: ignore[assignment]
+        is_complete = None  # type: ignore[assignment]
+        control = None
+        cleanup_control = None
+        effective_control = None
+        _attempt = 0
 
 
 def _safe_error(code: ErrorCode, message: str) -> SecAwareError:
@@ -615,6 +724,8 @@ def _refresh_materialized_batch(batch: _MaterializedBatch) -> _MaterializedBatch
 def _open_windows_material_leases(batch: _MaterializedBatch) -> _WindowsMaterialLeases:
     leases = _WindowsMaterialLeases([], None)
     path: Path | None = None
+    cleanup_control: KeyboardInterrupt | SystemExit | None = None
+    cleanup_failed = False
     try:
         if os.name != "nt":
             return leases
@@ -651,15 +762,29 @@ def _open_windows_material_leases(batch: _MaterializedBatch) -> _WindowsMaterial
                 raise OSError(_ENGINE_MESSAGE)
             leases.handles.append(handle)
         return leases
-    except BaseException:
-        try:
-            leases.close()
-        except BaseException:
-            pass
+    except BaseException as error:
+        primary_control = (
+            error if isinstance(error, (KeyboardInterrupt, SystemExit)) else None
+        )
+        cleanup_control, cleanup_failed = _bounded_cleanup(
+            leases.close,
+            lambda: not leases.handles,
+            primary_control,
+        )
+        if cleanup_control is not None:
+            cleanup_control.__traceback__ = None
+            raised_control = cleanup_control
+            cleanup_control = None
+            raise raised_control
+        if cleanup_failed:
+            raise OSError(_ENGINE_MESSAGE) from None
         raise
     finally:
         batch = None  # type: ignore[assignment]
         path = None
+        primary_control = None
+        cleanup_control = None
+        cleanup_failed = False
 
 
 def _invoke_materialized_analyzer(
@@ -676,6 +801,7 @@ def _invoke_materialized_analyzer(
     failure: SecAwareError | None = None
     control: KeyboardInterrupt | SystemExit | None = None
     drift = False
+    cleanup_failed = False
     try:
         # Windows leases deny write/delete for the entire analyzer call.  Linux's
         # analyzer namespace currently uses cwd for HOME/TMP, so a read-only bind
@@ -708,18 +834,15 @@ def _invoke_materialized_analyzer(
             if not _verify_materialized_batch(batch):
                 drift = True
         except (KeyboardInterrupt, SystemExit) as error:
-            if control is None and failure is None:
+            if control is None:
                 control = error
         except Exception:
             drift = True
-        try:
-            leases.close()
-        except (KeyboardInterrupt, SystemExit) as error:
-            if control is None and failure is None:
-                control = error
-        except Exception:
-            if control is None and failure is None:
-                failure = _safe_error(ErrorCode.ANALYZER_FAILED, _ENGINE_MESSAGE)
+        control, cleanup_failed = _bounded_cleanup(
+            leases.close,
+            lambda: not leases.handles,
+            control,
+        )
         batch = None  # type: ignore[assignment]
         argv = ()
         timeout_seconds = 0.0
@@ -735,6 +858,10 @@ def _invoke_materialized_analyzer(
         raised_control = control
         control = None
         raise raised_control
+    if cleanup_failed:
+        result = None
+        failure = None
+        raise _safe_error(ErrorCode.ANALYZER_FAILED, _ENGINE_MESSAGE) from None
     if drift:
         result = None
         failure = None
@@ -766,6 +893,7 @@ def _run_private_analyzer_batch(
     failure: SecAwareError | None = None
     control: KeyboardInterrupt | SystemExit | None = None
     cleanup_failed = False
+    cleanup_root: Path | None = None
     try:
         batch = _materialize_batch(codes, policy, analyzer)
         argv = (
@@ -789,14 +917,12 @@ def _run_private_analyzer_batch(
         failure = _safe_error(ErrorCode.ANALYZER_FAILED, _ENGINE_MESSAGE)
     finally:
         if batch is not None:
-            try:
-                _remove_batch_tree(batch.root)
-            except (KeyboardInterrupt, SystemExit) as error:
-                if control is None and failure is None:
-                    control = error
-            except Exception:
-                if control is None and failure is None:
-                    cleanup_failed = True
+            cleanup_root = batch.root
+            control, cleanup_failed = _bounded_cleanup(
+                lambda: _remove_batch_tree(cleanup_root),  # type: ignore[arg-type]
+                lambda: cleanup_root is None or not cleanup_root.exists(),
+                control,
+            )
         analyzer = "semgrep"
         codes = ()
         policy = None  # type: ignore[assignment]
@@ -806,6 +932,7 @@ def _run_private_analyzer_batch(
         max_stderr_bytes = 0
         runner = None  # type: ignore[assignment]
         batch = None
+        cleanup_root = None
         argv = ()
     if control is not None:
         result = None
