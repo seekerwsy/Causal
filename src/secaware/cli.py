@@ -30,7 +30,7 @@ from secaware.generation.result_importer import (
     import_offline_results,
 )
 from secaware.intervention.operators import apply_intervention
-from secaware.io.jsonl import read_jsonl, write_jsonl
+from secaware.io.jsonl import canonical_jsonl_sha256, read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.logging_utils import console
 from secaware.oracle.aggregator import run_oracle as run_code_oracle
@@ -337,7 +337,7 @@ def _execute_generation_stage(
     stage: str,
     action: Callable[[], _ActionResult],
 ) -> _ActionResult:
-    failure: Exception
+    failure: BaseException
     try:
         return action()
     except SecAwareError as error:
@@ -353,9 +353,13 @@ def _execute_generation_stage(
             stage,
             "generation stage execution failed",
         )
+    except BaseException as error:
+        failure = error
     try:
-        store.invalidate_stage(stage)
+        store.abort_stage(stage)
     except SecAwareError as error:
+        if not isinstance(failure, Exception):
+            raise failure from None
         code = error.code
         retryable = error.retryable
     else:
@@ -411,17 +415,18 @@ def _require_committed_provider_generation_plan(
     condition: GenerationCondition,
     generation_stage: str,
     ledger: Path,
-) -> None:
+) -> str:
     plan_stage = f"plan-provider-generation-{condition}"
     plan_inputs = [store.path("inputs", "prompts.jsonl")]
     if condition == "counterfactual":
         plan_inputs.append(store.path("interventions", "interventions.jsonl"))
     try:
-        store.require_committed_stage(plan_stage, plan_inputs, [ledger])
+        output_sha256 = store.require_committed_stage(plan_stage, plan_inputs, [ledger])
     except SecAwareError:
         pass
     else:
-        return
+        if len(output_sha256) == 1:
+            return next(iter(output_sha256.values()))
     try:
         store.invalidate_stage(generation_stage)
     except SecAwareError:
@@ -673,7 +678,7 @@ def generate_provider_stage(
             f"generate-{condition}",
         ),
     )
-    _require_committed_provider_generation_plan(
+    expected_ledger_sha256 = _require_committed_provider_generation_plan(
         store,
         condition=condition,
         generation_stage=stage,
@@ -699,6 +704,24 @@ def generate_provider_stage(
                 allow_empty=False,
                 max_records=MAX_GENERATION_REQUESTS,
             )
+            if canonical_jsonl_sha256(requests, stage=stage) != expected_ledger_sha256:
+                raise _generation_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "provider generation request ledger changed after authorization",
+                )
+            current_ledger_sha256 = _require_committed_provider_generation_plan(
+                store,
+                condition=condition,
+                generation_stage=stage,
+                ledger=ledger,
+            )
+            if current_ledger_sha256 != expected_ledger_sha256:
+                raise _generation_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "provider generation request authorization changed during execution",
+                )
             if any(
                 candidate.condition != condition
                 or candidate.endpoint_type != "chat_completions"
@@ -711,6 +734,18 @@ def generate_provider_stage(
                     "provider generation request ledger is incompatible",
                 )
             provider = create_openai_compatible_provider(provider_config)
+            api_ledger_sha256 = _require_committed_provider_generation_plan(
+                store,
+                condition=condition,
+                generation_stage=stage,
+                ledger=ledger,
+            )
+            if api_ledger_sha256 != expected_ledger_sha256:
+                raise _generation_stage_error(
+                    ErrorCode.MANIFEST_CONFLICT,
+                    stage,
+                    "provider generation request authorization changed before API use",
+                )
             for request in requests:
                 candidate = provider.generate(  # type: ignore[attr-defined]
                     request,
@@ -777,13 +812,14 @@ def generate_provider_stage(
                 stage,
                 "provider generation failed validation",
             )
-        if failure is not None:
+        finally:
             requests.clear()
             code_records.clear()
             attempt_records.clear()
             request = None
             result = None
             provider = None
+        if failure is not None:
             raise failure from None
 
     _execute_generation_stage(store, stage, execute)

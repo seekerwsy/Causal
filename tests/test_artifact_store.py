@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.request_planner import plan_observed_requests
 from secaware.io import jsonl
-from secaware.io.jsonl import read_jsonl, write_jsonl
+from secaware.io.jsonl import canonical_jsonl_sha256, read_jsonl, write_jsonl
+from secaware.pipeline.artifact import sha256_file
 from secaware.schema.generation import GenerationParameters
 from secaware.schema.records import PromptRecord
 
@@ -281,6 +282,18 @@ def test_write_jsonl_creates_parent_and_atomically_publishes_records(
         {"value": 2},
     ]
     assert list(path.parent.glob("*.tmp")) == []
+
+
+def test_canonical_jsonl_digest_matches_published_bytes_and_binds_order(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "records.jsonl"
+    records = [ExampleRecord(value=1), {"value": 2}]
+
+    write_jsonl(path, records)
+
+    assert canonical_jsonl_sha256(records) == sha256_file(path)
+    assert canonical_jsonl_sha256(list(reversed(records))) != sha256_file(path)
 
 
 @pytest.mark.parametrize("forged_field", ["prompt", "parameters"])

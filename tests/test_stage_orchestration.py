@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import threading
@@ -61,6 +62,24 @@ def _record_report_stage(store: RunStore, input_path: Path, outputs: list[Path])
     manifest_path = store.path(".stages", "report.json")
     assert manifest_path.is_file()
     return manifest_path
+
+
+def _hold_stage_lease_until_process_exit(
+    config_payload: dict[str, object],
+    input_path: str,
+    output_path: str,
+    ready: object,
+    release: object,
+) -> None:
+    store = RunStore(AppConfig.model_validate(config_payload))
+    decision = store.should_skip_stage(
+        "report",
+        [Path(input_path)],
+        [Path(output_path)],
+        force=False,
+    )
+    ready.send(decision)  # type: ignore[attr-defined]
+    release.wait(timeout=10)  # type: ignore[attr-defined]
 
 
 def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig, RunStore]:
@@ -161,6 +180,21 @@ def test_committed_stage_and_output_gates_accept_a_valid_manifest(tmp_path: Path
     store.require_committed_output("report", [output_path])
 
     assert manifest_path.read_bytes() == before
+
+
+def test_committed_gates_return_defensive_output_hash_copies(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    _record_report_stage(store, input_path, [output_path])
+    expected = {"reports/result.txt": sha256_path(output_path)}
+
+    stage_hashes = store.require_committed_stage("report", [input_path], [output_path])
+    output_hashes = store.require_committed_output("report", [output_path])
+    stage_hashes["reports/result.txt"] = "0" * 64
+    output_hashes.clear()
+
+    assert store.require_committed_stage("report", [input_path], [output_path]) == expected
+    assert store.require_committed_output("report", [output_path]) == expected
 
 
 @pytest.mark.parametrize(
@@ -290,6 +324,213 @@ def test_same_stage_concurrent_decision_has_one_executor_and_one_conflict(
     assert sorted(outcomes) == ["error-40", "skip-False"]
     store.record_stage("report", [input_path], [output_path])
     assert store.path(".stages", "report.json").exists()
+
+
+def test_cross_instance_stage_lease_blocks_without_clearing_owner_state(
+    tmp_path: Path,
+) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    lock_path = owner.path(".stages", "report.lock")
+    secret = "private-cross-instance-lease-secret"
+
+    assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert lock_path.is_file()
+    inode = lock_path.stat().st_ino
+
+    with pytest.raises(SecAwareError) as decision_info:
+        contender.should_skip_stage("report", [input_path], [output_path], force=False)
+    with pytest.raises(SecAwareError) as invalidation_info:
+        contender.invalidate_stage("report")
+
+    assert decision_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert invalidation_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    _assert_manifest_error_is_safe(
+        decision_info.value,
+        str(owner.root),
+        str(os.getpid()),
+        secret,
+    )
+    assert owner.stage_is_active("report")
+
+    owner.record_stage("report", [input_path], [output_path])
+
+    assert secret.encode() not in lock_path.read_bytes()
+    assert str(os.getpid()).encode() not in lock_path.read_bytes()
+    assert contender.should_skip_stage("report", [input_path], [output_path], force=False)
+    assert lock_path.is_file()
+    assert lock_path.stat().st_ino == inode
+
+
+def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    manifest_path = _record_report_stage(owner, input_path, [output_path])
+    before = manifest_path.read_bytes()
+    entered = threading.Event()
+    release = threading.Event()
+    real_allows_skip = run_store_module.manifest_allows_skip
+    decision_errors: list[BaseException] = []
+
+    def hold_decision(*args: object, **kwargs: object) -> bool:
+        entered.set()
+        assert release.wait(timeout=5)
+        del args, kwargs
+        return False
+
+    monkeypatch.setattr(run_store_module, "manifest_allows_skip", hold_decision)
+
+    def decide() -> None:
+        try:
+            owner.should_skip_stage("report", [input_path], [output_path], force=False)
+        except BaseException as error:
+            decision_errors.append(error)
+
+    thread = threading.Thread(target=decide)
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(SecAwareError) as require_info:
+            contender.require_committed_stage("report", [input_path], [output_path])
+        with pytest.raises(SecAwareError) as invalidate_info:
+            contender.invalidate_stage("report")
+
+        assert require_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert invalidate_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert manifest_path.read_bytes() == before
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        monkeypatch.setattr(run_store_module, "manifest_allows_skip", real_allows_skip)
+
+    assert not thread.is_alive()
+    assert decision_errors == []
+    owner.abort_stage("report")
+
+
+@pytest.mark.parametrize("release_path", ["skip", "record", "reject", "invalidate", "abort"])
+def test_stage_lease_is_released_on_every_terminal_path(
+    tmp_path: Path,
+    release_path: str,
+) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    lock_path = owner.path(".stages", "report.lock")
+
+    if release_path == "skip":
+        _record_report_stage(owner, input_path, [output_path])
+        assert owner.should_skip_stage("report", [input_path], [output_path], force=False)
+    else:
+        assert owner.should_skip_stage(
+            "report", [input_path], [output_path], force=False
+        ) is False
+        if release_path == "record":
+            owner.record_stage("report", [input_path], [output_path])
+        elif release_path == "reject":
+            output_path.unlink()
+            with pytest.raises(SecAwareError):
+                owner.record_stage("report", [input_path], [output_path])
+            output_path.write_text("replacement\n", encoding="utf-8")
+        elif release_path == "invalidate":
+            owner.invalidate_stage("report")
+        else:
+            owner.abort_stage("report")
+
+    assert lock_path.is_file()
+    acquired = contender.should_skip_stage(
+        "report", [input_path], [output_path], force=release_path != "skip"
+    )
+    assert acquired is (release_path == "skip")
+    if not acquired:
+        contender.abort_stage("report")
+
+
+def test_closed_stage_lease_handle_allows_another_store_to_recover(
+    tmp_path: Path,
+) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+
+    assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    owner._stage_leases["report"].close()
+
+    assert contender.should_skip_stage(
+        "report", [input_path], [output_path], force=False
+    ) is False
+    contender.abort_stage("report")
+    owner.abort_stage("report")
+
+
+def test_stage_decision_baseexception_releases_lease_and_pending_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    input_path, output_path = _input_and_output(owner)
+    real_allows_skip = run_store_module.manifest_allows_skip
+
+    def interrupt_decision(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        raise KeyboardInterrupt("private-decision-interrupt")
+
+    monkeypatch.setattr(run_store_module, "manifest_allows_skip", interrupt_decision)
+
+    with pytest.raises(KeyboardInterrupt):
+        owner.should_skip_stage("report", [input_path], [output_path], force=False)
+
+    monkeypatch.setattr(run_store_module, "manifest_allows_skip", real_allows_skip)
+    assert not owner.stage_is_active("report")
+    assert contender.should_skip_stage(
+        "report", [input_path], [output_path], force=False
+    ) is False
+    contender.abort_stage("report")
+
+
+def test_stage_lease_is_released_automatically_when_owner_process_exits(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    context = multiprocessing.get_context("spawn")
+    receive_ready, send_ready = context.Pipe(duplex=False)
+    release = context.Event()
+    process = context.Process(
+        target=_hold_stage_lease_until_process_exit,
+        args=(
+            store.config.model_dump(mode="python"),
+            str(input_path),
+            str(output_path),
+            send_ready,
+            release,
+        ),
+    )
+    process.start()
+    send_ready.close()
+    assert receive_ready.poll(10)
+    assert receive_ready.recv() is False
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            store.should_skip_stage("report", [input_path], [output_path], force=False)
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    finally:
+        release.set()
+        process.join(timeout=10)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+        receive_ready.close()
+
+    assert process.exitcode == 0
+    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    store.abort_stage("report")
 
 
 def test_stage_inputs_rejects_a_missing_required_input(tmp_path: Path) -> None:

@@ -1,4 +1,6 @@
 from pathlib import Path
+import threading
+import time
 
 import pytest
 from typer.testing import CliRunner
@@ -87,6 +89,39 @@ def _prepared_store(
     store = RunStore(config)
     store.prepare()
     return config, store, prompts
+
+
+def _replacement_provider_requests(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    mutation: str,
+) -> list[GenerationRequestRecord]:
+    prompts = read_jsonl(
+        store.path("inputs", "prompts.jsonl"),
+        PromptRecord,
+        required=True,
+        allow_empty=False,
+    )
+    models = list(config.generation.models)
+    if mutation == "prompt":
+        payload = prompts[0].model_dump(mode="python")
+        payload["prompt"] = "Legitimate but unauthorized replacement prompt."
+        prompts[0] = PromptRecord.model_validate(payload)
+    elif mutation == "model":
+        models[0] = "legitimate-but-unauthorized-model"
+    provider_config = config.generation.openai_compatible
+    assert provider_config is not None
+    return cli_module.plan_observed_requests(
+        prompts,
+        models,
+        config.generation.seeds,
+        endpoint_type="chat_completions",
+        endpoint_identity=provider_config.base_url,
+        parameters=provider_config.parameters,
+        system_template=provider_config.system_template,
+        system_template_version=provider_config.system_template_version,
+    )
 
 
 def _intervention(prompt: PromptRecord) -> InterventionRecord:
@@ -471,6 +506,357 @@ def test_provider_generation_rejects_tampered_plan_without_calling_factory(
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert calls == 0
     assert not store.path(".stages", "generate-provider-observed.json").exists()
+
+
+@pytest.mark.parametrize("mutation", ["prompt", "model", "reordered"])
+def test_provider_generation_rejects_valid_ledger_swap_after_initial_plan_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    ledger = store.path("generation", "observed_requests.jsonl")
+    original = read_jsonl(
+        ledger,
+        GenerationRequestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    replacement = (
+        list(reversed(original))
+        if mutation == "reordered"
+        else _replacement_provider_requests(config, store, mutation=mutation)
+    )
+    real_should_skip = store.should_skip_stage
+
+    def decide_then_swap(
+        stage: str,
+        input_paths: list[Path],
+        output_paths: list[Path],
+        force: bool,
+    ) -> bool:
+        decision = real_should_skip(stage, input_paths, output_paths, force)
+        write_jsonl(ledger, replacement)
+        return decision
+
+    monkeypatch.setattr(store, "should_skip_stage", decide_then_swap)
+    calls = 0
+
+    def factory(provider_config: object) -> FakeProvider:
+        nonlocal calls
+        del provider_config
+        calls += 1
+        return FakeProvider()
+
+    monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        generate_provider_stage(config, store, condition="observed", force=False)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert calls == 0
+    assert not store.path(".stages", "generate-provider-observed.json").exists()
+
+
+def test_provider_generation_rechecks_plan_after_parsing_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    ledger = store.path("generation", "observed_requests.jsonl")
+    replacement = _replacement_provider_requests(config, store, mutation="model")
+    real_read = cli_module._read_generation_records
+
+    def read_then_swap(*args: object, **kwargs: object) -> list[object]:
+        records = real_read(*args, **kwargs)
+        if Path(args[0]) == ledger and args[1] is GenerationRequestRecord:
+            write_jsonl(ledger, replacement)
+        return records
+
+    monkeypatch.setattr(cli_module, "_read_generation_records", read_then_swap)
+    calls = 0
+
+    def factory(provider_config: object) -> FakeProvider:
+        nonlocal calls
+        del provider_config
+        calls += 1
+        return FakeProvider()
+
+    monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        generate_provider_stage(config, store, condition="observed", force=False)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert calls == 0
+
+
+def test_provider_generation_rejects_aba_ledger_snapshot_before_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    ledger = store.path("generation", "observed_requests.jsonl")
+    original_bytes = ledger.read_bytes()
+    replacement = _replacement_provider_requests(config, store, mutation="prompt")
+    real_read = cli_module._read_generation_records
+
+    def read_swapped_then_restore(*args: object, **kwargs: object) -> list[object]:
+        if Path(args[0]) != ledger or args[1] is not GenerationRequestRecord:
+            return real_read(*args, **kwargs)
+        write_jsonl(ledger, replacement)
+        try:
+            return real_read(*args, **kwargs)
+        finally:
+            ledger.write_bytes(original_bytes)
+
+    monkeypatch.setattr(cli_module, "_read_generation_records", read_swapped_then_restore)
+    calls = 0
+
+    def factory(provider_config: object) -> FakeProvider:
+        nonlocal calls
+        del provider_config
+        calls += 1
+        return FakeProvider()
+
+    monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        generate_provider_stage(config, store, condition="observed", force=False)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert calls == 0
+    assert ledger.read_bytes() == original_bytes
+
+
+def test_provider_generation_rechecks_plan_after_factory_before_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    ledger = store.path("generation", "observed_requests.jsonl")
+    replacement = _replacement_provider_requests(config, store, mutation="model")
+    provider = FakeProvider()
+    factory_calls = 0
+
+    def factory(provider_config: object) -> FakeProvider:
+        nonlocal factory_calls
+        del provider_config
+        factory_calls += 1
+        write_jsonl(ledger, replacement)
+        return provider
+
+    monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        generate_provider_stage(config, store, condition="observed", force=False)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert factory_calls == 1
+    assert provider.calls == []
+
+
+def test_two_run_stores_serialize_provider_generation_with_one_api_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts_path = tmp_path / "single-source-prompts.jsonl"
+    write_jsonl(prompts_path, [_prompt("prompt-only")])
+    payload = _config(tmp_path, prompts_path).model_dump(mode="python")
+    payload["generation"]["models"] = ["model-only"]  # type: ignore[index]
+    payload["generation"]["seeds"] = [1]  # type: ignore[index]
+    config = AppConfig.model_validate(payload)
+    owner = RunStore(config)
+    contender = RunStore(config)
+    owner.prepare()
+    plan_generation_stage(
+        config,
+        owner,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    call_lock = threading.Lock()
+    provider_calls = 0
+    factory_calls = 0
+
+    class BlockingProvider(FakeProvider):
+        def generate(
+            self,
+            request: GenerationRequestRecord,
+            system_template: str,
+        ) -> OpenAICompatibleGenerationResult:
+            nonlocal provider_calls
+            with call_lock:
+                provider_calls += 1
+            entered.set()
+            assert release.wait(timeout=5)
+            return super().generate(request, system_template)
+
+    provider = BlockingProvider()
+
+    def factory(provider_config: object) -> BlockingProvider:
+        nonlocal factory_calls
+        del provider_config
+        with call_lock:
+            factory_calls += 1
+        return provider
+
+    monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+    start = threading.Barrier(3)
+    done = [threading.Event(), threading.Event()]
+    outcomes: list[tuple[int, str]] = []
+
+    def run(index: int, store: RunStore) -> None:
+        start.wait()
+        try:
+            generate_provider_stage(config, store, condition="observed", force=False)
+        except SecAwareError as error:
+            outcome = f"error-{int(error.code)}"
+        else:
+            outcome = "success"
+        outcomes.append((index, outcome))
+        done[index].set()
+
+    threads = [
+        threading.Thread(target=run, args=(0, owner)),
+        threading.Thread(target=run, args=(1, contender)),
+    ]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    assert entered.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    while not any(event.is_set() for event in done) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert sum(event.is_set() for event in done) == 1
+    assert [outcome for _, outcome in outcomes] == ["error-40"]
+    assert provider_calls == 1
+    assert factory_calls == 1
+
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(outcome for _, outcome in outcomes) == ["error-40", "success"]
+    assert provider_calls == 1
+    assert factory_calls == 1
+
+    generate_provider_stage(config, owner, condition="observed", force=False)
+    generate_provider_stage(config, contender, condition="observed", force=False)
+
+    assert provider_calls == 1
+    assert factory_calls == 1
+
+
+def test_alternate_producer_cannot_invalidate_active_provider_generation(
+    tmp_path: Path,
+) -> None:
+    config, owner, _ = _prepared_store(tmp_path)
+    contender = RunStore(config)
+    plan_generation_stage(
+        config,
+        owner,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    stage = "generate-provider-observed"
+    ledger = owner.path("generation", "observed_requests.jsonl")
+    outputs = [
+        owner.path("generation", "observed_code.jsonl"),
+        owner.path("generation", "observed_attempts.jsonl"),
+    ]
+    assert owner.should_skip_stage(stage, [ledger], outputs, force=False) is False
+
+    with pytest.raises(SecAwareError) as exc_info:
+        cli_module._invalidate_alternate_generation_stages(
+            contender,
+            stage="import-generation-observed",
+            alternate_stages=(stage,),
+        )
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert owner.stage_is_active(stage)
+    owner.abort_stage(stage)
+
+
+@pytest.mark.parametrize("boundary", ["factory", "api"])
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_provider_generation_baseexception_releases_lease_and_can_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    signal_type: type[BaseException],
+) -> None:
+    config, store, _ = _prepared_store(tmp_path)
+    plan_generation_stage(
+        config,
+        store,
+        condition="observed",
+        mode="provider",
+        force=False,
+    )
+    stage = "generate-provider-observed"
+
+    class InterruptingProvider:
+        def generate(self, request: object, system_template: object) -> object:
+            del request, system_template
+            raise signal_type("private-provider-control-flow")
+
+    def factory(provider_config: object) -> object:
+        del provider_config
+        if boundary == "factory":
+            raise signal_type("private-factory-control-flow")
+        return InterruptingProvider()
+
+    monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+
+    with pytest.raises(signal_type):
+        generate_provider_stage(config, store, condition="observed", force=False)
+
+    assert not store.stage_is_active(stage)
+    assert not store.path(".stages", f"{stage}.json").exists()
+
+    monkeypatch.setattr(
+        cli_module,
+        "create_openai_compatible_provider",
+        lambda provider_config: FakeProvider(),
+    )
+    generate_provider_stage(config, store, condition="observed", force=False)
+
+    assert store.path(".stages", f"{stage}.json").exists()
 
 
 def test_provider_output_is_accepted_by_both_committed_downstream_gates(

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -201,6 +202,27 @@ def _serialize_record(
         path=path,
         line=line,
     ) from None
+
+
+def canonical_jsonl_sha256(
+    records: Iterable[BaseModel | dict],
+    *,
+    stage: str = "io",
+) -> str:
+    """Hash records using the exact canonical line serialization used by write_jsonl."""
+
+    digest = hashlib.sha256()
+    path = Path("canonical.jsonl")
+    for line_number, record in enumerate(records, start=1):
+        serialized = _serialize_record(
+            record,
+            path=path,
+            line=line_number,
+            stage=stage,
+        )
+        digest.update(serialized.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _write_contract_error(*, path: Path, stage: str) -> SecAwareError:

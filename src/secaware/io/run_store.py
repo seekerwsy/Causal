@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 import threading
-from typing import Any, Callable, TypeVar
+from typing import Any, BinaryIO, Callable, TypeVar
 
 from secaware import __version__
 from secaware.config import AppConfig, write_resolved_config
@@ -57,6 +57,7 @@ class RunStore:
         self.root = Path(config.run.output_dir)
         self._pending_snapshots: dict[str, _StageSnapshot] = {}
         self._sealed_outputs: dict[str, _StageOutputSeal] = {}
+        self._stage_leases: dict[str, BinaryIO] = {}
         self._state_lock = threading.RLock()
 
     def path(self, *parts: str) -> Path:
@@ -156,9 +157,99 @@ class RunStore:
             candidate,
         )
 
+    @staticmethod
+    def _safe_stage_name(stage: str) -> str:
+        return re.sub(r"[^A-Za-z0-9._-]+", "-", stage).strip(".-_") or "stage"
+
     def _manifest_path(self, stage: str) -> Path:
-        safe_stage = re.sub(r"[^A-Za-z0-9._-]+", "-", stage).strip(".-_") or "stage"
+        safe_stage = self._safe_stage_name(stage)
         return self.path(".stages", f"{safe_stage}.json")
+
+    def _lease_path(self, stage: str) -> Path:
+        safe_stage = self._safe_stage_name(stage)
+        return self.path(".stages", f"{safe_stage}.lock")
+
+    @staticmethod
+    def _lock_stage_handle(handle: BinaryIO) -> None:
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    @staticmethod
+    def _release_stage_handle(handle: BinaryIO) -> None:
+        if handle.closed:
+            return
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
+    def _open_stage_lease(self, stage: str) -> BinaryIO:
+        path = self._lease_path(stage)
+        handle: BinaryIO | None = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_symlink():
+                raise OSError
+            handle = path.open("a+b")
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._lock_stage_handle(handle)
+            return handle
+        except (OSError, ValueError):
+            if handle is not None:
+                try:
+                    handle.close()
+                except OSError:
+                    pass
+        raise self._manifest_conflict(
+            stage,
+            "stage execution lease is unavailable",
+        ) from None
+
+    def _owned_stage_lease(self, stage: str) -> BinaryIO | None:
+        handle = self._stage_leases.get(stage)
+        if handle is not None and handle.closed:
+            self._stage_leases.pop(stage, None)
+            return None
+        return handle
+
+    def _acquire_stage_lease(self, stage: str) -> None:
+        if self._owned_stage_lease(stage) is not None:
+            raise self._manifest_conflict(stage, "stage execution is already active")
+        self._stage_leases[stage] = self._open_stage_lease(stage)
+
+    def _release_stage_lease(self, stage: str) -> None:
+        handle = self._stage_leases.pop(stage, None)
+        if handle is not None:
+            self._release_stage_handle(handle)
+
+    def _temporary_stage_lease(self, stage: str) -> BinaryIO | None:
+        if self._owned_stage_lease(stage) is not None:
+            return None
+        return self._open_stage_lease(stage)
 
     def _invalidate_stage_manifest(self, stage: str) -> None:
         try:
@@ -173,8 +264,21 @@ class RunStore:
     def invalidate_stage(self, stage: str) -> None:
         """Remove any committed manifest and pending execution authorization."""
 
-        self._clear_stage_state(stage)
-        self._invalidate_stage_manifest(stage)
+        owned = self._owned_stage_lease(stage) is not None
+        temporary = None if owned else self._temporary_stage_lease(stage)
+        try:
+            self._clear_stage_state(stage)
+            self._invalidate_stage_manifest(stage)
+        finally:
+            if owned:
+                self._release_stage_lease(stage)
+            elif temporary is not None:
+                self._release_stage_handle(temporary)
+
+    def abort_stage(self, stage: str) -> None:
+        """Abort one stage execution and release its lease after invalidation."""
+
+        self.invalidate_stage(stage)
 
     def _clear_stage_state(self, stage: str) -> None:
         self._pending_snapshots.pop(stage, None)
@@ -184,11 +288,14 @@ class RunStore:
     def stage_is_active(self, stage: str) -> bool:
         """Return whether this store has an active execution for the stage."""
 
-        return stage in self._pending_snapshots or stage in self._sealed_outputs
+        return (
+            stage in self._pending_snapshots
+            or stage in self._sealed_outputs
+            or self._owned_stage_lease(stage) is not None
+        )
 
     def _reject_stage_record(self, stage: str, message: str) -> None:
-        self._clear_stage_state(stage)
-        self._invalidate_stage_manifest(stage)
+        self.invalidate_stage(stage)
         raise self._manifest_conflict(stage, message)
 
     @staticmethod
@@ -281,58 +388,69 @@ class RunStore:
         output_paths: Sequence[str | Path],
         *,
         input_paths: Sequence[str | Path] | None,
-    ) -> None:
+    ) -> dict[str, str]:
+        temporary_lease = self._temporary_stage_lease(stage)
         valid = False
+        committed_output_sha256: dict[str, str] = {}
         try:
-            outputs = [Path(path) for path in output_paths]
-            relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
-            manifest = read_stage_manifest(self._manifest_path(stage))
-            config = self.config.model_dump(mode="json")
-            inputs = (
-                manifest.inputs
-                if input_paths is None
-                else self.stage_inputs(input_paths)
-            )
-            current_output_sha256 = {
-                relative_path: sha256_path(output)
-                for relative_path, output in zip(
-                    relative_outputs,
-                    outputs,
-                    strict=True,
+            try:
+                outputs = [Path(path) for path in output_paths]
+                relative_outputs = [
+                    self._relative_path(path, kind="output") for path in outputs
+                ]
+                manifest = read_stage_manifest(self._manifest_path(stage))
+                config = self.config.model_dump(mode="json")
+                inputs = (
+                    manifest.inputs
+                    if input_paths is None
+                    else self.stage_inputs(input_paths)
                 )
-            }
-            valid = (
-                manifest.stage == stage
-                and manifest.inputs == inputs
-                and manifest.config_sha256 == canonical_sha256(config)
-                and manifest.code_version == __version__
-                and manifest.fingerprint == self._fingerprint_from_inputs(stage, inputs, config)
-                and manifest.outputs == relative_outputs
-                and manifest.output_sha256 == current_output_sha256
-            )
-        except (OSError, SecAwareError, TypeError, UnicodeError, ValueError):
-            pass
+                current_output_sha256 = {
+                    relative_path: sha256_path(output)
+                    for relative_path, output in zip(
+                        relative_outputs,
+                        outputs,
+                        strict=True,
+                    )
+                }
+                valid = (
+                    manifest.stage == stage
+                    and manifest.inputs == inputs
+                    and manifest.config_sha256 == canonical_sha256(config)
+                    and manifest.code_version == __version__
+                    and manifest.fingerprint
+                    == self._fingerprint_from_inputs(stage, inputs, config)
+                    and manifest.outputs == relative_outputs
+                    and manifest.output_sha256 == current_output_sha256
+                )
+                committed_output_sha256 = dict(manifest.output_sha256)
+            except (OSError, SecAwareError, TypeError, UnicodeError, ValueError):
+                pass
+        finally:
+            if temporary_lease is not None:
+                self._release_stage_handle(temporary_lease)
         if not valid:
             raise self._manifest_conflict(stage, "committed stage output verification failed")
+        return dict(committed_output_sha256)
 
     def require_committed_stage(
         self,
         stage: str,
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
-    ) -> None:
+    ) -> dict[str, str]:
         """Require a complete committed stage with current inputs and outputs."""
 
-        self._require_committed(stage, output_paths, input_paths=input_paths)
+        return self._require_committed(stage, output_paths, input_paths=input_paths)
 
     def require_committed_output(
         self,
         stage: str,
         output_paths: Sequence[str | Path],
-    ) -> None:
+    ) -> dict[str, str]:
         """Require a committed output without re-reading producer inputs."""
 
-        self._require_committed(stage, output_paths, input_paths=None)
+        return self._require_committed(stage, output_paths, input_paths=None)
 
     @_synchronized
     def seal_stage_outputs(
@@ -407,40 +525,58 @@ class RunStore:
         output_paths: Sequence[str | Path],
         force: bool,
     ) -> bool:
-        if stage in self._pending_snapshots or stage in self._sealed_outputs:
+        if (
+            stage in self._pending_snapshots
+            or stage in self._sealed_outputs
+            or self._owned_stage_lease(stage) is not None
+        ):
             raise self._manifest_conflict(stage, "stage execution is already active")
-        outputs = [Path(path) for path in output_paths]
-        relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
-        inputs = self.stage_inputs(input_paths)
-        config = self.config.model_dump(mode="json")
-        fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
-        self._pending_snapshots[stage] = _StageSnapshot(
-            stage=stage,
-            inputs=tuple(sorted(inputs.items())),
-            config_sha256=canonical_sha256(config),
-            fingerprint=fingerprint,
-            code_version=__version__,
-            outputs=tuple(relative_outputs),
-        )
-        allows_skip = manifest_allows_skip(
-            self._manifest_path(stage),
-            fingerprint,
-            outputs,
-            force=force,
-            manifest_outputs=relative_outputs,
-        )
-        if allows_skip:
-            self._clear_stage_state(stage)
-            return True
+        self._acquire_stage_lease(stage)
         try:
+            outputs = [Path(path) for path in output_paths]
+            relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+            inputs = self.stage_inputs(input_paths)
+            config = self.config.model_dump(mode="json")
+            fingerprint = self._fingerprint_from_inputs(stage, inputs, config)
+            self._pending_snapshots[stage] = _StageSnapshot(
+                stage=stage,
+                inputs=tuple(sorted(inputs.items())),
+                config_sha256=canonical_sha256(config),
+                fingerprint=fingerprint,
+                code_version=__version__,
+                outputs=tuple(relative_outputs),
+            )
+            allows_skip = manifest_allows_skip(
+                self._manifest_path(stage),
+                fingerprint,
+                outputs,
+                force=force,
+                manifest_outputs=relative_outputs,
+            )
+            if allows_skip:
+                self._clear_stage_state(stage)
+                self._release_stage_lease(stage)
+                return True
             self._invalidate_stage_manifest(stage)
-        except SecAwareError:
+        except BaseException:
             self._clear_stage_state(stage)
+            self._release_stage_lease(stage)
             raise
         return False
 
     @_synchronized
     def record_stage(
+        self,
+        stage: str,
+        input_paths: Sequence[str | Path],
+        output_paths: Sequence[str | Path],
+    ) -> None:
+        try:
+            self._record_stage(stage, input_paths, output_paths)
+        finally:
+            self._release_stage_lease(stage)
+
+    def _record_stage(
         self,
         stage: str,
         input_paths: Sequence[str | Path],
