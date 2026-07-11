@@ -77,23 +77,29 @@ def _safe_error(code: ErrorCode) -> SecAwareError:
 
 
 def _validate_analyzer_argv(argv: Sequence[str]) -> tuple[str, ...]:
-    if isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence):
-        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-    if not argv or len(argv) > _MAX_ARGV_ITEMS:
-        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
     validated: list[str] = []
     total_bytes = 0
-    for item in argv:
-        if type(item) is not str or not item or "\x00" in item:
+    item = ""
+    try:
+        if isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence):
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        try:
-            total_bytes += len(item.encode("utf-8", errors="strict"))
-        except UnicodeError:
-            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
-        if total_bytes > _MAX_ARG_BYTES:
+        if not argv or len(argv) > _MAX_ARGV_ITEMS:
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        validated.append(item)
-    return tuple(validated)
+        for item in argv:
+            if type(item) is not str or not item or "\x00" in item:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            try:
+                total_bytes += len(item.encode("utf-8", errors="strict"))
+            except UnicodeError:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
+            if total_bytes > _MAX_ARG_BYTES:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            validated.append(item)
+        return tuple(validated)
+    finally:
+        argv = ()
+        validated = []
+        item = ""
 
 
 def _validate_limits(
@@ -118,16 +124,22 @@ def _validate_limits(
 
 
 def _validate_cwd(cwd: Path) -> Path:
+    candidate: Path | None = None
     try:
         candidate = Path(os.path.abspath(os.fspath(cwd))).resolve(strict=True)
         if not candidate.is_dir():
             raise ValueError(_FAILED_MESSAGE)
+        return candidate
     except (OSError, TypeError, ValueError, RuntimeError):
         raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
-    return candidate
+    finally:
+        cwd = None  # type: ignore[assignment]
+        candidate = None
 
 
 def _resolve_analyzer_executable(value: str) -> Path:
+    resolved: str | None = None
+    candidate: Path | None = None
     try:
         resolved = shutil.which(value)
         if resolved is None:
@@ -135,45 +147,64 @@ def _resolve_analyzer_executable(value: str) -> Path:
         candidate = Path(resolved).resolve(strict=True)
         if not candidate.is_file():
             raise _RunnerFailure(ErrorCode.ANALYZER_MISSING)
+        return candidate
     except _RunnerFailure:
         raise
     except (OSError, TypeError, ValueError, RuntimeError):
         raise _RunnerFailure(ErrorCode.ANALYZER_MISSING) from None
-    return candidate
+    finally:
+        value = ""
+        resolved = None
+        candidate = None
 
 
 def _argv_sha256(argv: tuple[str, ...]) -> str:
-    payload = json.dumps(
-        argv,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8", errors="strict")
-    return hashlib.sha256(payload).hexdigest()
+    payload = b""
+    try:
+        payload = json.dumps(
+            argv,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8", errors="strict")
+        return hashlib.sha256(payload).hexdigest()
+    finally:
+        argv = ()
+        payload = b""
 
 
 def _minimal_environment(executable: Path, cwd: Path) -> dict[str, str]:
-    root = str(cwd)
-    environment = {
-        "HOME": root,
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-        "NO_COLOR": "1",
-        "PATH": str(executable.parent),
-        "PYTHONHASHSEED": "0",
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONUTF8": "1",
-        "SEMGREP_ENABLE_VERSION_CHECK": "0",
-        "SEMGREP_SEND_METRICS": "off",
-        "TEMP": root,
-        "TMP": root,
-        "USERPROFILE": root,
-    }
-    if os.name == "nt":
-        system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
-        if system_root:
-            environment["SYSTEMROOT"] = system_root
-            environment["WINDIR"] = system_root
-    return environment
+    root = ""
+    system_root: str | None = None
+    environment: dict[str, str] = {}
+    try:
+        root = str(cwd)
+        environment = {
+            "HOME": root,
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": str(executable.parent),
+            "PYTHONHASHSEED": "0",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+            "SEMGREP_ENABLE_VERSION_CHECK": "0",
+            "SEMGREP_SEND_METRICS": "off",
+            "TEMP": root,
+            "TMP": root,
+            "USERPROFILE": root,
+        }
+        if os.name == "nt":
+            system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+            if system_root:
+                environment["SYSTEMROOT"] = system_root
+                environment["WINDIR"] = system_root
+        return environment
+    finally:
+        executable = None  # type: ignore[assignment]
+        cwd = None  # type: ignore[assignment]
+        root = ""
+        system_root = None
+        environment = {}
 
 
 def _popen_process(
@@ -213,8 +244,18 @@ def _popen_process(
 
 
 def _create_windows_job(process: subprocess.Popen[bytes]) -> _WindowsJob | None:
-    if os.name != "nt":
-        return None
+    process_handle = 0
+    try:
+        if os.name != "nt":
+            return None
+        process_handle = int(process._handle)  # type: ignore[attr-defined]
+        return _create_windows_job_for_handle(process_handle)
+    finally:
+        process = None  # type: ignore[assignment]
+        process_handle = 0
+
+
+def _create_windows_job_for_handle(process_handle: int) -> _WindowsJob:
 
     import ctypes
     from ctypes import wintypes
@@ -284,9 +325,8 @@ def _create_windows_job(process: subprocess.Popen[bytes]) -> _WindowsJob | None:
                 ctypes.sizeof(information),
             )
         )
-        process_handle = wintypes.HANDLE(int(process._handle))  # type: ignore[attr-defined]
         assigned = configured and bool(
-            kernel32.AssignProcessToJobObject(handle, process_handle)
+            kernel32.AssignProcessToJobObject(handle, wintypes.HANDLE(process_handle))
         )
     finally:
         if not assigned:
@@ -297,7 +337,10 @@ def _create_windows_job(process: subprocess.Popen[bytes]) -> _WindowsJob | None:
 
 
 def _stream_size(handle: BinaryIO) -> int:
-    return os.fstat(handle.fileno()).st_size
+    try:
+        return os.fstat(handle.fileno()).st_size
+    finally:
+        handle = None  # type: ignore[assignment]
 
 
 def _outputs_within_limits(
@@ -306,10 +349,14 @@ def _outputs_within_limits(
     max_stdout_bytes: int,
     max_stderr_bytes: int,
 ) -> bool:
-    return (
-        _stream_size(stdout_file) <= max_stdout_bytes
-        and _stream_size(stderr_file) <= max_stderr_bytes
-    )
+    try:
+        return (
+            _stream_size(stdout_file) <= max_stdout_bytes
+            and _stream_size(stderr_file) <= max_stderr_bytes
+        )
+    finally:
+        stdout_file = None  # type: ignore[assignment]
+        stderr_file = None  # type: ignore[assignment]
 
 
 def _monitor_process(
@@ -345,48 +392,59 @@ def _monitor_process(
 
 
 def _signal_process_group(process: subprocess.Popen[bytes]) -> None:
-    if os.name == "nt":
-        ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
-        if ctrl_break is not None:
-            try:
-                os.kill(process.pid, ctrl_break)
-            except (OSError, ValueError):
-                pass
-        return
     try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (OSError, ProcessLookupError):
-        pass
+        if os.name == "nt":
+            ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+            if ctrl_break is not None:
+                try:
+                    os.kill(process.pid, ctrl_break)
+                except (OSError, ValueError):
+                    pass
+            return
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    finally:
+        process = None  # type: ignore[assignment]
 
 
 def _terminate_and_wait(
     process: subprocess.Popen[bytes],
     windows_job: _WindowsJob | None,
 ) -> None:
-    if windows_job is not None:
-        windows_job.close()
-    _signal_process_group(process)
-    if process.poll() is None:
-        try:
-            process.kill()
-        except (OSError, ProcessLookupError):
-            pass
     try:
-        process.wait(timeout=_CLEANUP_WAIT_SECONDS)
-    except subprocess.TimeoutExpired:
+        if windows_job is not None:
+            windows_job.close()
+        _signal_process_group(process)
+        if process.poll() is None:
+            try:
+                process.kill()
+            except (OSError, ProcessLookupError):
+                pass
         try:
-            process.kill()
-        except (OSError, ProcessLookupError):
-            pass
-        process.wait(timeout=_CLEANUP_WAIT_SECONDS)
+            process.wait(timeout=_CLEANUP_WAIT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except (OSError, ProcessLookupError):
+                pass
+            process.wait(timeout=_CLEANUP_WAIT_SECONDS)
+    finally:
+        process = None  # type: ignore[assignment]
+        windows_job = None
 
 
 def _capture_cleanup_failure(function: object, *args: object) -> BaseException | None:
     try:
-        function(*args)  # type: ignore[operator]
-    except BaseException as error:
-        return error
-    return None
+        try:
+            function(*args)  # type: ignore[operator]
+        except BaseException as error:
+            return error
+        return None
+    finally:
+        function = None
+        args = ()
 
 
 def _cleanup_resources(
@@ -400,20 +458,29 @@ def _cleanup_resources(
     control: KeyboardInterrupt | SystemExit | None = None
     failed = False
     failures: list[BaseException | None] = []
-    if process is not None:
-        failures.append(_capture_cleanup_failure(_terminate_and_wait, process, windows_job))
-    if stdout_file is not None:
-        failures.append(_capture_cleanup_failure(stdout_file.close))
-    if stderr_file is not None:
-        failures.append(_capture_cleanup_failure(stderr_file.close))
-    if not suppress_failures:
-        for error in failures:
-            if isinstance(error, (KeyboardInterrupt, SystemExit)) and control is None:
-                control = error
-            elif error is not None:
-                failed = True
-    failures = []
-    return control, failed
+    error: BaseException | None = None
+    try:
+        if process is not None:
+            failures.append(_capture_cleanup_failure(_terminate_and_wait, process, windows_job))
+        if stdout_file is not None:
+            failures.append(_capture_cleanup_failure(stdout_file.close))
+        if stderr_file is not None:
+            failures.append(_capture_cleanup_failure(stderr_file.close))
+        if not suppress_failures:
+            for error in failures:
+                if isinstance(error, (KeyboardInterrupt, SystemExit)) and control is None:
+                    control = error
+                elif error is not None:
+                    failed = True
+        return control, failed
+    finally:
+        process = None
+        windows_job = None
+        stdout_file = None
+        stderr_file = None
+        failures = []
+        error = None
+        control = None
 
 
 def _snapshot_stdout(
@@ -423,21 +490,27 @@ def _snapshot_stdout(
     max_stdout_bytes: int,
     max_stderr_bytes: int,
 ) -> bytes:
-    stdout_size = _stream_size(stdout_file)
-    stderr_size = _stream_size(stderr_file)
-    if stdout_size > max_stdout_bytes or stderr_size > max_stderr_bytes:
-        raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
-    stdout_file.seek(0)
-    payload = stdout_file.read(max_stdout_bytes + 1)
-    if (
-        len(payload) != stdout_size
-        or len(payload) > max_stdout_bytes
-        or _stream_size(stdout_file) != stdout_size
-        or _stream_size(stderr_file) != stderr_size
-    ):
+    payload = b""
+    try:
+        stdout_size = _stream_size(stdout_file)
+        stderr_size = _stream_size(stderr_file)
+        if stdout_size > max_stdout_bytes or stderr_size > max_stderr_bytes:
+            raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
+        stdout_file.seek(0)
+        payload = stdout_file.read(max_stdout_bytes + 1)
+        if (
+            len(payload) != stdout_size
+            or len(payload) > max_stdout_bytes
+            or _stream_size(stdout_file) != stdout_size
+            or _stream_size(stderr_file) != stderr_size
+        ):
+            payload = b""
+            raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
+        return payload
+    finally:
+        stdout_file = None  # type: ignore[assignment]
+        stderr_file = None  # type: ignore[assignment]
         payload = b""
-        raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
-    return payload
 
 
 def _run_resolved_process(

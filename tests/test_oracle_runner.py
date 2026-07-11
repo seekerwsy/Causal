@@ -4,11 +4,13 @@ import json
 import math
 import os
 from pathlib import Path
+from functools import partial
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
 
@@ -52,6 +54,33 @@ def _runner_frame_surfaces(error: BaseException) -> tuple[str, ...]:
             if isinstance(value, _POPEN_TYPE):
                 surfaces.append(repr(value.args))
     return tuple(surfaces)
+
+
+def _contains_identity(value: object, forbidden_ids: set[int], seen: set[int]) -> bool:
+    identity = id(value)
+    if identity in forbidden_ids:
+        return True
+    if identity in seen:
+        return False
+    seen.add(identity)
+    if isinstance(value, dict):
+        return any(
+            _contains_identity(item, forbidden_ids, seen)
+            for pair in value.items()
+            for item in pair
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_contains_identity(item, forbidden_ids, seen) for item in value)
+    return False
+
+
+def _assert_runner_frames_release_objects(
+    error: BaseException,
+    *forbidden: object,
+) -> None:
+    forbidden_ids = {id(value) for value in forbidden}
+    for _, frame_locals in _secaware_traceback_frames(error):
+        assert not _contains_identity(frame_locals, forbidden_ids, set())
 
 
 def _assert_safe_error(
@@ -571,6 +600,7 @@ def test_launch_control_flow_clears_argv_and_environment_from_every_runner_frame
     assert exc_info.value is signal
     assert len(handles) == 2
     assert all(handle.closed for handle in handles)  # type: ignore[attr-defined]
+    _assert_runner_frames_release_objects(signal, *handles)
     retained = "\n".join(_runner_frame_surfaces(signal))
     for hidden in (
         private_argument,
@@ -628,9 +658,222 @@ def test_monitor_control_flow_clears_popen_args_from_every_runner_frame_and_clea
     assert processes[0].poll() is not None
     assert len(handles) == 2
     assert all(handle.closed for handle in handles)  # type: ignore[attr-defined]
+    _assert_runner_frames_release_objects(signal, *processes, *handles)
     retained = "\n".join(_runner_frame_surfaces(signal))
     for hidden in (private_argument, source, str(tmp_path), sys.executable):
         assert hidden not in retained
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_hash_control_flow_clears_argv_and_completed_process_resources_from_frames(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    private_argument = "private-hash-control-argument"
+    source = "import sys; sys.stdout.buffer.write(b'private-hash-output')"
+    signal = signal_type("private-hash-control-signal")
+    processes: list[subprocess.Popen[bytes]] = []
+    handles: list[object] = []
+    real_popen = runner_module.subprocess.Popen
+    real_temporary_file = runner_module.tempfile.TemporaryFile
+
+    def recording_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+        processes.append(process)
+        return process  # type: ignore[return-value]
+
+    def tracking_temporary_file(*args: object, **kwargs: object) -> object:
+        handle = real_temporary_file(*args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    def interrupt_json_dumps(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise signal
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", recording_popen)
+    monkeypatch.setattr(runner_module.tempfile, "TemporaryFile", tracking_temporary_file)
+    monkeypatch.setattr(runner_module.json, "dumps", interrupt_json_dumps)
+
+    with pytest.raises(signal_type) as exc_info:
+        run_analyzer_process(
+            _python_argv(source, private_argument),
+            cwd=tmp_path,
+            timeout_seconds=2.0,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value is signal
+    assert len(processes) == 1
+    assert processes[0].poll() is not None
+    assert len(handles) == 2
+    assert all(handle.closed for handle in handles)  # type: ignore[attr-defined]
+    _assert_runner_frames_release_objects(signal, *processes, *handles)
+    retained = "\n".join(_runner_frame_surfaces(signal))
+    for hidden in (
+        private_argument,
+        "private-hash-output",
+        source,
+        str(tmp_path),
+        sys.executable,
+    ):
+        assert hidden not in retained
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("boundary", ["argv", "cwd", "executable", "environment"])
+def test_input_preparation_helpers_release_sensitive_references_on_control_flow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+    boundary: str,
+) -> None:
+    sentinel = f"private-{boundary}-preparation"
+    signal = signal_type(f"private-{boundary}-signal")
+    sensitive: object
+
+    class InterruptingArgv(Sequence[str]):
+        def __len__(self) -> int:
+            raise signal
+
+        def __getitem__(self, index: int) -> str:
+            del index
+            return sentinel
+
+        def __repr__(self) -> str:
+            return sentinel
+
+    if boundary == "argv":
+        sensitive = InterruptingArgv()
+        action = partial(runner_module._validate_analyzer_argv, sensitive)  # type: ignore[arg-type]
+    elif boundary == "cwd":
+        sensitive = tmp_path / sentinel
+
+        def interrupt_fspath(value: object) -> str:
+            del value
+            raise signal
+
+        monkeypatch.setattr(runner_module.os, "fspath", interrupt_fspath)
+        action = partial(runner_module._validate_cwd, sensitive)  # type: ignore[arg-type]
+    elif boundary == "executable":
+        sensitive = sentinel
+
+        def interrupt_which(value: str) -> str:
+            del value
+            raise signal
+
+        monkeypatch.setattr(runner_module.shutil, "which", interrupt_which)
+        action = partial(runner_module._resolve_analyzer_executable, sensitive)  # type: ignore[arg-type]
+    else:
+        class InterruptingEnvironment(dict[str, str]):
+            def get(self, key: str, default: str | None = None) -> str | None:
+                del key, default
+                raise signal
+
+        environment = InterruptingEnvironment({"PRIVATE_ENVIRONMENT": sentinel})
+        sensitive = environment
+        monkeypatch.setattr(runner_module.os, "name", "nt")
+        monkeypatch.setattr(runner_module.os, "environ", environment)
+        action = partial(runner_module._minimal_environment, tmp_path, tmp_path)
+
+    with pytest.raises(signal_type) as exc_info:
+        action()
+
+    assert exc_info.value is signal
+    _assert_runner_frames_release_objects(signal, sensitive)
+    assert sentinel not in "\n".join(_runner_frame_surfaces(signal))
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_snapshot_control_flow_clears_raw_output_and_stdio_references(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    private_output = b"private-snapshot-control-output"
+    signal = signal_type("private-snapshot-control-signal")
+    stdout_file = tempfile.TemporaryFile(mode="w+b")
+    stderr_file = tempfile.TemporaryFile(mode="w+b")
+    stdout_file.write(private_output)
+    stdout_file.flush()
+    sizes = iter([len(private_output), 0])
+
+    def interrupt_after_read(handle: object) -> int:
+        del handle
+        try:
+            return next(sizes)
+        except StopIteration:
+            raise signal from None
+
+    monkeypatch.setattr(runner_module, "_stream_size", interrupt_after_read)
+    try:
+        with pytest.raises(signal_type) as exc_info:
+            runner_module._snapshot_stdout(
+                stdout_file,
+                stderr_file,
+                max_stdout_bytes=1024,
+                max_stderr_bytes=1024,
+            )
+    finally:
+        stdout_file.close()
+        stderr_file.close()
+
+    assert exc_info.value is signal
+    _assert_runner_frames_release_objects(signal, stdout_file, stderr_file)
+    assert private_output.decode("ascii") not in "\n".join(_runner_frame_surfaces(signal))
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_cleanup_control_flow_releases_nested_stdio_arguments_and_closes_both_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    signal = signal_type("private-cleanup-control-signal")
+    private_argument = "private-cleanup-control-argument"
+    real_temporary_file = runner_module.tempfile.TemporaryFile
+    handles: list[object] = []
+
+    class ControlCloseFile:
+        def __init__(self, handle: object, *, interrupt: bool) -> None:
+            self._handle = handle
+            self._interrupt = interrupt
+            self.closed = False
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._handle, name)
+
+        def close(self) -> None:
+            self.closed = True
+            self._handle.close()  # type: ignore[attr-defined]
+            if self._interrupt:
+                raise signal
+
+    def control_temporary_file(*args: object, **kwargs: object) -> ControlCloseFile:
+        handle = ControlCloseFile(
+            real_temporary_file(*args, **kwargs),
+            interrupt=not handles,
+        )
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(runner_module.tempfile, "TemporaryFile", control_temporary_file)
+
+    with pytest.raises(signal_type) as exc_info:
+        run_analyzer_process(
+            _python_argv("pass", private_argument),
+            cwd=tmp_path,
+            timeout_seconds=2.0,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value is signal
+    assert len(handles) == 2
+    assert all(handle.closed for handle in handles)  # type: ignore[attr-defined]
+    _assert_runner_frames_release_objects(signal, *handles)
+    assert private_argument not in "\n".join(_runner_frame_surfaces(signal))
 
 
 def test_negative_signal_returncode_is_safe_failure(tmp_path: Path) -> None:
