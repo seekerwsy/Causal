@@ -131,6 +131,33 @@ def test_canonical_bridge_helper_builds_provider_and_offline_records_identically
     assert record.request_id == request.request_id
 
 
+def test_canonical_bridge_failure_does_not_retain_request_code_or_provenance() -> None:
+    request = _request(
+        endpoint_type="chat_completions",
+        prompt="private bridge prompt body",
+    ).model_copy(update={"model_id": "forged-private-model"})
+    code = "private bridge generated code"
+    provenance = GenerationProvenance(producer="private-bridge-producer")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        canonical_generated_code_from_request(request, code, provenance)
+
+    retained: list[str] = []
+    current = exc_info.value.__traceback__
+    while current is not None:
+        if "/src/secaware/" in current.tb_frame.f_code.co_filename.replace("\\", "/"):
+            retained.append(repr(current.tb_frame.f_locals))
+        current = current.tb_next
+    surface = "\n".join(retained)
+    for hidden in (
+        "private bridge prompt body",
+        "forged-private-model",
+        code,
+        provenance.producer,
+    ):
+        assert hidden not in surface
+
+
 def _validation_surfaces(error: ValidationError) -> tuple[str, ...]:
     return (
         str(error),

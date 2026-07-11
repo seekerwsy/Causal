@@ -8,12 +8,16 @@ import typer
 from secaware.analysis.effects import estimate_effects
 from secaware.analysis.pairing import build_pairs
 from secaware.commands.common import cli_action
-from secaware.config import AppConfig, load_config
+from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.generation.providers import get_provider
+from secaware.generation.openai_compatible_provider import (
+    OpenAICompatibleGenerationResult,
+    create_openai_compatible_provider,
+)
 from secaware.generation.request_planner import (
     MAX_GENERATION_AXIS_ITEMS,
     MAX_GENERATION_REQUESTS,
@@ -22,6 +26,7 @@ from secaware.generation.request_planner import (
 )
 from secaware.generation.result_importer import (
     MAX_OFFLINE_IMPORT_RECORDS,
+    canonical_generated_code_from_request,
     import_offline_results,
 )
 from secaware.intervention.operators import apply_intervention
@@ -32,7 +37,12 @@ from secaware.oracle.aggregator import run_oracle as run_code_oracle
 from secaware.pipeline.preflight import run_preflight
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
-from secaware.schema.generation import GenerationRequestRecord, OfflineGenerationResultRecord
+from secaware.schema.generation import (
+    GenerationAttemptRecord,
+    GenerationRequestRecord,
+    OfflineGenerationResultRecord,
+    sha256_text,
+)
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import (
     CanonicalGeneratedCodeRecord,
@@ -44,10 +54,12 @@ from secaware.schema.tsg import TSGRecord
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
 GenerationCondition = Literal["observed", "counterfactual"]
+GenerationMode = Literal["offline", "provider"]
 _Record = TypeVar("_Record")
 _ActionResult = TypeVar("_ActionResult")
 MAX_GENERATION_JSONL_LINE_CHARS = 8 * 1024 * 1024
 MAX_GENERATION_JSONL_TOTAL_CHARS = 512 * 1024 * 1024
+MAX_PROVIDER_ATTEMPT_RECORDS = MAX_GENERATION_REQUESTS * 10
 
 
 def _load(config: Path, run_dir: Optional[Path]) -> tuple[AppConfig, RunStore]:
@@ -71,6 +83,37 @@ def _generation_condition(value: str) -> GenerationCondition:
         code=ErrorCode.CONFIG,
         stage="generation",
         message="generation condition is invalid",
+    )
+
+
+def _generation_mode(value: str) -> GenerationMode:
+    if value == "offline" or value == "provider":
+        return cast(GenerationMode, value)
+    raise SecAwareError(
+        code=ErrorCode.CONFIG,
+        stage="generation",
+        message="generation mode is invalid",
+    )
+
+
+def _openai_provider_config(
+    config: AppConfig,
+    *,
+    stage: str,
+) -> OpenAICompatibleConfig:
+    try:
+        if config.generation.provider != "openai_compatible":
+            raise ValueError
+        candidate = config.generation.openai_compatible
+        if type(candidate) is not OpenAICompatibleConfig:
+            raise TypeError
+        return OpenAICompatibleConfig.model_validate(candidate)
+    except Exception:
+        pass
+    raise _generation_stage_error(
+        ErrorCode.CONFIG,
+        stage,
+        "provider generation configuration is unavailable",
     )
 
 
@@ -212,23 +255,36 @@ def _invalidate_alternate_generation_stage(
     stage: str,
     alternate_stage: str,
 ) -> None:
-    try:
-        store.invalidate_stage(alternate_stage)
-    except SecAwareError as error:
-        code = error.code
-        retryable = error.retryable
-    else:
+    _invalidate_alternate_generation_stages(
+        store,
+        stage=stage,
+        alternate_stages=(alternate_stage,),
+    )
+
+
+def _invalidate_alternate_generation_stages(
+    store: RunStore,
+    *,
+    stage: str,
+    alternate_stages: tuple[str, ...],
+) -> None:
+    failure: SecAwareError | None = None
+    for alternate_stage in alternate_stages:
+        try:
+            store.invalidate_stage(alternate_stage)
+        except SecAwareError as error:
+            failure = error
+    if failure is None:
         return
     try:
         store.invalidate_stage(stage)
     except SecAwareError as error:
-        code = error.code
-        retryable = error.retryable
+        failure = error
     raise _generation_stage_error(
-        code,
+        failure.code,
         stage,
         "generation stage manifest could not be invalidated",
-        retryable=retryable,
+        retryable=failure.retryable,
     )
 
 
@@ -242,8 +298,11 @@ def _validate_offline_results_path(
     protected = [
         store.path("generation", f"{condition}_requests.jsonl"),
         store.path("generation", f"{condition}_code.jsonl"),
+        store.path("generation", f"{condition}_attempts.jsonl"),
         store.path(".stages", f"plan-generation-{condition}.json"),
+        store.path(".stages", f"plan-provider-generation-{condition}.json"),
         store.path(".stages", f"import-generation-{condition}.json"),
+        store.path(".stages", f"generate-provider-{condition}.json"),
         store.path(".stages", f"generate-{condition}.json"),
         store.path("config.resolved.yaml"),
         store.path("inputs", "prompts.jsonl"),
@@ -281,8 +340,19 @@ def _execute_generation_stage(
     failure: Exception
     try:
         return action()
-    except Exception as error:
-        failure = error
+    except SecAwareError as error:
+        failure = _generation_stage_error(
+            error.code,
+            stage,
+            "generation stage execution failed",
+            retryable=error.retryable,
+        )
+    except Exception:
+        failure = _generation_stage_error(
+            ErrorCode.CONTRACT,
+            stage,
+            "generation stage execution failed",
+        )
     try:
         store.invalidate_stage(stage)
     except SecAwareError as error:
@@ -304,6 +374,7 @@ def _require_committed_generation_plan(
     condition: GenerationCondition,
     import_stage: str,
     legacy_stage: str,
+    provider_stage: str,
     ledger: Path,
 ) -> None:
     plan_stage = f"plan-generation-{condition}"
@@ -317,7 +388,7 @@ def _require_committed_generation_plan(
     else:
         return
     cleanup_failed = False
-    for stage in (import_stage, legacy_stage):
+    for stage in (import_stage, legacy_stage, provider_stage):
         try:
             store.invalidate_stage(stage)
         except SecAwareError:
@@ -334,6 +405,36 @@ def _require_committed_generation_plan(
     )
 
 
+def _require_committed_provider_generation_plan(
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    generation_stage: str,
+    ledger: Path,
+) -> None:
+    plan_stage = f"plan-provider-generation-{condition}"
+    plan_inputs = [store.path("inputs", "prompts.jsonl")]
+    if condition == "counterfactual":
+        plan_inputs.append(store.path("interventions", "interventions.jsonl"))
+    try:
+        store.require_committed_stage(plan_stage, plan_inputs, [ledger])
+    except SecAwareError:
+        pass
+    else:
+        return
+    try:
+        store.invalidate_stage(generation_stage)
+    except SecAwareError:
+        message = "provider generation plan trust failure could not be cleaned up"
+    else:
+        message = "provider generation request ledger is not committed"
+    raise _generation_stage_error(
+        ErrorCode.MANIFEST_CONFLICT,
+        generation_stage,
+        message,
+    )
+
+
 def _require_committed_generation_code(
     store: RunStore,
     *,
@@ -343,10 +444,14 @@ def _require_committed_generation_code(
 ) -> None:
     for producer_stage in (
         f"import-generation-{condition}",
+        f"generate-provider-{condition}",
         f"generate-{condition}",
     ):
+        producer_outputs = [code_output]
+        if producer_stage.startswith("generate-provider-"):
+            producer_outputs.append(store.path("generation", f"{condition}_attempts.jsonl"))
         try:
-            store.require_committed_output(producer_stage, [code_output])
+            store.require_committed_output(producer_stage, producer_outputs)
         except SecAwareError:
             continue
         return
@@ -366,16 +471,30 @@ def plan_generation_stage(
     store: RunStore,
     *,
     condition: GenerationCondition,
+    mode: GenerationMode = "offline",
     force: bool,
 ) -> None:
     condition = _generation_condition(condition)
-    stage = f"plan-generation-{condition}"
+    mode = _generation_mode(mode)
+    if mode == "provider":
+        stage = f"plan-provider-generation-{condition}"
+        alternate_stage = f"plan-generation-{condition}"
+        provider_config = _openai_provider_config(config, stage=stage)
+    else:
+        stage = f"plan-generation-{condition}"
+        alternate_stage = f"plan-provider-generation-{condition}"
+        provider_config = None
     prompts_path = store.path("inputs", "prompts.jsonl")
     inputs = [prompts_path]
     if condition == "counterfactual":
         inputs.append(store.path("interventions", "interventions.jsonl"))
     output = store.path("generation", f"{condition}_requests.jsonl")
     outputs = [output]
+    _invalidate_alternate_generation_stage(
+        store,
+        stage=stage,
+        alternate_stage=alternate_stage,
+    )
     if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
         return
 
@@ -387,12 +506,22 @@ def plan_generation_stage(
             allow_empty=False,
             max_records=MAX_GENERATION_AXIS_ITEMS,
         )
+        if provider_config is not None:
+            planning_options: dict[str, object] = {
+                "endpoint_type": "chat_completions",
+                "endpoint_identity": provider_config.base_url,
+                "parameters": provider_config.parameters,
+                "system_template": provider_config.system_template,
+                "system_template_version": provider_config.system_template_version,
+            }
+        else:
+            planning_options = {"endpoint_type": "offline"}
         if condition == "observed":
             records = plan_observed_requests(
                 prompts,
                 config.generation.models,
                 config.generation.seeds,
-                endpoint_type="offline",
+                **planning_options,  # type: ignore[arg-type]
             )
         else:
             interventions = _read_generation_records(
@@ -407,7 +536,7 @@ def plan_generation_stage(
                 interventions,
                 config.generation.models,
                 config.generation.seeds,
-                endpoint_type="offline",
+                **planning_options,  # type: ignore[arg-type]
             )
         _write_generation_records(output, cast(list[object], records), stage=stage)
         store.seal_stage_outputs(stage, outputs)
@@ -438,6 +567,7 @@ def import_generation_stage(
     condition = _generation_condition(condition)
     stage = f"import-generation-{condition}"
     legacy_stage = f"generate-{condition}"
+    provider_stage = f"generate-provider-{condition}"
     ledger = store.path("generation", f"{condition}_requests.jsonl")
     output = store.path("generation", f"{condition}_code.jsonl")
     outputs = [output]
@@ -451,8 +581,19 @@ def import_generation_stage(
     )
 
     if not results.is_file():
-        store.invalidate_stage(stage)
-        store.invalidate_stage(legacy_stage)
+        invalidation_failure: SecAwareError | None = None
+        for producer_stage in (stage, legacy_stage, provider_stage):
+            try:
+                store.invalidate_stage(producer_stage)
+            except SecAwareError as error:
+                invalidation_failure = error
+        if invalidation_failure is not None:
+            raise _generation_stage_error(
+                invalidation_failure.code,
+                stage,
+                "generation producer trust failure could not be cleaned up",
+                retryable=invalidation_failure.retryable,
+            )
         raise _generation_stage_error(
             ErrorCode.EXTERNAL_INPUT_REQUIRED,
             stage,
@@ -465,12 +606,13 @@ def import_generation_stage(
         condition=condition,
         import_stage=stage,
         legacy_stage=legacy_stage,
+        provider_stage=provider_stage,
         ledger=ledger,
     )
-    _invalidate_alternate_generation_stage(
+    _invalidate_alternate_generation_stages(
         store,
         stage=stage,
-        alternate_stage=legacy_stage,
+        alternate_stages=(legacy_stage, provider_stage),
     )
     inputs = [ledger, results]
     if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
@@ -509,6 +651,144 @@ def import_generation_stage(
     _execute_generation_stage(store, stage, execute)
 
 
+def generate_provider_stage(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    condition: GenerationCondition,
+    force: bool,
+) -> None:
+    condition = _generation_condition(condition)
+    stage = f"generate-provider-{condition}"
+    provider_config = _openai_provider_config(config, stage=stage)
+    ledger = store.path("generation", f"{condition}_requests.jsonl")
+    code_output = store.path("generation", f"{condition}_code.jsonl")
+    attempts_output = store.path("generation", f"{condition}_attempts.jsonl")
+    outputs = [code_output, attempts_output]
+    _invalidate_alternate_generation_stages(
+        store,
+        stage=stage,
+        alternate_stages=(
+            f"import-generation-{condition}",
+            f"generate-{condition}",
+        ),
+    )
+    _require_committed_provider_generation_plan(
+        store,
+        condition=condition,
+        generation_stage=stage,
+        ledger=ledger,
+    )
+    inputs = [ledger]
+    if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
+        return
+
+    def execute() -> None:
+        requests: list[GenerationRequestRecord] = []
+        code_records: list[CanonicalGeneratedCodeRecord] = []
+        attempt_records: list[GenerationAttemptRecord] = []
+        request: GenerationRequestRecord | None = None
+        result: OpenAICompatibleGenerationResult | None = None
+        provider: object | None = None
+        failure: SecAwareError | None = None
+        try:
+            requests = _read_generation_records(
+                ledger,
+                GenerationRequestRecord,
+                stage=stage,
+                allow_empty=False,
+                max_records=MAX_GENERATION_REQUESTS,
+            )
+            if any(
+                candidate.condition != condition
+                or candidate.endpoint_type != "chat_completions"
+                or candidate.endpoint_sha256 != sha256_text(provider_config.base_url)
+                for candidate in requests
+            ):
+                raise _generation_stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "provider generation request ledger is incompatible",
+                )
+            provider = create_openai_compatible_provider(provider_config)
+            for request in requests:
+                candidate = provider.generate(  # type: ignore[attr-defined]
+                    request,
+                    provider_config.system_template,
+                )
+                if type(candidate) is not OpenAICompatibleGenerationResult:
+                    raise _generation_stage_error(
+                        ErrorCode.CONTRACT,
+                        stage,
+                        "provider generation result failed validation",
+                    )
+                result = candidate
+                if any(attempt.request_id != request.request_id for attempt in result.attempts):
+                    raise _generation_stage_error(
+                        ErrorCode.CONTRACT,
+                        stage,
+                        "provider generation attempt journal failed validation",
+                    )
+                code_records.append(
+                    canonical_generated_code_from_request(
+                        request,
+                        result.code,
+                        result.provenance,
+                    )
+                )
+                attempt_records.extend(result.attempts)
+            _write_generation_records(
+                code_output,
+                cast(list[object], code_records),
+                stage=stage,
+            )
+            _write_generation_records(
+                attempts_output,
+                cast(list[object], attempt_records),
+                stage=stage,
+            )
+            store.seal_stage_outputs(stage, outputs)
+            _read_verified_generation_records(
+                store,
+                code_output,
+                CanonicalGeneratedCodeRecord,
+                code_records,
+                outputs,
+                stage=stage,
+                max_records=MAX_GENERATION_REQUESTS,
+                mismatch_message="provider generation code changed during publication",
+            )
+            _read_verified_generation_records(
+                store,
+                attempts_output,
+                GenerationAttemptRecord,
+                attempt_records,
+                outputs,
+                stage=stage,
+                max_records=MAX_PROVIDER_ATTEMPT_RECORDS,
+                mismatch_message="provider generation journal changed during publication",
+            )
+            store.record_stage(stage, inputs, outputs)
+        except SecAwareError as error:
+            failure = error
+        except Exception:
+            failure = _generation_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "provider generation failed validation",
+            )
+        if failure is not None:
+            requests.clear()
+            code_records.clear()
+            attempt_records.clear()
+            request = None
+            result = None
+            provider = None
+            raise failure from None
+
+    _execute_generation_stage(store, stage, execute)
+
+
 def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     del config
     stage = "extract-prompt-tsg"
@@ -523,41 +803,68 @@ def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool)
 
 
 def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    if config.generation.provider == "openai_compatible":
+        plan_generation_stage(
+            config,
+            store,
+            condition="observed",
+            mode="provider",
+            force=force,
+        )
+        generate_provider_stage(
+            config,
+            store,
+            condition="observed",
+            force=force,
+        )
+        return
     stage = "generate-observed"
     inputs = [store.path("inputs", "prompts.jsonl")]
     if config.generation.provider == "file" and config.generation.file_provider_dir is not None:
         inputs.append(Path(config.generation.file_provider_dir))
     output = store.path("generation", "observed_code.jsonl")
     outputs = [output]
+    _invalidate_alternate_generation_stages(
+        store,
+        stage=stage,
+        alternate_stages=(
+            "import-generation-observed",
+            "generate-provider-observed",
+        ),
+    )
     if store.should_skip_stage(stage, inputs, outputs, force):
         return
-    prompts = _prompt_records(store)
-    provider = get_provider(
-        config.generation.provider,
-        file_provider_dir=config.generation.file_provider_dir,
-    )
-    records: list[GeneratedCodeRecord] = []
-    for prompt in prompts:
-        for model_id in config.generation.models:
-            for seed in config.generation.seeds:
-                code_id = f"observed_{prompt.prompt_id}_{_safe_id(model_id)}_{seed}"
-                records.append(
-                    GeneratedCodeRecord(
-                        code_id=code_id,
-                        prompt_id=prompt.prompt_id,
-                        condition="observed",
-                        model_id=model_id,
-                        seed_id=seed,
-                        code=provider.generate(
-                            prompt.prompt,
+
+    def execute() -> None:
+        prompts = _prompt_records(store)
+        provider = get_provider(
+            config.generation.provider,
+            file_provider_dir=config.generation.file_provider_dir,
+        )
+        records: list[GeneratedCodeRecord] = []
+        for prompt in prompts:
+            for model_id in config.generation.models:
+                for seed in config.generation.seeds:
+                    code_id = f"observed_{prompt.prompt_id}_{_safe_id(model_id)}_{seed}"
+                    records.append(
+                        GeneratedCodeRecord(
+                            code_id=code_id,
+                            prompt_id=prompt.prompt_id,
+                            condition="observed",
                             model_id=model_id,
-                            seed=seed,
-                            language=prompt.language,
-                        ),
+                            seed_id=seed,
+                            code=provider.generate(
+                                prompt.prompt,
+                                model_id=model_id,
+                                seed=seed,
+                                language=prompt.language,
+                            ),
+                        )
                     )
-                )
-    write_jsonl(output, records)
-    store.record_stage(stage, inputs, outputs)
+        write_jsonl(output, records)
+        store.record_stage(stage, inputs, outputs)
+
+    _execute_generation_stage(store, stage, execute)
 
 
 def extract_code_tsg_stage(
@@ -708,6 +1015,21 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
 
 
 def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    if config.generation.provider == "openai_compatible":
+        plan_generation_stage(
+            config,
+            store,
+            condition="counterfactual",
+            mode="provider",
+            force=force,
+        )
+        generate_provider_stage(
+            config,
+            store,
+            condition="counterfactual",
+            force=force,
+        )
+        return
     stage = "generate-counterfactual"
     inputs = [
         store.path("inputs", "prompts.jsonl"),
@@ -717,44 +1039,56 @@ def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: 
         inputs.append(Path(config.generation.file_provider_dir))
     output = store.path("generation", "counterfactual_code.jsonl")
     outputs = [output]
+    _invalidate_alternate_generation_stages(
+        store,
+        stage=stage,
+        alternate_stages=(
+            "import-generation-counterfactual",
+            "generate-provider-counterfactual",
+        ),
+    )
     if store.should_skip_stage(stage, inputs, outputs, force):
         return
-    prompts = {prompt.prompt_id: prompt for prompt in _prompt_records(store)}
-    interventions = read_jsonl(
-        store.path("interventions", "interventions.jsonl"), InterventionRecord
-    )
-    provider = get_provider(
-        config.generation.provider,
-        file_provider_dir=config.generation.file_provider_dir,
-    )
-    records: list[GeneratedCodeRecord] = []
-    for intervention in interventions:  # type: ignore[assignment]
-        prompt = prompts[intervention.prompt_id]
-        for model_id in config.generation.models:
-            for seed in config.generation.seeds:
-                code_id = (
-                    f"counterfactual_{intervention.prompt_id}_{intervention.hypothesis_id}_"
-                    f"{_safe_id(model_id)}_{seed}"
-                )
-                records.append(
-                    GeneratedCodeRecord(
-                        code_id=code_id,
-                        prompt_id=intervention.prompt_id,
-                        condition="counterfactual",
-                        model_id=model_id,
-                        seed_id=seed,
-                        hypothesis_id=intervention.hypothesis_id,
-                        intervention_id=intervention.intervention_id,
-                        code=provider.generate(
-                            intervention.counterfactual_prompt,
-                            model_id=model_id,
-                            seed=seed,
-                            language=prompt.language,
-                        ),
+
+    def execute() -> None:
+        prompts = {prompt.prompt_id: prompt for prompt in _prompt_records(store)}
+        interventions = read_jsonl(
+            store.path("interventions", "interventions.jsonl"), InterventionRecord
+        )
+        provider = get_provider(
+            config.generation.provider,
+            file_provider_dir=config.generation.file_provider_dir,
+        )
+        records: list[GeneratedCodeRecord] = []
+        for intervention in interventions:  # type: ignore[assignment]
+            prompt = prompts[intervention.prompt_id]
+            for model_id in config.generation.models:
+                for seed in config.generation.seeds:
+                    code_id = (
+                        f"counterfactual_{intervention.prompt_id}_{intervention.hypothesis_id}_"
+                        f"{_safe_id(model_id)}_{seed}"
                     )
-                )
-    write_jsonl(output, records)
-    store.record_stage(stage, inputs, outputs)
+                    records.append(
+                        GeneratedCodeRecord(
+                            code_id=code_id,
+                            prompt_id=intervention.prompt_id,
+                            condition="counterfactual",
+                            model_id=model_id,
+                            seed_id=seed,
+                            hypothesis_id=intervention.hypothesis_id,
+                            intervention_id=intervention.intervention_id,
+                            code=provider.generate(
+                                intervention.counterfactual_prompt,
+                                model_id=model_id,
+                                seed=seed,
+                                language=prompt.language,
+                            ),
+                        )
+                    )
+        write_jsonl(output, records)
+        store.record_stage(stage, inputs, outputs)
+
+    _execute_generation_stage(store, stage, execute)
 
 
 def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
@@ -905,12 +1239,41 @@ def plan_generation_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
     condition: str = typer.Option("observed", "--condition"),
+    mode: str = typer.Option("offline", "--mode", hidden=True),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    validated_condition = _generation_condition(condition)
+    validated_mode = _generation_mode(mode)
+    cfg, store = _load(config, run_dir)
+    _prepare(cfg, store)
+    plan_generation_stage(
+        cfg,
+        store,
+        condition=validated_condition,
+        mode=validated_mode,
+        force=force,
+    )
+
+
+@app.command("generate")
+@cli_action
+def generate_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    condition: str = typer.Option("observed", "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     validated_condition = _generation_condition(condition)
     cfg, store = _load(config, run_dir)
     _prepare(cfg, store)
     plan_generation_stage(
+        cfg,
+        store,
+        condition=validated_condition,
+        mode="provider",
+        force=force,
+    )
+    generate_provider_stage(
         cfg,
         store,
         condition=validated_condition,

@@ -142,6 +142,8 @@ def canonical_generated_code_from_request(
 ) -> CanonicalGeneratedCodeRecord:
     """Build the canonical metadata bridge for any validated generation producer."""
 
+    trusted_request: GenerationRequestRecord | None = None
+    trusted_provenance: GenerationProvenance | None = None
     try:
         trusted_request = revalidate_generation_request_envelope(request)
         trusted_provenance = GenerationProvenance.model_validate(provenance)
@@ -165,6 +167,11 @@ def canonical_generated_code_from_request(
         )
     except Exception:
         pass
+    request = None  # type: ignore[assignment]
+    code = ""
+    provenance = None  # type: ignore[assignment]
+    trusted_request = None
+    trusted_provenance = None
     raise _import_error(
         ErrorCode.CONTRACT,
         "canonical generation record construction failed",

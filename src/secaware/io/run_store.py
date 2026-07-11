@@ -193,7 +193,14 @@ class RunStore:
 
     @staticmethod
     def _requires_output_seal(stage: str) -> bool:
-        return stage.startswith(("plan-generation-", "import-generation-"))
+        return stage.startswith(
+            (
+                "plan-generation-",
+                "plan-provider-generation-",
+                "import-generation-",
+                "generate-provider-",
+            )
+        )
 
     def _stage_output_hashes(
         self,
