@@ -191,17 +191,25 @@ def _popen_process(
         }
     else:
         platform_options = {"start_new_session": True}
-    return subprocess.Popen(
-        argv,
-        cwd=str(cwd),
-        env=environment,
-        shell=False,
-        stdin=subprocess.DEVNULL,
-        stdout=stdout_file,
-        stderr=stderr_file,
-        close_fds=True,
-        **platform_options,
-    )
+    try:
+        return subprocess.Popen(
+            argv,
+            cwd=str(cwd),
+            env=environment,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            close_fds=True,
+            **platform_options,
+        )
+    finally:
+        argv = ()
+        cwd = None  # type: ignore[assignment]
+        stdout_file = None  # type: ignore[assignment]
+        stderr_file = None  # type: ignore[assignment]
+        environment = {}
+        platform_options = {}
 
 
 def _create_windows_job(process: subprocess.Popen[bytes]) -> _WindowsJob | None:
@@ -314,21 +322,26 @@ def _monitor_process(
     max_stderr_bytes: int,
 ) -> int:
     deadline = time.monotonic() + timeout_seconds
-    while True:
-        if not _outputs_within_limits(
-            stdout_file,
-            stderr_file,
-            max_stdout_bytes,
-            max_stderr_bytes,
-        ):
-            raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
-        returncode = process.poll()
-        if returncode is not None:
-            return returncode
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        time.sleep(min(_POLL_INTERVAL_SECONDS, remaining))
+    try:
+        while True:
+            if not _outputs_within_limits(
+                stdout_file,
+                stderr_file,
+                max_stdout_bytes,
+                max_stderr_bytes,
+            ):
+                raise _RunnerFailure(ErrorCode.ANALYZER_INVALID_OUTPUT)
+            returncode = process.poll()
+            if returncode is not None:
+                return returncode
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            time.sleep(min(_POLL_INTERVAL_SECONDS, remaining))
+    finally:
+        process = None  # type: ignore[assignment]
+        stdout_file = None  # type: ignore[assignment]
+        stderr_file = None  # type: ignore[assignment]
 
 
 def _signal_process_group(process: subprocess.Popen[bytes]) -> None:

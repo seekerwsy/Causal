@@ -17,6 +17,9 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.runner import AnalyzerProcessResult, run_analyzer_process
 
 
+_POPEN_TYPE = subprocess.Popen
+
+
 def _python_argv(source: str, *arguments: str) -> tuple[str, ...]:
     return (sys.executable, "-c", source, *arguments)
 
@@ -39,6 +42,16 @@ def _secaware_traceback_frames(
             frames.append((current.tb_frame.f_code.co_name, dict(current.tb_frame.f_locals)))
         current = current.tb_next
     return frames
+
+
+def _runner_frame_surfaces(error: BaseException) -> tuple[str, ...]:
+    surfaces: list[str] = []
+    for _, frame_locals in _secaware_traceback_frames(error):
+        surfaces.append(repr(frame_locals))
+        for value in frame_locals.values():
+            if isinstance(value, _POPEN_TYPE):
+                surfaces.append(repr(value.args))
+    return tuple(surfaces)
 
 
 def _assert_safe_error(
@@ -511,11 +524,113 @@ def test_control_flow_exception_identity_survives_and_child_is_cleaned(
     assert exc_info.value is signal
     assert len(processes) == 1
     assert processes[0].poll() is not None
-    retained = "\n".join(
-        repr(frame_locals) for _, frame_locals in _secaware_traceback_frames(signal)
-    )
+    retained = "\n".join(_runner_frame_surfaces(signal))
     assert "private-control-argument" not in retained
     assert str(tmp_path) not in retained
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_launch_control_flow_clears_argv_and_environment_from_every_runner_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    private_argument = "private-launch-control-argument"
+    private_environment = "private-launch-control-environment"
+    source = "print('private-launch-control-source')"
+    signal = signal_type("private-launch-control-signal")
+    handles: list[object] = []
+    real_temporary_file = runner_module.tempfile.TemporaryFile
+
+    def tracking_temporary_file(*args: object, **kwargs: object) -> object:
+        handle = real_temporary_file(*args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    def private_minimal_environment(executable: Path, cwd: Path) -> dict[str, str]:
+        del executable, cwd
+        return {"PRIVATE_RUNNER_ENVIRONMENT": private_environment}
+
+    def interrupt_popen(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise signal
+
+    monkeypatch.setattr(runner_module, "_minimal_environment", private_minimal_environment)
+    monkeypatch.setattr(runner_module.tempfile, "TemporaryFile", tracking_temporary_file)
+    monkeypatch.setattr(runner_module.subprocess, "Popen", interrupt_popen)
+
+    with pytest.raises(signal_type) as exc_info:
+        run_analyzer_process(
+            _python_argv(source, private_argument),
+            cwd=tmp_path,
+            timeout_seconds=2.0,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value is signal
+    assert len(handles) == 2
+    assert all(handle.closed for handle in handles)  # type: ignore[attr-defined]
+    retained = "\n".join(_runner_frame_surfaces(signal))
+    for hidden in (
+        private_argument,
+        private_environment,
+        source,
+        str(tmp_path),
+        sys.executable,
+    ):
+        assert hidden not in retained
+
+
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_monitor_control_flow_clears_popen_args_from_every_runner_frame_and_cleans_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    private_argument = "private-monitor-control-argument"
+    source = "import time; time.sleep(10)"
+    signal = signal_type("private-monitor-control-signal")
+    processes: list[subprocess.Popen[bytes]] = []
+    handles: list[object] = []
+    real_popen = runner_module.subprocess.Popen
+    real_temporary_file = runner_module.tempfile.TemporaryFile
+
+    def tracking_temporary_file(*args: object, **kwargs: object) -> object:
+        handle = real_temporary_file(*args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    def recording_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+        processes.append(process)
+        return process  # type: ignore[return-value]
+
+    def interrupt_sleep(seconds: float) -> None:
+        del seconds
+        raise signal
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", recording_popen)
+    monkeypatch.setattr(runner_module.tempfile, "TemporaryFile", tracking_temporary_file)
+    monkeypatch.setattr(runner_module.time, "sleep", interrupt_sleep)
+
+    with pytest.raises(signal_type) as exc_info:
+        run_analyzer_process(
+            _python_argv(source, private_argument),
+            cwd=tmp_path,
+            timeout_seconds=2.0,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+        )
+
+    assert exc_info.value is signal
+    assert len(processes) == 1
+    assert processes[0].poll() is not None
+    assert len(handles) == 2
+    assert all(handle.closed for handle in handles)  # type: ignore[attr-defined]
+    retained = "\n".join(_runner_frame_surfaces(signal))
+    for hidden in (private_argument, source, str(tmp_path), sys.executable):
+        assert hidden not in retained
 
 
 def test_negative_signal_returncode_is_safe_failure(tmp_path: Path) -> None:
