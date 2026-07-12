@@ -219,6 +219,7 @@ class _ImmutableTSGModel(SafeValidationMixin, StrictModel):
         protected_namespaces=(),
         revalidate_instances="always",
         strict=True,
+        validate_default=True,
     )
 
 

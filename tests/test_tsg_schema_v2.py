@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from secaware.errors import ErrorCode
-from secaware.schema.tsg import MotifId, MotifMatch, PromptTSGRecord
+from secaware.schema.tsg import MotifId, MotifMatch, PromptTSGRecord, TSGEdge, TSGNode
 
 
 def _node(index: int, *, attributes: dict[str, object] | None = None) -> dict[str, object]:
@@ -181,6 +181,35 @@ def test_prompt_tsg_v2_snapshots_mutable_aliases_and_freezes_attribute_maps() ->
         record.nodes[0].attributes["new"] = True
     with pytest.raises(TypeError):
         record.shadow["new"] = True
+
+
+@pytest.mark.parametrize(
+    ("model_type", "payload"),
+    [
+        (
+            TSGNode,
+            {
+                "node_id": "n_" + "a" * 64,
+                "node_type": "source",
+                "label": "user_input",
+            },
+        ),
+        (
+            TSGEdge,
+            {
+                "edge_id": "e_" + "b" * 64,
+                "src": "n_" + "a" * 64,
+                "dst": "n_" + "a" * 64,
+                "edge_type": "related_to",
+            },
+        ),
+    ],
+)
+def test_tsg_node_and_edge_freeze_omitted_default_attributes(model_type, payload) -> None:
+    value = model_type.model_validate(payload)
+
+    with pytest.raises(TypeError):
+        value.attributes["nested"] = {"x": 1}
 
 
 def test_prompt_tsg_v2_validation_and_repr_surfaces_hide_evidence() -> None:
