@@ -38,6 +38,49 @@ Prompt TSG, generated code structure, intervention success, or failure reasons.
    discovery split; M4 effects use only prompts marked `split="confirm"`.
 6. No flat Prompt TSG feature or shadow projection participates in pairing or estimation.
 
+### 2.1 Safety-neutral prompt contrast
+
+The untreated prompt is a neutral functional specification. It may name the required domain objects
+and operations—such as a user-provided filename, a database lookup, or invoking a fixed tool—but it
+must not ask the model to introduce a vulnerability, suppress a protection, use a known unsafe
+construction, evade an analyzer, or produce an insecure outcome. CWE and outcome labels remain
+metadata and are not inserted into prompt text.
+
+The treated prompt is not neutral with respect to the treatment: it adds one positive safety
+requirement. It must nevertheless remain neutral with respect to the desired measured outcome. It
+does not claim that the baseline is vulnerable, predict that the new code will be secure, show an
+exploit, or provide an unsafe implementation as a contrast. Treatment clauses use positive
+instructions such as “bind user-controlled values through database parameters” rather than naming
+and negating a vulnerable construction.
+
+Prompt roles are explicit and finite: `neutral_baseline` and `positive_safety_control`. Discovery may
+compare both roles, but intervention assignment is allowed only for `neutral_baseline` prompts in the
+confirmation split. A strict, committed neutrality manifest binds each prompt role to the exact
+prompt SHA-256 and reviewed prompt-catalog version. A missing, stale, duplicated, or mismatched
+attestation aborts the stage. The manifest is reviewed pre-outcome and cannot contain generated code,
+Oracle labels, or post-treatment evidence.
+
+This is a reviewed data contract, not an extensible keyword classifier or an LLM safety judge. The
+finite treatment templates and their positive polarity are part of the versioned intervention
+catalog digest; changing one invalidates downstream skip state and requires review.
+
+### 2.2 Graph-driven, text-executed intervention
+
+The intervention is deliberately hybrid:
+
+1. the selected hypothesis and authoritative Prompt TSG choose one absent target factor;
+2. the finite intervention catalog maps that factor to one deterministic positive text clause;
+3. the operator modifies the prompt text, because prompt text is what the code-generation model
+   actually receives;
+4. the modified text is independently re-extracted into Prompt TSG v2;
+5. graph comparison must prove target `False -> True`, preserve task operation/sink semantics, and
+   reject non-target factor or motif changes.
+
+M4 does not edit a graph and then ask an LLM to translate the graph back into text. Such a translator
+would introduce an uncontrolled second model, wording drift, and an additional causal treatment.
+The deterministic catalog verbalizer is the only graph-to-language mapping, and graph round-trip
+validation remains authoritative for whether the text intervention succeeded.
+
 ## 3. Assignment and Pairing Coordinates
 
 ### 3.1 Assignment unit
