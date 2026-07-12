@@ -5,7 +5,14 @@ import pytest
 from pydantic import ValidationError
 
 from secaware.errors import ErrorCode
-from secaware.schema.tsg import MotifId, MotifMatch, PromptTSGRecord, TSGEdge, TSGNode
+from secaware.schema.tsg import (
+    MAX_TSG_ATTRIBUTES,
+    MotifId,
+    MotifMatch,
+    PromptTSGRecord,
+    TSGEdge,
+    TSGNode,
+)
 
 
 def _node(index: int, *, attributes: dict[str, object] | None = None) -> dict[str, object]:
@@ -42,7 +49,11 @@ def _minimal_prompt_tsg() -> dict[str, object]:
                 "node_id": node_id,
                 "node_type": "source",
                 "label": "user_input",
-                "attributes": {"evidence_digest": "c" * 64},
+                "attributes": {
+                    "evidence_start": 0,
+                    "evidence_end": 10,
+                    "evidence_sha256": "c" * 64,
+                },
             }
         ],
         "edges": [
@@ -51,7 +62,7 @@ def _minimal_prompt_tsg() -> dict[str, object]:
                 "src": node_id,
                 "dst": node_id,
                 "edge_type": "related_to",
-                "attributes": {"ordinal": 0},
+                "attributes": {},
             }
         ],
         "shadow": {"graph.node_count": 1, "factor.input_validation_required": False},
@@ -110,22 +121,27 @@ def test_prompt_tsg_v2_accepts_exact_edge_limit_and_rejects_one_more() -> None:
         PromptTSGRecord.model_validate(payload)
 
 
-def test_prompt_tsg_v2_accepts_32_attributes_and_rejects_33() -> None:
+def test_finite_attribute_contract_is_tighter_than_defensive_32_item_gate() -> None:
     payload = _minimal_prompt_tsg()
-    payload["nodes"][0]["attributes"] = {f"key_{index}": index for index in range(32)}
-    assert len(PromptTSGRecord.model_validate(payload).nodes[0].attributes) == 32
+    approved = payload["nodes"][0]["attributes"]
+    assert len(approved) < MAX_TSG_ATTRIBUTES
+    PromptTSGRecord.model_validate(payload)
 
-    payload["nodes"][0]["attributes"]["key_32"] = 32
-    with pytest.raises(ValidationError):
-        PromptTSGRecord.model_validate(payload)
+    for count in (32, 33):
+        payload["nodes"][0]["attributes"] = {
+            f"unreviewed_key_{index}": index for index in range(count)
+        }
+        with pytest.raises(ValidationError):
+            PromptTSGRecord.model_validate(payload)
 
 
 def test_prompt_tsg_v2_counts_attribute_string_limits_in_utf8_bytes() -> None:
     payload = _minimal_prompt_tsg()
-    payload["nodes"][0]["attributes"] = {"evidence": "界" * 341 + "a"}
+    payload["nodes"][0]["node_type"] = "api"
+    payload["nodes"][0]["attributes"] = {"api_name": "界" * 341 + "a"}
     PromptTSGRecord.model_validate(payload)
 
-    payload["nodes"][0]["attributes"] = {"evidence": "界" * 342}
+    payload["nodes"][0]["attributes"] = {"api_name": "界" * 342}
     with pytest.raises(ValidationError):
         PromptTSGRecord.model_validate(payload)
 
@@ -172,11 +188,11 @@ def test_prompt_tsg_v2_snapshots_mutable_aliases_and_freezes_attribute_maps() ->
     record = PromptTSGRecord.model_validate(payload)
     payload["nodes"].clear()
     payload["shadow"]["graph.node_count"] = 999
-    input_attributes["evidence_digest"] = "changed"
+    input_attributes["evidence_sha256"] = "changed"
 
     assert len(record.nodes) == 1
     assert record.shadow["graph.node_count"] == 1
-    assert record.nodes[0].attributes["evidence_digest"] == "c" * 64
+    assert record.nodes[0].attributes["evidence_sha256"] == "c" * 64
     with pytest.raises(TypeError):
         record.nodes[0].attributes["new"] = True
     with pytest.raises(TypeError):
@@ -212,15 +228,206 @@ def test_tsg_node_and_edge_freeze_omitted_default_attributes(model_type, payload
         value.attributes["nested"] = {"x": 1}
 
 
+def test_direct_attribute_and_shadow_reprs_are_structurally_redacted() -> None:
+    secret = "PROMPT-EVIDENCE-DO-NOT-LEAK"
+    node = TSGNode.model_validate(
+        {
+            "node_id": "n_" + "a" * 64,
+            "node_type": "api",
+            "label": "external_api",
+            "attributes": {"api_name": secret},
+        }
+    )
+    edge = TSGEdge.model_validate(
+        {
+            "edge_id": "e_" + "b" * 64,
+            "src": node.node_id,
+            "dst": node.node_id,
+            "edge_type": "related_to",
+            "attributes": {"relation_kind": secret},
+        }
+    )
+    payload = _minimal_prompt_tsg()
+    payload["shadow"] = {"review.secret": secret}
+    record = PromptTSGRecord.model_validate(payload)
+
+    for value in (node.attributes, edge.attributes, record.shadow):
+        rendered = repr(value)
+        assert secret not in rendered
+        assert "<1 items>" in rendered
+
+
+@pytest.mark.parametrize(
+    ("model_type", "payload"),
+    [
+        (
+            TSGNode,
+            {
+                "node_id": "n_" + "a" * 64,
+                "node_type": "source",
+                "label": "user_input",
+                "attributes": {"unknown": 1},
+            },
+        ),
+        (
+            TSGNode,
+            {
+                "node_id": "n_" + "a" * 64,
+                "node_type": "source",
+                "label": "user_input",
+                "attributes": {"evidence": "raw prompt evidence"},
+            },
+        ),
+        (
+            TSGEdge,
+            {
+                "edge_id": "e_" + "b" * 64,
+                "src": "n_" + "a" * 64,
+                "dst": "n_" + "a" * 64,
+                "edge_type": "flows_to",
+                "attributes": {"unknown": 1},
+            },
+        ),
+        (
+            TSGEdge,
+            {
+                "edge_id": "e_" + "b" * 64,
+                "src": "n_" + "a" * 64,
+                "dst": "n_" + "a" * 64,
+                "edge_type": "flows_to",
+                "attributes": {"evidence": "raw prompt evidence"},
+            },
+        ),
+    ],
+)
+def test_node_and_edge_attribute_contracts_reject_unknown_and_raw_evidence(
+    model_type, payload
+) -> None:
+    with pytest.raises(ValidationError):
+        model_type.model_validate(payload)
+
+
+def test_node_and_edge_accept_bounded_prompt_evidence_metadata() -> None:
+    evidence = {
+        "evidence_start": 2,
+        "evidence_end": 7,
+        "evidence_sha256": "c" * 64,
+        "confidence": 0.75,
+    }
+    node = TSGNode.model_validate(
+        {
+            "node_id": "n_" + "a" * 64,
+            "node_type": "source",
+            "label": "user_input",
+            "attributes": evidence,
+        }
+    )
+    edge = TSGEdge.model_validate(
+        {
+            "edge_id": "e_" + "b" * 64,
+            "src": node.node_id,
+            "dst": node.node_id,
+            "edge_type": "flows_to",
+            "attributes": evidence,
+        }
+    )
+    assert node.attributes == evidence
+    assert edge.attributes == evidence
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {"evidence_start": -1, "evidence_end": 7, "evidence_sha256": "c" * 64},
+        {"evidence_start": 7, "evidence_end": 7, "evidence_sha256": "c" * 64},
+        {"evidence_start": 2, "evidence_end": 7, "evidence_sha256": "C" * 64},
+        {"evidence_start": True, "evidence_end": 7, "evidence_sha256": "c" * 64},
+        {"evidence_start": 2, "evidence_end": 7},
+    ],
+)
+def test_prompt_evidence_metadata_is_complete_strict_ordered_and_hashed(attributes) -> None:
+    with pytest.raises(ValidationError):
+        TSGNode.model_validate(
+            {
+                "node_id": "n_" + "a" * 64,
+                "node_type": "source",
+                "label": "user_input",
+                "attributes": attributes,
+            }
+        )
+
+
+def test_attribute_structural_overrides_are_type_dependent() -> None:
+    api = {
+        "node_id": "n_" + "a" * 64,
+        "node_type": "api",
+        "label": "external_api",
+        "attributes": {"api_name": "payments.lookup"},
+    }
+    TSGNode.model_validate(api)
+    with pytest.raises(ValidationError):
+        TSGNode.model_validate({**api, "node_type": "source"})
+
+    related = {
+        "edge_id": "e_" + "b" * 64,
+        "src": "n_" + "a" * 64,
+        "dst": "n_" + "a" * 64,
+        "edge_type": "related_to",
+        "attributes": {"relation_kind": "same_resource"},
+    }
+    TSGEdge.model_validate(related)
+    with pytest.raises(ValidationError):
+        TSGEdge.model_validate({**related, "edge_type": "flows_to"})
+
+
+@pytest.mark.parametrize(
+    ("model_type", "payload"),
+    [
+        (
+            TSGNode,
+            {
+                "node_id": "n_" + "a" * 64,
+                "node_type": "source",
+                "label": "user_input",
+                "attributes": {"confidence": None},
+            },
+        ),
+        (
+            TSGNode,
+            {
+                "node_id": "n_" + "a" * 64,
+                "node_type": "api",
+                "label": "external_api",
+                "attributes": {"api_name": None},
+            },
+        ),
+        (
+            TSGEdge,
+            {
+                "edge_id": "e_" + "b" * 64,
+                "src": "n_" + "a" * 64,
+                "dst": "n_" + "a" * 64,
+                "edge_type": "related_to",
+                "attributes": {"relation_kind": None},
+            },
+        ),
+    ],
+)
+def test_reviewed_attribute_keys_reject_null_values(model_type, payload) -> None:
+    with pytest.raises(ValidationError):
+        model_type.model_validate(payload)
+
+
 def test_prompt_tsg_v2_validation_and_repr_surfaces_hide_evidence() -> None:
     secret = "PROMPT-EVIDENCE-DO-NOT-LEAK"
     payload = _minimal_prompt_tsg()
-    payload["nodes"][0]["attributes"] = {"evidence": secret}
+    payload["nodes"][0]["node_type"] = "api"
+    payload["nodes"][0]["attributes"] = {"api_name": secret}
     record = PromptTSGRecord.model_validate(payload)
     assert secret not in repr(record)
     assert secret not in repr(record.nodes[0])
 
-    payload["nodes"][0]["attributes"] = {"nested": {"secret": secret}}
+    payload["nodes"][0]["attributes"] = {"evidence": {"secret": secret}}
     with pytest.raises(ValidationError) as exc_info:
         PromptTSGRecord.model_validate(payload)
     rendered = str(exc_info.value) + repr(exc_info.value.errors(include_input=True))

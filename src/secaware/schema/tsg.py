@@ -2,12 +2,15 @@ from collections.abc import Iterator, Mapping
 from enum import Enum
 from itertools import islice
 import math
+import re
+from types import MappingProxyType
 from typing import Literal, TypeAlias, cast
 
 from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    ValidationInfo,
     field_serializer,
     field_validator,
     model_validator,
@@ -29,6 +32,7 @@ MAX_TSG_ATTRIBUTES = 32
 MAX_TSG_STRING_BYTES = 1_024
 MAX_MOTIF_HOPS = 8
 MAX_MOTIF_MATCHES = 256
+MAX_TSG_EVIDENCE_OFFSET = 2**31 - 1
 
 _NODE_ID_PATTERN = r"^n_[0-9a-f]{64}$"
 _EDGE_ID_PATTERN = r"^e_[0-9a-f]{64}$"
@@ -76,6 +80,41 @@ class MotifId(str, Enum):
     )
 
 
+_EVIDENCE_ATTRIBUTE_KEYS = frozenset(
+    {"evidence_start", "evidence_end", "evidence_sha256", "confidence"}
+)
+_NODE_TYPE_ATTRIBUTE_KEYS: Mapping[NodeType, frozenset[str]] = MappingProxyType(
+    {
+        NodeType.TASK_OPERATION: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.DATA_OBJECT: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.SOURCE: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.SINK: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.GUARD: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.PROMPT_REQUIREMENT: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.TRUST_BOUNDARY: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.SECURITY_ASSUMPTION: _EVIDENCE_ATTRIBUTE_KEYS,
+        NodeType.API: _EVIDENCE_ATTRIBUTE_KEYS | {"api_name"},
+        NodeType.CWE: _EVIDENCE_ATTRIBUTE_KEYS | {"cwe_id"},
+    }
+)
+_EDGE_TYPE_ATTRIBUTE_KEYS: Mapping[EdgeType, frozenset[str]] = MappingProxyType(
+    {
+        EdgeType.OPERATES_ON: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.SOURCE_OF: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.FLOWS_TO: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.GUARDED_BY: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.REQUIRES: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.OMITS: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.WEAKENS: _EVIDENCE_ATTRIBUTE_KEYS,
+        EdgeType.MAPS_TO: _EVIDENCE_ATTRIBUTE_KEYS | {"mapping_kind"},
+        EdgeType.RELATED_TO: _EVIDENCE_ATTRIBUTE_KEYS | {"relation_kind"},
+    }
+)
+_EVIDENCE_LOCATION_KEYS = frozenset(
+    {"evidence_start", "evidence_end", "evidence_sha256"}
+)
+
+
 TSGScalar: TypeAlias = str | int | float | bool | None
 
 
@@ -101,7 +140,7 @@ class _FrozenTSGMapping(Mapping[str, TSGScalar]):
         return isinstance(other, Mapping) and dict(self.items()) == dict(other.items())
 
     def __repr__(self) -> str:
-        return repr(dict(self.__items))
+        return f"_FrozenTSGMapping(<{len(self.__items)} items>)"
 
     def __setattr__(self, name: str, value: object) -> None:
         raise TypeError("TSG attributes are read-only")
@@ -139,7 +178,11 @@ def _snapshot_scalar(value: object) -> TSGScalar:
     return scalar
 
 
-def _snapshot_attributes(value: object) -> dict[str, TSGScalar]:
+def _snapshot_attributes(
+    value: object,
+    *,
+    allowed_keys: frozenset[str] | None = None,
+) -> dict[str, TSGScalar]:
     if not isinstance(value, Mapping):
         raise TypeError(_INVALID_TSG_MESSAGE)
     snapshot: dict[str, TSGScalar] = {}
@@ -150,7 +193,48 @@ def _snapshot_attributes(value: object) -> dict[str, TSGScalar]:
             raise ValueError(_INVALID_TSG_MESSAGE)
         _require_canonical_text(key)
         snapshot[key] = _snapshot_scalar(value[key])
+    if allowed_keys is not None and not snapshot.keys() <= allowed_keys:
+        raise ValueError(_INVALID_TSG_MESSAGE)
+    _validate_attribute_values(snapshot)
     return snapshot
+
+
+def _validate_attribute_values(attributes: Mapping[str, TSGScalar]) -> None:
+    evidence_keys = attributes.keys() & _EVIDENCE_LOCATION_KEYS
+    if evidence_keys and evidence_keys != _EVIDENCE_LOCATION_KEYS:
+        raise ValueError(_INVALID_TSG_MESSAGE)
+    if evidence_keys:
+        start = attributes["evidence_start"]
+        end = attributes["evidence_end"]
+        digest = attributes["evidence_sha256"]
+        if (
+            type(start) is not int
+            or type(end) is not int
+            or not 0 <= start < end <= MAX_TSG_EVIDENCE_OFFSET
+            or type(digest) is not str
+            or re.fullmatch(_LOWERCASE_SHA256_PATTERN, digest) is None
+        ):
+            raise ValueError(_INVALID_TSG_MESSAGE)
+
+    if "confidence" in attributes:
+        confidence = attributes["confidence"]
+        if type(confidence) is not float or not 0.0 <= confidence <= 1.0:
+            raise ValueError(_INVALID_TSG_MESSAGE)
+
+    for key in ("api_name", "mapping_kind", "relation_kind"):
+        if key in attributes:
+            value = attributes[key]
+            if type(value) is not str:
+                raise ValueError(_INVALID_TSG_MESSAGE)
+            _require_canonical_text(value)
+
+    if "cwe_id" in attributes:
+        cwe_id = attributes["cwe_id"]
+        if (
+            type(cwe_id) is not str
+            or re.fullmatch(r"CWE-[1-9][0-9]{0,5}", cwe_id) is None
+        ):
+            raise ValueError(_INVALID_TSG_MESSAGE)
 
 
 def _parse_enum(value: object, enum_type: type[Enum]) -> Enum:
@@ -241,8 +325,18 @@ class TSGNode(_ImmutableTSGModel):
 
     @field_validator("attributes", mode="before")
     @classmethod
-    def snapshot_attributes(cls, value: object) -> dict[str, TSGScalar]:
-        return _snapshot_attributes(value)
+    def snapshot_attributes(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> dict[str, TSGScalar]:
+        node_type = info.data.get("node_type")
+        if type(node_type) is not NodeType:
+            raise ValueError(_INVALID_TSG_MESSAGE)
+        return _snapshot_attributes(
+            value,
+            allowed_keys=_NODE_TYPE_ATTRIBUTE_KEYS[node_type],
+        )
 
     @field_validator("attributes")
     @classmethod
@@ -268,8 +362,18 @@ class TSGEdge(_ImmutableTSGModel):
 
     @field_validator("attributes", mode="before")
     @classmethod
-    def snapshot_attributes(cls, value: object) -> dict[str, TSGScalar]:
-        return _snapshot_attributes(value)
+    def snapshot_attributes(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> dict[str, TSGScalar]:
+        edge_type = info.data.get("edge_type")
+        if type(edge_type) is not EdgeType:
+            raise ValueError(_INVALID_TSG_MESSAGE)
+        return _snapshot_attributes(
+            value,
+            allowed_keys=_EDGE_TYPE_ATTRIBUTE_KEYS[edge_type],
+        )
 
     @field_validator("attributes")
     @classmethod
@@ -414,6 +518,7 @@ __all__ = [
     "MAX_MOTIF_MATCHES",
     "MAX_TSG_ATTRIBUTES",
     "MAX_TSG_EDGES",
+    "MAX_TSG_EVIDENCE_OFFSET",
     "MAX_TSG_NODES",
     "MAX_TSG_STRING_BYTES",
     "MotifId",
