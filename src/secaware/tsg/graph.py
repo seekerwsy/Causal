@@ -650,7 +650,9 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKin
         if validated.graph_sha256 != _digest(rebuilt_nodes, rebuilt_edges):
             raise _InvalidInput from None
         expected_shadow = _derive_shadow(graph)
-        if _canonical_json(dict(validated.shadow.items())) != _canonical_json(expected_shadow):
+        if tuple(validated.shadow) != tuple(expected_shadow) or _canonical_json(
+            dict(validated.shadow.items())
+        ) != _canonical_json(expected_shadow):
             raise _InvalidInput from None
         return graph
     except _InvalidInput:

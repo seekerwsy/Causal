@@ -85,6 +85,21 @@ def test_shadow_key_order_and_record_json_are_deterministic() -> None:
     assert tuple(payload["shadow"]) == _expected_keys()
 
 
+def test_reversed_shadow_key_order_is_rejected() -> None:
+    record = extract_prompt_tsg(_path_prompt())
+    assert record_to_multidigraph(record).number_of_nodes() == len(record.nodes)
+    reversed_shadow = dict(reversed(tuple(record.shadow.items())))
+    assert tuple(reversed_shadow) == tuple(reversed(tuple(record.shadow)))
+    forged = record.model_copy(update={"shadow": reversed_shadow})
+
+    with pytest.raises(SecAwareError) as exc_info:
+        record_to_multidigraph(forged)
+
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+    assert exc_info.value.__context__ is None
+    assert exc_info.value.__cause__ is None
+
+
 @pytest.mark.parametrize(
     "mutate",
     (
