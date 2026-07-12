@@ -27,7 +27,6 @@ CLI_COMMANDS = [
     "generate-observed",
     "plan-generation",
     "import-generation",
-    "extract-code-tsg",
     "run-oracle",
     "discover",
     "intervene",

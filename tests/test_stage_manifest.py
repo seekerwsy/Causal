@@ -291,6 +291,63 @@ def test_non_oracle_manifest_rejects_policy_digest() -> None:
         StageManifest.model_validate(payload)
 
 
+def test_prompt_tsg_manifest_requires_catalog_digest() -> None:
+    payload = _manifest(
+        fingerprint="fingerprint",
+        outputs=["tsg/prompt_tsg.jsonl"],
+    ).model_dump(mode="python")
+    payload["stage"] = "extract-prompt-tsg"
+
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(payload)
+
+
+def test_prompt_tsg_manifest_round_trips_catalog_digest(tmp_path: Path) -> None:
+    output = tmp_path / "prompt_tsg.jsonl"
+    output.write_text("ready\n", encoding="utf-8")
+    manifest = StageManifest(
+        schema_version="1.0",
+        stage="extract-prompt-tsg",
+        fingerprint="fingerprint",
+        inputs={"inputs/prompts.jsonl": "input-sha"},
+        config_sha256="config-sha",
+        code_version="test-version",
+        catalog_sha256="c" * 64,
+        outputs=[output],
+        output_sha256={output: sha256_path(output)},
+    )
+    manifest_path = tmp_path / "prompt-tsg-manifest.json"
+
+    write_stage_manifest(manifest_path, manifest)
+
+    assert read_stage_manifest(manifest_path).catalog_sha256 == "c" * 64
+
+
+@pytest.mark.parametrize("catalog_sha256", ["C" * 64, "short", None])
+def test_prompt_tsg_manifest_rejects_noncanonical_catalog_digest(
+    catalog_sha256: str | None,
+) -> None:
+    payload = _manifest(
+        fingerprint="fingerprint",
+        outputs=["tsg/prompt_tsg.jsonl"],
+    ).model_dump(mode="python")
+    payload.update(stage="extract-prompt-tsg", catalog_sha256=catalog_sha256)
+
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(payload)
+
+
+def test_non_prompt_tsg_manifest_rejects_catalog_digest() -> None:
+    payload = _manifest(
+        fingerprint="fingerprint",
+        outputs=["reports/summary.json"],
+    ).model_dump(mode="python")
+    payload["catalog_sha256"] = "c" * 64
+
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(payload)
+
+
 def test_legacy_non_oracle_manifest_without_policy_digest_remains_readable(
     tmp_path: Path,
 ) -> None:

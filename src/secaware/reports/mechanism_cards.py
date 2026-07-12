@@ -36,9 +36,10 @@ def build_mechanism_card(
     return {
         "hypothesis_id": hypothesis.hypothesis_id,
         "label": spec.label if spec else hypothesis.factor_type.value,
-        "editable_prompt_factor": hypothesis.prompt_factor,
+        "editable_prompt_factor": hypothesis.requirement_label,
         "tsg_mechanism_path": (
-            f"{hypothesis.mechanism_motif} -> fixed oracle finding -> {hypothesis.scope.get('cwe', '')}"
+            f"{hypothesis.motif_id.value} -> fixed oracle finding -> "
+            f"{hypothesis.scope.get('cwe', '')}"
         ),
         "expected_direction": hypothesis.expected_direction,
         "confirmed_status": status,

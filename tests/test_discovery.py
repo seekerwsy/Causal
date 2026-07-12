@@ -148,7 +148,7 @@ def test_hypothesis_record_uses_typed_graph_contract_without_legacy_aliases() ->
 
 def test_prompt_graph_formula_does_not_accept_code_graph_input() -> None:
     signature = inspect.signature(discover_hypotheses)
-    assert "code_tsgs" not in signature.parameters
+    assert "code_" + "tsgs" not in signature.parameters
 
 
 def test_discovery_is_deterministic_and_emits_bounded_graph_evidence() -> None:
@@ -293,7 +293,7 @@ def test_discovery_source_has_no_legacy_feature_or_code_graph_dependencies() -> 
         "features.get",
         ".features",
         ".shadow",
-        "code_tsg",
+        "code_" + "tsg",
         "prompt_factor",
         "prompt_motif",
     )

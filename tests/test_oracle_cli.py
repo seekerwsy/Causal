@@ -18,7 +18,6 @@ from secaware.cli import app as pipeline_app
 from secaware.cli import (
     confirm_stage,
     discover_stage,
-    extract_code_tsg_stage,
     extract_prompt_tsg_stage,
     generate_counterfactual_stage,
     generate_observed_stage,
@@ -51,6 +50,7 @@ from secaware.schema.generation import (
 )
 from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -171,7 +171,6 @@ def _prepared_observed_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore]:
     store.prepare()
     extract_prompt_tsg_stage(config, store, force=False)
     generate_observed_stage(config, store, force=False)
-    extract_code_tsg_stage(config, store, condition="observed", force=False)
     run_oracle_stage(
         config,
         store,
@@ -188,7 +187,6 @@ def _prepared_confirmation_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore
     discover_stage(config, store, force=False)
     intervene_stage(config, store, force=False)
     generate_counterfactual_stage(config, store, force=False)
-    extract_code_tsg_stage(config, store, condition="counterfactual", force=False)
     run_oracle_stage(
         config,
         store,
@@ -1073,6 +1071,40 @@ def test_confirm_requires_both_committed_oracles(tmp_path: Path) -> None:
     assert not store.path(".stages", "confirm.json").exists()
 
 
+def test_discovery_rejects_committed_legacy_prompt_graph_artifact(tmp_path: Path) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    output = store.path("tsg", "prompt_tsg.jsonl")
+    output.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "graph_id": "prompt:legacy",
+                "source_type": "prompt",
+                "prompt_id": "legacy",
+                "features": {},
+                "nodes": [],
+                "edges": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    manifest = read_stage_manifest(manifest_path)
+    write_stage_manifest(
+        manifest_path,
+        manifest.model_copy(
+            update={"output_sha256": {"tsg/prompt_tsg.jsonl": sha256_path(output)}}
+        ),
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert not store.path(".stages", "discover.json").exists()
+
+
 def test_confirm_holds_both_oracle_leases_in_fixed_order_through_computation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1109,6 +1141,73 @@ def test_confirm_holds_both_oracle_leases_in_fixed_order_through_computation(
 
     assert entered == ["run-oracle-observed", "run-oracle-counterfactual"]
     assert checked is True
+    assert active == []
+
+
+@pytest.mark.parametrize(
+    ("consumer", "expected_order"),
+    [
+        ("discover", ["extract-prompt-tsg", "run-oracle-observed"]),
+        ("intervene", ["discover", "extract-prompt-tsg"]),
+    ],
+)
+def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    expected_order: list[str],
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    if consumer == "intervene":
+        discover_stage(config, store, force=False)
+    real_hold = store.hold_committed_output
+    real_execute = pipeline_cli._execute_jsonl_stage_transaction
+    active: list[str] = []
+    entered: list[str] = []
+    bindings: dict[str, str | None] = {}
+    checked = False
+
+    @contextmanager
+    def tracked_hold(
+        stage: str,
+        outputs: Sequence[Path],
+        *,
+        expected_catalog_sha256: str | None = None,
+    ) -> object:
+        with real_hold(
+            stage,
+            outputs,
+            expected_catalog_sha256=expected_catalog_sha256,
+        ) as hashes:
+            active.append(stage)
+            entered.append(stage)
+            bindings[stage] = expected_catalog_sha256
+            try:
+                yield hashes
+            finally:
+                active.remove(stage)
+
+    def checked_execute(*args: object, **kwargs: object) -> None:
+        nonlocal checked
+        checked = active == expected_order
+        real_execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store, "hold_committed_output", tracked_hold)
+    monkeypatch.setattr(pipeline_cli, "_execute_jsonl_stage_transaction", checked_execute)
+
+    if consumer == "discover":
+        discover_stage(config, store, force=True)
+    else:
+        intervene_stage(config, store, force=True)
+
+    assert entered == expected_order
+    assert checked is True
+    assert bindings["extract-prompt-tsg"] == PROMPT_TSG_CATALOG_SHA256
+    assert all(
+        binding is None
+        for stage, binding in bindings.items()
+        if stage != "extract-prompt-tsg"
+    )
     assert active == []
 
 
@@ -1286,7 +1385,6 @@ def test_multioutput_mark_failure_holds_stage_lease_through_rollback(
         inputs = [
             owner.path("inputs", "prompts.jsonl"),
             owner.path("tsg", "prompt_tsg.jsonl"),
-            owner.path("tsg", "observed_code_tsg.jsonl"),
             owner.path("oracle", "observed_oracle.jsonl"),
         ]
         outputs = [
@@ -1466,7 +1564,6 @@ def test_postcommit_finalize_control_keeps_commit_and_ensures_release(
         inputs = [
             owner.path("inputs", "prompts.jsonl"),
             owner.path("tsg", "prompt_tsg.jsonl"),
-            owner.path("tsg", "observed_code_tsg.jsonl"),
             owner.path("oracle", "observed_oracle.jsonl"),
         ]
         outputs = [
@@ -1557,7 +1654,6 @@ def test_postcommit_finalize_release_failure_keeps_commit_recoverable(
     inputs = [
         owner.path("inputs", "prompts.jsonl"),
         owner.path("tsg", "prompt_tsg.jsonl"),
-        owner.path("tsg", "observed_code_tsg.jsonl"),
         owner.path("oracle", "observed_oracle.jsonl"),
     ]
     outputs = [
@@ -1627,7 +1723,6 @@ def test_downstream_postcommit_cleanup_failure_keeps_new_commit_and_retries_late
     inputs = [
         store.path("inputs", "prompts.jsonl"),
         store.path("tsg", "prompt_tsg.jsonl"),
-        store.path("tsg", "observed_code_tsg.jsonl"),
         store.path("oracle", "observed_oracle.jsonl"),
     ]
     outputs = [
@@ -1698,7 +1793,6 @@ def test_downstream_postcommit_control_keeps_new_commit(
     inputs = [
         store.path("inputs", "prompts.jsonl"),
         store.path("tsg", "prompt_tsg.jsonl"),
-        store.path("tsg", "observed_code_tsg.jsonl"),
         store.path("oracle", "observed_oracle.jsonl"),
     ]
     outputs = [
@@ -2539,7 +2633,6 @@ def test_multioutput_partial_restore_preserves_backup_and_next_skip_recovers(
         [
             store.path("inputs", "prompts.jsonl"),
             store.path("tsg", "prompt_tsg.jsonl"),
-            store.path("tsg", "observed_code_tsg.jsonl"),
             store.path("oracle", "observed_oracle.jsonl"),
         ],
         outputs,

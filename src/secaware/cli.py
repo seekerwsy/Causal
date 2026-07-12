@@ -14,7 +14,6 @@ from secaware.commands.common import cli_action
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.generation.providers import get_provider
 from secaware.generation.openai_compatible_provider import (
@@ -60,12 +59,12 @@ from secaware.schema.generation import (
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import (
     CanonicalGeneratedCodeRecord,
-    GeneratedCodeRecord,
     PromptRecord,
 )
 from secaware.schema.oracle import OracleRecord
 from secaware.schema.results import EffectRecord, PairResult
-from secaware.schema.tsg import TSGRecord
+from secaware.schema.tsg import PromptTSGRecord
+from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
 GenerationCondition = Literal["observed", "counterfactual"]
@@ -738,7 +737,7 @@ def _stale_transaction_paths(path: Path, *suffixes: str) -> list[Path]:
 
 def _read_jsonl_output(
     path: Path,
-    model: type[_Record],
+    model: type[_Record] | None,
     *,
     stage: str,
 ) -> list[_Record]:
@@ -763,9 +762,11 @@ def _execute_jsonl_stage_transaction(
     stage: str,
     inputs: Sequence[Path],
     outputs: Sequence[Path],
-    models: Sequence[type[Any]],
+    models: Sequence[type[Any] | None],
     force: bool,
     build: Callable[[], Sequence[Sequence[BaseModel | dict[Any, Any]]]],
+    catalog_sha256: str | None = None,
+    require_nonempty: bool = False,
 ) -> None:
     if len(outputs) != len(models):
         raise _oracle_stage_error(
@@ -810,6 +811,7 @@ def _execute_jsonl_stage_transaction(
         inputs,
         outputs,
         force,
+        catalog_sha256=catalog_sha256,
         preserve_committed=True,
         after_lease_acquired=recover_or_cleanup_transaction,
     ):
@@ -840,6 +842,12 @@ def _execute_jsonl_stage_transaction(
                 "stage output transaction is invalid",
             )
         expected_groups = [list(records) for records in record_groups]
+        if require_nonempty and any(not records for records in expected_groups):
+            raise _oracle_stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage artifact must not be empty",
+            )
         for index, (output, model, expected) in enumerate(
             zip(outputs, models, expected_groups, strict=True)
         ):
@@ -880,7 +888,13 @@ def _execute_jsonl_stage_transaction(
                 )
         store.verify_sealed_outputs(stage, outputs)
         stage_commit_lease = store.begin_stage_commit(stage)
-        store.record_stage(stage, inputs, outputs, lease=stage_commit_lease)
+        store.record_stage(
+            stage,
+            inputs,
+            outputs,
+            catalog_sha256=catalog_sha256,
+            lease=stage_commit_lease,
+        )
         try:
             transaction.mark_postcommit()
         except (KeyboardInterrupt, SystemExit):
@@ -1290,11 +1304,20 @@ def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool)
     inputs = [store.path("inputs", "prompts.jsonl")]
     output = store.path("tsg", "prompt_tsg.jsonl")
     outputs = [output]
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    prompts = _prompt_records(store)
-    write_jsonl(output, [extract_prompt_tsg(prompt) for prompt in prompts])
-    store.record_stage(stage, inputs, outputs)
+    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
+        return [[extract_prompt_tsg(prompt) for prompt in _prompt_records(store)]]
+
+    _execute_jsonl_stage_transaction(
+        store,
+        stage=stage,
+        inputs=inputs,
+        outputs=outputs,
+        models=[PromptTSGRecord],
+        force=force,
+        build=build,
+        catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+        require_nonempty=True,
+    )
 
 
 def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
@@ -1390,35 +1413,6 @@ def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) 
         store.record_stage(stage, inputs, outputs)
 
     _execute_generation_stage(store, stage, execute)
-
-
-def extract_code_tsg_stage(
-    config: AppConfig,
-    store: RunStore,
-    *,
-    condition: str,
-    force: bool,
-) -> None:
-    del config
-    stage = f"extract-code-tsg-{condition}"
-    source_name = "observed_code.jsonl" if condition == "observed" else "counterfactual_code.jsonl"
-    output_name = (
-        "observed_code_tsg.jsonl" if condition == "observed" else "counterfactual_code_tsg.jsonl"
-    )
-    inputs = [store.path("generation", source_name)]
-    output = store.path("tsg", output_name)
-    outputs = [output]
-    _require_committed_generation_code(
-        store,
-        condition=condition,
-        consumer_stage=stage,
-        code_output=inputs[0],
-    )
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    codes = read_jsonl(inputs[0], GeneratedCodeRecord)
-    write_jsonl(output, [extract_code_tsg(code) for code in codes])  # type: ignore[arg-type]
-    store.record_stage(stage, inputs, outputs)
 
 
 def _run_oracle_stage(
@@ -1718,7 +1712,6 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     inputs = [
         store.path("inputs", "prompts.jsonl"),
         store.path("tsg", "prompt_tsg.jsonl"),
-        store.path("tsg", "observed_code_tsg.jsonl"),
         store.path("oracle", "observed_oracle.jsonl"),
     ]
     all_output = store.path("discovery", "hypotheses_all.jsonl")
@@ -1731,12 +1724,13 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         prompt_ids = {prompt.prompt_id for prompt in prompts}
         prompt_tsgs = [
             tsg
-            for tsg in read_jsonl(store.path("tsg", "prompt_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
-            if tsg.prompt_id in prompt_ids
-        ]
-        code_tsgs = [
-            tsg
-            for tsg in read_jsonl(store.path("tsg", "observed_code_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
+            for tsg in read_jsonl(
+                store.path("tsg", "prompt_tsg.jsonl"),
+                PromptTSGRecord,
+                required=True,
+                allow_empty=False,
+                stage=stage,
+            )
             if tsg.prompt_id in prompt_ids
         ]
         oracles = [
@@ -1751,7 +1745,6 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         all_h, selected_h = discover_hypotheses(
             prompts,
             prompt_tsgs,
-            code_tsgs,
             oracles,
             min_support_total=config.discovery.min_support_total,
             min_support_each_side=config.discovery.min_support_each_side,
@@ -1763,7 +1756,23 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             selected_h[: config.intervention.max_hypotheses],
         ]
 
-    with store.hold_committed_output("run-oracle-observed", [oracle_output]):
+    producer_outputs = {
+        "extract-prompt-tsg": [store.path("tsg", "prompt_tsg.jsonl")],
+        "run-oracle-observed": [oracle_output],
+    }
+    with ExitStack() as stack:
+        for producer_stage in sorted(producer_outputs):
+            stack.enter_context(
+                store.hold_committed_output(
+                    producer_stage,
+                    producer_outputs[producer_stage],
+                    expected_catalog_sha256=(
+                        PROMPT_TSG_CATALOG_SHA256
+                        if producer_stage == "extract-prompt-tsg"
+                        else None
+                    ),
+                )
+            )
         _execute_jsonl_stage_transaction(
             store,
             stage=stage,
@@ -1785,30 +1794,38 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     output = store.path("interventions", "interventions.jsonl")
     paired_output = store.path("interventions", "paired_prompts.jsonl")
     outputs = [output, paired_output]
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "confirm"]
-    prompt_by_id = {prompt.prompt_id: prompt for prompt in prompts}
-    prompt_tsgs = {
-        tsg.prompt_id: tsg
-        for tsg in read_jsonl(store.path("tsg", "prompt_tsg.jsonl"), TSGRecord)  # type: ignore[arg-type]
-        if tsg.prompt_id in prompt_by_id
-    }
-    hypotheses = read_jsonl(store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord)
-    interventions: list[InterventionRecord] = []
-    for hypothesis in hypotheses:  # type: ignore[assignment]
-        if "risk_down" not in config.intervention.enabled_directions:
-            continue
-        for prompt in prompts:
-            if not _matches_scope(prompt, hypothesis):
-                continue
-            interventions.append(
-                apply_intervention(prompt, prompt_tsgs[prompt.prompt_id], hypothesis)
+    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
+        prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "confirm"]
+        prompt_by_id = {prompt.prompt_id: prompt for prompt in prompts}
+        prompt_tsgs = {
+            tsg.prompt_id: tsg
+            for tsg in read_jsonl(
+                store.path("tsg", "prompt_tsg.jsonl"),
+                PromptTSGRecord,
+                required=True,
+                allow_empty=False,
+                stage=stage,
             )
-    write_jsonl(output, interventions)
-    write_jsonl(
-        paired_output,
-        [
+            if tsg.prompt_id in prompt_by_id
+        }
+        hypotheses = read_jsonl(
+            store.path("discovery", "hypotheses_selected.jsonl"),
+            HypothesisRecord,
+            required=True,
+            allow_empty=True,
+            stage=stage,
+        )
+        interventions: list[InterventionRecord] = []
+        for hypothesis in hypotheses:
+            if "risk_down" not in config.intervention.enabled_directions:
+                continue
+            for prompt in prompts:
+                if not _matches_scope(prompt, hypothesis):
+                    continue
+                interventions.append(
+                    apply_intervention(prompt, prompt_tsgs[prompt.prompt_id], hypothesis)
+                )
+        paired_prompts = [
             {
                 "intervention_id": item.intervention_id,
                 "prompt_id": item.prompt_id,
@@ -1817,9 +1834,38 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
                 "counterfactual_prompt": item.counterfactual_prompt,
             }
             for item in interventions
+        ]
+        return [interventions, paired_prompts]
+
+    producer_outputs = {
+        "discover": [
+            store.path("discovery", "hypotheses_all.jsonl"),
+            store.path("discovery", "hypotheses_selected.jsonl"),
         ],
-    )
-    store.record_stage(stage, inputs, outputs)
+        "extract-prompt-tsg": [store.path("tsg", "prompt_tsg.jsonl")],
+    }
+    with ExitStack() as stack:
+        for producer_stage in sorted(producer_outputs):
+            stack.enter_context(
+                store.hold_committed_output(
+                    producer_stage,
+                    producer_outputs[producer_stage],
+                    expected_catalog_sha256=(
+                        PROMPT_TSG_CATALOG_SHA256
+                        if producer_stage == "extract-prompt-tsg"
+                        else None
+                    ),
+                )
+            )
+        _execute_jsonl_stage_transaction(
+            store,
+            stage=stage,
+            inputs=inputs,
+            outputs=outputs,
+            models=[InterventionRecord, None],
+            force=force,
+            build=build,
+        )
 
 
 def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
@@ -2163,18 +2209,6 @@ def import_generation_command(
     )
 
 
-@app.command("extract-code-tsg")
-@cli_action
-def extract_code_tsg_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    condition: str = typer.Option("observed", "--condition"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    cfg, store = _load(config, run_dir)
-    extract_code_tsg_stage(cfg, store, condition=condition, force=force)
-
-
 @app.command("run-oracle")
 @cli_action
 def run_oracle_command(
@@ -2254,12 +2288,10 @@ def run_all_command(
     _prepare(cfg, store)
     extract_prompt_tsg_stage(cfg, store, force=force)
     generate_observed_stage(cfg, store, force=force)
-    extract_code_tsg_stage(cfg, store, condition="observed", force=force)
     run_oracle_stage(cfg, store, condition="observed", force=force)
     discover_stage(cfg, store, force=force)
     intervene_stage(cfg, store, force=force)
     generate_counterfactual_stage(cfg, store, force=force)
-    extract_code_tsg_stage(cfg, store, condition="counterfactual", force=force)
     run_oracle_stage(cfg, store, condition="counterfactual", force=force)
     confirm_stage(cfg, store, force=force)
     report_stage(cfg, store, force=force)

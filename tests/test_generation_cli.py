@@ -10,14 +10,12 @@ from typer.testing import CliRunner
 from secaware import cli as cli_module
 from secaware.cli import (
     app,
-    extract_code_tsg_stage,
     import_generation_stage,
     plan_generation_stage,
     run_oracle_stage,
 )
 from secaware.config import AppConfig, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.oracle import aggregator as aggregator_module
@@ -570,7 +568,6 @@ def test_import_shuffled_results_writes_ledger_order_canonical_output(
     assert [record.request_id for record in records] == [
         request.request_id for request in requests
     ]
-    assert extract_code_tsg(records[0]).code_id == records[0].code_id
     manifest = read_stage_manifest(store.path(".stages", "import-generation-observed.json"))
     assert "generation/observed_requests.jsonl" in manifest.inputs
     external_keys = [path for path in manifest.inputs if path.startswith("@external/")]
@@ -885,10 +882,8 @@ def test_import_rejects_a_schema_valid_ledger_without_committed_plan_provenance(
     assert not import_manifest.exists()
 
 
-@pytest.mark.parametrize("consumer", ["extract", "oracle"])
-def test_downstream_rejects_old_code_after_partial_import_invalidates_producers(
+def test_oracle_rejects_old_code_after_partial_import_invalidates_producers(
     tmp_path: Path,
-    consumer: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, store, _ = _prepared_store(tmp_path)
@@ -902,27 +897,17 @@ def test_downstream_rejects_old_code_after_partial_import_invalidates_producers(
         results_path=results_path,
         force=False,
     )
-    if consumer == "extract":
-        consumer_stage = "extract-code-tsg-observed"
-        consumer_output = store.path("tsg", "observed_code_tsg.jsonl")
-        run_consumer = lambda: extract_code_tsg_stage(  # noqa: E731
-            config,
-            store,
-            condition="observed",
-            force=False,
-        )
-    else:
-        monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
-        consumer_stage = "run-oracle-observed"
-        consumer_output = store.path("oracle", "observed_oracle.jsonl")
-        run_consumer = lambda: run_oracle_stage(  # noqa: E731
-            config,
-            store,
-            condition="observed",
-            force=False,
-            runner=_clean_oracle_runner,
-            runtime_validator=lambda: None,
-        )
+    monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
+    consumer_stage = "run-oracle-observed"
+    consumer_output = store.path("oracle", "observed_oracle.jsonl")
+    run_consumer = lambda: run_oracle_stage(  # noqa: E731
+        config,
+        store,
+        condition="observed",
+        force=False,
+        runner=_clean_oracle_runner,
+        runtime_validator=lambda: None,
+    )
     run_consumer()
     consumer_manifest = store.path(".stages", f"{consumer_stage}.json")
     assert consumer_manifest.exists()

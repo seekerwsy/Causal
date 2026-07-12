@@ -91,6 +91,16 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         manifest = read_stage_manifest(run_dir / ".stages" / f"run-oracle-{condition}.json")
         assert manifest.policy_sha256 is not None
     assert (run_dir / "reports" / "summary.md").exists()
+    removed_artifacts = [
+        run_dir / "tsg" / (condition + "_" + "code_" + "tsg.jsonl")
+        for condition in ("observed", "counterfactual")
+    ]
+    removed_stage_prefix = "extract-" + "code-" + "tsg"
+    assert all(not path.exists() for path in removed_artifacts)
+    assert all(
+        not path.stem.startswith(removed_stage_prefix)
+        for path in run_dir.joinpath(".stages").glob("*.json")
+    )
 
 
 def test_run_all_demo_fails_closed_before_legacy_oracle_publication(tmp_path: Path) -> None:

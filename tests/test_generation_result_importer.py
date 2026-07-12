@@ -7,7 +7,6 @@ import pytest
 from pydantic import ValidationError
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.extractors.code_tsg_extractor import extract_code_tsg
 from secaware.generation import result_importer
 from secaware.generation.result_importer import (
     canonical_generated_code_from_request,
@@ -660,65 +659,6 @@ def test_canonical_counterfactual_record_requires_both_identifiers(
 
     with pytest.raises(ValidationError):
         GeneratedCodeRecord.model_validate(payload)
-
-
-def test_imported_record_is_directly_compatible_with_extractor() -> None:
-    request = _request()
-    imported = import_offline_results([request], [_result(request)])[0]
-
-    tsg = extract_code_tsg(imported)
-
-    assert tsg.code_id == imported.code_id
-    assert tsg.prompt_id == imported.prompt_id
-    assert tsg.features["code.parse_ok"] is True
-
-
-@pytest.mark.parametrize(
-    ("forgery", "secret"),
-    [
-        ("model_copy_code", "forged-runtime-code-secret"),
-        ("model_copy_hash", "forged-runtime-hash-secret"),
-        ("model_copy_coordinate", "forged-runtime-coordinate-secret"),
-        ("model_construct_coordinate", "constructed-runtime-coordinate-secret"),
-        ("model_construct_downgrade", "constructed-runtime-downgrade-secret"),
-    ],
-)
-def test_extractor_revalidates_canonical_runtime_instances(
-    forgery: str,
-    secret: str,
-) -> None:
-    request = _request()
-    canonical = import_offline_results([request], [_result(request)])[0]
-    if forgery == "model_copy_code":
-        forged = canonical.model_copy(update={"code": secret})
-    elif forgery == "model_copy_hash":
-        forged = canonical.model_copy(update={"code_sha256": secret})
-    elif forgery == "model_copy_coordinate":
-        forged = canonical.model_copy(update={"model_id": secret})
-    else:
-        payload = canonical.model_dump(mode="python")
-        if forgery == "model_construct_coordinate":
-            payload["model_id"] = secret
-        else:
-            for field in _CANONICAL_METADATA_FIELDS:
-                payload.pop(field)
-            payload["prompt_id"] = secret
-        forged = CanonicalGeneratedCodeRecord.model_construct(**payload)
-
-    with pytest.raises(SecAwareError) as exc_info:
-        extract_code_tsg(forged)
-
-    assert exc_info.value.code is ErrorCode.CONTRACT
-    assert exc_info.value.retryable is False
-    assert exc_info.value.details == {}
-    for hidden in (
-        secret,
-        canonical.code,
-        canonical.code_id,
-        canonical.request_id,
-        _PRODUCER,
-    ):
-        assert all(hidden not in surface for surface in _error_surfaces(exc_info.value))
 
 
 def test_different_interventions_produce_different_canonical_code_ids() -> None:

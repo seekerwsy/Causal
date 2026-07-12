@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 from secaware import cli as cli_module
 from secaware.cli import (
     app,
-    extract_code_tsg_stage,
     generate_observed_stage,
     generate_provider_stage,
     import_generation_stage,
@@ -979,7 +978,7 @@ def test_provider_generation_baseexception_releases_lease_and_can_retry(
     assert store.path(".stages", f"{stage}.json").exists()
 
 
-def test_provider_output_is_accepted_by_both_committed_downstream_gates(
+def test_provider_output_is_accepted_by_committed_oracle_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -998,7 +997,6 @@ def test_provider_output_is_accepted_by_both_committed_downstream_gates(
     )
     generate_provider_stage(config, store, condition="observed", force=False)
 
-    extract_code_tsg_stage(config, store, condition="observed", force=False)
     monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
     run_oracle_stage(
         config,
@@ -1009,7 +1007,6 @@ def test_provider_output_is_accepted_by_both_committed_downstream_gates(
         runtime_validator=lambda: None,
     )
 
-    assert store.path(".stages", "extract-code-tsg-observed.json").exists()
     assert store.path(".stages", "run-oracle-observed.json").exists()
 
 
@@ -1031,7 +1028,6 @@ def test_failed_provider_rerun_makes_old_code_unavailable_to_downstream(
         lambda provider_config: FakeProvider(),
     )
     generate_provider_stage(config, store, condition="observed", force=False)
-    extract_code_tsg_stage(config, store, condition="observed", force=False)
 
     class FailingProvider:
         def generate(self, request: object, system_template: object) -> object:
@@ -1051,10 +1047,16 @@ def test_failed_provider_rerun_makes_old_code_unavailable_to_downstream(
         generate_provider_stage(config, store, condition="observed", force=True)
 
     with pytest.raises(SecAwareError) as exc_info:
-        extract_code_tsg_stage(config, store, condition="observed", force=False)
+        run_oracle_stage(
+            config,
+            store,
+            condition="observed",
+            force=False,
+            runner=_clean_oracle_runner,
+            runtime_validator=lambda: None,
+        )
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
-    assert not store.path(".stages", "extract-code-tsg-observed.json").exists()
 
 
 def test_compatibility_observed_entrypoint_dispatches_to_provider_pipeline(
