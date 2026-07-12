@@ -69,9 +69,7 @@ class EdgeType(str, Enum):
 
 class MotifId(str, Enum):
     USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD = "user_path_to_file_open_without_guard"
-    USER_STRING_TO_SQL_WITHOUT_PARAMETERIZATION = (
-        "user_string_to_sql_without_parameterization"
-    )
+    USER_STRING_TO_SQL_WITHOUT_PARAMETERIZATION = "user_string_to_sql_without_parameterization"
     USER_INPUT_TO_SHELL_WITHOUT_GUARD = "user_input_to_shell_without_guard"
     SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD = "sensitive_operation_without_auth_guard"
     UNTRUSTED_DATA_TO_DESERIALIZATION_SINK = "untrusted_data_to_deserialization_sink"
@@ -110,9 +108,7 @@ _EDGE_TYPE_ATTRIBUTE_KEYS: Mapping[EdgeType, frozenset[str]] = MappingProxyType(
         EdgeType.RELATED_TO: _EVIDENCE_ATTRIBUTE_KEYS | {"relation_kind"},
     }
 )
-_EVIDENCE_LOCATION_KEYS = frozenset(
-    {"evidence_start", "evidence_end", "evidence_sha256"}
-)
+_EVIDENCE_LOCATION_KEYS = frozenset({"evidence_start", "evidence_end", "evidence_sha256"})
 
 
 TSGScalar: TypeAlias = str | int | float | bool | None
@@ -230,10 +226,7 @@ def _validate_attribute_values(attributes: Mapping[str, TSGScalar]) -> None:
 
     if "cwe_id" in attributes:
         cwe_id = attributes["cwe_id"]
-        if (
-            type(cwe_id) is not str
-            or re.fullmatch(r"CWE-[1-9][0-9]{0,5}", cwe_id) is None
-        ):
+        if type(cwe_id) is not str or re.fullmatch(r"CWE-[1-9][0-9]{0,5}", cwe_id) is None:
             raise ValueError(_INVALID_TSG_MESSAGE)
 
 
@@ -309,6 +302,7 @@ class _ImmutableTSGModel(SafeValidationMixin, StrictModel):
 
 class TSGNode(_ImmutableTSGModel):
     node_id: str = Field(pattern=_NODE_ID_PATTERN)
+    semantic_key_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     node_type: NodeType
     label: str
     attributes: FrozenTSGAttributes = Field(default_factory=dict, repr=False)

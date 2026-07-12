@@ -18,6 +18,7 @@ from secaware.schema.tsg import (
 def _node(index: int, *, attributes: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "node_id": f"n_{index:064x}",
+        "semantic_key_sha256": "9" * 64,
         "node_type": "source",
         "label": f"node_{index}",
         "attributes": {} if attributes is None else attributes,
@@ -47,6 +48,7 @@ def _minimal_prompt_tsg() -> dict[str, object]:
         "nodes": [
             {
                 "node_id": node_id,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "source",
                 "label": "user_input",
                 "attributes": {
@@ -76,6 +78,18 @@ def test_prompt_tsg_v2_is_frozen_and_rejects_code_shape() -> None:
         record.nodes = ()
     with pytest.raises(ValidationError):
         PromptTSGRecord.model_validate({**_minimal_prompt_tsg(), "source_type": "code"})
+
+
+def test_tsg_node_requires_semantic_key_commitment() -> None:
+    payload = {
+        "node_id": "n_" + "a" * 64,
+        "node_type": "source",
+        "label": "user_input",
+        "attributes": {},
+    }
+
+    with pytest.raises(ValidationError):
+        TSGNode.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -206,6 +220,7 @@ def test_prompt_tsg_v2_snapshots_mutable_aliases_and_freezes_attribute_maps() ->
             TSGNode,
             {
                 "node_id": "n_" + "a" * 64,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "source",
                 "label": "user_input",
             },
@@ -233,6 +248,7 @@ def test_direct_attribute_and_shadow_reprs_are_structurally_redacted() -> None:
     node = TSGNode.model_validate(
         {
             "node_id": "n_" + "a" * 64,
+            "semantic_key_sha256": "9" * 64,
             "node_type": "api",
             "label": "external_api",
             "attributes": {"api_name": secret},
@@ -264,6 +280,7 @@ def test_direct_attribute_and_shadow_reprs_are_structurally_redacted() -> None:
             TSGNode,
             {
                 "node_id": "n_" + "a" * 64,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "source",
                 "label": "user_input",
                 "attributes": {"unknown": 1},
@@ -273,6 +290,7 @@ def test_direct_attribute_and_shadow_reprs_are_structurally_redacted() -> None:
             TSGNode,
             {
                 "node_id": "n_" + "a" * 64,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "source",
                 "label": "user_input",
                 "attributes": {"evidence": "raw prompt evidence"},
@@ -317,6 +335,7 @@ def test_node_and_edge_accept_bounded_prompt_evidence_metadata() -> None:
     node = TSGNode.model_validate(
         {
             "node_id": "n_" + "a" * 64,
+            "semantic_key_sha256": "9" * 64,
             "node_type": "source",
             "label": "user_input",
             "attributes": evidence,
@@ -350,6 +369,7 @@ def test_prompt_evidence_metadata_is_complete_strict_ordered_and_hashed(attribut
         TSGNode.model_validate(
             {
                 "node_id": "n_" + "a" * 64,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "source",
                 "label": "user_input",
                 "attributes": attributes,
@@ -360,6 +380,7 @@ def test_prompt_evidence_metadata_is_complete_strict_ordered_and_hashed(attribut
 def test_attribute_structural_overrides_are_type_dependent() -> None:
     api = {
         "node_id": "n_" + "a" * 64,
+        "semantic_key_sha256": "9" * 64,
         "node_type": "api",
         "label": "external_api",
         "attributes": {"api_name": "payments.lookup"},
@@ -387,6 +408,7 @@ def test_attribute_structural_overrides_are_type_dependent() -> None:
             TSGNode,
             {
                 "node_id": "n_" + "a" * 64,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "source",
                 "label": "user_input",
                 "attributes": {"confidence": None},
@@ -396,6 +418,7 @@ def test_attribute_structural_overrides_are_type_dependent() -> None:
             TSGNode,
             {
                 "node_id": "n_" + "a" * 64,
+                "semantic_key_sha256": "9" * 64,
                 "node_type": "api",
                 "label": "external_api",
                 "attributes": {"api_name": None},

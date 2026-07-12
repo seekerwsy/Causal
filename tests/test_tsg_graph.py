@@ -11,6 +11,7 @@ import traceback
 import networkx as nx
 import pytest
 
+import secaware.tsg.graph as graph_codec
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.tsg import EdgeType, MAX_TSG_NODES, NodeType
 from secaware.tsg.graph import (
@@ -53,6 +54,10 @@ def _canonical_json(value: object) -> bytes:
     ).encode("utf-8")
 
 
+def _semantic_key_sha256(semantic_key: str) -> str:
+    return hashlib.sha256(_canonical_json({"semantic_key": semantic_key})).hexdigest()
+
+
 def test_parallel_edges_round_trip_without_order_drift() -> None:
     graph = nx.MultiDiGraph()
     graph.add_node("source", node_type="source", label="user_input", attributes={})
@@ -87,6 +92,7 @@ def test_record_codec_rejects_digest_and_endpoint_tampering() -> None:
 
 
 def test_canonical_node_id_hashes_explicit_semantic_identity() -> None:
+    semantic_key_sha256 = _semantic_key_sha256("request.body")
     expected = (
         "n_"
         + hashlib.sha256(
@@ -94,7 +100,7 @@ def test_canonical_node_id_hashes_explicit_semantic_identity() -> None:
                 {
                     "label": "user_input",
                     "node_type": "source",
-                    "semantic_key": "request.body",
+                    "semantic_key_sha256": semantic_key_sha256,
                 }
             )
         ).hexdigest()
@@ -104,6 +110,17 @@ def test_canonical_node_id_hashes_explicit_semantic_identity() -> None:
     assert canonical_node_id(NodeType.SOURCE, "user_input", "request.body") != canonical_node_id(
         NodeType.DATA_OBJECT, "user_input", "request.body"
     )
+
+
+def test_canonical_looking_builder_key_is_not_blindly_trusted() -> None:
+    arbitrary_id = "n_" + "0" * 64
+    graph = nx.MultiDiGraph()
+    graph.add_node(arbitrary_id, node_type="source", label="source", attributes={})
+
+    record = multidigraph_to_record(graph, prompt_id="p001")
+
+    assert record.nodes[0].node_id != arbitrary_id
+    assert record.nodes[0].node_id == canonical_node_id(NodeType.SOURCE, "source", arbitrary_id)
 
 
 def test_parallel_edge_ordinals_are_deterministic_and_keys_are_canonical_ids() -> None:
@@ -289,6 +306,76 @@ def test_reconstructed_canonical_graph_is_idempotent() -> None:
 
     assert one.model_dump_json() == two.model_dump_json()
     assert graph_sha256(rebuilt) == one.graph_sha256
+    assert all(
+        set(attributes) == {"node_type", "label", "attributes", "semantic_key_sha256"}
+        for _, attributes in rebuilt.nodes(data=True)
+    )
+
+
+def test_node_type_and_label_tampering_cannot_be_rehashed_into_valid_record() -> None:
+    record = multidigraph_to_record(_minimal_graph(), prompt_id="p001")
+    source = next(node for node in record.nodes if node.node_type is NodeType.SOURCE)
+    forged_node = source.model_copy(update={"node_type": NodeType.SINK, "label": "changed_sink"})
+    forged_nodes = tuple(
+        sorted(
+            (forged_node if node.node_id == source.node_id else node for node in record.nodes),
+            key=lambda node: node.node_id,
+        )
+    )
+    forged_digest = graph_codec._digest(forged_nodes, record.edges)
+    forged = record.model_copy(update={"nodes": forged_nodes, "graph_sha256": forged_digest})
+
+    with pytest.raises(SecAwareError, match="TSG"):
+        record_to_multidigraph(forged)
+
+
+def test_semantic_commitment_tampering_is_rejected_even_with_recomputed_digest() -> None:
+    record = multidigraph_to_record(_minimal_graph(), prompt_id="p001")
+    source = next(node for node in record.nodes if node.node_type is NodeType.SOURCE)
+    commitment = getattr(source, "semantic_key_sha256", None)
+    assert isinstance(commitment, str)
+    forged_commitment = "f" * 64 if commitment != "f" * 64 else "e" * 64
+    forged_node = source.model_copy(update={"semantic_key_sha256": forged_commitment})
+    forged_nodes = tuple(
+        sorted(
+            (forged_node if node.node_id == source.node_id else node for node in record.nodes),
+            key=lambda node: node.node_id,
+        )
+    )
+    forged_digest = graph_codec._digest(forged_nodes, record.edges)
+    forged = record.model_copy(update={"nodes": forged_nodes, "graph_sha256": forged_digest})
+
+    with pytest.raises(SecAwareError, match="TSG"):
+        record_to_multidigraph(forged)
+
+
+def test_raw_semantic_key_never_persists_or_leaks_from_errors() -> None:
+    sentinel = "PROMPT-SEMANTIC-KEY-DO-NOT-PERSIST"
+    graph = nx.MultiDiGraph()
+    graph.add_node(sentinel, node_type="source", label="source", attributes={})
+    record = multidigraph_to_record(graph, prompt_id="p001")
+
+    rendered = record.model_dump_json() + repr(record) + repr(record.nodes[0])
+    assert sentinel not in rendered
+    assert getattr(record.nodes[0], "semantic_key_sha256", None) == _semantic_key_sha256(sentinel)
+
+    invalid = nx.MultiDiGraph()
+    invalid.add_node(
+        sentinel,
+        node_type="source",
+        label="source",
+        attributes={"evidence": sentinel},
+    )
+    with pytest.raises(SecAwareError) as exc_info:
+        multidigraph_to_record(invalid, prompt_id="p001")
+    error = exc_info.value
+    rendered = str(error) + repr(error) + "".join(traceback.format_exception(error))
+    current = error.__traceback__
+    while current is not None:
+        if current.tb_frame.f_globals.get("__name__") == "secaware.tsg.graph":
+            rendered += repr(current.tb_frame.f_locals)
+        current = current.tb_next
+    assert sentinel not in rendered
 
 
 def test_prompt_evidence_is_absent_from_error_repr_traceback_and_direct_frames() -> None:

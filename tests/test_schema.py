@@ -40,6 +40,7 @@ def test_prompt_tsg_record_serializes_graph_fields() -> None:
             "nodes": [
                 {
                     "node_id": "n_" + "1" * 64,
+                    "semantic_key_sha256": "9" * 64,
                     "node_type": "sink",
                     "label": "file_open",
                     "attributes": {"confidence": 1.0},

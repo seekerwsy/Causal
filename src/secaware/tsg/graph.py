@@ -29,9 +29,11 @@ from secaware.schema.tsg import (
 ONTOLOGY_VERSION = "1.0"
 MOTIF_VERSION = "1.0"
 
-_NODE_FIELDS = frozenset({"node_type", "label", "attributes"})
+_BUILDER_NODE_FIELDS = frozenset({"node_type", "label", "attributes"})
+_COMMITTED_NODE_FIELDS = _BUILDER_NODE_FIELDS | {"semantic_key_sha256"}
 _EDGE_FIELDS = frozenset({"edge_type", "attributes"})
 _NODE_ID_RE = re.compile(r"^n_[0-9a-f]{64}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_SIGNED_64_BIT = 2**63 - 1
 
 
@@ -85,22 +87,41 @@ def _parse_edge_type(value: object) -> EdgeType:
     raise ValueError
 
 
-def _node_id(node_type: NodeType, label: str, semantic_key: str) -> str:
+def _semantic_key_commitment(semantic_key: str) -> str:
+    semantic_key = _require_text(semantic_key)
+    return _sha256_hex(_canonical_json({"semantic_key": semantic_key}))
+
+
+def _node_id_from_commitment(
+    node_type: NodeType,
+    label: str,
+    semantic_key_sha256: str,
+) -> str:
+    if type(semantic_key_sha256) is not str or _SHA256_RE.fullmatch(semantic_key_sha256) is None:
+        raise ValueError
     TSGNode.model_validate(
         {
             "node_id": "n_" + "0" * 64,
+            "semantic_key_sha256": semantic_key_sha256,
             "node_type": node_type,
             "label": label,
             "attributes": {},
         }
     )
-    semantic_key = _require_text(semantic_key)
     identity = {
         "label": label,
         "node_type": node_type.value,
-        "semantic_key": semantic_key,
+        "semantic_key_sha256": semantic_key_sha256,
     }
     return "n_" + _sha256_hex(_canonical_json(identity))
+
+
+def _node_id(node_type: NodeType, label: str, semantic_key: str) -> str:
+    return _node_id_from_commitment(
+        node_type,
+        label,
+        _semantic_key_commitment(semantic_key),
+    )
 
 
 def _edge_id(
@@ -173,9 +194,29 @@ def _canonical_node_key(
     label: str,
 ) -> tuple[str, str]:
     semantic_key = _require_text(builder_key)
+    semantic_key_sha256 = _semantic_key_commitment(semantic_key)
+    return (
+        _node_id_from_commitment(node_type, label, semantic_key_sha256),
+        semantic_key_sha256,
+    )
+
+
+def _verified_node_key(
+    builder_key: object,
+    node_type: NodeType,
+    label: str,
+    semantic_key_sha256: object,
+) -> tuple[str, str]:
+    semantic_key = _require_text(builder_key)
+    if type(semantic_key_sha256) is not str:
+        raise ValueError
+    node_id = _node_id_from_commitment(node_type, label, semantic_key_sha256)
     if _NODE_ID_RE.fullmatch(semantic_key) is not None:
-        return semantic_key, semantic_key
-    return _node_id(node_type, label, semantic_key), semantic_key
+        if semantic_key != node_id:
+            raise ValueError
+    elif semantic_key_sha256 != _semantic_key_commitment(semantic_key):
+        raise ValueError
+    return node_id, semantic_key_sha256
 
 
 def _sorted_attributes(attributes: Mapping[str, TSGScalar]) -> dict[str, TSGScalar]:
@@ -192,15 +233,27 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
     identities_by_id: dict[str, tuple[str, str, str]] = {}
     builder_to_canonical: dict[object, str] = {}
     for builder_key, raw in graph.nodes(data=True):
-        if type(raw) is not dict or raw.keys() != _NODE_FIELDS:
+        if type(raw) is not dict or frozenset(raw) not in {
+            _BUILDER_NODE_FIELDS,
+            _COMMITTED_NODE_FIELDS,
+        }:
             raise ValueError
         node_type = _parse_node_type(raw["node_type"])
         label = raw["label"]
         attributes = raw["attributes"]
-        node_id, semantic_key = _canonical_node_key(builder_key, node_type, label)
+        if "semantic_key_sha256" in raw:
+            node_id, semantic_key_sha256 = _verified_node_key(
+                builder_key,
+                node_type,
+                label,
+                raw["semantic_key_sha256"],
+            )
+        else:
+            node_id, semantic_key_sha256 = _canonical_node_key(builder_key, node_type, label)
         validated_node = TSGNode.model_validate(
             {
                 "node_id": node_id,
+                "semantic_key_sha256": semantic_key_sha256,
                 "node_type": node_type,
                 "label": label,
                 "attributes": attributes,
@@ -209,12 +262,13 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
         node = TSGNode.model_validate(
             {
                 "node_id": validated_node.node_id,
+                "semantic_key_sha256": validated_node.semantic_key_sha256,
                 "node_type": validated_node.node_type,
                 "label": validated_node.label,
                 "attributes": _sorted_attributes(validated_node.attributes),
             }
         )
-        identity = (node.node_type.value, node.label, semantic_key)
+        identity = (node.node_type.value, node.label, node.semantic_key_sha256)
         if node_id in identities_by_id:
             raise ValueError
         identities_by_id[node_id] = identity
@@ -285,6 +339,7 @@ def _digest(nodes: tuple[TSGNode, ...], edges: tuple[TSGEdge, ...]) -> str:
         "nodes": [
             [
                 node.node_id,
+                node.semantic_key_sha256,
                 node.node_type.value,
                 node.label,
                 dict(node.attributes.items()),
@@ -373,8 +428,15 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | None:
 
         graph = nx.MultiDiGraph()
         for node in validated.nodes:
+            if node.node_id != _node_id_from_commitment(
+                node.node_type,
+                node.label,
+                node.semantic_key_sha256,
+            ):
+                raise ValueError
             graph.add_node(
                 node.node_id,
+                semantic_key_sha256=node.semantic_key_sha256,
                 node_type=node.node_type,
                 label=node.label,
                 attributes=dict(node.attributes.items()),
