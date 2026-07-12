@@ -141,8 +141,10 @@ def path_score(
         motif_ids=(spec.motif_id,),
     )
     absent = [item for item in evaluated if not item.has_factor(spec.factor_type)]
+    if not absent:
+        return 0.0
     motif_absent = [item for item in absent if item.motif_count(spec.motif_id) >= 1]
-    p_motif = len(motif_absent) / len(absent) if absent else 0.0
+    p_motif = len(motif_absent) / len(absent)
     motif_prompt_ids = {
         item.prompt_id for item in evaluated if item.motif_count(spec.motif_id) >= 1
     }

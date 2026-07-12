@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
+import networkx as nx
 import pytest
 from pydantic import ValidationError
 
@@ -18,8 +19,9 @@ from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.records import PromptRecord
-from secaware.schema.tsg import EdgeType
+from secaware.schema.tsg import EdgeType, NodeType
 from secaware.tsg.graph import multidigraph_to_record, record_to_multidigraph
+from secaware.tsg.motifs import find_motif_matches, has_factor_requirement
 
 
 PATH_SPEC = FACTOR_SPECS[FactorType.PATH_NORMALIZATION]
@@ -189,6 +191,50 @@ def test_path_formula_handles_empty_absent_no_motif_missing_oracle_and_cap() -> 
         )
         == 1.0
     )
+
+
+def test_path_formula_is_zero_when_absent_denominator_is_empty_even_with_cwe_evidence() -> None:
+    builder = nx.MultiDiGraph()
+    builder.add_node("source", node_type=NodeType.SOURCE, label="user_input", attributes={})
+    builder.add_node(
+        "data",
+        node_type=NodeType.DATA_OBJECT,
+        label="user_path",
+        attributes={},
+    )
+    builder.add_node("sink", node_type=NodeType.SINK, label="file_open", attributes={})
+    builder.add_node(
+        "requirement",
+        node_type=NodeType.PROMPT_REQUIREMENT,
+        label=PATH_SPEC.requirement_label,
+        attributes={},
+    )
+    builder.add_node(
+        "disconnected_guard",
+        node_type=NodeType.GUARD,
+        label=PATH_SPEC.guard_label,
+        attributes={},
+    )
+    builder.add_edge("source", "data", edge_type=EdgeType.SOURCE_OF, attributes={})
+    builder.add_edge("data", "sink", edge_type=EdgeType.FLOWS_TO, attributes={})
+    builder.add_edge(
+        "requirement",
+        "disconnected_guard",
+        edge_type=EdgeType.REQUIRES,
+        attributes={},
+    )
+    present_but_unguarded = multidigraph_to_record(builder, prompt_id="p-present-motif")
+    graph = record_to_multidigraph(present_but_unguarded)
+    assert has_factor_requirement(graph, PATH_SPEC.factor_type) is True
+    assert find_motif_matches(graph, PATH_SPEC.motif_id)
+
+    score = path_score(
+        PATH_SPEC,
+        [present_but_unguarded],
+        _oracle_by_prompt(_oracle("p-present-motif", insecure=True, cwe="CWE-22")),
+    )
+
+    assert score == 0.0
 
 
 def test_path_oracle_join_is_by_exact_prompt_id_and_does_not_invent_labels() -> None:
