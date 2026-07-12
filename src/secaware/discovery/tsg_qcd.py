@@ -1,31 +1,40 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
+import math
+from types import MappingProxyType
 
 from secaware.discovery.candidate_enum import FACTOR_SPECS, FactorSpec
 from secaware.discovery.scoring import (
+    EvaluatedPromptGraph,
+    _association_from_evaluated,
     _evaluate_prompt_tsgs,
+    _graph_evidence_from_evaluated,
+    _nuisance_from_evaluated,
+    _path_from_evaluated,
     _revalidate_oracle,
-    association_score,
-    graph_evidence_summary,
-    nuisance_penalty,
-    path_score,
-    stability_score,
+    _stability_from_evaluated,
 )
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.hypotheses import HypothesisRecord
+from secaware.schema.hypotheses import FactorType, HypothesisRecord
 from secaware.schema.oracle import OracleRecord
 from secaware.schema.records import PromptRecord
-from secaware.schema.tsg import PromptTSGRecord
+from secaware.schema.tsg import MotifId, PromptTSGRecord
 
 
-DEFAULT_WEIGHTS = {
-    "association": 0.35,
-    "path": 0.35,
-    "targetability": 0.15,
-    "stability": 0.15,
-    "nuisance_penalty": 0.20,
-}
+DEFAULT_WEIGHTS: Mapping[str, float] = MappingProxyType(
+    {
+        "association": 0.35,
+        "path": 0.35,
+        "targetability": 0.15,
+        "stability": 0.15,
+        "nuisance_penalty": 0.20,
+    }
+)
+_PRIMARY_WEIGHT_KEYS = ("association", "path", "targetability", "stability")
+_WEIGHT_KEYS = frozenset(DEFAULT_WEIGHTS)
+_WEIGHT_SUM_TOLERANCE = 1e-12
 
 
 def _coordinate_error() -> SecAwareError:
@@ -34,6 +43,50 @@ def _coordinate_error() -> SecAwareError:
         "discovery.coordinates",
         "discovery prompt graph coordinates are invalid",
     )
+
+
+def _configuration_error() -> SecAwareError:
+    return SecAwareError(
+        ErrorCode.ANALYSIS_INVALID,
+        "discovery.configuration",
+        "discovery scoring configuration is invalid",
+    )
+
+
+def _validated_configuration(
+    *,
+    score_weights: dict[str, float] | None,
+    min_support_total: int,
+    min_support_each_side: int,
+    top_k_per_scope: int,
+) -> Mapping[str, float]:
+    if (
+        type(min_support_total) is not int
+        or min_support_total < 0
+        or type(min_support_each_side) is not int
+        or min_support_each_side < 0
+        or type(top_k_per_scope) is not int
+        or top_k_per_scope <= 0
+        or (score_weights is not None and type(score_weights) is not dict)
+    ):
+        raise _configuration_error() from None
+    overrides = score_weights or {}
+    if not overrides.keys() <= _WEIGHT_KEYS:
+        raise _configuration_error() from None
+    weights = {**DEFAULT_WEIGHTS, **overrides}
+    if any(
+        type(value) not in {int, float} or not math.isfinite(value) or not 0.0 <= value <= 1.0
+        for value in weights.values()
+    ):
+        raise _configuration_error() from None
+    if not math.isclose(
+        sum(weights[key] for key in _PRIMARY_WEIGHT_KEYS),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=_WEIGHT_SUM_TOLERANCE,
+    ):
+        raise _configuration_error() from None
+    return MappingProxyType({key: float(weights[key]) for key in DEFAULT_WEIGHTS})
 
 
 def _oracle_by_prompt(records: list[OracleRecord]) -> dict[str, list[OracleRecord]]:
@@ -56,8 +109,16 @@ def _scope_prompts(prompts: list[PromptRecord], spec: FactorSpec) -> list[Prompt
 def _validated_coordinates(
     prompts: list[PromptRecord],
     prompt_tsgs: list[PromptTSGRecord],
-) -> tuple[list[PromptRecord], dict[str, PromptTSGRecord]]:
-    evaluated = _evaluate_prompt_tsgs(prompt_tsgs)
+) -> tuple[
+    list[PromptRecord],
+    tuple[EvaluatedPromptGraph, ...],
+    dict[str, EvaluatedPromptGraph],
+]:
+    evaluated = _evaluate_prompt_tsgs(
+        prompt_tsgs,
+        factor_types=tuple(FactorType),
+        motif_ids=tuple(MotifId),
+    )
     prompt_ids = [prompt.prompt_id for prompt in prompts]
     if (
         any(not prompt_id or not prompt_id.strip() for prompt_id in prompt_ids)
@@ -68,10 +129,9 @@ def _validated_coordinates(
         prompt_tsgs = []
         raise _coordinate_error() from None
     ordered_prompts = sorted(prompts, key=lambda prompt: prompt.prompt_id)
-    graph_by_id = {
-        item.prompt_id: record for item, record in zip(evaluated, prompt_tsgs, strict=True)
-    }
-    return ordered_prompts, graph_by_id
+    evaluated_by_id = {item.prompt_id: item for item in evaluated}
+    ordered_evaluated = tuple(evaluated_by_id[prompt.prompt_id] for prompt in ordered_prompts)
+    return ordered_prompts, ordered_evaluated, evaluated_by_id
 
 
 def _discover_impl(
@@ -84,20 +144,35 @@ def _discover_impl(
     top_k_per_scope: int,
     score_weights: dict[str, float] | None,
 ) -> tuple[list[HypothesisRecord], list[HypothesisRecord]]:
-    ordered_prompts, prompt_tsg_by_id = _validated_coordinates(prompts, prompt_tsgs)
-    weights = {**DEFAULT_WEIGHTS, **(score_weights or {})}
+    weights = _validated_configuration(
+        score_weights=score_weights,
+        min_support_total=min_support_total,
+        min_support_each_side=min_support_each_side,
+        top_k_per_scope=top_k_per_scope,
+    )
+    ordered_prompts, global_evaluated, evaluated_by_id = _validated_coordinates(
+        prompts,
+        prompt_tsgs,
+    )
     oracle_by_prompt = _oracle_by_prompt(oracle_records)
-    global_tsgs = [prompt_tsg_by_id[prompt.prompt_id] for prompt in ordered_prompts]
     all_hypotheses: list[HypothesisRecord] = []
 
     for index, spec in enumerate(FACTOR_SPECS.values(), start=1):
         scoped_prompts = _scope_prompts(ordered_prompts, spec)
-        scoped_tsgs = [prompt_tsg_by_id[prompt.prompt_id] for prompt in scoped_prompts]
-        association, raw, support = association_score(spec, scoped_tsgs, oracle_by_prompt)
-        scoring_tsgs = scoped_tsgs
+        scoped_evaluated = tuple(evaluated_by_id[prompt.prompt_id] for prompt in scoped_prompts)
+        association, raw, support = _association_from_evaluated(
+            spec,
+            scoped_evaluated,
+            oracle_by_prompt,
+        )
+        scoring_evaluated = scoped_evaluated
         if support["n_total"] < min_support_total:
-            association, raw, support = association_score(spec, global_tsgs, oracle_by_prompt)
-            scoring_tsgs = global_tsgs
+            association, raw, support = _association_from_evaluated(
+                spec,
+                global_evaluated,
+                oracle_by_prompt,
+            )
+            scoring_evaluated = global_evaluated
         if support["n_total"] < min_support_total:
             continue
         if (
@@ -106,10 +181,15 @@ def _discover_impl(
         ):
             continue
 
-        path = path_score(spec, scoring_tsgs, oracle_by_prompt)
+        path = _path_from_evaluated(spec, scoring_evaluated, oracle_by_prompt)
         targetability = 1.0
-        stability = stability_score(spec, ordered_prompts, prompt_tsg_by_id, oracle_by_prompt)
-        penalty = nuisance_penalty(spec, ordered_prompts, prompt_tsg_by_id)
+        stability = _stability_from_evaluated(
+            spec,
+            ordered_prompts,
+            evaluated_by_id,
+            oracle_by_prompt,
+        )
+        penalty = _nuisance_from_evaluated(spec, ordered_prompts, evaluated_by_id)
         score = (
             weights["association"] * association
             + weights["path"] * path
@@ -117,7 +197,7 @@ def _discover_impl(
             + weights["stability"] * stability
             - weights["nuisance_penalty"] * penalty
         )
-        evidence = graph_evidence_summary(spec, scoring_tsgs)
+        evidence = _graph_evidence_from_evaluated(spec, scoring_evaluated)
         hypothesis_id = f"h_{spec.cwe.replace('-', '')}_{spec.factor_type.value}_{index:03}"
         all_hypotheses.append(
             HypothesisRecord(

@@ -4,13 +4,14 @@ from dataclasses import fields
 from dataclasses import FrozenInstanceError
 import hashlib
 import inspect
+import math
 from types import MappingProxyType
 
 import pytest
 from pydantic import ValidationError
 
 from secaware.discovery.candidate_enum import FACTOR_SPECS, FactorSpec
-from secaware.discovery.tsg_qcd import discover_hypotheses
+from secaware.discovery.tsg_qcd import DEFAULT_WEIGHTS, discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
@@ -76,6 +77,18 @@ def _oracle(prompt_id: str, *, insecure: bool, cwe: str = "CWE-22") -> OracleRec
                 }
                 for analyzer, policy in (("semgrep", "a" * 64), ("bandit", "b" * 64))
             ],
+        }
+    )
+
+
+def _counterfactual_oracle(prompt_id: str) -> OracleRecord:
+    observed = _oracle(prompt_id, insecure=True)
+    return OracleRecord.model_validate(
+        {
+            **observed.model_dump(mode="python"),
+            "condition": "counterfactual",
+            "hypothesis_id": "h-counterfactual",
+            "intervention_id": "i-counterfactual",
         }
     )
 
@@ -169,6 +182,7 @@ def test_discovery_is_deterministic_and_emits_bounded_graph_evidence() -> None:
     ]
     assert len(one) == 1
     hypothesis = one[0]
+    assert HypothesisRecord.model_validate_json(hypothesis.model_dump_json()) == hypothesis
     assert hypothesis.factor_type is FactorType.PATH_NORMALIZATION
     assert hypothesis.motif_id is MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD
     assert hypothesis.requirement_label == "require_path_normalization"
@@ -259,6 +273,21 @@ def test_discovery_revalidates_every_oracle_record_before_grouping() -> None:
         discover_hypotheses([prompt], [extract_prompt_tsg(prompt)], [forged])
 
 
+def test_discovery_rejects_structurally_valid_counterfactual_oracle() -> None:
+    prompt = _path_prompt("p-counterfactual", guarded=False)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_hypotheses(
+            [prompt],
+            [extract_prompt_tsg(prompt)],
+            [_counterfactual_oracle(prompt.prompt_id)],
+        )
+
+    assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
+    assert exc_info.value.details == {}
+    assert exc_info.value.__cause__ is None
+
+
 def test_discovery_source_has_no_legacy_feature_or_code_graph_dependencies() -> None:
     forbidden = (
         "features.get",
@@ -272,3 +301,97 @@ def test_discovery_source_has_no_legacy_feature_or_code_graph_dependencies() -> 
     discovery_dir = __import__("pathlib").Path(source_dir).parent
     source = "\n".join(path.read_text(encoding="utf-8") for path in discovery_dir.glob("*.py"))
     assert all(token not in source for token in forbidden)
+
+
+@pytest.mark.parametrize(
+    "score_weights",
+    (
+        {"unknown": 0.1},
+        {"association": True},
+        {"association": "0.35"},
+        {"association": -0.1},
+        {"association": math.nan},
+        {"association": math.inf},
+        {"association": -math.inf},
+        {"nuisance_penalty": 1.1},
+        {"association": 0.4},
+    ),
+)
+def test_discovery_rejects_invalid_score_weights(score_weights: dict[str, object]) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_hypotheses([], [], [], score_weights=score_weights)  # type: ignore[arg-type]
+
+    assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
+    assert exc_info.value.details == {}
+    assert exc_info.value.__cause__ is None
+
+
+def test_discovery_weights_are_immutable_and_valid_merged_overrides_pass() -> None:
+    assert isinstance(DEFAULT_WEIGHTS, MappingProxyType)
+    with pytest.raises(TypeError):
+        DEFAULT_WEIGHTS["association"] = 0.0  # type: ignore[index]
+
+    assert discover_hypotheses([], [], []) == ([], [])
+    assert discover_hypotheses([], [], [], score_weights={"association": 0.35}) == ([], [])
+    assert discover_hypotheses(
+        [],
+        [],
+        [],
+        score_weights={
+            "association": 0.25,
+            "path": 0.25,
+            "targetability": 0.25,
+            "stability": 0.25,
+            "nuisance_penalty": 0.5,
+        },
+    ) == ([], [])
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value"),
+    (
+        ("min_support_total", True),
+        ("min_support_total", -1),
+        ("min_support_each_side", True),
+        ("min_support_each_side", -1),
+        ("top_k_per_scope", True),
+        ("top_k_per_scope", 0),
+    ),
+)
+def test_discovery_rejects_invalid_selection_parameters(parameter: str, value: object) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_hypotheses([], [], [], **{parameter: value})  # type: ignore[arg-type]
+
+    assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
+
+
+@pytest.mark.parametrize(
+    "score_field",
+    (
+        "discovery_score",
+        "association_score",
+        "path_score",
+        "targetability_score",
+        "stability_score",
+        "nuisance_penalty",
+    ),
+)
+@pytest.mark.parametrize("invalid_value", (-0.1, 1.1, math.nan, math.inf, -math.inf))
+def test_hypothesis_score_fields_are_finite_unit_interval(
+    score_field: str,
+    invalid_value: float,
+) -> None:
+    payload = {
+        "hypothesis_id": "h-path",
+        "factor_type": FactorType.PATH_NORMALIZATION,
+        "motif_id": MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD,
+        "requirement_label": "require_path_normalization",
+        "guard_label": "path_normalization",
+        "expected_direction": "risk_down_when_added",
+        "scope": {"language": "python", "cwe": "CWE-22", "task_family": "path_handling"},
+        "patch_operator": "add_path_normalization_requirement",
+        score_field: invalid_value,
+    }
+
+    with pytest.raises(ValidationError):
+        HypothesisRecord.model_validate(payload)

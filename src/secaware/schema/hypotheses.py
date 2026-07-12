@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,9 @@ class FactorType(str, Enum):
     SAFE_DESERIALIZATION = "safe_deserialization"
 
 
+UnitIntervalScore = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+
+
 class HypothesisRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -26,11 +29,11 @@ class HypothesisRecord(BaseModel):
     expected_direction: str
     scope: dict[str, str] = Field(default_factory=dict)
     patch_operator: str
-    discovery_score: float = 0.0
-    association_score: float = 0.0
-    path_score: float = 0.0
-    targetability_score: float = 0.0
-    stability_score: float = 0.0
-    nuisance_penalty: float = 0.0
+    discovery_score: UnitIntervalScore = 0.0
+    association_score: UnitIntervalScore = 0.0
+    path_score: UnitIntervalScore = 0.0
+    targetability_score: UnitIntervalScore = 0.0
+    stability_score: UnitIntervalScore = 0.0
+    nuisance_penalty: UnitIntervalScore = 0.0
     support: dict[str, Any] = Field(default_factory=dict)
     status: str = "selected_for_confirmation"

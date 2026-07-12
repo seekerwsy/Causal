@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import networkx as nx
 import pytest
@@ -10,10 +11,12 @@ import secaware.discovery.scoring as scoring
 from secaware.discovery.candidate_enum import FACTOR_SPECS
 from secaware.discovery.scoring import (
     association_score,
+    graph_evidence_summary,
     nuisance_penalty,
     path_score,
     stability_score,
 )
+from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.schema.hypotheses import FactorType
@@ -21,6 +24,7 @@ from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import EdgeType, NodeType
 from secaware.tsg.graph import multidigraph_to_record, record_to_multidigraph
+from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.motifs import find_motif_matches, has_factor_requirement
 
 
@@ -109,6 +113,18 @@ def _oracle_by_prompt(*records: OracleRecord) -> dict[str, list[OracleRecord]]:
     return result
 
 
+def _counterfactual_oracle(prompt_id: str) -> OracleRecord:
+    observed = _oracle(prompt_id, insecure=True)
+    return OracleRecord.model_validate(
+        {
+            **observed.model_dump(mode="python"),
+            "condition": "counterfactual",
+            "hypothesis_id": "h-counterfactual",
+            "intervention_id": "i-counterfactual",
+        }
+    )
+
+
 def _remove_edge_and_recanonicalize(record, edge_type: EdgeType):
     graph = record_to_multidigraph(record)
     edge = next(
@@ -118,6 +134,27 @@ def _remove_edge_and_recanonicalize(record, edge_type: EdgeType):
     )
     graph.remove_edge(*edge)
     return multidigraph_to_record(graph, prompt_id=record.prompt_id)
+
+
+def _unique_path_motif_record(index: int):
+    builder = nx.MultiDiGraph()
+    builder.add_node("source", node_type=NodeType.SOURCE, label="user_input", attributes={})
+    builder.add_node(
+        "data",
+        node_type=NodeType.DATA_OBJECT,
+        label="user_path",
+        attributes={},
+    )
+    builder.add_node("sink", node_type=NodeType.SINK, label="file_open", attributes={})
+    builder.add_node(
+        "marker",
+        node_type=NodeType.SECURITY_ASSUMPTION,
+        label=f"reviewed_marker_{index}",
+        attributes={},
+    )
+    builder.add_edge("source", "data", edge_type=EdgeType.SOURCE_OF, attributes={})
+    builder.add_edge("data", "sink", edge_type=EdgeType.FLOWS_TO, attributes={})
+    return multidigraph_to_record(builder, prompt_id=f"p-evidence-{index:03}")
 
 
 def test_path_score_changes_when_graph_changes_even_if_shadow_is_hostile() -> None:
@@ -256,6 +293,28 @@ def test_scoring_revalidates_forged_oracle_records(score) -> None:
         score(PATH_SPEC, [motif], {"p-motif": [forged]})
 
 
+@pytest.mark.parametrize("score", (association_score, path_score))
+def test_scoring_rejects_structurally_valid_counterfactual_oracles(score) -> None:
+    motif = extract_prompt_tsg(_path_prompt("p-counterfactual"))
+    counterfactual = _counterfactual_oracle("p-counterfactual")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        score(PATH_SPEC, [motif], _oracle_by_prompt(counterfactual))
+
+    assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
+    assert exc_info.value.details == {}
+    assert exc_info.value.__cause__ is None
+    retained = []
+    frame = exc_info.value.__traceback__
+    while frame is not None:
+        if "/src/secaware/" in frame.tb_frame.f_code.co_filename.replace("\\", "/"):
+            retained.append(repr(frame.tb_frame.f_locals))
+        frame = frame.tb_next
+    rendered = "\n".join(retained)
+    assert "p-counterfactual" not in rendered
+    assert "OracleRecord" not in rendered
+
+
 def test_nuisance_penalty_uses_live_factor_queries() -> None:
     absent_prompt = _path_prompt("p-a")
     present_prompt = _path_prompt("p-b", guarded=True)
@@ -312,3 +371,99 @@ def test_internal_graph_query_errors_are_not_mislabeled_as_tsg_invalid(
     monkeypatch.setattr(scoring, "has_factor_requirement", fail)
     with pytest.raises(RuntimeError, match="query failed"):
         association_score(PATH_SPEC, [record], {})
+
+
+def test_graph_evidence_is_fixed_bounded_with_exact_aggregates_and_commitment() -> None:
+    records = [_unique_path_motif_record(index) for index in range(67)]
+    complete_digests = sorted({record.graph_sha256 for record in records})
+    expected_commitment = hashlib.sha256(
+        json.dumps(
+            complete_digests,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    summary = graph_evidence_summary(PATH_SPEC, list(reversed(records)))
+    repeated = graph_evidence_summary(PATH_SPEC, records)
+
+    assert summary == repeated
+    assert summary["graph_count"] == 67
+    assert summary["distinct_graph_digest_count"] == 67
+    assert summary["motif_prompt_count"] == 67
+    assert summary["motif_match_count"] == 67
+    assert summary["graph_digest_commitment_sha256"] == expected_commitment
+    assert summary["graph_sha256"] == complete_digests[:64]
+    assert len(summary["graph_sha256"]) <= 64
+    assert summary["graph_digests_truncated"] is True
+    assert len(summary["motif_evidence"]) == 64
+    assert summary["motif_evidence_truncated"] is True
+
+
+def test_motif_evidence_contains_only_bounded_deterministic_graph_and_path_ids() -> None:
+    record = _unique_path_motif_record(1)
+    match = find_motif_matches(record_to_multidigraph(record), PATH_SPEC.motif_id)[0]
+
+    summary = graph_evidence_summary(PATH_SPEC, [record])
+
+    assert summary["motif_evidence"] == [
+        {
+            "graph_sha256": record.graph_sha256,
+            "node_path": list(match.node_path),
+            "edge_path": list(match.edge_path),
+        }
+    ]
+    rendered = json.dumps(summary, sort_keys=True)
+    assert "reviewed_marker_1" not in rendered
+    assert "Open a user-provided file path." not in rendered
+    assert "Reviewed security finding." not in rendered
+
+
+def test_discovery_decodes_each_prompt_graph_exactly_once_for_all_six_factors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    domain_text = ". ".join(entry.domain_terms[0] for entry in PROMPT_TSG_CATALOG)
+    guard_text = ". ".join(entry.guard_terms[0] for entry in PROMPT_TSG_CATALOG)
+    prompts = [
+        PromptRecord(
+            prompt_id=f"p-cache-{index:02}",
+            split="discover",
+            language="python",
+            task_family="all_factors",
+            cwe="CWE-999",
+            prompt=domain_text if index < 6 else f"{domain_text}. {guard_text}",
+        )
+        for index in range(12)
+    ]
+    records = [extract_prompt_tsg(prompt) for prompt in prompts]
+    oracles = [
+        _oracle(prompt.prompt_id, insecure=index < 6) for index, prompt in enumerate(prompts)
+    ]
+    baseline, baseline_selected = discover_hypotheses(
+        prompts,
+        records,
+        oracles,
+        min_support_total=12,
+    )
+    calls = 0
+    original = scoring.record_to_multidigraph
+
+    def counted(record):
+        nonlocal calls
+        calls += 1
+        return original(record)
+
+    monkeypatch.setattr(scoring, "record_to_multidigraph", counted)
+    actual, actual_selected = discover_hypotheses(
+        list(reversed(prompts)),
+        list(reversed(records)),
+        list(reversed(oracles)),
+        min_support_total=12,
+    )
+
+    assert len(actual) == 6
+    assert [item.model_dump() for item in actual] == [item.model_dump() for item in baseline]
+    assert [item.hypothesis_id for item in actual_selected] == [
+        item.hypothesis_id for item in baseline_selected
+    ]
+    assert calls == len(records)
