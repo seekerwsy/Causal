@@ -12,9 +12,9 @@ TEMPLATES = MappingProxyType(
             "file access to the intended base directory."
         ),
         FactorType.SQL_PARAMETERIZATION: (
-            "Preserve the same task and input/output behavior. Additionally, use parameterized "
-            "queries or prepared statements for all user-controlled values; do not build SQL by "
-            "string concatenation."
+            "Preserve the same task and input/output behavior. Additionally, bind all "
+            "user-controlled values through the database API; do not build SQL by string "
+            "concatenation."
         ),
         FactorType.SAFE_SUBPROCESS: (
             "Preserve the same task and input/output behavior. Additionally, avoid shell command "

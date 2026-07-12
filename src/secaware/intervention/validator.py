@@ -71,6 +71,16 @@ def _validate_hypothesis_contract(hypothesis: HypothesisRecord) -> None:
         raise _InvalidContract from None
 
 
+def _snapshot_intervention_contract(
+    prompt: PromptRecord,
+    hypothesis: HypothesisRecord,
+) -> tuple[PromptRecord, HypothesisRecord]:
+    prompt_snapshot = _strict_snapshot(PromptRecord, prompt)
+    hypothesis_snapshot = _strict_snapshot(HypothesisRecord, hypothesis)
+    _validate_hypothesis_contract(hypothesis_snapshot)
+    return prompt_snapshot, hypothesis_snapshot
+
+
 def _semantic_labels(graph: nx.MultiDiGraph, node_type: NodeType) -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -107,9 +117,7 @@ def _validate_impl(
     counterfactual_prompt: str,
     hypothesis: HypothesisRecord,
 ) -> dict[str, bool]:
-    prompt_snapshot = _strict_snapshot(PromptRecord, prompt)
-    hypothesis_snapshot = _strict_snapshot(HypothesisRecord, hypothesis)
-    _validate_hypothesis_contract(hypothesis_snapshot)
+    prompt_snapshot, hypothesis_snapshot = _snapshot_intervention_contract(prompt, hypothesis)
 
     original_graph = record_to_multidigraph(original_tsg)
     if prompt_snapshot.prompt_id != original_tsg.prompt_id:
