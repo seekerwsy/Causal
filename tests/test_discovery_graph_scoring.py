@@ -32,6 +32,34 @@ from secaware.tsg.motifs import find_motif_matches, has_factor_requirement
 PATH_SPEC = FACTOR_SPECS[FactorType.PATH_NORMALIZATION]
 
 
+class _ProjectionTrapMapping(dict[str, object]):
+    def __getitem__(self, key: str) -> object:
+        if key in {"fea" + "tures", "sha" + "dow"}:
+            raise AssertionError("flat projection was accessed after graph reconstruction")
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: object = None) -> object:
+        if key in {"fea" + "tures", "sha" + "dow"}:
+            raise AssertionError("flat projection was accessed after graph reconstruction")
+        return super().get(key, default)
+
+
+class _PostCodecProjectionSentinel:
+    __slots__ = ("_record",)
+
+    def __init__(self, record: object) -> None:
+        object.__setattr__(self, "_record", record)
+
+    def __getattr__(self, name: str) -> object:
+        if name in {"fea" + "tures", "sha" + "dow"}:
+            raise AssertionError("flat projection was accessed after graph reconstruction")
+        return getattr(object.__getattribute__(self, "_record"), name)
+
+    def model_dump(self, *args: object, **kwargs: object) -> _ProjectionTrapMapping:
+        record = object.__getattribute__(self, "_record")
+        return _ProjectionTrapMapping(record.model_dump(*args, **kwargs))
+
+
 def _path_prompt(
     prompt_id: str = "p-path",
     *,
@@ -194,6 +222,23 @@ def test_path_score_changes_when_graph_changes_even_if_shadow_is_hostile() -> No
 
     assert path_score(PATH_SPEC, [unsafe], oracle_map) > 0.0
     assert path_score(PATH_SPEC, [changed], oracle_map) == 0.0
+
+
+def test_scoring_uses_only_reconstructed_graph_after_codec_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = extract_prompt_tsg(_path_prompt())
+    sentinel = _PostCodecProjectionSentinel(record)
+    oracle_map = _oracle_by_prompt(_oracle(record.prompt_id, insecure=True))
+
+    def trusted_boundary(candidate: object):
+        assert candidate is sentinel
+        trusted = object.__getattribute__(candidate, "_record")
+        return record_to_multidigraph(trusted)
+
+    monkeypatch.setattr(scoring, "record_to_multidigraph", trusted_boundary)
+
+    assert path_score(PATH_SPEC, [sentinel], oracle_map) > 0.0  # type: ignore[list-item]
 
 
 def test_tampered_shadow_is_rejected_not_read() -> None:

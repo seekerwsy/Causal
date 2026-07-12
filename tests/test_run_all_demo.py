@@ -1,13 +1,17 @@
+import ast
 from collections.abc import Sequence
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from secaware import cli as cli_module
 from secaware.cli import app
-from secaware.config import load_config, write_resolved_config
+from secaware.config import TSGConfig, load_config, write_resolved_config
+from secaware import extractors as extractors_module
 from secaware.errors import ErrorCode
 from secaware.io.jsonl import read_jsonl
 from secaware.oracle import aggregator as aggregator_module
@@ -19,6 +23,118 @@ from secaware.schema.results import PairResult
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _security_rows(pairs: Sequence[PairResult]) -> list[tuple[str, str, str, int, str, str]]:
+    return sorted(
+        (
+            pair.prompt_id,
+            pair.hypothesis_id,
+            pair.model_id,
+            pair.seed_id,
+            pair.security_observed,
+            pair.security_counterfactual,
+        )
+        for pair in pairs
+    )
+
+
+def _assert_pair_security_matches_oracle(
+    pairs: Sequence[PairResult],
+    observed: Sequence[OracleRecord],
+    counterfactual: Sequence[OracleRecord],
+    interventions: Sequence[InterventionRecord],
+) -> None:
+    observed_by_coordinate = {
+        (record.prompt_id, record.model_id, record.seed_id): record.security_label.value
+        for record in observed
+    }
+    intervention_by_id = {record.intervention_id: record for record in interventions}
+    expected_security_rows = sorted(
+        (
+            record.prompt_id,
+            intervention_by_id[record.intervention_id].hypothesis_id,
+            record.model_id,
+            record.seed_id,
+            observed_by_coordinate[(record.prompt_id, record.model_id, record.seed_id)],
+            record.security_label.value,
+        )
+        for record in counterfactual
+    )
+    assert {record.security_label.value for record in (*observed, *counterfactual)} == {
+        "secure",
+        "insecure",
+    }
+    assert any(pair.security_observed != pair.security_counterfactual for pair in pairs)
+    assert ("insecure", "secure") in {
+        (pair.security_observed, pair.security_counterfactual) for pair in pairs
+    }
+    assert _security_rows(pairs) == expected_security_rows
+
+
+def _static_string(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _static_string(node.left)
+        right = _static_string(node.right)
+        return left + right if left is not None and right is not None else None
+    return None
+
+
+def _authority_access_violations(path: Path) -> list[tuple[int, str]]:
+    forbidden_keys = {"fea" + "tures", "sha" + "dow"}
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    violations: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in forbidden_keys:
+            violations.append((node.lineno, "attribute"))
+        elif isinstance(node, ast.Subscript) and _static_string(node.slice) in forbidden_keys:
+            violations.append((node.lineno, "subscript"))
+        elif isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and node.args
+                and _static_string(node.args[0]) in forbidden_keys
+            ):
+                violations.append((node.lineno, "mapping-get"))
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) >= 2
+                and _static_string(node.args[1]) in forbidden_keys
+            ):
+                violations.append((node.lineno, "getattr"))
+    return violations
+
+
+def _assert_no_removed_registered_command(application: typer.Typer) -> None:
+    removed_command = "extract-" + "code-" + "tsg"
+    assert all(command.name != removed_command for command in application.registered_commands)
+    assert all(
+        command.callback is None or "code_" + "tsg" not in command.callback.__name__
+        for command in application.registered_commands
+    )
+
+
+def _declared_cli_commands(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    declared_commands: set[str] = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "command"
+        ):
+            continue
+        declared = _static_string(node.args[0]) if node.args else None
+        for keyword in node.keywords:
+            if keyword.arg == "name":
+                declared = _static_string(keyword.value)
+        if declared is not None:
+            declared_commands.add(declared)
+    return declared_commands
 
 
 class _RunAllOracleRunner:
@@ -45,9 +161,27 @@ class _RunAllOracleRunner:
             return AnalyzerProcessResult(0, stdout, "a" * 64)
         files = sorted(path.name for path in cwd.iterdir() if path.suffix == ".py")
         if analyzer == "semgrep":
+            insecure_files = [
+                path.name
+                for path in sorted(cwd.iterdir())
+                if path.suffix == ".py" and " + name + " in path.read_text(encoding="utf-8")
+            ]
             payload = {
                 "version": "1.168.0",
-                "results": [],
+                "results": [
+                    {
+                        "check_id": "secaware.python.sql-injection",
+                        "path": filename,
+                        "start": {"line": 1, "col": 1, "offset": 0},
+                        "end": {"line": 1, "col": 2, "offset": 1},
+                        "extra": {
+                            "message": "Deterministic SQL fixture finding.",
+                            "metadata": {"cwe": "CWE-89"},
+                            "severity": "ERROR",
+                        },
+                    }
+                    for filename in insecure_files
+                ],
                 "errors": [],
                 "paths": {"scanned": files},
                 "skipped_rules": [],
@@ -100,34 +234,26 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         required=True,
         allow_empty=False,
     )
-    observed_by_coordinate = {
-        (record.prompt_id, record.model_id, record.seed_id): record.security_label.value
-        for record in observed
-    }
-    intervention_by_id = {record.intervention_id: record for record in interventions}
-    expected_security_rows = sorted(
-        (
-            record.prompt_id,
-            intervention_by_id[record.intervention_id].hypothesis_id,
-            record.model_id,
-            record.seed_id,
-            observed_by_coordinate[(record.prompt_id, record.model_id, record.seed_id)],
-            record.security_label.value,
-        )
-        for record in counterfactual
-    )
-    actual_security_rows = sorted(
-        (
-            pair.prompt_id,
-            pair.hypothesis_id,
-            pair.model_id,
-            pair.seed_id,
-            pair.security_observed,
-            pair.security_counterfactual,
+    _assert_pair_security_matches_oracle(pairs, observed, counterfactual, interventions)
+    hardcoded_secure = [
+        pair.model_copy(update={"security_observed": "secure", "security_counterfactual": "secure"})
+        for pair in pairs
+    ]
+    swapped = [
+        pair.model_copy(
+            update={
+                "security_observed": pair.security_counterfactual,
+                "security_counterfactual": pair.security_observed,
+            }
         )
         for pair in pairs
-    )
-    assert actual_security_rows == expected_security_rows
+    ]
+    with pytest.raises(AssertionError):
+        _assert_pair_security_matches_oracle(
+            hardcoded_secure, observed, counterfactual, interventions
+        )
+    with pytest.raises(AssertionError):
+        _assert_pair_security_matches_oracle(swapped, observed, counterfactual, interventions)
     for condition in ("observed", "counterfactual"):
         manifest = read_stage_manifest(run_dir / ".stages" / f"run-oracle-{condition}.json")
         assert manifest.policy_sha256 is not None
@@ -147,9 +273,10 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
 def test_final_architecture_has_no_flat_projection_or_removed_stage_authority() -> None:
     forbidden_authority_reads = ("." + "features", "." + "shadow")
     for package in ("discovery", "intervention"):
-        for path in sorted((REPO_ROOT / "src" / "secaware" / package).glob("*.py")):
+        for path in sorted((REPO_ROOT / "src" / "secaware" / package).rglob("*.py")):
             source = path.read_text(encoding="utf-8")
             assert all(fragment not in source for fragment in forbidden_authority_reads)
+            assert _authority_access_violations(path) == []
 
     removed_fragments = (
         "code" + "_tsg",
@@ -166,7 +293,65 @@ def test_final_architecture_has_no_flat_projection_or_removed_stage_authority() 
 
     help_result = CliRunner().invoke(app, ["--help"])
     assert help_result.exit_code == 0
-    assert "extract-" + "code-" + "tsg" not in help_result.output
+    removed_command = "extract-" + "code-" + "tsg"
+    assert removed_command not in help_result.output
+
+    _assert_no_removed_registered_command(app)
+
+    cli_path = REPO_ROOT / "src" / "secaware" / "cli.py"
+    assert removed_command not in _declared_cli_commands(cli_path)
+
+    removed_module = "code_" + "tsg_" + "extractor"
+    removed_symbol = "extract_" + "code_" + "tsg"
+    assert not (REPO_ROOT / "src" / "secaware" / "extractors" / f"{removed_module}.py").exists()
+    assert importlib.util.find_spec(f"secaware.extractors.{removed_module}") is None
+    assert not hasattr(extractors_module, removed_symbol)
+    assert not hasattr(cli_module, removed_symbol + "_stage")
+    assert not hasattr(cli_module, removed_symbol + "_command")
+    assert "code_" + "extractor" not in TSGConfig.model_fields
+
+
+@pytest.mark.parametrize(
+    "expression",
+    (
+        "record." + "fea" + "tures",
+        "record." + "sha" + "dow",
+        "record[" + repr("sha" + "dow") + "]",
+        "record.get(" + repr("fea" + "tures") + ")",
+        "getattr(record, " + repr("sha" + "dow") + ")",
+        "record.model_dump()[" + repr("sha" + "dow") + "]",
+        "record.model_dump().get(" + repr("fea" + "tures") + ")",
+    ),
+)
+def test_authority_ast_gate_rejects_common_indirect_reads(
+    tmp_path: Path,
+    expression: str,
+) -> None:
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text(f"def probe(record):\n    return {expression}\n", encoding="utf-8")
+
+    assert _authority_access_violations(candidate)
+
+
+def test_removed_cli_gate_detects_hidden_runtime_and_source_registration(
+    tmp_path: Path,
+) -> None:
+    removed_command = "extract-" + "code-" + "tsg"
+    hidden_app = typer.Typer()
+
+    def hidden_callback() -> None:
+        return None
+
+    hidden_app.command(removed_command, hidden=True)(hidden_callback)
+    with pytest.raises(AssertionError):
+        _assert_no_removed_registered_command(hidden_app)
+
+    candidate = tmp_path / "candidate_cli.py"
+    candidate.write_text(
+        "@app.command(" + repr(removed_command) + ", hidden=True)\ndef command():\n    pass\n",
+        encoding="utf-8",
+    )
+    assert removed_command in _declared_cli_commands(candidate)
 
 
 def test_prompt_graph_outcome_boundary_and_breaking_migration_are_documented() -> None:
