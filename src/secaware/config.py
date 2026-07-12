@@ -43,7 +43,6 @@ class DataConfig(StrictModel):
 
 class TSGConfig(StrictModel):
     prompt_extractor: str = "rule_based_v0"
-    code_extractor: str = "python_ast_v0"
 
 
 class DiscoveryConfig(StrictModel):

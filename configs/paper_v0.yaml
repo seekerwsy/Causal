@@ -8,7 +8,6 @@ data:
 
 tsg:
   prompt_extractor: rule_based_v0
-  code_extractor: python_ast_v0
 
 discovery:
   min_support_total: 20

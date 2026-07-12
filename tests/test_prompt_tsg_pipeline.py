@@ -70,6 +70,39 @@ def test_prompt_tsg_committed_output_rejects_catalog_mismatch(tmp_path: Path) ->
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
+def test_prompt_tsg_input_aware_committed_gate_requires_expected_catalog(
+    tmp_path: Path,
+) -> None:
+    config, store = _prepared_store(tmp_path)
+    extract_prompt_tsg_stage(config, store, force=False)  # type: ignore[arg-type]
+    inputs = [store.path("inputs", "prompts.jsonl")]
+    outputs = [store.path("tsg", "prompt_tsg.jsonl")]
+
+    expected = store.require_committed_stage(
+        "extract-prompt-tsg",
+        inputs,
+        outputs,
+        expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+    )
+    with store.hold_committed_stage(
+        "extract-prompt-tsg",
+        inputs,
+        outputs,
+        expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+    ) as held:
+        assert held == expected
+
+    for catalog_sha256 in (None, "0" * 64):
+        with pytest.raises(SecAwareError) as exc_info:
+            store.require_committed_stage(
+                "extract-prompt-tsg",
+                inputs,
+                outputs,
+                expected_catalog_sha256=catalog_sha256,
+            )
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
 def test_prompt_tsg_committed_output_rejects_real_output_tamper(tmp_path: Path) -> None:
     config, store = _prepared_store(tmp_path)
     extract_prompt_tsg_stage(config, store, force=False)  # type: ignore[arg-type]

@@ -92,6 +92,63 @@ def _prompt_records(store: RunStore) -> list[PromptRecord]:
     return read_jsonl(store.path("inputs", "prompts.jsonl"), PromptRecord)  # type: ignore[return-value]
 
 
+def _prompt_tsg_coordinate_error(stage: str) -> SecAwareError:
+    return SecAwareError(
+        code=ErrorCode.TSG_INVALID,
+        stage=stage,
+        message="Prompt TSG coordinates failed validation",
+    )
+
+
+def _validated_prompt_tsg_coordinates(
+    store: RunStore,
+    *,
+    stage: str,
+) -> tuple[list[PromptRecord], dict[str, PromptTSGRecord]]:
+    prompts: list[PromptRecord] = []
+    prompt_tsgs: list[PromptTSGRecord] = []
+    prompt_ids: list[str] = []
+    graph_prompt_ids: list[str] = []
+    prompt_tsg_by_id: dict[str, PromptTSGRecord] = {}
+    try:
+        prompts = _prompt_records(store)
+        prompt_tsgs = cast(
+            list[PromptTSGRecord],
+            read_jsonl(
+                store.path("tsg", "prompt_tsg.jsonl"),
+                PromptTSGRecord,
+                required=True,
+                allow_empty=False,
+                stage=stage,
+            ),
+        )
+        prompt_ids = [prompt.prompt_id for prompt in prompts]
+        graph_prompt_ids = [prompt_tsg.prompt_id for prompt_tsg in prompt_tsgs]
+        if (
+            not prompt_ids
+            or len(prompt_ids) != len(set(prompt_ids))
+            or len(graph_prompt_ids) != len(set(graph_prompt_ids))
+            or set(prompt_ids) != set(graph_prompt_ids)
+        ):
+            raise ValueError("invalid Prompt TSG coordinates")
+        prompt_tsg_by_id = {prompt_tsg.prompt_id: prompt_tsg for prompt_tsg in prompt_tsgs}
+        return prompts, prompt_tsg_by_id
+    except (KeyboardInterrupt, SystemExit):
+        prompts.clear()
+        prompt_tsgs.clear()
+        prompt_ids.clear()
+        graph_prompt_ids.clear()
+        prompt_tsg_by_id.clear()
+        raise
+    except Exception:
+        prompts.clear()
+        prompt_tsgs.clear()
+        prompt_ids.clear()
+        graph_prompt_ids.clear()
+        prompt_tsg_by_id.clear()
+        raise _prompt_tsg_coordinate_error(stage) from None
+
+
 def _generation_condition(value: str) -> GenerationCondition:
     if value == "observed" or value == "counterfactual":
         return cast(GenerationCondition, value)
@@ -1720,19 +1777,13 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     oracle_output = store.path("oracle", "observed_oracle.jsonl")
 
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "discover"]
+        all_prompts, prompt_tsg_by_id = _validated_prompt_tsg_coordinates(
+            store,
+            stage=stage,
+        )
+        prompts = [prompt for prompt in all_prompts if prompt.split == "discover"]
         prompt_ids = {prompt.prompt_id for prompt in prompts}
-        prompt_tsgs = [
-            tsg
-            for tsg in read_jsonl(
-                store.path("tsg", "prompt_tsg.jsonl"),
-                PromptTSGRecord,
-                required=True,
-                allow_empty=False,
-                stage=stage,
-            )
-            if tsg.prompt_id in prompt_ids
-        ]
+        prompt_tsgs = [prompt_tsg_by_id[prompt.prompt_id] for prompt in prompts]
         oracles = [
             record
             for record in _read_oracle_output(
@@ -1795,19 +1846,11 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     paired_output = store.path("interventions", "paired_prompts.jsonl")
     outputs = [output, paired_output]
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        prompts = [prompt for prompt in _prompt_records(store) if prompt.split == "confirm"]
-        prompt_by_id = {prompt.prompt_id: prompt for prompt in prompts}
-        prompt_tsgs = {
-            tsg.prompt_id: tsg
-            for tsg in read_jsonl(
-                store.path("tsg", "prompt_tsg.jsonl"),
-                PromptTSGRecord,
-                required=True,
-                allow_empty=False,
-                stage=stage,
-            )
-            if tsg.prompt_id in prompt_by_id
-        }
+        all_prompts, prompt_tsg_by_id = _validated_prompt_tsg_coordinates(
+            store,
+            stage=stage,
+        )
+        prompts = [prompt for prompt in all_prompts if prompt.split == "confirm"]
         hypotheses = read_jsonl(
             store.path("discovery", "hypotheses_selected.jsonl"),
             HypothesisRecord,
@@ -1823,7 +1866,7 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
                 if not _matches_scope(prompt, hypothesis):
                     continue
                 interventions.append(
-                    apply_intervention(prompt, prompt_tsgs[prompt.prompt_id], hypothesis)
+                    apply_intervention(prompt, prompt_tsg_by_id[prompt.prompt_id], hypothesis)
                 )
         paired_prompts = [
             {

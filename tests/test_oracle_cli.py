@@ -27,7 +27,9 @@ from secaware.cli import (
     run_oracle_stage,
 )
 from secaware.config import AppConfig, load_config, write_resolved_config
+from secaware.discovery.candidate_enum import FACTOR_SPECS
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io import run_store as run_store_module
 from secaware.io.run_store import RunStore
@@ -48,8 +50,10 @@ from secaware.schema.generation import (
     OfflineGenerationResultRecord,
     sha256_text,
 )
+from secaware.schema.hypotheses import FactorType, HypothesisRecord
 from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
 
 
@@ -1101,8 +1105,156 @@ def test_discovery_rejects_committed_legacy_prompt_graph_artifact(tmp_path: Path
     with pytest.raises(SecAwareError) as exc_info:
         discover_stage(config, store, force=False)
 
-    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
     assert not store.path(".stages", "discover.json").exists()
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "unknown"])
+def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    intervene_stage(config, store, force=False)
+    outputs = [
+        store.path("interventions", "interventions.jsonl"),
+        store.path("interventions", "paired_prompts.jsonl"),
+    ]
+    manifest_path = store.path(".stages", "intervene.json")
+    previous = ([path.read_bytes() for path in outputs], manifest_path.read_bytes())
+    spec = FACTOR_SPECS[FactorType.PATH_NORMALIZATION]
+    selected_hypothesis = HypothesisRecord(
+        hypothesis_id="h-coordinate-validation",
+        factor_type=spec.factor_type,
+        motif_id=spec.motif_id,
+        requirement_label=spec.requirement_label,
+        guard_label=spec.guard_label,
+        expected_direction="risk_down_when_added",
+        scope={"language": "python", "task_family": "path_handling", "cwe": "CWE-22"},
+        patch_operator=spec.patch_operator,
+    )
+    discovery_outputs = [
+        store.path("discovery", "hypotheses_all.jsonl"),
+        store.path("discovery", "hypotheses_selected.jsonl"),
+    ]
+    for discovery_output in discovery_outputs:
+        write_jsonl(discovery_output, [selected_hypothesis])
+    discovery_manifest_path = store.path(".stages", "discover.json")
+    discovery_manifest = read_stage_manifest(discovery_manifest_path)
+    write_stage_manifest(
+        discovery_manifest_path,
+        discovery_manifest.model_copy(
+            update={
+                "output_sha256": {
+                    path.relative_to(store.root).as_posix(): sha256_path(path)
+                    for path in discovery_outputs
+                }
+            }
+        ),
+    )
+    prompts = read_jsonl(
+        store.path("inputs", "prompts.jsonl"),
+        PromptRecord,
+        required=True,
+        allow_empty=False,
+    )
+    confirm_prompt = next(prompt for prompt in prompts if prompt.split == "confirm")
+    prompt_graph_path = store.path("tsg", "prompt_tsg.jsonl")
+    prompt_graphs = read_jsonl(
+        prompt_graph_path,
+        PromptTSGRecord,
+        required=True,
+        allow_empty=False,
+    )
+    confirm_graph = next(
+        graph for graph in prompt_graphs if graph.prompt_id == confirm_prompt.prompt_id
+    )
+    unknown_prompt_id = "private-unknown-prompt-coordinate"
+    unknown_prompt_text = "PRIVATE_RAW_PROMPT_COORDINATE_SENTINEL"
+    if mutation == "missing":
+        mutated = [
+            graph for graph in prompt_graphs if graph.prompt_id != confirm_prompt.prompt_id
+        ]
+    elif mutation == "duplicate":
+        mutated = [*prompt_graphs, confirm_graph]
+    else:
+        mutated = [
+            *prompt_graphs,
+            extract_prompt_tsg(
+                PromptRecord(
+                    prompt_id=unknown_prompt_id,
+                    split="confirm",
+                    language="python",
+                    task_family="path_handling",
+                    cwe="CWE-22",
+                    prompt=unknown_prompt_text,
+                )
+            ),
+        ]
+    write_jsonl(prompt_graph_path, mutated)
+    producer_manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    producer_manifest = read_stage_manifest(producer_manifest_path)
+    write_stage_manifest(
+        producer_manifest_path,
+        producer_manifest.model_copy(
+            update={
+                "output_sha256": {
+                    "tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)
+                }
+            }
+        ),
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        intervene_stage(config, store, force=True)
+
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+    assert exc_info.value.details == {}
+    safe_surfaces = _safe_surfaces(exc_info.value)
+    assert confirm_prompt.prompt_id not in safe_surfaces
+    assert confirm_prompt.prompt not in safe_surfaces
+    assert unknown_prompt_id not in safe_surfaces
+    assert unknown_prompt_text not in safe_surfaces
+    assert ([path.read_bytes() for path in outputs], manifest_path.read_bytes()) == previous
+    assert not store.stage_is_active("intervene")
+    with store.hold_committed_output(
+        "extract-prompt-tsg",
+        [prompt_graph_path],
+        expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+    ):
+        pass
+
+
+def test_discovery_uses_full_prompt_graph_coordinate_boundary(tmp_path: Path) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    prompt_graph_path = store.path("tsg", "prompt_tsg.jsonl")
+    prompt_graphs = read_jsonl(
+        prompt_graph_path,
+        PromptTSGRecord,
+        required=True,
+        allow_empty=False,
+    )
+    write_jsonl(prompt_graph_path, prompt_graphs[1:])
+    producer_manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    producer_manifest = read_stage_manifest(producer_manifest_path)
+    write_stage_manifest(
+        producer_manifest_path,
+        producer_manifest.model_copy(
+            update={
+                "output_sha256": {
+                    "tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)
+                }
+            }
+        ),
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_stage(config, store, force=True)
+
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+    assert exc_info.value.details == {}
+    assert not store.stage_is_active("discover")
 
 
 def test_confirm_holds_both_oracle_leases_in_fixed_order_through_computation(

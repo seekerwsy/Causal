@@ -236,6 +236,24 @@ def test_app_config_rejects_unknown_nested_keys() -> None:
     }
 
 
+def test_app_config_rejects_removed_tsg_field() -> None:
+    removed_field = "code_" + "extractor"
+    removed_value = "python_" + "ast_v0"
+
+    with pytest.raises(ValidationError) as exc_info:
+        AppConfig.model_validate(
+            {
+                "run": {"name": "strict"},
+                "data": {"prompts_path": "prompts.jsonl"},
+                "tsg": {removed_field: removed_value},
+            }
+        )
+
+    assert ("tsg", removed_field) in {
+        tuple(error["loc"]) for error in exc_info.value.errors()
+    }
+
+
 @pytest.mark.parametrize("config_name", ["demo.yaml", "paper_v0.yaml"])
 def test_existing_config_files_still_load(config_name: str) -> None:
     config = load_config(PROJECT_ROOT / "configs" / config_name)

@@ -594,6 +594,8 @@ class RunStore:
         stage: str,
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
+        *,
+        expected_catalog_sha256: str | None = None,
     ) -> dict[str, str]:
         """Require a complete committed stage with current inputs and outputs."""
 
@@ -601,7 +603,7 @@ class RunStore:
             stage,
             output_paths,
             input_paths=input_paths,
-            expected_catalog_sha256=None,
+            expected_catalog_sha256=expected_catalog_sha256,
         )
 
     def require_committed_output(
@@ -626,6 +628,8 @@ class RunStore:
         stage: str,
         input_paths: Sequence[str | Path],
         output_paths: Sequence[str | Path],
+        *,
+        expected_catalog_sha256: str | None = None,
     ) -> Iterator[dict[str, str]]:
         """Hold a committed producer lease while a dependent stage consumes it."""
 
@@ -645,6 +649,7 @@ class RunStore:
                 stage,
                 input_paths,
                 output_paths,
+                expected_catalog_sha256=expected_catalog_sha256,
             )
             yield dict(output_sha256)
         finally:
