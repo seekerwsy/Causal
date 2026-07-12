@@ -1,13 +1,20 @@
-# Paired Confirmation and Causal Effects Design
+# Unified Feature Graph, Paired Confirmation, and Causal Effects Design
 
-**Date:** 2026-07-12  
-**Scope:** M4 — exact paired confirmation, conservative ITT, per-protocol effects, and clustered uncertainty
+**Date:** 2026-07-12
+**Revised:** 2026-07-13
+**Scope:** M4 — unified feature graph, typed reversible interventions, exact paired confirmation, and clustered effects
 
 ## 1. Objective
 
-M4 turns confirmed-split interventions and independent Oracle outcomes into exact paired records and
-auditable hypothesis-level effects. It replaces permissive dictionary joins and ambiguous missing
-outcome handling with a fail-closed coordinate contract.
+M4 extends the authoritative Prompt TSG into one typed feature view for task-function,
+safety-control, and presentation/placebo features. All three families share canonical graph deltas,
+typed add/remove operations, provenance, and round-trip validation. They remain separate experiment
+families with separate invariants and outcomes; a unified graph never implies a pooled effect.
+
+M4 also turns confirmed-split safety interventions and independent Oracle outcomes into exact paired
+records and auditable hypothesis-level effects. It replaces permissive dictionary joins and
+ambiguous missing outcome handling with a fail-closed coordinate contract. Safety confirmation is
+the first complete outcome-estimation family built on the unified feature graph.
 
 The primary statistical design is the user-approved conservative option:
 
@@ -37,6 +44,10 @@ Prompt TSG, generated code structure, intervention success, or failure reasons.
 5. Discovery and confirmation samples remain disjoint. Selected hypotheses originate from the
    discovery split; M4 effects use only prompts marked `split="confirm"`.
 6. No flat Prompt TSG feature or shadow projection participates in pairing or estimation.
+7. Task-function, safety-control, and presentation-control features share one graph record and one
+   delta engine, but their observations are never pooled into one denominator or status.
+8. A functional change is not relabeled as a safety side effect, and a presentation change is not
+   relabeled as a task or safety mechanism. Cross-family changes are explicit graph deltas.
 
 ### 2.1 Safety-neutral prompt contrast
 
@@ -53,9 +64,11 @@ exploit, or provide an unsafe implementation as a contrast. Treatment clauses us
 instructions such as “bind user-controlled values through database parameters” rather than naming
 and negating a vulnerable construction.
 
-Prompt roles are explicit and finite: `neutral_baseline` and `positive_safety_control`. Discovery may
-compare both roles, but intervention assignment is allowed only for `neutral_baseline` prompts in the
-confirmation split. A strict, committed neutrality manifest binds each prompt role to the exact
+Prompt roles are explicit and finite: `neutral_baseline`, `positive_safety_control`,
+`task_function_variant`, and `presentation_control`. Safety addition is allowed only from an attested
+`neutral_baseline`; safety removal is allowed only from a `positive_safety_control` that is bound to
+its exact neutral counterpart. Task and presentation experiments use their corresponding roles. A
+strict, committed neutrality manifest binds each prompt role and counterpart relation to the exact
 prompt SHA-256 and reviewed prompt-catalog version. A missing, stale, duplicated, or mismatched
 attestation aborts the stage. The manifest is reviewed pre-outcome and cannot contain generated code,
 Oracle labels, or post-treatment evidence.
@@ -68,33 +81,111 @@ catalog digest; changing one invalidates downstream skip state and requires revi
 
 The intervention is deliberately hybrid:
 
-1. the selected hypothesis and authoritative Prompt TSG choose one absent target factor;
-2. the finite intervention catalog maps that factor to one deterministic positive text clause;
+1. the selected hypothesis and authoritative Prompt TSG choose one exact target feature and
+   `add`/`remove` operation;
+2. the finite intervention catalog maps that typed operation to one deterministic text transform;
 3. the operator modifies the prompt text, because prompt text is what the code-generation model
    actually receives;
-4. the modified text is independently re-extracted into Prompt TSG v2;
-5. graph comparison must prove target `False -> True`, preserve task operation/sink semantics, and
-   reject non-target factor or motif changes.
+4. the modified text is independently re-extracted into Prompt TSG 2.1;
+5. graph comparison must prove the exact family-specific target delta and reject every disallowed
+   cross-family change.
 
 M4 does not edit a graph and then ask an LLM to translate the graph back into text. Such a translator
 would introduce an uncontrolled second model, wording drift, and an additional causal treatment.
 The deterministic catalog verbalizer is the only graph-to-language mapping, and graph round-trip
 validation remains authoritative for whether the text intervention succeeded.
 
+Safety removal is the inverse of safety addition, not an unsafe instruction. It may remove only a
+catalog-owned positive clause whose span, text SHA-256, feature ID, and originating neutral prompt
+are committed. Removal must restore the attested neutral text exactly; it cannot insert wording such
+as “skip validation” or “use an unsafe API.” Adding and then removing the same clause must produce
+`False -> True -> False` for the target factor and byte-for-byte restore the original prompt.
+
+The same neutral/safety text pair supplies one experimental contrast. Reporting the reverse contrast
+as the negative of the forward contrast is allowed for audit, but it is not a second independent
+sample and never doubles a denominator. An independently sourced positive-control prompt may enter a
+separate removal cohort only when it has its own neutral counterpart and provenance.
+
+### 2.3 Unified feature graph
+
+Prompt TSG 2.1 remains one canonical `MultiDiGraph`. It adds finite enums:
+
+```text
+FeatureFamily = TASK_FUNCTION | SAFETY_CONTROL | PRESENTATION_CONTROL
+FeatureOperation = ADD | REMOVE
+```
+
+Every intervenable semantic identity has one catalog-bound `feature_id` and exactly one family.
+Existing task operations, data objects, sources, and sinks form the task-function layer. Safety
+requirements, guards, trust boundaries, and security assumptions form the safety-control layer. A
+new bounded `PRESENTATION_FEATURE` node type represents reviewed surface controls such as instruction
+ordering or list formatting; presentation edges cannot participate in source-to-sink or guard motif
+queries.
+
+Feature-family attributes, presentation kinds, and their permitted edge types use strict finite
+allowlists. The catalog is immutable, versioned, and included in the Prompt TSG stage-contract
+digest. Arbitrary labels, runtime registration, LLM-generated feature definitions, and an open-ended
+rule registry are forbidden. Prompt TSG 2.0 records must be regenerated rather than silently
+upgraded.
+
+One graph may contain all three typed layers, but consumers use explicit projections:
+
+- task projection: operations, requirements, data, APIs, sources, and sinks;
+- safety projection: safety requirements, guards, assumptions, trust boundaries, and motifs;
+- presentation projection: reviewed surface-form nodes and ordering/format relations.
+
+No projection is stored as an authoritative flat dictionary. Each is recomputed from the canonical
+graph and checked against graph bounds and catalog versions.
+
+### 2.4 Canonical GraphDelta and family invariants
+
+Every intervention produces a frozen `GraphDeltaRecord` containing:
+
+- before/after graph IDs and SHA-256 values;
+- feature family, feature ID, operation, operator version, and catalog digest;
+- canonical added/removed node semantic identities;
+- canonical added/removed edge semantic identities;
+- before/after task, safety, and presentation projection commitments;
+- target-changed, reversible, and cross-family-change flags;
+- a digest over the complete delta.
+
+The same delta engine applies different invariants:
+
+| Experiment family | Allowed target change | Required invariants | Outcome family |
+|---|---|---|---|
+| safety control | one safety feature `False <-> True` | task projection unchanged; non-target safety features unchanged | Semgrep+Bandit security `Y` |
+| task function | one reviewed task feature added/removed | non-target task features and safety projection unchanged | independent functional outcome contract |
+| presentation control | one reviewed surface feature added/removed | complete task and safety projections unchanged | placebo security diagnostic or presentation metric |
+
+Any delta outside the selected row is a typed side effect or semantic drift. Safety estimation rejects
+it from PP while retaining the assignment in ITT. Task-function and presentation experiments use
+their own eligibility and effect records; they are never converted into safety pairs merely because
+an Oracle label is available.
+
+M4 implements schema, canonical delta construction, add/remove reversibility, and invariant
+validation for all three families. It implements complete paired outcome estimation for the safety
+family and a security-outcome negative-control diagnostic for presentation features. A task-function
+effect requires a separately committed `FunctionalOutcomeRecord`; without an independent functional
+validator the graph delta may be audited but no functional causal claim is published.
+
 ## 3. Assignment and Pairing Coordinates
 
 ### 3.1 Assignment unit
 
-One assigned unit is identified by:
+One safety or presentation assigned unit is identified by:
 
 ```text
-(prompt_id, hypothesis_id, intervention_id, model_id, seed_id)
+(prompt_id, hypothesis_id, feature_family, feature_id, operation,
+ intervention_id, model_id, seed_id)
 ```
 
 `intervention_id` binds the concrete counterfactual prompt and must map to exactly one
 `InterventionRecord`. A deterministic `pair_id` is `pair_` plus the lowercase SHA-256 of the
 canonical assignment coordinates and the bound observed/counterfactual request and code IDs. Raw
 prompt text is not included in the identifier or output records.
+
+Forward and reverse views of the same exact text pair share one `contrast_id`. The assignment
+validator rejects attempts to publish both views as independent rows for the same model/seed.
 
 The assignment universe is the finite Cartesian product of every selected, persisted intervention
 attempt and the configured generation `(model_id, seed_id)` axes. It is bounded by the existing
@@ -138,7 +229,9 @@ schema version `2.0`. It contains:
 
 - assignment coordinates and deterministic `pair_id`;
 - observed/counterfactual request IDs, code IDs, and code SHA-256 values when present;
-- typed `FactorType`, expected direction, and finite `FailureReason`/flip enums;
+- typed feature family, feature ID, add/remove operation, expected direction, and `contrast_id`;
+- a safety `FactorType` only when `feature_family == SAFETY_CONTROL`;
+- finite `FailureReason` and flip enums;
 - intervention validity facts (`patch_success`, `round_trip_valid`, `semantic_valid`,
   `target_changed`, `side_effect`);
 - Oracle parse/functional states and typed security labels;
@@ -165,6 +258,10 @@ No error, repr, traceback local, or schema detail contains raw prompt/code text.
 
 Let `Y(0)` be the observed-prompt Oracle risk outcome and `Y(1)` the counterfactual-prompt Oracle
 risk outcome. Lower is safer.
+
+This section defines the safety-control estimand. Presentation controls reuse exact pairing only as a
+negative-control diagnostic and cannot receive `confirmed` safety-mechanism status. Task-function
+features require a functional outcome estimand defined by their independent outcome contract.
 
 ### 5.1 Per-protocol risk difference
 
@@ -258,6 +355,7 @@ Both unadjusted point estimates and adjusted confidence intervals are persisted.
 `EffectRecord` becomes frozen and strict with result schema version `2.0`. It stores:
 
 - hypothesis/factor/scope coordinates;
+- safety feature family, feature ID, operation, and contrast direction;
 - attempted, PP-eligible, Oracle-evaluable, and unique prompt counts;
 - PP and ITT risk differences with adjusted cluster-bootstrap intervals;
 - valid bootstrap replicate counts;
@@ -283,6 +381,12 @@ gate is unmet. `unsupported` covers insufficient denominators, no effect, opposi
 excess harm flips, excess side effects, or invalid bootstrap support. Failure-reason precedence is
 finite and tested. A confirmed result never carries a failure reason.
 
+Presentation-control diagnostics report `consistent_with_null`, `unexpected_security_shift`, or
+`unsupported` in a separate strict `ControlEffectRecord`; they never report `confirmed` and are not
+included in safety multiplicity counts. A task-function graph delta reports only structural
+validation until a committed functional outcome artifact is present, after which a separate
+`FunctionalEffectRecord` and estimand are required.
+
 ## 8. Confirmation Stage Transaction
 
 `confirm` holds committed producer leases in canonical stage-name order for:
@@ -302,6 +406,10 @@ prompts and selected hypotheses came from the committed discovery output. Pair a
 outputs use the existing preserve-committed transaction. Any error restores the previous output and
 manifest byte-for-byte.
 
+The intervention producer also commits `GraphDeltaRecord` outputs. Confirmation requires exact
+coverage between intervention attempts and deltas, rejects duplicate forward/reverse publication of
+one contrast, and verifies the feature-catalog digest before reading any outcome.
+
 ## 9. Configuration
 
 `AnalysisConfig` is strict and bounded. It retains existing thresholds and adds only parameters
@@ -310,6 +418,9 @@ required by this design:
 - minimum unique prompts;
 - minimum valid PP bootstrap fraction;
 - maximum insecure-flip rate for confirmation.
+
+Feature families, operations, catalogs, and validators are code-level finite enums/contracts rather
+than user-extensible configuration.
 
 `bootstrap_samples`, confidence level, denominator thresholds, rates, and the assignment product are
 validated before execution. Zero, negative, non-finite, boolean-as-integer, and excessive values are
@@ -323,6 +434,8 @@ rejected. There is no open-ended estimator or rule registry.
 - Unknown Oracle outcomes are never converted into secure/insecure labels.
 - Empty assignment universes and missing selected hypotheses fail closed; they do not produce a
   vacuous confirmed effect.
+- A feature-family mismatch, disallowed cross-family delta, non-reversible catalog operation, or
+  duplicated forward/reverse contrast aborts confirmation.
 - Bootstrap insufficiency yields a typed unsupported effect only when the underlying pair artifact
   is valid. Invalid pair input aborts estimation.
 - All traversals, products, grouping maps, and bootstrap loops have explicit finite bounds.
@@ -349,6 +462,14 @@ M4 is complete only when tests prove:
 14. Python 3.10, Python 3.12, minimum Pydantic, Ruff, compile, static, and real-Oracle regressions
     pass;
 15. run-all final pair labels remain exactly traceable to committed Oracle records.
+16. one Prompt TSG round-trip preserves task, safety, and presentation layers and rejects invalid
+    cross-layer edges;
+17. safety add/remove operations are exact inverses and cannot insert an unsafe instruction;
+18. the same forward/reverse text contrast cannot be counted twice;
+19. task-function, safety-control, and presentation-control mutations change only their permitted
+    graph projections;
+20. presentation negative controls cannot receive safety-confirmed status, and task-function deltas
+    cannot publish an effect without a committed independent functional outcome.
 
 ## 12. Non-Goals
 
@@ -357,11 +478,16 @@ M4 is complete only when tests prove:
 - M4 does not replace the Semgrep+Bandit Oracle or infer outcomes from Prompt TSG.
 - M4 does not add adaptive stopping, Bayesian priors, model weighting, or an estimator plugin system.
 - M4 does not hide protocol failures by dropping them from the ITT assignment universe.
+- M4 does not treat the reverse view of one text pair as independent evidence.
+- M4 does not publish a functional causal effect before an independent, committed functional
+  validator exists.
+- M4 does not pool feature families into one score, denominator, confidence interval, or status.
 
 ## 13. Consequences
 
-The design is intentionally stricter than the current implementation. Old pair/effect artifacts must
-be regenerated. Exact pairing and conservative ITT reduce optimistic bias, while PP and sensitivity
-bounds preserve interpretability. Clustered, multiplicity-adjusted uncertainty is more conservative
-than row-wise bootstrap but matches the experimental dependence structure and independent-split
-claim.
+The design is intentionally stricter than the current implementation. Prompt TSG 2.0 and old
+pair/effect artifacts must be regenerated. A unified graph and delta engine prevent parallel,
+inconsistent representations while typed experiment families prevent invalid statistical pooling.
+Exact pairing and conservative ITT reduce optimistic bias, while PP and sensitivity bounds preserve
+interpretability. Clustered, multiplicity-adjusted uncertainty is more conservative than row-wise
+bootstrap but matches the experimental dependence structure and independent-split claim.
