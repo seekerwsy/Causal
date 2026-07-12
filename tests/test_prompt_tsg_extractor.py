@@ -251,6 +251,39 @@ def test_invalid_prompt_record_error_surfaces_are_sanitized() -> None:
     assert sentinel not in rendered
 
 
+@pytest.mark.parametrize(
+    ("field_name", "wrong_value"),
+    (
+        ("prompt_id", b"p001"),
+        ("split", b"discover"),
+        ("language", b"python"),
+        ("task_family", b"reviewed_task"),
+        ("cwe", b"CWE-20"),
+        ("prompt", b"Return the number seven. RAW_PROMPT_SENTINEL_431e"),
+    ),
+)
+def test_coercible_prompt_field_mutations_are_rejected_without_leakage(
+    field_name: str,
+    wrong_value: object,
+) -> None:
+    sentinel = "RAW_PROMPT_SENTINEL_431e"
+    prompt = _prompt(f"Return the number seven. {sentinel}")
+    object.__setattr__(prompt, field_name, wrong_value)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        extract_prompt_tsg(prompt)
+
+    rendered = "\n".join(
+        (
+            str(exc_info.value),
+            repr(exc_info.value),
+            "".join(traceback.format_exception(exc_info.value)),
+        )
+    )
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+    assert sentinel not in rendered
+
+
 def test_unexpected_extraction_failure_is_sanitized_analysis_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

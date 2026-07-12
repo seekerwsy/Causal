@@ -50,13 +50,24 @@ def _internal_error() -> SecAwareError:
 def _snapshot_prompt(value: object) -> PromptRecord:
     if type(value) is not PromptRecord or not model_shape_is_intact(value):
         raise _InvalidInput from None
+    runtime_fields = (
+        value.prompt_id,
+        value.split,
+        value.language,
+        value.task_family,
+        value.cwe,
+        value.prompt,
+    )
+    if any(type(item) is not str for item in runtime_fields):
+        raise _InvalidInput from None
     payload = value.model_dump(mode="python", round_trip=True, warnings=False)
     try:
-        snapshot = PromptRecord.model_validate(payload)
+        snapshot = PromptRecord.model_validate(payload, strict=True)
     except ValidationError:
         raise _InvalidInput from None
     string_fields = (
         snapshot.prompt_id,
+        snapshot.split,
         snapshot.language,
         snapshot.task_family,
         snapshot.cwe,
