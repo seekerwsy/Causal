@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 
 import networkx as nx
@@ -155,6 +156,35 @@ def _unique_path_motif_record(index: int):
     builder.add_edge("source", "data", edge_type=EdgeType.SOURCE_OF, attributes={})
     builder.add_edge("data", "sink", edge_type=EdgeType.FLOWS_TO, attributes={})
     return multidigraph_to_record(builder, prompt_id=f"p-evidence-{index:03}")
+
+
+def _many_path_matches_record(graph_index: int, match_count: int = 100):
+    builder = nx.MultiDiGraph()
+    builder.add_node("sink", node_type=NodeType.SINK, label="file_open", attributes={})
+    builder.add_node(
+        "marker",
+        node_type=NodeType.SECURITY_ASSUMPTION,
+        label=f"high_volume_marker_{graph_index}",
+        attributes={},
+    )
+    for index in range(match_count):
+        source = f"source_{index}"
+        data = f"data_{index}"
+        builder.add_node(
+            source,
+            node_type=NodeType.SOURCE,
+            label="user_input",
+            attributes={},
+        )
+        builder.add_node(
+            data,
+            node_type=NodeType.DATA_OBJECT,
+            label="user_path",
+            attributes={},
+        )
+        builder.add_edge(source, data, edge_type=EdgeType.SOURCE_OF, attributes={})
+        builder.add_edge(data, "sink", edge_type=EdgeType.FLOWS_TO, attributes={})
+    return multidigraph_to_record(builder, prompt_id=f"p-high-volume-{graph_index}")
 
 
 def test_path_score_changes_when_graph_changes_even_if_shadow_is_hostile() -> None:
@@ -467,3 +497,77 @@ def test_discovery_decodes_each_prompt_graph_exactly_once_for_all_six_factors(
         item.hypothesis_id for item in baseline_selected
     ]
     assert calls == len(records)
+
+
+def test_high_volume_motif_evidence_uses_only_cap_plus_one_selection_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helper_source = inspect.getsource(scoring._graph_evidence_from_evaluated)
+    assert "evidence = sorted(" not in helper_source
+    records = [_many_path_matches_record(index) for index in range(3)]
+    peak_selection_storage = 0
+    original_insort = scoring.insort_right
+
+    def observed_insort(items, value):
+        nonlocal peak_selection_storage
+        result = original_insort(items, value)
+        peak_selection_storage = max(peak_selection_storage, len(items))
+        return result
+
+    monkeypatch.setattr(scoring, "insort_right", observed_insort)
+    summary = graph_evidence_summary(PATH_SPEC, records)
+    reversed_summary = graph_evidence_summary(PATH_SPEC, list(reversed(records)))
+
+    assert summary == reversed_summary
+    assert summary["motif_prompt_count"] == 3
+    assert summary["motif_match_count"] == 300
+    assert len(summary["motif_evidence"]) == 64
+    assert summary["motif_evidence_truncated"] is True
+    assert peak_selection_storage <= 65
+
+
+def test_aggregate_commitment_covers_full_evidence_beyond_retained_samples() -> None:
+    record = _many_path_matches_record(1)
+    evaluated = scoring._evaluate_prompt_tsgs(
+        [record],
+        factor_types=(PATH_SPEC.factor_type,),
+        motif_ids=(PATH_SPEC.motif_id,),
+    )[0]
+    motif = evaluated.motif_evaluation(PATH_SPEC.motif_id)
+    assert motif.count == 100
+    assert len(motif.retained_matches) == 64
+    full_matches = find_motif_matches(record_to_multidigraph(record), PATH_SPEC.motif_id)
+    omitted = full_matches[-1]
+    changed_omitted = type(omitted).model_validate(
+        {
+            **omitted.model_dump(mode="python"),
+            "edge_path": (*omitted.edge_path[:-1], "e_" + "f" * 64),
+        }
+    )
+    changed_full_matches = (*full_matches[:-1], changed_omitted)
+    assert full_matches[:64] == changed_full_matches[:64] == motif.retained_matches
+    assert motif.commitment_sha256 == scoring._match_commitment(full_matches)
+    changed_commitment = scoring._match_commitment(changed_full_matches)
+    assert changed_commitment != motif.commitment_sha256
+    changed_motif = scoring.EvaluatedMotif(
+        motif_id=motif.motif_id,
+        count=motif.count,
+        retained_matches=motif.retained_matches,
+        commitment_sha256=changed_commitment,
+    )
+    changed = scoring.EvaluatedPromptGraph(
+        prompt_id=evaluated.prompt_id,
+        graph_sha256=evaluated.graph_sha256,
+        factors=evaluated.factors,
+        motifs=((PATH_SPEC.motif_id, changed_motif),),
+    )
+
+    original_summary = scoring._graph_evidence_from_evaluated(PATH_SPEC, (evaluated,))
+    changed_summary = scoring._graph_evidence_from_evaluated(PATH_SPEC, (changed,))
+
+    assert original_summary["motif_evidence"] == changed_summary["motif_evidence"]
+    assert original_summary["motif_match_count"] == changed_summary["motif_match_count"] == 100
+    assert (
+        original_summary["motif_evidence_commitment_sha256"]
+        != changed_summary["motif_evidence_commitment_sha256"]
+    )

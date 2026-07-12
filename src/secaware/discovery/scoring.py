@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import math
-import hashlib
-import json
+from bisect import insort_right
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
+import json
+import math
 from typing import Any
 
 from secaware.discovery.candidate_enum import FactorSpec
@@ -23,20 +24,51 @@ MAX_DISCOVERY_MOTIF_EVIDENCE = 64
 
 
 @dataclass(frozen=True, slots=True)
+class EvaluatedMotif:
+    motif_id: MotifId
+    count: int
+    retained_matches: tuple[MotifMatch, ...]
+    commitment_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluatedPromptGraph:
     prompt_id: str
     graph_sha256: str
     factors: tuple[tuple[FactorType, bool], ...]
-    motifs: tuple[tuple[MotifId, tuple[MotifMatch, ...]], ...]
+    motifs: tuple[tuple[MotifId, EvaluatedMotif], ...]
 
     def has_factor(self, factor_type: FactorType) -> bool:
         return dict(self.factors)[factor_type]
 
     def motif_count(self, motif_id: MotifId) -> int:
-        return len(self.motif_matches(motif_id))
+        return self.motif_evaluation(motif_id).count
 
-    def motif_matches(self, motif_id: MotifId) -> tuple[MotifMatch, ...]:
+    def motif_evaluation(self, motif_id: MotifId) -> EvaluatedMotif:
         return dict(self.motifs)[motif_id]
+
+
+def _match_commitment(matches: Sequence[MotifMatch]) -> str:
+    digest = hashlib.sha256()
+    for match in matches:
+        payload = json.dumps(
+            [match.motif_id.value, list(match.node_path), list(match.edge_path)],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest.update(len(payload).to_bytes(4, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
+def _evaluate_motif(graph: Any, motif_id: MotifId) -> EvaluatedMotif:
+    matches = find_motif_matches(graph, motif_id)
+    return EvaluatedMotif(
+        motif_id=motif_id,
+        count=len(matches),
+        retained_matches=matches[:MAX_DISCOVERY_MOTIF_EVIDENCE],
+        commitment_sha256=_match_commitment(matches),
+    )
 
 
 def _coordinate_error() -> SecAwareError:
@@ -77,7 +109,7 @@ def _evaluate_prompt_tsgs(
                 graph_sha256=record.graph_sha256,
                 factors=factors,
                 motifs=tuple(
-                    (motif_id, find_motif_matches(graph, motif_id)) for motif_id in motif_ids
+                    (motif_id, _evaluate_motif(graph, motif_id)) for motif_id in motif_ids
                 ),
             )
         )
@@ -361,27 +393,66 @@ def graph_evidence_summary(
     return _graph_evidence_from_evaluated(spec, evaluated)
 
 
+_EvidenceCandidate = tuple[str, tuple[str, ...], tuple[str, ...]]
+
+
+class _BoundedEvidenceSelector:
+    __slots__ = ("_items",)
+
+    def __init__(self) -> None:
+        self._items: list[_EvidenceCandidate] = []
+
+    def add(self, candidate: _EvidenceCandidate) -> None:
+        insort_right(self._items, candidate)
+        if len(self._items) > MAX_DISCOVERY_MOTIF_EVIDENCE:
+            self._items.pop()
+
+    def finish(self) -> tuple[_EvidenceCandidate, ...]:
+        return tuple(self._items)
+
+
+def _aggregate_motif_commitment(
+    spec: FactorSpec,
+    evaluated: Sequence[EvaluatedPromptGraph],
+) -> str:
+    components = sorted(
+        (
+            item.graph_sha256,
+            item.motif_evaluation(spec.motif_id).count,
+            item.motif_evaluation(spec.motif_id).commitment_sha256,
+        )
+        for item in evaluated
+    )
+    digest = hashlib.sha256()
+    for graph_digest, count, match_commitment in components:
+        payload = json.dumps(
+            [graph_digest, count, match_commitment],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest.update(len(payload).to_bytes(4, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
 def _graph_evidence_from_evaluated(
     spec: FactorSpec,
     evaluated: Sequence[EvaluatedPromptGraph],
 ) -> dict[str, Any]:
     complete_digests = sorted({item.graph_sha256 for item in evaluated})
-    evidence = sorted(
-        (
-            {
-                "graph_sha256": item.graph_sha256,
-                "node_path": list(match.node_path),
-                "edge_path": list(match.edge_path),
-            }
-            for item in evaluated
-            for match in item.motif_matches(spec.motif_id)
-        ),
-        key=lambda item: (
-            item["graph_sha256"],
-            item["node_path"],
-            item["edge_path"],
-        ),
-    )
+    selector = _BoundedEvidenceSelector()
+    for item in evaluated:
+        motif = item.motif_evaluation(spec.motif_id)
+        for match in motif.retained_matches:
+            selector.add((item.graph_sha256, match.node_path, match.edge_path))
+    evidence = [
+        {
+            "graph_sha256": graph_digest,
+            "node_path": list(node_path),
+            "edge_path": list(edge_path),
+        }
+        for graph_digest, node_path, edge_path in selector.finish()
+    ]
     motif_counts = [item.motif_count(spec.motif_id) for item in evaluated]
     commitment_payload = json.dumps(
         complete_digests,
@@ -397,8 +468,9 @@ def _graph_evidence_from_evaluated(
         "graph_digests_truncated": len(complete_digests) > MAX_DISCOVERY_GRAPH_DIGESTS,
         "motif_prompt_count": sum(1 for count in motif_counts if count >= 1),
         "motif_match_count": sum(motif_counts),
-        "motif_evidence": evidence[:MAX_DISCOVERY_MOTIF_EVIDENCE],
-        "motif_evidence_truncated": len(evidence) > MAX_DISCOVERY_MOTIF_EVIDENCE,
+        "motif_evidence": evidence,
+        "motif_evidence_truncated": sum(motif_counts) > len(evidence),
+        "motif_evidence_commitment_sha256": _aggregate_motif_commitment(spec, evaluated),
     }
 
 
