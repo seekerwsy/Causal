@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import Enum
 import hashlib
 import json
 import re
@@ -35,6 +36,12 @@ _EDGE_FIELDS = frozenset({"edge_type", "attributes"})
 _NODE_ID_RE = re.compile(r"^n_[0-9a-f]{64}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_SIGNED_64_BIT = 2**63 - 1
+_EXPECTED_INPUT_EXCEPTIONS = (ValueError, TypeError, UnicodeError)
+
+
+class _FailureKind(Enum):
+    INVALID_INPUT = "invalid_input"
+    INTERNAL = "internal"
 
 
 def _invalid_error() -> SecAwareError:
@@ -43,6 +50,20 @@ def _invalid_error() -> SecAwareError:
         "tsg.codec",
         "prompt TSG graph codec validation failed",
     )
+
+
+def _internal_error() -> SecAwareError:
+    return SecAwareError(
+        ErrorCode.ANALYSIS_INVALID,
+        "tsg.codec",
+        "internal prompt TSG graph codec failure",
+    )
+
+
+def _raise_failure(failure: _FailureKind) -> None:
+    if failure is _FailureKind.INVALID_INPUT:
+        raise _invalid_error() from None
+    raise _internal_error() from None
 
 
 def _canonical_json(value: object) -> bytes:
@@ -69,6 +90,11 @@ def _require_text(value: object) -> str:
     ):
         raise ValueError
     return value
+
+
+def _graph_id(prompt_id: str) -> str:
+    prompt_id = _require_text(prompt_id)
+    return "prompt_sha256:" + _sha256_hex(_canonical_json({"prompt_id": prompt_id}))
 
 
 def _parse_node_type(value: object) -> NodeType:
@@ -156,13 +182,15 @@ def canonical_node_id(node_type: NodeType, label: str, semantic_key: str) -> str
     """Return the full SHA-256 identifier for a canonical node semantic key."""
     try:
         result = _node_id(_parse_node_type(node_type), label, semantic_key)
+    except _EXPECTED_INPUT_EXCEPTIONS:
+        result = _FailureKind.INVALID_INPUT
     except Exception:
-        result = None
-    if result is None:
+        result = _FailureKind.INTERNAL
+    if isinstance(result, _FailureKind):
         node_type = cast(NodeType, None)
         label = cast(str, None)
         semantic_key = cast(str, None)
-        raise _invalid_error() from None
+        _raise_failure(result)
     return result
 
 
@@ -176,15 +204,17 @@ def canonical_edge_id(
     """Return the full SHA-256 identifier for one canonical multiedge ordinal."""
     try:
         result = _edge_id(src, dst, _parse_edge_type(edge_type), attributes, ordinal)
+    except _EXPECTED_INPUT_EXCEPTIONS:
+        result = _FailureKind.INVALID_INPUT
     except Exception:
-        result = None
-    if result is None:
+        result = _FailureKind.INTERNAL
+    if isinstance(result, _FailureKind):
         src = cast(str, None)
         dst = cast(str, None)
         edge_type = cast(EdgeType, None)
         attributes = cast(Mapping[str, TSGScalar], None)
         ordinal = cast(int, None)
-        raise _invalid_error() from None
+        _raise_failure(result)
     return result
 
 
@@ -351,20 +381,22 @@ def _digest(nodes: tuple[TSGNode, ...], edges: tuple[TSGEdge, ...]) -> str:
     return _sha256_hex(_canonical_json(payload))
 
 
-def _try_graph_sha256(graph: nx.MultiDiGraph) -> str | None:
+def _try_graph_sha256(graph: nx.MultiDiGraph) -> str | _FailureKind:
     try:
         nodes, edges = _canonicalize_graph(graph)
         return _digest(nodes, edges)
+    except _EXPECTED_INPUT_EXCEPTIONS:
+        return _FailureKind.INVALID_INPUT
     except Exception:
-        return None
+        return _FailureKind.INTERNAL
 
 
 def graph_sha256(graph: nx.MultiDiGraph) -> str:
     """Hash the canonical graph structure and fixed catalog versions."""
     result = _try_graph_sha256(graph)
-    if result is None:
+    if isinstance(result, _FailureKind):
         graph = cast(nx.MultiDiGraph, None)
-        raise _invalid_error() from None
+        _raise_failure(result)
     return result
 
 
@@ -372,14 +404,14 @@ def _try_multidigraph_to_record(
     graph: nx.MultiDiGraph,
     prompt_id: str,
     shadow: Mapping[str, TSGScalar] | None,
-) -> PromptTSGRecord | None:
+) -> PromptTSGRecord | _FailureKind:
     try:
         prompt_id = _require_text(prompt_id)
         nodes, edges = _canonicalize_graph(graph)
         candidate = PromptTSGRecord.model_validate(
             {
                 "schema_version": TSG_SCHEMA_VERSION,
-                "graph_id": f"prompt:{prompt_id}",
+                "graph_id": _graph_id(prompt_id),
                 "source_type": "prompt",
                 "prompt_id": prompt_id,
                 "ontology_version": ONTOLOGY_VERSION,
@@ -395,8 +427,10 @@ def _try_multidigraph_to_record(
         payload = candidate.model_dump(mode="python", round_trip=True, warnings=False)
         payload["shadow"] = _sorted_attributes(candidate.shadow)
         return PromptTSGRecord.model_validate(payload)
+    except _EXPECTED_INPUT_EXCEPTIONS:
+        return _FailureKind.INVALID_INPUT
     except Exception:
-        return None
+        return _FailureKind.INTERNAL
 
 
 def multidigraph_to_record(
@@ -407,21 +441,21 @@ def multidigraph_to_record(
 ) -> PromptTSGRecord:
     """Snapshot and canonicalize an internally built ``MultiDiGraph`` record."""
     result = _try_multidigraph_to_record(graph, prompt_id, shadow)
-    if result is None:
+    if isinstance(result, _FailureKind):
         graph = cast(nx.MultiDiGraph, None)
         prompt_id = cast(str, None)
         shadow = None
-        raise _invalid_error() from None
+        _raise_failure(result)
     return result
 
 
-def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | None:
+def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKind:
     try:
         validated = PromptTSGRecord.model_validate(record)
         if (
             validated.ontology_version != ONTOLOGY_VERSION
             or validated.motif_version != MOTIF_VERSION
-            or validated.graph_id != f"prompt:{validated.prompt_id}"
+            or validated.graph_id != _graph_id(validated.prompt_id)
             or validated.graph_sha256 != _digest(validated.nodes, validated.edges)
         ):
             raise ValueError
@@ -453,16 +487,18 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | None:
         if validated.graph_sha256 != _digest(rebuilt_nodes, rebuilt_edges):
             raise ValueError
         return graph
+    except _EXPECTED_INPUT_EXCEPTIONS:
+        return _FailureKind.INVALID_INPUT
     except Exception:
-        return None
+        return _FailureKind.INTERNAL
 
 
 def record_to_multidigraph(record: object) -> nx.MultiDiGraph:
     """Revalidate a strict prompt record and reconstruct its canonical graph."""
     result = _try_record_to_multidigraph(record)
-    if result is None:
+    if isinstance(result, _FailureKind):
         record = None
-        raise _invalid_error() from None
+        _raise_failure(result)
     return result
 
 

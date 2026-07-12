@@ -453,3 +453,125 @@ def test_public_id_helpers_reject_unsafe_inputs() -> None:
             {},
             True,
         )
+
+
+def _assert_sanitized_internal_error(error: SecAwareError, sentinel: str) -> None:
+    assert error.code is ErrorCode.ANALYSIS_INVALID
+    rendered = str(error) + repr(error) + "".join(traceback.format_exception(error))
+    current = error.__traceback__
+    while current is not None:
+        if current.tb_frame.f_globals.get("__name__") == "secaware.tsg.graph":
+            rendered += repr(current.tb_frame.f_locals)
+        current = current.tb_next
+    assert sentinel not in rendered
+    assert error.__cause__ is None
+    assert error.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["node_id", "edge_id", "graph_hash", "graph_conversion", "record_reconstruction"],
+)
+def test_unexpected_internal_failures_are_distinct_and_sanitized(
+    path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sentinel = "PROMPT-INTERNAL-DEFECT-DO-NOT-LEAK"
+    graph = nx.MultiDiGraph()
+    graph.add_node(sentinel, node_type="source", label="source", attributes={})
+    record = multidigraph_to_record(graph, prompt_id=sentinel)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(sentinel)
+
+    if path == "node_id":
+        monkeypatch.setattr(graph_codec, "_node_id", fail)
+
+        def invoke():
+            return canonical_node_id(NodeType.SOURCE, "source", sentinel)
+
+    elif path == "edge_id":
+        monkeypatch.setattr(graph_codec, "_edge_id", fail)
+
+        def invoke():
+            return canonical_edge_id(
+                record.nodes[0].node_id,
+                record.nodes[0].node_id,
+                EdgeType.RELATED_TO,
+                {},
+                0,
+            )
+
+    elif path == "graph_hash":
+        monkeypatch.setattr(graph_codec, "_digest", fail)
+
+        def invoke():
+            return graph_sha256(graph)
+
+    elif path == "graph_conversion":
+        monkeypatch.setattr(graph_codec, "_digest", fail)
+
+        def invoke():
+            return multidigraph_to_record(graph, prompt_id=sentinel)
+
+    else:
+        monkeypatch.setattr(graph_codec, "_digest", fail)
+
+        def invoke():
+            return record_to_multidigraph(record)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        invoke()
+    _assert_sanitized_internal_error(exc_info.value, sentinel)
+
+
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        lambda: canonical_node_id(NodeType.SOURCE, "source", " untrimmed"),
+        lambda: canonical_node_id(NodeType.SOURCE, "source", "\ud800"),
+        lambda: canonical_edge_id(
+            "n_" + "a" * 64,
+            "n_" + "b" * 64,
+            EdgeType.FLOWS_TO,
+            {"confidence": 1},
+            0,
+        ),
+        lambda: multidigraph_to_record(
+            nx.MultiDiGraph(incoming_graph_data=[("a", "b")]), prompt_id="p001"
+        ),
+    ],
+)
+def test_expected_hostile_input_failures_remain_tsg_invalid(invoke) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        invoke()
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+
+
+def test_graph_id_commits_bounded_prompt_id_without_embedding_it() -> None:
+    exact_limit = "界" * 341 + "a"
+    assert len(exact_limit.encode("utf-8")) == 1024
+    graph = _minimal_graph()
+
+    one = multidigraph_to_record(graph, prompt_id=exact_limit)
+    two = multidigraph_to_record(_reverse_insertions(graph), prompt_id=exact_limit)
+    expected_graph_id = (
+        "prompt_sha256:" + hashlib.sha256(_canonical_json({"prompt_id": exact_limit})).hexdigest()
+    )
+
+    assert one.graph_id == expected_graph_id == two.graph_id
+    assert len(one.graph_id.encode("utf-8")) <= 1024
+    assert exact_limit not in one.graph_id
+    assert record_to_multidigraph(one).number_of_nodes() == graph.number_of_nodes()
+
+    short = multidigraph_to_record(graph, prompt_id="a")
+    assert short.graph_id != one.graph_id
+
+    forged = one.model_copy(update={"graph_id": short.graph_id})
+    with pytest.raises(SecAwareError, match="TSG"):
+        record_to_multidigraph(forged)
+
+
+def test_prompt_id_rejects_one_byte_above_limit() -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        multidigraph_to_record(_minimal_graph(), prompt_id="a" * 1025)
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
