@@ -113,7 +113,8 @@ def test_each_family_domain_prompt_emits_graph_facts(entry: object) -> None:
     }
     assert {label for label, _ in _nodes(graph, NodeType.DATA_OBJECT)} == {entry.data_label}
     assert {label for label, _ in _nodes(graph, NodeType.SINK)} == {entry.sink_label}
-    assert record.shadow == {}
+    assert record.shadow["graph.node_count"] == len(record.nodes)
+    assert record.shadow[f"factor.{entry.factor_type.value}_required"] is False
     assert not hasattr(record, "features")
 
 
@@ -245,7 +246,11 @@ def test_unknown_language_yields_valid_minimal_graph(entry: object) -> None:
 
     assert record.nodes == ()
     assert record.edges == ()
-    assert record.shadow == {}
+    assert record.shadow["graph.node_count"] == 0
+    assert record.shadow["graph.edge_count"] == 0
+    assert not any(
+        value for key, value in record.shadow.items() if key.startswith(("factor.", "motif."))
+    )
     assert not hasattr(record, "features")
 
 

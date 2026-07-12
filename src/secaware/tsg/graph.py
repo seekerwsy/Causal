@@ -421,6 +421,67 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
     )
 
 
+def _canonical_query_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    """Validate and copy an already committed canonical graph snapshot."""
+    nodes, edges = _canonicalize_graph(graph)
+    raw_node_ids = tuple(graph.nodes)
+    raw_edges = tuple(graph.edges(keys=True))
+    if set(raw_node_ids) != {node.node_id for node in nodes}:
+        raise _InvalidInput from None
+    if set(raw_edges) != {(edge.src, edge.dst, edge.edge_id) for edge in edges}:
+        raise _InvalidInput from None
+
+    copied = nx.MultiDiGraph()
+    for node in nodes:
+        try:
+            raw = graph.nodes[node.node_id]
+        except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
+            raise _InvalidInput from None
+        if (
+            type(raw) is not dict
+            or frozenset(raw) != _COMMITTED_NODE_FIELDS
+            or type(raw["node_type"]) is not NodeType
+            or raw["node_type"] is not node.node_type
+            or type(raw["label"]) is not str
+            or raw["label"] != node.label
+            or type(raw["semantic_key_sha256"]) is not str
+            or raw["semantic_key_sha256"] != node.semantic_key_sha256
+            or type(raw["attributes"]) is not dict
+            or raw["attributes"] != dict(node.attributes.items())
+        ):
+            raise _InvalidInput from None
+        copied.add_node(
+            node.node_id,
+            semantic_key_sha256=node.semantic_key_sha256,
+            node_type=node.node_type,
+            label=node.label,
+            attributes=dict(node.attributes.items()),
+        )
+
+    for edge in edges:
+        try:
+            raw = graph.edges[edge.src, edge.dst, edge.edge_id]
+        except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
+            raise _InvalidInput from None
+        if (
+            type(raw) is not dict
+            or frozenset(raw) != _EDGE_FIELDS
+            or type(raw["edge_type"]) is not EdgeType
+            or raw["edge_type"] is not edge.edge_type
+            or type(raw["attributes"]) is not dict
+            or raw["attributes"] != dict(edge.attributes.items())
+        ):
+            raise _InvalidInput from None
+        copied.add_edge(
+            edge.src,
+            edge.dst,
+            key=edge.edge_id,
+            edge_type=edge.edge_type,
+            attributes=dict(edge.attributes.items()),
+        )
+    return copied
+
+
 def _digest(nodes: tuple[TSGNode, ...], edges: tuple[TSGEdge, ...]) -> str:
     payload = {
         "edges": [
@@ -449,6 +510,60 @@ def _digest(nodes: tuple[TSGNode, ...], edges: tuple[TSGEdge, ...]) -> str:
     return _sha256_hex(_canonical_json(payload))
 
 
+def _graph_from_models(
+    nodes: tuple[TSGNode, ...],
+    edges: tuple[TSGEdge, ...],
+) -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    for node in nodes:
+        graph.add_node(
+            node.node_id,
+            semantic_key_sha256=node.semantic_key_sha256,
+            node_type=node.node_type,
+            label=node.label,
+            attributes=dict(node.attributes.items()),
+        )
+    for edge in edges:
+        graph.add_edge(
+            edge.src,
+            edge.dst,
+            key=edge.edge_id,
+            edge_type=edge.edge_type,
+            attributes=dict(edge.attributes.items()),
+        )
+    return graph
+
+
+def _derive_shadow(graph: nx.MultiDiGraph) -> dict[str, TSGScalar]:
+    from secaware.schema.hypotheses import FactorType
+    from secaware.schema.tsg import MotifId
+    from secaware.tsg.features import derive_shadow
+
+    try:
+        derived = derive_shadow(graph)
+    except SecAwareError as error:
+        if error.code is ErrorCode.TSG_INVALID:
+            raise _InvalidInput from None
+        raise RuntimeError from None
+    expected_boolean_keys = {
+        *(f"factor.{factor.value}_required" for factor in FactorType),
+        *(f"motif.{motif.value}" for motif in MotifId),
+    }
+    expected_keys = expected_boolean_keys | {"graph.node_count", "graph.edge_count"}
+    if (
+        type(derived) is not dict
+        or set(derived) != expected_keys
+        or tuple(derived) != tuple(sorted(derived))
+        or any(type(derived[key]) is not bool for key in expected_boolean_keys)
+        or type(derived["graph.node_count"]) is not int
+        or type(derived["graph.edge_count"]) is not int
+        or derived["graph.node_count"] != graph.number_of_nodes()
+        or derived["graph.edge_count"] != graph.number_of_edges()
+    ):
+        raise RuntimeError from None
+    return dict(derived)
+
+
 def _try_graph_sha256(graph: nx.MultiDiGraph) -> str | _FailureKind:
     try:
         nodes, edges = _canonicalize_graph(graph)
@@ -471,11 +586,11 @@ def graph_sha256(graph: nx.MultiDiGraph) -> str:
 def _try_multidigraph_to_record(
     graph: nx.MultiDiGraph,
     prompt_id: str,
-    shadow: Mapping[str, TSGScalar] | None,
 ) -> PromptTSGRecord | _FailureKind:
     try:
         prompt_id = _require_text(prompt_id)
         nodes, edges = _canonicalize_graph(graph)
+        canonical_graph = _graph_from_models(nodes, edges)
         candidate = _validate_model(
             PromptTSGRecord,
             {
@@ -488,14 +603,10 @@ def _try_multidigraph_to_record(
                 "graph_sha256": _digest(nodes, edges),
                 "nodes": nodes,
                 "edges": edges,
-                "shadow": {} if shadow is None else shadow,
+                "shadow": _derive_shadow(canonical_graph),
             },
         )
-        if tuple(candidate.shadow) == tuple(sorted(candidate.shadow)):
-            return candidate
-        payload = candidate.model_dump(mode="python", round_trip=True, warnings=False)
-        payload["shadow"] = _sorted_attributes(candidate.shadow)
-        return _validate_model(PromptTSGRecord, payload)
+        return candidate
     except _InvalidInput:
         return _FailureKind.INVALID_INPUT
     except Exception:
@@ -506,14 +617,12 @@ def multidigraph_to_record(
     graph: nx.MultiDiGraph,
     *,
     prompt_id: str,
-    shadow: Mapping[str, TSGScalar] | None = None,
 ) -> PromptTSGRecord:
     """Snapshot and canonicalize an internally built ``MultiDiGraph`` record."""
-    result = _try_multidigraph_to_record(graph, prompt_id, shadow)
+    result = _try_multidigraph_to_record(graph, prompt_id)
     if isinstance(result, _FailureKind):
         graph = cast(nx.MultiDiGraph, None)
         prompt_id = cast(str, None)
-        shadow = None
         _raise_failure(result)
     return result
 
@@ -529,7 +638,6 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKin
         ):
             raise _InvalidInput from None
 
-        graph = nx.MultiDiGraph()
         for node in validated.nodes:
             if node.node_id != _node_id_from_commitment(
                 node.node_type,
@@ -537,23 +645,12 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKin
                 node.semantic_key_sha256,
             ):
                 raise _InvalidInput from None
-            graph.add_node(
-                node.node_id,
-                semantic_key_sha256=node.semantic_key_sha256,
-                node_type=node.node_type,
-                label=node.label,
-                attributes=dict(node.attributes.items()),
-            )
-        for edge in validated.edges:
-            graph.add_edge(
-                edge.src,
-                edge.dst,
-                key=edge.edge_id,
-                edge_type=edge.edge_type,
-                attributes=dict(edge.attributes.items()),
-            )
+        graph = _graph_from_models(validated.nodes, validated.edges)
         rebuilt_nodes, rebuilt_edges = _canonicalize_graph(graph)
         if validated.graph_sha256 != _digest(rebuilt_nodes, rebuilt_edges):
+            raise _InvalidInput from None
+        expected_shadow = _derive_shadow(graph)
+        if _canonical_json(dict(validated.shadow.items())) != _canonical_json(expected_shadow):
             raise _InvalidInput from None
         return graph
     except _InvalidInput:

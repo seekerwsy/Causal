@@ -268,12 +268,8 @@ def test_attribute_insertion_order_does_not_change_record_json() -> None:
         attributes={"confidence": 0.5, "relation_kind": "retry"},
     )
 
-    one = multidigraph_to_record(
-        graph, prompt_id="p001", shadow={"factor.z": True, "factor.a": False}
-    )
-    two = multidigraph_to_record(
-        reordered, prompt_id="p001", shadow={"factor.a": False, "factor.z": True}
-    )
+    one = multidigraph_to_record(graph, prompt_id="p001")
+    two = multidigraph_to_record(reordered, prompt_id="p001")
 
     assert one.model_dump_json() == two.model_dump_json()
 
@@ -341,7 +337,7 @@ def test_conversion_snapshots_mutable_containers_in_both_directions() -> None:
     graph = _minimal_graph()
     graph.nodes["source"]["attributes"] = {"confidence": 0.5}
     original_node_attributes = graph.nodes["source"]["attributes"]
-    record = multidigraph_to_record(graph, prompt_id="p001", shadow={"graph.node_count": 2})
+    record = multidigraph_to_record(graph, prompt_id="p001")
     original_node_attributes["confidence"] = 0.9
     graph.clear()
 
@@ -359,7 +355,7 @@ def test_conversion_snapshots_mutable_containers_in_both_directions() -> None:
 def test_reconstructed_canonical_graph_is_idempotent() -> None:
     one = multidigraph_to_record(_minimal_graph(), prompt_id="p001")
     rebuilt = record_to_multidigraph(one)
-    two = multidigraph_to_record(rebuilt, prompt_id="p001", shadow=one.shadow)
+    two = multidigraph_to_record(rebuilt, prompt_id="p001")
 
     assert one.model_dump_json() == two.model_dump_json()
     assert graph_sha256(rebuilt) == one.graph_sha256
