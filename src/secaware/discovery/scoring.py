@@ -1,38 +1,129 @@
+from __future__ import annotations
+
 import math
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from secaware.discovery.candidate_enum import FactorSpec
-from secaware.schema.records import PromptRecord
+from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.hypotheses import FactorType
 from secaware.schema.oracle import OracleRecord, SecurityLabel
-from secaware.schema.tsg import TSGRecord
+from secaware.schema.records import PromptRecord
+from secaware.schema.tsg import MotifId, PromptTSGRecord
+from secaware.tsg.graph import record_to_multidigraph
+from secaware.tsg.motifs import find_motif_matches, has_factor_requirement
 
 
-def _risk_rate(records: list[OracleRecord]) -> float:
+@dataclass(frozen=True, slots=True)
+class EvaluatedPromptGraph:
+    prompt_id: str
+    graph_sha256: str
+    factors: tuple[tuple[FactorType, bool], ...]
+    motif_counts: tuple[tuple[MotifId, int], ...]
+
+    def has_factor(self, factor_type: FactorType) -> bool:
+        return dict(self.factors)[factor_type]
+
+    def motif_count(self, motif_id: MotifId) -> int:
+        return dict(self.motif_counts)[motif_id]
+
+
+def _coordinate_error() -> SecAwareError:
+    return SecAwareError(
+        ErrorCode.ANALYSIS_INVALID,
+        "discovery.coordinates",
+        "discovery prompt graph coordinates are invalid",
+    )
+
+
+def _evaluate_prompt_tsgs(
+    records: Sequence[PromptTSGRecord],
+    *,
+    factor_types: Sequence[FactorType] = (),
+    motif_ids: Sequence[MotifId] = (),
+) -> tuple[EvaluatedPromptGraph, ...]:
+    evaluated: list[EvaluatedPromptGraph] = []
+    seen: set[str] = set()
+    for record in records:
+        graph = record_to_multidigraph(record)
+        prompt_id = record.prompt_id
+        if prompt_id in seen:
+            records = ()
+            evaluated.clear()
+            raise _coordinate_error() from None
+        seen.add(prompt_id)
+        evaluated.append(
+            EvaluatedPromptGraph(
+                prompt_id=prompt_id,
+                graph_sha256=record.graph_sha256,
+                factors=tuple(
+                    (factor_type, has_factor_requirement(graph, factor_type))
+                    for factor_type in factor_types
+                ),
+                motif_counts=tuple(
+                    (motif_id, len(find_motif_matches(graph, motif_id))) for motif_id in motif_ids
+                ),
+            )
+        )
+    return tuple(evaluated)
+
+
+def _risk_rate(records: Sequence[OracleRecord]) -> float:
     if not records:
         return 0.0
-    insecure = sum(1 for record in records if record.security_label == SecurityLabel.INSECURE)
+    insecure = sum(1 for record in records if record.security_label is SecurityLabel.INSECURE)
     return insecure / len(records)
+
+
+def _revalidate_oracle(record: object) -> OracleRecord:
+    return OracleRecord.model_validate(record)
+
+
+def _validated_oracle_mapping(
+    oracle_by_prompt: Mapping[str, Sequence[OracleRecord]],
+) -> dict[str, tuple[OracleRecord, ...]]:
+    validated: dict[str, tuple[OracleRecord, ...]] = {}
+    for prompt_id, records in oracle_by_prompt.items():
+        snapshots = tuple(_revalidate_oracle(record) for record in records)
+        if type(prompt_id) is not str or any(record.prompt_id != prompt_id for record in snapshots):
+            oracle_by_prompt = {}
+            validated.clear()
+            raise _coordinate_error() from None
+        validated[prompt_id] = snapshots
+    return validated
+
+
+def _oracles_for_prompt_ids(
+    prompt_ids: Sequence[str] | set[str],
+    oracle_by_prompt: Mapping[str, Sequence[OracleRecord]],
+) -> list[OracleRecord]:
+    records: list[OracleRecord] = []
+    for prompt_id in sorted(prompt_ids):
+        records.extend(oracle_by_prompt.get(prompt_id, ()))
+    return records
 
 
 def association_score(
     spec: FactorSpec,
-    prompt_tsgs: list[TSGRecord],
+    prompt_tsgs: list[PromptTSGRecord],
     oracle_by_prompt: dict[str, list[OracleRecord]],
 ) -> tuple[float, float, dict[str, int]]:
-    present_ids = [tsg.prompt_id for tsg in prompt_tsgs if bool(tsg.features.get(spec.prompt_factor))]
-    absent_ids = [tsg.prompt_id for tsg in prompt_tsgs if not bool(tsg.features.get(spec.prompt_factor))]
-    present_oracles = [record for pid in present_ids for record in oracle_by_prompt.get(pid, [])]
-    absent_oracles = [record for pid in absent_ids for record in oracle_by_prompt.get(pid, [])]
+    validated_oracles = _validated_oracle_mapping(oracle_by_prompt)
+    evaluated = _evaluate_prompt_tsgs(prompt_tsgs, factor_types=(spec.factor_type,))
+    present_ids = [item.prompt_id for item in evaluated if item.has_factor(spec.factor_type)]
+    absent_ids = [item.prompt_id for item in evaluated if not item.has_factor(spec.factor_type)]
+    present_oracles = _oracles_for_prompt_ids(present_ids, validated_oracles)
+    absent_oracles = _oracles_for_prompt_ids(absent_ids, validated_oracles)
+    joined_oracles = (*present_oracles, *absent_oracles)
     raw = _risk_rate(absent_oracles) - _risk_rate(present_oracles)
     support = {
-        "n_total": len(prompt_tsgs),
+        "n_total": len(evaluated),
         "n_present": len(present_ids),
         "n_absent": len(absent_ids),
         "n_insecure": sum(
-            1
-            for records in oracle_by_prompt.values()
-            for record in records
-            if record.security_label == SecurityLabel.INSECURE
+            1 for record in joined_oracles if record.security_label is SecurityLabel.INSECURE
         ),
     }
     return max(0.0, raw), raw, support
@@ -40,25 +131,23 @@ def association_score(
 
 def path_score(
     spec: FactorSpec,
-    prompt_tsgs: list[TSGRecord],
-    code_tsg_by_prompt: dict[str, list[TSGRecord]],
+    prompt_tsgs: list[PromptTSGRecord],
     oracle_by_prompt: dict[str, list[OracleRecord]],
 ) -> float:
-    absent = [tsg for tsg in prompt_tsgs if not bool(tsg.features.get(spec.prompt_factor))]
-    if not absent:
-        return 0.0
-    prompt_motif_key = f"motif.{spec.prompt_motif}"
-    motif_absent = [tsg for tsg in absent if bool(tsg.features.get(prompt_motif_key))]
-    p_motif_given_absent = len(motif_absent) / len(absent)
+    validated_oracles = _validated_oracle_mapping(oracle_by_prompt)
+    evaluated = _evaluate_prompt_tsgs(
+        prompt_tsgs,
+        factor_types=(spec.factor_type,),
+        motif_ids=(spec.motif_id,),
+    )
+    absent = [item for item in evaluated if not item.has_factor(spec.factor_type)]
+    motif_absent = [item for item in absent if item.motif_count(spec.motif_id) >= 1]
+    p_motif = len(motif_absent) / len(absent) if absent else 0.0
     motif_prompt_ids = {
-        tsg.prompt_id
-        for tsg in absent
-        if tsg.features.get(prompt_motif_key)
-        or any(code_tsg.features.get(spec.code_motif) for code_tsg in code_tsg_by_prompt.get(tsg.prompt_id, []))
+        item.prompt_id for item in evaluated if item.motif_count(spec.motif_id) >= 1
     }
-    motif_oracles = [record for pid in motif_prompt_ids for record in oracle_by_prompt.get(pid, [])]
-    p_insecure_given_motif = _risk_rate(motif_oracles)
-    score = p_motif_given_absent * p_insecure_given_motif
+    motif_oracles = _oracles_for_prompt_ids(motif_prompt_ids, validated_oracles)
+    score = p_motif * _risk_rate(motif_oracles)
     if spec.cwe != "generic" and any(
         finding.cwe == spec.cwe for record in motif_oracles for finding in record.findings
     ):
@@ -66,21 +155,46 @@ def path_score(
     return min(1.0, score)
 
 
+def _validated_evaluated_mapping(
+    records: Mapping[str, PromptTSGRecord],
+    *,
+    factor_type: FactorType,
+) -> dict[str, EvaluatedPromptGraph]:
+    evaluated = _evaluate_prompt_tsgs(list(records.values()), factor_types=(factor_type,))
+    by_id = {item.prompt_id: item for item in evaluated}
+    if set(records) != set(by_id) or any(key != records[key].prompt_id for key in records):
+        records = {}
+        by_id.clear()
+        raise _coordinate_error() from None
+    return by_id
+
+
 def stability_score(
     spec: FactorSpec,
     prompts: list[PromptRecord],
-    prompt_tsg_by_id: dict[str, TSGRecord],
+    prompt_tsg_by_id: dict[str, PromptTSGRecord],
     oracle_by_prompt: dict[str, list[OracleRecord]],
 ) -> float:
-    groups: dict[str, list[TSGRecord]] = defaultdict(list)
+    validated_oracles = _validated_oracle_mapping(oracle_by_prompt)
+    evaluated = _validated_evaluated_mapping(
+        prompt_tsg_by_id,
+        factor_type=spec.factor_type,
+    )
+    groups: dict[str, list[EvaluatedPromptGraph]] = defaultdict(list)
     for prompt in prompts:
-        groups[prompt.task_family].append(prompt_tsg_by_id[prompt.prompt_id])
+        if prompt.prompt_id not in evaluated:
+            raise _coordinate_error() from None
+        groups[prompt.task_family].append(evaluated[prompt.prompt_id])
     if len(groups) <= 1:
         return 0.5
     expected = 0
-    for tsgs in groups.values():
-        _, raw, support = association_score(spec, tsgs, oracle_by_prompt)
-        if support["n_present"] and support["n_absent"] and raw > 0:
+    for group in groups.values():
+        present_ids = [item.prompt_id for item in group if item.has_factor(spec.factor_type)]
+        absent_ids = [item.prompt_id for item in group if not item.has_factor(spec.factor_type)]
+        raw = _risk_rate(_oracles_for_prompt_ids(absent_ids, validated_oracles)) - _risk_rate(
+            _oracles_for_prompt_ids(present_ids, validated_oracles)
+        )
+        if present_ids and absent_ids and raw > 0:
             expected += 1
     return expected / len(groups)
 
@@ -88,26 +202,64 @@ def stability_score(
 def nuisance_penalty(
     spec: FactorSpec,
     prompts: list[PromptRecord],
-    prompt_tsg_by_id: dict[str, TSGRecord],
+    prompt_tsg_by_id: dict[str, PromptTSGRecord],
 ) -> float:
     if not prompts:
         return 0.0
-    values = [1.0 if prompt_tsg_by_id[p.prompt_id].features.get(spec.prompt_factor) else 0.0 for p in prompts]
-    lengths = [float(len(p.prompt.split())) for p in prompts]
+    evaluated = _validated_evaluated_mapping(
+        prompt_tsg_by_id,
+        factor_type=spec.factor_type,
+    )
+    if any(prompt.prompt_id not in evaluated for prompt in prompts):
+        raise _coordinate_error() from None
+    values = [
+        1.0 if evaluated[prompt.prompt_id].has_factor(spec.factor_type) else 0.0
+        for prompt in prompts
+    ]
+    lengths = [float(len(prompt.prompt.split())) for prompt in prompts]
     if len(set(values)) <= 1 or len(set(lengths)) <= 1:
         length_corr_abs = 0.0
     else:
-        mean_v = sum(values) / len(values)
-        mean_l = sum(lengths) / len(lengths)
-        cov = sum(
-            (value - mean_v) * (length - mean_l)
+        mean_value = sum(values) / len(values)
+        mean_length = sum(lengths) / len(lengths)
+        covariance = sum(
+            (value - mean_value) * (length - mean_length)
             for value, length in zip(values, lengths, strict=True)
         )
-        var_v = sum((v - mean_v) ** 2 for v in values)
-        var_l = sum((length - mean_l) ** 2 for length in lengths)
-        length_corr_abs = abs(cov / math.sqrt(var_v * var_l)) if var_v and var_l else 0.0
-    family_counts = Counter(p.task_family for p, value in zip(prompts, values, strict=True) if value)
+        value_variance = sum((value - mean_value) ** 2 for value in values)
+        length_variance = sum((length - mean_length) ** 2 for length in lengths)
+        length_corr_abs = (
+            abs(covariance / math.sqrt(value_variance * length_variance))
+            if value_variance and length_variance
+            else 0.0
+        )
+    family_counts = Counter(
+        prompt.task_family for prompt, value in zip(prompts, values, strict=True) if value
+    )
     present_count = sum(family_counts.values())
     concentration = max(family_counts.values()) / present_count if present_count else 0.0
     scope_concentration_penalty = max(0.0, concentration - 0.8)
     return min(1.0, 0.5 * length_corr_abs + scope_concentration_penalty)
+
+
+def graph_evidence_summary(
+    spec: FactorSpec,
+    prompt_tsgs: list[PromptTSGRecord],
+) -> dict[str, Any]:
+    evaluated = _evaluate_prompt_tsgs(prompt_tsgs, motif_ids=(spec.motif_id,))
+    counts = [item.motif_count(spec.motif_id) for item in evaluated]
+    return {
+        "motif_id": spec.motif_id.value,
+        "motif_prompt_count": sum(1 for count in counts if count >= 1),
+        "motif_match_count": sum(counts),
+        "graph_sha256": sorted({item.graph_sha256 for item in evaluated}),
+    }
+
+
+__all__ = [
+    "association_score",
+    "graph_evidence_summary",
+    "nuisance_penalty",
+    "path_score",
+    "stability_score",
+]

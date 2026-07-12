@@ -1,79 +1,89 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from secaware.schema.hypotheses import FactorType
+from secaware.schema.tsg import MotifId
+from secaware.tsg.catalog import prompt_ontology_entry
+from secaware.tsg.motifs import MOTIF_SPECS
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FactorSpec:
     factor_type: FactorType
-    prompt_factor: str
-    prompt_motif: str
-    code_motif: str
+    motif_id: MotifId
+    requirement_label: str
+    guard_label: str
     patch_operator: str
     cwe: str
     task_family: str
     label: str
 
 
-FACTOR_SPECS: dict[FactorType, FactorSpec] = {
-    FactorType.PATH_NORMALIZATION: FactorSpec(
-        factor_type=FactorType.PATH_NORMALIZATION,
-        prompt_factor="factor.path_normalization_required",
-        prompt_motif="user_path_to_file_open_without_guard",
-        code_motif="code.user_path_to_file_open_without_guard",
-        patch_operator="add_path_normalization_requirement",
-        cwe="CWE-22",
-        task_family="path_handling",
-        label="Path normalization reduces path traversal risk",
-    ),
-    FactorType.SQL_PARAMETERIZATION: FactorSpec(
-        factor_type=FactorType.SQL_PARAMETERIZATION,
-        prompt_factor="factor.sql_parameterization_required",
-        prompt_motif="user_string_to_sql_without_parameterization",
-        code_motif="code.user_string_to_sql_without_parameterization",
-        patch_operator="add_sql_parameterization_requirement",
-        cwe="CWE-89",
-        task_family="sql_query",
-        label="SQL parameterization reduces injection risk",
-    ),
-    FactorType.SAFE_SUBPROCESS: FactorSpec(
-        factor_type=FactorType.SAFE_SUBPROCESS,
-        prompt_factor="factor.safe_subprocess_required",
-        prompt_motif="user_input_to_shell_without_guard",
-        code_motif="code.user_input_to_shell_without_guard",
-        patch_operator="add_safe_subprocess_requirement",
-        cwe="CWE-78",
-        task_family="command_execution",
-        label="Safe subprocess invocation reduces command injection risk",
-    ),
-    FactorType.AUTHORIZATION_CHECK: FactorSpec(
-        factor_type=FactorType.AUTHORIZATION_CHECK,
-        prompt_factor="factor.authorization_check_required",
-        prompt_motif="sensitive_operation_without_auth_guard",
-        code_motif="code.sensitive_operation_without_auth_guard",
-        patch_operator="add_authorization_check_requirement",
-        cwe="CWE-862",
-        task_family="authorization",
-        label="Authorization checks reduce missing authorization risk",
-    ),
-    FactorType.SAFE_DESERIALIZATION: FactorSpec(
-        factor_type=FactorType.SAFE_DESERIALIZATION,
-        prompt_factor="factor.safe_deserialization_required",
-        prompt_motif="untrusted_data_to_deserialization_sink",
-        code_motif="code.untrusted_data_to_deserialization_sink",
-        patch_operator="add_safe_deserialization_requirement",
-        cwe="CWE-502",
-        task_family="deserialization",
-        label="Safe deserialization reduces unsafe object loading risk",
-    ),
-    FactorType.INPUT_VALIDATION: FactorSpec(
-        factor_type=FactorType.INPUT_VALIDATION,
-        prompt_factor="factor.input_validation_required",
-        prompt_motif="untrusted_source_to_sensitive_sink_without_guard",
-        code_motif="code.untrusted_source_to_sensitive_sink_without_guard",
-        patch_operator="add_input_validation_requirement",
-        cwe="generic",
-        task_family="generic",
-        label="Input validation reduces sensitive sink risk",
-    ),
-}
+_INTERVENTION_METADATA = MappingProxyType(
+    {
+        FactorType.INPUT_VALIDATION: (
+            "add_input_validation_requirement",
+            "generic",
+            "Input validation reduces sensitive sink risk",
+        ),
+        FactorType.PATH_NORMALIZATION: (
+            "add_path_normalization_requirement",
+            "path_handling",
+            "Path normalization reduces path traversal risk",
+        ),
+        FactorType.SQL_PARAMETERIZATION: (
+            "add_sql_parameterization_requirement",
+            "sql_query",
+            "SQL parameterization reduces injection risk",
+        ),
+        FactorType.SAFE_SUBPROCESS: (
+            "add_safe_subprocess_requirement",
+            "command_execution",
+            "Safe subprocess invocation reduces command injection risk",
+        ),
+        FactorType.AUTHORIZATION_CHECK: (
+            "add_authorization_check_requirement",
+            "authorization",
+            "Authorization checks reduce missing authorization risk",
+        ),
+        FactorType.SAFE_DESERIALIZATION: (
+            "add_safe_deserialization_requirement",
+            "deserialization",
+            "Safe deserialization reduces unsafe object loading risk",
+        ),
+    }
+)
+
+
+def _build_factor_specs() -> Mapping[FactorType, FactorSpec]:
+    motif_by_factor = {spec.factor_type: spec for spec in MOTIF_SPECS.values()}
+    specs: dict[FactorType, FactorSpec] = {}
+    for factor_type in FactorType:
+        catalog = prompt_ontology_entry(factor_type)
+        motif = motif_by_factor[factor_type]
+        patch_operator, task_family, label = _INTERVENTION_METADATA[factor_type]
+        specs[factor_type] = FactorSpec(
+            factor_type=factor_type,
+            motif_id=motif.motif_id,
+            requirement_label=catalog.requirement_label,
+            guard_label=catalog.guard_label,
+            patch_operator=patch_operator,
+            cwe=catalog.cwe,
+            task_family=task_family,
+            label=label,
+        )
+    if (
+        tuple(specs) != tuple(FactorType)
+        or len(specs) != 6
+        or set(motif_by_factor) != set(FactorType)
+        or {spec.motif_id for spec in specs.values()} != set(MotifId)
+    ):
+        raise RuntimeError("invalid discovery factor catalog")
+    return MappingProxyType(specs)
+
+
+FACTOR_SPECS: Mapping[FactorType, FactorSpec] = _build_factor_specs()
+
+
+__all__ = ["FACTOR_SPECS", "FactorSpec"]

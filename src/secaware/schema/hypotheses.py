@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from secaware.schema.tsg import MotifId
+
 
 class FactorType(str, Enum):
     INPUT_VALIDATION = "input_validation"
@@ -18,8 +20,9 @@ class HypothesisRecord(BaseModel):
 
     hypothesis_id: str
     factor_type: FactorType
-    prompt_factor: str
-    mechanism_motif: str
+    motif_id: MotifId
+    requirement_label: str
+    guard_label: str
     expected_direction: str
     scope: dict[str, str] = Field(default_factory=dict)
     patch_operator: str
