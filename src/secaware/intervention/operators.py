@@ -3,12 +3,12 @@ from secaware.intervention.verbalizer import TEMPLATES, verbalize_counterfactual
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.interventions import FailureReason, InterventionRecord
 from secaware.schema.records import PromptRecord
-from secaware.schema.tsg import TSGRecord
+from secaware.schema.tsg import PromptTSGRecord
 
 
 def apply_intervention(
     prompt: PromptRecord,
-    prompt_tsg: TSGRecord,
+    prompt_tsg: PromptTSGRecord,
     hypothesis: HypothesisRecord,
 ) -> InterventionRecord:
     intervention_id = f"int_{prompt.prompt_id}_{hypothesis.hypothesis_id}"
