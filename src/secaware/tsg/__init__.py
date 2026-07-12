@@ -1,47 +1,44 @@
-"""TSG helper namespace."""
+"""Lazy public namespace for prompt task-semantic-graph helpers."""
 
-from secaware.tsg.catalog import (
-    MOTIF_VERSION,
-    ONTOLOGY_VERSION,
-    PROMPT_TSG_CATALOG,
-    PROMPT_TSG_CATALOG_SHA256,
-    PromptOntologyEntry,
-    prompt_ontology_entry,
-)
-from secaware.tsg.graph import (
-    canonical_edge_id,
-    canonical_node_id,
-    graph_sha256,
-    multidigraph_to_record,
-    record_to_multidigraph,
-)
-from secaware.tsg.features import derive_shadow
-from secaware.tsg.motifs import (
-    MOTIF_SPECS,
-    MotifSpec,
-    factor_query_vector,
-    find_motif_matches,
-    has_factor_requirement,
-    motif_query_vector,
-)
+from __future__ import annotations
 
-__all__ = [
-    "MOTIF_VERSION",
-    "ONTOLOGY_VERSION",
-    "PROMPT_TSG_CATALOG",
-    "PROMPT_TSG_CATALOG_SHA256",
-    "PromptOntologyEntry",
-    "MOTIF_SPECS",
-    "MotifSpec",
-    "canonical_edge_id",
-    "canonical_node_id",
-    "derive_shadow",
-    "factor_query_vector",
-    "find_motif_matches",
-    "graph_sha256",
-    "has_factor_requirement",
-    "multidigraph_to_record",
-    "prompt_ontology_entry",
-    "record_to_multidigraph",
-    "motif_query_vector",
-]
+from importlib import import_module
+from typing import Any
+
+
+_EXPORTS = {
+    "MOTIF_VERSION": ("secaware.tsg.catalog", "MOTIF_VERSION"),
+    "ONTOLOGY_VERSION": ("secaware.tsg.catalog", "ONTOLOGY_VERSION"),
+    "PROMPT_TSG_CATALOG": ("secaware.tsg.catalog", "PROMPT_TSG_CATALOG"),
+    "PROMPT_TSG_CATALOG_SHA256": ("secaware.tsg.catalog", "PROMPT_TSG_CATALOG_SHA256"),
+    "PromptOntologyEntry": ("secaware.tsg.catalog", "PromptOntologyEntry"),
+    "MOTIF_SPECS": ("secaware.tsg.motifs", "MOTIF_SPECS"),
+    "MotifSpec": ("secaware.tsg.motifs", "MotifSpec"),
+    "canonical_edge_id": ("secaware.tsg.graph", "canonical_edge_id"),
+    "canonical_node_id": ("secaware.tsg.graph", "canonical_node_id"),
+    "derive_shadow": ("secaware.tsg.features", "derive_shadow"),
+    "factor_query_vector": ("secaware.tsg.motifs", "factor_query_vector"),
+    "find_motif_matches": ("secaware.tsg.motifs", "find_motif_matches"),
+    "graph_sha256": ("secaware.tsg.graph", "graph_sha256"),
+    "has_factor_requirement": ("secaware.tsg.motifs", "has_factor_requirement"),
+    "multidigraph_to_record": ("secaware.tsg.graph", "multidigraph_to_record"),
+    "prompt_ontology_entry": ("secaware.tsg.catalog", "prompt_ontology_entry"),
+    "record_to_multidigraph": ("secaware.tsg.graph", "record_to_multidigraph"),
+    "motif_query_vector": ("secaware.tsg.motifs", "motif_query_vector"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *__all__))

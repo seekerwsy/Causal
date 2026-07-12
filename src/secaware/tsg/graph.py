@@ -270,7 +270,11 @@ def _sorted_attributes(attributes: Mapping[str, TSGScalar]) -> dict[str, TSGScal
     return {key: attributes[key] for key in sorted(attributes)}
 
 
-def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tuple[TSGEdge, ...]]:
+def _canonicalize_graph(
+    graph: nx.MultiDiGraph,
+    *,
+    committed_only: bool = False,
+) -> tuple[tuple[TSGNode, ...], tuple[TSGEdge, ...]]:
     if type(graph) is not nx.MultiDiGraph:
         raise _InvalidInput from None
     try:
@@ -326,11 +330,22 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
     nodes_by_id: dict[str, TSGNode] = {}
     identities_by_id: dict[str, tuple[str, str, str]] = {}
     builder_to_canonical: dict[object, str] = {}
+    allowed_node_fields = (
+        {_COMMITTED_NODE_FIELDS}
+        if committed_only
+        else {_BUILDER_NODE_FIELDS, _COMMITTED_NODE_FIELDS}
+    )
     for builder_key, raw in raw_nodes:
-        if type(raw) is not dict or frozenset(raw) not in {
-            _BUILDER_NODE_FIELDS,
-            _COMMITTED_NODE_FIELDS,
-        }:
+        if type(raw) is not dict or frozenset(raw) not in allowed_node_fields:
+            raise _InvalidInput from None
+        if committed_only and (
+            type(builder_key) is not str
+            or _NODE_ID_RE.fullmatch(builder_key) is None
+            or type(raw["node_type"]) is not NodeType
+            or type(raw["label"]) is not str
+            or type(raw["semantic_key_sha256"]) is not str
+            or type(raw["attributes"]) is not dict
+        ):
             raise _InvalidInput from None
         node_type = _parse_node_type(raw["node_type"])
         label = raw["label"]
@@ -344,6 +359,8 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
             )
         else:
             node_id, semantic_key_sha256 = _canonical_node_key(builder_key, node_type, label)
+        if committed_only and builder_key != node_id:
+            raise _InvalidInput from None
         validated_node = _validate_model(
             TSGNode,
             {
@@ -371,9 +388,20 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
         nodes_by_id[node_id] = node
         builder_to_canonical[builder_key] = node_id
 
-    pending_by_endpoints: dict[tuple[str, str], list[tuple[EdgeType, dict[str, TSGScalar]]]] = {}
-    for src, dst, _builder_key, raw in raw_edges:
+    pending_by_endpoints: dict[
+        tuple[str, str],
+        list[tuple[EdgeType, dict[str, TSGScalar], object]],
+    ] = {}
+    for src, dst, builder_key, raw in raw_edges:
         if type(raw) is not dict or raw.keys() != _EDGE_FIELDS:
+            raise _InvalidInput from None
+        if committed_only and (
+            type(builder_key) is not str
+            or not builder_key.startswith("e_")
+            or len(builder_key) != 66
+            or type(raw["edge_type"]) is not EdgeType
+            or type(raw["attributes"]) is not dict
+        ):
             raise _InvalidInput from None
         if src not in builder_to_canonical or dst not in builder_to_canonical:
             raise _InvalidInput from None
@@ -391,14 +419,16 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
             },
         )
         pending_by_endpoints.setdefault((canonical_src, canonical_dst), []).append(
-            (edge_type, _sorted_attributes(validated.attributes))
+            (edge_type, _sorted_attributes(validated.attributes), builder_key)
         )
 
     edges_by_id: dict[str, TSGEdge] = {}
     identities_by_edge_id: dict[str, tuple[str, str, str, bytes, int]] = {}
     for (src, dst), pending in sorted(pending_by_endpoints.items()):
         ordered = sorted(pending, key=lambda item: (item[0].value, _canonical_json(item[1])))
-        for ordinal, (edge_type, attributes) in enumerate(ordered):
+        actual_committed: dict[str, tuple[str, bytes]] = {}
+        expected_committed: dict[str, tuple[str, bytes]] = {}
+        for ordinal, (edge_type, attributes, builder_key) in enumerate(ordered):
             edge_id = _edge_id(src, dst, edge_type, attributes, ordinal)
             identity = (src, dst, edge_type.value, _canonical_json(attributes), ordinal)
             if edge_id in identities_by_edge_id:
@@ -414,6 +444,19 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
                     "attributes": attributes,
                 },
             )
+            if committed_only:
+                if builder_key in actual_committed:
+                    raise _InvalidInput from None
+                actual_committed[cast(str, builder_key)] = (
+                    edge_type.value,
+                    _canonical_json(attributes),
+                )
+                expected_committed[edge_id] = (
+                    edge_type.value,
+                    _canonical_json(attributes),
+                )
+        if committed_only and actual_committed != expected_committed:
+            raise _InvalidInput from None
 
     return (
         tuple(nodes_by_id[node_id] for node_id in sorted(nodes_by_id)),
@@ -423,63 +466,8 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
 
 def _canonical_query_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
     """Validate and copy an already committed canonical graph snapshot."""
-    nodes, edges = _canonicalize_graph(graph)
-    raw_node_ids = tuple(graph.nodes)
-    raw_edges = tuple(graph.edges(keys=True))
-    if set(raw_node_ids) != {node.node_id for node in nodes}:
-        raise _InvalidInput from None
-    if set(raw_edges) != {(edge.src, edge.dst, edge.edge_id) for edge in edges}:
-        raise _InvalidInput from None
-
-    copied = nx.MultiDiGraph()
-    for node in nodes:
-        try:
-            raw = graph.nodes[node.node_id]
-        except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
-            raise _InvalidInput from None
-        if (
-            type(raw) is not dict
-            or frozenset(raw) != _COMMITTED_NODE_FIELDS
-            or type(raw["node_type"]) is not NodeType
-            or raw["node_type"] is not node.node_type
-            or type(raw["label"]) is not str
-            or raw["label"] != node.label
-            or type(raw["semantic_key_sha256"]) is not str
-            or raw["semantic_key_sha256"] != node.semantic_key_sha256
-            or type(raw["attributes"]) is not dict
-            or raw["attributes"] != dict(node.attributes.items())
-        ):
-            raise _InvalidInput from None
-        copied.add_node(
-            node.node_id,
-            semantic_key_sha256=node.semantic_key_sha256,
-            node_type=node.node_type,
-            label=node.label,
-            attributes=dict(node.attributes.items()),
-        )
-
-    for edge in edges:
-        try:
-            raw = graph.edges[edge.src, edge.dst, edge.edge_id]
-        except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
-            raise _InvalidInput from None
-        if (
-            type(raw) is not dict
-            or frozenset(raw) != _EDGE_FIELDS
-            or type(raw["edge_type"]) is not EdgeType
-            or raw["edge_type"] is not edge.edge_type
-            or type(raw["attributes"]) is not dict
-            or raw["attributes"] != dict(edge.attributes.items())
-        ):
-            raise _InvalidInput from None
-        copied.add_edge(
-            edge.src,
-            edge.dst,
-            key=edge.edge_id,
-            edge_type=edge.edge_type,
-            attributes=dict(edge.attributes.items()),
-        )
-    return copied
+    nodes, edges = _canonicalize_graph(graph, committed_only=True)
+    return _graph_from_models(nodes, edges)
 
 
 def _digest(nodes: tuple[TSGNode, ...], edges: tuple[TSGEdge, ...]) -> str:

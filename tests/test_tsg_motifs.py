@@ -11,7 +11,13 @@ import pytest
 import secaware.tsg.motifs as motif_queries
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.hypotheses import FactorType
-from secaware.schema.tsg import EdgeType, MotifId, NodeType
+from secaware.schema.tsg import (
+    EdgeType,
+    MAX_TSG_EDGES,
+    MAX_TSG_NODES,
+    MotifId,
+    NodeType,
+)
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.graph import canonical_edge_id, canonical_node_id
 from secaware.tsg.motifs import (
@@ -162,8 +168,6 @@ def test_same_flow_guard_removes_unguarded_match() -> None:
 @pytest.mark.parametrize(
     "guard_options",
     (
-        {"guard_data": False},
-        {"guard_sink": False},
         {"guard_label": "input_validation"},
         {"requirement_label": "require_input_validation"},
         {"guard_type": NodeType.API},
@@ -176,14 +180,24 @@ def test_wrong_or_partial_guard_does_not_protect(guard_options: dict[str, object
     assert len(find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)) == 1
 
 
+@pytest.mark.parametrize(
+    "guard_options",
+    ({"guard_data": False}, {"guard_sink": False}),
+)
+def test_guard_relation_from_any_path_data_or_sink_node_protects(
+    guard_options: dict[str, object],
+) -> None:
+    graph = _unsafe_flow()
+    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION, **guard_options)
+
+    assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
+
+
 @pytest.mark.parametrize("wrong_type", (NodeType.DATA_OBJECT, NodeType.SINK))
 def test_guard_edges_from_wrong_data_or_sink_nodes_do_not_protect(
     wrong_type: NodeType,
 ) -> None:
     graph = _unsafe_flow()
-    entry = next(
-        item for item in PROMPT_TSG_CATALOG if item.factor_type is FactorType.PATH_NORMALIZATION
-    )
     _, guard = _add_guard_structure(
         graph,
         FactorType.PATH_NORMALIZATION,
@@ -192,12 +206,72 @@ def test_guard_edges_from_wrong_data_or_sink_nodes_do_not_protect(
     )
     wrong = _add_node(graph, f"wrong:{wrong_type.value}", wrong_type, f"wrong_{wrong_type.value}")
     _add_edge(graph, wrong, guard, EdgeType.GUARDED_BY)
-    correct_endpoint = _node(
+    assert len(find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)) == 1
+
+
+@pytest.mark.parametrize(
+    ("guard_type", "guard_label", "requirement_label", "with_requirement", "protected"),
+    (
+        (NodeType.GUARD, "path_normalization", "require_path_normalization", True, True),
+        (NodeType.API, "path_normalization", "require_path_normalization", True, False),
+        (NodeType.GUARD, "input_validation", "require_path_normalization", True, False),
+        (NodeType.GUARD, "path_normalization", "require_input_validation", True, False),
+        (NodeType.GUARD, "path_normalization", "require_path_normalization", False, False),
+    ),
+)
+def test_guard_on_matched_flow_path_requires_exact_typed_requirement(
+    guard_type: NodeType,
+    guard_label: str,
+    requirement_label: str,
+    with_requirement: bool,
+    protected: bool,
+) -> None:
+    graph = nx.MultiDiGraph()
+    source = _add_node(graph, "path-guard:source", NodeType.SOURCE, "user_input")
+    data = _add_node(graph, "path-guard:data", NodeType.DATA_OBJECT, "user_path")
+    guard = _add_node(graph, "path-guard:guard", guard_type, guard_label)
+    sink = _add_node(graph, "path-guard:sink", NodeType.SINK, "file_open")
+    _add_edge(graph, source, data, EdgeType.SOURCE_OF)
+    _add_edge(graph, data, guard, EdgeType.FLOWS_TO)
+    _add_edge(graph, guard, sink, EdgeType.FLOWS_TO)
+    if with_requirement:
+        requirement = _add_node(
+            graph,
+            "path-guard:requirement",
+            NodeType.PROMPT_REQUIREMENT,
+            requirement_label,
+        )
+        _add_edge(graph, requirement, guard, EdgeType.REQUIRES)
+
+    matches = find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)
+
+    assert (matches == ()) is protected
+
+
+def test_guard_relation_from_intermediate_path_data_node_protects() -> None:
+    graph = _unsafe_flow(flow_hops=2)
+    _, guard = _add_guard_structure(
         graph,
-        NodeType.SINK if wrong_type is NodeType.DATA_OBJECT else NodeType.DATA_OBJECT,
-        entry.sink_label if wrong_type is NodeType.DATA_OBJECT else entry.data_label,
+        FactorType.PATH_NORMALIZATION,
+        guard_data=False,
+        guard_sink=False,
     )
-    _add_edge(graph, correct_endpoint, guard, EdgeType.GUARDED_BY)
+    intermediate = _node(graph, NodeType.DATA_OBJECT, "intermediate_0")
+    _add_edge(graph, intermediate, guard, EdgeType.GUARDED_BY)
+
+    assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
+
+
+def test_guard_relation_from_data_node_outside_matched_path_does_not_protect() -> None:
+    graph = _unsafe_flow()
+    _, guard = _add_guard_structure(
+        graph,
+        FactorType.PATH_NORMALIZATION,
+        guard_data=False,
+        guard_sink=False,
+    )
+    outside = _add_node(graph, "outside:data", NodeType.DATA_OBJECT, "outside_data")
+    _add_edge(graph, outside, guard, EdgeType.GUARDED_BY)
 
     assert len(find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)) == 1
 
@@ -269,6 +343,73 @@ def _parallel_match_graph(count: int) -> nx.MultiDiGraph:
     return graph
 
 
+class _SecondTraversalProbe:
+    def __init__(
+        self,
+        items: tuple[object, ...],
+        *,
+        second_behavior: str,
+        maximum: int,
+    ) -> None:
+        self.items = items
+        self.second_behavior = second_behavior
+        self.maximum = maximum
+        self.traversals = 0
+        self.consumed = 0
+
+    def __call__(self, *_args, **_kwargs):
+        return self
+
+    def __iter__(self):
+        self.traversals += 1
+        if self.traversals == 1 or self.second_behavior == "repeat":
+            for item in self.items:
+                self.consumed += 1
+                yield item
+            return
+        if self.second_behavior == "explode":
+            raise RuntimeError("SECOND_LIVE_VIEW_MUST_NOT_BE_TOUCHED")
+        for index in range(self.maximum + 2):
+            self.consumed += 1
+            if index > self.maximum:
+                raise AssertionError("second traversal consumed beyond MAX+1")
+            yield (f"second-{index}", {})
+
+
+@pytest.mark.parametrize("dimension", ("nodes", "edges"))
+@pytest.mark.parametrize("second_behavior", ("explode", "oversized"))
+def test_query_uses_one_bounded_committed_snapshot(
+    dimension: str,
+    second_behavior: str,
+) -> None:
+    canonical = _unsafe_flow()
+    raw_nodes = tuple(canonical.nodes(data=True))
+    raw_edges = tuple(canonical.edges(keys=True, data=True))
+    node_view = _SecondTraversalProbe(
+        raw_nodes,
+        second_behavior=second_behavior if dimension == "nodes" else "repeat",
+        maximum=MAX_TSG_NODES,
+    )
+    edge_view = _SecondTraversalProbe(
+        raw_edges,
+        second_behavior=second_behavior if dimension == "edges" else "repeat",
+        maximum=MAX_TSG_EDGES,
+    )
+    probe = nx.MultiDiGraph()
+    probe.number_of_nodes = lambda: len(raw_nodes)
+    probe.number_of_edges = lambda: len(raw_edges)
+    probe.__dict__["nodes"] = node_view
+    probe.__dict__["edges"] = edge_view
+
+    matches = find_motif_matches(probe, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)
+
+    assert len(matches) == 1
+    assert node_view.traversals == 1
+    assert edge_view.traversals == 1
+    assert node_view.consumed == len(raw_nodes) <= MAX_TSG_NODES
+    assert edge_view.consumed == len(raw_edges) <= MAX_TSG_EDGES
+
+
 def test_exact_match_limit_succeeds_and_next_match_fails_closed() -> None:
     assert (
         len(
@@ -288,7 +429,7 @@ def test_exact_match_limit_succeeds_and_next_match_fails_closed() -> None:
     assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
-def test_traversal_states_are_bounded_before_path_explosion() -> None:
+def _high_branching_without_eligible_sink(*, wrong_sink: bool) -> nx.MultiDiGraph:
     graph = _unsafe_flow()
     sink = _node(graph, NodeType.SINK, "file_open")
     graph.remove_node(sink)
@@ -307,14 +448,40 @@ def test_traversal_states_are_bounded_before_path_explosion() -> None:
                 _add_edge(graph, parent, child, EdgeType.FLOWS_TO)
                 next_layer.append(child)
         previous_layer = next_layer
+    if wrong_sink:
+        wrong = _add_node(graph, "wrong:sink", NodeType.SINK, "wrong_sink")
+        _add_edge(graph, previous_layer[-1], wrong, EdgeType.FLOWS_TO)
+    return graph
 
-    with pytest.raises(SecAwareError) as exc_info:
+
+@pytest.mark.parametrize("wrong_sink", (False, True))
+def test_high_branching_without_eligible_sink_is_pruned(
+    wrong_sink: bool,
+) -> None:
+    graph = _high_branching_without_eligible_sink(wrong_sink=wrong_sink)
+
+    assert (
         find_motif_matches(
             graph,
             MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD,
             max_matches=1,
         )
-    assert exc_info.value.code is ErrorCode.TSG_INVALID
+        == ()
+    )
+    assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
+
+
+@pytest.mark.parametrize("count", (256, 257))
+def test_guarded_candidates_still_enforce_match_bound(count: int) -> None:
+    graph = _parallel_match_graph(count)
+    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION)
+
+    if count == 256:
+        assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
+    else:
+        with pytest.raises(SecAwareError) as exc_info:
+            find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)
+        assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
 @pytest.mark.parametrize(

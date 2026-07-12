@@ -240,6 +240,70 @@ print(multidigraph_to_record(graph, prompt_id="p001").model_dump_json())
     assert outputs[0] == outputs[1]
 
 
+def test_concurrent_cold_tsg_imports_do_not_deadlock_or_expose_partial_exports() -> None:
+    script = r"""
+import importlib
+import sys
+import threading
+
+modules = sys.argv[1:]
+barrier = threading.Barrier(len(modules))
+failures = []
+
+def load(name):
+    try:
+        barrier.wait(timeout=10)
+        importlib.import_module(name)
+    except BaseException as error:
+        failures.append((name, type(error).__name__, str(error)))
+
+threads = [threading.Thread(target=load, args=(name,)) for name in modules]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join(timeout=15)
+if any(thread.is_alive() for thread in threads):
+    failures.append(("thread", "Timeout", "import did not finish"))
+package = importlib.import_module("secaware.tsg")
+expected_exports = {
+    "MOTIF_VERSION", "ONTOLOGY_VERSION", "PROMPT_TSG_CATALOG",
+    "PROMPT_TSG_CATALOG_SHA256", "PromptOntologyEntry", "MOTIF_SPECS",
+    "MotifSpec", "canonical_edge_id", "canonical_node_id", "derive_shadow",
+    "factor_query_vector", "find_motif_matches", "graph_sha256",
+    "has_factor_requirement", "multidigraph_to_record", "prompt_ontology_entry",
+    "record_to_multidigraph", "motif_query_vector",
+}
+if set(package.__all__) != expected_exports:
+    failures.append(("exports", "Mismatch", repr(package.__all__)))
+for name in package.__all__:
+    try:
+        getattr(package, name)
+    except BaseException as error:
+        failures.append((name, type(error).__name__, str(error)))
+if failures:
+    raise SystemExit(repr(failures))
+"""
+    modules = (
+        "secaware.tsg.graph",
+        "secaware.tsg.features",
+        "secaware.tsg.motifs",
+        "secaware.tsg",
+    )
+    project_root = Path(__file__).resolve().parents[1]
+    for offset in range(len(modules)):
+        ordered = (*modules[offset:], *modules[:offset])
+        for _ in range(4):
+            result = subprocess.run(
+                [sys.executable, "-c", script, *ordered],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+
+
 def test_attribute_insertion_order_does_not_change_record_json() -> None:
     graph = nx.MultiDiGraph()
     graph.add_node(

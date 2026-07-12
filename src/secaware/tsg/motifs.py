@@ -15,6 +15,7 @@ from secaware.schema.tsg import (
     EdgeType,
     MAX_MOTIF_HOPS,
     MAX_MOTIF_MATCHES,
+    MAX_TSG_EDGES,
     MotifId,
     MotifMatch,
     NodeType,
@@ -85,6 +86,8 @@ _ShadowQueryInputs = tuple[
     int,
     int,
 ]
+# At most one bounded allowance per canonical edge at each possible hop layer.
+_MAX_TRAVERSAL_STATES = MAX_TSG_EDGES * (MAX_MOTIF_HOPS + 1)
 
 
 class _InvalidQuery(Exception):
@@ -141,35 +144,41 @@ def _iter_sorted_out_edges(graph: nx.MultiDiGraph, node_id: str):
     return iter(sorted(edges, key=lambda item: (item[1], item[2])))
 
 
+def _is_required_guard(
+    graph: nx.MultiDiGraph,
+    spec: MotifSpec,
+    guard_node: str,
+) -> bool:
+    guard = graph.nodes[guard_node]
+    if guard["node_type"] is not NodeType.GUARD or guard["label"] != spec.guard_label:
+        return False
+    for requirement_node, _, _, attributes in sorted(
+        graph.in_edges(guard_node, keys=True, data=True),
+        key=lambda item: (item[0], item[2]),
+    ):
+        requirement = graph.nodes[requirement_node]
+        if (
+            attributes["edge_type"] is EdgeType.REQUIRES
+            and requirement["node_type"] is NodeType.PROMPT_REQUIREMENT
+            and requirement["label"] == spec.requirement_label
+        ):
+            return True
+    return False
+
+
 def _is_same_flow_guarded(
     graph: nx.MultiDiGraph,
     spec: MotifSpec,
-    data_node: str,
-    sink_node: str,
+    node_path: tuple[str, ...],
 ) -> bool:
-    data_guards = {
-        dst
-        for _, dst, _, attributes in _iter_sorted_out_edges(graph, data_node)
-        if attributes["edge_type"] is EdgeType.GUARDED_BY
-    }
-    sink_guards = {
-        dst
-        for _, dst, _, attributes in _iter_sorted_out_edges(graph, sink_node)
-        if attributes["edge_type"] is EdgeType.GUARDED_BY
-    }
-    for guard_node in sorted(data_guards & sink_guards):
-        guard = graph.nodes[guard_node]
-        if guard["node_type"] is not NodeType.GUARD or guard["label"] != spec.guard_label:
+    if any(_is_required_guard(graph, spec, node_id) for node_id in node_path):
+        return True
+    for path_node in node_path:
+        if graph.nodes[path_node]["node_type"] not in {NodeType.DATA_OBJECT, NodeType.SINK}:
             continue
-        for requirement_node, _, _, attributes in sorted(
-            graph.in_edges(guard_node, keys=True, data=True),
-            key=lambda item: (item[0], item[2]),
-        ):
-            requirement = graph.nodes[requirement_node]
-            if (
-                attributes["edge_type"] is EdgeType.REQUIRES
-                and requirement["node_type"] is NodeType.PROMPT_REQUIREMENT
-                and requirement["label"] == spec.requirement_label
+        for _, guard_node, _, attributes in _iter_sorted_out_edges(graph, path_node):
+            if attributes["edge_type"] is EdgeType.GUARDED_BY and _is_required_guard(
+                graph, spec, guard_node
             ):
                 return True
     return False
@@ -188,6 +197,34 @@ def _match(spec: MotifSpec, node_path: tuple[str, ...], edge_path: tuple[str, ..
     )
 
 
+def _reverse_sink_distances(
+    graph: nx.MultiDiGraph,
+    spec: MotifSpec,
+    hop_limit: int,
+) -> dict[str, int]:
+    sinks = {
+        node_id
+        for node_id, attributes in graph.nodes(data=True)
+        if attributes["node_type"] is NodeType.SINK and attributes["label"] == spec.sink_label
+    }
+    distances = {node_id: 0 for node_id in sinks}
+    frontier = sinks
+    for distance in range(1, hop_limit):
+        next_frontier: set[str] = set()
+        for node_id in sorted(frontier):
+            for predecessor, _, _, attributes in sorted(
+                graph.in_edges(node_id, keys=True, data=True),
+                key=lambda item: (item[0], item[2]),
+            ):
+                if attributes["edge_type"] is EdgeType.FLOWS_TO and predecessor not in distances:
+                    distances[predecessor] = distance
+                    next_frontier.add(predecessor)
+        if not next_frontier:
+            break
+        frontier = next_frontier
+    return distances
+
+
 def _find_matches(
     graph: nx.MultiDiGraph,
     spec: MotifSpec,
@@ -196,8 +233,11 @@ def _find_matches(
     max_matches: int,
 ) -> tuple[MotifMatch, ...]:
     hop_limit = min(max_hops, spec.max_hops)
-    state_limit = max_matches * (max_hops + 1)
+    sink_distances = _reverse_sink_distances(graph, spec, hop_limit)
+    if not sink_distances:
+        return ()
     states = 0
+    candidates = 0
     matches: list[MotifMatch] = []
 
     for source_id, source in sorted(graph.nodes(data=True), key=lambda item: item[0]):
@@ -209,6 +249,7 @@ def _find_matches(
                 first_edge["edge_type"] is not spec.first_edge_type
                 or data["node_type"] is not NodeType.DATA_OBJECT
                 or data["label"] != spec.data_label
+                or sink_distances.get(data_id, hop_limit) > hop_limit - 1
             ):
                 continue
             stack = [
@@ -221,7 +262,7 @@ def _find_matches(
             ]
             while stack:
                 states += 1
-                if states > state_limit:
+                if states > _MAX_TRAVERSAL_STATES:
                     raise _InvalidQuery from None
                 current, node_path, edge_path, visited = stack.pop()
                 if len(edge_path) >= hop_limit:
@@ -234,10 +275,14 @@ def _find_matches(
                     next_edge_path = (*edge_path, edge_id)
                     target = graph.nodes[dst]
                     if target["node_type"] is NodeType.SINK and target["label"] == spec.sink_label:
-                        if not _is_same_flow_guarded(graph, spec, data_id, dst):
+                        candidates += 1
+                        if candidates > max_matches:
+                            raise _InvalidQuery from None
+                        if not _is_same_flow_guarded(graph, spec, next_node_path):
                             matches.append(_match(spec, next_node_path, next_edge_path))
-                            if len(matches) > max_matches:
-                                raise _InvalidQuery from None
+                        continue
+                    remaining_hops = hop_limit - len(next_edge_path)
+                    if sink_distances.get(dst, hop_limit) > remaining_hops:
                         continue
                     next_states.append(
                         (dst, next_node_path, next_edge_path, visited | frozenset((dst,)))
