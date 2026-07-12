@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import Enum
 import hashlib
+from itertools import islice
 import json
 import re
 from typing import TypeVar, cast
@@ -277,14 +278,49 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
     if type(graph) is not nx.MultiDiGraph:
         raise _InvalidInput from None
     try:
-        graph_attributes = graph.graph
         node_count = graph.number_of_nodes()
         edge_count = graph.number_of_edges()
-        raw_nodes = tuple(graph.nodes(data=True))
-        raw_edges = tuple(graph.edges(keys=True, data=True))
     except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
         raise _InvalidInput from None
-    if graph_attributes or node_count > MAX_TSG_NODES or edge_count > MAX_TSG_EDGES:
+    if (
+        type(node_count) is not int
+        or type(edge_count) is not int
+        or not 0 <= node_count <= MAX_TSG_NODES
+        or not 0 <= edge_count <= MAX_TSG_EDGES
+    ):
+        raise _InvalidInput from None
+
+    try:
+        graph_attributes = graph.graph
+        raw_nodes = tuple(islice(graph.nodes(data=True), MAX_TSG_NODES + 1))
+    except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
+        raise _InvalidInput from None
+    if (
+        type(graph_attributes) is not dict
+        or graph_attributes
+        or len(raw_nodes) != node_count
+        or len(raw_nodes) > MAX_TSG_NODES
+        or any(type(item) is not tuple or len(item) != 2 for item in raw_nodes)
+    ):
+        raise _InvalidInput from None
+
+    try:
+        raw_edges = tuple(islice(graph.edges(keys=True, data=True), MAX_TSG_EDGES + 1))
+    except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
+        raise _InvalidInput from None
+    if (
+        len(raw_edges) != edge_count
+        or len(raw_edges) > MAX_TSG_EDGES
+        or any(type(item) is not tuple or len(item) != 4 for item in raw_edges)
+    ):
+        raise _InvalidInput from None
+
+    try:
+        final_node_count = graph.number_of_nodes()
+        final_edge_count = graph.number_of_edges()
+    except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
+        raise _InvalidInput from None
+    if final_node_count != node_count or final_edge_count != edge_count:
         raise _InvalidInput from None
 
     nodes_by_id: dict[str, TSGNode] = {}

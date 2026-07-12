@@ -13,7 +13,7 @@ import pytest
 
 import secaware.tsg.graph as graph_codec
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.tsg import EdgeType, MAX_TSG_NODES, NodeType
+from secaware.schema.tsg import EdgeType, MAX_TSG_EDGES, MAX_TSG_NODES, NodeType
 from secaware.tsg.graph import (
     canonical_edge_id,
     canonical_node_id,
@@ -56,6 +56,48 @@ def _canonical_json(value: object) -> bytes:
 
 def _semantic_key_sha256(semantic_key: str) -> str:
     return hashlib.sha256(_canonical_json({"semantic_key": semantic_key})).hexdigest()
+
+
+class _ExplodingView:
+    def __init__(self) -> None:
+        self.touched = False
+
+    def __call__(self, *_args, **_kwargs):
+        self.touched = True
+        raise AssertionError("oversized view must not be touched")
+
+
+class _BoundedView:
+    def __init__(self, *, count: int, item_factory, maximum_consumption: int) -> None:
+        self.count = count
+        self.item_factory = item_factory
+        self.maximum_consumption = maximum_consumption
+        self.consumed = 0
+
+    def __call__(self, *_args, **_kwargs):
+        return self
+
+    def __iter__(self):
+        for index in range(self.count):
+            self.consumed += 1
+            if self.consumed > self.maximum_consumption:
+                raise AssertionError("graph snapshot consumed beyond its defensive bound")
+            yield self.item_factory(index)
+
+
+def _view_probe_graph(
+    *,
+    node_count: int,
+    edge_count: int,
+    node_view,
+    edge_view,
+) -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    graph.number_of_nodes = lambda: node_count
+    graph.number_of_edges = lambda: edge_count
+    graph.__dict__["nodes"] = node_view
+    graph.__dict__["edges"] = edge_view
+    return graph
 
 
 def test_parallel_edges_round_trip_without_order_drift() -> None:
@@ -404,6 +446,88 @@ def test_codec_rejects_graph_above_node_limit() -> None:
 
     with pytest.raises(SecAwareError, match="TSG"):
         multidigraph_to_record(graph, prompt_id="p001")
+
+
+@pytest.mark.parametrize("path", ["hash", "conversion"])
+@pytest.mark.parametrize(
+    ("node_count", "edge_count"),
+    [(MAX_TSG_NODES + 1, 0), (0, MAX_TSG_EDGES + 1)],
+)
+def test_reported_oversize_rejects_before_touching_views(
+    path: str, node_count: int, edge_count: int
+) -> None:
+    node_view = _ExplodingView()
+    edge_view = _ExplodingView()
+    graph = _view_probe_graph(
+        node_count=node_count,
+        edge_count=edge_count,
+        node_view=node_view,
+        edge_view=edge_view,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        if path == "hash":
+            graph_sha256(graph)
+        else:
+            multidigraph_to_record(graph, prompt_id="p001")
+
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+    assert not node_view.touched
+    assert not edge_view.touched
+
+
+@pytest.mark.parametrize("path", ["hash", "conversion"])
+@pytest.mark.parametrize("dimension", ["nodes", "edges"])
+def test_inconsistent_views_are_bounded_and_rejected_as_input(path: str, dimension: str) -> None:
+    node_view = _BoundedView(
+        count=MAX_TSG_NODES + 2 if dimension == "nodes" else 0,
+        item_factory=lambda index: (f"node-{index}", {}),
+        maximum_consumption=MAX_TSG_NODES + 1,
+    )
+    edge_view = _BoundedView(
+        count=MAX_TSG_EDGES + 2 if dimension == "edges" else 0,
+        item_factory=lambda index: ("source", "sink", index, {}),
+        maximum_consumption=MAX_TSG_EDGES + 1,
+    )
+    graph = _view_probe_graph(
+        node_count=MAX_TSG_NODES if dimension == "nodes" else 0,
+        edge_count=MAX_TSG_EDGES if dimension == "edges" else 0,
+        node_view=node_view,
+        edge_view=edge_view,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        if path == "hash":
+            graph_sha256(graph)
+        else:
+            multidigraph_to_record(graph, prompt_id="p001")
+
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
+    if dimension == "nodes":
+        assert node_view.consumed == MAX_TSG_NODES + 1
+        assert edge_view.consumed == 0
+    else:
+        assert edge_view.consumed == MAX_TSG_EDGES + 1
+
+
+def test_exact_graph_size_limits_succeed() -> None:
+    graph = nx.MultiDiGraph()
+    for index in range(MAX_TSG_NODES):
+        graph.add_node(f"node-{index}", node_type="source", label=f"node-{index}", attributes={})
+    for index in range(MAX_TSG_EDGES):
+        graph.add_edge(
+            "node-0",
+            "node-0",
+            key=index,
+            edge_type="related_to",
+            attributes={},
+        )
+
+    record = multidigraph_to_record(graph, prompt_id="p001")
+
+    assert len(record.nodes) == MAX_TSG_NODES
+    assert len(record.edges) == MAX_TSG_EDGES
+    assert graph_sha256(graph) == record.graph_sha256
 
 
 @pytest.mark.parametrize(
