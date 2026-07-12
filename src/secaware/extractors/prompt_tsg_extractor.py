@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 import hashlib
 import re
 from typing import cast
@@ -29,6 +30,11 @@ _VALID_CWE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 
 class _InvalidInput(Exception):
     pass
+
+
+class _FailureKind(Enum):
+    INVALID_INPUT = "invalid_input"
+    INTERNAL = "internal"
 
 
 def _invalid_error() -> SecAwareError:
@@ -92,7 +98,8 @@ def _snapshot_prompt(value: object) -> PromptRecord:
 def _first_match(text: str, terms: tuple[str, ...]) -> tuple[int, int] | None:
     earliest: tuple[int, int, int] | None = None
     for term_index, term in enumerate(terms):
-        match = re.search(re.escape(term), text, flags=re.IGNORECASE | re.ASCII)
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])"
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.ASCII)
         if match is not None:
             candidate = (match.start(), match.end(), term_index)
             earliest = candidate if earliest is None else min(earliest, candidate)
@@ -264,22 +271,38 @@ def _extract(snapshot: PromptRecord) -> PromptTSGRecord:
     return multidigraph_to_record(graph, prompt_id=snapshot.prompt_id)
 
 
+def _try_snapshot_prompt(value: object) -> PromptRecord | _FailureKind:
+    try:
+        return _snapshot_prompt(value)
+    except _InvalidInput:
+        return _FailureKind.INVALID_INPUT
+    except Exception:
+        return _FailureKind.INTERNAL
+
+
+def _try_extract(snapshot: PromptRecord) -> PromptTSGRecord | _FailureKind:
+    try:
+        return _extract(snapshot)
+    except Exception:
+        return _FailureKind.INTERNAL
+
+
 def extract_prompt_tsg(prompt: PromptRecord) -> PromptTSGRecord:
     """Snapshot one prompt and emit only finite reviewed graph evidence."""
-    try:
-        snapshot = _snapshot_prompt(prompt)
-    except _InvalidInput:
+    snapshot_result = _try_snapshot_prompt(prompt)
+    prompt = cast(PromptRecord, None)
+    if isinstance(snapshot_result, _FailureKind):
+        failure = snapshot_result
+        snapshot_result = cast(PromptRecord, None)
+        if failure is _FailureKind.INVALID_INPUT:
+            raise _invalid_error()
+        raise _internal_error()
+
+    result = _try_extract(snapshot_result)
+    snapshot_result = cast(PromptRecord, None)
+    if isinstance(result, _FailureKind):
         prompt = cast(PromptRecord, None)
-        raise _invalid_error() from None
-    except Exception:
-        prompt = cast(PromptRecord, None)
-        raise _internal_error() from None
-    try:
-        result = _extract(snapshot)
-    except Exception:
-        prompt = cast(PromptRecord, None)
-        snapshot = cast(PromptRecord, None)
-        raise _internal_error() from None
+        raise _internal_error()
     return result
 
 

@@ -16,6 +16,20 @@ from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.graph import record_to_multidigraph
 
 
+_DOMAIN_BOUNDARY_CASES = tuple(
+    (entry, term, prefix, suffix)
+    for entry in PROMPT_TSG_CATALOG
+    for term in entry.domain_terms
+    for prefix, suffix in (("x", ""), ("", "x"), ("_", "_"))
+)
+_GUARD_BOUNDARY_CASES = tuple(
+    (entry, term, prefix, suffix)
+    for entry in PROMPT_TSG_CATALOG
+    for term in entry.guard_terms
+    for prefix, suffix in (("x", ""), ("", "x"), ("_", "_"))
+)
+
+
 def _prompt(
     text: str,
     *,
@@ -64,6 +78,26 @@ def _guard_targets(graph: object, guard_label: str) -> set[str]:
         for src, dst, attributes in graph.edges(data=True)  # type: ignore[union-attr]
         if dst == guard and attributes["edge_type"] is EdgeType.GUARDED_BY
     }
+
+
+def _assert_sanitized_error(
+    error: SecAwareError,
+    *,
+    code: ErrorCode,
+    sentinel: str,
+) -> None:
+    assert error.code is code
+    assert error.__context__ is None
+    assert error.__cause__ is None
+    assert sentinel not in str(error)
+    assert sentinel not in repr(error)
+
+    traceback_cursor = error.__traceback__
+    while traceback_cursor is not None:
+        frame = traceback_cursor.tb_frame
+        if Path(frame.f_code.co_filename).resolve() == Path(prompt_extractor.__file__).resolve():
+            assert sentinel not in repr(frame.f_locals)
+        traceback_cursor = traceback_cursor.tb_next
 
 
 @pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
@@ -122,6 +156,64 @@ def test_detached_guard_evidence_emits_no_family(entry: object) -> None:
     labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
     assert entry.guard_label not in labels
     assert entry.requirement_label not in labels
+
+
+@pytest.mark.parametrize(
+    ("entry", "term", "prefix", "suffix"),
+    _DOMAIN_BOUNDARY_CASES,
+)
+def test_embedded_domain_terms_do_not_emit_family_facts(
+    entry: object,
+    term: str,
+    prefix: str,
+    suffix: str,
+) -> None:
+    graph = record_to_multidigraph(
+        extract_prompt_tsg(_prompt(f"Please process {prefix}{term}{suffix}."))
+    )
+    labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
+
+    assert entry.data_label not in labels
+    assert entry.sink_label not in labels
+
+
+@pytest.mark.parametrize(
+    ("entry", "term", "prefix", "suffix"),
+    _GUARD_BOUNDARY_CASES,
+)
+def test_embedded_guard_terms_do_not_emit_guard_facts(
+    entry: object,
+    term: str,
+    prefix: str,
+    suffix: str,
+) -> None:
+    text = f"Please {entry.domain_terms[0]}; then {prefix}{term}{suffix}."
+    graph = record_to_multidigraph(extract_prompt_tsg(_prompt(text)))
+    labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
+
+    assert entry.data_label in labels
+    assert entry.guard_label not in labels
+
+
+def test_punctuated_shell_guard_matches_case_insensitively_with_raw_evidence() -> None:
+    shell = next(
+        entry for entry in PROMPT_TSG_CATALOG if entry.factor_type is FactorType.SAFE_SUBPROCESS
+    )
+    raw_guard = "SHELL=FALSE"
+    text = f"Please RUN A COMMAND; ({raw_guard})!"
+    graph = record_to_multidigraph(extract_prompt_tsg(_prompt(text)))
+    guard_attributes = next(
+        attributes["attributes"]
+        for _, attributes in graph.nodes(data=True)
+        if attributes["node_type"] is NodeType.GUARD and attributes["label"] == shell.guard_label
+    )
+    start = text.index(raw_guard)
+
+    assert guard_attributes == {
+        "evidence_start": start,
+        "evidence_end": start + len(raw_guard),
+        "evidence_sha256": hashlib.sha256(raw_guard.encode("utf-8")).hexdigest(),
+    }
 
 
 def test_path_prompt_emits_flow_facts_without_feature_decisions() -> None:
@@ -240,15 +332,11 @@ def test_invalid_prompt_record_error_surfaces_are_sanitized() -> None:
     with pytest.raises(SecAwareError) as exc_info:
         extract_prompt_tsg(prompt)
 
-    rendered = "\n".join(
-        (
-            str(exc_info.value),
-            repr(exc_info.value),
-            "".join(traceback.format_exception(exc_info.value)),
-        )
+    _assert_sanitized_error(
+        exc_info.value,
+        code=ErrorCode.TSG_INVALID,
+        sentinel=sentinel,
     )
-    assert exc_info.value.code is ErrorCode.TSG_INVALID
-    assert sentinel not in rendered
 
 
 @pytest.mark.parametrize(
@@ -284,27 +372,26 @@ def test_coercible_prompt_field_mutations_are_rejected_without_leakage(
     assert sentinel not in rendered
 
 
+@pytest.mark.parametrize("error_type", (RuntimeError, ValueError, TypeError))
 def test_unexpected_extraction_failure_is_sanitized_analysis_error(
     monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
 ) -> None:
     sentinel = "INTERNAL_SENTINEL_018aec"
 
-    def fail(_: PromptRecord) -> object:
-        raise RuntimeError(sentinel)
+    def fail(snapshot: PromptRecord) -> object:
+        held_snapshot = snapshot
+        raise error_type(f"{sentinel}:{held_snapshot.prompt}")
 
     monkeypatch.setattr(prompt_extractor, "_extract", fail)
     with pytest.raises(SecAwareError) as exc_info:
         extract_prompt_tsg(_prompt("Return the number seven."))
 
-    rendered = "\n".join(
-        (
-            str(exc_info.value),
-            repr(exc_info.value),
-            "".join(traceback.format_exception(exc_info.value)),
-        )
+    _assert_sanitized_error(
+        exc_info.value,
+        code=ErrorCode.ANALYSIS_INVALID,
+        sentinel=sentinel,
     )
-    assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
-    assert sentinel not in rendered
 
 
 def test_unexpected_snapshot_failure_is_sanitized_analysis_error(
