@@ -1257,6 +1257,96 @@ def test_discovery_uses_full_prompt_graph_coordinate_boundary(tmp_path: Path) ->
     assert not store.stage_is_active("discover")
 
 
+def test_discovery_rejects_prompt_graph_from_stale_prompt_input_without_leaks(
+    tmp_path: Path,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    prompts_path = store.path("inputs", "prompts.jsonl")
+    prompts = read_jsonl(
+        prompts_path,
+        PromptRecord,
+        required=True,
+        allow_empty=False,
+    )
+    stale_prompt_text = "PRIVATE_STALE_DISCOVERY_PROMPT_SENTINEL"
+    write_jsonl(
+        prompts_path,
+        [
+            prompt.model_copy(update={"prompt": stale_prompt_text})
+            if prompt.split == "discover"
+            else prompt
+            for prompt in prompts
+        ],
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        discover_stage(config, store, force=True)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert stale_prompt_text not in _safe_surfaces(exc_info.value)
+    assert not store.path("discovery", "hypotheses_all.jsonl").exists()
+    assert not store.path("discovery", "hypotheses_selected.jsonl").exists()
+    assert not store.path(".stages", "discover.json").exists()
+    assert not store.stage_is_active("discover")
+    assert not store.should_skip_stage(
+        "extract-prompt-tsg",
+        [prompts_path],
+        [store.path("tsg", "prompt_tsg.jsonl")],
+        force=True,
+        catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+        preserve_committed=True,
+    )
+    store.abort_stage("extract-prompt-tsg")
+
+
+def test_intervention_rejects_prompt_graph_from_stale_prompt_input_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    config, store = _prepared_observed_pipeline(tmp_path)
+    discover_stage(config, store, force=False)
+    intervene_stage(config, store, force=False)
+    outputs = [
+        store.path("interventions", "interventions.jsonl"),
+        store.path("interventions", "paired_prompts.jsonl"),
+    ]
+    manifest_path = store.path(".stages", "intervene.json")
+    previous = ([path.read_bytes() for path in outputs], manifest_path.read_bytes())
+    prompts_path = store.path("inputs", "prompts.jsonl")
+    prompts = read_jsonl(
+        prompts_path,
+        PromptRecord,
+        required=True,
+        allow_empty=False,
+    )
+    stale_prompt_text = "PRIVATE_STALE_INTERVENTION_PROMPT_SENTINEL"
+    write_jsonl(
+        prompts_path,
+        [
+            prompt.model_copy(update={"prompt": stale_prompt_text})
+            if prompt.split == "confirm"
+            else prompt
+            for prompt in prompts
+        ],
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        intervene_stage(config, store, force=True)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert stale_prompt_text not in _safe_surfaces(exc_info.value)
+    assert ([path.read_bytes() for path in outputs], manifest_path.read_bytes()) == previous
+    assert not store.stage_is_active("intervene")
+    assert not store.should_skip_stage(
+        "extract-prompt-tsg",
+        [prompts_path],
+        [store.path("tsg", "prompt_tsg.jsonl")],
+        force=True,
+        catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+        preserve_committed=True,
+    )
+    store.abort_stage("extract-prompt-tsg")
+
+
 def test_confirm_holds_both_oracle_leases_in_fixed_order_through_computation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1312,21 +1402,23 @@ def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
     config, store = _prepared_observed_pipeline(tmp_path)
     if consumer == "intervene":
         discover_stage(config, store, force=False)
-    real_hold = store.hold_committed_output
+    real_hold_output = store.hold_committed_output
+    real_hold_stage = store.hold_committed_stage
     real_execute = pipeline_cli._execute_jsonl_stage_transaction
     active: list[str] = []
     entered: list[str] = []
     bindings: dict[str, str | None] = {}
+    stage_inputs: dict[str, list[Path]] = {}
     checked = False
 
     @contextmanager
-    def tracked_hold(
+    def tracked_output_hold(
         stage: str,
         outputs: Sequence[Path],
         *,
         expected_catalog_sha256: str | None = None,
     ) -> object:
-        with real_hold(
+        with real_hold_output(
             stage,
             outputs,
             expected_catalog_sha256=expected_catalog_sha256,
@@ -1339,12 +1431,36 @@ def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
             finally:
                 active.remove(stage)
 
+    @contextmanager
+    def tracked_stage_hold(
+        stage: str,
+        inputs: Sequence[Path],
+        outputs: Sequence[Path],
+        *,
+        expected_catalog_sha256: str | None = None,
+    ) -> object:
+        with real_hold_stage(
+            stage,
+            inputs,
+            outputs,
+            expected_catalog_sha256=expected_catalog_sha256,
+        ) as hashes:
+            active.append(stage)
+            entered.append(stage)
+            bindings[stage] = expected_catalog_sha256
+            stage_inputs[stage] = list(inputs)
+            try:
+                yield hashes
+            finally:
+                active.remove(stage)
+
     def checked_execute(*args: object, **kwargs: object) -> None:
         nonlocal checked
         checked = active == expected_order
         real_execute(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(store, "hold_committed_output", tracked_hold)
+    monkeypatch.setattr(store, "hold_committed_output", tracked_output_hold)
+    monkeypatch.setattr(store, "hold_committed_stage", tracked_stage_hold)
     monkeypatch.setattr(pipeline_cli, "_execute_jsonl_stage_transaction", checked_execute)
 
     if consumer == "discover":
@@ -1355,6 +1471,9 @@ def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
     assert entered == expected_order
     assert checked is True
     assert bindings["extract-prompt-tsg"] == PROMPT_TSG_CATALOG_SHA256
+    assert stage_inputs == {
+        "extract-prompt-tsg": [store.path("inputs", "prompts.jsonl")]
+    }
     assert all(
         binding is None
         for stage, binding in bindings.items()

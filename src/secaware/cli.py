@@ -1813,17 +1813,19 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     }
     with ExitStack() as stack:
         for producer_stage in sorted(producer_outputs):
-            stack.enter_context(
-                store.hold_committed_output(
+            if producer_stage == "extract-prompt-tsg":
+                producer_context = store.hold_committed_stage(
+                    producer_stage,
+                    [store.path("inputs", "prompts.jsonl")],
+                    producer_outputs[producer_stage],
+                    expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+                )
+            else:
+                producer_context = store.hold_committed_output(
                     producer_stage,
                     producer_outputs[producer_stage],
-                    expected_catalog_sha256=(
-                        PROMPT_TSG_CATALOG_SHA256
-                        if producer_stage == "extract-prompt-tsg"
-                        else None
-                    ),
                 )
-            )
+            stack.enter_context(producer_context)
         _execute_jsonl_stage_transaction(
             store,
             stage=stage,
@@ -1889,17 +1891,19 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     }
     with ExitStack() as stack:
         for producer_stage in sorted(producer_outputs):
-            stack.enter_context(
-                store.hold_committed_output(
+            if producer_stage == "extract-prompt-tsg":
+                producer_context = store.hold_committed_stage(
+                    producer_stage,
+                    [store.path("inputs", "prompts.jsonl")],
+                    producer_outputs[producer_stage],
+                    expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+                )
+            else:
+                producer_context = store.hold_committed_output(
                     producer_stage,
                     producer_outputs[producer_stage],
-                    expected_catalog_sha256=(
-                        PROMPT_TSG_CATALOG_SHA256
-                        if producer_stage == "extract-prompt-tsg"
-                        else None
-                    ),
                 )
-            )
+            stack.enter_context(producer_context)
         _execute_jsonl_stage_transaction(
             store,
             stage=stage,
