@@ -1,7 +1,7 @@
 import pytest
 
 from secaware.schema.records import GeneratedCodeRecord, PromptRecord
-from secaware.schema.tsg import EdgeType, NodeType, TSGEdge, TSGNode, TSGRecord
+from secaware.schema.tsg import PromptTSGRecord
 
 
 def test_prompt_record_validates_split() -> None:
@@ -27,30 +27,35 @@ def test_prompt_record_validates_split() -> None:
         )
 
 
-def test_tsg_record_serializes_graph_fields() -> None:
-    tsg = TSGRecord(
-        graph_id="prompt:p001",
-        source_type="prompt",
-        prompt_id="p001",
-        code_id=None,
-        nodes=[
-            TSGNode(
-                node_id="n1",
-                node_type=NodeType.SINK,
-                label="file_open",
-                attributes={"confidence": 1.0},
-            )
-        ],
-        edges=[
-            TSGEdge(
-                edge_id="e1",
-                src="n1",
-                dst="n1",
-                edge_type=EdgeType.RELATED_TO,
-                attributes={},
-            )
-        ],
-        features={"factor.path_normalization_required": False},
+def test_prompt_tsg_record_serializes_graph_fields() -> None:
+    tsg = PromptTSGRecord.model_validate(
+        {
+            "schema_version": "2.0",
+            "graph_id": "prompt:p001",
+            "source_type": "prompt",
+            "prompt_id": "p001",
+            "ontology_version": "1.0",
+            "motif_version": "1.0",
+            "graph_sha256": "0" * 64,
+            "nodes": [
+                {
+                    "node_id": "n_" + "1" * 64,
+                    "node_type": "sink",
+                    "label": "file_open",
+                    "attributes": {"confidence": 1.0},
+                }
+            ],
+            "edges": [
+                {
+                    "edge_id": "e_" + "2" * 64,
+                    "src": "n_" + "1" * 64,
+                    "dst": "n_" + "1" * 64,
+                    "edge_type": "related_to",
+                    "attributes": {},
+                }
+            ],
+            "shadow": {"factor.path_normalization_required": False},
+        }
     )
 
     dumped = tsg.model_dump(mode="json")

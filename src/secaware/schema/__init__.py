@@ -20,7 +20,17 @@ from secaware.schema.records import (
     PromptRecord,
 )
 from secaware.schema.results import EffectRecord, PairResult
-from secaware.schema.tsg import EdgeType, NodeType, TSGEdge, TSGNode, TSGRecord
+from secaware.schema.tsg import (
+    EdgeType,
+    FrozenTSGAttributes,
+    MotifId,
+    MotifMatch,
+    NodeType,
+    PromptTSGRecord,
+    TSGEdge,
+    TSGNode,
+    TSGScalar,
+)
 
 __all__ = [
     "CanonicalGeneratedCodeRecord",
@@ -31,6 +41,7 @@ __all__ = [
     "FactorType",
     "FailureReason",
     "FindingRecord",
+    "FrozenTSGAttributes",
     "GenerationParameters",
     "GENERATION_REQUEST_SCHEMA_VERSION",
     "GenerationProvenance",
@@ -38,13 +49,16 @@ __all__ = [
     "GeneratedCodeRecord",
     "HypothesisRecord",
     "InterventionRecord",
+    "MotifId",
+    "MotifMatch",
     "NodeType",
     "OracleRecord",
     "OfflineGenerationResultRecord",
     "PairResult",
     "PromptRecord",
+    "PromptTSGRecord",
     "SecurityLabel",
     "TSGEdge",
     "TSGNode",
-    "TSGRecord",
+    "TSGScalar",
 ]
