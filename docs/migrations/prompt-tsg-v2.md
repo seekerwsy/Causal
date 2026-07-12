@@ -34,9 +34,9 @@ Prompt TSG publication and skip decisions are bound to one version fingerprint:
   SHA-256 together.
 
 The `extract-prompt-tsg` manifest records the catalog SHA-256, and consumers require the expected
-catalog digest while holding the committed artifact. A catalog, schema, or extractor change
-changes the stage fingerprint and invalidates skip state. Editing a manifest cannot make a v1 or
-otherwise stale artifact consumable.
+catalog digest while holding the committed artifact. A catalog, schema, or extractor version
+change changes the stage fingerprint and invalidates skip state. Editing a manifest cannot make a
+v1 or otherwise stale artifact consumable.
 
 ## Migrate a run directory
 
@@ -83,13 +83,13 @@ Then verify the new run directory and every persisted Prompt TSG record:
 
 ```powershell
 $run = "runs/demo-v2"
-Test-Path -LiteralPath "$run/tsg/prompt_tsg.jsonl"
-Test-Path -LiteralPath "$run/.stages/extract-prompt-tsg.json"
+if (-not (Test-Path -LiteralPath "$run/tsg/prompt_tsg.jsonl")) { throw "Prompt TSG artifact is missing" }
+if (-not (Test-Path -LiteralPath "$run/.stages/extract-prompt-tsg.json")) { throw "Prompt TSG manifest is missing" }
 python -c "import json,pathlib; p=pathlib.Path('runs/demo-v2/tsg/prompt_tsg.jsonl'); rows=[json.loads(x) for x in p.read_text(encoding='utf-8').splitlines() if x]; assert rows and all(r['schema_version']=='2.0' for r in rows)"
-python -c "import json,pathlib; p=pathlib.Path('runs/demo-v2/.stages/extract-prompt-tsg.json'); m=json.loads(p.read_text(encoding='utf-8')); assert len(m['catalog_sha256'])==64"
+python -c "import json,pathlib,re; from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256; p=pathlib.Path('runs/demo-v2/.stages/extract-prompt-tsg.json'); m=json.loads(p.read_text(encoding='utf-8')); digest=m.get('catalog_sha256'); assert isinstance(digest,str) and re.fullmatch(r'[0-9a-f]{64}',digest) and digest==PROMPT_TSG_CATALOG_SHA256"
 python -c "import pathlib; p=pathlib.Path('runs/demo-v2'); assert not list((p/'tsg').glob('*code_tsg*')); assert not list((p/'.stages').glob('extract-code-tsg*'))"
 ```
 
-Both `Test-Path` commands and all Python assertions must succeed. Finally, confirm that the
+Both guarded `Test-Path` checks and all Python assertions must succeed. Finally, confirm that the
 observed and counterfactual Oracle artifacts and their committed manifests exist. Those
 `OracleRecord` values, not Prompt TSG or `shadow`, are the only authoritative security labels.

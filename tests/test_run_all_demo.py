@@ -19,24 +19,11 @@ from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.oracle import OracleRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.schema.results import PairResult
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _security_rows(pairs: Sequence[PairResult]) -> list[tuple[str, str, str, int, str, str]]:
-    return sorted(
-        (
-            pair.prompt_id,
-            pair.hypothesis_id,
-            pair.model_id,
-            pair.seed_id,
-            pair.security_observed,
-            pair.security_counterfactual,
-        )
-        for pair in pairs
-    )
 
 
 def _assert_pair_security_matches_oracle(
@@ -44,23 +31,148 @@ def _assert_pair_security_matches_oracle(
     observed: Sequence[OracleRecord],
     counterfactual: Sequence[OracleRecord],
     interventions: Sequence[InterventionRecord],
+    observed_code: Sequence[CanonicalGeneratedCodeRecord],
+    counterfactual_code: Sequence[CanonicalGeneratedCodeRecord],
 ) -> None:
-    observed_by_coordinate = {
-        (record.prompt_id, record.model_id, record.seed_id): record.security_label.value
-        for record in observed
-    }
-    intervention_by_id = {record.intervention_id: record for record in interventions}
-    expected_security_rows = sorted(
-        (
+    def producer_coordinate(record: OracleRecord | CanonicalGeneratedCodeRecord) -> tuple:
+        return (
+            record.request_id,
+            record.code_id,
+            record.code_sha256,
             record.prompt_id,
-            intervention_by_id[record.intervention_id].hypothesis_id,
+            record.condition,
             record.model_id,
             record.seed_id,
-            observed_by_coordinate[(record.prompt_id, record.model_id, record.seed_id)],
-            record.security_label.value,
+            record.hypothesis_id,
+            record.intervention_id,
         )
+
+    observed_oracle_producers = [producer_coordinate(record) for record in observed]
+    observed_code_producers = [producer_coordinate(record) for record in observed_code]
+    counter_oracle_producers = [producer_coordinate(record) for record in counterfactual]
+    counter_code_producers = [producer_coordinate(record) for record in counterfactual_code]
+    for coordinates in (
+        observed_oracle_producers,
+        observed_code_producers,
+        counter_oracle_producers,
+        counter_code_producers,
+    ):
+        assert len(coordinates) == len(set(coordinates))
+    for records in (observed, observed_code, counterfactual, counterfactual_code):
+        request_ids = [record.request_id for record in records]
+        code_ids = [record.code_id for record in records]
+        assert len(request_ids) == len(set(request_ids))
+        assert len(code_ids) == len(set(code_ids))
+    assert set(observed_oracle_producers) == set(observed_code_producers)
+    assert set(counter_oracle_producers) == set(counter_code_producers)
+
+    observed_coordinates = [
+        (record.prompt_id, record.model_id, record.seed_id) for record in observed
+    ]
+    observed_code_coordinates = [
+        (record.prompt_id, record.model_id, record.seed_id) for record in observed_code
+    ]
+    intervention_ids = [record.intervention_id for record in interventions]
+    intervention_coordinates = [
+        (record.prompt_id, record.hypothesis_id) for record in interventions
+    ]
+    counter_coordinates = [
+        (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
         for record in counterfactual
-    )
+    ]
+    counter_code_coordinates = [
+        (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
+        for record in counterfactual_code
+    ]
+    pair_ids = [record.pair_id for record in pairs]
+    pair_coordinates = [
+        (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
+        for record in pairs
+    ]
+    for coordinates in (
+        observed_coordinates,
+        observed_code_coordinates,
+        intervention_ids,
+        intervention_coordinates,
+        counter_coordinates,
+        counter_code_coordinates,
+        pair_ids,
+        pair_coordinates,
+    ):
+        assert len(coordinates) == len(set(coordinates))
+    assert set(observed_coordinates) == set(observed_code_coordinates)
+    assert set(counter_coordinates) == set(counter_code_coordinates) == set(pair_coordinates)
+    assert set(intervention_coordinates) == {
+        (record.prompt_id, record.hypothesis_id) for record in counterfactual
+    }
+    assert set(intervention_ids) == {record.intervention_id for record in counterfactual}
+
+    label_value = {"secure": 0, "insecure": 1}
+    for pair in pairs:
+        matching_observed = [
+            record
+            for record in observed
+            if (record.prompt_id, record.model_id, record.seed_id)
+            == (pair.prompt_id, pair.model_id, pair.seed_id)
+        ]
+        matching_counter = [
+            record
+            for record in counterfactual
+            if (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
+            == (pair.prompt_id, pair.hypothesis_id, pair.model_id, pair.seed_id)
+        ]
+        matching_interventions = [
+            record
+            for record in interventions
+            if (record.prompt_id, record.hypothesis_id) == (pair.prompt_id, pair.hypothesis_id)
+        ]
+        assert len(matching_observed) == len(matching_counter) == len(matching_interventions) == 1
+        observed_record = matching_observed[0]
+        counter_record = matching_counter[0]
+        intervention = matching_interventions[0]
+        assert counter_record.intervention_id == intervention.intervention_id
+        assert pair.factor_type == intervention.factor_type.value
+        assert pair.expected_direction == intervention.expected_direction
+        assert pair.same_task_valid is intervention.semantic_valid
+        assert pair.target_changed is intervention.target_changed
+        assert pair.side_effect is intervention.side_effect
+        assert pair.functional_observed is observed_record.functional_ok
+        assert pair.functional_counterfactual is counter_record.functional_ok
+        assert pair.security_observed == observed_record.security_label.value
+        assert pair.security_counterfactual == counter_record.security_label.value
+        expected_delta = (
+            label_value[counter_record.security_label.value]
+            - label_value[observed_record.security_label.value]
+        )
+        assert pair.delta == expected_delta
+        if pair.security_observed == pair.security_counterfactual:
+            expected_flip = "no_flip"
+        elif (pair.security_observed, pair.security_counterfactual) == (
+            "insecure",
+            "secure",
+        ):
+            expected_flip = "secure_flip"
+        else:
+            expected_flip = "insecure_flip"
+        assert pair.flip_type == expected_flip
+        assert pair.eligible_per_protocol is (
+            intervention.semantic_valid
+            and intervention.target_changed
+            and not intervention.side_effect
+            and observed_record.functional_ok
+            and counter_record.functional_ok
+        )
+        assert pair.eligible_itt is True
+        if intervention.failure_reason is not None:
+            expected_failure = intervention.failure_reason.value
+        elif not observed_record.parse_ok or not counter_record.parse_ok:
+            expected_failure = "parse_failed"
+        elif not observed_record.functional_ok or not counter_record.functional_ok:
+            expected_failure = "functional_failed"
+        else:
+            expected_failure = None
+        assert pair.failure_reason == expected_failure
+
     assert {record.security_label.value for record in (*observed, *counterfactual)} == {
         "secure",
         "insecure",
@@ -69,7 +181,6 @@ def _assert_pair_security_matches_oracle(
     assert ("insecure", "secure") in {
         (pair.security_observed, pair.security_counterfactual) for pair in pairs
     }
-    assert _security_rows(pairs) == expected_security_rows
 
 
 def _static_string(node: ast.AST) -> str | None:
@@ -87,7 +198,9 @@ def _authority_access_violations(path: Path) -> list[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     violations: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in forbidden_keys:
+        if isinstance(node, ast.Constant) and node.value in forbidden_keys:
+            violations.append((node.lineno, "forbidden-constant"))
+        elif isinstance(node, ast.Attribute) and node.attr in forbidden_keys:
             violations.append((node.lineno, "attribute"))
         elif isinstance(node, ast.Subscript) and _static_string(node.slice) in forbidden_keys:
             violations.append((node.lineno, "subscript"))
@@ -111,11 +224,22 @@ def _authority_access_violations(path: Path) -> list[tuple[int, str]]:
 
 def _assert_no_removed_registered_command(application: typer.Typer) -> None:
     removed_command = "extract-" + "code-" + "tsg"
-    assert all(command.name != removed_command for command in application.registered_commands)
-    assert all(
-        command.callback is None or "code_" + "tsg" not in command.callback.__name__
-        for command in application.registered_commands
-    )
+    removed_callback_fragment = "code_" + "tsg"
+    pending = [application]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+        assert all(command.name != removed_command for command in current.registered_commands)
+        assert all(
+            command.callback is None or removed_callback_fragment not in command.callback.__name__
+            for command in current.registered_commands
+        )
+        for group in current.registered_groups:
+            assert group.name != removed_command
+            pending.append(group.typer_instance)
 
 
 def _declared_cli_commands(path: Path) -> set[str]:
@@ -221,6 +345,18 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         required=True,
         allow_empty=False,
     )
+    observed_code = read_jsonl(
+        run_dir / "generation" / "observed_code.jsonl",
+        CanonicalGeneratedCodeRecord,
+        required=True,
+        allow_empty=False,
+    )
+    counterfactual_code = read_jsonl(
+        run_dir / "generation" / "counterfactual_code.jsonl",
+        CanonicalGeneratedCodeRecord,
+        required=True,
+        allow_empty=False,
+    )
     assert observed and counterfactual
     interventions = read_jsonl(
         run_dir / "interventions" / "interventions.jsonl",
@@ -234,7 +370,14 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         required=True,
         allow_empty=False,
     )
-    _assert_pair_security_matches_oracle(pairs, observed, counterfactual, interventions)
+    _assert_pair_security_matches_oracle(
+        pairs,
+        observed,
+        counterfactual,
+        interventions,
+        observed_code,
+        counterfactual_code,
+    )
     hardcoded_secure = [
         pair.model_copy(update={"security_observed": "secure", "security_counterfactual": "secure"})
         for pair in pairs
@@ -250,10 +393,98 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     ]
     with pytest.raises(AssertionError):
         _assert_pair_security_matches_oracle(
-            hardcoded_secure, observed, counterfactual, interventions
+            hardcoded_secure,
+            observed,
+            counterfactual,
+            interventions,
+            observed_code,
+            counterfactual_code,
         )
     with pytest.raises(AssertionError):
-        _assert_pair_security_matches_oracle(swapped, observed, counterfactual, interventions)
+        _assert_pair_security_matches_oracle(
+            swapped,
+            observed,
+            counterfactual,
+            interventions,
+            observed_code,
+            counterfactual_code,
+        )
+    extra_digest = "f" * 64
+    extra_observed = observed[0].model_copy(
+        update={
+            "request_id": f"req_{extra_digest}",
+            "code_id": f"code_{extra_digest}",
+            "prompt_id": "extra-observed",
+        }
+    )
+    for mutation in (
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            [*observed, observed[0]],
+            counterfactual,
+            interventions,
+            observed_code,
+            counterfactual_code,
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            [*observed, extra_observed],
+            counterfactual,
+            interventions,
+            observed_code,
+            counterfactual_code,
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            observed[1:],
+            counterfactual,
+            interventions,
+            observed_code,
+            counterfactual_code,
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            observed,
+            counterfactual,
+            [*interventions, interventions[0]],
+            observed_code,
+            counterfactual_code,
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            observed,
+            counterfactual,
+            interventions,
+            [*observed_code, observed_code[0]],
+            counterfactual_code,
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            observed,
+            counterfactual,
+            interventions,
+            observed_code,
+            [*counterfactual_code, counterfactual_code[0]],
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            pairs,
+            observed,
+            [*counterfactual, counterfactual[0]],
+            interventions,
+            observed_code,
+            counterfactual_code,
+        ),
+        lambda: _assert_pair_security_matches_oracle(
+            [*pairs, pairs[0]],
+            observed,
+            counterfactual,
+            interventions,
+            observed_code,
+            counterfactual_code,
+        ),
+    ):
+        with pytest.raises(AssertionError):
+            mutation()
     for condition in ("observed", "counterfactual"):
         manifest = read_stage_manifest(run_dir / ".stages" / f"run-oracle-{condition}.json")
         assert manifest.policy_sha256 is not None
@@ -321,6 +552,9 @@ def test_final_architecture_has_no_flat_projection_or_removed_stage_authority() 
         "getattr(record, " + repr("sha" + "dow") + ")",
         "record.model_dump()[" + repr("sha" + "dow") + "]",
         "record.model_dump().get(" + repr("fea" + "tures") + ")",
+        "record.pop(" + repr("sha" + "dow") + ")",
+        "record.setdefault(" + repr("fea" + "tures") + ", False)",
+        "operator.getitem(record, " + repr("sha" + "dow") + ")",
     ),
 )
 def test_authority_ast_gate_rejects_common_indirect_reads(
@@ -345,6 +579,15 @@ def test_removed_cli_gate_detects_hidden_runtime_and_source_registration(
     hidden_app.command(removed_command, hidden=True)(hidden_callback)
     with pytest.raises(AssertionError):
         _assert_no_removed_registered_command(hidden_app)
+
+    root_app = typer.Typer()
+    child_app = typer.Typer()
+    grandchild_app = typer.Typer()
+    grandchild_app.command(removed_command, hidden=True)(hidden_callback)
+    child_app.add_typer(grandchild_app, name="grandchild")
+    root_app.add_typer(child_app, name="child")
+    with pytest.raises(AssertionError):
+        _assert_no_removed_registered_command(root_app)
 
     candidate = tmp_path / "candidate_cli.py"
     candidate.write_text(
@@ -376,6 +619,14 @@ def test_prompt_graph_outcome_boundary_and_breaking_migration_are_documented() -
         assert removed_surface in migration
     assert "run directory" in migration
     assert "secaware run-all" in migration
+    assert "extractor version change" in normalized_migration
+    assert 'if (-not (Test-Path -LiteralPath "$run/tsg/prompt_tsg.jsonl")) { throw' in migration
+    assert (
+        'if (-not (Test-Path -LiteralPath "$run/.stages/extract-prompt-tsg.json")) { throw'
+        in migration
+    )
+    assert "PROMPT_TSG_CATALOG_SHA256" in migration
+    assert "re.fullmatch" in migration
 
 
 def test_run_all_demo_fails_closed_before_legacy_oracle_publication(tmp_path: Path) -> None:

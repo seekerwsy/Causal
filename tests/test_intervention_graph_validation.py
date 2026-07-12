@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import operator
 
 import networkx as nx
 import pytest
@@ -20,18 +21,6 @@ from secaware.tsg.motifs import factor_query_vector, motif_query_vector
 PATH_SPEC = FACTOR_SPECS[FactorType.PATH_NORMALIZATION]
 
 
-class _ProjectionTrapMapping(dict[str, object]):
-    def __getitem__(self, key: str) -> object:
-        if key in {"fea" + "tures", "sha" + "dow"}:
-            raise AssertionError("flat projection was accessed after graph reconstruction")
-        return super().__getitem__(key)
-
-    def get(self, key: str, default: object = None) -> object:
-        if key in {"fea" + "tures", "sha" + "dow"}:
-            raise AssertionError("flat projection was accessed after graph reconstruction")
-        return super().get(key, default)
-
-
 class _PostCodecProjectionSentinel:
     __slots__ = ("_record",)
 
@@ -43,9 +32,9 @@ class _PostCodecProjectionSentinel:
             raise AssertionError("flat projection was accessed after graph reconstruction")
         return getattr(object.__getattribute__(self, "_record"), name)
 
-    def model_dump(self, *args: object, **kwargs: object) -> _ProjectionTrapMapping:
-        record = object.__getattribute__(self, "_record")
-        return _ProjectionTrapMapping(record.model_dump(*args, **kwargs))
+    def model_dump(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("record dump was accessed after graph reconstruction")
 
 
 def _path_prompt_without_guard(prompt_id: str = "p-path") -> PromptRecord:
@@ -220,6 +209,16 @@ def test_intervention_uses_only_reconstructed_graph_after_codec_boundary(
     )
     counterfactual = extract_prompt_tsg(counterfactual_prompt)
     sentinel = _PostCodecProjectionSentinel(counterfactual)
+    projection_key = "sha" + "dow"
+
+    for mutation in (
+        lambda: sentinel.model_dump(),
+        lambda: sentinel.model_dump().pop(projection_key),
+        lambda: sentinel.model_dump().setdefault(projection_key, False),
+        lambda: operator.getitem(sentinel.model_dump(), projection_key),
+    ):
+        with pytest.raises(AssertionError):
+            mutation()
 
     def trusted_boundary(candidate: object):
         assert candidate is sentinel
