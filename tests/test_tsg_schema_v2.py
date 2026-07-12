@@ -80,6 +80,15 @@ def test_prompt_tsg_v2_is_frozen_and_rejects_code_shape() -> None:
         PromptTSGRecord.model_validate({**_minimal_prompt_tsg(), "source_type": "code"})
 
 
+def test_prompt_tsg_json_round_trip_preserves_shadow_boolean_types() -> None:
+    record = PromptTSGRecord.model_validate(_minimal_prompt_tsg())
+
+    restored = PromptTSGRecord.model_validate_json(record.model_dump_json())
+
+    assert type(restored.shadow["factor.input_validation_required"]) is bool
+    assert restored.shadow["factor.input_validation_required"] is False
+
+
 def test_tsg_node_requires_semantic_key_commitment() -> None:
     payload = {
         "node_id": "n_" + "a" * 64,

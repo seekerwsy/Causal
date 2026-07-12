@@ -46,12 +46,16 @@ def test_prompt_tsg_stage_records_catalog_bound_exact_v2_artifact(tmp_path: Path
 def test_prompt_tsg_contract_digest_binds_extractor_schema_and_catalog_versions() -> None:
     baseline = build_prompt_tsg_stage_contract_sha256()
 
-    assert build_prompt_tsg_stage_contract_sha256(
-        extractor_version=PROMPT_TSG_EXTRACTOR_VERSION + ".next"
-    ) != baseline
-    assert build_prompt_tsg_stage_contract_sha256(
-        schema_version=TSG_SCHEMA_VERSION + ".next"
-    ) != baseline
+    assert (
+        build_prompt_tsg_stage_contract_sha256(
+            extractor_version=PROMPT_TSG_EXTRACTOR_VERSION + ".next"
+        )
+        != baseline
+    )
+    assert (
+        build_prompt_tsg_stage_contract_sha256(schema_version=TSG_SCHEMA_VERSION + ".next")
+        != baseline
+    )
     assert build_prompt_tsg_stage_contract_sha256(catalog_sha256="0" * 64) != baseline
 
 
@@ -212,9 +216,7 @@ def test_prompt_tsg_stage_contract_change_invalidates_skip_only_for_prompt_stage
     prompt_output = store.path("tsg", "prompt_tsg.jsonl")
     report_output = store.path("reports", "result.txt")
     report_output.write_text("ready\n", encoding="utf-8")
-    assert not store.should_skip_stage(
-        "report", [prompt_input], [report_output], force=False
-    )
+    assert not store.should_skip_stage("report", [prompt_input], [report_output], force=False)
     store.record_stage("report", [prompt_input], [report_output])
     report_fingerprint = store.stage_fingerprint("report", [prompt_input])
 
@@ -235,9 +237,7 @@ def test_prompt_tsg_stage_contract_change_invalidates_skip_only_for_prompt_stage
     )
     store.abort_stage("extract-prompt-tsg")
     assert store.stage_fingerprint("report", [prompt_input]) == report_fingerprint
-    assert store.should_skip_stage(
-        "report", [prompt_input], [report_output], force=False
-    )
+    assert store.should_skip_stage("report", [prompt_input], [report_output], force=False)
 
 
 def test_prompt_tsg_seal_rejection_retains_lease_until_rollback_finishes(

@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from pydantic import ConfigDict
+
 from secaware.config import AppConfig, OpenAICompatibleConfig, OracleConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
@@ -20,6 +22,8 @@ from secaware.schema.records import PromptRecord
 
 
 class PreflightReport(StrictModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     prompt_count: int
     discover_count: int
     confirm_count: int

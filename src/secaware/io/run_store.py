@@ -513,9 +513,7 @@ class RunStore:
             policy_sha256=policy_sha256,
             catalog_sha256=catalog_sha256,
             stage_contract_sha256=(
-                PROMPT_TSG_STAGE_CONTRACT_SHA256
-                if stage == "extract-prompt-tsg"
-                else None
+                PROMPT_TSG_STAGE_CONTRACT_SHA256 if stage == "extract-prompt-tsg" else None
             ),
             code_version=__version__,
         )

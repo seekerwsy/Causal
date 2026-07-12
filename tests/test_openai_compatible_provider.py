@@ -317,9 +317,7 @@ def test_openai_config_owns_frozen_template_version_and_generation_parameters() 
 
     assert config.system_template == "Return only source code."
     assert config.system_template_version == "secure-v2"
-    assert config.parameters == GenerationParameters(
-        values={"temperature": 0.1, "max_tokens": 256}
-    )
+    assert config.parameters == GenerationParameters(values={"temperature": 0.1, "max_tokens": 256})
     assert config.system_template not in repr(config)
     with pytest.raises(ValidationError):
         config.system_template = "mutated"  # type: ignore[misc]
@@ -659,9 +657,7 @@ def test_max_completion_tokens_is_sent_through_extra_body() -> None:
 
     call = client.completions.calls[0]
     assert call["extra_body"] == {"max_completion_tokens": 192}
-    assert "max_completion_tokens" not in {
-        key for key in call if key != "extra_body"
-    }
+    assert "max_completion_tokens" not in {key for key in call if key != "extra_body"}
 
 
 def test_translated_payload_matches_installed_official_sdk_signature() -> None:
@@ -727,9 +723,7 @@ def test_empty_system_template_is_not_sent() -> None:
 
     provider.generate(request)
 
-    assert client.completions.calls[0]["messages"] == [
-        {"role": "user", "content": _PROMPT}
-    ]
+    assert client.completions.calls[0]["messages"] == [{"role": "user", "content": _PROMPT}]
 
 
 def test_optional_usage_may_be_absent_from_a_valid_response() -> None:
@@ -1070,6 +1064,7 @@ def test_factory_control_flow_signals_clear_frames_and_import_precedes_credentia
         return client
 
     if boundary == "import":
+
         def interrupt_import(name: str) -> object:
             if name == "OpenAI":
                 raise signal
@@ -1127,9 +1122,7 @@ def test_factory_control_flow_signals_clear_frames_and_import_precedes_credentia
     for _, frame_locals in frames:
         retained = repr(frame_locals)
         assert all(id(value) not in forbidden_ids for value in frame_locals.values())
-        assert all(
-            type(value) is not OpenAICompatibleConfig for value in frame_locals.values()
-        )
+        assert all(type(value) is not OpenAICompatibleConfig for value in frame_locals.values())
         for secret in (
             _API_KEY,
             _BASE_URL,
@@ -1179,9 +1172,7 @@ def test_retryable_failures_use_deterministic_backoff_and_success_journal(
 
 def test_backoff_is_exponential_and_capped_without_jitter() -> None:
     sleeps: list[float] = []
-    client = FakeClient(
-        [StatusFailure(500), StatusFailure(500), StatusFailure(500), _response()]
-    )
+    client = FakeClient([StatusFailure(500), StatusFailure(500), StatusFailure(500), _response()])
     provider = OpenAICompatibleProvider(
         _config(max_attempts=4),
         client=client,
@@ -1329,15 +1320,9 @@ def test_retry_exhaustion_returns_safe_attempt_summaries_without_request_id() ->
         _response(code="   "),
         _response(finish_reason=None),
         _response(finish_reason="malformed-finish-reason-secret"),
-        _response(
-            usage=SimpleNamespace(prompt_tokens=-1, completion_tokens=1, total_tokens=0)
-        ),
-        _response(
-            usage=SimpleNamespace(prompt_tokens=True, completion_tokens=1, total_tokens=2)
-        ),
-        _response(
-            usage=SimpleNamespace(prompt_tokens=1.5, completion_tokens=1, total_tokens=2)
-        ),
+        _response(usage=SimpleNamespace(prompt_tokens=-1, completion_tokens=1, total_tokens=0)),
+        _response(usage=SimpleNamespace(prompt_tokens=True, completion_tokens=1, total_tokens=2)),
+        _response(usage=SimpleNamespace(prompt_tokens=1.5, completion_tokens=1, total_tokens=2)),
         _response(usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1)),
     ],
 )

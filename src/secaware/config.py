@@ -59,9 +59,7 @@ class InterventionConfig(StrictModel):
 
 
 class OpenAICompatibleConfig(SafeValidationMixin, StrictModel):
-    _safe_validation_message = (
-        "OpenAI-compatible provider configuration failed validation"
-    )
+    _safe_validation_message = "OpenAI-compatible provider configuration failed validation"
 
     model_config = ConfigDict(
         extra="forbid",

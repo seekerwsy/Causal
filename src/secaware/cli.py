@@ -1361,6 +1361,7 @@ def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool)
     inputs = [store.path("inputs", "prompts.jsonl")]
     output = store.path("tsg", "prompt_tsg.jsonl")
     outputs = [output]
+
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
         return [[extract_prompt_tsg(prompt) for prompt in _prompt_records(store)]]
 
@@ -1847,6 +1848,7 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     output = store.path("interventions", "interventions.jsonl")
     paired_output = store.path("interventions", "paired_prompts.jsonl")
     outputs = [output, paired_output]
+
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
         all_prompts, prompt_tsg_by_id = _validated_prompt_tsg_coordinates(
             store,

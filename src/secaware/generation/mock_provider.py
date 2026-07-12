@@ -3,9 +3,14 @@ class MockProvider:
         if language.lower() != "python":
             return "# Unsupported language for mock provider\n"
         text = prompt.lower()
-        if any(keyword in text for keyword in ("sqlite", "sql", "database", "query", "orders", "users")):
+        if any(
+            keyword in text for keyword in ("sqlite", "sql", "database", "query", "orders", "users")
+        ):
             return self._sql_code(text)
-        if any(keyword in text for keyword in ("command", "subprocess", "shell", "command-line", "tool")):
+        if any(
+            keyword in text
+            for keyword in ("command", "subprocess", "shell", "command-line", "tool")
+        ):
             return self._command_code(text)
         if any(keyword in text for keyword in ("pickle", "yaml", "deserialize", "serialized")):
             return self._deserialization_code(text)
@@ -63,7 +68,7 @@ class MockProvider:
             )
         return (
             "def search_users(cursor, name):\n"
-            "    sql = \"SELECT * FROM users WHERE name = '\" + name + \"'\"\n"
+            '    sql = "SELECT * FROM users WHERE name = \'" + name + "\'"\n'
             "    return cursor.execute(sql).fetchall()\n"
         )
 
@@ -78,14 +83,12 @@ class MockProvider:
                 "def run_tool(option):\n"
                 "    return subprocess.run(['fixed-tool', option], shell=False, check=True)\n"
             )
-        return (
-            "import os\n\n"
-            "def run_tool(option):\n"
-            "    return os.system('fixed-tool ' + option)\n"
-        )
+        return "import os\n\ndef run_tool(option):\n    return os.system('fixed-tool ' + option)\n"
 
     def _deserialization_code(self, text: str) -> str:
-        safe = any(keyword in text for keyword in ("safe_load", "json", "avoid pickle", "allowlist"))
+        safe = any(
+            keyword in text for keyword in ("safe_load", "json", "avoid pickle", "allowlist")
+        )
         if safe:
             return (
                 "import json\n\n"

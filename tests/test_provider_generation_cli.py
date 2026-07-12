@@ -61,10 +61,7 @@ def _clean_oracle_runner(
         output = (
             b"1.168.0\n"
             if analyzer == "semgrep"
-            else (
-                b"bandit 1.9.4\n"
-                b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
-            )
+            else (b"bandit 1.9.4\n  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n")
         )
         return AnalyzerProcessResult(0, output, "a" * 64)
     files = sorted(path.name for path in cwd.iterdir() if path.suffix == ".py")
@@ -77,10 +74,7 @@ def _clean_oracle_runner(
             "skipped_rules": [],
         }
     else:
-        metrics = {
-            filename: {"loc": 2, "nosec": 0, "skipped_tests": 0}
-            for filename in files
-        }
+        metrics = {filename: {"loc": 2, "nosec": 0, "skipped_tests": 0} for filename in files}
         metrics["_totals"] = {"loc": 2, "nosec": 0, "skipped_tests": 0}
         payload = {"errors": [], "metrics": metrics, "results": []}
     return AnalyzerProcessResult(0, json.dumps(payload).encode(), "a" * 64)

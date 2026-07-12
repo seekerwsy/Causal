@@ -66,13 +66,7 @@ def _opaque_file(value: object) -> str | None:
         return None
     if text.startswith("./") or text.startswith(".\\"):
         text = text[2:]
-    if (
-        not text
-        or "/" in text
-        or "\\" in text
-        or text in {".", ".."}
-        or not text.endswith(".py")
-    ):
+    if not text or "/" in text or "\\" in text or text in {".", ".."} or not text.endswith(".py"):
         return None
     return text
 
@@ -99,10 +93,7 @@ def _coverage(document: dict[str, Any]) -> tuple[str, ...] | None:
             return None
         if values.get("nosec") != 0 or type(values.get("nosec")) is not int:
             return None
-        if (
-            values.get("skipped_tests") != 0
-            or type(values.get("skipped_tests")) is not int
-        ):
+        if values.get("skipped_tests") != 0 or type(values.get("skipped_tests")) is not int:
             return None
         if path == "_totals":
             continue
@@ -248,8 +239,7 @@ def _parse_document(
         if returncode not in {0, 1}:
             raise _AdapterFailure(ErrorCode.ANALYZER_FAILED)
         if version != BANDIT_VERSION or (
-            type(policy_sha256) is not str
-            or _SHA256_PATTERN.fullmatch(policy_sha256) is None
+            type(policy_sha256) is not str or _SHA256_PATTERN.fullmatch(policy_sha256) is None
         ):
             raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
         if type(constraints) is not tuple or not constraints:

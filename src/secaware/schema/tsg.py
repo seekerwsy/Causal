@@ -111,7 +111,7 @@ _EDGE_TYPE_ATTRIBUTE_KEYS: Mapping[EdgeType, frozenset[str]] = MappingProxyType(
 _EVIDENCE_LOCATION_KEYS = frozenset({"evidence_start", "evidence_end", "evidence_sha256"})
 
 
-TSGScalar: TypeAlias = str | int | float | bool | None
+TSGScalar: TypeAlias = str | bool | int | float | None
 
 
 class _FrozenTSGMapping(Mapping[str, TSGScalar]):

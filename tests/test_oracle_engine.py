@@ -29,9 +29,7 @@ from secaware.schema.oracle import SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord, GeneratedCodeRecord
 
 
-_POLICY_LOCK = (
-    Path(__file__).parents[1] / "policies" / "oracle" / "python" / "policy.lock.json"
-)
+_POLICY_LOCK = Path(__file__).parents[1] / "policies" / "oracle" / "python" / "policy.lock.json"
 
 
 def _request(*, prompt_id: str, seed_id: int) -> GenerationRequestRecord:
@@ -162,9 +160,7 @@ class FakeRunner:
         max_stderr_bytes: int,
     ) -> AnalyzerProcessResult:
         argv = tuple(argv)
-        self.calls.append(
-            (argv, cwd, timeout_seconds, max_stdout_bytes, max_stderr_bytes)
-        )
+        self.calls.append((argv, cwd, timeout_seconds, max_stdout_bytes, max_stderr_bytes))
         self.batch_dirs.append(cwd)
         if self.inspect_batch is not None:
             self.inspect_batch(argv, cwd)
@@ -211,10 +207,7 @@ class FakeRunner:
         results = [_bandit_result(files[0])] if self.finding == analyzer else []
         if results:
             self._mutate_coordinates(analyzer, results[0])
-        metrics = {
-            filename: {"loc": 3, "nosec": 0, "skipped_tests": 0}
-            for filename in covered
-        }
+        metrics = {filename: {"loc": 3, "nosec": 0, "skipped_tests": 0} for filename in covered}
         metrics["_totals"] = {"loc": 3, "nosec": 0, "skipped_tests": 0}
         payload = {"errors": [], "metrics": metrics, "results": results}
         return AnalyzerProcessResult(
@@ -343,9 +336,7 @@ def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
     assert all(call[2:] == (7.5, 8192, 2048) for call in runner.calls)
     assert runner.calls[0][0][-1] == "."
     assert runner.calls[1][0][2] == "."
-    assert [record.request_id for record in records] == sorted(
-        code.request_id for code in codes
-    )
+    assert [record.request_id for record in records] == sorted(code.request_id for code in codes)
     assert all(record.security_label is SecurityLabel.SECURE for record in records)
     assert all(record.severity == "none" for record in records)
     assert all(record.findings == () for record in records)
@@ -354,8 +345,7 @@ def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
         for record in records
     )
     assert all(
-        {item.policy_sha256 for item in record.analyzers}
-        == {policy.combined_sha256}
+        {item.policy_sha256 for item in record.analyzers} == {policy.combined_sha256}
         for record in records
     )
     assert all(not path.exists() for path in runner.batch_dirs)
@@ -443,14 +433,16 @@ def test_any_analyzer_failure_returns_no_canonical_records(
     [
         [],
         [_code(), _code()],
-        [GeneratedCodeRecord(
-            code_id="legacy",
-            prompt_id="prompt",
-            condition="observed",
-            model_id="model",
-            seed_id=1,
-            code="x = 1\n",
-        )],
+        [
+            GeneratedCodeRecord(
+                code_id="legacy",
+                prompt_id="prompt",
+                condition="observed",
+                model_id="model",
+                seed_id=1,
+                code="x = 1\n",
+            )
+        ],
     ],
 )
 def test_batch_rejects_empty_duplicate_or_noncanonical_inputs(
@@ -1023,10 +1015,7 @@ def test_valid_unicode_crlf_and_tab_boundaries_are_accepted(
 
 def _has_exact_analyzers() -> bool:
     try:
-        return (
-            metadata.version("semgrep") == "1.168.0"
-            and metadata.version("bandit") == "1.9.4"
-        )
+        return metadata.version("semgrep") == "1.168.0" and metadata.version("bandit") == "1.9.4"
     except metadata.PackageNotFoundError:
         return False
 
@@ -1043,11 +1032,7 @@ def test_exact_analyzers_classify_one_real_batch(
     insecure = _code(
         prompt_id="insecure-prompt",
         seed_id=2,
-        code=(
-            "import os\r\n"
-            "command = input()\r\n"
-            '前缀 = "值"; os.system(command)\r\n'
-        ),
+        code=('import os\r\ncommand = input()\r\n前缀 = "值"; os.system(command)\r\n'),
     )
 
     records = run_oracle_batch([secure, insecure], policy)

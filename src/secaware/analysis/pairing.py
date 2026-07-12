@@ -32,7 +32,11 @@ def build_pairs(
             continue
         observed_value = SECURITY_TO_INT.get(observed.security_label)
         cf_value = SECURITY_TO_INT.get(cf.security_label)
-        delta = cf_value - observed_value if observed_value is not None and cf_value is not None else None
+        delta = (
+            cf_value - observed_value
+            if observed_value is not None and cf_value is not None
+            else None
+        )
         failure_reason = _failure_reason(intervention, observed, cf)
         eligible = (
             intervention.semantic_valid
@@ -53,8 +57,7 @@ def build_pairs(
         pairs.append(
             PairResult(
                 pair_id=(
-                    f"pair_{cf.prompt_id}_{intervention.hypothesis_id}_"
-                    f"{cf.model_id}_{cf.seed_id}"
+                    f"pair_{cf.prompt_id}_{intervention.hypothesis_id}_{cf.model_id}_{cf.seed_id}"
                 ),
                 prompt_id=cf.prompt_id,
                 hypothesis_id=intervention.hypothesis_id,
@@ -73,7 +76,9 @@ def build_pairs(
                 flip_type=flip_type,
                 eligible_per_protocol=eligible,
                 eligible_itt=True,
-                failure_reason=failure_reason.value if isinstance(failure_reason, FailureReason) else failure_reason,
+                failure_reason=failure_reason.value
+                if isinstance(failure_reason, FailureReason)
+                else failure_reason,
             )
         )
     return pairs

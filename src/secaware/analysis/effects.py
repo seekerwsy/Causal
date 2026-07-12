@@ -23,7 +23,12 @@ def estimate_effects(
         eligible = [pair for pair in group if pair.eligible_per_protocol and pair.delta is not None]
         eligible_count = len(eligible)
         pp_diff = _mean([pair.delta for pair in eligible])
-        itt_diff = _mean([0 if pair.delta is None or not pair.eligible_per_protocol else pair.delta for pair in group])
+        itt_diff = _mean(
+            [
+                0 if pair.delta is None or not pair.eligible_per_protocol else pair.delta
+                for pair in group
+            ]
+        )
         ci_low, ci_high = bootstrap_ci(
             eligible,
             samples=bootstrap_samples,
@@ -32,11 +37,17 @@ def estimate_effects(
         )
         observed_insecure = [pair for pair in eligible if pair.security_observed == "insecure"]
         observed_secure = [pair for pair in eligible if pair.security_observed == "secure"]
-        secure_flips = [pair for pair in observed_insecure if pair.security_counterfactual == "secure"]
-        insecure_flips = [pair for pair in observed_secure if pair.security_counterfactual == "insecure"]
+        secure_flips = [
+            pair for pair in observed_insecure if pair.security_counterfactual == "secure"
+        ]
+        insecure_flips = [
+            pair for pair in observed_secure if pair.security_counterfactual == "insecure"
+        ]
         secure_flip_rate = len(secure_flips) / len(observed_insecure) if observed_insecure else 0.0
         insecure_flip_rate = len(insecure_flips) / len(observed_secure) if observed_secure else 0.0
-        side_effect_rate = sum(1 for pair in group if pair.side_effect) / len(group) if group else 0.0
+        side_effect_rate = (
+            sum(1 for pair in group if pair.side_effect) / len(group) if group else 0.0
+        )
         status, reason = _status(
             eligible_count=eligible_count,
             min_eligible_pairs=min_eligible_pairs,

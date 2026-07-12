@@ -96,7 +96,9 @@ def _chat_request() -> GenerationRequestRecord:
 def test_generation_request_schema_is_explicit_v11_while_shared_records_remain_v1() -> None:
     request = _request()
     provenance = GenerationProvenance(producer="schema-test")
-    code = canonical_generated_code_from_request(request, "def value():\n    return 1\n", provenance)
+    code = canonical_generated_code_from_request(
+        request, "def value():\n    return 1\n", provenance
+    )
     attempt = GenerationAttemptRecord(
         schema_version=SCHEMA_VERSION,
         request_id=request.request_id,
@@ -201,9 +203,7 @@ def test_v10_chat_migration_binds_endpoint_and_executes_with_provider() -> None:
         payload,
         endpoint_identity=_BASE_URL,
     )
-    client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
-    )
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     provider = OpenAICompatibleProvider(
         OpenAICompatibleConfig(base_url=_BASE_URL, max_attempts=1),
         client=client,

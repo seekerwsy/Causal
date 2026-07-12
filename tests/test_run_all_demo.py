@@ -13,7 +13,12 @@ from secaware.io.jsonl import read_jsonl
 from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
+from secaware.schema.interventions import InterventionRecord
 from secaware.schema.oracle import OracleRecord
+from secaware.schema.results import PairResult
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _RunAllOracleRunner:
@@ -34,8 +39,7 @@ class _RunAllOracleRunner:
                 b"1.168.0\n"
                 if analyzer == "semgrep"
                 else (
-                    b"bandit 1.9.4\n"
-                    b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
+                    b"bandit 1.9.4\n  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
                 )
             )
             return AnalyzerProcessResult(0, stdout, "a" * 64)
@@ -49,10 +53,7 @@ class _RunAllOracleRunner:
                 "skipped_rules": [],
             }
         else:
-            metrics = {
-                filename: {"loc": 2, "nosec": 0, "skipped_tests": 0}
-                for filename in files
-            }
+            metrics = {filename: {"loc": 2, "nosec": 0, "skipped_tests": 0} for filename in files}
             metrics["_totals"] = {"loc": 2, "nosec": 0, "skipped_tests": 0}
             payload = {"errors": [], "metrics": metrics, "results": []}
         return AnalyzerProcessResult(0, json.dumps(payload).encode(), "a" * 64)
@@ -87,6 +88,46 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         allow_empty=False,
     )
     assert observed and counterfactual
+    interventions = read_jsonl(
+        run_dir / "interventions" / "interventions.jsonl",
+        InterventionRecord,
+        required=True,
+        allow_empty=False,
+    )
+    pairs = read_jsonl(
+        run_dir / "analysis" / "pair_results.jsonl",
+        PairResult,
+        required=True,
+        allow_empty=False,
+    )
+    observed_by_coordinate = {
+        (record.prompt_id, record.model_id, record.seed_id): record.security_label.value
+        for record in observed
+    }
+    intervention_by_id = {record.intervention_id: record for record in interventions}
+    expected_security_rows = sorted(
+        (
+            record.prompt_id,
+            intervention_by_id[record.intervention_id].hypothesis_id,
+            record.model_id,
+            record.seed_id,
+            observed_by_coordinate[(record.prompt_id, record.model_id, record.seed_id)],
+            record.security_label.value,
+        )
+        for record in counterfactual
+    )
+    actual_security_rows = sorted(
+        (
+            pair.prompt_id,
+            pair.hypothesis_id,
+            pair.model_id,
+            pair.seed_id,
+            pair.security_observed,
+            pair.security_counterfactual,
+        )
+        for pair in pairs
+    )
+    assert actual_security_rows == expected_security_rows
     for condition in ("observed", "counterfactual"):
         manifest = read_stage_manifest(run_dir / ".stages" / f"run-oracle-{condition}.json")
         assert manifest.policy_sha256 is not None
@@ -101,6 +142,55 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         not path.stem.startswith(removed_stage_prefix)
         for path in run_dir.joinpath(".stages").glob("*.json")
     )
+
+
+def test_final_architecture_has_no_flat_projection_or_removed_stage_authority() -> None:
+    forbidden_authority_reads = ("." + "features", "." + "shadow")
+    for package in ("discovery", "intervention"):
+        for path in sorted((REPO_ROOT / "src" / "secaware" / package).glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            assert all(fragment not in source for fragment in forbidden_authority_reads)
+
+    removed_fragments = (
+        "code" + "_tsg",
+        "extract_" + "code_" + "tsg",
+        "code_" + "extractor",
+        "python_" + "ast_v0",
+    )
+    for root in (REPO_ROOT / "src", REPO_ROOT / "configs"):
+        for path in sorted(
+            item for item in root.rglob("*") if item.is_file() and item.suffix in {".py", ".yaml"}
+        ):
+            source = path.read_text(encoding="utf-8")
+            assert all(fragment not in source for fragment in removed_fragments)
+
+    help_result = CliRunner().invoke(app, ["--help"])
+    assert help_result.exit_code == 0
+    assert "extract-" + "code-" + "tsg" not in help_result.output
+
+
+def test_prompt_graph_outcome_boundary_and_breaking_migration_are_documented() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    migration_path = REPO_ROOT / "docs" / "migrations" / "prompt-tsg-v2.md"
+
+    assert "pre-treatment graph factors" in readme
+    assert "only security outcome" in readme
+    assert "Code TSG" in readme and "compatibility path" in readme
+    assert "shadow" in readme and "never authoritative" in readme
+    assert "fail closed" in readme
+
+    migration = migration_path.read_text(encoding="utf-8")
+    normalized_migration = " ".join(migration.split())
+    assert "breaking migration" in migration.lower()
+    assert "regenerate Prompt TSG v2 and every downstream stage" in normalized_migration
+    assert "v1 artifacts are rejected" in migration
+    assert "not converted" in migration
+    for required_term in ("catalog", "schema", "extractor", "fingerprint"):
+        assert required_term in migration
+    for removed_surface in ("artifacts", "manifests", "CLI", "configuration"):
+        assert removed_surface in migration
+    assert "run directory" in migration
+    assert "secaware run-all" in migration
 
 
 def test_run_all_demo_fails_closed_before_legacy_oracle_publication(tmp_path: Path) -> None:

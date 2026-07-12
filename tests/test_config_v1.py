@@ -231,9 +231,7 @@ def test_app_config_rejects_unknown_nested_keys() -> None:
             }
         )
 
-    assert ("run", "unexpected") in {
-        tuple(error["loc"]) for error in exc_info.value.errors()
-    }
+    assert ("run", "unexpected") in {tuple(error["loc"]) for error in exc_info.value.errors()}
 
 
 def test_app_config_rejects_removed_tsg_field() -> None:
@@ -249,9 +247,7 @@ def test_app_config_rejects_removed_tsg_field() -> None:
             }
         )
 
-    assert ("tsg", removed_field) in {
-        tuple(error["loc"]) for error in exc_info.value.errors()
-    }
+    assert ("tsg", removed_field) in {tuple(error["loc"]) for error in exc_info.value.errors()}
 
 
 @pytest.mark.parametrize("config_name", ["demo.yaml", "paper_v0.yaml"])

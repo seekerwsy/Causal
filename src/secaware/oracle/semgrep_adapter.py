@@ -71,13 +71,7 @@ def _opaque_file(value: object) -> str | None:
         return None
     if text.startswith("./") or text.startswith(".\\"):
         text = text[2:]
-    if (
-        not text
-        or "/" in text
-        or "\\" in text
-        or text in {".", ".."}
-        or not text.endswith(".py")
-    ):
+    if not text or "/" in text or "\\" in text or text in {".", ".."} or not text.endswith(".py"):
         return None
     return text
 
@@ -235,8 +229,7 @@ def _parse_document(
         if returncode != 0:
             raise _AdapterFailure(ErrorCode.ANALYZER_FAILED)
         if version != SEMGREP_VERSION or (
-            type(policy_sha256) is not str
-            or _SHA256_PATTERN.fullmatch(policy_sha256) is None
+            type(policy_sha256) is not str or _SHA256_PATTERN.fullmatch(policy_sha256) is None
         ):
             raise _AdapterFailure(ErrorCode.POLICY_MISMATCH)
         if (

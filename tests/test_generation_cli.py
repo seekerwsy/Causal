@@ -47,10 +47,7 @@ def _clean_oracle_runner(
         output = (
             b"1.168.0\n"
             if analyzer == "semgrep"
-            else (
-                b"bandit 1.9.4\n"
-                b"  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n"
-            )
+            else (b"bandit 1.9.4\n  python version = 3.12.13 (main) [MSC v.1944 64 bit (AMD64)]\n")
         )
         return AnalyzerProcessResult(0, output, "a" * 64)
     files = sorted(path.name for path in cwd.iterdir() if path.suffix == ".py")
@@ -63,10 +60,7 @@ def _clean_oracle_runner(
             "skipped_rules": [],
         }
     else:
-        metrics = {
-            filename: {"loc": 2, "nosec": 0, "skipped_tests": 0}
-            for filename in files
-        }
+        metrics = {filename: {"loc": 2, "nosec": 0, "skipped_tests": 0} for filename in files}
         metrics["_totals"] = {"loc": 2, "nosec": 0, "skipped_tests": 0}
         payload = {"errors": [], "metrics": metrics, "results": []}
     return AnalyzerProcessResult(0, json.dumps(payload).encode(), "a" * 64)
@@ -215,9 +209,7 @@ def test_generation_artifact_reads_apply_central_character_budgets(
     read_limits: list[tuple[object, object]] = []
 
     def capture_limits(*args: object, **kwargs: object) -> object:
-        read_limits.append(
-            (kwargs.get("max_line_chars"), kwargs.get("max_total_chars"))
-        )
+        read_limits.append((kwargs.get("max_line_chars"), kwargs.get("max_total_chars")))
         return real_read(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(cli_module, "read_jsonl", capture_limits)
@@ -275,9 +267,7 @@ def test_plan_counterfactual_uses_fixed_inputs_and_preserves_coordinates(
     assert all(record.condition == "counterfactual" for record in records)
     assert all(record.intervention_id == intervention.intervention_id for record in records)
     assert all(record.hypothesis_id == intervention.hypothesis_id for record in records)
-    manifest = read_stage_manifest(
-        store.path(".stages", "plan-generation-counterfactual.json")
-    )
+    manifest = read_stage_manifest(store.path(".stages", "plan-generation-counterfactual.json"))
     assert set(manifest.inputs) == {
         "inputs/prompts.jsonl",
         "interventions/interventions.jsonl",
@@ -565,16 +555,14 @@ def test_import_shuffled_results_writes_ledger_order_canonical_output(
         required=True,
         allow_empty=False,
     )
-    assert [record.request_id for record in records] == [
-        request.request_id for request in requests
-    ]
+    assert [record.request_id for record in records] == [request.request_id for request in requests]
     manifest = read_stage_manifest(store.path(".stages", "import-generation-observed.json"))
     assert "generation/observed_requests.jsonl" in manifest.inputs
     external_keys = [path for path in manifest.inputs if path.startswith("@external/")]
     assert len(external_keys) == 1
-    rendered_manifest = store.path(
-        ".stages", "import-generation-observed.json"
-    ).read_text(encoding="utf-8")
+    rendered_manifest = store.path(".stages", "import-generation-observed.json").read_text(
+        encoding="utf-8"
+    )
     assert str(results_path) not in rendered_manifest
     assert results_path.name not in rendered_manifest
     assert manifest.outputs == ["generation/observed_code.jsonl"]
@@ -612,9 +600,7 @@ def test_import_counterfactual_results_preserves_request_coordinates(
         required=True,
         allow_empty=False,
     )
-    assert [record.request_id for record in records] == [
-        request.request_id for request in requests
-    ]
+    assert [record.request_id for record in records] == [request.request_id for request in requests]
     assert all(record.condition == "counterfactual" for record in records)
     assert all(record.intervention_id == intervention.intervention_id for record in records)
     assert all(record.hypothesis_id == intervention.hypothesis_id for record in records)

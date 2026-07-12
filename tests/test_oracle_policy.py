@@ -380,9 +380,7 @@ def test_loaded_policy_revalidation_rejects_model_copy_and_construct_forgery(
     valid = load_policy_bundle(_write_locked_policy(tmp_path))
     if forgery == "bytes_copy":
         hidden = ("forged-policy-bytes",)
-        forged: object = valid.model_copy(
-            update={"semgrep_rules_bytes": hidden[0].encode("utf-8")}
-        )
+        forged: object = valid.model_copy(update={"semgrep_rules_bytes": hidden[0].encode("utf-8")})
     elif forgery == "constraint_copy":
         hidden = ("forged-bandit-constraint",)
         forged_constraint = valid.bandit_constraints[0].model_copy(
@@ -656,7 +654,7 @@ def test_loader_rejects_tampered_lock_versions_and_hashes(
         b'{"private":"unterminated}',
         b'{"private":NaN}',
         b'{"private":Infinity}',
-        b'{} private-trailing-json',
+        b"{} private-trailing-json",
         b'{"private":"\xff"}',
         b"\xef\xbb\xbf{}",
     ],
@@ -681,10 +679,7 @@ def test_loader_rejects_empty_invalid_utf8_or_noncanonical_json(
 def test_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     payload = _lock_payload()
     serialized = json.dumps(payload)
-    duplicate = (
-        serialized[:-1]
-        + ', "semgrep_rules": "semgrep.yml"}'
-    )
+    duplicate = serialized[:-1] + ', "semgrep_rules": "semgrep.yml"}'
     lock_path = _write_locked_policy(tmp_path)
     lock_path.write_text(duplicate, encoding="utf-8")
 
@@ -1078,15 +1073,12 @@ def test_checked_in_policy_bundle_authenticates_exact_files_and_versions() -> No
     assert loaded.language == "python"
     assert loaded.semgrep_version == SEMGREP_VERSION
     assert loaded.bandit_version == BANDIT_VERSION
-    assert loaded.semgrep_rules_path == (
-        _CHECKED_IN_POLICY_DIRECTORY / "semgrep.yml"
-    ).resolve()
-    assert loaded.bandit_config_path == (
-        _CHECKED_IN_POLICY_DIRECTORY / "bandit.yml"
-    ).resolve()
-    assert loaded.bandit_metadata_path == (
-        _CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json"
-    ).resolve()
+    assert loaded.semgrep_rules_path == (_CHECKED_IN_POLICY_DIRECTORY / "semgrep.yml").resolve()
+    assert loaded.bandit_config_path == (_CHECKED_IN_POLICY_DIRECTORY / "bandit.yml").resolve()
+    assert (
+        loaded.bandit_metadata_path
+        == (_CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json").resolve()
+    )
     assert loaded.semgrep_sha256 == _sha256(loaded.semgrep_rules_bytes)
     assert loaded.bandit_sha256 == _sha256(loaded.bandit_config_bytes)
     assert loaded.bandit_metadata_sha256 == _sha256(loaded.bandit_metadata_bytes)
@@ -1137,9 +1129,7 @@ def test_checked_in_bandit_config_enables_bandit_native_tests_without_skips() ->
     config_path = _CHECKED_IN_POLICY_DIRECTORY / "bandit.yml"
     document = yaml.safe_load(config_path.read_bytes())
 
-    metadata = json.loads(
-        (_CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json").read_bytes()
-    )
+    metadata = json.loads((_CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json").read_bytes())
 
     assert set(document) == {"tests"}
     assert type(document["tests"]) is list
@@ -1272,9 +1262,7 @@ def test_exact_semgrep_disable_nosem_still_reports_and_normalizes_finding(
         encoding="utf-8",
         newline="\n",
     )
-    loaded = load_policy_bundle(
-        _CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json"
-    )
+    loaded = load_policy_bundle(_CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json")
     completed = subprocess.run(
         semgrep_argv(
             Path(executable),
@@ -1295,9 +1283,7 @@ def test_exact_semgrep_disable_nosem_still_reports_and_normalizes_finding(
         policy_sha256=loaded.semgrep_sha256,
     )
 
-    assert [finding.rule_id for finding in report.findings] == [
-        "secaware.python.command-injection"
-    ]
+    assert [finding.rule_id for finding in report.findings] == ["secaware.python.command-injection"]
 
 
 def test_exact_semgrep_preserves_canonical_rule_id_across_config_paths(
@@ -1309,9 +1295,7 @@ def test_exact_semgrep_preserves_canonical_rule_id_across_config_paths(
     executable = shutil.which(configured_executable)
     if executable is None:
         pytest.fail("configured Semgrep executable is unavailable")
-    loaded = load_policy_bundle(
-        _CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json"
-    )
+    loaded = load_policy_bundle(_CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json")
     source = tmp_path / "code_a.py"
     source.write_text(
         "import os\ncommand = input()\nos.system(command)\n",
@@ -1355,9 +1339,7 @@ def test_exact_bandit_ignore_nosec_still_reports_without_retaining_literal(
         encoding="utf-8",
         newline="\n",
     )
-    loaded = load_policy_bundle(
-        _CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json"
-    )
+    loaded = load_policy_bundle(_CHECKED_IN_POLICY_DIRECTORY / "policy.lock.json")
     completed = subprocess.run(
         bandit_argv(
             Path(executable),

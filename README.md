@@ -3,6 +3,27 @@
 SecAware is a reproducible Python CLI prototype for TSG-driven prompt-side
 security mechanism discovery and confirmation.
 
+## Architecture and causal boundary
+
+Prompt TSG v2 supplies pre-treatment graph factors: its canonical graph is the authority for
+prompt-side factor and motif queries used in discovery and intervention validation. The `shadow`
+mapping is a read-only audit projection derived from that graph. It is never authoritative and is
+not an input to discovery, intervention, confirmation, or security labeling.
+
+The only security outcome `Y` comes from the independent Semgrep 1.168.0 plus Bandit 1.9.4
+Oracle. Prompt TSG does not classify generated code, and its graph factors cannot create, replace,
+filter, or override an Oracle label. Code TSG is no longer a mandatory stage and has been removed
+from the production pipeline, CLI, artifacts, manifests, and configuration. There is no Code TSG
+compatibility path.
+
+The Oracle is fail closed. An unavailable, mismatched, incomplete, malformed, or otherwise invalid
+static analyzer run publishes no security result; SecAware has no handwritten or reduced-security
+fallback. Prompt TSG validation also fails closed: an invalid graph, digest, schema, catalog, or
+shadow prevents downstream publication rather than falling back to v1 data or flat projections.
+
+See [Prompt TSG v2 migration](docs/migrations/prompt-tsg-v2.md) before opening or rerunning an
+existing run directory.
+
 Install the core development environment and run the unit suite with:
 
 ```bash

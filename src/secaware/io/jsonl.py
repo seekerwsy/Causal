@@ -86,16 +86,12 @@ def read_jsonl(
             message="JSONL record limit is invalid",
             path=path,
         )
-    if max_line_chars is not None and (
-        type(max_line_chars) is not int or max_line_chars <= 0
-    ):
+    if max_line_chars is not None and (type(max_line_chars) is not int or max_line_chars <= 0):
         raise _limit_error(
             stage=stage,
             message="JSONL line character limit is invalid",
         )
-    if max_total_chars is not None and (
-        type(max_total_chars) is not int or max_total_chars < 0
-    ):
+    if max_total_chars is not None and (type(max_total_chars) is not int or max_total_chars < 0):
         raise _limit_error(
             stage=stage,
             message="JSONL total character limit is invalid",

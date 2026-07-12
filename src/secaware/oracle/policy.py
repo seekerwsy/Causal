@@ -42,10 +42,7 @@ def _canonical_policy_path(value: str, message: str) -> str:
         or "//" in value
         or path.is_absolute()
         or any(part in {"", ".", ".."} for part in parts)
-        or any(
-            ord(character) < 0x20 or ord(character) == 0x7F
-            for character in value
-        )
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
         or path.as_posix() != value
     ):
         raise ValueError(message)
@@ -265,18 +262,13 @@ class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
             or not self.bandit_metadata_path.is_absolute()
         ):
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
-        if len(
-            {self.semgrep_rules_path, self.bandit_config_path, self.bandit_metadata_path}
-        ) != 3:
+        if len({self.semgrep_rules_path, self.bandit_config_path, self.bandit_metadata_path}) != 3:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         if hashlib.sha256(self.semgrep_rules_bytes).hexdigest() != self.semgrep_sha256:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         if hashlib.sha256(self.bandit_config_bytes).hexdigest() != self.bandit_sha256:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
-        if (
-            hashlib.sha256(self.bandit_metadata_bytes).hexdigest()
-            != self.bandit_metadata_sha256
-        ):
+        if hashlib.sha256(self.bandit_metadata_bytes).hexdigest() != self.bandit_metadata_sha256:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         if canonical_sha256(self.lock_payload) != self.combined_sha256:
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)

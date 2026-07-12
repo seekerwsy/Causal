@@ -261,7 +261,9 @@ def test_semgrep_rejects_analyzer_errors_without_leaking_them() -> None:
         b'{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"],"scanned":["code_a.py"]},"skipped_rules":[]}',
         b'{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[],"time":NaN}',
         b'{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[],"time":Infinity}',
-        '{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[]}'.encode("utf-16"),
+        '{"version":"1.168.0","results":[],"errors":[],"paths":{"scanned":["code_a.py"]},"skipped_rules":[]}'.encode(
+            "utf-16"
+        ),
     ],
 )
 def test_semgrep_requires_strict_utf8_json_without_duplicates_or_nonfinite_numbers(

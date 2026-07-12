@@ -98,18 +98,13 @@ def _secaware_traceback_frames(
     while current is not None:
         filename = current.tb_frame.f_code.co_filename.replace("\\", "/")
         if "/src/secaware/" in filename:
-            retained.append(
-                (current.tb_frame.f_code.co_name, dict(current.tb_frame.f_locals))
-            )
+            retained.append((current.tb_frame.f_code.co_name, dict(current.tb_frame.f_locals)))
         current = current.tb_next
     return retained
 
 
 def _secaware_traceback_locals(error: BaseException) -> str:
-    return "\n".join(
-        repr(frame_locals)
-        for _, frame_locals in _secaware_traceback_frames(error)
-    )
+    return "\n".join(repr(frame_locals) for _, frame_locals in _secaware_traceback_frames(error))
 
 
 def _assert_safe_validation_error(error: ValidationError, *hidden: str) -> None:
@@ -140,9 +135,7 @@ def test_oracle_record_requires_analyzer_provenance_and_request_binding() -> Non
 
 
 def test_secure_oracle_record_has_no_findings_and_no_aggregate_severity() -> None:
-    record = OracleRecord.model_validate(
-        _canonical_oracle_payload(security_label="secure")
-    )
+    record = OracleRecord.model_validate(_canonical_oracle_payload(security_label="secure"))
 
     assert record.security_label is SecurityLabel.SECURE
     assert record.severity == "none"
@@ -372,16 +365,12 @@ def test_oracle_revalidation_rejects_model_copy_and_construct_forgery(
         forged = valid.model_copy(update={"findings": (finding,)})
     elif forgery == "nested_provenance_copy":
         provenance = valid.analyzers[0].model_copy(update={"version": " "})
-        forged = valid.model_copy(
-            update={"analyzers": (provenance, valid.analyzers[1])}
-        )
+        forged = valid.model_copy(update={"analyzers": (provenance, valid.analyzers[1])})
     else:
         provenance_payload = valid.analyzers[0].model_dump(mode="python")
         provenance_payload.pop("policy_sha256")
         provenance = AnalyzerProvenanceRecord.model_construct(**provenance_payload)
-        forged = valid.model_copy(
-            update={"analyzers": (provenance, valid.analyzers[1])}
-        )
+        forged = valid.model_copy(update={"analyzers": (provenance, valid.analyzers[1])})
 
     with pytest.raises(ValidationError):
         OracleRecord.model_validate(forged)
@@ -395,15 +384,14 @@ def test_oracle_validation_four_public_surfaces_hide_input_and_frame_locals(
     surface: str,
 ) -> None:
     secret = f"oracle-{surface}-private-input"
+    private_key = "private_" + "credential"
     payload = _canonical_oracle_payload()
-    payload["private_credential"] = secret
+    payload[private_key] = secret
     operations: dict[str, Callable[[], object]] = {
         "constructor": lambda: OracleRecord(**payload),
         "python": lambda: OracleRecord.model_validate(payload),
         "json": lambda: OracleRecord.model_validate_json(json.dumps(payload)),
-        "strings": lambda: OracleRecord.model_validate_strings(
-            {"private_credential": secret}
-        ),
+        "strings": lambda: OracleRecord.model_validate_strings({private_key: secret}),
     }
 
     with pytest.raises(ValidationError) as exc_info:
@@ -685,34 +673,52 @@ def _frozen_assignment_case(
             message="finding-message-frame-sentinel",
         )
         record: object = AnalyzerFindingRecord.model_validate(payload)
-        return record, "message", replacement, (
-            "finding-rule-frame-sentinel",
-            "CWE-finding-frame-sentinel",
-            "finding-message-frame-sentinel",
+        return (
+            record,
+            "message",
             replacement,
+            (
+                "finding-rule-frame-sentinel",
+                "CWE-finding-frame-sentinel",
+                "finding-message-frame-sentinel",
+                replacement,
+            ),
         )
     if case == "provenance":
         payload = _provenance_payload("semgrep")
         payload["version"] = "provenance-version-frame-sentinel"
         record = AnalyzerProvenanceRecord.model_validate(payload)
-        return record, "version", replacement, (
-            "provenance-version-frame-sentinel",
+        return (
+            record,
+            "version",
             replacement,
+            (
+                "provenance-version-frame-sentinel",
+                replacement,
+            ),
         )
     if case == "oracle":
         payload = _canonical_oracle_payload(security_label="secure")
         payload["prompt_id"] = "oracle-prompt-frame-sentinel"
         record = OracleRecord.model_validate(payload)
-        return record, "prompt_id", replacement, (
-            "oracle-prompt-frame-sentinel",
+        return (
+            record,
+            "prompt_id",
             replacement,
+            (
+                "oracle-prompt-frame-sentinel",
+                replacement,
+            ),
         )
-    record = OracleConfig(
-        semgrep_executable="config-executable-frame-sentinel"
-    )
-    return record, "semgrep_executable", replacement, (
-        "config-executable-frame-sentinel",
+    record = OracleConfig(semgrep_executable="config-executable-frame-sentinel")
+    return (
+        record,
+        "semgrep_executable",
         replacement,
+        (
+            "config-executable-frame-sentinel",
+            replacement,
+        ),
     )
 
 

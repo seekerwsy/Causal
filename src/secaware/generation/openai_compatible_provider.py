@@ -21,12 +21,8 @@ _PRODUCER = "openai_compatible"
 _PRODUCER_VERSION = "chat_completions-v1"
 _MISSING = object()
 _NO_DEFAULT = object()
-_MAX_TOKEN_PARAMETER_KEYS = frozenset(
-    {"max_tokens", "max_completion_tokens", "max_output_tokens"}
-)
-_EXTRA_BODY_PARAMETER_KEYS = frozenset(
-    {"max_completion_tokens", "reasoning_effort", "verbosity"}
-)
+_MAX_TOKEN_PARAMETER_KEYS = frozenset({"max_tokens", "max_completion_tokens", "max_output_tokens"})
+_EXTRA_BODY_PARAMETER_KEYS = frozenset({"max_completion_tokens", "reasoning_effort", "verbosity"})
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -44,8 +40,7 @@ class OpenAICompatibleGenerationResult:
             if type(self.attempts) is not tuple or not self.attempts:
                 raise ValueError
             attempts = tuple(
-                GenerationAttemptRecord.model_validate(attempt)
-                for attempt in self.attempts
+                GenerationAttemptRecord.model_validate(attempt) for attempt in self.attempts
             )
         except Exception:
             metadata_failed = True
@@ -302,13 +297,7 @@ class OpenAICompatibleProvider:
                 raise ValueError
             if trusted.parameters.values.get("n", 1) != 1:
                 raise ValueError
-            if (
-                sum(
-                    key in trusted.parameters.values
-                    for key in _MAX_TOKEN_PARAMETER_KEYS
-                )
-                > 1
-            ):
+            if sum(key in trusted.parameters.values for key in _MAX_TOKEN_PARAMETER_KEYS) > 1:
                 raise ValueError
         except Exception:
             trusted = None

@@ -41,9 +41,7 @@ class AnalyzerFindingRecord(SafeValidationMixin, VersionedModel):
     rule_id: str = Field(min_length=1, max_length=256, repr=False)
     cwe: str = Field(min_length=1, max_length=32, repr=False)
     severity: Literal["low", "medium", "high"] = Field(repr=False)
-    confidence: Literal["low", "medium", "high", "not_provided"] = Field(
-        repr=False
-    )
+    confidence: Literal["low", "medium", "high", "not_provided"] = Field(repr=False)
     line: StrictInt = Field(ge=1, repr=False)
     column: StrictInt = Field(ge=1, repr=False)
     end_line: StrictInt = Field(ge=1, repr=False)

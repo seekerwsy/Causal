@@ -123,9 +123,7 @@ def _intervention_snapshot(value: object) -> _InterventionSnapshot:
     )
 
 
-def _validated_grid(
-    models: Iterable[str], seeds: Iterable[int]
-) -> tuple[list[str], list[int]]:
+def _validated_grid(models: Iterable[str], seeds: Iterable[int]) -> tuple[list[str], list[int]]:
     model_values = _bounded_snapshots(
         models,
         code=ErrorCode.CONFIG,
@@ -181,8 +179,7 @@ def _validated_interventions(
             "counterfactual intervention collection must not be empty",
         )
     coordinates = [
-        (item.prompt_id, item.hypothesis_id, item.intervention_id)
-        for item in intervention_values
+        (item.prompt_id, item.hypothesis_id, item.intervention_id) for item in intervention_values
     ]
     if len(set(coordinates)) != len(coordinates):
         raise _planner_error(

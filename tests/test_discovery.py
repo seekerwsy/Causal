@@ -290,12 +290,12 @@ def test_discovery_rejects_structurally_valid_counterfactual_oracle() -> None:
 
 def test_discovery_source_has_no_legacy_feature_or_code_graph_dependencies() -> None:
     forbidden = (
-        "features.get",
-        ".features",
-        ".shadow",
+        "features" + ".get",
+        "." + "features",
+        "." + "shadow",
         "code_" + "tsg",
-        "prompt_factor",
-        "prompt_motif",
+        "prompt_" + "factor",
+        "prompt_" + "motif",
     )
     source_dir = inspect.getfile(discover_hypotheses)
     discovery_dir = __import__("pathlib").Path(source_dir).parent

@@ -125,16 +125,10 @@ def migrate_generation_request_v1_0_to_v1_1(
                 raise ValueError
 
             legacy_identity = {
-                key: (
-                    parameters.model_dump(mode="json")
-                    if key == "parameters"
-                    else snapshot[key]
-                )
+                key: (parameters.model_dump(mode="json") if key == "parameters" else snapshot[key])
                 for key in _GENERATION_REQUEST_V1_IDENTITY_FIELDS
             }
-            if snapshot["request_id"] != _build_generation_request_v1_id(
-                legacy_identity
-            ):
+            if snapshot["request_id"] != _build_generation_request_v1_id(legacy_identity):
                 raise ValueError
 
             endpoint_type = snapshot["endpoint_type"]

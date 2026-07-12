@@ -1173,9 +1173,7 @@ def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
     unknown_prompt_id = "private-unknown-prompt-coordinate"
     unknown_prompt_text = "PRIVATE_RAW_PROMPT_COORDINATE_SENTINEL"
     if mutation == "missing":
-        mutated = [
-            graph for graph in prompt_graphs if graph.prompt_id != confirm_prompt.prompt_id
-        ]
+        mutated = [graph for graph in prompt_graphs if graph.prompt_id != confirm_prompt.prompt_id]
     elif mutation == "duplicate":
         mutated = [*prompt_graphs, confirm_graph]
     else:
@@ -1198,11 +1196,7 @@ def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
     write_stage_manifest(
         producer_manifest_path,
         producer_manifest.model_copy(
-            update={
-                "output_sha256": {
-                    "tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)
-                }
-            }
+            update={"output_sha256": {"tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)}}
         ),
     )
 
@@ -1241,11 +1235,7 @@ def test_discovery_uses_full_prompt_graph_coordinate_boundary(tmp_path: Path) ->
     write_stage_manifest(
         producer_manifest_path,
         producer_manifest.model_copy(
-            update={
-                "output_sha256": {
-                    "tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)
-                }
-            }
+            update={"output_sha256": {"tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)}}
         ),
     )
 
@@ -1471,13 +1461,9 @@ def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
     assert entered == expected_order
     assert checked is True
     assert bindings["extract-prompt-tsg"] == PROMPT_TSG_CATALOG_SHA256
-    assert stage_inputs == {
-        "extract-prompt-tsg": [store.path("inputs", "prompts.jsonl")]
-    }
+    assert stage_inputs == {"extract-prompt-tsg": [store.path("inputs", "prompts.jsonl")]}
     assert all(
-        binding is None
-        for stage, binding in bindings.items()
-        if stage != "extract-prompt-tsg"
+        binding is None for stage, binding in bindings.items() if stage != "extract-prompt-tsg"
     )
     assert active == []
 

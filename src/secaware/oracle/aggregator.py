@@ -269,10 +269,7 @@ def _snapshot_codes(codes: Iterable[CanonicalGeneratedCodeRecord]) -> tuple[_Val
         for index, item in enumerate(codes):
             if index >= _MAX_BATCH_RECORDS:
                 raise ValueError(_CONTRACT_MESSAGE)
-            if (
-                type(item) is not CanonicalGeneratedCodeRecord
-                or not model_shape_is_intact(item)
-            ):
+            if type(item) is not CanonicalGeneratedCodeRecord or not model_shape_is_intact(item):
                 raise TypeError(_CONTRACT_MESSAGE)
             payload = item.model_dump(mode="python", round_trip=True, warnings=False)
             trusted = CanonicalGeneratedCodeRecord.model_validate(payload)
@@ -430,12 +427,7 @@ def _materialize_file(root: Path, name: str, payload: bytes) -> _MaterializedFil
     before: os.stat_result | None = None
     after: os.stat_result | None = None
     try:
-        if (
-            type(name) is not str
-            or not name
-            or Path(name).name != name
-            or name in {".", ".."}
-        ):
+        if type(name) is not str or not name or Path(name).name != name or name in {".", ".."}:
             raise ValueError(_ENGINE_MESSAGE)
         path = root / name
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -763,9 +755,7 @@ def _open_windows_material_leases(batch: _MaterializedBatch) -> _WindowsMaterial
             leases.handles.append(handle)
         return leases
     except BaseException as error:
-        primary_control = (
-            error if isinstance(error, (KeyboardInterrupt, SystemExit)) else None
-        )
+        primary_control = error if isinstance(error, (KeyboardInterrupt, SystemExit)) else None
         cleanup_control, cleanup_failed = _bounded_cleanup(
             leases.close,
             lambda: not leases.handles,
@@ -1146,9 +1136,7 @@ def _aggregate(
     bandit_report: AnalyzerReport,
 ) -> list[OracleRecord]:
     located: list[LocatedAnalyzerFinding] = []
-    by_file: dict[str, list[LocatedAnalyzerFinding]] = {
-        item.opaque_file: [] for item in codes
-    }
+    by_file: dict[str, list[LocatedAnalyzerFinding]] = {item.opaque_file: [] for item in codes}
     records: list[OracleRecord] = []
     code: _ValidatedCode | None = None
     findings: tuple[LocatedAnalyzerFinding, ...] = ()
@@ -1194,9 +1182,7 @@ def _aggregate(
                     parse_ok=True,
                     functional_ok=code.functional_ok,
                     security_label=(
-                        SecurityLabel.INSECURE
-                        if canonical_findings
-                        else SecurityLabel.SECURE
+                        SecurityLabel.INSECURE if canonical_findings else SecurityLabel.SECURE
                     ),
                     severity=severity,
                     findings=canonical_findings,

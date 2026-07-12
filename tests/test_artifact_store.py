@@ -51,11 +51,14 @@ class CloseFailingHandle:
 
 
 def test_read_jsonl_keeps_missing_files_optional_by_default(tmp_path: Path) -> None:
-    assert read_jsonl(
-        tmp_path / "missing.jsonl",
-        required=False,
-        allow_empty=False,
-    ) == []
+    assert (
+        read_jsonl(
+            tmp_path / "missing.jsonl",
+            required=False,
+            allow_empty=False,
+        )
+        == []
+    )
 
 
 def test_read_jsonl_rejects_a_missing_required_artifact(tmp_path: Path) -> None:
@@ -321,9 +324,7 @@ def test_write_jsonl_revalidates_base_models_before_publishing(
     )[0]
     replacement: object = secret
     if forged_field == "parameters":
-        replacement = GenerationParameters.model_construct(
-            values={"api_key": secret}
-        )
+        replacement = GenerationParameters.model_construct(values={"api_key": secret})
     forged = record.model_copy(update={forged_field: replacement})
 
     with pytest.raises(SecAwareError) as exc_info:

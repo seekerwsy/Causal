@@ -548,5 +548,10 @@ def test_intervention_source_has_no_legacy_or_shadow_authority_reads() -> None:
         )
     )
 
-    for forbidden in (".features", ".shadow", "features.get", "prompt_factor"):
+    for forbidden in (
+        "." + "features",
+        "." + "shadow",
+        "features" + ".get",
+        "prompt_" + "factor",
+    ):
         assert forbidden not in source

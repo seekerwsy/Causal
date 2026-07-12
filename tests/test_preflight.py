@@ -48,6 +48,10 @@ def _prompt(prompt_id: str, split: str, prompt: str) -> PromptRecord:
     )
 
 
+def test_preflight_report_allows_model_count_without_namespace_warning() -> None:
+    assert PreflightReport.model_config["protected_namespaces"] == ()
+
+
 def _config(
     tmp_path: Path,
     prompts_path: Path,

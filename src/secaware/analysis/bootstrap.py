@@ -23,10 +23,7 @@ def bootstrap_ci(
     for _ in range(samples):
         sampled_ids = [rng.choice(prompt_ids) for _ in prompt_ids]
         sampled_deltas = [
-            pair.delta
-            for pid in sampled_ids
-            for pair in by_prompt[pid]
-            if pair.delta is not None
+            pair.delta for pid in sampled_ids for pair in by_prompt[pid] if pair.delta is not None
         ]
         if sampled_deltas:
             estimates.append(sum(sampled_deltas) / len(sampled_deltas))

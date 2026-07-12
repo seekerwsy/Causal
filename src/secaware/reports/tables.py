@@ -65,7 +65,9 @@ def write_funnel(
                 "semantic_valid": sum(1 for item in h_interventions if item.semantic_valid),
                 "target_changed": sum(1 for item in h_interventions if item.target_changed),
                 "functional_preserved": sum(
-                    1 for pair in h_pairs if pair.functional_observed and pair.functional_counterfactual
+                    1
+                    for pair in h_pairs
+                    if pair.functional_observed and pair.functional_counterfactual
                 ),
                 "eligible_pairs": effect.eligible_pairs if effect else 0,
                 "confirmed_pairs": sum(1 for pair in h_pairs if pair.flip_type == "secure_flip"),
@@ -90,7 +92,9 @@ def write_effects(
                 "factor_type": effect.factor_type,
                 "scope_cwe": hypothesis.scope.get("cwe", "") if hypothesis else effect.scope_cwe,
                 "scope_task_family": (
-                    hypothesis.scope.get("task_family", "") if hypothesis else effect.scope_task_family
+                    hypothesis.scope.get("task_family", "")
+                    if hypothesis
+                    else effect.scope_task_family
                 ),
                 "eligible_pairs": effect.eligible_pairs,
                 "per_protocol_risk_difference": effect.per_protocol_risk_difference,
@@ -203,7 +207,9 @@ def write_summary(
             f"[{effect.ci_low:.3f}, {effect.ci_high:.3f}] | {effect.status} |"
         )
     lines.extend(["", "## Main Failures"])
-    failure_counts = Counter(effect.main_failure_reason for effect in effects if effect.main_failure_reason)
+    failure_counts = Counter(
+        effect.main_failure_reason for effect in effects if effect.main_failure_reason
+    )
     if failure_counts:
         for reason, count in failure_counts.most_common():
             lines.append(f"- {reason}: {count}")

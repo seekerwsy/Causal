@@ -530,9 +530,7 @@ def test_generation_parameter_nested_values_are_read_only_and_dump_as_json() -> 
 
     assert stop == ["END", "DONE"]
     assert parameters.values == {"stop": ["END", "DONE"]}
-    assert parameters.model_dump(mode="json") == {
-        "values": {"stop": ["END", "DONE"]}
-    }
+    assert parameters.model_dump(mode="json") == {"values": {"stop": ["END", "DONE"]}}
     assert isinstance(parameters.model_dump(mode="json")["values"], dict)
     assert isinstance(parameters.model_dump(mode="json")["values"]["stop"], list)
     assert canonical_sha256(parameters.model_dump(mode="json")) == original_hash
@@ -547,9 +545,7 @@ def test_generation_parameters_snapshot_nested_containers_before_validation() ->
             list.__setitem__(self, 0, {"api_key": secret})
             return iter(stale_values)
 
-    parameters = GenerationParameters(
-        values={"stop": MutatingStopList(["END"])}
-    )
+    parameters = GenerationParameters(values={"stop": MutatingStopList(["END"])})
 
     assert parameters.values == {"stop": ["END"]}
     assert parameters.model_dump(mode="json") == {"values": {"stop": ["END"]}}
@@ -705,15 +701,11 @@ def test_valid_nested_parameter_instances_survive_revalidation_as_json_lists() -
         endpoint_type="mock",
         parameters=parameters,
     )[0]
-    direct = GenerationRequestRecord.model_validate(
-        _record_values(parameters=parameters)
-    )
+    direct = GenerationRequestRecord.model_validate(_record_values(parameters=parameters))
 
     for record in (planned, direct):
         assert record.parameters.values == {"stop": ["END", "DONE"]}
-        assert record.model_dump(mode="json")["parameters"] == {
-            "values": {"stop": ["END", "DONE"]}
-        }
+        assert record.model_dump(mode="json")["parameters"] == {"values": {"stop": ["END", "DONE"]}}
 
 
 def test_generation_parameters_model_is_frozen() -> None:
@@ -728,9 +720,7 @@ def test_generation_parameters_model_is_frozen() -> None:
 def test_planner_revalidates_untrusted_generation_parameter_instances() -> None:
     unknown_key = "untrustedPlannerOption"
     secret = "planner-model-construct-provider-secret"
-    untrusted = GenerationParameters.model_construct(
-        values={unknown_key: secret}
-    )
+    untrusted = GenerationParameters.model_construct(values={unknown_key: secret})
 
     with pytest.raises(SecAwareError) as exc_info:
         plan_observed_requests(
@@ -813,9 +803,7 @@ def test_planner_safely_wraps_hostile_parameter_scalar() -> None:
 def test_generation_request_revalidates_untrusted_nested_parameter_instances() -> None:
     unknown_key = "untrustedRecordOption"
     secret = "record-model-construct-provider-secret"
-    untrusted = GenerationParameters.model_construct(
-        values={unknown_key: secret}
-    )
+    untrusted = GenerationParameters.model_construct(values={unknown_key: secret})
     payload = _record_values(parameters=untrusted)
 
     with pytest.raises(ValidationError) as exc_info:
@@ -1031,12 +1019,8 @@ def test_observed_grid_has_explicit_version_and_stable_coordinate_order() -> Non
     )
 
     assert len(records) == 8
-    assert all(
-        record.schema_version == GENERATION_REQUEST_SCHEMA_VERSION for record in records
-    )
-    assert [
-        (record.prompt_id, record.model_id, record.seed_id) for record in records
-    ] == [
+    assert all(record.schema_version == GENERATION_REQUEST_SCHEMA_VERSION for record in records)
+    assert [(record.prompt_id, record.model_id, record.seed_id) for record in records] == [
         (prompt_id, model_id, seed_id)
         for prompt_id in ("prompt-a", "prompt-b")
         for model_id in ("model-a", "model-z")
@@ -1100,16 +1084,14 @@ def test_request_identity_includes_schema_version_and_language() -> None:
     python_prompt = _prompt("prompt-language", "Generate the same implementation.")
     javascript_prompt = python_prompt.model_copy(update={"language": "javascript"})
 
-    python_record = plan_observed_requests(
-        [python_prompt], ["model-a"], [1], endpoint_type="mock"
-    )[0]
+    python_record = plan_observed_requests([python_prompt], ["model-a"], [1], endpoint_type="mock")[
+        0
+    ]
     javascript_record = plan_observed_requests(
         [javascript_prompt], ["model-a"], [1], endpoint_type="mock"
     )[0]
 
-    assert python_record.request_id == _expected_request_id(
-        python_record.model_dump(mode="python")
-    )
+    assert python_record.request_id == _expected_request_id(python_record.model_dump(mode="python"))
     assert python_record.request_id != javascript_record.request_id
 
 
@@ -1181,9 +1163,7 @@ def test_observed_and_counterfactual_request_ids_do_not_collide() -> None:
     prompt = _prompt("prompt-a")
     intervention = _intervention(prompt, counterfactual_prompt=prompt.prompt)
 
-    observed = plan_observed_requests(
-        [prompt], ["model-a"], [1], endpoint_type="mock"
-    )[0]
+    observed = plan_observed_requests([prompt], ["model-a"], [1], endpoint_type="mock")[0]
     counterfactual = plan_counterfactual_requests(
         {prompt.prompt_id: prompt},
         [intervention],
@@ -1301,9 +1281,7 @@ def test_counterfactual_missing_prompt_raises_safe_contract_error() -> None:
     intervention = _intervention(prompt)
 
     with pytest.raises(SecAwareError) as exc_info:
-        plan_counterfactual_requests(
-            {}, [intervention], ["model-a"], [1], endpoint_type="mock"
-        )
+        plan_counterfactual_requests({}, [intervention], ["model-a"], [1], endpoint_type="mock")
 
     error = exc_info.value
     assert error.code is ErrorCode.CONTRACT
@@ -1320,9 +1298,7 @@ def test_counterfactual_missing_prompt_raises_safe_contract_error() -> None:
         (["model-a"], [1, 1]),
     ],
 )
-def test_empty_or_duplicate_grid_axes_raise_config(
-    models: list[str], seeds: list[int]
-) -> None:
+def test_empty_or_duplicate_grid_axes_raise_config(models: list[str], seeds: list[int]) -> None:
     with pytest.raises(SecAwareError) as exc_info:
         plan_observed_requests([_prompt("prompt-a")], models, seeds, endpoint_type="mock")
 
@@ -1333,9 +1309,7 @@ def test_duplicate_request_id_raises_contract() -> None:
     prompt = _prompt("prompt-a")
 
     with pytest.raises(SecAwareError) as exc_info:
-        plan_observed_requests(
-            [prompt, prompt], ["model-a"], [1], endpoint_type="mock"
-        )
+        plan_observed_requests([prompt, prompt], ["model-a"], [1], endpoint_type="mock")
 
     assert exc_info.value.code is ErrorCode.CONTRACT
 
@@ -1389,9 +1363,7 @@ def test_observed_planner_materializes_each_iterable_with_a_bound(
 
     assert exc_info.value.code is expected_code
     assert guarded.reads == limit + 1
-    assert "overread-secret" not in "".join(
-        traceback.format_exception(exc_info.value)
-    )
+    assert "overread-secret" not in "".join(traceback.format_exception(exc_info.value))
 
 
 @pytest.mark.parametrize(
@@ -1449,9 +1421,7 @@ def test_counterfactual_planner_materializes_each_iterable_with_a_bound(
 
     assert exc_info.value.code is expected_code
     assert guarded.reads == limit + 1
-    assert "overread-secret" not in "".join(
-        traceback.format_exception(exc_info.value)
-    )
+    assert "overread-secret" not in "".join(traceback.format_exception(exc_info.value))
 
 
 @pytest.mark.parametrize("condition", ["observed", "counterfactual"])
@@ -1719,9 +1689,7 @@ def test_planner_revalidates_forged_input_models(source: str) -> None:
                 endpoint_type="mock",
             )
         else:
-            forged_intervention = _intervention(prompt).model_copy(
-                update={"factor_type": secret}
-            )
+            forged_intervention = _intervention(prompt).model_copy(update={"factor_type": secret})
             plan_counterfactual_requests(
                 {prompt.prompt_id: prompt},
                 [forged_intervention],

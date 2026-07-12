@@ -39,9 +39,7 @@ _SENSITIVE_COMPACT_FRAGMENTS = (
 
 def _normalize_key(key: str) -> str:
     with_acronym_boundaries = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
-    with_word_boundaries = re.sub(
-        r"([a-z0-9])([A-Z])", r"\1_\2", with_acronym_boundaries
-    )
+    with_word_boundaries = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", with_acronym_boundaries)
     return re.sub(r"[^a-z0-9]+", "_", with_word_boundaries.casefold()).strip("_")
 
 

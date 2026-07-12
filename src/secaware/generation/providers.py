@@ -8,11 +8,12 @@ from secaware.generation.mock_provider import MockProvider
 
 
 class CodeGeneratorProvider(Protocol):
-    def generate(self, prompt: str, *, model_id: str, seed: int, language: str) -> str:
-        ...
+    def generate(self, prompt: str, *, model_id: str, seed: int, language: str) -> str: ...
 
 
-def get_provider(provider_name: str, *, file_provider_dir: str | None = None) -> CodeGeneratorProvider:
+def get_provider(
+    provider_name: str, *, file_provider_dir: str | None = None
+) -> CodeGeneratorProvider:
     if provider_name == "mock":
         return MockProvider()
     if provider_name == "file":
