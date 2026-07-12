@@ -472,8 +472,11 @@ def _assert_sanitized_internal_error(error: SecAwareError, sentinel: str) -> Non
     "path",
     ["node_id", "edge_id", "graph_hash", "graph_conversion", "record_reconstruction"],
 )
+@pytest.mark.parametrize("exception_type", [RuntimeError, ValueError, TypeError])
 def test_unexpected_internal_failures_are_distinct_and_sanitized(
-    path: str, monkeypatch: pytest.MonkeyPatch
+    path: str,
+    exception_type: type[Exception],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sentinel = "PROMPT-INTERNAL-DEFECT-DO-NOT-LEAK"
     graph = nx.MultiDiGraph()
@@ -481,7 +484,7 @@ def test_unexpected_internal_failures_are_distinct_and_sanitized(
     record = multidigraph_to_record(graph, prompt_id=sentinel)
 
     def fail(*_args, **_kwargs):
-        raise RuntimeError(sentinel)
+        raise exception_type(sentinel)
 
     if path == "node_id":
         monkeypatch.setattr(graph_codec, "_node_id", fail)

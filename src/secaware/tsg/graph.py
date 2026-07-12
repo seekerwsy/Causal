@@ -7,9 +7,10 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import cast
+from typing import TypeVar, cast
 
 import networkx as nx
+from pydantic import BaseModel, ValidationError
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.tsg import (
@@ -36,7 +37,11 @@ _EDGE_FIELDS = frozenset({"edge_type", "attributes"})
 _NODE_ID_RE = re.compile(r"^n_[0-9a-f]{64}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_SIGNED_64_BIT = 2**63 - 1
-_EXPECTED_INPUT_EXCEPTIONS = (ValueError, TypeError, UnicodeError)
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
+class _InvalidInput(Exception):
+    pass
 
 
 class _FailureKind(Enum):
@@ -66,6 +71,13 @@ def _raise_failure(failure: _FailureKind) -> None:
     raise _internal_error() from None
 
 
+def _validate_model(model_type: type[_ModelT], value: object) -> _ModelT:
+    try:
+        return model_type.model_validate(value)
+    except ValidationError:
+        raise _InvalidInput from None
+
+
 def _canonical_json(value: object) -> bytes:
     return json.dumps(
         value,
@@ -81,14 +93,14 @@ def _sha256_hex(payload: bytes) -> str:
 
 
 def _require_text(value: object) -> str:
-    if (
-        type(value) is not str
-        or not value
-        or not value.strip()
-        or value != value.strip()
-        or len(value.encode("utf-8")) > MAX_TSG_STRING_BYTES
-    ):
-        raise ValueError
+    if type(value) is not str or not value or not value.strip() or value != value.strip():
+        raise _InvalidInput from None
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeError:
+        raise _InvalidInput from None
+    if len(encoded) > MAX_TSG_STRING_BYTES:
+        raise _InvalidInput from None
     return value
 
 
@@ -101,16 +113,22 @@ def _parse_node_type(value: object) -> NodeType:
     if type(value) is NodeType:
         return cast(NodeType, value)
     if type(value) is str:
-        return NodeType(value)
-    raise ValueError
+        try:
+            return NodeType(value)
+        except ValueError:
+            raise _InvalidInput from None
+    raise _InvalidInput from None
 
 
 def _parse_edge_type(value: object) -> EdgeType:
     if type(value) is EdgeType:
         return cast(EdgeType, value)
     if type(value) is str:
-        return EdgeType(value)
-    raise ValueError
+        try:
+            return EdgeType(value)
+        except ValueError:
+            raise _InvalidInput from None
+    raise _InvalidInput from None
 
 
 def _semantic_key_commitment(semantic_key: str) -> str:
@@ -124,15 +142,16 @@ def _node_id_from_commitment(
     semantic_key_sha256: str,
 ) -> str:
     if type(semantic_key_sha256) is not str or _SHA256_RE.fullmatch(semantic_key_sha256) is None:
-        raise ValueError
-    TSGNode.model_validate(
+        raise _InvalidInput from None
+    _validate_model(
+        TSGNode,
         {
             "node_id": "n_" + "0" * 64,
             "semantic_key_sha256": semantic_key_sha256,
             "node_type": node_type,
             "label": label,
             "attributes": {},
-        }
+        },
     )
     identity = {
         "label": label,
@@ -158,15 +177,16 @@ def _edge_id(
     ordinal: int,
 ) -> str:
     if type(ordinal) is not int or not 0 <= ordinal <= _MAX_SIGNED_64_BIT:
-        raise ValueError
-    validated = TSGEdge.model_validate(
+        raise _InvalidInput from None
+    validated = _validate_model(
+        TSGEdge,
         {
             "edge_id": "e_" + "0" * 64,
             "src": src,
             "dst": dst,
             "edge_type": edge_type,
             "attributes": attributes,
-        }
+        },
     )
     identity = {
         "attributes": dict(validated.attributes.items()),
@@ -182,7 +202,7 @@ def canonical_node_id(node_type: NodeType, label: str, semantic_key: str) -> str
     """Return the full SHA-256 identifier for a canonical node semantic key."""
     try:
         result = _node_id(_parse_node_type(node_type), label, semantic_key)
-    except _EXPECTED_INPUT_EXCEPTIONS:
+    except _InvalidInput:
         result = _FailureKind.INVALID_INPUT
     except Exception:
         result = _FailureKind.INTERNAL
@@ -204,7 +224,7 @@ def canonical_edge_id(
     """Return the full SHA-256 identifier for one canonical multiedge ordinal."""
     try:
         result = _edge_id(src, dst, _parse_edge_type(edge_type), attributes, ordinal)
-    except _EXPECTED_INPUT_EXCEPTIONS:
+    except _InvalidInput:
         result = _FailureKind.INVALID_INPUT
     except Exception:
         result = _FailureKind.INTERNAL
@@ -239,13 +259,13 @@ def _verified_node_key(
 ) -> tuple[str, str]:
     semantic_key = _require_text(builder_key)
     if type(semantic_key_sha256) is not str:
-        raise ValueError
+        raise _InvalidInput from None
     node_id = _node_id_from_commitment(node_type, label, semantic_key_sha256)
     if _NODE_ID_RE.fullmatch(semantic_key) is not None:
         if semantic_key != node_id:
-            raise ValueError
+            raise _InvalidInput from None
     elif semantic_key_sha256 != _semantic_key_commitment(semantic_key):
-        raise ValueError
+        raise _InvalidInput from None
     return node_id, semantic_key_sha256
 
 
@@ -254,20 +274,28 @@ def _sorted_attributes(attributes: Mapping[str, TSGScalar]) -> dict[str, TSGScal
 
 
 def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tuple[TSGEdge, ...]]:
-    if type(graph) is not nx.MultiDiGraph or graph.graph:
-        raise ValueError
-    if graph.number_of_nodes() > MAX_TSG_NODES or graph.number_of_edges() > MAX_TSG_EDGES:
-        raise ValueError
+    if type(graph) is not nx.MultiDiGraph:
+        raise _InvalidInput from None
+    try:
+        graph_attributes = graph.graph
+        node_count = graph.number_of_nodes()
+        edge_count = graph.number_of_edges()
+        raw_nodes = tuple(graph.nodes(data=True))
+        raw_edges = tuple(graph.edges(keys=True, data=True))
+    except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
+        raise _InvalidInput from None
+    if graph_attributes or node_count > MAX_TSG_NODES or edge_count > MAX_TSG_EDGES:
+        raise _InvalidInput from None
 
     nodes_by_id: dict[str, TSGNode] = {}
     identities_by_id: dict[str, tuple[str, str, str]] = {}
     builder_to_canonical: dict[object, str] = {}
-    for builder_key, raw in graph.nodes(data=True):
+    for builder_key, raw in raw_nodes:
         if type(raw) is not dict or frozenset(raw) not in {
             _BUILDER_NODE_FIELDS,
             _COMMITTED_NODE_FIELDS,
         }:
-            raise ValueError
+            raise _InvalidInput from None
         node_type = _parse_node_type(raw["node_type"])
         label = raw["label"]
         attributes = raw["attributes"]
@@ -280,48 +308,51 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
             )
         else:
             node_id, semantic_key_sha256 = _canonical_node_key(builder_key, node_type, label)
-        validated_node = TSGNode.model_validate(
+        validated_node = _validate_model(
+            TSGNode,
             {
                 "node_id": node_id,
                 "semantic_key_sha256": semantic_key_sha256,
                 "node_type": node_type,
                 "label": label,
                 "attributes": attributes,
-            }
+            },
         )
-        node = TSGNode.model_validate(
+        node = _validate_model(
+            TSGNode,
             {
                 "node_id": validated_node.node_id,
                 "semantic_key_sha256": validated_node.semantic_key_sha256,
                 "node_type": validated_node.node_type,
                 "label": validated_node.label,
                 "attributes": _sorted_attributes(validated_node.attributes),
-            }
+            },
         )
         identity = (node.node_type.value, node.label, node.semantic_key_sha256)
         if node_id in identities_by_id:
-            raise ValueError
+            raise _InvalidInput from None
         identities_by_id[node_id] = identity
         nodes_by_id[node_id] = node
         builder_to_canonical[builder_key] = node_id
 
     pending_by_endpoints: dict[tuple[str, str], list[tuple[EdgeType, dict[str, TSGScalar]]]] = {}
-    for src, dst, _builder_key, raw in graph.edges(keys=True, data=True):
+    for src, dst, _builder_key, raw in raw_edges:
         if type(raw) is not dict or raw.keys() != _EDGE_FIELDS:
-            raise ValueError
+            raise _InvalidInput from None
         if src not in builder_to_canonical or dst not in builder_to_canonical:
-            raise ValueError
+            raise _InvalidInput from None
         canonical_src = builder_to_canonical[src]
         canonical_dst = builder_to_canonical[dst]
         edge_type = _parse_edge_type(raw["edge_type"])
-        validated = TSGEdge.model_validate(
+        validated = _validate_model(
+            TSGEdge,
             {
                 "edge_id": "e_" + "0" * 64,
                 "src": canonical_src,
                 "dst": canonical_dst,
                 "edge_type": edge_type,
                 "attributes": raw["attributes"],
-            }
+            },
         )
         pending_by_endpoints.setdefault((canonical_src, canonical_dst), []).append(
             (edge_type, _sorted_attributes(validated.attributes))
@@ -335,16 +366,17 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
             edge_id = _edge_id(src, dst, edge_type, attributes, ordinal)
             identity = (src, dst, edge_type.value, _canonical_json(attributes), ordinal)
             if edge_id in identities_by_edge_id:
-                raise ValueError
+                raise _InvalidInput from None
             identities_by_edge_id[edge_id] = identity
-            edges_by_id[edge_id] = TSGEdge.model_validate(
+            edges_by_id[edge_id] = _validate_model(
+                TSGEdge,
                 {
                     "edge_id": edge_id,
                     "src": src,
                     "dst": dst,
                     "edge_type": edge_type,
                     "attributes": attributes,
-                }
+                },
             )
 
     return (
@@ -385,7 +417,7 @@ def _try_graph_sha256(graph: nx.MultiDiGraph) -> str | _FailureKind:
     try:
         nodes, edges = _canonicalize_graph(graph)
         return _digest(nodes, edges)
-    except _EXPECTED_INPUT_EXCEPTIONS:
+    except _InvalidInput:
         return _FailureKind.INVALID_INPUT
     except Exception:
         return _FailureKind.INTERNAL
@@ -408,7 +440,8 @@ def _try_multidigraph_to_record(
     try:
         prompt_id = _require_text(prompt_id)
         nodes, edges = _canonicalize_graph(graph)
-        candidate = PromptTSGRecord.model_validate(
+        candidate = _validate_model(
+            PromptTSGRecord,
             {
                 "schema_version": TSG_SCHEMA_VERSION,
                 "graph_id": _graph_id(prompt_id),
@@ -420,14 +453,14 @@ def _try_multidigraph_to_record(
                 "nodes": nodes,
                 "edges": edges,
                 "shadow": {} if shadow is None else shadow,
-            }
+            },
         )
         if tuple(candidate.shadow) == tuple(sorted(candidate.shadow)):
             return candidate
         payload = candidate.model_dump(mode="python", round_trip=True, warnings=False)
         payload["shadow"] = _sorted_attributes(candidate.shadow)
-        return PromptTSGRecord.model_validate(payload)
-    except _EXPECTED_INPUT_EXCEPTIONS:
+        return _validate_model(PromptTSGRecord, payload)
+    except _InvalidInput:
         return _FailureKind.INVALID_INPUT
     except Exception:
         return _FailureKind.INTERNAL
@@ -451,14 +484,14 @@ def multidigraph_to_record(
 
 def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKind:
     try:
-        validated = PromptTSGRecord.model_validate(record)
+        validated = _validate_model(PromptTSGRecord, record)
         if (
             validated.ontology_version != ONTOLOGY_VERSION
             or validated.motif_version != MOTIF_VERSION
             or validated.graph_id != _graph_id(validated.prompt_id)
             or validated.graph_sha256 != _digest(validated.nodes, validated.edges)
         ):
-            raise ValueError
+            raise _InvalidInput from None
 
         graph = nx.MultiDiGraph()
         for node in validated.nodes:
@@ -467,7 +500,7 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKin
                 node.label,
                 node.semantic_key_sha256,
             ):
-                raise ValueError
+                raise _InvalidInput from None
             graph.add_node(
                 node.node_id,
                 semantic_key_sha256=node.semantic_key_sha256,
@@ -485,9 +518,9 @@ def _try_record_to_multidigraph(record: object) -> nx.MultiDiGraph | _FailureKin
             )
         rebuilt_nodes, rebuilt_edges = _canonicalize_graph(graph)
         if validated.graph_sha256 != _digest(rebuilt_nodes, rebuilt_edges):
-            raise ValueError
+            raise _InvalidInput from None
         return graph
-    except _EXPECTED_INPUT_EXCEPTIONS:
+    except _InvalidInput:
         return _FailureKind.INVALID_INPUT
     except Exception:
         return _FailureKind.INTERNAL
