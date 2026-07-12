@@ -180,6 +180,18 @@ Protocol completion and Oracle-evaluable rates are reported over assigned pairs.
 
 ## 6. Cluster Bootstrap and Multiplicity
 
+Here, a cluster is a design-based resampling unit, not a machine-learning cluster discovered by an
+algorithm such as k-means. Within one hypothesis, every pair that shares the same original
+`prompt_id` belongs to one cluster. Model and seed rows from that prompt are therefore sampled as a
+single block. Hypotheses are estimated separately, so a cluster never combines rows from different
+hypotheses.
+
+For example, three prompts with two models and two seeds produce twelve pair rows but only three
+independent prompt clusters. A bootstrap draw of `[p2, p2, p1]` includes all four rows belonging to
+`p2` twice, all four rows belonging to `p1` once, and no rows from `p3`. Row-wise resampling is
+forbidden because it would treat repeated model/seed measurements as independent and make confidence
+intervals artificially narrow.
+
 Bootstrap resampling is deterministic and clustered by `prompt_id` within each hypothesis:
 
 1. sort unique prompt IDs;
