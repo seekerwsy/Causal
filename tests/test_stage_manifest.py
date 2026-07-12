@@ -122,6 +122,27 @@ def test_stage_fingerprint_ignores_input_mapping_order() -> None:
     assert first == reordered
 
 
+def test_stage_fingerprint_changes_with_explicit_stage_contract_digest() -> None:
+    baseline = build_stage_fingerprint(
+        "extract-prompt-tsg",
+        {"inputs/prompts.jsonl": "sha-a"},
+        {"alpha": 1},
+        catalog_sha256="a" * 64,
+        stage_contract_sha256="b" * 64,
+        code_version="v1",
+    )
+    changed = build_stage_fingerprint(
+        "extract-prompt-tsg",
+        {"inputs/prompts.jsonl": "sha-a"},
+        {"alpha": 1},
+        catalog_sha256="a" * 64,
+        stage_contract_sha256="c" * 64,
+        code_version="v1",
+    )
+
+    assert changed != baseline
+
+
 @pytest.mark.parametrize(
     "changes",
     [

@@ -71,6 +71,7 @@ def build_stage_fingerprint(
     *,
     policy_sha256: str | None = None,
     catalog_sha256: str | None = None,
+    stage_contract_sha256: str | None = None,
     code_version: str,
 ) -> str:
     return canonical_sha256(
@@ -80,6 +81,7 @@ def build_stage_fingerprint(
             "config_sha256": canonical_sha256(config),
             "policy_sha256": policy_sha256,
             "catalog_sha256": catalog_sha256,
+            "stage_contract_sha256": stage_contract_sha256,
             "code_version": code_version,
         }
     )

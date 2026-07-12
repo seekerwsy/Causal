@@ -22,6 +22,7 @@ from secaware.pipeline.manifest import (
     write_stage_manifest,
 )
 from secaware.schema.common import SCHEMA_VERSION
+from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
 
 _Result = TypeVar("_Result")
 
@@ -389,12 +390,9 @@ class RunStore:
 
     def _reject_stage_record(self, stage: str, message: str) -> None:
         if stage in self._stage_commit_leases:
-            self._clear_stage_state(stage)
             raise self._manifest_conflict(stage, message)
         snapshot = self._pending_snapshots.get(stage)
         if snapshot is not None and snapshot.preserve_committed:
-            self._clear_stage_state(stage)
-            self._release_stage_lease(stage)
             raise self._manifest_conflict(stage, message)
         self.invalidate_stage(stage)
         raise self._manifest_conflict(stage, message)
@@ -514,6 +512,11 @@ class RunStore:
             self.config.model_dump(mode="json") if config is None else config,
             policy_sha256=policy_sha256,
             catalog_sha256=catalog_sha256,
+            stage_contract_sha256=(
+                PROMPT_TSG_STAGE_CONTRACT_SHA256
+                if stage == "extract-prompt-tsg"
+                else None
+            ),
             code_version=__version__,
         )
 
