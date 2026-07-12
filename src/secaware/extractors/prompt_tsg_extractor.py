@@ -1,186 +1,275 @@
-from collections.abc import Iterable
+"""Extract reviewed prompt evidence into authoritative graph facts."""
 
+from __future__ import annotations
+
+import hashlib
+import re
+from typing import cast
+
+import networkx as nx
+from pydantic import ValidationError
+
+from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.common import model_shape_is_intact
 from secaware.schema.records import PromptRecord
-from secaware.schema.tsg import EdgeType, NodeType, TSGEdge, TSGNode, TSGRecord
+from secaware.schema.tsg import (
+    MAX_TSG_EVIDENCE_OFFSET,
+    MAX_TSG_STRING_BYTES,
+    EdgeType,
+    NodeType,
+    PromptTSGRecord,
+)
+from secaware.tsg.catalog import ONTOLOGY_VERSION, PROMPT_TSG_CATALOG, PromptOntologyEntry
+from secaware.tsg.graph import multidigraph_to_record
 
 
-PATH_KEYWORDS = [
-    "file",
-    "path",
-    "directory",
-    "upload",
-    "read file",
-    "open file",
-    "filename",
-]
-PATH_GUARD_KEYWORDS = [
-    "normalize",
-    "canonicalize",
-    "resolve",
-    "allowlist",
-    "base directory",
-    "prevent traversal",
-    "..",
-    "path traversal",
-    "rejects traversal",
-    "reject traversal",
-]
-SQL_KEYWORDS = ["sql", "database", "query", "sqlite", "select", "insert", "update"]
-SQL_GUARD_KEYWORDS = [
-    "parameterized",
-    "prepared statement",
-    "bind parameter",
-    "placeholder",
-    "?",
-    "%s",
-]
-SHELL_KEYWORDS = ["shell", "command", "subprocess", "os.system", "execute command", "terminal"]
-SHELL_GUARD_KEYWORDS = ["shell=false", "list arguments", "avoid shell", "do not use shell=true"]
-AUTH_KEYWORDS = ["delete", "update user", "admin", "account", "permission", "private", "sensitive"]
-AUTH_GUARD_KEYWORDS = [
-    "authorize",
-    "authorization",
-    "permission check",
-    "role check",
-    "admin only",
-    "access control",
-]
-DESER_KEYWORDS = ["pickle", "yaml", "deserialize", "load object", "serialized"]
-DESER_GUARD_KEYWORDS = ["safe_load", "allowlist", "trusted format", "json", "avoid pickle"]
+_SUPPORTED_LANGUAGE_ALIASES = frozenset({"py", "python", "python3"})
+_VALID_CWE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 
 
-def _contains_any(text: str, keywords: Iterable[str]) -> bool:
-    return any(keyword in text for keyword in keywords)
+class _InvalidInput(Exception):
+    pass
 
 
-class _GraphBuilder:
-    def __init__(self) -> None:
-        self.nodes: list[TSGNode] = []
-        self.edges: list[TSGEdge] = []
-        self._node_index = 0
-        self._edge_index = 0
-        self._by_key: dict[tuple[NodeType, str], str] = {}
-
-    def node(self, node_type: NodeType, label: str, **attributes: object) -> str:
-        key = (node_type, label)
-        if key in self._by_key:
-            return self._by_key[key]
-        self._node_index += 1
-        node_id = f"n{self._node_index}"
-        self.nodes.append(
-            TSGNode(
-                node_id=node_id,
-                node_type=node_type,
-                label=label,
-                attributes={k: v for k, v in attributes.items() if v is not None},
-            )
-        )
-        self._by_key[key] = node_id
-        return node_id
-
-    def edge(self, src: str, dst: str, edge_type: EdgeType, **attributes: object) -> None:
-        self._edge_index += 1
-        self.edges.append(
-            TSGEdge(
-                edge_id=f"e{self._edge_index}",
-                src=src,
-                dst=dst,
-                edge_type=edge_type,
-                attributes={k: v for k, v in attributes.items() if v is not None},
-            )
-        )
+def _invalid_error() -> SecAwareError:
+    return SecAwareError(
+        ErrorCode.TSG_INVALID,
+        "tsg.extract_prompt",
+        "prompt TSG extraction validation failed",
+    )
 
 
-def _add_flow(builder: _GraphBuilder, operation: str, data: str, sink: str) -> None:
-    operation_id = builder.node(NodeType.TASK_OPERATION, operation)
-    data_id = builder.node(NodeType.DATA_OBJECT, data)
-    source_id = builder.node(NodeType.SOURCE, "user_input")
-    sink_id = builder.node(NodeType.SINK, sink)
-    boundary_id = builder.node(NodeType.TRUST_BOUNDARY, "untrusted_user_input")
-    builder.edge(operation_id, data_id, EdgeType.OPERATES_ON)
-    builder.edge(source_id, data_id, EdgeType.SOURCE_OF)
-    builder.edge(boundary_id, source_id, EdgeType.RELATED_TO)
-    builder.edge(data_id, sink_id, EdgeType.FLOWS_TO)
+def _internal_error() -> SecAwareError:
+    return SecAwareError(
+        ErrorCode.ANALYSIS_INVALID,
+        "tsg.extract_prompt",
+        "internal prompt TSG extraction failure",
+    )
 
 
-def _add_requirement(builder: _GraphBuilder, requirement: str, guard: str) -> None:
-    requirement_id = builder.node(NodeType.PROMPT_REQUIREMENT, requirement)
-    guard_id = builder.node(NodeType.GUARD, guard)
-    builder.edge(requirement_id, guard_id, EdgeType.REQUIRES)
+def _snapshot_prompt(value: object) -> PromptRecord:
+    if type(value) is not PromptRecord or not model_shape_is_intact(value):
+        raise _InvalidInput from None
+    payload = value.model_dump(mode="python", round_trip=True, warnings=False)
+    try:
+        snapshot = PromptRecord.model_validate(payload)
+    except ValidationError:
+        raise _InvalidInput from None
+    string_fields = (
+        snapshot.prompt_id,
+        snapshot.language,
+        snapshot.task_family,
+        snapshot.cwe,
+        snapshot.prompt,
+    )
+    if any(type(item) is not str for item in string_fields):
+        raise _InvalidInput from None
+    try:
+        encoded_fields = tuple(item.encode("utf-8") for item in string_fields)
+    except UnicodeError:
+        raise _InvalidInput from None
+    if (
+        not snapshot.prompt_id
+        or snapshot.prompt_id != snapshot.prompt_id.strip()
+        or len(encoded_fields[0]) > MAX_TSG_STRING_BYTES
+        or len(snapshot.prompt) > MAX_TSG_EVIDENCE_OFFSET
+    ):
+        raise _InvalidInput from None
+    return snapshot
 
 
-def _default_features() -> dict[str, bool]:
+def _first_match(text: str, terms: tuple[str, ...]) -> tuple[int, int] | None:
+    earliest: tuple[int, int, int] | None = None
+    for term_index, term in enumerate(terms):
+        match = re.search(re.escape(term), text, flags=re.IGNORECASE | re.ASCII)
+        if match is not None:
+            candidate = (match.start(), match.end(), term_index)
+            earliest = candidate if earliest is None else min(earliest, candidate)
+    if earliest is None:
+        return None
+    start, end, _ = earliest
+    return start, end
+
+
+def _evidence(text: str, match: tuple[int, int]) -> dict[str, str | int]:
+    start, end = match
+    span = text[start:end]
     return {
-        "factor.input_validation_required": False,
-        "factor.path_normalization_required": False,
-        "factor.sql_parameterization_required": False,
-        "factor.safe_subprocess_required": False,
-        "factor.authorization_check_required": False,
-        "factor.safe_deserialization_required": False,
-        "motif.user_path_to_file_open_without_guard": False,
-        "motif.user_string_to_sql_without_parameterization": False,
-        "motif.user_input_to_shell_without_guard": False,
-        "motif.sensitive_operation_without_auth_guard": False,
-        "motif.untrusted_data_to_deserialization_sink": False,
-        "motif.untrusted_source_to_sensitive_sink_without_guard": False,
+        "evidence_start": start,
+        "evidence_end": end,
+        "evidence_sha256": hashlib.sha256(span.encode("utf-8")).hexdigest(),
     }
 
 
-def extract_prompt_tsg(prompt: PromptRecord) -> TSGRecord:
-    text = prompt.prompt.lower()
-    builder = _GraphBuilder()
-    features = _default_features()
-    builder.node(NodeType.CWE, prompt.cwe)
+def _semantic_key(entry: PromptOntologyEntry, role: str) -> str:
+    return f"prompt-catalog:{ONTOLOGY_VERSION}:{entry.factor_type.value}:{role}"
 
-    if _contains_any(text, PATH_KEYWORDS):
-        operation = "write_file" if "write" in text or "upload" in text else "read_file"
-        _add_flow(builder, operation, "user_path", "file_open")
-        if _contains_any(text, PATH_GUARD_KEYWORDS):
-            features["factor.path_normalization_required"] = True
-            _add_requirement(builder, "require_path_normalization", "path_normalization")
-        else:
-            features["motif.user_path_to_file_open_without_guard"] = True
 
-    if _contains_any(text, SQL_KEYWORDS):
-        _add_flow(builder, "build_sql_query", "user_query_param", "sql_execute")
-        if _contains_any(text, SQL_GUARD_KEYWORDS):
-            features["factor.sql_parameterization_required"] = True
-            _add_requirement(builder, "require_sql_parameterization", "sql_parameterization")
-        else:
-            features["motif.user_string_to_sql_without_parameterization"] = True
-
-    if _contains_any(text, SHELL_KEYWORDS):
-        _add_flow(builder, "execute_command", "command_arg", "shell_exec")
-        if _contains_any(text, SHELL_GUARD_KEYWORDS):
-            features["factor.safe_subprocess_required"] = True
-            _add_requirement(builder, "require_safe_subprocess", "safe_subprocess")
-        else:
-            features["motif.user_input_to_shell_without_guard"] = True
-
-    if _contains_any(text, AUTH_KEYWORDS):
-        operation_id = builder.node(NodeType.TASK_OPERATION, "sensitive_operation")
-        sink_id = builder.node(NodeType.SINK, "sensitive_action")
-        builder.edge(operation_id, sink_id, EdgeType.FLOWS_TO)
-        if _contains_any(text, AUTH_GUARD_KEYWORDS):
-            features["factor.authorization_check_required"] = True
-            _add_requirement(builder, "require_authorization_check", "auth_check")
-        else:
-            features["motif.sensitive_operation_without_auth_guard"] = True
-
-    if _contains_any(text, DESER_KEYWORDS):
-        _add_flow(builder, "deserialize_data", "serialized_input", "deserialization_sink")
-        if _contains_any(text, DESER_GUARD_KEYWORDS):
-            features["factor.safe_deserialization_required"] = True
-            _add_requirement(builder, "require_safe_deserialization", "safe_deserialization")
-        else:
-            features["motif.untrusted_data_to_deserialization_sink"] = True
-
-    return TSGRecord(
-        graph_id=f"prompt:{prompt.prompt_id}",
-        source_type="prompt",
-        prompt_id=prompt.prompt_id,
-        code_id=None,
-        nodes=builder.nodes,
-        edges=builder.edges,
-        features=features,
+def _add_node(
+    graph: nx.MultiDiGraph,
+    entry: PromptOntologyEntry,
+    role: str,
+    node_type: NodeType,
+    label: str,
+    attributes: dict[str, str | int],
+) -> str:
+    key = _semantic_key(entry, role)
+    graph.add_node(
+        key,
+        node_type=node_type,
+        label=label,
+        attributes=dict(attributes),
     )
+    return key
+
+
+def _add_edge(
+    graph: nx.MultiDiGraph,
+    src: str,
+    dst: str,
+    edge_type: EdgeType,
+    attributes: dict[str, str | int],
+) -> None:
+    graph.add_edge(src, dst, edge_type=edge_type, attributes=dict(attributes))
+
+
+def _add_domain_flow(
+    graph: nx.MultiDiGraph,
+    entry: PromptOntologyEntry,
+    evidence: dict[str, str | int],
+) -> tuple[str, str]:
+    operation = _add_node(
+        graph,
+        entry,
+        "operation",
+        NodeType.TASK_OPERATION,
+        entry.operation_label,
+        evidence,
+    )
+    source = _add_node(
+        graph,
+        entry,
+        "source",
+        NodeType.SOURCE,
+        f"{entry.factor_type.value}_source",
+        evidence,
+    )
+    data = _add_node(
+        graph,
+        entry,
+        "data",
+        NodeType.DATA_OBJECT,
+        entry.data_label,
+        evidence,
+    )
+    sink = _add_node(
+        graph,
+        entry,
+        "sink",
+        NodeType.SINK,
+        entry.sink_label,
+        evidence,
+    )
+    boundary = _add_node(
+        graph,
+        entry,
+        "boundary",
+        NodeType.TRUST_BOUNDARY,
+        f"{entry.factor_type.value}_trust_boundary",
+        evidence,
+    )
+    cwe_attributes = dict(evidence)
+    if _VALID_CWE.fullmatch(entry.cwe) is not None:
+        cwe_attributes["cwe_id"] = entry.cwe
+    cwe = _add_node(graph, entry, "cwe", NodeType.CWE, entry.cwe, cwe_attributes)
+
+    _add_edge(graph, operation, data, EdgeType.OPERATES_ON, evidence)
+    _add_edge(graph, source, data, EdgeType.SOURCE_OF, evidence)
+    _add_edge(graph, data, sink, EdgeType.FLOWS_TO, evidence)
+    _add_edge(
+        graph,
+        boundary,
+        source,
+        EdgeType.RELATED_TO,
+        {**evidence, "relation_kind": "crosses_trust_boundary"},
+    )
+    _add_edge(
+        graph,
+        sink,
+        cwe,
+        EdgeType.MAPS_TO,
+        {**evidence, "mapping_kind": "reviewed_catalog_cwe"},
+    )
+    return data, sink
+
+
+def _add_guard_requirement(
+    graph: nx.MultiDiGraph,
+    entry: PromptOntologyEntry,
+    data: str,
+    sink: str,
+    evidence: dict[str, str | int],
+) -> None:
+    requirement = _add_node(
+        graph,
+        entry,
+        "requirement",
+        NodeType.PROMPT_REQUIREMENT,
+        entry.requirement_label,
+        evidence,
+    )
+    guard = _add_node(
+        graph,
+        entry,
+        "guard",
+        NodeType.GUARD,
+        entry.guard_label,
+        evidence,
+    )
+    _add_edge(graph, requirement, guard, EdgeType.REQUIRES, evidence)
+    _add_edge(graph, data, guard, EdgeType.GUARDED_BY, evidence)
+    _add_edge(graph, sink, guard, EdgeType.GUARDED_BY, evidence)
+
+
+def _extract(snapshot: PromptRecord) -> PromptTSGRecord:
+    graph = nx.MultiDiGraph()
+    if snapshot.language.casefold() not in _SUPPORTED_LANGUAGE_ALIASES:
+        return multidigraph_to_record(graph, prompt_id=snapshot.prompt_id)
+
+    for entry in PROMPT_TSG_CATALOG:
+        domain_match = _first_match(snapshot.prompt, entry.domain_terms)
+        if domain_match is None:
+            continue
+        data, sink = _add_domain_flow(graph, entry, _evidence(snapshot.prompt, domain_match))
+        guard_match = _first_match(snapshot.prompt, entry.guard_terms)
+        if guard_match is not None:
+            _add_guard_requirement(
+                graph,
+                entry,
+                data,
+                sink,
+                _evidence(snapshot.prompt, guard_match),
+            )
+    return multidigraph_to_record(graph, prompt_id=snapshot.prompt_id)
+
+
+def extract_prompt_tsg(prompt: PromptRecord) -> PromptTSGRecord:
+    """Snapshot one prompt and emit only finite reviewed graph evidence."""
+    try:
+        snapshot = _snapshot_prompt(prompt)
+    except _InvalidInput:
+        prompt = cast(PromptRecord, None)
+        raise _invalid_error() from None
+    except Exception:
+        prompt = cast(PromptRecord, None)
+        raise _internal_error() from None
+    try:
+        result = _extract(snapshot)
+    except Exception:
+        prompt = cast(PromptRecord, None)
+        snapshot = cast(PromptRecord, None)
+        raise _internal_error() from None
+    return result
+
+
+__all__ = ["extract_prompt_tsg"]

@@ -26,11 +26,7 @@ from secaware.schema.tsg import (
     TSGScalar,
     TSG_SCHEMA_VERSION,
 )
-
-
-# Task 3 replaces these fixed catalog versions with the centralized catalog constants.
-ONTOLOGY_VERSION = "1.0"
-MOTIF_VERSION = "1.0"
+from secaware.tsg.catalog import MOTIF_VERSION, ONTOLOGY_VERSION
 
 _BUILDER_NODE_FIELDS = frozenset({"node_type", "label", "attributes"})
 _COMMITTED_NODE_FIELDS = _BUILDER_NODE_FIELDS | {"semantic_key_sha256"}
