@@ -85,6 +85,21 @@ class _BoundedView:
             yield self.item_factory(index)
 
 
+class _FailingIteratorView:
+    def __init__(self, exception_type: type[Exception], sentinel: str) -> None:
+        self.exception_type = exception_type
+        self.sentinel = sentinel
+
+    def __call__(self, *_args, **_kwargs):
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        raise self.exception_type(self.sentinel)
+
+
 def _view_probe_graph(
     *,
     node_count: int,
@@ -508,6 +523,39 @@ def test_inconsistent_views_are_bounded_and_rejected_as_input(path: str, dimensi
         assert edge_view.consumed == 0
     else:
         assert edge_view.consumed == MAX_TSG_EDGES + 1
+
+
+@pytest.mark.parametrize("dimension", ["nodes", "edges"])
+@pytest.mark.parametrize("exception_type", [RuntimeError, ValueError, TypeError])
+def test_iterator_failures_are_internal_and_sanitized(
+    dimension: str, exception_type: type[Exception]
+) -> None:
+    sentinel = "PROMPT-ITERATOR-DEFECT-DO-NOT-LEAK"
+    valid_nodes = _BoundedView(
+        count=1,
+        item_factory=lambda _index: (
+            sentinel,
+            {"node_type": "source", "label": "source", "attributes": {}},
+        ),
+        maximum_consumption=1,
+    )
+    empty_edges = _BoundedView(
+        count=0,
+        item_factory=lambda _index: None,
+        maximum_consumption=0,
+    )
+    failing = _FailingIteratorView(exception_type, sentinel)
+    graph = _view_probe_graph(
+        node_count=1,
+        edge_count=1 if dimension == "edges" else 0,
+        node_view=failing if dimension == "nodes" else valid_nodes,
+        edge_view=failing if dimension == "edges" else empty_edges,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        graph_sha256(graph)
+
+    _assert_sanitized_internal_error(exc_info.value, sentinel)
 
 
 def test_exact_graph_size_limits_succeed() -> None:

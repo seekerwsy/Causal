@@ -292,9 +292,11 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
 
     try:
         graph_attributes = graph.graph
-        raw_nodes = tuple(islice(graph.nodes(data=True), MAX_TSG_NODES + 1))
+        node_view = graph.nodes(data=True)
+        node_iterator = iter(node_view)
     except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
         raise _InvalidInput from None
+    raw_nodes = tuple(islice(node_iterator, MAX_TSG_NODES + 1))
     if (
         type(graph_attributes) is not dict
         or graph_attributes
@@ -305,9 +307,11 @@ def _canonicalize_graph(graph: nx.MultiDiGraph) -> tuple[tuple[TSGNode, ...], tu
         raise _InvalidInput from None
 
     try:
-        raw_edges = tuple(islice(graph.edges(keys=True, data=True), MAX_TSG_EDGES + 1))
+        edge_view = graph.edges(keys=True, data=True)
+        edge_iterator = iter(edge_view)
     except (nx.NetworkXError, KeyError, TypeError, ValueError, UnicodeError):
         raise _InvalidInput from None
+    raw_edges = tuple(islice(edge_iterator, MAX_TSG_EDGES + 1))
     if (
         len(raw_edges) != edge_count
         or len(raw_edges) > MAX_TSG_EDGES
