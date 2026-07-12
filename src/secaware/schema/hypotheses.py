@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,7 +26,7 @@ class HypothesisRecord(BaseModel):
     motif_id: MotifId
     requirement_label: str
     guard_label: str
-    expected_direction: str
+    expected_direction: Literal["risk_down_when_added"]
     scope: dict[str, str] = Field(default_factory=dict)
     patch_operator: str
     discovery_score: UnitIntervalScore = 0.0

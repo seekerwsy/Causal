@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TypeVar, cast
 
@@ -24,9 +25,21 @@ class _InvalidContract(Exception):
     pass
 
 
+class _InvalidTSGContract(Exception):
+    pass
+
+
 class _FailureKind(Enum):
     TSG_INVALID = "tsg_invalid"
     ANALYSIS_INVALID = "analysis_invalid"
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedIntervention:
+    prompt: PromptRecord
+    hypothesis: HypothesisRecord
+    original_tsg: PromptTSGRecord = field(repr=False)
+    original_graph: nx.MultiDiGraph = field(repr=False, compare=False)
 
 
 def _tsg_error() -> SecAwareError:
@@ -55,6 +68,16 @@ def _strict_snapshot(model_type: type[_ModelT], value: object) -> _ModelT:
         raise _InvalidContract from None
 
 
+def _strict_tsg_snapshot(value: object) -> PromptTSGRecord:
+    if type(value) is not PromptTSGRecord or not model_shape_is_intact(value):
+        raise _InvalidTSGContract from None
+    try:
+        payload = value.model_dump(mode="python", round_trip=True, warnings=False)
+        return PromptTSGRecord.model_validate(payload, strict=True)
+    except (TypeError, ValueError, ValidationError):
+        raise _InvalidTSGContract from None
+
+
 def _validate_hypothesis_contract(hypothesis: HypothesisRecord) -> None:
     if type(hypothesis.factor_type) is not FactorType:
         raise _InvalidContract from None
@@ -67,6 +90,7 @@ def _validate_hypothesis_contract(hypothesis: HypothesisRecord) -> None:
         or hypothesis.requirement_label != spec.requirement_label
         or hypothesis.guard_label != spec.guard_label
         or hypothesis.patch_operator != spec.patch_operator
+        or hypothesis.expected_direction != "risk_down_when_added"
     ):
         raise _InvalidContract from None
 
@@ -79,6 +103,29 @@ def _snapshot_intervention_contract(
     hypothesis_snapshot = _strict_snapshot(HypothesisRecord, hypothesis)
     _validate_hypothesis_contract(hypothesis_snapshot)
     return prompt_snapshot, hypothesis_snapshot
+
+
+def _same_canonical_record(one: PromptTSGRecord, two: PromptTSGRecord) -> bool:
+    return one.model_dump_json() == two.model_dump_json()
+
+
+def _prepare_intervention(
+    prompt: PromptRecord,
+    original_tsg: PromptTSGRecord,
+    hypothesis: HypothesisRecord,
+) -> PreparedIntervention:
+    prompt_snapshot, hypothesis_snapshot = _snapshot_intervention_contract(prompt, hypothesis)
+    tsg_snapshot = _strict_tsg_snapshot(original_tsg)
+    original_graph = record_to_multidigraph(tsg_snapshot)
+    expected_tsg = extract_prompt_tsg(prompt_snapshot)
+    if not _same_canonical_record(tsg_snapshot, expected_tsg):
+        raise _InvalidContract from None
+    return PreparedIntervention(
+        prompt=prompt_snapshot,
+        hypothesis=hypothesis_snapshot,
+        original_tsg=tsg_snapshot,
+        original_graph=nx.freeze(original_graph),
+    )
 
 
 def _semantic_labels(graph: nx.MultiDiGraph, node_type: NodeType) -> tuple[str, ...]:
@@ -111,27 +158,20 @@ def _has_non_target_change(
     )
 
 
-def _validate_impl(
-    prompt: PromptRecord,
-    original_tsg: PromptTSGRecord,
+def _validate_prepared(
+    prepared: PreparedIntervention,
     counterfactual_prompt: str,
-    hypothesis: HypothesisRecord,
 ) -> dict[str, bool]:
-    prompt_snapshot, hypothesis_snapshot = _snapshot_intervention_contract(prompt, hypothesis)
-
-    original_graph = record_to_multidigraph(original_tsg)
-    if prompt_snapshot.prompt_id != original_tsg.prompt_id:
-        raise _InvalidContract from None
-    if type(counterfactual_prompt) is not str:
+    if type(prepared) is not PreparedIntervention or type(counterfactual_prompt) is not str:
         raise _InvalidContract from None
     try:
         counterfactual_record = PromptRecord.model_validate(
             {
-                "prompt_id": prompt_snapshot.prompt_id,
-                "split": prompt_snapshot.split,
-                "language": prompt_snapshot.language,
-                "task_family": prompt_snapshot.task_family,
-                "cwe": prompt_snapshot.cwe,
+                "prompt_id": prepared.prompt.prompt_id,
+                "split": prepared.prompt.split,
+                "language": prepared.prompt.language,
+                "task_family": prepared.prompt.task_family,
+                "cwe": prepared.prompt.cwe,
                 "prompt": counterfactual_prompt,
             },
             strict=True,
@@ -141,28 +181,24 @@ def _validate_impl(
 
     counterfactual_tsg = extract_prompt_tsg(counterfactual_record)
     counter_graph = record_to_multidigraph(counterfactual_tsg)
-    if counterfactual_tsg.prompt_id != prompt_snapshot.prompt_id:
+    if counterfactual_tsg.prompt_id != prepared.prompt.prompt_id:
         raise _InvalidContract from None
 
-    original_factors = dict(factor_query_vector(original_graph))
+    original_factors = dict(factor_query_vector(prepared.original_graph))
     counter_factors = dict(factor_query_vector(counter_graph))
-    original_motifs = dict(motif_query_vector(original_graph))
+    original_motifs = dict(motif_query_vector(prepared.original_graph))
     counter_motifs = dict(motif_query_vector(counter_graph))
-    target_factor = hypothesis_snapshot.factor_type
-    target_motif = hypothesis_snapshot.motif_id
+    target_factor = prepared.hypothesis.factor_type
+    target_motif = prepared.hypothesis.motif_id
 
     counter_target_valid = counter_factors[target_factor] and not counter_motifs[target_motif]
-    target_pair_changed = (
-        original_factors[target_factor] != counter_factors[target_factor]
-        or original_motifs[target_motif] != counter_motifs[target_motif]
-    )
     semantic_valid = (
         (
-            prompt_snapshot.prompt_id,
-            prompt_snapshot.split,
-            prompt_snapshot.language,
-            prompt_snapshot.task_family,
-            prompt_snapshot.cwe,
+            prepared.prompt.prompt_id,
+            prepared.prompt.split,
+            prepared.prompt.language,
+            prepared.prompt.task_family,
+            prepared.prompt.cwe,
         )
         == (
             counterfactual_record.prompt_id,
@@ -171,15 +207,19 @@ def _validate_impl(
             counterfactual_record.task_family,
             counterfactual_record.cwe,
         )
-        and _semantic_labels(original_graph, NodeType.TASK_OPERATION)
+        and _semantic_labels(prepared.original_graph, NodeType.TASK_OPERATION)
         == _semantic_labels(counter_graph, NodeType.TASK_OPERATION)
-        and _semantic_labels(original_graph, NodeType.SINK)
+        and _semantic_labels(prepared.original_graph, NodeType.SINK)
         == _semantic_labels(counter_graph, NodeType.SINK)
     )
     return {
         "round_trip_valid": bool(counter_target_valid),
         "semantic_valid": bool(semantic_valid),
-        "target_changed": bool(counter_target_valid and target_pair_changed),
+        "target_changed": bool(
+            not original_factors[target_factor]
+            and counter_factors[target_factor]
+            and counter_target_valid
+        ),
         "side_effect": _has_non_target_change(
             original_factors,
             counter_factors,
@@ -198,7 +238,10 @@ def _try_validate(
     hypothesis: HypothesisRecord,
 ) -> dict[str, bool] | _FailureKind:
     try:
-        return _validate_impl(prompt, original_tsg, counterfactual_prompt, hypothesis)
+        prepared = _prepare_intervention(prompt, original_tsg, hypothesis)
+        return _validate_prepared(prepared, counterfactual_prompt)
+    except _InvalidTSGContract:
+        return _FailureKind.TSG_INVALID
     except _InvalidContract:
         return _FailureKind.ANALYSIS_INVALID
     except SecAwareError as error:

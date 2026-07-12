@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from secaware.discovery.candidate_enum import FACTOR_SPECS
 from secaware.errors import ErrorCode, SecAwareError
@@ -128,7 +129,8 @@ def test_operator_sanitizes_validation_failures_without_frame_context(
     def fail(*_args, **_kwargs):
         raise failure
 
-    monkeypatch.setattr(operators, "validate_intervention", fail)
+    monkeypatch.setattr(operators, "validate_intervention", fail, raising=False)
+    monkeypatch.setattr(operators, "_validate_prepared", fail, raising=False)
     with pytest.raises(SecAwareError) as exc_info:
         apply_intervention(prompt, extract_prompt_tsg(prompt), hypothesis)
 
@@ -187,15 +189,19 @@ def test_operator_prevalidates_forged_hypothesis_before_template_lookup(
     hypothesis = _hypothesis(FactorType.PATH_NORMALIZATION).model_copy(
         update={field: value, "hypothesis_id": f"h-{_SENTINEL}"}
     )
+    patch_called = False
 
-    def must_not_run(*_args, **_kwargs):
-        raise AssertionError("template lookup ran before contract validation")
+    def observe_patch(*_args, **_kwargs):
+        nonlocal patch_called
+        patch_called = True
+        return prompt.prompt
 
-    monkeypatch.setattr(operators, "verbalize_counterfactual", must_not_run)
+    monkeypatch.setattr(operators, "verbalize_counterfactual", observe_patch)
     with pytest.raises(SecAwareError) as exc_info:
         apply_intervention(prompt, extract_prompt_tsg(prompt), hypothesis)
 
     _assert_sanitized_operator_error(exc_info.value, ErrorCode.ANALYSIS_INVALID)
+    assert patch_called is False
 
 
 @pytest.mark.parametrize(
@@ -223,15 +229,19 @@ def test_operator_prevalidates_invalid_exact_and_subclass_models(
             pass
 
         prompt = PromptSubclass.model_validate(prompt.model_dump())
+    patch_called = False
 
-    def must_not_run(*_args, **_kwargs):
-        raise AssertionError("template lookup ran before contract validation")
+    def observe_patch(*_args, **_kwargs):
+        nonlocal patch_called
+        patch_called = True
+        return _sentinel_prompt().prompt
 
-    monkeypatch.setattr(operators, "verbalize_counterfactual", must_not_run)
+    monkeypatch.setattr(operators, "verbalize_counterfactual", observe_patch)
     with pytest.raises(SecAwareError) as exc_info:
         apply_intervention(prompt, extract_prompt_tsg(_sentinel_prompt()), hypothesis)
 
     _assert_sanitized_operator_error(exc_info.value, ErrorCode.ANALYSIS_INVALID)
+    assert patch_called is False
 
 
 def test_operator_validates_prompt_graph_before_template_lookup(
@@ -240,15 +250,161 @@ def test_operator_validates_prompt_graph_before_template_lookup(
     prompt = _sentinel_prompt()
     original = extract_prompt_tsg(prompt)
     forged = original.model_copy(update={"shadow": {**original.shadow, "graph.node_count": 999}})
+    patch_called = False
 
-    def must_not_run(*_args, **_kwargs):
-        raise AssertionError("template lookup ran before prompt graph validation")
+    def observe_patch(*_args, **_kwargs):
+        nonlocal patch_called
+        patch_called = True
+        return prompt.prompt
 
-    monkeypatch.setattr(operators, "verbalize_counterfactual", must_not_run)
+    monkeypatch.setattr(operators, "verbalize_counterfactual", observe_patch)
     with pytest.raises(SecAwareError) as exc_info:
         apply_intervention(prompt, forged, _hypothesis(FactorType.PATH_NORMALIZATION))
 
     _assert_sanitized_operator_error(exc_info.value, ErrorCode.TSG_INVALID)
+    assert patch_called is False
+
+
+def test_operator_uses_prepared_graph_snapshot_when_caller_mutates_during_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = _sentinel_prompt()
+    original = extract_prompt_tsg(prompt)
+    real_verbalizer = operators.verbalize_counterfactual
+
+    def mutate_then_verbalize(original_prompt: str, factor_type: FactorType) -> str:
+        original.__dict__["nodes"] = ()
+        return real_verbalizer(original_prompt, factor_type)
+
+    monkeypatch.setattr(operators, "verbalize_counterfactual", mutate_then_verbalize)
+
+    intervention = apply_intervention(
+        prompt,
+        original,
+        _hypothesis(FactorType.PATH_NORMALIZATION),
+    )
+
+    assert intervention.round_trip_valid is True
+    assert intervention.target_changed is True
+
+
+def test_operator_decodes_supplied_original_graph_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = _sentinel_prompt()
+    original = extract_prompt_tsg(prompt)
+    original_digest = original.graph_sha256
+    original_decodes = 0
+    real_validator_decode = validator.record_to_multidigraph
+
+    def counted(record):
+        nonlocal original_decodes
+        if record.graph_sha256 == original_digest:
+            original_decodes += 1
+        return real_validator_decode(record)
+
+    monkeypatch.setattr(validator, "record_to_multidigraph", counted)
+    monkeypatch.setattr(operators, "record_to_multidigraph", counted, raising=False)
+
+    intervention = apply_intervention(
+        prompt,
+        original,
+        _hypothesis(FactorType.PATH_NORMALIZATION),
+    )
+
+    assert intervention.round_trip_valid is True
+    assert original_decodes == 1
+
+
+@pytest.mark.parametrize("direction", ("risk_up_when_added", "garbage"))
+def test_operator_rejects_forged_causal_direction_before_patch(
+    monkeypatch: pytest.MonkeyPatch,
+    direction: str,
+) -> None:
+    prompt = _sentinel_prompt()
+    hypothesis = _hypothesis(FactorType.PATH_NORMALIZATION).model_copy(
+        update={"expected_direction": direction}
+    )
+    patch_called = False
+
+    def observe_patch(*_args, **_kwargs):
+        nonlocal patch_called
+        patch_called = True
+        return prompt.prompt
+
+    monkeypatch.setattr(operators, "verbalize_counterfactual", observe_patch)
+    with pytest.raises(SecAwareError) as exc_info:
+        apply_intervention(prompt, extract_prompt_tsg(prompt), hypothesis)
+
+    _assert_sanitized_operator_error(exc_info.value, ErrorCode.ANALYSIS_INVALID)
+    assert patch_called is False
+
+
+def test_hypothesis_schema_rejects_invalid_causal_direction() -> None:
+    payload = _hypothesis(FactorType.PATH_NORMALIZATION).model_dump()
+
+    with pytest.raises(ValidationError):
+        HypothesisRecord.model_validate({**payload, "expected_direction": "risk_up_when_added"})
+
+
+@pytest.mark.parametrize("counterfactual", ("", "   ", None))
+def test_patch_failure_returns_record_without_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    counterfactual: str | None,
+) -> None:
+    prompt = _sentinel_prompt()
+    returned = prompt.prompt if counterfactual is None else counterfactual
+
+    def must_not_validate(*_args, **_kwargs):
+        raise AssertionError("validator called for failed patch")
+
+    monkeypatch.setattr(operators, "verbalize_counterfactual", lambda *_args: returned)
+    monkeypatch.setattr(operators, "validate_intervention", must_not_validate, raising=False)
+    monkeypatch.setattr(operators, "_validate_prepared", must_not_validate, raising=False)
+    intervention = apply_intervention(
+        prompt,
+        extract_prompt_tsg(prompt),
+        _hypothesis(FactorType.PATH_NORMALIZATION),
+    )
+
+    assert intervention.patch_success is False
+    assert intervention.failure_reason is operators.FailureReason.PATCH_FAILED
+    assert intervention.counterfactual_prompt == returned
+    assert intervention.round_trip_valid is False
+    assert intervention.semantic_valid is False
+    assert intervention.target_changed is False
+    assert intervention.side_effect is False
+
+
+@pytest.mark.parametrize(
+    ("factor_type", "guard_term"),
+    tuple(
+        (factor_type, term)
+        for factor_type in FactorType
+        for term in prompt_ontology_entry(factor_type).guard_terms
+    ),
+)
+def test_existing_reviewed_guard_is_idempotent_patch_failure(
+    factor_type: FactorType,
+    guard_term: str,
+) -> None:
+    entry = prompt_ontology_entry(factor_type)
+    original_text = f"Implement {entry.domain_terms[0]}. Already {guard_term}."
+    prompt = PromptRecord(
+        prompt_id=f"p-idempotent-{factor_type.value}",
+        split="confirm",
+        language="python",
+        task_family=FACTOR_SPECS[factor_type].task_family,
+        cwe=entry.cwe,
+        prompt=original_text,
+    )
+
+    assert verbalize_counterfactual(original_text, factor_type) == original_text
+    intervention = apply_intervention(prompt, extract_prompt_tsg(prompt), _hypothesis(factor_type))
+
+    assert intervention.patch_success is False
+    assert intervention.counterfactual_prompt == original_text
+    assert intervention.failure_reason is operators.FailureReason.PATCH_FAILED
 
 
 @pytest.mark.parametrize("factor_type", tuple(FactorType))

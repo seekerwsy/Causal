@@ -21,6 +21,7 @@ from secaware.schema.tsg import (
     PromptTSGRecord,
 )
 from secaware.tsg.catalog import ONTOLOGY_VERSION, PROMPT_TSG_CATALOG, PromptOntologyEntry
+from secaware.tsg.evidence import first_reviewed_term_match
 from secaware.tsg.graph import multidigraph_to_record
 
 
@@ -93,20 +94,6 @@ def _snapshot_prompt(value: object) -> PromptRecord:
     ):
         raise _InvalidInput from None
     return snapshot
-
-
-def _first_match(text: str, terms: tuple[str, ...]) -> tuple[int, int] | None:
-    earliest: tuple[int, int, int] | None = None
-    for term_index, term in enumerate(terms):
-        pattern = rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])"
-        match = re.search(pattern, text, flags=re.IGNORECASE | re.ASCII)
-        if match is not None:
-            candidate = (match.start(), match.end(), term_index)
-            earliest = candidate if earliest is None else min(earliest, candidate)
-    if earliest is None:
-        return None
-    start, end, _ = earliest
-    return start, end
 
 
 def _evidence(text: str, match: tuple[int, int]) -> dict[str, str | int]:
@@ -255,11 +242,11 @@ def _extract(snapshot: PromptRecord) -> PromptTSGRecord:
         return multidigraph_to_record(graph, prompt_id=snapshot.prompt_id)
 
     for entry in PROMPT_TSG_CATALOG:
-        domain_match = _first_match(snapshot.prompt, entry.domain_terms)
+        domain_match = first_reviewed_term_match(snapshot.prompt, entry.domain_terms)
         if domain_match is None:
             continue
         data, sink = _add_domain_flow(graph, entry, _evidence(snapshot.prompt, domain_match))
-        guard_match = _first_match(snapshot.prompt, entry.guard_terms)
+        guard_match = first_reviewed_term_match(snapshot.prompt, entry.guard_terms)
         if guard_match is not None:
             _add_guard_requirement(
                 graph,

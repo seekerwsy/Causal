@@ -5,15 +5,17 @@ from typing import cast
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.intervention.validator import (
-    _snapshot_intervention_contract,
-    validate_intervention,
+    PreparedIntervention,
+    _InvalidContract,
+    _InvalidTSGContract,
+    _prepare_intervention,
+    _validate_prepared,
 )
 from secaware.intervention.verbalizer import TEMPLATES, verbalize_counterfactual
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.interventions import FailureReason, InterventionRecord
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
-from secaware.tsg.graph import record_to_multidigraph
 
 
 class _ApplyFailure(Enum):
@@ -37,27 +39,46 @@ def _analysis_error() -> SecAwareError:
     )
 
 
+def _patch_failed_record(
+    prepared: PreparedIntervention,
+    counterfactual_prompt: str,
+) -> InterventionRecord:
+    return InterventionRecord(
+        intervention_id=(f"int_{prepared.prompt.prompt_id}_{prepared.hypothesis.hypothesis_id}"),
+        prompt_id=prepared.prompt.prompt_id,
+        hypothesis_id=prepared.hypothesis.hypothesis_id,
+        factor_type=prepared.hypothesis.factor_type,
+        operator=prepared.hypothesis.patch_operator,
+        expected_direction="risk_down",
+        original_prompt=prepared.prompt.prompt,
+        counterfactual_prompt=counterfactual_prompt,
+        patch_success=False,
+        round_trip_valid=False,
+        semantic_valid=False,
+        target_changed=False,
+        side_effect=False,
+        failure_reason=FailureReason.PATCH_FAILED,
+    )
+
+
 def _apply_impl(
     prompt: PromptRecord,
     prompt_tsg: PromptTSGRecord,
     hypothesis: HypothesisRecord,
 ) -> InterventionRecord:
-    prompt_snapshot, hypothesis_snapshot = _snapshot_intervention_contract(prompt, hypothesis)
-    record_to_multidigraph(prompt_tsg)
-    if prompt_snapshot.prompt_id != prompt_tsg.prompt_id:
-        raise ValueError("invalid intervention coordinates")
+    prepared = _prepare_intervention(prompt, prompt_tsg, hypothesis)
 
-    intervention_id = f"int_{prompt_snapshot.prompt_id}_{hypothesis_snapshot.hypothesis_id}"
-    if hypothesis_snapshot.factor_type not in TEMPLATES:
+    intervention_id = f"int_{prepared.prompt.prompt_id}_{prepared.hypothesis.hypothesis_id}"
+    if prepared.hypothesis.factor_type not in TEMPLATES:
         return InterventionRecord(
             intervention_id=intervention_id,
-            prompt_id=prompt_snapshot.prompt_id,
-            hypothesis_id=hypothesis_snapshot.hypothesis_id,
-            factor_type=hypothesis_snapshot.factor_type,
-            operator=hypothesis_snapshot.patch_operator,
+            prompt_id=prepared.prompt.prompt_id,
+            hypothesis_id=prepared.hypothesis.hypothesis_id,
+            factor_type=prepared.hypothesis.factor_type,
+            operator=prepared.hypothesis.patch_operator,
             expected_direction="risk_down",
-            original_prompt=prompt_snapshot.prompt,
-            counterfactual_prompt=prompt_snapshot.prompt,
+            original_prompt=prepared.prompt.prompt,
+            counterfactual_prompt=prepared.prompt.prompt,
             patch_success=False,
             round_trip_valid=False,
             semantic_valid=False,
@@ -67,22 +88,18 @@ def _apply_impl(
         )
 
     counterfactual_prompt = verbalize_counterfactual(
-        prompt_snapshot.prompt,
-        hypothesis_snapshot.factor_type,
+        prepared.prompt.prompt,
+        prepared.hypothesis.factor_type,
     )
     patch_success = bool(
-        counterfactual_prompt.strip() and counterfactual_prompt != prompt_snapshot.prompt
+        counterfactual_prompt.strip() and counterfactual_prompt != prepared.prompt.prompt
     )
-    validation = validate_intervention(
-        prompt_snapshot,
-        prompt_tsg,
-        counterfactual_prompt,
-        hypothesis_snapshot,
-    )
-    failure_reason = None
     if not patch_success:
-        failure_reason = FailureReason.PATCH_FAILED
-    elif not validation["round_trip_valid"]:
+        return _patch_failed_record(prepared, counterfactual_prompt)
+
+    validation = _validate_prepared(prepared, counterfactual_prompt)
+    failure_reason = None
+    if not validation["round_trip_valid"]:
         failure_reason = FailureReason.ROUND_TRIP_FAILED
     elif not validation["semantic_valid"]:
         failure_reason = FailureReason.SEMANTIC_DRIFT
@@ -93,12 +110,12 @@ def _apply_impl(
 
     return InterventionRecord(
         intervention_id=intervention_id,
-        prompt_id=prompt_snapshot.prompt_id,
-        hypothesis_id=hypothesis_snapshot.hypothesis_id,
-        factor_type=hypothesis_snapshot.factor_type,
-        operator=hypothesis_snapshot.patch_operator,
+        prompt_id=prepared.prompt.prompt_id,
+        hypothesis_id=prepared.hypothesis.hypothesis_id,
+        factor_type=prepared.hypothesis.factor_type,
+        operator=prepared.hypothesis.patch_operator,
         expected_direction="risk_down",
-        original_prompt=prompt_snapshot.prompt,
+        original_prompt=prepared.prompt.prompt,
         counterfactual_prompt=counterfactual_prompt,
         patch_success=patch_success,
         round_trip_valid=validation["round_trip_valid"],
@@ -116,6 +133,10 @@ def _try_apply(
 ) -> InterventionRecord | _ApplyFailure:
     try:
         return _apply_impl(prompt, prompt_tsg, hypothesis)
+    except _InvalidTSGContract:
+        return _ApplyFailure.TSG_INVALID
+    except _InvalidContract:
+        return _ApplyFailure.ANALYSIS_INVALID
     except SecAwareError as error:
         if error.code is ErrorCode.TSG_INVALID:
             return _ApplyFailure.TSG_INVALID

@@ -2,6 +2,7 @@ from types import MappingProxyType
 
 from secaware.schema.hypotheses import FactorType
 from secaware.tsg.catalog import prompt_ontology_entry
+from secaware.tsg.evidence import first_reviewed_term_match
 
 
 TEMPLATES = MappingProxyType(
@@ -40,4 +41,6 @@ def verbalize_counterfactual(original_prompt: str, factor_type: FactorType) -> s
     if type(original_prompt) is not str or type(factor_type) is not FactorType:
         raise KeyError("unsupported intervention factor")
     entry = prompt_ontology_entry(factor_type)
+    if first_reviewed_term_match(original_prompt, entry.guard_terms) is not None:
+        return original_prompt
     return f"{original_prompt} {TEMPLATES[factor_type]} {entry.guard_terms[0]}."

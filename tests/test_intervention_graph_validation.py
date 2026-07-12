@@ -113,6 +113,56 @@ def _disconnected_path_guard_record(prompt_id: str):
     return multidigraph_to_record(graph, prompt_id=prompt_id)
 
 
+def _path_state_record(
+    prompt_id: str,
+    *,
+    factor: bool,
+    motif: bool,
+):
+    graph = nx.MultiDiGraph()
+    graph.add_node("operation", node_type=NodeType.TASK_OPERATION, label="open_file", attributes={})
+    graph.add_node(
+        "source", node_type=NodeType.SOURCE, label="path_normalization_source", attributes={}
+    )
+    graph.add_node("data", node_type=NodeType.DATA_OBJECT, label="user_path", attributes={})
+    graph.add_node("sink", node_type=NodeType.SINK, label="file_open", attributes={})
+    graph.add_edge("operation", "data", edge_type=EdgeType.OPERATES_ON, attributes={})
+    if motif or factor:
+        graph.add_edge("source", "data", edge_type=EdgeType.SOURCE_OF, attributes={})
+        graph.add_edge("data", "sink", edge_type=EdgeType.FLOWS_TO, attributes={})
+    if factor:
+        graph.add_node(
+            "requirement",
+            node_type=NodeType.PROMPT_REQUIREMENT,
+            label=PATH_SPEC.requirement_label,
+            attributes={},
+        )
+        graph.add_node(
+            "guard",
+            node_type=NodeType.GUARD,
+            label=PATH_SPEC.guard_label,
+            attributes={},
+        )
+        graph.add_edge("requirement", "guard", edge_type=EdgeType.REQUIRES, attributes={})
+        if not motif:
+            graph.add_edge("data", "guard", edge_type=EdgeType.GUARDED_BY, attributes={})
+            graph.add_edge("sink", "guard", edge_type=EdgeType.GUARDED_BY, attributes={})
+    return multidigraph_to_record(graph, prompt_id=prompt_id)
+
+
+def _route_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    original_text: str,
+    original_record: object,
+    counter_record: object,
+) -> None:
+    def routed(candidate: PromptRecord):
+        return original_record if candidate.prompt == original_text else counter_record
+
+    monkeypatch.setattr(validator, "extract_prompt_tsg", routed)
+
+
 def test_intervention_target_and_side_effect_ignore_shadow() -> None:
     original_prompt = _path_prompt_without_guard()
     original = extract_prompt_tsg(original_prompt)
@@ -156,7 +206,12 @@ def test_disconnected_guard_does_not_count_as_valid_round_trip(
     prompt = _path_prompt_without_guard()
     original = extract_prompt_tsg(prompt)
     disconnected = _disconnected_path_guard_record(prompt.prompt_id)
-    monkeypatch.setattr(validator, "extract_prompt_tsg", lambda _prompt: disconnected)
+    _route_extraction(
+        monkeypatch,
+        original_text=prompt.prompt,
+        original_record=original,
+        counter_record=disconnected,
+    )
 
     result = validate_intervention(prompt, original, _path_prompt_text_with_guard(), _hypothesis())
 
@@ -203,7 +258,12 @@ def test_semantic_validation_compares_complete_operation_and_sink_multisets(
         operation_labels=counter_operations,
         sink_labels=counter_sinks,
     )
-    monkeypatch.setattr(validator, "extract_prompt_tsg", lambda _prompt: counter)
+    _route_extraction(
+        monkeypatch,
+        original_text=prompt.prompt,
+        original_record=original,
+        counter_record=counter,
+    )
 
     result = validate_intervention(prompt, original, _path_prompt_text_with_guard(), _hypothesis())
 
@@ -224,7 +284,12 @@ def test_semantic_identity_ignores_graph_node_ids_and_insertion_order(
         operation_labels=("alpha", "beta"),
         sink_labels=("zeta", "zeta"),
     )
-    monkeypatch.setattr(validator, "extract_prompt_tsg", lambda _prompt: counter)
+    _route_extraction(
+        monkeypatch,
+        original_text=prompt.prompt,
+        original_record=original,
+        counter_record=counter,
+    )
 
     result = validate_intervention(prompt, original, _path_prompt_text_with_guard(), _hypothesis())
 
@@ -281,7 +346,12 @@ def test_canonical_graph_change_updates_validation_without_shadow_authority(
     )
     graph.remove_edge(*requires)
     changed = multidigraph_to_record(graph, prompt_id=prompt.prompt_id)
-    monkeypatch.setattr(validator, "extract_prompt_tsg", lambda _prompt: changed)
+    _route_extraction(
+        monkeypatch,
+        original_text=prompt.prompt,
+        original_record=original,
+        counter_record=changed,
+    )
 
     result = validate_intervention(prompt, original, _path_prompt_text_with_guard(), _hypothesis())
 
@@ -325,6 +395,82 @@ def test_prompt_and_graph_coordinates_must_match() -> None:
 
     assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
     assert exc_info.value.details == {}
+
+
+def test_same_prompt_id_graph_from_different_prompt_is_analysis_invalid() -> None:
+    prompt = _path_prompt_without_guard("p-same-id")
+    wrong_prompt = PromptRecord.model_validate(
+        {
+            **prompt.model_dump(),
+            "prompt": "Create a Python helper that builds a SQL query.",
+        }
+    )
+    wrong_graph = extract_prompt_tsg(wrong_prompt)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_intervention(prompt, wrong_graph, _path_prompt_text_with_guard(), _hypothesis())
+
+    assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
+    assert exc_info.value.details == {}
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    (
+        "original_factor",
+        "original_motif",
+        "counter_factor",
+        "counter_motif",
+        "round_trip",
+        "target_changed",
+    ),
+    (
+        (False, True, True, False, True, True),
+        (True, True, True, False, True, False),
+        (True, False, True, False, True, False),
+        (False, True, False, False, False, False),
+        (False, False, True, False, True, True),
+    ),
+)
+def test_target_changed_requires_exact_false_to_true_factor_direction(
+    monkeypatch: pytest.MonkeyPatch,
+    original_factor: bool,
+    original_motif: bool,
+    counter_factor: bool,
+    counter_motif: bool,
+    round_trip: bool,
+    target_changed: bool,
+) -> None:
+    prompt = PromptRecord(
+        prompt_id="p-target-direction",
+        split="confirm",
+        language="python",
+        task_family="path_handling",
+        cwe="CWE-22",
+        prompt="original target graph",
+    )
+    original = _path_state_record(
+        prompt.prompt_id,
+        factor=original_factor,
+        motif=original_motif,
+    )
+    counter = _path_state_record(
+        prompt.prompt_id,
+        factor=counter_factor,
+        motif=counter_motif,
+    )
+    _route_extraction(
+        monkeypatch,
+        original_text=prompt.prompt,
+        original_record=original,
+        counter_record=counter,
+    )
+
+    result = validate_intervention(prompt, original, "counter target graph", _hypothesis())
+
+    assert result["round_trip_valid"] is round_trip
+    assert result["target_changed"] is target_changed
 
 
 @pytest.mark.parametrize("kind", ("prompt", "hypothesis", "tsg"))
