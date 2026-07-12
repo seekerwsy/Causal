@@ -83,17 +83,49 @@ The intervention is deliberately hybrid:
 
 1. the selected hypothesis and authoritative Prompt TSG choose one exact target feature and
    `add`/`remove` operation;
-2. the finite intervention catalog maps that typed operation to one deterministic text transform;
-3. the operator modifies the prompt text, because prompt text is what the code-generation model
-   actually receives;
+2. the finite intervention catalog constructs a bounded executor request for that typed operation;
+3. the run-locked executor modifies the prompt text, because prompt text is what the code-generation
+   model actually receives;
 4. the modified text is independently re-extracted into Prompt TSG 2.1;
 5. graph comparison must prove the exact family-specific target delta and reject every disallowed
    cross-family change.
 
-M4 does not edit a graph and then ask an LLM to translate the graph back into text. Such a translator
-would introduce an uncontrolled second model, wording drift, and an additional causal treatment.
-The deterministic catalog verbalizer is the only graph-to-language mapping, and graph round-trip
-validation remains authoritative for whether the text intervention succeeded.
+M4 supports finite execution modes and executors:
+
+```text
+InterventionMode = TEXT_NATIVE | GRAPH_NATIVE
+InterventionExecutor = DETERMINISTIC | LLM
+```
+
+`TEXT_NATIVE` asks the chosen executor to apply the FeatureSpec directly to the original text and
+derives the realized graph delta afterward. `GRAPH_NATIVE` first applies the typed patch to an
+immutable working copy of the source graph, records the intended graph delta, and asks the executor
+to render that delta into text. It then requires intended and realized graph deltas to match exactly.
+Neither mode mutates the committed source graph.
+
+The deterministic executor uses finite, reviewed, syntax-aware templates. The LLM executor may
+improve fluency, but it is only a text-edit implementation mechanism. It cannot choose the feature,
+operation, graph patch, expected direction, eligibility, or outcome. It receives no generated code,
+Oracle record, security label, or post-treatment evidence. It has no tools and returns one strict,
+bounded prompt candidate.
+
+The authoritative validator—not the LLM—decides whether an intervention succeeded. It independently
+re-extracts Prompt TSG, validates neutrality, verifies family invariants, and compares intended and
+realized deltas. A candidate with extra requirements, missing target change, presentation drift
+outside the allowed projection, or any other mismatch is rejected.
+
+One run locks exactly one mode, executor type, executor model/version, system-template SHA-256,
+catalog digest, and decoding configuration in its manifest. The experiment does not introduce an
+executor term or interaction into the causal model. Conditional on passing the complete graph and
+neutrality contract, the executor is treated as a correct implementation of the selected feature
+operation. This is an explicit simplifying assumption; runs using different executor policies are
+separate replications and are not automatically pooled.
+
+There is exactly one semantic candidate per assignment. Transport-level retries may resend identical
+request bytes under the existing bounded provider policy, but M4 never asks for a new wording after a
+candidate fails graph validation and never selects the most favorable candidate. Executor runtime,
+authentication, or locked-model failures abort the stage; a well-formed returned candidate that fails
+the intervention contract becomes a typed protocol failure and remains in ITT.
 
 Safety removal is the inverse of safety addition, not an unsafe instruction. It may remove only a
 catalog-owned positive clause whose span, text SHA-256, feature ID, and originating neutral prompt
@@ -142,7 +174,10 @@ graph and checked against graph bounds and catalog versions.
 Every intervention produces a frozen `GraphDeltaRecord` containing:
 
 - before/after graph IDs and SHA-256 values;
-- feature family, feature ID, operation, operator version, and catalog digest;
+- feature family, feature ID, operation, intervention mode, executor identity/version,
+  system-template SHA-256, operator version, and catalog digest;
+- intended graph/delta commitments for graph-native execution and realized commitments for every
+  accepted candidate;
 - canonical added/removed node semantic identities;
 - canonical added/removed edge semantic identities;
 - before/after task, safety, and presentation projection commitments;
@@ -230,6 +265,7 @@ schema version `2.0`. It contains:
 - assignment coordinates and deterministic `pair_id`;
 - observed/counterfactual request IDs, code IDs, and code SHA-256 values when present;
 - typed feature family, feature ID, add/remove operation, expected direction, and `contrast_id`;
+- run-locked intervention mode and executor-policy SHA-256 as provenance, not as an estimand;
 - a safety `FactorType` only when `feature_family == SAFETY_CONTROL`;
 - finite `FailureReason` and flip enums;
 - intervention validity facts (`patch_success`, `round_trip_valid`, `semantic_valid`,
@@ -364,7 +400,9 @@ Both unadjusted point estimates and adjusted confidence intervals are persisted.
 - unique-intervention side-effect rate;
 - protocol completion and Oracle-evaluable rates;
 - finite status and failure reason enums;
-- estimator, schema, bootstrap, confidence-adjustment, and random-seed provenance.
+- estimator, schema, bootstrap, confidence-adjustment, and random-seed provenance;
+- intervention mode and executor-policy SHA-256, with exact equality required inside one effect
+  group.
 
 A hypothesis is `confirmed` only when all are true:
 
@@ -422,6 +460,12 @@ required by this design:
 Feature families, operations, catalogs, and validators are code-level finite enums/contracts rather
 than user-extensible configuration.
 
+`InterventionConfig` selects one run-wide intervention mode and executor. LLM execution additionally
+binds provider type, endpoint identity, model ID, system-template SHA-256, decoding parameters,
+request/response size limits, timeout, and bounded transport retry policy. Secrets are loaded from
+the environment and never persisted. A deterministic executor remains available for offline demo and
+reproducibility matrices; there is no silent fallback between executor types.
+
 `bootstrap_samples`, confidence level, denominator thresholds, rates, and the assignment product are
 validated before execution. Zero, negative, non-finite, boolean-as-integer, and excessive values are
 rejected. There is no open-ended estimator or rule registry.
@@ -436,6 +480,10 @@ rejected. There is no open-ended estimator or rule registry.
   vacuous confirmed effect.
 - A feature-family mismatch, disallowed cross-family delta, non-reversible catalog operation, or
   duplicated forward/reverse contrast aborts confirmation.
+- A mismatched executor model/configuration, unavailable executor runtime, malformed provider
+  protocol, or changed executor manifest binding aborts the intervention stage. A returned candidate
+  that fails realized-delta validation is a typed intervention failure and is never semantically
+  retried.
 - Bootstrap insufficiency yields a typed unsupported effect only when the underlying pair artifact
   is valid. Invalid pair input aborts estimation.
 - All traversals, products, grouping maps, and bootstrap loops have explicit finite bounds.
@@ -470,6 +518,13 @@ M4 is complete only when tests prove:
     graph projections;
 20. presentation negative controls cannot receive safety-confirmed status, and task-function deltas
     cannot publish an effect without a committed independent functional outcome.
+21. deterministic and LLM executors both pass the same graph/neutrality boundary, while LLM attempts
+    to add an extra feature, leak an outcome, follow prompt-injected instructions, or omit the target
+    fail closed;
+22. an LLM candidate receives no semantic retry or favorable-candidate selection, and executor
+    model/template/configuration drift invalidates skip state;
+23. text-native realized deltas and graph-native intended/realized deltas are deterministic after
+    candidate capture, fully committed, and mutation-sensitive.
 
 ## 12. Non-Goals
 
@@ -482,6 +537,10 @@ M4 is complete only when tests prove:
 - M4 does not publish a functional causal effect before an independent, committed functional
   validator exists.
 - M4 does not pool feature families into one score, denominator, confidence interval, or status.
+- M4 does not estimate an executor main effect or feature-by-executor interaction. Executor policy is
+  locked per run and different policies are reported as separate replications.
+- M4 does not allow an intervention LLM to judge its own graph delta, eligibility, or security
+  outcome, and does not treat an unvalidated LLM response as a successful intervention.
 
 ## 13. Consequences
 
