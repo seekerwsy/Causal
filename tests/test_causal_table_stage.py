@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from contextlib import contextmanager
 
 import pytest
 
+from secaware.cli import generate_observed_stage
 from secaware.config import AppConfig
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
@@ -25,7 +25,7 @@ from secaware.schema.oracle import (
     OracleRecord,
     SecurityLabel,
 )
-from secaware.schema.records import PromptRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
 from secaware.errors import ErrorCode, SecAwareError
 
@@ -78,8 +78,7 @@ def _prompts() -> tuple[PromptRecord, ...]:
     )
 
 
-def _oracle(prompt: PromptRecord) -> OracleRecord:
-    digest = hashlib.sha256(f"{prompt.prompt_id}:model-a:7".encode()).hexdigest()
+def _oracle(code: CanonicalGeneratedCodeRecord) -> OracleRecord:
     analyzers = tuple(
         AnalyzerProvenanceRecord(
             schema_version="1.0",
@@ -91,13 +90,13 @@ def _oracle(prompt: PromptRecord) -> OracleRecord:
     )
     return OracleRecord(
         schema_version="1.1",
-        request_id=f"req_{digest}",
-        code_id=f"code_{digest}",
-        code_sha256="c" * 64,
-        prompt_id=prompt.prompt_id,
+        request_id=code.request_id,
+        code_id=code.code_id,
+        code_sha256=code.code_sha256,
+        prompt_id=code.prompt_id,
         condition="observed",
-        model_id="model-a",
-        seed_id=7,
+        model_id=code.model_id,
+        seed_id=code.seed_id,
         hypothesis_id=None,
         intervention_id=None,
         parse_ok=True,
@@ -121,9 +120,19 @@ def _prepared_store(
     store = RunStore(config)
     store.prepare()
     run_prompt_extraction_stage(config, store, force=False)
+    generate_observed_stage(config, store, force=False)
+    code_output = store.path("generation", "observed_code.jsonl")
+    codes = tuple(
+        read_jsonl(
+            code_output,
+            CanonicalGeneratedCodeRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
     oracle_output = store.path("oracle", "observed_oracle.jsonl")
     stage = "run-oracle-observed"
-    inputs = (store.path("inputs", "prompts.jsonl"),)
+    inputs = (code_output,)
     assert not store.should_skip_stage(
         stage,
         inputs,
@@ -131,7 +140,7 @@ def _prepared_store(
         False,
         policy_sha256="d" * 64,
     )
-    write_jsonl(oracle_output, tuple(_oracle(prompt) for prompt in selected_prompts))
+    write_jsonl(oracle_output, tuple(_oracle(code) for code in codes))
     store.seal_stage_outputs(stage, (oracle_output,))
     store.record_stage(stage, inputs, (oracle_output,), policy_sha256="d" * 64)
     return config, store
@@ -155,6 +164,43 @@ def test_causal_table_stage_rejects_an_empty_discovery_split_without_outputs(
         store.path("discovery", name).exists()
         for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
     )
+
+
+def test_causal_table_stage_rejects_new_prompt_tsg_with_stale_code_and_oracle(
+    tmp_path: Path,
+) -> None:
+    import secaware.pipeline.stages.causal_tables as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    changed_prompts = tuple(
+        prompt.model_copy(update={"prompt": f"{prompt.prompt} Updated wording."})
+        for prompt in _prompts()
+    )
+    write_jsonl(store.path("inputs", "prompts.jsonl"), changed_prompts)
+    run_prompt_extraction_stage(config, store, force=True)
+
+    with pytest.raises(SecAwareError):
+        stage_module.assemble_causal_tables_stage(config, store, force=False)
+
+    assert not store.path(".stages", "assemble-causal-tables.json").exists()
+    assert not any(
+        store.path("discovery", name).exists()
+        for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
+    )
+
+    generate_observed_stage(config, store, force=True)
+    codes = tuple(
+        read_jsonl(
+            store.path("generation", "observed_code.jsonl"),
+            CanonicalGeneratedCodeRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    _recommit_oracles(store, tuple(_oracle(code) for code in codes))
+    stage_module.assemble_causal_tables_stage(config, store, force=False)
+
+    assert store.path(".stages", "assemble-causal-tables.json").exists()
 
 
 def test_causal_table_stage_publishes_the_closed_output_contract() -> None:
@@ -287,7 +333,7 @@ def _recommit_extraction(
 
 def _recommit_oracles(store: RunStore, records: tuple[OracleRecord, ...]) -> None:
     stage = "run-oracle-observed"
-    inputs = (store.path("inputs", "prompts.jsonl"),)
+    inputs = (store.path("generation", "observed_code.jsonl"),)
     output = store.path("oracle", "observed_oracle.jsonl")
     manifest = read_stage_manifest(store.path(".stages", f"{stage}.json"))
     store.invalidate_stage(stage)
@@ -412,6 +458,34 @@ def test_causal_table_middle_output_install_failure_rolls_back_complete_bundle(
     assert manifest_path.read_bytes() == manifest_before
 
 
+def test_causal_table_code_schema_drift_invalidates_manifest_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stage_contracts as contracts
+    import secaware.pipeline.stages.causal_tables as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    stage_module.assemble_causal_tables_stage(config, store, force=False)
+    baseline = contracts.discovery_stage_contract_payload("assemble-causal-tables")
+    real_schema_sha256 = contracts._schema_sha256
+
+    def drift_code_schema(model: type) -> str:
+        if model is CanonicalGeneratedCodeRecord:
+            return "0" * 64
+        return real_schema_sha256(model)
+
+    def fail_build(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("code schema drift forced table rebuild")
+
+    assert baseline["canonical_observed_code_schema"]
+    monkeypatch.setattr(contracts, "_schema_sha256", drift_code_schema)
+    monkeypatch.setattr(stage_module, "build_local_tables", fail_build)
+
+    with pytest.raises(RuntimeError, match="code schema drift forced"):
+        stage_module.assemble_causal_tables_stage(config, store, force=False)
+
+
 @pytest.mark.parametrize(
     "drift_field",
     ("PROMPT_FEATURE_CATALOG_SHA256", "PROMPT_TSG_STAGE_CONTRACT_SHA256"),
@@ -473,5 +547,5 @@ def test_causal_table_stage_holds_producer_leases_in_sorted_order(
     monkeypatch.setattr(store, "hold_committed_output", tracked_output)
     assemble_causal_tables_stage(config, store, force=False)
 
-    assert entered == ["extract-prompt-tsg", "run-oracle-observed"]
+    assert entered == ["extract-prompt-tsg", "generate-observed", "run-oracle-observed"]
     assert active == []

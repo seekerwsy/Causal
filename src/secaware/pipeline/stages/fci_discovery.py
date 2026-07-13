@@ -80,6 +80,7 @@ class _DiscoveryInputSnapshot:
     tables: tuple[CausalTableRecord, ...]
     rows: tuple
     exclusions: tuple
+    causal_manifest: StageManifest
     extraction_manifest: StageManifest
     input_sha256: tuple[str, ...]
 
@@ -133,6 +134,81 @@ def _source_coordinates_from_bundle(
         for item in exclusions
     )
     return tuple(sorted(coordinates))
+
+
+def _relative_manifest_path(store: RunStore, path: Path) -> str:
+    try:
+        return path.resolve(strict=False).relative_to(store.root.resolve(strict=False)).as_posix()
+    except (OSError, ValueError):
+        raise _stage_error("causal/extractor provenance failed validation") from None
+
+
+def _validate_causal_extractor_provenance(
+    *,
+    store: RunStore,
+    causal_paths: tuple[Path, ...],
+    causal_sha256: tuple[str, ...],
+    causal_manifest: StageManifest,
+    extraction_manifest: StageManifest,
+) -> None:
+    try:
+        prompt_path = store.path("inputs", "prompts.jsonl")
+        proposal_path = store.path("tsg", "prompt_extraction_proposals.jsonl")
+        graph_path = store.path("tsg", "prompt_tsg.jsonl")
+        code_path = store.path("generation", "observed_code.jsonl")
+        oracle_path = store.path("oracle", "observed_oracle.jsonl")
+        oracle_manifest_path = store.path(".stages", "run-oracle-observed.json")
+        prompt_key = _relative_manifest_path(store, prompt_path)
+        proposal_key = _relative_manifest_path(store, proposal_path)
+        graph_key = _relative_manifest_path(store, graph_path)
+        base_causal_inputs = {
+            prompt_key,
+            proposal_key,
+            graph_key,
+            _relative_manifest_path(store, code_path),
+            _relative_manifest_path(store, oracle_path),
+            _relative_manifest_path(store, oracle_manifest_path),
+        }
+        generation_manifest_keys = {
+            _relative_manifest_path(store, store.path(".stages", f"{stage}.json"))
+            for stage in (
+                "generate-observed",
+                "generate-provider-observed",
+                "import-generation-observed",
+            )
+        }
+        causal_output_keys = tuple(
+            _relative_manifest_path(store, path) for path in causal_paths
+        )
+        extraction_output_keys = (proposal_key, graph_key)
+        causal_input_keys = set(causal_manifest.inputs)
+        extra_causal_inputs = causal_input_keys - base_causal_inputs
+        if (
+            causal_manifest.stage != "assemble-causal-tables"
+            or not base_causal_inputs <= causal_input_keys
+            or len(extra_causal_inputs) != 1
+            or not extra_causal_inputs <= generation_manifest_keys
+            or causal_manifest.outputs != list(causal_output_keys)
+            or causal_manifest.output_sha256
+            != dict(zip(causal_output_keys, causal_sha256, strict=True))
+            or extraction_manifest.stage != "extract-prompt-tsg"
+            or set(extraction_manifest.inputs) != {prompt_key}
+            or extraction_manifest.outputs != list(extraction_output_keys)
+            or extraction_manifest.output_sha256
+            != {
+                proposal_key: sha256_path(proposal_path),
+                graph_key: sha256_path(graph_path),
+            }
+            or causal_manifest.inputs[prompt_key] != extraction_manifest.inputs[prompt_key]
+            or causal_manifest.inputs[proposal_key]
+            != extraction_manifest.output_sha256[proposal_key]
+            or causal_manifest.inputs[graph_key] != extraction_manifest.output_sha256[graph_key]
+        ):
+            raise ValueError
+    except (KeyboardInterrupt, SystemExit, SecAwareError):
+        raise
+    except Exception:
+        raise _stage_error("causal/extractor provenance failed validation") from None
 
 
 def _too_many_failures(
@@ -420,6 +496,7 @@ def fci_discovery_stage(
             exclusions,
             source_coordinates=_source_coordinates_from_bundle(tables, rows, exclusions),
         )
+        causal_manifest = read_stage_manifest(causal_manifest_path)
         extraction_manifest = read_stage_manifest(extraction_manifest_path)
         current_policy = extraction_policy(config.tsg)
         if (
@@ -428,10 +505,18 @@ def fci_discovery_stage(
             or extraction_manifest.policy_sha256 != current_policy.policy_sha256
         ):
             raise _stage_error("extractor provenance failed validation")
+        _validate_causal_extractor_provenance(
+            store=store,
+            causal_paths=causal_paths,
+            causal_sha256=digests[: len(causal_paths)],
+            causal_manifest=causal_manifest,
+            extraction_manifest=extraction_manifest,
+        )
         snapshot = _DiscoveryInputSnapshot(
             tables=tables,
             rows=rows,
             exclusions=exclusions,
+            causal_manifest=causal_manifest,
             extraction_manifest=extraction_manifest,
             input_sha256=digests,
         )

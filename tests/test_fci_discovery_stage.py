@@ -13,7 +13,7 @@ from secaware.cli import app
 from secaware.config import FCIDiscoveryConfig
 from secaware.config import write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.io.jsonl import read_jsonl
+from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema.causal import (
@@ -320,6 +320,33 @@ def test_fci_force_failure_restores_the_complete_committed_bundle(
 
     assert tuple(path.read_bytes() for path in paths) == before
     assert manifest_path.read_bytes() == manifest_before
+
+
+def test_fci_stage_rejects_old_causal_bundle_with_current_extractor_provenance(
+    tmp_path: Path,
+) -> None:
+    from secaware.pipeline.stages.fci_discovery import FCI_DISCOVERY_OUTPUTS
+    from secaware.pipeline.stages.fci_discovery import fci_discovery_stage
+    from secaware.pipeline.stages.prompt_extraction import run_prompt_extraction_stage
+    from test_causal_table_stage import _prompts
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    changed_prompts = tuple(
+        prompt.model_copy(update={"prompt": f"{prompt.prompt} Current extraction."})
+        for prompt in _prompts()
+    )
+    write_jsonl(store.path("inputs", "prompts.jsonl"), changed_prompts)
+    run_prompt_extraction_stage(config, store, force=True)
+
+    with pytest.raises(SecAwareError, match="provenance"):
+        fci_discovery_stage(config, store, force=False, runner=_StablePathRunner())
+
+    assert not store.path(".stages", "fci-discovery.json").exists()
+    assert not any(
+        store.path("discovery", name).exists()
+        for name, _model in FCI_DISCOVERY_OUTPUTS
+    )
 
 
 def test_fci_middle_output_install_failure_rolls_back_complete_bundle(

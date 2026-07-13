@@ -22,6 +22,7 @@ from secaware.schema.causal import (
     PathPatternRecord,
     PathSupportRecord,
 )
+from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
@@ -55,6 +56,7 @@ def discovery_stage_contract_payload(stage: str) -> dict[str, object]:
             "table_schema": _schema_sha256(CausalTableRecord),
             "observation_schema": _schema_sha256(CausalObservationRecord),
             "exclusion_schema": _schema_sha256(CausalExclusionRecord),
+            "canonical_observed_code_schema": _schema_sha256(CanonicalGeneratedCodeRecord),
         }
     if stage == _FCI_STAGE:
         return {

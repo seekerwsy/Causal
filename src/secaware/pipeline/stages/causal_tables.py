@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 
 from secaware.causal.table_builder import build_local_tables, validate_local_table_bundle
@@ -23,7 +24,7 @@ from secaware.schema.causal import (
     CausalTableRecord,
 )
 from secaware.schema.oracle import OracleRecord
-from secaware.schema.records import PromptRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
@@ -42,6 +43,7 @@ class _ProducerSnapshot:
     prompts: tuple[PromptRecord, ...]
     proposals: tuple[PromptExtractionProposalRecord, ...]
     graphs: tuple[PromptTSGRecord, ...]
+    codes: tuple[CanonicalGeneratedCodeRecord, ...]
     oracles: tuple[OracleRecord, ...]
     input_sha256: tuple[str, ...]
 
@@ -74,8 +76,9 @@ def _read_records(path: Path, model: type, *, allow_empty: bool = False) -> tupl
     )
 
 
-def _validate_exact_observed_coverage(
+def _validate_exact_observed_chain(
     prompts: tuple[PromptRecord, ...],
+    codes: tuple[CanonicalGeneratedCodeRecord, ...],
     oracles: tuple[OracleRecord, ...],
     config: AppConfig,
 ) -> None:
@@ -96,30 +99,95 @@ def _validate_exact_observed_coverage(
             for model_id in models
             for seed_id in seeds
         }
-        coordinates: set[tuple[str, str, int]] = set()
-        request_ids: set[str] = set()
+        prompt_by_id = {item.prompt_id: item for item in prompts}
+        code_by_coordinate: dict[tuple[str, str, int], CanonicalGeneratedCodeRecord] = {}
+        code_request_ids: set[str] = set()
         code_ids: set[str] = set()
-        for record in oracles:
+        for record in codes:
             coordinate = (record.prompt_id, record.model_id, record.seed_id)
+            prompt = prompt_by_id.get(record.prompt_id)
+            request = record.generation_request
             if (
-                type(record) is not OracleRecord
+                type(record) is not CanonicalGeneratedCodeRecord
+                or prompt is None
                 or record.condition != "observed"
                 or record.hypothesis_id is not None
                 or record.intervention_id is not None
-                or coordinate in coordinates
-                or record.request_id in request_ids
+                or coordinate in code_by_coordinate
+                or record.request_id in code_request_ids
                 or record.code_id in code_ids
+                or request.prompt_id != prompt.prompt_id
+                or request.prompt != prompt.prompt
+                or request.prompt_sha256 != record.prompt_sha256
+                or request.language != prompt.language
+                or record.prompt_sha256
+                != hashlib.sha256(prompt.prompt.encode("utf-8")).hexdigest()
             ):
                 raise ValueError
-            coordinates.add(coordinate)
-            request_ids.add(record.request_id)
+            code_by_coordinate[coordinate] = record
+            code_request_ids.add(record.request_id)
             code_ids.add(record.code_id)
-        if coordinates != expected:
+        oracle_by_coordinate: dict[tuple[str, str, int], OracleRecord] = {}
+        oracle_request_ids: set[str] = set()
+        oracle_code_ids: set[str] = set()
+        for record in oracles:
+            coordinate = (record.prompt_id, record.model_id, record.seed_id)
+            code = code_by_coordinate.get(coordinate)
+            if (
+                type(record) is not OracleRecord
+                or code is None
+                or record.condition != "observed"
+                or record.hypothesis_id is not None
+                or record.intervention_id is not None
+                or coordinate in oracle_by_coordinate
+                or record.request_id in oracle_request_ids
+                or record.code_id in oracle_code_ids
+                or record.request_id != code.request_id
+                or record.code_id != code.code_id
+                or record.code_sha256 != code.code_sha256
+            ):
+                raise ValueError
+            oracle_by_coordinate[coordinate] = record
+            oracle_request_ids.add(record.request_id)
+            oracle_code_ids.add(record.code_id)
+        if set(code_by_coordinate) != expected or set(oracle_by_coordinate) != expected:
             raise ValueError
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        raise _producer_error("observed Oracle coverage failed validation") from None
+        raise _producer_error("observed generation/Oracle coverage failed validation") from None
+
+
+def _generation_producer_outputs(
+    store: RunStore,
+    stage: str,
+    code_path: Path,
+) -> tuple[Path, ...]:
+    if stage == "generate-provider-observed":
+        return (code_path, store.path("generation", "observed_attempts.jsonl"))
+    return (code_path,)
+
+
+def _observed_generation_producer(
+    store: RunStore,
+    code_path: Path,
+) -> tuple[str, tuple[Path, ...]]:
+    candidates = (
+        "generate-observed",
+        "generate-provider-observed",
+        "import-generation-observed",
+    )
+    committed: list[tuple[str, tuple[Path, ...]]] = []
+    for stage in candidates:
+        outputs = _generation_producer_outputs(store, stage, code_path)
+        try:
+            store.require_committed_output(stage, outputs)
+        except SecAwareError:
+            continue
+        committed.append((stage, outputs))
+    if len(committed) != 1:
+        raise _producer_error("observed generation producer failed validation")
+    return committed[0]
 
 
 def _discover_source_coordinates(
@@ -154,8 +222,20 @@ def assemble_causal_tables_stage(
     prompt_input = store.path("inputs", "prompts.jsonl")
     proposal_input = store.path("tsg", "prompt_extraction_proposals.jsonl")
     graph_input = store.path("tsg", "prompt_tsg.jsonl")
+    code_input = store.path("generation", "observed_code.jsonl")
     oracle_input = store.path("oracle", "observed_oracle.jsonl")
-    inputs = (prompt_input, proposal_input, graph_input, oracle_input)
+    generation_stage, generation_outputs = _observed_generation_producer(store, code_input)
+    generation_manifest = store.path(".stages", f"{generation_stage}.json")
+    oracle_manifest = store.path(".stages", "run-oracle-observed.json")
+    inputs = (
+        prompt_input,
+        proposal_input,
+        graph_input,
+        code_input,
+        oracle_input,
+        generation_manifest,
+        oracle_manifest,
+    )
     output_specs = tuple(
         JsonlOutputSpec(
             store.path("discovery", filename),
@@ -176,10 +256,11 @@ def assemble_causal_tables_stage(
         prompts = _read_records(prompt_input, PromptRecord)
         proposals = _read_records(proposal_input, PromptExtractionProposalRecord)
         graphs = _read_records(graph_input, PromptTSGRecord)
+        codes = _read_records(code_input, CanonicalGeneratedCodeRecord)
         oracles = _read_records(oracle_input, OracleRecord)
         validate_exact_extraction_coverage(prompts, proposals, graphs, policy)
-        _validate_exact_observed_coverage(prompts, oracles, config)
-        snapshot = _ProducerSnapshot(prompts, proposals, graphs, oracles, digests)
+        _validate_exact_observed_chain(prompts, codes, oracles, config)
+        snapshot = _ProducerSnapshot(prompts, proposals, graphs, codes, oracles, digests)
         return digests
 
     def verify_input_snapshot() -> None:
@@ -205,6 +286,7 @@ def assemble_causal_tables_stage(
 
     producer_outputs = {
         "extract-prompt-tsg": (proposal_input, graph_input),
+        generation_stage: generation_outputs,
         "run-oracle-observed": (oracle_input,),
     }
     with ExitStack() as stack:
@@ -215,6 +297,12 @@ def assemble_causal_tables_stage(
                     (prompt_input,),
                     producer_outputs[producer_stage],
                     expected_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+                )
+            elif producer_stage == "run-oracle-observed":
+                context = store.hold_committed_stage(
+                    producer_stage,
+                    (code_input,),
+                    producer_outputs[producer_stage],
                 )
             else:
                 context = store.hold_committed_output(
