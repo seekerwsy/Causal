@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from causallearn.graph.GraphNode import GraphNode
 from causallearn.utils.PCUtils.BackgroundKnowledge import BackgroundKnowledge
 
+from secaware.causal.variable_catalog import declaration_by_id, declaration_sha256
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
@@ -26,7 +27,6 @@ _TEMPORAL_TIER_BY_ROLE = {
     VariableRole.X: 1,
     VariableRole.Y: 2,
 }
-_TEMPORAL_TIER_BY_PREFIX = {f"{role.value}.": tier for role, tier in _TEMPORAL_TIER_BY_ROLE.items()}
 _OBSERVATIONAL_RUN_KINDS = frozenset(
     {
         PAGRunKind.OBSERVATIONAL_REFERENCE,
@@ -90,6 +90,25 @@ def _typed_adjacency_exclusions(
     return tuple(sorted(exclusions))
 
 
+def _typed_adjacency_exclusions_from_ids(
+    variable_ids: Sequence[str],
+) -> tuple[tuple[str, str], ...]:
+    declarations = tuple(declaration_by_id(variable_id) for variable_id in variable_ids)
+    exclusions = {
+        canonical_pair(left.variable_id, right.variable_id)
+        for index, left in enumerate(declarations)
+        for right in declarations[index + 1 :]
+        if frozenset(
+            {
+                (left.role, left.adjacency_type),
+                (right.role, right.adjacency_type),
+            }
+        )
+        in _REVIEWED_TYPED_ADJACENCY_EXCLUSIONS
+    }
+    return tuple(sorted(exclusions))
+
+
 def typed_adjacency_exclusions(
     variables: Sequence[CausalVariableSpec],
 ) -> tuple[tuple[str, str], ...]:
@@ -112,11 +131,17 @@ def typed_adjacency_exclusions(
 def _build_background_knowledge(table: CausalTableRecord) -> BackgroundKnowledgeRecord:
     checked = CausalTableRecord.model_validate(table)
     variables = checked.variables
-    if any(
-        variable.role not in _TEMPORAL_TIER_BY_ROLE
-        or not variable.variable_id.startswith(f"{variable.role.value}.")
-        or variable.temporal_tier != _TEMPORAL_TIER_BY_ROLE[variable.role]
-        for variable in variables
+    expected_scope_id = f"scope.cwe_{checked.cwe.removeprefix('CWE-')}"
+    if (
+        any(
+            not _variable_matches_declaration(
+                variable,
+                scope_id=checked.scope_id,
+                cwe=checked.cwe,
+            )
+            for variable in variables
+        )
+        or checked.scope_id != expected_scope_id
     ):
         raise ValueError
     tiers = tuple((variable.variable_id, variable.temporal_tier) for variable in variables)
@@ -137,6 +162,29 @@ def _build_background_knowledge(table: CausalTableRecord) -> BackgroundKnowledge
         forbidden_adjacencies=_typed_adjacency_exclusions(variables),
         required_directions=(),
     )
+
+
+def _variable_matches_declaration(
+    variable: CausalVariableSpec,
+    *,
+    scope_id: str,
+    cwe: str,
+) -> bool:
+    declaration = declaration_by_id(variable.variable_id)
+    if declaration.applicable_cwes != ("*",) and cwe not in declaration.applicable_cwes:
+        return False
+    expected = CausalVariableSpec(
+        schema_version="1.0",
+        variable_id=declaration.variable_id,
+        role=declaration.role,
+        states=declaration.states,
+        source_query_id=declaration.query_id,
+        scope_id=scope_id,
+        temporal_tier=declaration.tier,
+        adjacency_type=declaration.adjacency_type,
+        producer_sha256=declaration_sha256(declaration),
+    )
+    return variable == expected
 
 
 def build_background_knowledge(table: CausalTableRecord) -> BackgroundKnowledgeRecord:
@@ -173,13 +221,24 @@ def _validate_knowledge_structure(
     tiered = {variable_id for variable_id, _tier in knowledge.tiers}
     unconstrained = set(knowledge.unconstrained_variable_ids)
     known = tiered | unconstrained
-    tiers_match_roles = all(
-        any(
-            variable_id.startswith(prefix) and tier == expected
-            for prefix, expected in _TEMPORAL_TIER_BY_PREFIX.items()
-        )
-        for variable_id, tier in knowledge.tiers
+    tier_declarations = tuple(
+        (declaration_by_id(variable_id), tier) for variable_id, tier in knowledge.tiers
     )
+    tiers_match_roles = all(
+        declaration.role in _TEMPORAL_TIER_BY_ROLE
+        and declaration.variable_id.startswith(f"{declaration.role.value}.")
+        and tier == declaration.tier == _TEMPORAL_TIER_BY_ROLE[declaration.role]
+        for declaration, tier in tier_declarations
+    )
+    expected_directions = _tier_reversals(knowledge)
+    expected_adjacencies = set(
+        _typed_adjacency_exclusions_from_ids(
+            tuple(variable_id for variable_id, _ in knowledge.tiers)
+        )
+    )
+    actual_directions = set(knowledge.forbidden_directions)
+    actual_adjacencies = set(knowledge.forbidden_adjacencies)
+    is_jci_escape = bool(unconstrained)
     if (
         tiered & unconstrained
         or not 2 <= len(known) <= _MAX_VARIABLES
@@ -187,7 +246,20 @@ def _validate_knowledge_structure(
         or any(not variable_id.startswith("c.") for variable_id in unconstrained)
         or (observational and unconstrained)
         or knowledge.required_directions
-        or not _tier_reversals(knowledge) <= set(knowledge.forbidden_directions)
+        or (
+            is_jci_escape
+            and (
+                not expected_directions <= actual_directions
+                or not expected_adjacencies <= actual_adjacencies
+            )
+        )
+        or (
+            not is_jci_escape
+            and (
+                actual_directions != expected_directions
+                or actual_adjacencies != expected_adjacencies
+            )
+        )
     ):
         raise ValueError
 
@@ -213,6 +285,10 @@ def _to_causal_learn_background(
         backend.add_forbidden_by_node(node_by_id[left], node_by_id[right])
         backend.add_forbidden_by_node(node_by_id[right], node_by_id[left])
     expected_tiers = {node_by_id[variable_id]: tier for variable_id, tier in checked.tiers}
+    expected_tier_entries = {(variable_id, tier) for variable_id, tier in checked.tiers}
+    actual_tier_entries = tuple(
+        (node.get_name(), tier) for tier, nodes in backend.tier_map.items() for node in nodes
+    )
     expected_forbidden = {
         (node_by_id[source], node_by_id[target]) for source, target in checked.forbidden_directions
     } | {
@@ -225,6 +301,8 @@ def _to_causal_learn_background(
     }
     if (
         backend.tier_value_map != expected_tiers
+        or len(actual_tier_entries) != len(expected_tier_entries)
+        or set(actual_tier_entries) != expected_tier_entries
         or backend.forbidden_rules_specs != expected_forbidden
         or backend.forbidden_pattern_rules_specs
         or backend.required_rules_specs

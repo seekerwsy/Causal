@@ -15,42 +15,34 @@ from secaware.schema.causal import (
     PAGEdgeRecord,
     PAGRecord,
     PAGRunKind,
-    VariableRole,
 )
 
 
 SHA_A = "a" * 64
 
 
-def _variable(
-    variable_id: str,
-    role: VariableRole,
-    tier: int,
-    adjacency_type: str,
-) -> CausalVariableSpec:
+def _variable(variable_id: str) -> CausalVariableSpec:
+    from secaware.causal.variable_catalog import declaration_by_id, declaration_sha256
+
+    declaration = declaration_by_id(variable_id)
     return CausalVariableSpec(
         schema_version="1.0",
-        variable_id=variable_id,
-        role=role,
-        states=("absent", "present"),
-        source_query_id=f"query.{variable_id}",
-        scope_id="scope.sql",
-        temporal_tier=tier,
-        adjacency_type=adjacency_type,
-        producer_sha256=SHA_A,
+        variable_id=declaration.variable_id,
+        role=declaration.role,
+        states=declaration.states,
+        source_query_id=declaration.query_id,
+        scope_id="scope.cwe_89",
+        temporal_tier=declaration.tier,
+        adjacency_type=declaration.adjacency_type,
+        producer_sha256=declaration_sha256(declaration),
     )
 
 
 def _table() -> CausalTableRecord:
     variables = (
-        _variable("w.language_family", VariableRole.W, 0, "task_metadata"),
-        _variable(
-            "x.safety.sql_parameterization",
-            VariableRole.X,
-            1,
-            "prompt_safety_control",
-        ),
-        _variable("y.secure_functional", VariableRole.Y, 2, "outcome"),
+        _variable("w.language_family"),
+        _variable("x.safety.sql_parameterization"),
+        _variable("y.secure_functional"),
     )
     values = ((0, 1, 1), (1, 0, 0))
     payload = tuple(
@@ -70,7 +62,7 @@ def _table() -> CausalTableRecord:
         for index, row_values in enumerate(values, start=1)
     )
     return CausalTableRecord.from_content(
-        scope_id="scope.sql",
+        scope_id="scope.cwe_89",
         cwe="CWE-89",
         model_id="model-a",
         variables=variables,
@@ -268,6 +260,56 @@ def test_pag_rejects_rehashed_background_with_swapped_x_y_tiers() -> None:
     )
     forged_pag = _pag(table, forged_knowledge)
 
+    with pytest.raises(SecAwareError):
+        validate_pag_against_background(forged_pag, forged_knowledge)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["extra_direction", "removed_adjacency", "added_adjacency"],
+)
+def test_observational_background_rejects_rehashed_nonexact_constraints(
+    mutation: str,
+) -> None:
+    from secaware.causal.background import build_background_knowledge
+    from secaware.causal.background import to_causal_learn_background
+    from secaware.causal.background import validate_pag_against_background
+
+    table = _table()
+    original = build_background_knowledge(table)
+    forbidden_directions = original.forbidden_directions
+    forbidden_adjacencies = original.forbidden_adjacencies
+    if mutation == "extra_direction":
+        forbidden_directions = tuple(
+            sorted(
+                (
+                    *forbidden_directions,
+                    ("x.safety.sql_parameterization", "y.secure_functional"),
+                )
+            )
+        )
+    elif mutation == "removed_adjacency":
+        forbidden_adjacencies = forbidden_adjacencies[1:]
+    else:
+        forbidden_adjacencies = tuple(
+            sorted(
+                (
+                    *forbidden_adjacencies,
+                    ("x.safety.sql_parameterization", "y.secure_functional"),
+                )
+            )
+        )
+    forged_knowledge = BackgroundKnowledgeRecord.from_content(
+        table_id=table.table_id,
+        tiers=original.tiers,
+        forbidden_directions=forbidden_directions,
+        forbidden_adjacencies=forbidden_adjacencies,
+        required_directions=(),
+    )
+    forged_pag = _pag(table, forged_knowledge)
+
+    with pytest.raises(SecAwareError):
+        to_causal_learn_background(forged_knowledge)
     with pytest.raises(SecAwareError):
         validate_pag_against_background(forged_pag, forged_knowledge)
 
