@@ -10,7 +10,11 @@ from secaware.schema.prompt_extraction import EvidenceSpan, PromptExtractionProp
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import EdgeType, NodeType, PromptTSGRecord
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG, PromptOntologyEntry
-from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG, FeatureSpec
+from secaware.tsg.feature_catalog import (
+    PROMPT_FEATURE_CATALOG,
+    FeatureSpec,
+    prompt_feature_node_slot,
+)
 from secaware.tsg.graph import multidigraph_to_record, record_to_multidigraph
 from secaware.tsg.proposal_validator import (
     _snapshot_prompt,
@@ -256,15 +260,18 @@ def _build_structural_graph(
 
     aliases: dict[str, str] = {}
     for node in trusted.direct_nodes:
-        key = f"proposal-direct:{node.feature_id}:{node.node_type.value}:{node.label}"
+        slot = prompt_feature_node_slot(node.feature_id, node.node_type)
+        states[node.feature_id] = FeatureState.PRESENT
+        if slot.is_presence_marker:
+            continue
+        key = f"proposal-direct:{node.feature_id}:{node.node_type.value}"
         graph.add_node(
             key,
             node_type=node.node_type,
-            label=node.label,
+            label=slot.canonical_label,
             attributes=_evidence_attributes(node.evidence[0]),
         )
         aliases[node.local_id] = key
-        states[node.feature_id] = FeatureState.PRESENT
     for edge in trusted.direct_edges:
         graph.add_edge(
             aliases[edge.src_local_id],

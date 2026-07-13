@@ -8,7 +8,7 @@ import json
 import re
 
 from secaware.schema.features import FeatureFamily, FeatureOperation
-from secaware.schema.tsg import EdgeType, NodeType
+from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
 FEATURE_CATALOG_VERSION = "1.0"
@@ -56,6 +56,15 @@ class FeatureSpec:
     structural_node_types: tuple[NodeType, ...]
     structural_edge_types: tuple[EdgeType, ...]
     deterministic_terms: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureNodeSlot:
+    """One finite direct-graph semantic slot derived from a catalog feature."""
+
+    node_type: NodeType
+    canonical_label: str
+    is_presence_marker: bool
 
 
 def _feature(
@@ -223,6 +232,35 @@ PROMPT_FEATURE_CATALOG = (
 )
 
 
+def _node_slots_for_spec(spec: FeatureSpec) -> tuple[FeatureNodeSlot, ...]:
+    if spec.structural_node_types:
+        return tuple(
+            FeatureNodeSlot(
+                node_type=node_type,
+                canonical_label=f"{spec.feature_id}:{node_type.value}",
+                is_presence_marker=False,
+            )
+            for node_type in spec.structural_node_types
+        )
+    marker_type = (
+        NodeType.PRESENTATION_FEATURE
+        if spec.feature_family is FeatureFamily.PRESENTATION_CONTROL
+        else NodeType.FEATURE
+    )
+    return (
+        FeatureNodeSlot(
+            node_type=marker_type,
+            canonical_label=spec.feature_id,
+            is_presence_marker=True,
+        ),
+    )
+
+
+_PROMPT_FEATURE_NODE_SLOTS = {
+    spec.feature_id: _node_slots_for_spec(spec) for spec in PROMPT_FEATURE_CATALOG
+}
+
+
 def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
     if type(catalog) is not tuple or len(catalog) != 20:
         raise RuntimeError("invalid prompt feature catalog shape")
@@ -241,7 +279,9 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
 
     for item in catalog:
         prefix = _PREFIX_BY_FAMILY[item.feature_family]
-        if _FEATURE_ID_RE.fullmatch(item.feature_id) is None or not item.feature_id.startswith(prefix):
+        if _FEATURE_ID_RE.fullmatch(item.feature_id) is None or not item.feature_id.startswith(
+            prefix
+        ):
             raise RuntimeError("invalid prompt feature family prefix")
         tuple_fields = (
             item.applicable_cwes,
@@ -279,10 +319,26 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
             type(value) is not EdgeType for value in item.structural_edge_types
         ):
             raise RuntimeError("invalid prompt feature edge contract")
+        slots = _PROMPT_FEATURE_NODE_SLOTS[item.feature_id]
+        if (
+            not slots
+            or len({slot.node_type for slot in slots}) != len(slots)
+            or any(
+                type(slot) is not FeatureNodeSlot
+                or type(slot.node_type) is not NodeType
+                or type(slot.canonical_label) is not str
+                or not slot.canonical_label
+                or slot.canonical_label != slot.canonical_label.strip()
+                or len(slot.canonical_label.encode("utf-8")) > MAX_TSG_STRING_BYTES
+                or type(slot.is_presence_marker) is not bool
+                for slot in slots
+            )
+        ):
+            raise RuntimeError("invalid prompt feature node slots")
+        if bool(item.structural_node_types) == any(slot.is_presence_marker for slot in slots):
+            raise RuntimeError("invalid prompt feature presence marker")
 
-    non_intervenable = {
-        item.feature_id for item in catalog if not item.intervenable
-    }
+    non_intervenable = {item.feature_id for item in catalog if not item.intervenable}
     if non_intervenable != {
         "safety.prohibited_unsafe_request",
         "safety.vulnerability_disclosure",
@@ -317,9 +373,7 @@ _CATALOG_DIGEST_PAYLOAD = {
     "catalog_version": FEATURE_CATALOG_VERSION,
     "entries": [_digest_entry(item) for item in PROMPT_FEATURE_CATALOG],
 }
-PROMPT_FEATURE_CATALOG_SHA256 = hashlib.sha256(
-    _canonical_json(_CATALOG_DIGEST_PAYLOAD)
-).hexdigest()
+PROMPT_FEATURE_CATALOG_SHA256 = hashlib.sha256(_canonical_json(_CATALOG_DIGEST_PAYLOAD)).hexdigest()
 
 
 def prompt_feature_spec(feature_id: str) -> FeatureSpec:
@@ -332,10 +386,29 @@ def prompt_feature_spec(feature_id: str) -> FeatureSpec:
     raise KeyError("unknown prompt feature")
 
 
+def prompt_feature_node_slots(feature_id: str) -> tuple[FeatureNodeSlot, ...]:
+    """Return the exact finite direct-graph slots for one catalog feature."""
+    prompt_feature_spec(feature_id)
+    return _PROMPT_FEATURE_NODE_SLOTS[feature_id]
+
+
+def prompt_feature_node_slot(feature_id: str, node_type: NodeType) -> FeatureNodeSlot:
+    """Return one exact feature/type slot; unknown combinations fail closed."""
+    if type(node_type) is not NodeType:
+        raise KeyError("unknown prompt feature node slot")
+    for slot in prompt_feature_node_slots(feature_id):
+        if slot.node_type is node_type:
+            return slot
+    raise KeyError("unknown prompt feature node slot")
+
+
 __all__ = [
     "FEATURE_CATALOG_VERSION",
+    "FeatureNodeSlot",
     "FeatureSpec",
     "PROMPT_FEATURE_CATALOG",
     "PROMPT_FEATURE_CATALOG_SHA256",
+    "prompt_feature_node_slot",
+    "prompt_feature_node_slots",
     "prompt_feature_spec",
 ]

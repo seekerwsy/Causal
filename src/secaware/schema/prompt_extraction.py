@@ -18,7 +18,7 @@ from pydantic import (
 
 from secaware.schema.common import SafeValidationMixin, StrictModel, VersionedModel
 from secaware.schema.features import FeatureState, PromptExtractorBackend
-from secaware.schema.tsg import EdgeType, NodeType
+from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
 MAX_RAW_RESPONSE_CHARS = 262_144
@@ -140,7 +140,9 @@ class DirectNodeProposal(_ImmutableProposalModel):
     def validate_label(cls, value: str) -> str:
         if not value.strip() or value != value.strip():
             raise ValueError(_INVALID_PROPOSAL_MESSAGE)
-        value.encode("utf-8")
+        encoded = value.encode("utf-8")
+        if len(encoded) > MAX_TSG_STRING_BYTES:
+            raise ValueError(_INVALID_PROPOSAL_MESSAGE)
         return value
 
     @field_validator("evidence", mode="before")
@@ -408,6 +410,7 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
         from secaware.tsg.feature_catalog import (
             PROMPT_FEATURE_CATALOG,
             PROMPT_FEATURE_CATALOG_SHA256,
+            prompt_feature_node_slot,
             prompt_feature_spec,
         )
 
@@ -448,15 +451,19 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
                     raise ValueError(_INVALID_PROPOSAL_MESSAGE)
             return self
 
-        if self.facts:
+        if self.facts or not self.direct_nodes:
             raise ValueError(_INVALID_PROPOSAL_MESSAGE)
         aliases: dict[str, DirectNodeProposal] = {}
-        semantic_identities: set[tuple[str, NodeType, str]] = set()
+        semantic_identities: set[tuple[str, NodeType]] = set()
         for node in self.direct_nodes:
-            spec = prompt_feature_spec(node.feature_id)
-            if node.local_id in aliases or node.node_type not in spec.structural_node_types:
+            prompt_feature_spec(node.feature_id)
+            try:
+                slot = prompt_feature_node_slot(node.feature_id, node.node_type)
+            except KeyError:
+                raise ValueError(_INVALID_PROPOSAL_MESSAGE) from None
+            if node.local_id in aliases or node.label != slot.canonical_label:
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
-            identity = (node.feature_id, node.node_type, node.label)
+            identity = (node.feature_id, node.node_type)
             if identity in semantic_identities:
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
             aliases[node.local_id] = node

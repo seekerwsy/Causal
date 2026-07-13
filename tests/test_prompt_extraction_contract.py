@@ -207,14 +207,14 @@ def test_parallel_direct_edges_sort_after_child_evidence_canonicalization() -> N
             {
                 "local_id": "v1",
                 "node_type": "prompt_requirement",
-                "label": "path normalization requirement",
+                "label": "safety.path_normalization:prompt_requirement",
                 "feature_id": "safety.path_normalization",
                 "evidence": node_evidence,
             },
             {
                 "local_id": "v2",
                 "node_type": "guard",
-                "label": "path normalization guard",
+                "label": "safety.path_normalization:guard",
                 "feature_id": "safety.path_normalization",
                 "evidence": node_evidence,
             },

@@ -304,14 +304,14 @@ def test_direct_proposal_builds_only_catalog_typed_structure_plus_complete_state
             {
                 "local_id": "v2",
                 "node_type": NodeType.GUARD,
-                "label": "path normalization guard",
+                "label": "safety.path_normalization:guard",
                 "feature_id": "safety.path_normalization",
                 "evidence": evidence,
             },
             {
                 "local_id": "v1",
                 "node_type": NodeType.PROMPT_REQUIREMENT,
-                "label": "path normalization requirement",
+                "label": "safety.path_normalization:prompt_requirement",
                 "feature_id": "safety.path_normalization",
                 "evidence": evidence,
             },

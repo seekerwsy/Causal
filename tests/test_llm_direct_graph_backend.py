@@ -6,6 +6,7 @@ import hashlib
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
@@ -19,13 +20,20 @@ from secaware.extractors.llm_direct_graph import (
     llm_direct_graph_policy_sha256,
 )
 from secaware.llm.structured_transport import StructuredLLMPolicy
-from secaware.schema.features import PromptExtractorBackend
+from secaware.schema.features import FeatureState, PromptExtractorBackend
+from secaware.schema.prompt_extraction import (
+    DirectNodeProposal,
+    PromptExtractionProposalRecord,
+    proposal_id_for_payload,
+)
 from secaware.schema.records import PromptRecord
 from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
 )
+from secaware.tsg.graph import record_to_multidigraph
+from secaware.tsg.queries import feature_state
 
 
 def _prompt(
@@ -75,14 +83,19 @@ def _policy(structured: StructuredLLMPolicy | None = None) -> ExtractionPolicy:
 
 def _evidence(prompt: PromptRecord) -> list[dict[str, object]]:
     needle = "user path"
-    start = prompt.prompt.index(needle)
+    starts: list[int] = []
+    start = 0
+    while (found := prompt.prompt.find(needle, start)) >= 0:
+        starts.append(found)
+        start = found + len(needle)
     return [
         {
-            "start": start,
-            "end": start + len(needle),
+            "start": item,
+            "end": item + len(needle),
             "text": needle,
             "text_sha256": hashlib.sha256(needle.encode()).hexdigest(),
         }
+        for item in starts
     ]
 
 
@@ -93,21 +106,21 @@ def _graph_payload(prompt: PromptRecord) -> dict[str, object]:
             {
                 "local_id": "v1",
                 "node_type": "task_operation",
-                "label": "read_file",
+                "label": "task.file_read:task_operation",
                 "feature_id": "task.file_read",
                 "evidence": deepcopy(evidence),
             },
             {
                 "local_id": "v2",
                 "node_type": "data_object",
-                "label": "user_path",
+                "label": "task.file_read:data_object",
                 "feature_id": "task.file_read",
                 "evidence": deepcopy(evidence),
             },
             {
                 "local_id": "v3",
                 "node_type": "sink",
-                "label": "file_read",
+                "label": "task.file_read:sink",
                 "feature_id": "task.file_read",
                 "evidence": deepcopy(evidence),
             },
@@ -206,8 +219,8 @@ def test_direct_request_is_exact_blind_and_catalog_bounded() -> None:
         "intervention",
         "shadow",
     } & set(request)
-    assert request["allowed_node_templates"] == catalog_node_template_view()
-    assert request["allowed_edge_templates"] == catalog_edge_template_view()
+    assert request["allowed_node_templates"] == catalog_node_template_view(prompt)
+    assert request["allowed_edge_templates"] == catalog_edge_template_view(prompt)
     assert {item["feature_id"] for item in request["allowed_node_templates"]} <= {
         spec.feature_id for spec in PROMPT_FEATURE_CATALOG
     }
@@ -215,8 +228,8 @@ def test_direct_request_is_exact_blind_and_catalog_bounded() -> None:
 
 
 def test_direct_template_views_are_finite_typed_catalog_projections() -> None:
-    nodes = catalog_node_template_view()
-    edges = catalog_edge_template_view()
+    nodes = catalog_node_template_view(_prompt())
+    edges = catalog_edge_template_view(_prompt())
     assert nodes == sorted(
         nodes,
         key=lambda item: (item["feature_id"], item["node_type"]),
@@ -225,7 +238,17 @@ def test_direct_template_views_are_finite_typed_catalog_projections() -> None:
         edges,
         key=lambda item: (item["feature_id"], item["edge_type"]),
     )
-    assert all(set(item) == {"feature_id", "feature_family", "node_type"} for item in nodes)
+    assert all(
+        set(item)
+        == {
+            "feature_id",
+            "feature_family",
+            "node_type",
+            "canonical_label",
+            "slot_kind",
+        }
+        for item in nodes
+    )
     assert all(
         set(item)
         == {
@@ -250,6 +273,7 @@ def test_direct_template_views_are_finite_typed_catalog_projections() -> None:
 def test_direct_alias_order_and_evidence_order_have_identical_semantic_records() -> None:
     prompt = _prompt()
     first_payload = _graph_payload(prompt)
+    assert len(first_payload["nodes"][0]["evidence"]) == 2  # type: ignore[index]
     second_payload = deepcopy(first_payload)
     alias_map = {"v1": "v9", "v2": "v8", "v3": "v7"}
     for node in second_payload["nodes"]:  # type: ignore[index,union-attr]
@@ -273,6 +297,148 @@ def test_direct_alias_order_and_evidence_order_have_identical_semantic_records()
     assert first_record.nodes == second_record.nodes
     assert first_record.edges == second_record.edges
     assert first_record.shadow == second_record.shadow
+
+
+def test_direct_graph_rejects_duplicate_semantic_slot_with_different_label() -> None:
+    prompt = _prompt()
+    payload = _graph_payload(prompt)
+    duplicate = deepcopy(payload["nodes"][0])  # type: ignore[index]
+    duplicate["local_id"] = "v4"
+    duplicate["label"] = "free-form-second-operation"
+    payload["nodes"].append(duplicate)  # type: ignore[union-attr]
+    transport = CapturingTransport(_response(prompt, payload))
+
+    with pytest.raises(SecAwareError):
+        LLMDirectGraphExtractor(transport, _structured()).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "free-form-operation",
+        "secure",
+        "insecure",
+        "oracle_pass",
+        "outcome_fail",
+    ],
+)
+def test_direct_graph_rejects_noncanonical_and_security_outcome_labels(label: str) -> None:
+    prompt = _prompt()
+    payload = _graph_payload(prompt)
+    payload["nodes"][0]["label"] = label  # type: ignore[index]
+    transport = CapturingTransport(_response(prompt, payload))
+
+    with pytest.raises(SecAwareError):
+        LLMDirectGraphExtractor(transport, _structured()).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+
+def test_direct_node_label_enforces_tsg_utf8_byte_limit() -> None:
+    prompt = _prompt()
+    node = _graph_payload(prompt)["nodes"][0]  # type: ignore[index]
+    node["label"] = "界" * 400
+
+    with pytest.raises(ValidationError):
+        DirectNodeProposal.model_validate(node)
+
+
+def test_direct_request_advertises_only_prompt_applicable_closed_templates() -> None:
+    path_request = direct_graph_request_payload(_prompt(), _policy())
+    path_nodes = path_request["allowed_node_templates"]
+    path_edges = path_request["allowed_edge_templates"]
+    path_feature_ids = {item["feature_id"] for item in path_nodes}
+    assert "task.file_read" in path_feature_ids
+    assert "safety.path_normalization" in path_feature_ids
+    assert "task.database_query" not in path_feature_ids
+    assert "safety.sql_parameterization" not in path_feature_ids
+
+    sql_prompt = PromptRecord(
+        prompt_id="prompt-direct-sql-1",
+        task_id="task-direct-sql-1",
+        split="discover",
+        language="python",
+        task_family="sql_query",
+        cwe="CWE-89",
+        prompt="Run a database query with the supplied value.",
+    )
+    sql_request = direct_graph_request_payload(sql_prompt, _policy())
+    sql_feature_ids = {item["feature_id"] for item in sql_request["allowed_node_templates"]}
+    assert "task.database_query" in sql_feature_ids
+    assert "safety.sql_parameterization" in sql_feature_ids
+    assert "task.file_read" not in sql_feature_ids
+    assert "safety.path_normalization" not in sql_feature_ids
+
+    advertised_slots = {(item["feature_id"], item["node_type"]) for item in path_nodes}
+    assert all(
+        (edge["feature_id"], edge["src_node_type"]) in advertised_slots
+        and (edge["feature_id"], edge["dst_node_type"]) in advertised_slots
+        for edge in path_edges
+    )
+
+
+def test_presentation_presence_marker_is_present_and_omission_remains_absent() -> None:
+    prompt = _prompt()
+    marker_payload: dict[str, object] = {
+        "nodes": [
+            {
+                "local_id": "v1",
+                "node_type": "presentation_feature",
+                "label": "presentation.noop_rewrite",
+                "feature_id": "presentation.noop_rewrite",
+                "evidence": deepcopy(_evidence(prompt)),
+            }
+        ],
+        "edges": [],
+    }
+    marker_proposal, _, _ = _extract(marker_payload, prompt=prompt)
+    marker_record = build_prompt_tsg(marker_proposal, prompt)  # type: ignore[arg-type]
+    marker_graph = record_to_multidigraph(marker_record)
+    assert feature_state(marker_graph, "presentation.noop_rewrite") is FeatureState.PRESENT
+    presentation_nodes = [
+        data
+        for _, data in marker_graph.nodes(data=True)
+        if data["node_type"].value == "presentation_feature"
+    ]
+    assert len(presentation_nodes) == 4
+
+    ordinary_proposal, _, _ = _extract(prompt=prompt)
+    ordinary_record = build_prompt_tsg(ordinary_proposal, prompt)  # type: ignore[arg-type]
+    ordinary_graph = record_to_multidigraph(ordinary_record)
+    assert feature_state(ordinary_graph, "presentation.noop_rewrite") is FeatureState.ABSENT
+    assert marker_record.graph_sha256 != ordinary_record.graph_sha256
+
+
+def test_direct_backend_rejects_completely_empty_semantic_response() -> None:
+    prompt = _prompt()
+    transport = CapturingTransport(_response(prompt, {"nodes": [], "edges": []}))
+
+    with pytest.raises(SecAwareError):
+        LLMDirectGraphExtractor(transport, _structured()).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+
+def test_direct_proposal_contract_rejects_completely_empty_semantic_graph() -> None:
+    prompt = _prompt()
+    raw_response = '{"edges":[],"nodes":[]}'
+    payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "prompt_id": prompt.prompt_id,
+        "task_id": prompt.task_id,
+        "prompt_sha256": hashlib.sha256(prompt.prompt.encode()).hexdigest(),
+        "backend": PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+        "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
+        "policy_sha256": _policy().policy_sha256,
+        "response_sha256": hashlib.sha256(raw_response.encode()).hexdigest(),
+        "raw_response": raw_response,
+        "facts": [],
+        "direct_nodes": [],
+        "direct_edges": [],
+    }
+    payload["proposal_id"] = proposal_id_for_payload(payload)
+
+    with pytest.raises(ValidationError):
+        PromptExtractionProposalRecord.model_validate(payload)
 
 
 @pytest.mark.parametrize(

@@ -26,8 +26,13 @@ from secaware.schema.tsg import EdgeType, NodeType
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
+    prompt_feature_node_slots,
 )
-from secaware.tsg.proposal_validator import _snapshot_prompt, validate_proposal
+from secaware.tsg.proposal_validator import (
+    _snapshot_prompt,
+    feature_is_applicable,
+    validate_proposal,
+)
 
 
 _STAGE = "tsg.extract_prompt.llm_direct_graph"
@@ -48,6 +53,7 @@ _OUTPUT_SCHEMA = {
     "evidence_keys": ["end", "start", "text", "text_sha256"],
     "local_id_pattern": "^v[0-9]{1,4}$",
     "output_kind": "typed_graph",
+    "semantic_slot_contract": "catalog_feature_node_slots_v1",
 }
 
 
@@ -76,35 +82,47 @@ def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
     )
 
 
-def catalog_node_template_view() -> list[dict[str, str]]:
-    """Return the finite feature/node combinations accepted by the shared validator."""
+def _catalog_node_template_view(source: PromptRecord) -> list[dict[str, str]]:
     return sorted(
         (
             {
                 "feature_id": spec.feature_id,
                 "feature_family": spec.feature_family.value,
-                "node_type": node_type.value,
+                "node_type": slot.node_type.value,
+                "canonical_label": slot.canonical_label,
+                "slot_kind": ("presence_marker" if slot.is_presence_marker else "structural"),
             }
             for spec in PROMPT_FEATURE_CATALOG
-            for node_type in spec.structural_node_types
+            if feature_is_applicable(spec, source)
+            for slot in prompt_feature_node_slots(spec.feature_id)
         ),
         key=lambda item: (item["feature_id"], item["node_type"]),
     )
 
 
-def catalog_edge_template_view() -> list[dict[str, str]]:
-    """Return the finite feature/edge/endpoint combinations accepted by the validator."""
+def catalog_node_template_view(prompt: PromptRecord) -> list[dict[str, str]]:
+    """Return prompt-applicable finite node slots accepted by the shared validator."""
+    return _catalog_node_template_view(_snapshot_prompt(prompt))
+
+
+def _catalog_edge_template_view(
+    source: PromptRecord,
+    node_templates: list[dict[str, str]],
+) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
+    advertised_slots = {(item["feature_id"], item["node_type"]) for item in node_templates}
     for spec in PROMPT_FEATURE_CATALOG:
+        if not feature_is_applicable(spec, source):
+            continue
         for edge_type in spec.structural_edge_types:
             endpoint_types = _EDGE_ENDPOINT_TYPES.get(edge_type)
             if endpoint_types is None:
                 raise RuntimeError("invalid prompt feature edge template")
             src_type, dst_type = endpoint_types
-            if (
-                src_type not in spec.structural_node_types
-                or dst_type not in spec.structural_node_types
-            ):
+            if (spec.feature_id, src_type.value) not in advertised_slots or (
+                spec.feature_id,
+                dst_type.value,
+            ) not in advertised_slots:
                 raise RuntimeError("invalid prompt feature edge template")
             result.append(
                 {
@@ -116,6 +134,12 @@ def catalog_edge_template_view() -> list[dict[str, str]]:
                 }
             )
     return sorted(result, key=lambda item: (item["feature_id"], item["edge_type"]))
+
+
+def catalog_edge_template_view(prompt: PromptRecord) -> list[dict[str, str]]:
+    """Return prompt-applicable edges whose endpoint slots are advertised."""
+    source = _snapshot_prompt(prompt)
+    return _catalog_edge_template_view(source, _catalog_node_template_view(source))
 
 
 def _structured_policy_payload(policy: StructuredLLMPolicy) -> dict[str, object]:
@@ -188,6 +212,8 @@ def direct_graph_request_payload(
     """Build the exact blind request envelope for one source prompt."""
     source = _snapshot_prompt(prompt)
     trusted = _trusted_policy(policy)
+    node_templates = _catalog_node_template_view(source)
+    edge_templates = _catalog_edge_template_view(source, node_templates)
     return {
         "schema_version": "1.0",
         "prompt_id": source.prompt_id,
@@ -195,8 +221,8 @@ def direct_graph_request_payload(
         "prompt_sha256": hashlib.sha256(source.prompt.encode("utf-8")).hexdigest(),
         "prompt_text": source.prompt,
         "catalog_sha256": trusted.catalog_sha256,
-        "allowed_node_templates": catalog_node_template_view(),
-        "allowed_edge_templates": catalog_edge_template_view(),
+        "allowed_node_templates": node_templates,
+        "allowed_edge_templates": edge_templates,
         "output_kind": "typed_graph",
     }
 
@@ -245,6 +271,8 @@ def parse_direct_graph_response(
         if len(raw_text) > trusted.max_response_chars:
             raise ValueError
         response = _json_payload(raw_text)
+        if not response["nodes"]:
+            raise ValueError
         payload = {
             "schema_version": "1.0",
             "prompt_id": source.prompt_id,
