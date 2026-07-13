@@ -7,7 +7,18 @@ data:
   prompts_path: data/examples/prompts_demo.jsonl
 
 tsg:
-  prompt_extractor: rule_based_v0
+  prompt_extractor: llm_facts_v1
+  llm:
+    provider: openai_compatible
+    model_id: gpt-4.1-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    timeout_seconds: 60.0
+    max_attempts: 3
+    max_response_bytes: 262144
+    temperature: 0.0
+    top_p: 1.0
+    seed: 0
 
 discovery:
   min_support_total: 20

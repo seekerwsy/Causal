@@ -83,6 +83,7 @@ def _config(tmp_path: Path, prompts_path: Path) -> AppConfig:
         {
             "run": {"name": "offline-generation", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "mock",
                 "models": ["model-b", "model-a"],

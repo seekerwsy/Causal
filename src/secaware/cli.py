@@ -14,7 +14,6 @@ from secaware.commands.common import cli_action
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.generation.providers import get_provider
 from secaware.generation.openai_compatible_provider import (
     OpenAICompatibleGenerationResult,
@@ -51,6 +50,9 @@ from secaware.pipeline.jsonl_stage import (
     execute_jsonl_stage_transaction,
 )
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
+from secaware.pipeline.stages.prompt_extraction import (
+    run_prompt_extraction_stage as extract_prompt_tsg_stage,
+)
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.generation import (
@@ -1150,28 +1152,6 @@ def generate_provider_stage(
         _execute_generation_stage(store, stage, execute)
 
 
-def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    del config
-    stage = "extract-prompt-tsg"
-    inputs = [store.path("inputs", "prompts.jsonl")]
-    output = store.path("tsg", "prompt_tsg.jsonl")
-
-    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        return [[extract_prompt_tsg(prompt) for prompt in _prompt_records(store)]]
-
-    execute_jsonl_stage_transaction(
-        store,
-        stage=stage,
-        inputs=inputs,
-        outputs=(
-            JsonlOutputSpec(output, PromptTSGRecord, require_nonempty=True),
-        ),
-        force=force,
-        build=build,
-        catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
-    )
-
-
 def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     if config.generation.provider == "openai_compatible":
         plan_generation_stage(
@@ -1603,7 +1583,10 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         ]
 
     producer_outputs = {
-        "extract-prompt-tsg": [store.path("tsg", "prompt_tsg.jsonl")],
+        "extract-prompt-tsg": [
+            store.path("tsg", "prompt_extraction_proposals.jsonl"),
+            store.path("tsg", "prompt_tsg.jsonl"),
+        ],
         "run-oracle-observed": [oracle_output],
     }
     with ExitStack() as stack:
@@ -1684,7 +1667,10 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             store.path("discovery", "hypotheses_all.jsonl"),
             store.path("discovery", "hypotheses_selected.jsonl"),
         ],
-        "extract-prompt-tsg": [store.path("tsg", "prompt_tsg.jsonl")],
+        "extract-prompt-tsg": [
+            store.path("tsg", "prompt_extraction_proposals.jsonl"),
+            store.path("tsg", "prompt_tsg.jsonl"),
+        ],
     }
     with ExitStack() as stack:
         for producer_stage in sorted(producer_outputs):

@@ -29,6 +29,7 @@ from secaware.cli import (
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.discovery.candidate_enum import FACTOR_SPECS
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.extractors.factory import extraction_policy
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io import run_store as run_store_module
@@ -61,6 +62,29 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 POLICY_LOCK = PROJECT_ROOT / "policies" / "oracle" / "python" / "policy.lock.json"
 
 
+def _prompt_stage_outputs(store: RunStore) -> list[Path]:
+    return [
+        store.path("tsg", "prompt_extraction_proposals.jsonl"),
+        store.path("tsg", "prompt_tsg.jsonl"),
+    ]
+
+
+def _rewrite_prompt_stage_output_hashes(store: RunStore) -> None:
+    manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    manifest = read_stage_manifest(manifest_path)
+    outputs = _prompt_stage_outputs(store)
+    write_stage_manifest(
+        manifest_path,
+        manifest.model_copy(
+            update={
+                "output_sha256": {
+                    path.relative_to(store.root).as_posix(): sha256_path(path) for path in outputs
+                }
+            }
+        ),
+    )
+
+
 def _config(tmp_path: Path, *, exact_tools: bool = False) -> AppConfig:
     prompts_path = tmp_path / "prompts.jsonl"
     write_jsonl(
@@ -81,6 +105,7 @@ def _config(tmp_path: Path, *, exact_tools: bool = False) -> AppConfig:
         {
             "run": {"name": "oracle-cli", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "mock",
                 "models": ["model-a"],
@@ -1094,14 +1119,7 @@ def test_discovery_rejects_committed_legacy_prompt_graph_artifact(tmp_path: Path
         + "\n",
         encoding="utf-8",
     )
-    manifest_path = store.path(".stages", "extract-prompt-tsg.json")
-    manifest = read_stage_manifest(manifest_path)
-    write_stage_manifest(
-        manifest_path,
-        manifest.model_copy(
-            update={"output_sha256": {"tsg/prompt_tsg.jsonl": sha256_path(output)}}
-        ),
-    )
+    _rewrite_prompt_stage_output_hashes(store)
 
     with pytest.raises(SecAwareError) as exc_info:
         discover_stage(config, store, force=False)
@@ -1193,14 +1211,7 @@ def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
             ),
         ]
     write_jsonl(prompt_graph_path, mutated)
-    producer_manifest_path = store.path(".stages", "extract-prompt-tsg.json")
-    producer_manifest = read_stage_manifest(producer_manifest_path)
-    write_stage_manifest(
-        producer_manifest_path,
-        producer_manifest.model_copy(
-            update={"output_sha256": {"tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)}}
-        ),
-    )
+    _rewrite_prompt_stage_output_hashes(store)
 
     with pytest.raises(SecAwareError) as exc_info:
         intervene_stage(config, store, force=True)
@@ -1216,7 +1227,7 @@ def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
     assert not store.stage_is_active("intervene")
     with store.hold_committed_output(
         "extract-prompt-tsg",
-        [prompt_graph_path],
+        _prompt_stage_outputs(store),
         expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
     ):
         pass
@@ -1232,14 +1243,7 @@ def test_discovery_uses_full_prompt_graph_coordinate_boundary(tmp_path: Path) ->
         allow_empty=False,
     )
     write_jsonl(prompt_graph_path, prompt_graphs[1:])
-    producer_manifest_path = store.path(".stages", "extract-prompt-tsg.json")
-    producer_manifest = read_stage_manifest(producer_manifest_path)
-    write_stage_manifest(
-        producer_manifest_path,
-        producer_manifest.model_copy(
-            update={"output_sha256": {"tsg/prompt_tsg.jsonl": sha256_path(prompt_graph_path)}}
-        ),
-    )
+    _rewrite_prompt_stage_output_hashes(store)
 
     with pytest.raises(SecAwareError) as exc_info:
         discover_stage(config, store, force=True)
@@ -1283,8 +1287,9 @@ def test_discovery_rejects_prompt_graph_from_stale_prompt_input_without_leaks(
     assert not store.should_skip_stage(
         "extract-prompt-tsg",
         [prompts_path],
-        [store.path("tsg", "prompt_tsg.jsonl")],
+        _prompt_stage_outputs(store),
         force=True,
+        policy_sha256=extraction_policy(config.tsg).policy_sha256,
         catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
         preserve_committed=True,
     )
@@ -1331,8 +1336,9 @@ def test_intervention_rejects_prompt_graph_from_stale_prompt_input_and_rolls_bac
     assert not store.should_skip_stage(
         "extract-prompt-tsg",
         [prompts_path],
-        [store.path("tsg", "prompt_tsg.jsonl")],
+        _prompt_stage_outputs(store),
         force=True,
+        policy_sha256=extraction_policy(config.tsg).policy_sha256,
         catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
         preserve_committed=True,
     )

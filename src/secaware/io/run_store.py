@@ -25,6 +25,10 @@ from secaware.schema.common import SCHEMA_VERSION
 from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
 
 _Result = TypeVar("_Result")
+_PROMPT_EXTRACTION_OUTPUTS = (
+    "tsg/prompt_extraction_proposals.jsonl",
+    "tsg/prompt_tsg.jsonl",
+)
 
 
 def _synchronized(method: Callable[..., _Result]) -> Callable[..., _Result]:
@@ -420,13 +424,21 @@ class RunStore:
         valid_digest = (
             type(policy_sha256) is str and re.fullmatch(r"[0-9a-f]{64}", policy_sha256) is not None
         )
-        if stage.startswith("run-oracle-"):
+        if stage.startswith("run-oracle-") or stage == "extract-prompt-tsg":
             if not valid_digest:
                 raise self._manifest_conflict(stage, "stage policy binding is invalid")
             return policy_sha256
         if policy_sha256 is not None:
             raise self._manifest_conflict(stage, "stage policy binding is invalid")
         return None
+
+    def _validate_stage_output_contract(
+        self,
+        stage: str,
+        relative_outputs: Sequence[str],
+    ) -> None:
+        if stage == "extract-prompt-tsg" and tuple(relative_outputs) != _PROMPT_EXTRACTION_OUTPUTS:
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
         valid_digest = (
@@ -549,6 +561,7 @@ class RunStore:
             try:
                 outputs = [Path(path) for path in output_paths]
                 relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+                self._validate_stage_output_contract(stage, relative_outputs)
                 manifest = read_stage_manifest(self._manifest_path(stage))
                 config = self.config.model_dump(mode="json")
                 inputs = manifest.inputs if input_paths is None else self.stage_inputs(input_paths)
@@ -767,12 +780,17 @@ class RunStore:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
         catalog_sha256 = self._catalog_binding(stage, catalog_sha256)
         recovery_authorized = preserve_committed is True and callable(after_lease_acquired)
-        transactional_stage = recovery_authorized or stage.startswith("run-oracle-") or stage in {
-            "discover",
-            "extract-prompt-tsg",
-            "intervene",
-            "confirm",
-        }
+        transactional_stage = (
+            recovery_authorized
+            or stage.startswith("run-oracle-")
+            or stage
+            in {
+                "discover",
+                "extract-prompt-tsg",
+                "intervene",
+                "confirm",
+            }
+        )
         if type(preserve_committed) is not bool or (preserve_committed and not transactional_stage):
             raise self._manifest_conflict(stage, "stage transaction mode is invalid")
         if after_lease_acquired is not None and not callable(after_lease_acquired):
@@ -790,6 +808,7 @@ class RunStore:
                 after_lease_acquired()
             outputs = [Path(path) for path in output_paths]
             relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
+            self._validate_stage_output_contract(stage, relative_outputs)
             inputs = self.stage_inputs(input_paths)
             config = self.config.model_dump(mode="json")
             fingerprint = self._fingerprint_from_inputs(

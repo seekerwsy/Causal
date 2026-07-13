@@ -163,6 +163,7 @@ def execute_jsonl_stage_transaction(
     outputs: Sequence[JsonlOutputSpec],
     force: bool,
     build: BuildRecords,
+    policy_sha256: str | None = None,
     catalog_sha256: str | None = None,
 ) -> None:
     if not outputs:
@@ -178,6 +179,7 @@ def execute_jsonl_stage_transaction(
         outputs=tuple(outputs),
         force=force,
         build=build,
+        policy_sha256=policy_sha256,
         catalog_sha256=catalog_sha256,
     )
 
@@ -190,6 +192,7 @@ def _execute_transaction_body(
     outputs: tuple[JsonlOutputSpec, ...],
     force: bool,
     build: BuildRecords,
+    policy_sha256: str | None,
     catalog_sha256: str | None,
 ) -> None:
     output_paths = tuple(output.path for output in outputs)
@@ -233,6 +236,7 @@ def _execute_transaction_body(
         inputs,
         output_paths,
         force,
+        policy_sha256=policy_sha256,
         catalog_sha256=catalog_sha256,
         preserve_committed=True,
         after_lease_acquired=recover_or_cleanup_transaction,
@@ -273,9 +277,7 @@ def _execute_transaction_body(
                 stage,
                 "stage artifact must not be empty",
             )
-        for index, (output, expected) in enumerate(
-            zip(outputs, expected_groups, strict=True)
-        ):
+        for index, (output, expected) in enumerate(zip(outputs, expected_groups, strict=True)):
             candidate = _transaction_path(output.path, ".stage.candidate", stage=stage)
             candidates[index] = candidate
             write_jsonl(candidate, expected, stage=stage)
@@ -317,6 +319,7 @@ def _execute_transaction_body(
             stage,
             inputs,
             output_paths,
+            policy_sha256=policy_sha256,
             catalog_sha256=catalog_sha256,
             lease=stage_commit_lease,
         )

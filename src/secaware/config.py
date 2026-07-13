@@ -2,12 +2,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import SplitResult, urlsplit, urlunsplit
+import unicodedata
 
 import yaml
 from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.generation import GenerationParameters
 
 
@@ -41,8 +43,77 @@ class DataConfig(StrictModel):
     prompts_path: str
 
 
+class PromptExtractorLLMConfig(SafeValidationMixin, StrictModel):
+    _safe_validation_message = "prompt extractor LLM configuration failed validation"
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    provider: Literal["openai_compatible"] = "openai_compatible"
+    model_id: str = Field(min_length=1, max_length=256)
+    base_url: str = Field(min_length=1, max_length=2048, repr=False)
+    api_key_env: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+        repr=False,
+    )
+    timeout_seconds: float = Field(gt=0.0, le=3600.0)
+    max_attempts: int = Field(ge=1, le=10)
+    max_response_bytes: int = Field(ge=1024, le=1_048_576)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+    seed: int | None = Field(default=0, ge=-(2**63), le=2**63 - 1)
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        try:
+            if not value.strip() or value != value.strip():
+                raise ValueError
+            if any(unicodedata.category(character).startswith("C") for character in value):
+                raise ValueError
+            value.encode("utf-8")
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+        return value
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        try:
+            if value != value.strip() or "\\" in value or "?" in value or "#" in value:
+                raise ValueError
+            if any(
+                character.isspace() or unicodedata.category(character).startswith("C")
+                for character in value
+            ):
+                raise ValueError
+            parsed = urlsplit(value)
+            if parsed.scheme.casefold() not in {"http", "https"}:
+                raise ValueError
+            if not parsed.netloc or parsed.hostname is None:
+                raise ValueError
+            if parsed.username is not None or parsed.password is not None:
+                raise ValueError
+            if parsed.query or parsed.fragment:
+                raise ValueError
+            port = parsed.port
+            if port is not None and not 1 <= port <= 65535:
+                raise ValueError
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+        return _normalized_base_url(parsed)
+
+
 class TSGConfig(StrictModel):
-    prompt_extractor: str = "rule_based_v0"
+    prompt_extractor: PromptExtractorBackend = PromptExtractorBackend.LLM_FACTS_V1
+    llm: PromptExtractorLLMConfig | None = None
 
 
 class DiscoveryConfig(StrictModel):
@@ -231,6 +302,16 @@ class AppConfig(StrictModel):
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     oracle: OracleConfig = Field(default_factory=OracleConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+
+    @model_validator(mode="after")
+    def validate_prompt_extractor_coordinates(self) -> "AppConfig":
+        llm_backend = self.tsg.prompt_extractor in {
+            PromptExtractorBackend.LLM_FACTS_V1,
+            PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+        }
+        if llm_backend != (self.tsg.llm is not None):
+            raise ValueError("prompt extractor configuration failed validation")
+        return self
 
 
 def _config_error(path: Path) -> SecAwareError:

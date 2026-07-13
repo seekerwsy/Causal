@@ -67,6 +67,7 @@ def _config(
                 "output_dir": str(tmp_path / "run-that-must-not-be-created"),
             },
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "models": ["model-a"] if models is None else models,
                 "seeds": [7] if seeds is None else seeds,
@@ -323,6 +324,7 @@ def _write_provider_config(
         {
             "run": {"name": "provider-test", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": provider,
                 "models": ["model-a"] if models is None else models,

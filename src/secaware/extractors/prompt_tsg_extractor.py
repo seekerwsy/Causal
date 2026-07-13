@@ -3,26 +3,21 @@
 from __future__ import annotations
 
 from enum import Enum
-import hashlib
 from typing import cast
 
+from secaware.config import TSGConfig
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
+from secaware.extractors.factory import extraction_policy
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.builder import build_prompt_tsg
-from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 from secaware.tsg.proposal_validator import _snapshot_prompt as _snapshot_source_prompt
 
 
-_LEGACY_POLICY_SHA256 = hashlib.sha256(b"deterministic_catalog_v1").hexdigest()
-_LEGACY_POLICY = ExtractionPolicy(
-    backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
-    policy_sha256=_LEGACY_POLICY_SHA256,
-    catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
-    max_response_chars=262_144,
+_LEGACY_POLICY = extraction_policy(
+    TSGConfig(prompt_extractor=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1)
 )
 
 

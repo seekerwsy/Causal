@@ -334,7 +334,11 @@ def test_openai_config_normalizes_equivalent_base_urls_for_endpoint_identity() -
 
 
 def test_generation_config_accepts_new_provider_without_removing_legacy_api() -> None:
-    base = {"run": {"name": "api"}, "data": {"prompts_path": "prompts.jsonl"}}
+    base = {
+        "run": {"name": "api"},
+        "data": {"prompts_path": "prompts.jsonl"},
+        "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+    }
 
     compatible = AppConfig.model_validate(
         {
@@ -446,6 +450,7 @@ def _write_prompt_config(
         {
             "run": {"name": "preflight", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": generation,
         }
     )

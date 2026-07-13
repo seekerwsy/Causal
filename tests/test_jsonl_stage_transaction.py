@@ -32,6 +32,7 @@ def _prepared_store(tmp_path: Path) -> RunStore:
                 "output_dir": str(tmp_path / "run"),
             },
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
         }
     )
     store = RunStore(config)

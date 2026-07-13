@@ -90,6 +90,7 @@ def _store(tmp_path: Path, *, bootstrap_samples: int = 200) -> RunStore:
         {
             "run": {"name": "stage-test", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(tmp_path / "source-prompts.jsonl")},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "analysis": {"bootstrap_samples": bootstrap_samples},
         }
     )
@@ -199,6 +200,7 @@ def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig,
         {
             "run": {"name": "file-provider", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "file",
                 "models": ["model-a"],
@@ -1160,6 +1162,7 @@ def test_compatibility_generation_seals_canonical_output_before_commit(
         {
             "run": {"name": "compat", "output_dir": str(tmp_path / "run")},
             "data": {"prompts_path": str(prompts_path)},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {"provider": "mock", "models": ["model-a"], "seeds": [1]},
         }
     )

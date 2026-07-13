@@ -333,6 +333,7 @@ def test_prompt_tsg_manifest_round_trips_catalog_digest(tmp_path: Path) -> None:
         inputs={"inputs/prompts.jsonl": "input-sha"},
         config_sha256="config-sha",
         code_version="test-version",
+        policy_sha256="d" * 64,
         catalog_sha256="c" * 64,
         outputs=[output],
         output_sha256={output: sha256_path(output)},

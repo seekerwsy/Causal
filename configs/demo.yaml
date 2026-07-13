@@ -7,7 +7,7 @@ data:
   prompts_path: data/examples/prompts_demo.jsonl
 
 tsg:
-  prompt_extractor: rule_based_v0
+  prompt_extractor: deterministic_catalog_v1
 
 discovery:
   min_support_total: 4
