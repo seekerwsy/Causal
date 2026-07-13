@@ -6,6 +6,7 @@ import hashlib
 import json
 from importlib.metadata import entry_points, metadata, requires
 from pathlib import Path
+import shutil
 import zipfile
 
 import pytest
@@ -22,6 +23,59 @@ from secaware.extractors.llm_facts import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
+
+
+def _clean_source_ignore(_directory: str, names: list[str]) -> set[str]:
+    ignored: set[str] = set()
+    for name in names:
+        path = Path(name)
+        if (
+            name in {".git", ".venv", "build", "dist", "__pycache__"}
+            or name.endswith(".egg-info")
+            or path.suffix in {".pyc", ".pyo"}
+        ):
+            ignored.add(name)
+    return ignored
+
+
+def _copy_clean_build_source(source: Path, destination: Path) -> None:
+    if destination.exists():
+        raise ValueError("clean build destination must not exist")
+    destination.mkdir(parents=True)
+    for filename in ("pyproject.toml", "README.md"):
+        shutil.copy2(source / filename, destination / filename)
+    shutil.copytree(
+        source / "src",
+        destination / "src",
+        copy_function=shutil.copy2,
+        ignore=_clean_source_ignore,
+    )
+
+
+def _project_generated_fingerprint() -> tuple[tuple[object, ...], ...]:
+    generated_roots = (
+        PROJECT_ROOT / "build",
+        PROJECT_ROOT / "dist",
+        *PROJECT_ROOT.glob("*.egg-info"),
+        *(PROJECT_ROOT / "src").glob("*.egg-info"),
+    )
+    entries: list[tuple[object, ...]] = []
+    for root in sorted(set(generated_roots)):
+        if not root.exists():
+            continue
+        for path in (root, *sorted(root.rglob("*"))):
+            stat_result = path.stat()
+            digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+            entries.append(
+                (
+                    path.relative_to(PROJECT_ROOT).as_posix(),
+                    path.is_dir(),
+                    stat_result.st_size,
+                    stat_result.st_mtime_ns,
+                    digest,
+                )
+            )
+    return tuple(entries)
 
 
 def _offline_build_environment() -> dict[str, str]:
@@ -105,7 +159,7 @@ print(json.dumps({
 _SECRET_ASSIGNMENT = re.compile(
     r"(?im)^\s*(?P<key>(?:[a-z0-9]+[_-])?api[_-]?key|access[_-]?token|"
     r"client[_-]?secret|secret|password)"
-    r"(?P<env>[_-]env)?\s*[:=]\s*(?P<value>[^#\r\n]+)"
+    r"(?P<env>[_-]env)?\s*[:=]\s*(?P<value>[^#\r\n]*)"
 )
 _AUTHORIZATION_BEARER = re.compile(
     r"(?im)authorization\s*[:=]\s*['\"]?\s*bearer\s+(?P<value>[^'\"\s]+)"
@@ -118,6 +172,7 @@ _ENVIRONMENT_REFERENCE = re.compile(
     r"(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|"
     r"<[A-Za-z0-9 _-]*(?:env|environment)[A-Za-z0-9 _-]*>|[A-Z][A-Z0-9_]{2,})"
 )
+_ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _nonsecret_reference(value: str) -> bool:
@@ -128,7 +183,12 @@ def _nonsecret_reference(value: str) -> bool:
 def _embedded_secret_violations(text: str) -> list[str]:
     violations: list[str] = []
     for match in _SECRET_ASSIGNMENT.finditer(text):
-        if match.group("env") is not None or _nonsecret_reference(match.group("value")):
+        if match.group("env") is not None:
+            environment_name = match.group("value").strip().strip("'\"")
+            if _ENVIRONMENT_NAME.fullmatch(environment_name) is None:
+                violations.append(f"invalid-{match.group('key').casefold()}-env")
+            continue
+        if _nonsecret_reference(match.group("value")):
             continue
         violations.append(f"literal-{match.group('key').casefold()}")
     for match in _AUTHORIZATION_BEARER.finditer(text):
@@ -212,6 +272,16 @@ def test_python_m_secaware_oracle_cli_shows_oracle_help() -> None:
 
 def test_built_wheel_contains_both_versioned_prompt_templates(tmp_path: Path) -> None:
     assert not any(tmp_path.iterdir())
+    original_generated = _project_generated_fingerprint()
+    clean_source = tmp_path / "clean-source"
+    _copy_clean_build_source(PROJECT_ROOT, clean_source)
+    assert {path.name for path in clean_source.iterdir()} == {"README.md", "pyproject.toml", "src"}
+    assert not any(
+        path.name in {".git", ".venv", "build", "dist", "__pycache__"}
+        or path.name.endswith(".egg-info")
+        or path.suffix in {".pyc", ".pyo"}
+        for path in clean_source.rglob("*")
+    )
     wheel_dir = tmp_path / "wheelhouse"
     wheel_dir.mkdir()
     env = _offline_build_environment()
@@ -227,7 +297,7 @@ def test_built_wheel_contains_both_versioned_prompt_templates(tmp_path: Path) ->
             str(wheel_dir),
             ".",
         ],
-        cwd=PROJECT_ROOT,
+        cwd=clean_source,
         env=env,
         capture_output=True,
         encoding="utf-8",
@@ -235,6 +305,7 @@ def test_built_wheel_contains_both_versioned_prompt_templates(tmp_path: Path) ->
     )
 
     assert result.returncode == 0, result.stderr
+    assert _project_generated_fingerprint() == original_generated
     wheels = tuple(wheel_dir.glob("*.whl"))
     assert len(wheels) == 1
     with zipfile.ZipFile(wheels[0]) as archive:
@@ -290,6 +361,10 @@ def test_package_and_config_examples_contain_no_embedded_secrets() -> None:
         "client_secret = 'literal-client-secret-value'",
         "Authorization: Bearer literal-access-token-value",
         "base_url: https://embedded-user:embedded-password@example.test/v1",
+        "api_key_env: literal-client-secret-value",
+        "api_key_env: ${OPENAI_API_KEY}",
+        "api_key_env: 9OPENAI_API_KEY",
+        "api_key_env: OPENAI API KEY",
     ),
 )
 def test_secret_gate_rejects_literal_credentials(snippet: str) -> None:
@@ -304,6 +379,9 @@ def test_secret_gate_rejects_literal_credentials(snippet: str) -> None:
         "client_secret: <set-via-environment>",
         "Authorization: Bearer ${ACCESS_TOKEN}",
         "base_url: https://${API_USER}:${API_PASSWORD}@example.test/v1",
+        "api_key_env: A",
+        "api_key_env: _A",
+        "api_key_env: openai_key_1",
     ),
 )
 def test_secret_gate_allows_nonsecret_environment_references(snippet: str) -> None:
