@@ -7,7 +7,9 @@ import math
 import pytest
 from pydantic import ValidationError
 
+import secaware.schema.causal as causal_schema
 from secaware.config import FCIDiscoveryConfig
+from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
     BootstrapFailureReason,
@@ -57,9 +59,25 @@ def _variables() -> tuple[CausalVariableSpec, ...]:
 
 
 def _table() -> CausalTableRecord:
-    observations = (
-        ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-        ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
+    coordinates = (
+        ("task-1", "prompt-1", 1, (1, 0)),
+        ("task-2", "prompt-2", 2, (0, 1)),
+    )
+    observations = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=task_id,
+                prompt_id=prompt_id,
+                model_id="model-a",
+                seed_id=seed_id,
+                values=values,
+            ),
+            task_id,
+            prompt_id,
+            seed_id,
+            values,
+        )
+        for task_id, prompt_id, seed_id, values in coordinates
     )
     return CausalTableRecord.from_content(
         scope_id="scope.path",
@@ -69,6 +87,29 @@ def _table() -> CausalTableRecord:
         row_count=2,
         independent_task_count=2,
         observation_payload=observations,
+    )
+
+
+def _observation_payload(
+    task_id: str,
+    prompt_id: str,
+    seed_id: int,
+    values: tuple[int, ...],
+    *,
+    model_id: str = "model-a",
+) -> tuple[str, str, str, int, tuple[int, ...]]:
+    return (
+        CausalObservationRecord.row_id_from_content(
+            task_id=task_id,
+            prompt_id=prompt_id,
+            model_id=model_id,
+            seed_id=seed_id,
+            values=values,
+        ),
+        task_id,
+        prompt_id,
+        seed_id,
+        values,
     )
 
 
@@ -113,6 +154,25 @@ def test_discovery_config_is_frozen_and_rejects_removed_heuristic_fields() -> No
 
 def test_table_ids_and_digests_are_derived_from_canonical_content() -> None:
     table = _table()
+    original_payload = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=task_id,
+                prompt_id=prompt_id,
+                model_id="model-a",
+                seed_id=seed_id,
+                values=values,
+            ),
+            task_id,
+            prompt_id,
+            seed_id,
+            values,
+        )
+        for task_id, prompt_id, seed_id, values in (
+            ("task-1", "prompt-1", 1, (1, 0)),
+            ("task-2", "prompt-2", 2, (0, 1)),
+        )
+    )
     reversed_table = CausalTableRecord.from_content(
         scope_id="scope.path",
         cwe="CWE-22",
@@ -120,14 +180,12 @@ def test_table_ids_and_digests_are_derived_from_canonical_content() -> None:
         variables=tuple(reversed(_variables())),
         row_count=2,
         independent_task_count=2,
-        observation_payload=(
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-            ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
-        ),
+        observation_payload=original_payload,
     )
 
     assert table.table_id == f"table_{table.table_sha256}"
     assert reversed_table == table
+    changed_values = (0, 0)
     changed = CausalTableRecord.from_content(
         scope_id="scope.path",
         cwe="CWE-22",
@@ -136,11 +194,59 @@ def test_table_ids_and_digests_are_derived_from_canonical_content() -> None:
         row_count=2,
         independent_task_count=2,
         observation_payload=(
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (0, 0)),
-            ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
+            (
+                CausalObservationRecord.row_id_from_content(
+                    task_id="task-1",
+                    prompt_id="prompt-1",
+                    model_id="model-a",
+                    seed_id=1,
+                    values=changed_values,
+                ),
+                "task-1",
+                "prompt-1",
+                1,
+                changed_values,
+            ),
+            original_payload[1],
         ),
     )
     assert changed.table_sha256 != table.table_sha256
+
+
+def test_table_rejects_arbitrary_row_id_even_when_row_semantics_are_unchanged() -> None:
+    table = _table()
+    valid = (
+        table.row_count,
+        table.independent_task_count,
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        CausalTableRecord.from_content(
+            scope_id=table.scope_id,
+            cwe=table.cwe,
+            model_id=table.model_id,
+            variables=table.variables,
+            row_count=valid[0],
+            independent_task_count=valid[1],
+            observation_payload=(
+                ("row_" + "f" * 64, "task-1", "prompt-1", 1, (1, 0)),
+                (
+                    CausalObservationRecord.row_id_from_content(
+                        task_id="task-2",
+                        prompt_id="prompt-2",
+                        model_id="model-a",
+                        seed_id=2,
+                        values=(0, 1),
+                    ),
+                    "task-2",
+                    "prompt-2",
+                    2,
+                    (0, 1),
+                ),
+            ),
+        )
+
+    assert "row_" + "f" * 64 not in str(exc_info.value)
 
 
 def test_table_rejects_duplicate_variables_invalid_states_and_bounds() -> None:
@@ -154,8 +260,8 @@ def test_table_rejects_duplicate_variables_invalid_states_and_bounds() -> None:
             row_count=2,
             independent_task_count=2,
             observation_payload=(
-                ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-                ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
+                _observation_payload("task-1", "prompt-1", 1, (1, 0)),
+                _observation_payload("task-2", "prompt-2", 2, (0, 1)),
             ),
         )
     with pytest.raises(ValidationError):
@@ -169,8 +275,8 @@ def test_table_rejects_duplicate_variables_invalid_states_and_bounds() -> None:
             row_count=2,
             independent_task_count=2,
             observation_payload=(
-                ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-                ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
+                _observation_payload("task-1", "prompt-1", 1, (0,) * 65),
+                _observation_payload("task-2", "prompt-2", 2, (0,) * 65),
             ),
         )
     with pytest.raises(ValidationError):
@@ -207,25 +313,21 @@ def test_categorical_state_order_is_semantic_not_lexicographic() -> None:
     "observation_payload",
     [
         (
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
+            _observation_payload("task-1", "prompt-1", 1, (1, 0)),
+            _observation_payload("task-1", "prompt-1", 1, (1, 0)),
         ),
         (
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-            ("row_" + "2" * 64, "task-1", "prompt-1", 1, (1, 0)),
+            _observation_payload("task-1", "prompt-1", 1, (1, 0)),
+            _observation_payload("task-1", "prompt-2", 2, (0, 1)),
+        ),
+        (_observation_payload("task-1", "prompt-1", 1, (1, 0)),),
+        (
+            _observation_payload("task-1", "prompt-1", 1, (2, 0)),
+            _observation_payload("task-2", "prompt-2", 2, (0, 1)),
         ),
         (
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-            ("row_" + "2" * 64, "task-1", "prompt-2", 2, (0, 1)),
-        ),
-        (("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),),
-        (
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (2, 0)),
-            ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
-        ),
-        (
-            ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1,)),
-            ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
+            _observation_payload("task-1", "prompt-1", 1, (1,)),
+            _observation_payload("task-2", "prompt-2", 2, (0, 1)),
         ),
     ],
 )
@@ -431,6 +533,27 @@ def test_background_knowledge_is_canonical_closed_and_consistent() -> None:
         BackgroundKnowledgeRecord.model_validate(tampered)
 
 
+@pytest.mark.parametrize(
+    ("tiers", "required_directions"),
+    [
+        ((("x.first", 1), ("x.second", 1)), (("x.first", "x.second"), ("x.second", "x.first"))),
+        ((("x.first", 1), ("y.second", 2)), (("y.second", "x.first"),)),
+    ],
+)
+def test_background_knowledge_rejects_required_cycles_and_reverse_tier_directions(
+    tiers: tuple[tuple[str, int], ...],
+    required_directions: tuple[tuple[str, str], ...],
+) -> None:
+    with pytest.raises(ValidationError):
+        BackgroundKnowledgeRecord.from_content(
+            table_id="table_" + "a" * 64,
+            tiers=tiers,
+            forbidden_directions=(),
+            forbidden_adjacencies=(),
+            required_directions=required_directions,
+        )
+
+
 def test_bootstrap_draw_items_are_sorted_unique_and_content_addressed() -> None:
     table = _table()
     item_0 = BootstrapDrawItem(
@@ -483,8 +606,8 @@ def test_nested_records_revalidate_mutated_instances_and_errors_hide_raw_inputs(
             row_count=2,
             independent_task_count=2,
             observation_payload=(
-                ("row_" + "1" * 64, "task-1", "prompt-1", 1, (1, 0)),
-                ("row_" + "2" * 64, "task-2", "prompt-2", 2, (0, 1)),
+                _observation_payload("task-1", "prompt-1", 1, (1, 0)),
+                _observation_payload("task-2", "prompt-2", 2, (0, 1)),
             ),
         )
 
@@ -615,6 +738,220 @@ def test_failure_records_only_accept_finite_reasons_and_safe_detail_digests() ->
     rendered = str(exc_info.value)
     assert "raw-secret-reason" not in rendered
     assert "secret prompt text" not in rendered
+
+
+def _persisted_causal_records() -> tuple[object, ...]:
+    table = _table()
+    row = CausalObservationRecord.from_content(
+        table=table,
+        task_id="task-1",
+        prompt_id="prompt-1",
+        model_id="model-a",
+        seed_id=1,
+        values=(1, 0),
+    )
+    edge = PAGEdgeRecord(
+        left=table.variables[0].variable_id,
+        right=table.variables[1].variable_id,
+        left_mark=EndpointMark.CIRCLE,
+        right_mark=EndpointMark.ARROW,
+    )
+    pag = PAGRecord.from_content(
+        run_kind=PAGRunKind.OBSERVATIONAL_REFERENCE,
+        table_id=table.table_id,
+        backend="causal_learn_fci_v1",
+        backend_version="0.1.4.7",
+        ci_test="gsq",
+        config_sha256=SHA_A,
+        background_knowledge_sha256=SHA_B,
+        variable_ids=tuple(variable.variable_id for variable in table.variables),
+        edges=(edge,),
+    )
+    knowledge = BackgroundKnowledgeRecord.from_content(
+        table_id=table.table_id,
+        tiers=tuple((variable.variable_id, variable.temporal_tier) for variable in table.variables),
+        forbidden_directions=((table.variables[1].variable_id, table.variables[0].variable_id),),
+        forbidden_adjacencies=(),
+    )
+    exclusion = CausalExclusionRecord.from_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        task_id="task-1",
+        prompt_id="prompt-1",
+        seed_id=1,
+        variable_id=table.variables[0].variable_id,
+        reason_code=CausalExclusionReason.UNRESOLVED_FEATURE,
+        producer_sha256=SHA_A,
+    )
+    item_0 = BootstrapDrawItem(
+        draw_index=0,
+        task_id="task-1",
+        prompt_id="prompt-1",
+        seed_id=1,
+        row_id=row.row_id,
+    )
+    item_1 = BootstrapDrawItem(
+        draw_index=1,
+        task_id="task-2",
+        prompt_id="prompt-2",
+        seed_id=2,
+        row_id=CausalObservationRecord.row_id_from_content(
+            task_id="task-2",
+            prompt_id="prompt-2",
+            model_id="model-a",
+            seed_id=2,
+            values=(0, 1),
+        ),
+    )
+    draw = BootstrapDrawRecord.from_content(
+        table_id=table.table_id,
+        run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
+        replicate_index=0,
+        rng_version="sha256-rejection-fisher-yates-v1",
+        seed_material_sha256=SHA_A,
+        items=(item_0, item_1),
+    )
+    bootstrap_failure = BootstrapFailureRecord.from_content(
+        table_id=table.table_id,
+        replicate_index=0,
+        draw_id=draw.draw_id,
+        reason_code=BootstrapFailureReason.BACKEND_TIMEOUT,
+        fci_config_sha256=SHA_A,
+        detail_sha256=SHA_B,
+    )
+    discovery_failure = DiscoveryFailureRecord.from_content(
+        table_id=table.table_id,
+        scope_id=table.scope_id,
+        model_id=table.model_id,
+        reason_code=DiscoveryFailureReason.NO_STABLE_HYPOTHESIS,
+        table_sha256=table.table_sha256,
+        fci_config_sha256=SHA_A,
+        background_knowledge_sha256=knowledge.knowledge_sha256,
+        detail_sha256=SHA_B,
+    )
+    path = PathPatternRecord.from_content(
+        variable_ids=(edge.left, edge.right),
+        endpoint_marks=((edge.left_mark, edge.right_mark),),
+    )
+    support = PathSupportRecord.from_content(
+        table_id=table.table_id,
+        reference_pag_id=pag.pag_id,
+        path=path,
+        support_numerator=1,
+        support_denominator=2,
+        bootstrap_config_sha256=SHA_A,
+    )
+    return (
+        table.variables[0],
+        table,
+        row,
+        edge,
+        pag,
+        knowledge,
+        exclusion,
+        item_0,
+        draw,
+        bootstrap_failure,
+        discovery_failure,
+        path,
+        support,
+    )
+
+
+@pytest.mark.parametrize(
+    "record",
+    _persisted_causal_records(),
+    ids=lambda record: type(record).__name__,
+)
+def test_every_causal_record_roundtrips_through_jsonl(tmp_path, record: object) -> None:
+    path = tmp_path / f"{type(record).__name__}.jsonl"
+
+    write_jsonl(path, [record], stage="test.causal_roundtrip")
+
+    assert read_jsonl(
+        path,
+        type(record),
+        required=True,
+        stage="test.causal_roundtrip",
+    ) == [record]
+
+
+def test_json_native_arrays_are_snapshotted_and_exact_enum_values_are_accepted() -> None:
+    table = _table()
+    payload = table.model_dump(mode="json")
+
+    restored = CausalTableRecord.model_validate(payload)
+    payload["variables"][0]["states"][0] = "mutated"
+
+    assert restored == table
+    assert restored.variables[0].role is VariableRole.X
+
+
+def test_over_bound_factories_fail_before_digest_or_sort(monkeypatch) -> None:
+    digest_calls: list[object] = []
+    sort_calls: list[object] = []
+
+    class SortProbe:
+        def __lt__(self, other: object) -> bool:
+            sort_calls.append(other)
+            return False
+
+    class DrawProbe:
+        @property
+        def draw_index(self) -> int:
+            sort_calls.append(self)
+            return 0
+
+    def observed_digest(payload: object) -> str:
+        digest_calls.append(payload)
+        return SHA_A
+
+    monkeypatch.setattr(causal_schema, "_digest", observed_digest)
+
+    with pytest.raises(ValidationError):
+        PAGRecord.from_content(
+            run_kind=PAGRunKind.OBSERVATIONAL_REFERENCE,
+            table_id="table_" + "a" * 64,
+            backend="causal_learn_fci_v1",
+            backend_version="0.1.4.7",
+            ci_test="gsq",
+            config_sha256=SHA_A,
+            background_knowledge_sha256=SHA_B,
+            variable_ids=tuple(SortProbe() for _index in range(65)),
+            edges=(),
+        )
+    assert digest_calls == []
+    assert sort_calls == []
+    with pytest.raises(ValidationError):
+        BackgroundKnowledgeRecord.from_content(
+            table_id="table_" + "a" * 64,
+            tiers=tuple((SortProbe(), 1) for _index in range(65)),
+            forbidden_directions=(),
+            forbidden_adjacencies=(),
+        )
+    assert digest_calls == []
+    assert sort_calls == []
+    with pytest.raises(ValidationError):
+        PathPatternRecord.from_content(
+            variable_ids=tuple(f"x.feature_{index}" for index in range(18)),
+            endpoint_marks=tuple((EndpointMark.CIRCLE, EndpointMark.ARROW) for _index in range(17)),
+        )
+    assert digest_calls == []
+
+    monkeypatch.setattr(causal_schema, "_MAX_ROWS", 2)
+    items = tuple(DrawProbe() for _index in range(3))
+    with pytest.raises(ValidationError):
+        BootstrapDrawRecord.from_content(
+            table_id="table_" + "a" * 64,
+            run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
+            replicate_index=0,
+            rng_version="sha256-rejection-fisher-yates-v1",
+            seed_material_sha256=SHA_A,
+            items=items,
+        )
+    assert digest_calls == []
+    assert sort_calls == []
 
 
 @pytest.mark.parametrize(

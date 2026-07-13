@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from secaware.schema.common import SafeValidationMixin, StrictModel
 
@@ -24,6 +24,8 @@ _VARIABLE_ID_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_PATTERN = re.compile(r"^CWE-[1-9][0-9]*$")
 _MAX_VARIABLES = 64
 _MAX_ROWS = 100_000
+_MAX_PAG_EDGES = _MAX_VARIABLES * (_MAX_VARIABLES - 1) // 2
+_MAX_DIRECTION_CONSTRAINTS = _MAX_VARIABLES * (_MAX_VARIABLES - 1)
 
 
 def _canonical_json(payload: object) -> bytes:
@@ -51,6 +53,17 @@ def _digest(payload: object) -> str:
     return hashlib.sha256(_canonical_json(payload)).hexdigest()
 
 
+def _row_id_from_content(
+    *,
+    task_id: str,
+    prompt_id: str,
+    model_id: str,
+    seed_id: int,
+    values: Sequence[int],
+) -> str:
+    return f"row_{_digest((task_id, prompt_id, model_id, seed_id, tuple(values)))}"
+
+
 def _content(model: StrictModel, *derived_fields: str) -> dict[str, Any]:
     return model.model_dump(mode="json", exclude=set(derived_fields))
 
@@ -63,6 +76,24 @@ def _valid_identifier(value: str) -> bool:
     )
 
 
+def _snapshot_json_arrays(value: object) -> object:
+    if type(value) is dict:
+        return {key: _snapshot_json_arrays(item) for key, item in value.items()}
+    if type(value) in {list, tuple}:
+        return tuple(_snapshot_json_arrays(item) for item in value)
+    return value
+
+
+def _exact_enum_value(value: object, enum_type: type[Enum]) -> object:
+    if isinstance(value, enum_type):
+        return value
+    if type(value) is str:
+        for member in enum_type:
+            if value == member.value:
+                return member
+    return value
+
+
 class _CausalContract(SafeValidationMixin, StrictModel):
     _safe_validation_message: ClassVar[str] = "causal contract failed validation"
 
@@ -73,6 +104,11 @@ class _CausalContract(SafeValidationMixin, StrictModel):
         revalidate_instances="always",
         strict=True,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def snapshot_json_arrays(cls, value: object) -> object:
+        return _snapshot_json_arrays(value)
 
 
 class _CausalVersionedContract(_CausalContract):
@@ -127,12 +163,17 @@ class CausalVariableSpec(_CausalVersionedContract):
     schema_version: Literal["1.0"]
     variable_id: str
     role: VariableRole
-    states: tuple[str, ...]
+    states: tuple[str, ...] = Field(min_length=2, max_length=256)
     source_query_id: str
     scope_id: str
     temporal_tier: int = Field(ge=0, le=2)
     adjacency_type: str
     producer_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def parse_role(cls, value: object) -> object:
+        return _exact_enum_value(value, VariableRole)
 
     @model_validator(mode="after")
     def validate_semantics(self) -> Self:
@@ -156,7 +197,7 @@ class CausalTableRecord(_CausalVersionedContract):
     scope_id: str
     cwe: str
     model_id: str
-    variables: tuple[CausalVariableSpec, ...]
+    variables: tuple[CausalVariableSpec, ...] = Field(min_length=2, max_length=_MAX_VARIABLES)
     row_count: int = Field(ge=2, le=_MAX_ROWS)
     independent_task_count: int = Field(ge=2, le=_MAX_ROWS)
     table_sha256: str = Field(pattern=_SHA256_PATTERN)
@@ -203,6 +244,15 @@ class CausalTableRecord(_CausalVersionedContract):
                         for value, variable in zip(values, ordered, strict=True)
                     )
                 ):
+                    raise ValueError
+                expected_row_id = _row_id_from_content(
+                    task_id=task_id,
+                    prompt_id=prompt_id,
+                    model_id=model_id,
+                    seed_id=seed_id,
+                    values=values,
+                )
+                if row_id != expected_row_id:
                     raise ValueError
                 row_ids.append(row_id)
                 coordinates.append((task_id, prompt_id, seed_id))
@@ -262,7 +312,7 @@ class CausalObservationRecord(_CausalVersionedContract):
     prompt_id: str
     model_id: str
     seed_id: int
-    values: tuple[int, ...]
+    values: tuple[int, ...] = Field(min_length=2, max_length=_MAX_VARIABLES)
 
     @staticmethod
     def row_id_from_content(
@@ -273,7 +323,13 @@ class CausalObservationRecord(_CausalVersionedContract):
         seed_id: int,
         values: Sequence[int],
     ) -> str:
-        return f"row_{_digest((task_id, prompt_id, model_id, seed_id, tuple(values)))}"
+        return _row_id_from_content(
+            task_id=task_id,
+            prompt_id=prompt_id,
+            model_id=model_id,
+            seed_id=seed_id,
+            values=values,
+        )
 
     @classmethod
     def from_content(
@@ -345,6 +401,11 @@ class PAGEdgeRecord(_CausalContract):
     left_mark: EndpointMark
     right_mark: EndpointMark
 
+    @field_validator("left_mark", "right_mark", mode="before")
+    @classmethod
+    def parse_endpoint_mark(cls, value: object) -> object:
+        return _exact_enum_value(value, EndpointMark)
+
     @model_validator(mode="before")
     @classmethod
     def canonicalize_endpoints(cls, value: object) -> object:
@@ -391,14 +452,26 @@ class PAGRecord(_CausalVersionedContract):
     ci_test: Literal["gsq"]
     config_sha256: str = Field(pattern=_SHA256_PATTERN)
     background_knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
-    variable_ids: tuple[str, ...]
-    edges: tuple[PAGEdgeRecord, ...]
+    variable_ids: tuple[str, ...] = Field(min_length=2, max_length=_MAX_VARIABLES)
+    edges: tuple[PAGEdgeRecord, ...] = Field(max_length=_MAX_PAG_EDGES)
+
+    @field_validator("run_kind", mode="before")
+    @classmethod
+    def parse_run_kind(cls, value: object) -> object:
+        return _exact_enum_value(value, PAGRunKind)
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
         try:
             payload = dict(content)
             payload["schema_version"] = "1.0"
+            if (
+                type(payload.get("variable_ids")) not in {list, tuple}
+                or not 2 <= len(payload["variable_ids"]) <= _MAX_VARIABLES
+                or type(payload.get("edges")) not in {list, tuple}
+                or len(payload["edges"]) > _MAX_PAG_EDGES
+            ):
+                raise ValueError
             payload["variable_ids"] = tuple(sorted(payload["variable_ids"]))
             payload["edges"] = tuple(
                 sorted(payload["edges"], key=lambda item: (item.left, item.right))
@@ -436,11 +509,13 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
     schema_version: Literal["1.0"]
     knowledge_id: str = Field(pattern=_BK_ID_PATTERN)
     table_id: str = Field(pattern=_TABLE_ID_PATTERN)
-    tiers: tuple[tuple[str, int], ...]
-    unconstrained_variable_ids: tuple[str, ...] = ()
-    forbidden_directions: tuple[tuple[str, str], ...]
-    forbidden_adjacencies: tuple[tuple[str, str], ...]
-    required_directions: tuple[tuple[str, str], ...] = ()
+    tiers: tuple[tuple[str, int], ...] = Field(max_length=_MAX_VARIABLES)
+    unconstrained_variable_ids: tuple[str, ...] = Field(default=(), max_length=_MAX_VARIABLES)
+    forbidden_directions: tuple[tuple[str, str], ...] = Field(max_length=_MAX_DIRECTION_CONSTRAINTS)
+    forbidden_adjacencies: tuple[tuple[str, str], ...] = Field(max_length=_MAX_PAG_EDGES)
+    required_directions: tuple[tuple[str, str], ...] = Field(
+        default=(), max_length=_MAX_DIRECTION_CONSTRAINTS
+    )
     knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
 
     @classmethod
@@ -456,6 +531,26 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
         required_directions: Sequence[tuple[str, str]] = (),
     ) -> Self:
         try:
+            if (
+                type(tiers) not in {list, tuple}
+                or len(tiers) > _MAX_VARIABLES
+                or (
+                    variable_ids is not None
+                    and (
+                        type(variable_ids) not in {list, tuple}
+                        or len(variable_ids) > _MAX_VARIABLES
+                    )
+                )
+                or type(unconstrained_variable_ids) not in {list, tuple}
+                or len(unconstrained_variable_ids) > _MAX_VARIABLES
+                or type(forbidden_directions) not in {list, tuple}
+                or len(forbidden_directions) > _MAX_DIRECTION_CONSTRAINTS
+                or type(forbidden_adjacencies) not in {list, tuple}
+                or len(forbidden_adjacencies) > _MAX_PAG_EDGES
+                or type(required_directions) not in {list, tuple}
+                or len(required_directions) > _MAX_DIRECTION_CONSTRAINTS
+            ):
+                raise ValueError
             ordered_tiers = tuple(sorted(tiers))
             ordered_unconstrained = tuple(sorted(unconstrained_variable_ids))
             inferred_variables = {item for item, _tier in ordered_tiers} | set(
@@ -493,6 +588,10 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
         known = set(tier_variables) | set(self.unconstrained_variable_ids)
         directions = (*self.forbidden_directions, *self.required_directions)
         forbidden_adjacencies = set(self.forbidden_adjacencies)
+        required_pairs = {
+            _canonical_pair(source, target) for source, target in self.required_directions
+        }
+        tier_by_variable = dict(self.tiers)
         expected = _digest(_content(self, "knowledge_id", "knowledge_sha256"))
         if (
             self.tiers != tuple(sorted(self.tiers))
@@ -507,6 +606,7 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
             or len(self.forbidden_directions) != len(set(self.forbidden_directions))
             or self.required_directions != tuple(sorted(self.required_directions))
             or len(self.required_directions) != len(set(self.required_directions))
+            or len(required_pairs) != len(self.required_directions)
             or self.forbidden_adjacencies != tuple(sorted(self.forbidden_adjacencies))
             or len(self.forbidden_adjacencies) != len(forbidden_adjacencies)
             or any(left >= right for left, right in self.forbidden_adjacencies)
@@ -521,6 +621,12 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
             or set(self.required_directions) & set(self.forbidden_directions)
             or any(
                 _canonical_pair(*item) in forbidden_adjacencies for item in self.required_directions
+            )
+            or any(
+                source in tier_by_variable
+                and target in tier_by_variable
+                and tier_by_variable[source] > tier_by_variable[target]
+                for source, target in self.required_directions
             )
             or self.knowledge_sha256 != expected
             or self.knowledge_id != f"bk_{expected}"
@@ -541,6 +647,11 @@ class CausalExclusionRecord(_CausalVersionedContract):
     variable_id: str
     reason_code: CausalExclusionReason
     producer_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def parse_reason_code(cls, value: object) -> object:
+        return _exact_enum_value(value, CausalExclusionReason)
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
@@ -592,8 +703,13 @@ class BootstrapDrawRecord(_CausalVersionedContract):
     replicate_index: int | None = Field(default=None, ge=0, le=9999)
     rng_version: str
     seed_material_sha256: str = Field(pattern=_SHA256_PATTERN)
-    items: tuple[BootstrapDrawItem, ...]
+    items: tuple[BootstrapDrawItem, ...] = Field(min_length=2, max_length=_MAX_ROWS)
     draw_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("run_kind", mode="before")
+    @classmethod
+    def parse_run_kind(cls, value: object) -> object:
+        return _exact_enum_value(value, PAGRunKind)
 
     @property
     def selected_row_ids(self) -> tuple[str, ...]:
@@ -603,6 +719,11 @@ class BootstrapDrawRecord(_CausalVersionedContract):
     def from_content(cls, **content: Any) -> Self:
         try:
             payload = {"schema_version": "1.0", **content}
+            if (
+                type(payload.get("items")) not in {list, tuple}
+                or not 2 <= len(payload["items"]) <= _MAX_ROWS
+            ):
+                raise ValueError
             payload["items"] = tuple(sorted(payload["items"], key=lambda item: item.draw_index))
             digest = _digest(
                 {
@@ -644,6 +765,11 @@ class BootstrapFailureRecord(_CausalVersionedContract):
     fci_config_sha256: str = Field(pattern=_SHA256_PATTERN)
     detail_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
 
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def parse_reason_code(cls, value: object) -> object:
+        return _exact_enum_value(value, BootstrapFailureReason)
+
     @classmethod
     def from_content(cls, **content: Any) -> Self:
         try:
@@ -672,6 +798,11 @@ class DiscoveryFailureRecord(_CausalVersionedContract):
     background_knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
     detail_sha256: str = Field(pattern=_SHA256_PATTERN, repr=False)
 
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def parse_reason_code(cls, value: object) -> object:
+        return _exact_enum_value(value, DiscoveryFailureReason)
+
     @classmethod
     def from_content(cls, **content: Any) -> Self:
         try:
@@ -695,14 +826,37 @@ class DiscoveryFailureRecord(_CausalVersionedContract):
 class PathPatternRecord(_CausalVersionedContract):
     schema_version: Literal["1.0"]
     path_id: str = Field(pattern=_PATH_ID_PATTERN)
-    variable_ids: tuple[str, ...]
-    endpoint_marks: tuple[tuple[EndpointMark, EndpointMark], ...]
+    variable_ids: tuple[str, ...] = Field(min_length=2, max_length=17)
+    endpoint_marks: tuple[tuple[EndpointMark, EndpointMark], ...] = Field(
+        min_length=1, max_length=16
+    )
     path_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("endpoint_marks", mode="before")
+    @classmethod
+    def parse_endpoint_marks(cls, value: object) -> object:
+        snapshot = _snapshot_json_arrays(value)
+        if type(snapshot) is not tuple:
+            return snapshot
+        parsed: list[object] = []
+        for pair in snapshot:
+            if type(pair) is not tuple:
+                parsed.append(pair)
+                continue
+            parsed.append(tuple(_exact_enum_value(mark, EndpointMark) for mark in pair))
+        return tuple(parsed)
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
         try:
             payload = {"schema_version": "1.0", **content}
+            if (
+                type(payload.get("variable_ids")) not in {list, tuple}
+                or not 2 <= len(payload["variable_ids"]) <= 17
+                or type(payload.get("endpoint_marks")) not in {list, tuple}
+                or not 1 <= len(payload["endpoint_marks"]) <= 16
+            ):
+                raise ValueError
             digest = _digest(payload)
             return cls(**payload, path_id=f"path_{digest}", path_sha256=digest)
         except Exception:
