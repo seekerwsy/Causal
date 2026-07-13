@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
+import traceback
 
 import pytest
 from pydantic import ValidationError
 
+from secaware.causal.variable_catalog import PROMPT_CAUSAL_VARIABLES
 from secaware.intervention import arm_catalog
 from secaware.intervention.arm_catalog import materialize_arm_protocol
+from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema.causal import (
     ExpectedOperationContrast,
     FrozenHypothesisRecord,
@@ -15,13 +19,20 @@ from secaware.schema.causal import (
 )
 from secaware.schema.experiments import (
     ArmRole,
+    ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
     FunctionalOutcomeContractRecord,
+    PromptRole,
+    TargetInstanceRecord,
     TargetSpecRecord,
 )
 from secaware.schema.features import FeatureFamily, FeatureOperation, FeatureState
 from secaware.schema.causal import EndpointMark
-from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
+import secaware.schema.experiments as experiment_schema
+from secaware.tsg.feature_catalog import (
+    PROMPT_FEATURE_CATALOG,
+    PROMPT_FEATURE_CATALOG_SHA256,
+)
 
 
 SHA_A = "a" * 64
@@ -114,6 +125,75 @@ def _contract(*, generic: bool = True) -> FunctionalOutcomeContractRecord:
     )
 
 
+def _content_authenticated_unsafe_target(
+    hypothesis: FrozenHypothesisRecord,
+    feature_id: str,
+    operation: FeatureOperation,
+) -> TargetSpecRecord:
+    selected = next(item for item in hypothesis.expected_contrasts if item.operation is operation)
+    content = {
+        "schema_version": "1.0",
+        "hypothesis_id": hypothesis.hypothesis_id,
+        "frozen_hypothesis_sha256": hypothesis.hypothesis_sha256,
+        "feature_family": hypothesis.feature_family.value,
+        "feature_id": feature_id,
+        "operation": operation.value,
+        "hypothesis_outcome_variable_id": hypothesis.outcome_variable_id,
+        "hypothesis_outcome_estimand_id": selected.outcome_estimand_id,
+        "expected_hypothesis_contrast_sign": selected.expected_sign,
+    }
+    python_content = {
+        **content,
+        "feature_family": hypothesis.feature_family,
+        "operation": operation,
+    }
+    return TargetSpecRecord.model_construct(
+        **python_content,
+        target_spec_id=f"target_{canonical_sha256(content)}",
+    )
+
+
+def _assert_secret_absent_from_exception(exc: BaseException, secret: str) -> None:
+    assert secret not in str(exc)
+    assert secret not in repr(exc)
+    assert secret not in "".join(traceback.format_exception(exc))
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        assert secret not in str(current)
+        assert secret not in repr(current)
+        assert secret not in "".join(traceback.format_exception(current))
+        trace = current.__traceback__
+        while trace is not None:
+            filename = Path(trace.tb_frame.f_code.co_filename).as_posix()
+            if "/src/secaware/" in filename.casefold():
+                for value in trace.tb_frame.f_locals.values():
+                    assert not _contains_secret(value, secret, set())
+            trace = trace.tb_next
+        current = current.__cause__ or current.__context__
+
+
+def _contains_secret(value: object, secret: str, seen: set[int]) -> bool:
+    if id(value) in seen:
+        return False
+    seen.add(id(value))
+    if isinstance(value, str):
+        return secret in value
+    if isinstance(value, dict):
+        return any(
+            _contains_secret(key, secret, seen) or _contains_secret(item, secret, seen)
+            for key, item in value.items()
+        )
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return any(_contains_secret(item, secret, seen) for item in value)
+    fields = getattr(type(value), "model_fields", None)
+    if fields is not None:
+        return any(_contains_secret(getattr(value, field, None), secret, seen) for field in fields)
+    return secret in repr(value)
+
+
 def test_safety_add_has_exact_four_arm_roles_and_eleven_contrasts() -> None:
     hypothesis = _hypothesis()
     protocol = materialize_arm_protocol(
@@ -172,6 +252,77 @@ def test_safety_remove_has_distinct_protocol_and_allowed_delta() -> None:
     assert target_transition.from_states == (FeatureState.PRESENT,)
     assert target_transition.to_states == (FeatureState.ABSENT,)
     assert len(remove.contrasts) == 11
+
+
+def test_confirmation_targetability_is_a_closed_m5_gate_over_the_full_catalog() -> None:
+    targetable = tuple(
+        item.feature_id
+        for item in PROMPT_FEATURE_CATALOG
+        if item.intervenable and item.feature_id != "safety.generic_security_reminder"
+    )
+    assert experiment_schema.CONFIRMATION_TARGET_FEATURE_IDS == targetable
+    assert experiment_schema.CONFIRMATION_CONTROL_ONLY_FEATURE_IDS == (
+        "safety.generic_security_reminder",
+    )
+
+    for spec in PROMPT_FEATURE_CATALOG:
+        for operation in FeatureOperation:
+            expected = spec.feature_id in targetable and operation in spec.operations
+            assert (
+                experiment_schema.is_confirmation_target_feature(spec.feature_id, operation)
+                is expected
+            )
+            hypothesis = _hypothesis(spec.feature_id, spec.feature_family)
+            if expected:
+                target = _target(spec.feature_id, operation, hypothesis=hypothesis)
+                assert target.feature_id == spec.feature_id
+                assert target.operation is operation
+            else:
+                with pytest.raises(
+                    ValidationError,
+                    match="experiment contract failed validation",
+                ):
+                    _target(spec.feature_id, operation, hypothesis=hypothesis)
+
+
+def test_generic_security_reminder_stays_observable_and_arm_only_not_a_target() -> None:
+    # M4B intentionally keeps this unified Prompt variable observable. M5 alone
+    # prevents it from becoming a target while retaining it as a finite arm control.
+    assert "x.safety.generic_security_reminder" in {
+        item.variable_id for item in PROMPT_CAUSAL_VARIABLES
+    }
+    hypothesis = _hypothesis(
+        "safety.generic_security_reminder",
+        FeatureFamily.SAFETY_CONTROL,
+    )
+    with pytest.raises(ValidationError, match="experiment contract failed validation"):
+        _target(
+            "safety.generic_security_reminder",
+            FeatureOperation.ADD,
+            hypothesis=hypothesis,
+        )
+
+    forged = _content_authenticated_unsafe_target(
+        hypothesis,
+        "safety.generic_security_reminder",
+        FeatureOperation.ADD,
+    )
+    with pytest.raises(ValidationError, match="arm protocol materialization failed"):
+        materialize_arm_protocol(hypothesis, forged)
+
+    ordinary = _hypothesis()
+    protocol = materialize_arm_protocol(
+        ordinary,
+        _target(
+            "safety.path_normalization",
+            FeatureOperation.ADD,
+            hypothesis=ordinary,
+        ),
+    )
+    control = _arm(protocol, ArmRole.GENERIC_SECURITY_REMINDER)
+    assert tuple(item.feature_id for item in control.allowed_delta.allowed_transitions) == (
+        "safety.generic_security_reminder",
+    )
 
 
 @pytest.mark.parametrize(
@@ -299,6 +450,49 @@ def test_task_protocol_has_four_arms_only_with_matching_reviewed_contract(
     assert all("generic_security" not in item.role.value for item in protocol.arms)
 
 
+@pytest.mark.parametrize("operation", tuple(FeatureOperation))
+@pytest.mark.parametrize("with_contract", (False, True))
+def test_task_placebo_contrast_uses_contract_outcome_or_explicit_fallback(
+    operation: FeatureOperation,
+    with_contract: bool,
+) -> None:
+    hypothesis = _hypothesis("task.database_query", FeatureFamily.TASK_FUNCTION)
+    target = _target("task.database_query", operation, hypothesis=hypothesis)
+    contract = _contract(generic=False) if with_contract else None
+    protocol = materialize_arm_protocol(
+        hypothesis,
+        target,
+        functional_contract=contract,
+    )
+    placebo = next(
+        item for item in protocol.contrasts if item.arm_contrast_id.endswith(".placebo_minus_noop")
+    )
+    assert placebo.outcome_id == (
+        contract.outcome_id if contract is not None else "y_secure_functional"
+    )
+    assert placebo.priority == "diagnostic"
+    assert placebo.expected_sign == "null"
+
+    target_noop_checks = {
+        item.outcome_id: (item.priority, item.expected_sign)
+        for item in protocol.contrasts
+        if item.arm_contrast_id.endswith(".target_minus_noop")
+        and item.outcome_id
+        in {
+            "y_secure_functional",
+            "y_cwe_secure",
+            "y_cwe_insecure",
+            "y_cwe_unknown",
+        }
+    }
+    assert target_noop_checks == {
+        "y_secure_functional": ("secondary", "two_sided"),
+        "y_cwe_secure": ("secondary", "two_sided"),
+        "y_cwe_insecure": ("diagnostic", "two_sided"),
+        "y_cwe_unknown": ("diagnostic", "two_sided"),
+    }
+
+
 def test_task_contract_for_another_feature_or_unknown_generic_fails_closed() -> None:
     hypothesis = _hypothesis("task.file_read", FeatureFamily.TASK_FUNCTION)
     target = _target("task.file_read", FeatureOperation.ADD, hypothesis=hypothesis)
@@ -368,19 +562,24 @@ def test_non_intervenable_or_unknown_target_feature_fails_closed(
     family: FeatureFamily,
     operation: FeatureOperation,
 ) -> None:
-    hypothesis = _hypothesis()
-    target_payload = _target(
-        "safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis
-    ).model_dump(mode="json", exclude={"target_spec_id"})
-    target_payload.update(
-        feature_id=feature_id,
-        feature_family=family,
-        operation=operation,
-    )
-    target = TargetSpecRecord.from_content(**target_payload)
+    hypothesis = _hypothesis(feature_id, family)
+    selected = next(item for item in hypothesis.expected_contrasts if item.operation is operation)
+    with pytest.raises(ValidationError, match="experiment contract failed validation"):
+        TargetSpecRecord.from_content(
+            hypothesis_id=hypothesis.hypothesis_id,
+            frozen_hypothesis_sha256=hypothesis.hypothesis_sha256,
+            feature_family=family,
+            feature_id=feature_id,
+            operation=operation,
+            hypothesis_outcome_variable_id=hypothesis.outcome_variable_id,
+            hypothesis_outcome_estimand_id=selected.outcome_estimand_id,
+            expected_hypothesis_contrast_sign=selected.expected_sign,
+        )
+
+    forged = _content_authenticated_unsafe_target(hypothesis, feature_id, operation)
 
     with pytest.raises(ValidationError, match="arm protocol materialization failed"):
-        materialize_arm_protocol(hypothesis, target)
+        materialize_arm_protocol(hypothesis, forged)
 
 
 @pytest.mark.parametrize(
@@ -552,6 +751,9 @@ def test_arm_catalog_is_finite_and_exposes_no_runtime_registration_hook() -> Non
     public_names = set(arm_catalog.__all__)
     assert public_names == {
         "ARM_PROTOCOL_CATALOG_ID",
+        "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
+        "CONFIRMATION_TARGET_FEATURE_IDS",
+        "is_confirmation_target_feature",
         "materialize_arm_protocol",
     }
     assert not any(
@@ -559,7 +761,7 @@ def test_arm_catalog_is_finite_and_exposes_no_runtime_registration_hook() -> Non
     )
 
 
-def test_materializer_sanitizes_unknown_values_and_repr_has_no_raw_input() -> None:
+def test_materializer_sanitizes_forged_model_repr_traceback_and_frame_locals() -> None:
     hypothesis = _hypothesis()
     target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
     secret = "raw-secret-operation"
@@ -567,5 +769,129 @@ def test_materializer_sanitizes_unknown_values_and_repr_has_no_raw_input() -> No
 
     with pytest.raises(ValidationError) as exc_info:
         materialize_arm_protocol(hypothesis, forged)
-    assert secret not in str(exc_info.value)
-    assert "raw-secret" not in repr(target)
+    assert secret not in repr(forged)
+    assert secret not in str(forged)
+    _assert_secret_absent_from_exception(exc_info.value, secret)
+
+
+def test_from_content_sanitizes_traceback_chain_and_frame_locals() -> None:
+    secret = "raw-secret-hypothesis"
+    with pytest.raises(ValidationError) as exc_info:
+        TargetSpecRecord.from_content(
+            hypothesis_id=secret,
+            frozen_hypothesis_sha256=SHA_A,
+            feature_family=FeatureFamily.SAFETY_CONTROL,
+            feature_id="safety.path_normalization",
+            operation=FeatureOperation.ADD,
+            hypothesis_outcome_variable_id="y.secure_functional",
+            hypothesis_outcome_estimand_id="y_secure_functional",
+            expected_hypothesis_contrast_sign="positive",
+        )
+    _assert_secret_absent_from_exception(exc_info.value, secret)
+
+
+@pytest.mark.parametrize(
+    "record_kind",
+    (
+        "target_spec",
+        "target_instance",
+        "protocol",
+        "protocol_instance",
+        "functional_contract",
+    ),
+)
+def test_every_content_addressed_factory_clears_secret_frame_locals(
+    record_kind: str,
+) -> None:
+    secret = f"raw-secret-{record_kind}"
+    hypothesis = _hypothesis()
+    target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
+    protocol = materialize_arm_protocol(hypothesis, target)
+    target_instance = TargetInstanceRecord.from_content(
+        target_spec_id=target.target_spec_id,
+        task_id="task-safe",
+        source_prompt_id="prompt-safe",
+        source_prompt_sha256=SHA_A,
+        counterpart_prompt_id=None,
+        counterpart_prompt_sha256=None,
+        source_prompt_role=PromptRole.NEUTRAL_BASELINE,
+        counterpart_required=False,
+    )
+
+    def invoke() -> None:
+        if record_kind == "target_spec":
+            payload = target.model_dump(mode="python", exclude={"target_spec_id"})
+            payload["hypothesis_id"] = secret
+            TargetSpecRecord.from_content(**payload)
+        elif record_kind == "target_instance":
+            payload = target_instance.model_dump(mode="python", exclude={"target_instance_id"})
+            payload["task_id"] = f"{secret}\n"
+            TargetInstanceRecord.from_content(**payload)
+        elif record_kind == "protocol":
+            payload = protocol.model_dump(
+                mode="python",
+                exclude={"arm_protocol_id", "contrast_set_sha256"},
+            )
+            payload["hypothesis_id"] = secret
+            ConfirmationProtocolRecord.from_content(**payload)
+        elif record_kind == "protocol_instance":
+            instance = ConfirmationProtocolInstanceRecord.from_content(
+                arm_protocol_id=protocol.arm_protocol_id,
+                target_instance_id=target_instance.target_instance_id,
+                task_id="task-safe",
+                source_prompt_id="prompt-safe",
+                source_prompt_sha256=SHA_A,
+                counterpart_prompt_id=None,
+                counterpart_prompt_sha256=None,
+            )
+            payload = instance.model_dump(mode="python", exclude={"protocol_instance_id"})
+            payload["task_id"] = f"{secret}\n"
+            ConfirmationProtocolInstanceRecord.from_content(**payload)
+        else:
+            payload = _contract().model_dump(mode="python", exclude={"contract_id"})
+            payload["task_feature_id"] = f"task.{secret}"
+            FunctionalOutcomeContractRecord.from_content(**payload)
+
+    with pytest.raises(ValidationError) as exc_info:
+        invoke()
+    _assert_secret_absent_from_exception(exc_info.value, secret)
+
+
+@pytest.mark.parametrize("forged_kind", ("hypothesis", "target", "contract"))
+def test_materializer_clears_every_forged_input_from_traceback_locals(
+    forged_kind: str,
+) -> None:
+    secret = f"raw-secret-{forged_kind}"
+    if forged_kind == "contract":
+        hypothesis = _hypothesis("task.database_query", FeatureFamily.TASK_FUNCTION)
+        target = _target("task.database_query", FeatureOperation.ADD, hypothesis=hypothesis)
+        contract = _contract().model_copy(update={"task_feature_id": f"task.{secret}"})
+    else:
+        hypothesis = _hypothesis()
+        target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
+        contract = None
+        if forged_kind == "hypothesis":
+            hypothesis = hypothesis.model_copy(update={"model_id": secret})
+        else:
+            target = target.model_copy(update={"operation": secret})
+
+    with pytest.raises(ValidationError) as exc_info:
+        materialize_arm_protocol(
+            hypothesis,
+            target,
+            functional_contract=contract,
+        )
+    _assert_secret_absent_from_exception(exc_info.value, secret)
+
+
+@pytest.mark.parametrize("interrupt", (KeyboardInterrupt, SystemExit))
+def test_materializer_preserves_process_interrupts(monkeypatch, interrupt) -> None:
+    hypothesis = _hypothesis()
+    target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
+
+    def raise_interrupt(_value):
+        raise interrupt
+
+    monkeypatch.setattr(arm_catalog, "revalidate_frozen_hypothesis", raise_interrupt)
+    with pytest.raises(interrupt):
+        materialize_arm_protocol(hypothesis, target)

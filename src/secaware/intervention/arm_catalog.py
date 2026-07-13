@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, NoReturn
 
 from secaware.causal.freeze import revalidate_frozen_hypothesis
 from secaware.schema.common import _sanitized_validation_error
@@ -12,6 +12,8 @@ from secaware.schema.experiments import (
     AllowedDeltaRecord as _AllowedDelta,
     ArmRole as _ArmRole,
     ArmSpecRecord as _ArmSpec,
+    CONFIRMATION_CONTROL_ONLY_FEATURE_IDS,
+    CONFIRMATION_TARGET_FEATURE_IDS,
     ConfirmationProtocolRecord as _Protocol,
     FeatureFamily as _Family,
     FeatureOperation as _Operation,
@@ -20,6 +22,7 @@ from secaware.schema.experiments import (
     FunctionalOutcomeContractRecord as _FunctionalContract,
     PreRegisteredContrastSpec as _ContrastSpec,
     TargetSpecRecord as _TargetSpec,
+    is_confirmation_target_feature,
 )
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG as _FEATURES
 from secaware.tsg.feature_catalog import prompt_feature_spec
@@ -45,8 +48,9 @@ _OUTCOME_SOURCE = {
 }
 
 
-def _materialization_error():
-    return _sanitized_validation_error(
+def _raise_materialization_error() -> NoReturn:
+    """Raise from a frame that never receives prompt-derived values."""
+    raise _sanitized_validation_error(
         "ConfirmationProtocolRecord",
         "arm protocol materialization failed",
     )
@@ -391,12 +395,13 @@ def _task_contrasts(
                     ),
                 )
             )
+    placebo_outcome_id = functional_outcome_id or "y_secure_functional"
     result.append(
         _contrast(
             arm_contrast_id=f"{prefix}.placebo_minus_noop",
             treatment=_ArmRole.TASK_LENGTH_PLACEBO,
             control=_ArmRole.TASK_NOOP,
-            outcome_id="y_secure_functional",
+            outcome_id=placebo_outcome_id,
             priority="diagnostic",
             expected_sign="null",
             multiplicity_family_id=family_id,
@@ -585,6 +590,17 @@ def materialize_arm_protocol(
     functional_contract: _FunctionalContract | None = None,
 ) -> _Protocol:
     """Materialize one closed, pre-randomization protocol for a frozen hypothesis."""
+    checked_hypothesis: FrozenHypothesisRecord | None = None
+    checked_target: _TargetSpec | None = None
+    checked_contract: _FunctionalContract | None = None
+    spec = None
+    selected: tuple[object, ...] = ()
+    arms: tuple[_ArmSpec, ...] = ()
+    contrasts: tuple[_ContrastSpec, ...] = ()
+    generic: str | None = None
+    functional_sign: Literal["positive", "negative", "two_sided"] | None = None
+    result: _Protocol | None = None
+    failed = False
     try:
         checked_hypothesis = revalidate_frozen_hypothesis(
             FrozenHypothesisRecord.model_validate(hypothesis)
@@ -604,6 +620,10 @@ def materialize_arm_protocol(
         if (
             len(selected) != 1
             or not spec.intervenable
+            or not is_confirmation_target_feature(
+                checked_target.feature_id,
+                checked_target.operation,
+            )
             or checked_target.hypothesis_id != checked_hypothesis.hypothesis_id
             or checked_target.frozen_hypothesis_sha256 != checked_hypothesis.hypothesis_sha256
             or checked_target.feature_id != checked_hypothesis.target_feature_id
@@ -659,7 +679,7 @@ def materialize_arm_protocol(
                 matched_present=len(arms) == 3,
             )
 
-        return _Protocol.from_content(
+        result = _Protocol.from_content(
             hypothesis_id=checked_hypothesis.hypothesis_id,
             frozen_hypothesis_sha256=checked_hypothesis.hypothesis_sha256,
             target_spec_id=checked_target.target_spec_id,
@@ -677,7 +697,29 @@ def materialize_arm_protocol(
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        raise _materialization_error() from None
+        failed = True
+    if failed:
+        hypothesis = None
+        target = None
+        functional_contract = None
+        checked_hypothesis = None
+        checked_target = None
+        checked_contract = None
+        spec = None
+        selected = ()
+        arms = ()
+        contrasts = ()
+        generic = None
+        functional_sign = None
+        result = None
+        _raise_materialization_error()
+    return result
 
 
-__all__ = ["ARM_PROTOCOL_CATALOG_ID", "materialize_arm_protocol"]
+__all__ = [
+    "ARM_PROTOCOL_CATALOG_ID",
+    "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
+    "CONFIRMATION_TARGET_FEATURE_IDS",
+    "is_confirmation_target_feature",
+    "materialize_arm_protocol",
+]

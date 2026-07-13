@@ -37,6 +37,8 @@ from secaware.schema.experiments import (
     AllowedDeltaRecord,
     ArmRole,
     ArmSpecRecord,
+    CONFIRMATION_CONTROL_ONLY_FEATURE_IDS,
+    CONFIRMATION_TARGET_FEATURE_IDS,
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
     FeatureTransition,
@@ -47,6 +49,7 @@ from secaware.schema.experiments import (
     PromptRole,
     TargetInstanceRecord,
     TargetSpecRecord,
+    is_confirmation_target_feature,
 )
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
 from secaware.schema.interventions import FailureReason, InterventionRecord
@@ -80,6 +83,8 @@ __all__ = [
     "AllowedDeltaRecord",
     "ArmRole",
     "ArmSpecRecord",
+    "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
+    "CONFIRMATION_TARGET_FEATURE_IDS",
     "BackgroundKnowledgeRecord",
     "BootstrapDrawItem",
     "BootstrapDrawRecord",
@@ -117,6 +122,7 @@ __all__ = [
     "InterventionRecord",
     "InterventionExecutorKind",
     "InterventionMode",
+    "is_confirmation_target_feature",
     "DiscoveryFailureReason",
     "DiscoveryFailureRecord",
     "MotifId",

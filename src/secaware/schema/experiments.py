@@ -7,7 +7,7 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import Any, ClassVar, Literal, Self
+from typing import Any, ClassVar, Literal, NoReturn, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -39,6 +39,42 @@ _RESERVED_FUNCTIONAL_OUTCOMES = frozenset(
         "y_functional_ok",
     }
 )
+
+# M4B intentionally observes every intervenable Prompt feature, including the
+# generic reminder. M5 applies this narrower, immutable target gate: the reminder
+# remains available as a randomized arm control but can never become the target.
+CONFIRMATION_CONTROL_ONLY_FEATURE_IDS = ("safety.generic_security_reminder",)
+CONFIRMATION_TARGET_FEATURE_IDS = (
+    "task.input_consumption",
+    "task.file_read",
+    "task.database_query",
+    "task.process_launch",
+    "task.privileged_action",
+    "task.object_deserialization",
+    "safety.input_validation",
+    "safety.path_normalization",
+    "safety.sql_parameterization",
+    "safety.safe_subprocess",
+    "safety.authorization_check",
+    "safety.safe_deserialization",
+    "presentation.noop_rewrite",
+    "presentation.length_matched_placebo",
+    "presentation.sham_edit",
+    "presentation.matched_control",
+)
+
+
+def is_confirmation_target_feature(
+    feature_id: object,
+    operation: object,
+) -> bool:
+    """Return whether one exact catalog operation may be an M5 target."""
+    return (
+        type(feature_id) is str
+        and type(operation) is FeatureOperation
+        and feature_id in CONFIRMATION_TARGET_FEATURE_IDS
+        and operation in (FeatureOperation.ADD, FeatureOperation.REMOVE)
+    )
 
 
 def _jsonable(value: object) -> object:
@@ -95,6 +131,13 @@ def _valid_identifier(value: str) -> bool:
     )
 
 
+def _raise_contract_validation_error(
+    model_type: type[SafeValidationMixin],
+) -> NoReturn:
+    """Raise from a frame that never receives raw contract values."""
+    raise model_type._safe_error()
+
+
 class _ExperimentContract(SafeValidationMixin, StrictModel):
     _safe_validation_message: ClassVar[str] = "experiment contract failed validation"
 
@@ -110,6 +153,12 @@ class _ExperimentContract(SafeValidationMixin, StrictModel):
     @classmethod
     def snapshot_json_arrays(cls, value: object) -> object:
         return _snapshot_json_arrays(value)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__}()"
 
 
 class _ExperimentVersionedContract(_ExperimentContract):
@@ -177,11 +226,23 @@ class TargetSpecRecord(_ExperimentVersionedContract):
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        result: Self | None = None
+        failed = False
         try:
             payload = {"schema_version": "1.0", **content}
-            return cls(**payload, target_spec_id=f"target_{_digest(payload)}")
+            result = cls(**payload, target_spec_id=f"target_{_digest(payload)}")
         except Exception:
-            raise cls._safe_error() from None
+            failed = True
+        if failed:
+            content.clear()
+            content = None
+            if payload is not None:
+                payload.clear()
+            payload = None
+            result = None
+            _raise_contract_validation_error(cls)
+        return result
 
     @model_validator(mode="after")
     def validate_semantics_and_digest(self) -> Self:
@@ -198,6 +259,7 @@ class TargetSpecRecord(_ExperimentVersionedContract):
         if (
             not _valid_identifier(self.feature_id)
             or not self.feature_id.startswith(prefix)
+            or not is_confirmation_target_feature(self.feature_id, self.operation)
             or expected_estimand != self.hypothesis_outcome_estimand_id
             or self.target_spec_id != f"target_{expected}"
         ):
@@ -224,11 +286,26 @@ class TargetInstanceRecord(_ExperimentVersionedContract):
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        result: Self | None = None
+        failed = False
         try:
             payload = {"schema_version": "1.0", **content}
-            return cls(**payload, target_instance_id=f"target_instance_{_digest(payload)}")
+            result = cls(
+                **payload,
+                target_instance_id=f"target_instance_{_digest(payload)}",
+            )
         except Exception:
-            raise cls._safe_error() from None
+            failed = True
+        if failed:
+            content.clear()
+            content = None
+            if payload is not None:
+                payload.clear()
+            payload = None
+            result = None
+            _raise_contract_validation_error(cls)
+        return result
 
     @model_validator(mode="after")
     def validate_semantics_and_digest(self) -> Self:
@@ -423,17 +500,35 @@ class ConfirmationProtocolRecord(_ExperimentVersionedContract):
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        complete: dict[str, Any] | None = None
+        contrasts: tuple[object, ...] = ()
+        result: Self | None = None
+        failed = False
         try:
             payload = {"schema_version": "1.0", **content}
             contrasts = tuple(payload["contrasts"])
             contrast_set_sha256 = cls.contrast_digest(contrasts)
             complete = {**payload, "contrast_set_sha256": contrast_set_sha256}
-            return cls(
+            result = cls(
                 **complete,
                 arm_protocol_id=f"arm_protocol_{_digest(complete)}",
             )
         except Exception:
-            raise cls._safe_error() from None
+            failed = True
+        if failed:
+            content.clear()
+            content = None
+            if payload is not None:
+                payload.clear()
+            payload = None
+            if complete is not None:
+                complete.clear()
+            complete = None
+            contrasts = ()
+            result = None
+            _raise_contract_validation_error(cls)
+        return result
 
     @model_validator(mode="after")
     def validate_semantics_and_digest(self) -> Self:
@@ -476,11 +571,26 @@ class ConfirmationProtocolInstanceRecord(_ExperimentVersionedContract):
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        result: Self | None = None
+        failed = False
         try:
             payload = {"schema_version": "1.0", **content}
-            return cls(**payload, protocol_instance_id=f"protocol_instance_{_digest(payload)}")
+            result = cls(
+                **payload,
+                protocol_instance_id=f"protocol_instance_{_digest(payload)}",
+            )
         except Exception:
-            raise cls._safe_error() from None
+            failed = True
+        if failed:
+            content.clear()
+            content = None
+            if payload is not None:
+                payload.clear()
+            payload = None
+            result = None
+            _raise_contract_validation_error(cls)
+        return result
 
     @model_validator(mode="after")
     def validate_semantics_and_digest(self) -> Self:
@@ -511,11 +621,26 @@ class FunctionalOutcomeContractRecord(_ExperimentVersionedContract):
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        result: Self | None = None
+        failed = False
         try:
             payload = {"schema_version": "1.0", **content}
-            return cls(**payload, contract_id=f"functional_contract_{_digest(payload)}")
+            result = cls(
+                **payload,
+                contract_id=f"functional_contract_{_digest(payload)}",
+            )
         except Exception:
-            raise cls._safe_error() from None
+            failed = True
+        if failed:
+            content.clear()
+            content = None
+            if payload is not None:
+                payload.clear()
+            payload = None
+            result = None
+            _raise_contract_validation_error(cls)
+        return result
 
     @model_validator(mode="after")
     def validate_semantics_and_digest(self) -> Self:
@@ -557,12 +682,15 @@ __all__ = [
     "AllowedDeltaRecord",
     "ArmRole",
     "ArmSpecRecord",
+    "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
+    "CONFIRMATION_TARGET_FEATURE_IDS",
     "ConfirmationProtocolInstanceRecord",
     "ConfirmationProtocolRecord",
     "FeatureTransition",
     "FunctionalOutcomeContractRecord",
     "InterventionExecutorKind",
     "InterventionMode",
+    "is_confirmation_target_feature",
     "PreRegisteredContrastSpec",
     "PromptRole",
     "TargetInstanceRecord",
