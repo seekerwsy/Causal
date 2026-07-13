@@ -96,7 +96,10 @@ def _validated_fci_inputs(
         matrix.ndim != 2
         or matrix.shape != expected_shape
         or checked_table.row_count > checked_config.max_rows
-        or checked_table.row_count % checked_table.independent_task_count != 0
+        or (
+            checked_run_kind in _OBSERVATIONAL_RUN_KINDS
+            and checked_table.row_count % checked_table.independent_task_count != 0
+        )
         or len(checked_table.variables) > checked_config.max_variables
         or checked_table.independent_task_count < checked_config.min_independent_tasks
         or checked_knowledge.table_id != checked_table.table_id

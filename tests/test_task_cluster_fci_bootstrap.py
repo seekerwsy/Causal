@@ -21,6 +21,7 @@ from secaware.schema.causal import (
     CausalVariableSpec,
     PAGRecord,
     PAGRunKind,
+    VariableRole,
 )
 
 
@@ -86,6 +87,80 @@ def _config(*, bootstrap_samples: int = 4) -> FCIDiscoveryConfig:
         bootstrap_samples=bootstrap_samples,
         min_independent_tasks=2,
     )
+
+
+def _jci_table_and_matrix() -> tuple[
+    CausalTableRecord,
+    BackgroundKnowledgeRecord,
+    np.ndarray,
+]:
+    variables = (
+        CausalVariableSpec(
+            schema_version="1.0",
+            variable_id="c.arm",
+            role=VariableRole.C,
+            states=("noop", "target"),
+            source_query_id="context.randomized_arm_v1",
+            scope_id="scope.cwe_89",
+            temporal_tier=0,
+            adjacency_type="context",
+            producer_sha256="c" * 64,
+        ),
+        _variable("x.safety.sql_parameterization"),
+        _variable("y.secure_functional"),
+    )
+    values_by_row = (
+        (0, 0, 0),
+        (1, 1, 1),
+        (0, 1, 1),
+        (1, 0, 0),
+        (0, 1, 0),
+    )
+    coordinates = (
+        ("task-0", "prompt-0", 0),
+        ("task-0", "prompt-0", 1),
+        ("task-1", "prompt-1", 0),
+        ("task-1", "prompt-1", 1),
+        ("task-2", "prompt-2", 0),
+    )
+    observations = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=task_id,
+                prompt_id=prompt_id,
+                model_id="model-a",
+                seed_id=seed_id,
+                values=values,
+            ),
+            task_id,
+            prompt_id,
+            seed_id,
+            values,
+        )
+        for (task_id, prompt_id, seed_id), values in zip(coordinates, values_by_row, strict=True)
+    )
+    table = CausalTableRecord.from_content(
+        scope_id="scope.cwe_89",
+        cwe="CWE-89",
+        model_id="model-a",
+        variables=variables,
+        row_count=5,
+        independent_task_count=3,
+        observation_payload=observations,
+    )
+    knowledge = BackgroundKnowledgeRecord.from_content(
+        table_id=table.table_id,
+        variable_ids=tuple(item.variable_id for item in table.variables),
+        tiers=(
+            ("x.safety.sql_parameterization", 1),
+            ("y.secure_functional", 2),
+        ),
+        unconstrained_variable_ids=("c.arm",),
+        forbidden_directions=(("y.secure_functional", "x.safety.sql_parameterization"),),
+        forbidden_adjacencies=(),
+        required_directions=(),
+    )
+    return table, knowledge, np.asarray(values_by_row, dtype=np.int64)
 
 
 class _RecordingRunner:
@@ -286,6 +361,30 @@ def test_fci_input_validation_accepts_authenticated_one_seed_per_task_matrix() -
         PAGRunKind.OBSERVATIONAL_REFERENCE,
     )
     assert checked.shape[0] == table.independent_task_count
+
+
+@pytest.mark.parametrize(
+    "run_kind",
+    (PAGRunKind.JCI_RAW, PAGRunKind.JCI_CONSTRAINED),
+)
+def test_jci_input_validation_keeps_all_rows_when_rows_are_not_divisible_by_tasks(
+    run_kind: PAGRunKind,
+) -> None:
+    from secaware.discovery.causal_learn_backend import validate_fci_inputs
+
+    table, knowledge, matrix = _jci_table_and_matrix()
+    assert table.row_count == 5
+    assert table.independent_task_count == 3
+
+    checked, *_rest = validate_fci_inputs(
+        matrix,
+        table,
+        knowledge,
+        _config(),
+        run_kind,
+    )
+
+    assert checked.shape == (table.row_count, len(table.variables))
 
 
 def test_runner_receives_reference_then_exact_configured_replicate_count() -> None:
