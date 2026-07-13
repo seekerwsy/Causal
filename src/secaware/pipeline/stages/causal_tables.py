@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
@@ -36,6 +35,11 @@ CAUSAL_TABLE_OUTPUTS = (
 )
 
 _STAGE = "assemble-causal-tables"
+_OBSERVED_GENERATION_PRODUCERS = (
+    "generate-observed",
+    "generate-provider-observed",
+    "import-generation-observed",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,13 +176,8 @@ def _observed_generation_producer(
     store: RunStore,
     code_path: Path,
 ) -> tuple[str, tuple[Path, ...]]:
-    candidates = (
-        "generate-observed",
-        "generate-provider-observed",
-        "import-generation-observed",
-    )
     committed: list[tuple[str, tuple[Path, ...]]] = []
-    for stage in candidates:
+    for stage in _OBSERVED_GENERATION_PRODUCERS:
         outputs = _generation_producer_outputs(store, stage, code_path)
         try:
             store.require_committed_output(stage, outputs)
@@ -224,7 +223,47 @@ def assemble_causal_tables_stage(
     graph_input = store.path("tsg", "prompt_tsg.jsonl")
     code_input = store.path("generation", "observed_code.jsonl")
     oracle_input = store.path("oracle", "observed_oracle.jsonl")
+    producer_stages = (
+        "extract-prompt-tsg",
+        *_OBSERVED_GENERATION_PRODUCERS,
+        "run-oracle-observed",
+    )
+    with store.hold_dependency_stages(producer_stages):
+        _assemble_causal_tables_under_leases(
+            config,
+            store,
+            force=force,
+            prompt_input=prompt_input,
+            proposal_input=proposal_input,
+            graph_input=graph_input,
+            code_input=code_input,
+            oracle_input=oracle_input,
+        )
+
+
+def _assemble_causal_tables_under_leases(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    force: bool,
+    prompt_input: Path,
+    proposal_input: Path,
+    graph_input: Path,
+    code_input: Path,
+    oracle_input: Path,
+) -> None:
     generation_stage, generation_outputs = _observed_generation_producer(store, code_input)
+    store.require_committed_stage(
+        "extract-prompt-tsg",
+        (prompt_input,),
+        (proposal_input, graph_input),
+        expected_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+    )
+    store.require_committed_stage(
+        "run-oracle-observed",
+        (code_input,),
+        (oracle_input,),
+    )
     generation_manifest = store.path(".stages", f"{generation_stage}.json")
     oracle_manifest = store.path(".stages", "run-oracle-observed.json")
     inputs = (
@@ -284,56 +323,30 @@ def assemble_causal_tables_stage(
             min_independent_tasks=config.discovery.min_independent_tasks,
         )
 
-    producer_outputs = {
-        "extract-prompt-tsg": (proposal_input, graph_input),
-        generation_stage: generation_outputs,
-        "run-oracle-observed": (oracle_input,),
-    }
-    with ExitStack() as stack:
-        for producer_stage in sorted(producer_outputs):
-            if producer_stage == "extract-prompt-tsg":
-                context = store.hold_committed_stage(
-                    producer_stage,
-                    (prompt_input,),
-                    producer_outputs[producer_stage],
-                    expected_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
-                )
-            elif producer_stage == "run-oracle-observed":
-                context = store.hold_committed_stage(
-                    producer_stage,
-                    (code_input,),
-                    producer_outputs[producer_stage],
-                )
-            else:
-                context = store.hold_committed_output(
-                    producer_stage,
-                    producer_outputs[producer_stage],
-                )
-            stack.enter_context(context)
-        execute_jsonl_stage_transaction(
-            store,
-            stage=_STAGE,
-            inputs=inputs,
-            outputs=output_specs,
-            force=force,
-            build=build,
-            capture_input_snapshot=capture_input_snapshot,
-            verify_input_snapshot=verify_input_snapshot,
-        )
-        if snapshot is None:
-            raise _stage_error("causal-table producer snapshot failed validation")
-        tables = _read_records(output_paths[0], CausalTableRecord)
-        rows = _read_records(output_paths[1], CausalObservationRecord)
-        exclusions = _read_records(output_paths[2], CausalExclusionRecord, allow_empty=True)
-        discover_prompts = tuple(item for item in snapshot.prompts if item.split == "discover")
-        prompt_ids = {item.prompt_id for item in discover_prompts}
-        discover_oracles = tuple(item for item in snapshot.oracles if item.prompt_id in prompt_ids)
-        validate_local_table_bundle(
-            tables,
-            rows,
-            exclusions,
-            source_coordinates=_discover_source_coordinates(discover_prompts, discover_oracles),
-        )
+    execute_jsonl_stage_transaction(
+        store,
+        stage=_STAGE,
+        inputs=inputs,
+        outputs=output_specs,
+        force=force,
+        build=build,
+        capture_input_snapshot=capture_input_snapshot,
+        verify_input_snapshot=verify_input_snapshot,
+    )
+    if snapshot is None:
+        raise _stage_error("causal-table producer snapshot failed validation")
+    tables = _read_records(output_paths[0], CausalTableRecord)
+    rows = _read_records(output_paths[1], CausalObservationRecord)
+    exclusions = _read_records(output_paths[2], CausalExclusionRecord, allow_empty=True)
+    discover_prompts = tuple(item for item in snapshot.prompts if item.split == "discover")
+    prompt_ids = {item.prompt_id for item in discover_prompts}
+    discover_oracles = tuple(item for item in snapshot.oracles if item.prompt_id in prompt_ids)
+    validate_local_table_bundle(
+        tables,
+        rows,
+        exclusions,
+        source_coordinates=_discover_source_coordinates(discover_prompts, discover_oracles),
+    )
 
 
 __all__ = ["CAUSAL_TABLE_OUTPUTS", "assemble_causal_tables_stage"]

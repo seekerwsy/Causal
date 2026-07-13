@@ -327,6 +327,75 @@ def test_held_committed_stage_blocks_mutation_and_allows_holder_revalidation(
     assert manifest_path.read_bytes() == manifest_bytes
 
 
+@pytest.mark.parametrize(
+    "stages",
+    [(), ("",), ("   ",), ("report", "report")],
+)
+def test_multi_stage_dependency_lease_rejects_invalid_stage_sets(
+    tmp_path: Path,
+    stages: tuple[str, ...],
+) -> None:
+    store = _store(tmp_path)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        with store.hold_dependency_stages(stages):
+            pytest.fail("invalid dependency stage set must not acquire leases")
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
+def test_multi_stage_dependency_lease_rejects_same_store_reentry(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+
+    with store.hold_dependency_stages(("z-stage", "a-stage")) as ordered:
+        assert ordered == ("a-stage", "z-stage")
+        with pytest.raises(SecAwareError) as exc_info:
+            with store.hold_dependency_stages(("a-stage",)):
+                pytest.fail("same-store lease reentry must be rejected")
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
+@pytest.mark.parametrize("signal_type", [RuntimeError, KeyboardInterrupt, SystemExit])
+def test_multi_stage_dependency_lease_releases_every_stage_on_exception(
+    tmp_path: Path,
+    signal_type: type[BaseException],
+) -> None:
+    owner = _store(tmp_path)
+    contender = _store(tmp_path)
+    signal = signal_type("private-multi-stage-control-flow")
+
+    with pytest.raises(signal_type) as exc_info:
+        with owner.hold_dependency_stages(("z-stage", "a-stage")):
+            raise signal
+
+    assert exc_info.value is signal
+    with contender.hold_dependency_stages(("a-stage", "z-stage")) as ordered:
+        assert ordered == ("a-stage", "z-stage")
+
+
+def test_multi_stage_dependency_lease_acquires_in_total_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    opened: list[str] = []
+    real_open = store._open_stage_lease
+
+    def tracked_open(stage: str):
+        opened.append(stage)
+        return real_open(stage)
+
+    monkeypatch.setattr(store, "_open_stage_lease", tracked_open)
+
+    with store.hold_dependency_stages(("z-stage", "a-stage", "m-stage")) as ordered:
+        assert ordered == ("a-stage", "m-stage", "z-stage")
+
+    assert opened == ["a-stage", "m-stage", "z-stage"]
+
+
 def test_held_committed_stage_blocks_other_process_operations(tmp_path: Path) -> None:
     holder = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)

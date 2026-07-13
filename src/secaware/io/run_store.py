@@ -700,6 +700,65 @@ class RunStore:
         )
 
     @contextmanager
+    def hold_dependency_stages(self, stages: Sequence[str]) -> Iterator[tuple[str, ...]]:
+        """Hold a validated set of dependency stage leases in one total order."""
+
+        if isinstance(stages, (str, bytes)):
+            raise self._manifest_conflict(
+                "dependency-stages",
+                "dependency stage set failed validation",
+            )
+        try:
+            requested = tuple(stages)
+        except (TypeError, ValueError):
+            raise self._manifest_conflict(
+                "dependency-stages",
+                "dependency stage set failed validation",
+            ) from None
+        if (
+            not requested
+            or len(requested) != len(set(requested))
+            or any(
+                type(stage) is not str or self._safe_stage_name(stage) != stage
+                for stage in requested
+            )
+        ):
+            raise self._manifest_conflict(
+                "dependency-stages",
+                "dependency stage set failed validation",
+            )
+        ordered = tuple(sorted(requested))
+        leases: dict[str, _HeldDependencyLease] = {}
+        with self._state_lock:
+            for stage in ordered:
+                if (
+                    self._owned_stage_lease(stage) is not None
+                    or self._owned_dependency_lease(stage) is not None
+                ):
+                    raise self._manifest_conflict(
+                        stage,
+                        "stage lease is already owned by this run store",
+                    )
+            try:
+                for stage in ordered:
+                    lease = _HeldDependencyLease(handle=self._open_stage_lease(stage))
+                    self._held_dependency_leases[stage] = lease
+                    leases[stage] = lease
+            except BaseException:
+                for acquired_stage in reversed(tuple(leases)):
+                    self._release_dependency_lease(
+                        acquired_stage,
+                        expected=leases[acquired_stage],
+                    )
+                raise
+        try:
+            yield ordered
+        finally:
+            with self._state_lock:
+                for stage in reversed(ordered):
+                    self._release_dependency_lease(stage, expected=leases[stage])
+
+    @contextmanager
     def hold_committed_stage(
         self,
         stage: str,

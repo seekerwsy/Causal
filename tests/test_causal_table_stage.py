@@ -349,6 +349,94 @@ def _recommit_oracles(store: RunStore, records: tuple[OracleRecord, ...]) -> Non
     store.record_stage(stage, inputs, (output,), policy_sha256=manifest.policy_sha256)
 
 
+def _commit_second_observed_generation_producer(store: RunStore) -> None:
+    stage = "import-generation-observed"
+    inputs = (store.path("inputs", "prompts.jsonl"),)
+    output = store.path("generation", "observed_code.jsonl")
+    assert not store.should_skip_stage(stage, inputs, (output,), False)
+    store.seal_stage_outputs(stage, (output,))
+    store.record_stage(stage, inputs, (output,))
+
+
+def test_causal_table_stage_closes_generation_producer_selection_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stages.causal_tables as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    contender = RunStore(config)
+    real_select = stage_module._observed_generation_producer
+    contender_errors: list[SecAwareError] = []
+
+    def select_then_submit_second_producer(
+        owner: RunStore,
+        code_path: Path,
+    ) -> tuple[str, tuple[Path, ...]]:
+        selected = real_select(owner, code_path)
+        try:
+            _commit_second_observed_generation_producer(contender)
+        except SecAwareError as error:
+            contender_errors.append(error)
+        return selected
+
+    monkeypatch.setattr(
+        stage_module,
+        "_observed_generation_producer",
+        select_then_submit_second_producer,
+    )
+
+    stage_module.assemble_causal_tables_stage(config, store, force=False)
+
+    assert store.path(".stages", "assemble-causal-tables.json").exists()
+    if not contender_errors:
+        store.require_committed_output(
+            "generate-observed",
+            (store.path("generation", "observed_code.jsonl"),),
+        )
+        contender.require_committed_output(
+            "import-generation-observed",
+            (store.path("generation", "observed_code.jsonl"),),
+        )
+        pytest.fail(
+            "causal assembly succeeded after two observed generation producers "
+            "were committed in the selection-to-lease window"
+        )
+    assert len(contender_errors) == 1
+    assert contender_errors[0].code is ErrorCode.MANIFEST_CONFLICT
+    assert not store.path(".stages", "import-generation-observed.json").exists()
+
+
+def test_causal_table_stage_rejects_zero_observed_generation_producers(
+    tmp_path: Path,
+) -> None:
+    from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
+
+    config, store = _prepared_store(tmp_path)
+    store.invalidate_stage("generate-observed")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        assemble_causal_tables_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert not store.path(".stages", "assemble-causal-tables.json").exists()
+
+
+def test_causal_table_stage_rejects_two_observed_generation_producers(
+    tmp_path: Path,
+) -> None:
+    from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
+
+    config, store = _prepared_store(tmp_path)
+    _commit_second_observed_generation_producer(store)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        assemble_causal_tables_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert not store.path(".stages", "assemble-causal-tables.json").exists()
+
+
 @pytest.mark.parametrize("producer", ("proposal", "graph", "oracle"))
 def test_causal_table_stage_rejects_committed_inexact_producer_coverage(
     tmp_path: Path,
@@ -520,32 +608,26 @@ def test_causal_table_stage_holds_producer_leases_in_sorted_order(
     config, store = _prepared_store(tmp_path)
     entered: list[str] = []
     active: list[str] = []
-    real_stage = store.hold_committed_stage
-    real_output = store.hold_committed_output
+    real_hold = store.hold_dependency_stages
 
     @contextmanager
-    def tracked_stage(stage: str, *args: object, **kwargs: object):
-        with real_stage(stage, *args, **kwargs) as hashes:  # type: ignore[arg-type]
-            entered.append(stage)
-            active.append(stage)
+    def tracked_stages(stages: tuple[str, ...]):
+        with real_hold(stages) as ordered:
+            entered.extend(ordered)
+            active.extend(ordered)
             try:
-                yield hashes
+                yield ordered
             finally:
-                active.remove(stage)
+                active.clear()
 
-    @contextmanager
-    def tracked_output(stage: str, *args: object, **kwargs: object):
-        with real_output(stage, *args, **kwargs) as hashes:  # type: ignore[arg-type]
-            entered.append(stage)
-            active.append(stage)
-            try:
-                yield hashes
-            finally:
-                active.remove(stage)
-
-    monkeypatch.setattr(store, "hold_committed_stage", tracked_stage)
-    monkeypatch.setattr(store, "hold_committed_output", tracked_output)
+    monkeypatch.setattr(store, "hold_dependency_stages", tracked_stages)
     assemble_causal_tables_stage(config, store, force=False)
 
-    assert entered == ["extract-prompt-tsg", "generate-observed", "run-oracle-observed"]
+    assert entered == [
+        "extract-prompt-tsg",
+        "generate-observed",
+        "generate-provider-observed",
+        "import-generation-observed",
+        "run-oracle-observed",
+    ]
     assert active == []
