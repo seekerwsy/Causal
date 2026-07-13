@@ -5,6 +5,9 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+from secaware.schema import common as common_schema
+from secaware.schema import experiments as experiment_schema
+from secaware.schema.common import SafeValidationMixin
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
     ArmRole,
@@ -20,11 +23,34 @@ from secaware.schema.experiments import (
     TargetSpecRecord,
 )
 from secaware.schema.features import FeatureFamily, FeatureOperation, FeatureState
+from secaware.tsg import feature_catalog
 
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 HYPOTHESIS_ID = "hypothesis_" + "c" * 64
+
+
+class _MemoryRaisingBase:
+    memory_error: MemoryError
+
+    def __init__(self, **_data: object) -> None:
+        raise type(self).memory_error
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise type(self).memory_error
+
+    @classmethod
+    def model_validate(cls, _obj: object, **_kwargs: object):
+        raise cls.memory_error
+
+    @classmethod
+    def model_validate_json(cls, _obj: object, **_kwargs: object):
+        raise cls.memory_error
+
+
+class _MemoryMixinProbe(SafeValidationMixin, _MemoryRaisingBase):
+    _safe_validation_message = "probe failed validation"
 
 
 def _target_spec() -> TargetSpecRecord:
@@ -85,6 +111,76 @@ def test_experiment_enums_are_exact_and_closed() -> None:
         "presentation_noop",
         "presentation_matched_control",
     )
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    (
+        "model_shape_is_intact",
+        "init",
+        "setattr",
+        "model_validate",
+        "model_validate_json",
+        "model_validate_strings",
+    ),
+)
+def test_safe_validation_mixin_preserves_memory_error_identity(
+    monkeypatch,
+    entrypoint: str,
+) -> None:
+    error = MemoryError(f"memory-{entrypoint}")
+    _MemoryMixinProbe.memory_error = error
+
+    with pytest.raises(MemoryError) as exc_info:
+        if entrypoint == "model_shape_is_intact":
+            target = _target_spec()
+
+            def fail_vars(_value):
+                raise error
+
+            monkeypatch.setattr(common_schema, "vars", fail_vars, raising=False)
+            common_schema.model_shape_is_intact(target)
+        elif entrypoint == "init":
+            _MemoryMixinProbe()
+        elif entrypoint == "setattr":
+            probe = object.__new__(_MemoryMixinProbe)
+            probe.value = "x"
+        elif entrypoint == "model_validate":
+            _MemoryMixinProbe.model_validate({})
+        elif entrypoint == "model_validate_json":
+            _MemoryMixinProbe.model_validate_json("{}")
+        else:
+            _MemoryMixinProbe.model_validate_strings({})
+
+    assert exc_info.value is error
+
+
+def test_experiment_factory_preserves_digest_memory_error_identity(monkeypatch) -> None:
+    error = MemoryError("memory-digest")
+
+    def fail_digest(_value):
+        raise error
+
+    monkeypatch.setattr(experiment_schema, "_digest", fail_digest)
+    with pytest.raises(MemoryError) as exc_info:
+        _target_spec()
+    assert exc_info.value is error
+
+
+def test_experiment_catalog_lookup_preserves_memory_error_identity(monkeypatch) -> None:
+    error = MemoryError("memory-catalog")
+
+    def fail_lookup(_value):
+        raise error
+
+    monkeypatch.setattr(feature_catalog, "prompt_feature_spec", fail_lookup)
+    with pytest.raises(MemoryError) as exc_info:
+        FeatureTransition(
+            feature_id="safety.path_normalization",
+            from_states=(FeatureState.ABSENT,),
+            to_states=(FeatureState.PRESENT,),
+        )
+    assert exc_info.value is error
 
 
 def test_target_spec_is_content_addressed_and_has_no_task_coordinates() -> None:

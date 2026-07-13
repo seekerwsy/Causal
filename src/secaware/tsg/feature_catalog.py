@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.0"
+FEATURE_CATALOG_VERSION = "1.1"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -50,6 +50,11 @@ _EXPECTED_FEATURE_IDS = (
     "presentation.sham_edit",
     "presentation.matched_control",
 )
+_EXPECTED_MATCHED_CONTROLS = {
+    "presentation.noop_rewrite": "presentation.matched_control",
+    "presentation.length_matched_placebo": "presentation.matched_control",
+    "presentation.sham_edit": "presentation.matched_control",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +65,7 @@ class FeatureSpec:
     applicable_task_families: tuple[str, ...]
     intervenable: bool
     operations: tuple[FeatureOperation, ...]
+    matched_control_feature_id: str | None
     structural_node_types: tuple[NodeType, ...]
     structural_edge_types: tuple[EdgeType, ...]
     deterministic_terms: tuple[str, ...]
@@ -90,6 +96,7 @@ def _feature(
     cwes: tuple[str, ...] = (),
     task_families: tuple[str, ...] = (),
     intervenable: bool = True,
+    matched_control: str | None = None,
     nodes: tuple[NodeType, ...] = (),
     edges: tuple[EdgeType, ...] = (),
     terms: tuple[str, ...] = (),
@@ -101,6 +108,7 @@ def _feature(
         applicable_task_families=task_families,
         intervenable=intervenable,
         operations=_ALL_OPERATIONS if intervenable else (),
+        matched_control_feature_id=matched_control,
         structural_node_types=nodes,
         structural_edge_types=edges,
         deterministic_terms=terms,
@@ -244,16 +252,19 @@ PROMPT_FEATURE_CATALOG = (
     _feature(
         "presentation.noop_rewrite",
         FeatureFamily.PRESENTATION_CONTROL,
+        matched_control="presentation.matched_control",
         terms=("no-op rewrite", "noop rewrite", "no op rewrite"),
     ),
     _feature(
         "presentation.length_matched_placebo",
         FeatureFamily.PRESENTATION_CONTROL,
+        matched_control="presentation.matched_control",
         terms=("length-matched placebo", "length matched placebo"),
     ),
     _feature(
         "presentation.sham_edit",
         FeatureFamily.PRESENTATION_CONTROL,
+        matched_control="presentation.matched_control",
         terms=("sham edit",),
     ),
     _feature(
@@ -407,6 +418,27 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
             )
         ):
             raise RuntimeError("invalid prompt feature edge slots")
+
+    by_id = {item.feature_id: item for item in catalog}
+    matched_controls = {
+        item.feature_id: item.matched_control_feature_id
+        for item in catalog
+        if item.matched_control_feature_id is not None
+    }
+    if matched_controls != _EXPECTED_MATCHED_CONTROLS:
+        raise RuntimeError("invalid prompt feature matched-control mapping")
+    for source_id, target_id in matched_controls.items():
+        source = by_id[source_id]
+        target = by_id.get(target_id)
+        if (
+            source.feature_family is not FeatureFamily.PRESENTATION_CONTROL
+            or not source.intervenable
+            or target is None
+            or target.feature_family is not FeatureFamily.PRESENTATION_CONTROL
+            or not target.intervenable
+            or source_id == target_id
+        ):
+            raise RuntimeError("invalid prompt feature matched-control reference")
 
     non_intervenable = {item.feature_id for item in catalog if not item.intervenable}
     if non_intervenable != {

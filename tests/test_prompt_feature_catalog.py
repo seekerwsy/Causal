@@ -6,8 +6,10 @@ import pytest
 
 from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.tsg.feature_catalog import (
+    FEATURE_CATALOG_VERSION,
     PROMPT_FEATURE_CATALOG,
     FeatureSpec,
+    _digest_entry,
     _validate_feature_catalog,
     prompt_feature_spec,
 )
@@ -53,6 +55,67 @@ def test_catalog_is_exactly_the_finite_immutable_feature_set() -> None:
     assert all(type(item) is FeatureSpec for item in PROMPT_FEATURE_CATALOG)
     with pytest.raises(FrozenInstanceError):
         PROMPT_FEATURE_CATALOG[0].intervenable = False  # type: ignore[misc]
+
+
+def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> None:
+    assert FEATURE_CATALOG_VERSION == "1.1"
+    mapping = {
+        item.feature_id: item.matched_control_feature_id
+        for item in PROMPT_FEATURE_CATALOG
+        if item.matched_control_feature_id is not None
+    }
+    assert mapping == {
+        "presentation.noop_rewrite": "presentation.matched_control",
+        "presentation.length_matched_placebo": "presentation.matched_control",
+        "presentation.sham_edit": "presentation.matched_control",
+    }
+    assert prompt_feature_spec("presentation.matched_control").matched_control_feature_id is None
+    assert all(
+        item.matched_control_feature_id is None
+        for item in PROMPT_FEATURE_CATALOG
+        if item.feature_family is not FeatureFamily.PRESENTATION_CONTROL
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_id", "matched_id"),
+    (
+        ("task.file_read", "presentation.matched_control"),
+        ("presentation.noop_rewrite", "presentation.unknown_control"),
+        ("presentation.noop_rewrite", "safety.path_normalization"),
+        ("presentation.noop_rewrite", "presentation.noop_rewrite"),
+    ),
+)
+def test_catalog_rejects_invalid_matched_control_ownership_or_reference(
+    source_id: str,
+    matched_id: str,
+) -> None:
+    mutated = tuple(
+        replace(item, matched_control_feature_id=matched_id)
+        if item.feature_id == source_id
+        else item
+        for item in PROMPT_FEATURE_CATALOG
+    )
+    with pytest.raises(RuntimeError):
+        _validate_feature_catalog(mutated)
+
+
+def test_catalog_rejects_nonintervenable_matched_control_target() -> None:
+    mutated = tuple(
+        replace(item, intervenable=False, operations=())
+        if item.feature_id == "presentation.matched_control"
+        else item
+        for item in PROMPT_FEATURE_CATALOG
+    )
+    with pytest.raises(RuntimeError):
+        _validate_feature_catalog(mutated)
+
+
+def test_catalog_digest_payload_commits_matched_control_mapping() -> None:
+    source = prompt_feature_spec("presentation.noop_rewrite")
+    mutated = replace(source, matched_control_feature_id=None)
+
+    assert _digest_entry(source) != _digest_entry(mutated)
 
 
 def test_catalog_rejects_duplicate_feature_ids() -> None:

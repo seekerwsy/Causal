@@ -30,12 +30,6 @@ from secaware.tsg.feature_catalog import prompt_feature_spec
 
 ARM_PROTOCOL_CATALOG_ID = "arm-protocol-catalog-v1"
 _CONTRAST_CATALOG_ID = "confirmation-contrast-catalog-v1"
-_PRESENTATION_MATCH = {
-    "presentation.noop_rewrite": "presentation.matched_control",
-    "presentation.length_matched_placebo": "presentation.matched_control",
-    "presentation.sham_edit": "presentation.matched_control",
-    "presentation.matched_control": None,
-}
 _FAMILY_ORDER = {family: index for index, family in enumerate(_Family)}
 _OUTCOME_SOURCE = {
     "y_secure_functional": "y.secure_functional",
@@ -53,6 +47,14 @@ def _raise_materialization_error() -> NoReturn:
     raise _sanitized_validation_error(
         "ConfirmationProtocolRecord",
         "arm protocol materialization failed",
+    )
+
+
+def _raise_protocol_revalidation_error() -> NoReturn:
+    """Raise from a frame that never receives protocol or contract values."""
+    raise _sanitized_validation_error(
+        "ConfirmationProtocolRecord",
+        "arm protocol revalidation failed",
     )
 
 
@@ -214,7 +216,7 @@ def _presentation_arms(feature_id: str, operation: _Operation) -> tuple[_ArmSpec
             _delta(fixed_families=tuple(_Family)),
         ),
     ]
-    matched = _PRESENTATION_MATCH[feature_id]
+    matched = prompt_feature_spec(feature_id).matched_control_feature_id
     if matched is not None:
         result.append(
             _arm(
@@ -584,6 +586,143 @@ def _validate_materialized_protocol(protocol: _Protocol) -> None:
     _validate_hypothesis_match(protocol)
 
 
+def revalidate_arm_protocol(
+    protocol: _Protocol,
+    target: _TargetSpec,
+    functional_contract: _FunctionalContract | None = None,
+) -> _Protocol:
+    """Close protocol, target, and optional functional-contract provenance."""
+    checked_protocol: _Protocol | None = None
+    checked_target: _TargetSpec | None = None
+    checked_contract: _FunctionalContract | None = None
+    spec = None
+    arms: tuple[_ArmSpec, ...] = ()
+    contrasts: tuple[_ContrastSpec, ...] = ()
+    generic: str | None = None
+    functional_sign: Literal["positive", "negative", "two_sided"] | None = None
+    expected: _Protocol | None = None
+    result: _Protocol | None = None
+    failed = False
+    try:
+        checked_protocol = _Protocol.model_validate(protocol)
+        checked_target = _TargetSpec.model_validate(target)
+        checked_contract = (
+            _FunctionalContract.model_validate(functional_contract)
+            if functional_contract is not None
+            else None
+        )
+        spec = prompt_feature_spec(checked_target.feature_id)
+        if (
+            not is_confirmation_target_feature(
+                checked_target.feature_id,
+                checked_target.operation,
+            )
+            or spec.feature_family is not checked_target.feature_family
+            or checked_target.operation not in spec.operations
+            or checked_protocol.hypothesis_id != checked_target.hypothesis_id
+            or checked_protocol.frozen_hypothesis_sha256 != checked_target.frozen_hypothesis_sha256
+            or checked_protocol.target_spec_id != checked_target.target_spec_id
+            or checked_protocol.feature_family is not checked_target.feature_family
+            or checked_protocol.operation is not checked_target.operation
+            or checked_protocol.hypothesis_outcome_variable_id
+            != checked_target.hypothesis_outcome_variable_id
+            or checked_protocol.hypothesis_outcome_estimand_id
+            != checked_target.hypothesis_outcome_estimand_id
+            or checked_protocol.expected_hypothesis_contrast_sign
+            != checked_target.expected_hypothesis_contrast_sign
+        ):
+            raise ValueError
+
+        if checked_target.feature_family is _Family.SAFETY_CONTROL:
+            if (
+                checked_contract is not None
+                or checked_protocol.functional_outcome_contract_id is not None
+            ):
+                raise ValueError
+            arms = _safety_arms(checked_target.feature_id, checked_target.operation)
+            contrasts = _safety_contrasts(checked_target)
+        elif checked_target.feature_family is _Family.TASK_FUNCTION:
+            if (checked_contract is None) != (
+                checked_protocol.functional_outcome_contract_id is None
+            ):
+                raise ValueError
+            if checked_contract is not None:
+                if (
+                    checked_contract.contract_id != checked_protocol.functional_outcome_contract_id
+                    or checked_contract.task_feature_id != checked_target.feature_id
+                ):
+                    raise ValueError
+                generic = checked_contract.generic_control_feature_id
+                functional_sign = (
+                    checked_contract.expected_add_sign
+                    if checked_target.operation is _Operation.ADD
+                    else checked_contract.expected_remove_sign
+                )
+            arms = _task_arms(
+                checked_target.feature_id,
+                checked_target.operation,
+                generic,
+            )
+            contrasts = _task_contrasts(
+                checked_target,
+                functional_outcome_id=(
+                    checked_contract.outcome_id if checked_contract is not None else None
+                ),
+                functional_sign=functional_sign,
+                generic_present=generic is not None,
+            )
+        else:
+            if (
+                checked_contract is not None
+                or checked_protocol.functional_outcome_contract_id is not None
+            ):
+                raise ValueError
+            arms = _presentation_arms(checked_target.feature_id, checked_target.operation)
+            contrasts = _presentation_contrasts(
+                checked_target,
+                matched_present=len(arms) == 3,
+            )
+
+        expected = _Protocol.from_content(
+            hypothesis_id=checked_target.hypothesis_id,
+            frozen_hypothesis_sha256=checked_target.frozen_hypothesis_sha256,
+            target_spec_id=checked_target.target_spec_id,
+            feature_family=checked_target.feature_family,
+            operation=checked_target.operation,
+            arms=arms,
+            hypothesis_outcome_variable_id=(checked_target.hypothesis_outcome_variable_id),
+            hypothesis_outcome_estimand_id=(checked_target.hypothesis_outcome_estimand_id),
+            expected_hypothesis_contrast_sign=(checked_target.expected_hypothesis_contrast_sign),
+            contrasts=contrasts,
+            functional_outcome_contract_id=(
+                checked_contract.contract_id if checked_contract is not None else None
+            ),
+        )
+        if checked_protocol != expected:
+            raise ValueError
+        result = checked_protocol
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        failed = True
+    if failed:
+        protocol = None
+        target = None
+        functional_contract = None
+        checked_protocol = None
+        checked_target = None
+        checked_contract = None
+        spec = None
+        arms = ()
+        contrasts = ()
+        generic = None
+        functional_sign = None
+        expected = None
+        result = None
+        _raise_protocol_revalidation_error()
+    return result
+
+
 def materialize_arm_protocol(
     hypothesis: FrozenHypothesisRecord,
     target: _TargetSpec,
@@ -694,7 +833,12 @@ def materialize_arm_protocol(
                 checked_contract.contract_id if checked_contract is not None else None
             ),
         )
-    except (KeyboardInterrupt, SystemExit):
+        result = revalidate_arm_protocol(
+            result,
+            checked_target,
+            functional_contract=checked_contract,
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         failed = True
@@ -722,4 +866,5 @@ __all__ = [
     "CONFIRMATION_TARGET_FEATURE_IDS",
     "is_confirmation_target_feature",
     "materialize_arm_protocol",
+    "revalidate_arm_protocol",
 ]

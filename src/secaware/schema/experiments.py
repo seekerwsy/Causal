@@ -232,6 +232,8 @@ class TargetSpecRecord(_ExperimentVersionedContract):
         try:
             payload = {"schema_version": "1.0", **content}
             result = cls(**payload, target_spec_id=f"target_{_digest(payload)}")
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             failed = True
         if failed:
@@ -295,6 +297,8 @@ class TargetInstanceRecord(_ExperimentVersionedContract):
                 **payload,
                 target_instance_id=f"target_instance_{_digest(payload)}",
             )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             failed = True
         if failed:
@@ -364,6 +368,8 @@ class FeatureTransition(_ExperimentContract):
             spec = prompt_feature_spec(self.feature_id)
             if not spec.intervenable:
                 raise ValueError
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             raise ValueError(self._safe_validation_message) from None
         return self
@@ -405,6 +411,8 @@ class AllowedDeltaRecord(_ExperimentContract):
                 item.feature_family in self.fixed_families for item in fixed_specs
             ):
                 raise ValueError
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             raise ValueError(self._safe_validation_message) from None
         return self
@@ -514,6 +522,8 @@ class ConfirmationProtocolRecord(_ExperimentVersionedContract):
                 **complete,
                 arm_protocol_id=f"arm_protocol_{_digest(complete)}",
             )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             failed = True
         if failed:
@@ -553,6 +563,8 @@ class ConfirmationProtocolRecord(_ExperimentVersionedContract):
             from secaware.intervention.arm_catalog import _validate_materialized_protocol
 
             _validate_materialized_protocol(self)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             raise ValueError(self._safe_validation_message) from None
         return self
@@ -580,6 +592,8 @@ class ConfirmationProtocolInstanceRecord(_ExperimentVersionedContract):
                 **payload,
                 protocol_instance_id=f"protocol_instance_{_digest(payload)}",
             )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             failed = True
         if failed:
@@ -630,6 +644,8 @@ class FunctionalOutcomeContractRecord(_ExperimentVersionedContract):
                 **payload,
                 contract_id=f"functional_contract_{_digest(payload)}",
             )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             failed = True
         if failed:
@@ -667,6 +683,8 @@ class FunctionalOutcomeContractRecord(_ExperimentVersionedContract):
                 )
             ):
                 raise ValueError
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             raise ValueError(self._safe_validation_message) from None
         if (

@@ -5,6 +5,7 @@ from secaware.intervention.arm_catalog import (
     CONFIRMATION_TARGET_FEATURE_IDS,
     is_confirmation_target_feature,
     materialize_arm_protocol,
+    revalidate_arm_protocol,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "apply_intervention",
     "is_confirmation_target_feature",
     "materialize_arm_protocol",
+    "revalidate_arm_protocol",
 ]

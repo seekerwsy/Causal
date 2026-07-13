@@ -125,6 +125,17 @@ def _contract(*, generic: bool = True) -> FunctionalOutcomeContractRecord:
     )
 
 
+def _alternative_contract() -> FunctionalOutcomeContractRecord:
+    return FunctionalOutcomeContractRecord.from_content(
+        task_feature_id="task.database_query",
+        outcome_id="y_task_database_alternative",
+        expected_add_sign="two_sided",
+        expected_remove_sign="two_sided",
+        generic_control_feature_id="task.file_read",
+        evaluator_policy_sha256=SHA_B,
+    )
+
+
 def _content_authenticated_unsafe_target(
     hypothesis: FrozenHypothesisRecord,
     feature_id: str,
@@ -506,6 +517,127 @@ def test_task_contract_for_another_feature_or_unknown_generic_fails_closed() -> 
         FunctionalOutcomeContractRecord.from_content(**payload)
 
 
+def test_cross_record_revalidator_rejects_content_addressed_contract_swap() -> None:
+    hypothesis = _hypothesis("task.database_query", FeatureFamily.TASK_FUNCTION)
+    target = _target("task.database_query", FeatureOperation.ADD, hypothesis=hypothesis)
+    contract_a = _contract()
+    contract_b = _alternative_contract()
+    protocol_a = materialize_arm_protocol(
+        hypothesis,
+        target,
+        functional_contract=contract_a,
+    )
+    forged_content = protocol_a.model_dump(
+        mode="python",
+        exclude={"arm_protocol_id", "contrast_set_sha256"},
+    )
+    forged_content["functional_outcome_contract_id"] = contract_b.contract_id
+    locally_valid_forgery = ConfirmationProtocolRecord.from_content(**forged_content)
+
+    assert locally_valid_forgery.functional_outcome_contract_id == contract_b.contract_id
+    for supplied_contract in (contract_a, contract_b):
+        with pytest.raises(ValidationError, match="arm protocol revalidation failed"):
+            arm_catalog.revalidate_arm_protocol(
+                locally_valid_forgery,
+                target,
+                functional_contract=supplied_contract,
+            )
+
+
+def test_cross_record_revalidator_requires_exact_target_and_contract_presence() -> None:
+    hypothesis = _hypothesis("task.database_query", FeatureFamily.TASK_FUNCTION)
+    add_target = _target("task.database_query", FeatureOperation.ADD, hypothesis=hypothesis)
+    remove_target = _target("task.database_query", FeatureOperation.REMOVE, hypothesis=hypothesis)
+    contract = _contract()
+    protocol = materialize_arm_protocol(
+        hypothesis,
+        add_target,
+        functional_contract=contract,
+    )
+
+    assert (
+        arm_catalog.revalidate_arm_protocol(
+            protocol,
+            add_target,
+            functional_contract=contract,
+        )
+        == protocol
+    )
+    for wrong_target, supplied_contract in (
+        (add_target, None),
+        (remove_target, contract),
+    ):
+        with pytest.raises(ValidationError, match="arm protocol revalidation failed"):
+            arm_catalog.revalidate_arm_protocol(
+                protocol,
+                wrong_target,
+                functional_contract=supplied_contract,
+            )
+
+    safety_hypothesis = _hypothesis()
+    safety_target = _target(
+        "safety.path_normalization",
+        FeatureOperation.ADD,
+        hypothesis=safety_hypothesis,
+    )
+    safety_protocol = materialize_arm_protocol(safety_hypothesis, safety_target)
+    with pytest.raises(ValidationError, match="arm protocol revalidation failed"):
+        arm_catalog.revalidate_arm_protocol(
+            safety_protocol,
+            safety_target,
+            functional_contract=contract,
+        )
+
+
+def test_materializer_runs_public_cross_record_revalidation(monkeypatch) -> None:
+    hypothesis = _hypothesis()
+    target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
+    calls: list[tuple[object, object, object]] = []
+    original = arm_catalog.revalidate_arm_protocol
+
+    def observed(protocol, supplied_target, functional_contract=None):
+        calls.append((protocol, supplied_target, functional_contract))
+        return original(protocol, supplied_target, functional_contract=functional_contract)
+
+    monkeypatch.setattr(arm_catalog, "revalidate_arm_protocol", observed)
+    protocol = materialize_arm_protocol(hypothesis, target)
+
+    assert calls == [(protocol, target, None)]
+
+
+def test_materializer_preserves_revalidation_memory_error_identity(monkeypatch) -> None:
+    hypothesis = _hypothesis()
+    target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
+    error = MemoryError("memory-revalidate")
+
+    def fail_revalidation(_value):
+        raise error
+
+    monkeypatch.setattr(arm_catalog, "revalidate_frozen_hypothesis", fail_revalidation)
+    with pytest.raises(MemoryError) as exc_info:
+        materialize_arm_protocol(hypothesis, target)
+    assert exc_info.value is error
+
+
+def test_public_revalidator_preserves_catalog_memory_error_identity(monkeypatch) -> None:
+    hypothesis = _hypothesis()
+    target = _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis)
+    protocol = materialize_arm_protocol(hypothesis, target)
+    error = MemoryError("memory-catalog")
+
+    def fail_catalog_lookup(_feature_id):
+        raise error
+
+    monkeypatch.setattr(arm_catalog, "prompt_feature_spec", fail_catalog_lookup)
+    with pytest.raises(MemoryError) as exc_info:
+        arm_catalog.revalidate_arm_protocol(protocol, target)
+    assert exc_info.value is error
+
+
+def test_arm_catalog_has_no_second_presentation_match_authority() -> None:
+    assert not hasattr(arm_catalog, "_PRESENTATION_MATCH")
+
+
 @pytest.mark.parametrize(
     ("feature_id", "expected_roles"),
     (
@@ -755,6 +887,7 @@ def test_arm_catalog_is_finite_and_exposes_no_runtime_registration_hook() -> Non
         "CONFIRMATION_TARGET_FEATURE_IDS",
         "is_confirmation_target_feature",
         "materialize_arm_protocol",
+        "revalidate_arm_protocol",
     }
     assert not any(
         "register" in name.casefold() or "plugin" in name.casefold() for name in dir(arm_catalog)

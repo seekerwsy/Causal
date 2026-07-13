@@ -46,6 +46,8 @@ def model_shape_is_intact(value: BaseModel) -> bool:
             not isinstance(nested, BaseModel) or model_shape_is_intact(nested)
             for nested in vars(value).values()
         )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         return False
 
@@ -67,6 +69,8 @@ class SafeValidationMixin:
     def __init__(self, /, **data: Any) -> None:
         try:
             super().__init__(**data)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
         else:
@@ -74,6 +78,8 @@ class SafeValidationMixin:
         data.clear()
         try:
             vars(self).clear()
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
         raise type(self)._safe_error()
@@ -82,6 +88,8 @@ class SafeValidationMixin:
         model_type = type(self)
         try:
             super().__setattr__(name, value)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
         else:
@@ -101,6 +109,8 @@ class SafeValidationMixin:
             if isinstance(obj, BaseModel) and not model_shape_is_intact(obj):
                 raise ValueError("unsafe model state")
             return super().model_validate(obj, **kwargs)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
         obj = None
@@ -115,6 +125,8 @@ class SafeValidationMixin:
     ) -> _SafeValidationModel:
         try:
             return super().model_validate_json(json_data, **kwargs)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
         json_data = b""
@@ -130,6 +142,8 @@ class SafeValidationMixin:
         try:
             kwargs["strict"] = True
             return cls.model_validate(obj, **kwargs)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
         obj = None
