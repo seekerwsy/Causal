@@ -33,6 +33,21 @@ from secaware.schema.features import (
     FeatureState,
     PromptExtractorBackend,
 )
+from secaware.schema.experiments import (
+    AllowedDeltaRecord,
+    ArmRole,
+    ArmSpecRecord,
+    ConfirmationProtocolInstanceRecord,
+    ConfirmationProtocolRecord,
+    FeatureTransition,
+    FunctionalOutcomeContractRecord,
+    InterventionExecutorKind,
+    InterventionMode,
+    PreRegisteredContrastSpec,
+    PromptRole,
+    TargetInstanceRecord,
+    TargetSpecRecord,
+)
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
 from secaware.schema.interventions import FailureReason, InterventionRecord
 from secaware.schema.oracle import (
@@ -62,6 +77,9 @@ from secaware.schema.tsg import (
 )
 
 __all__ = [
+    "AllowedDeltaRecord",
+    "ArmRole",
+    "ArmSpecRecord",
     "BackgroundKnowledgeRecord",
     "BootstrapDrawItem",
     "BootstrapDrawRecord",
@@ -74,6 +92,8 @@ __all__ = [
     "CausalObservationRecord",
     "CausalTableRecord",
     "CausalVariableSpec",
+    "ConfirmationProtocolInstanceRecord",
+    "ConfirmationProtocolRecord",
     "AnalyzerFindingRecord",
     "AnalyzerProvenanceRecord",
     "EffectRecord",
@@ -83,9 +103,11 @@ __all__ = [
     "FeatureFamily",
     "FeatureOperation",
     "FeatureState",
+    "FeatureTransition",
     "FailureReason",
     "FindingRecord",
     "FrozenTSGAttributes",
+    "FunctionalOutcomeContractRecord",
     "GenerationParameters",
     "GENERATION_REQUEST_SCHEMA_VERSION",
     "GenerationProvenance",
@@ -93,6 +115,8 @@ __all__ = [
     "GeneratedCodeRecord",
     "HypothesisRecord",
     "InterventionRecord",
+    "InterventionExecutorKind",
+    "InterventionMode",
     "DiscoveryFailureReason",
     "DiscoveryFailureRecord",
     "MotifId",
@@ -108,11 +132,15 @@ __all__ = [
     "PathPatternRecord",
     "PathSupportRecord",
     "PromptRecord",
+    "PreRegisteredContrastSpec",
+    "PromptRole",
     "PromptExtractorBackend",
     "PromptTSGRecord",
     "SecurityLabel",
     "TSGEdge",
     "TSGNode",
     "TSGScalar",
+    "TargetInstanceRecord",
+    "TargetSpecRecord",
     "VariableRole",
 ]
