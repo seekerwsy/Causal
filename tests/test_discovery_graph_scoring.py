@@ -113,7 +113,7 @@ def _oracle(prompt_id: str, *, insecure: bool, cwe: str = "CWE-22") -> OracleRec
     }
     return OracleRecord.model_validate(
         {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "request_id": f"req_{digest}",
             "code_id": f"code_{digest}",
             "code_sha256": "c" * 64,
@@ -126,6 +126,7 @@ def _oracle(prompt_id: str, *, insecure: bool, cwe: str = "CWE-22") -> OracleRec
             "parse_ok": True,
             "functional_ok": True,
             "security_label": "insecure" if insecure else "secure",
+            "evaluability": "evaluable",
             "severity": "high" if insecure else "none",
             "findings": [finding] if insecure else [],
             "analyzers": [

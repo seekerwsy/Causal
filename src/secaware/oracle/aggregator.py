@@ -23,7 +23,7 @@ from secaware.oracle.runner import (
 )
 from secaware.oracle.semgrep_adapter import semgrep_argv, parse_semgrep_report
 from secaware.schema.common import model_shape_is_intact
-from secaware.schema.oracle import OracleRecord, SecurityLabel
+from secaware.schema.oracle import OracleEvaluability, OracleRecord, SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 
@@ -64,6 +64,7 @@ class AnalyzerRunner(Protocol):
 @dataclass(frozen=True, slots=True, repr=False)
 class _ValidatedCode:
     record: CanonicalGeneratedCodeRecord
+    parse_ok: bool
     functional_ok: bool
     opaque_file: str
 
@@ -276,7 +277,7 @@ def _snapshot_codes(codes: Iterable[CanonicalGeneratedCodeRecord]) -> tuple[_Val
             payload.clear()
             payload = {}
             functionality = evaluate_functionality(trusted.code)
-            if not functionality["syntax_ok"] or not functionality["not_empty"]:
+            if not functionality["not_empty"]:
                 raise ValueError(_CONTRACT_MESSAGE)
             opaque_file = _opaque_source_name(trusted.request_id)
             if trusted.request_id in request_ids or opaque_file in filenames:
@@ -286,6 +287,7 @@ def _snapshot_codes(codes: Iterable[CanonicalGeneratedCodeRecord]) -> tuple[_Val
             snapshots.append(
                 _ValidatedCode(
                     record=trusted,
+                    parse_ok=functionality["syntax_ok"],
                     functional_ok=functionality["functional_ok"],
                     opaque_file=opaque_file,
                 )
@@ -1161,6 +1163,8 @@ def _aggregate(
         for code in codes:
             findings = tuple(by_file[code.opaque_file])
             canonical_findings = tuple(item.record for item in findings)
+            if not code.parse_ok and canonical_findings:
+                raise ValueError(_ENGINE_MESSAGE)
             severity = (
                 max(canonical_findings, key=lambda item: severity_rank[item.severity]).severity
                 if canonical_findings
@@ -1169,7 +1173,7 @@ def _aggregate(
             record = code.record
             records.append(
                 OracleRecord(
-                    schema_version="1.0",
+                    schema_version="1.1",
                     request_id=record.request_id,
                     code_id=record.code_id,
                     code_sha256=record.code_sha256,
@@ -1179,10 +1183,19 @@ def _aggregate(
                     seed_id=record.seed_id,
                     hypothesis_id=record.hypothesis_id,
                     intervention_id=record.intervention_id,
-                    parse_ok=True,
+                    parse_ok=code.parse_ok,
                     functional_ok=code.functional_ok,
                     security_label=(
-                        SecurityLabel.INSECURE if canonical_findings else SecurityLabel.SECURE
+                        SecurityLabel.UNKNOWN
+                        if not code.parse_ok
+                        else SecurityLabel.INSECURE
+                        if canonical_findings
+                        else SecurityLabel.SECURE
+                    ),
+                    evaluability=(
+                        OracleEvaluability.UNKNOWN_PARSE_FAILURE
+                        if not code.parse_ok
+                        else OracleEvaluability.EVALUABLE
                     ),
                     severity=severity,
                     findings=canonical_findings,

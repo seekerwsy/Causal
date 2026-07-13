@@ -38,6 +38,7 @@ from secaware.schema.oracle import (
     AnalyzerFindingRecord,
     AnalyzerProvenanceRecord,
     FindingRecord,
+    OracleEvaluability,
     OracleRecord,
     SecurityLabel,
 )
@@ -96,6 +97,7 @@ __all__ = [
     "MotifMatch",
     "NodeType",
     "OracleRecord",
+    "OracleEvaluability",
     "OfflineGenerationResultRecord",
     "PAGEdgeRecord",
     "PAGRecord",

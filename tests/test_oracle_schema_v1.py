@@ -14,6 +14,7 @@ from secaware.schema.generation import (
 from secaware.schema.oracle import (
     AnalyzerFindingRecord,
     AnalyzerProvenanceRecord,
+    OracleEvaluability,
     OracleRecord,
     SecurityLabel,
 )
@@ -59,7 +60,7 @@ def _canonical_oracle_payload(
 ) -> dict[str, object]:
     counterfactual = condition == "counterfactual"
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "request_id": f"req_{_REQUEST_DIGEST}",
         "code_id": f"code_{_REQUEST_DIGEST}",
         "code_sha256": _CODE_DIGEST,
@@ -72,6 +73,7 @@ def _canonical_oracle_payload(
         "parse_ok": True,
         "functional_ok": True,
         "security_label": security_label,
+        "evaluability": "evaluable",
         "severity": "high" if security_label == "insecure" else "none",
         "findings": [_finding_payload()] if security_label == "insecure" else [],
         "analyzers": [
@@ -124,7 +126,8 @@ def _assert_safe_validation_error(error: ValidationError, *hidden: str) -> None:
 def test_oracle_record_requires_analyzer_provenance_and_request_binding() -> None:
     record = OracleRecord.model_validate(_canonical_oracle_payload())
 
-    assert record.schema_version == "1.0"
+    assert record.schema_version == "1.1"
+    assert record.evaluability is OracleEvaluability.EVALUABLE
     assert record.request_id == f"req_{_REQUEST_DIGEST}"
     assert record.code_id == f"code_{_REQUEST_DIGEST}"
     assert record.code_sha256 == _CODE_DIGEST
@@ -140,6 +143,97 @@ def test_secure_oracle_record_has_no_findings_and_no_aggregate_severity() -> Non
     assert record.security_label is SecurityLabel.SECURE
     assert record.severity == "none"
     assert record.findings == ()
+
+
+def test_completed_parse_failure_is_the_only_legal_unknown_oracle_state() -> None:
+    payload = _canonical_oracle_payload(security_label="secure")
+    payload.update(
+        parse_ok=False,
+        functional_ok=False,
+        security_label="unknown",
+        evaluability="unknown_parse_failure",
+    )
+
+    record = OracleRecord.model_validate(payload)
+
+    assert record.security_label is SecurityLabel.UNKNOWN
+    assert record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+    assert record.findings == ()
+    assert record.severity == "none"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("parse_ok", True),
+        ("functional_ok", True),
+        ("evaluability", "evaluable"),
+        ("severity", "low"),
+        ("analyzers", []),
+    ],
+)
+def test_unknown_rejects_parseable_incomplete_or_nonempty_analyzer_states(
+    field: str,
+    value: object,
+) -> None:
+    payload = _canonical_oracle_payload(security_label="secure")
+    payload.update(
+        parse_ok=False,
+        functional_ok=False,
+        security_label="unknown",
+        evaluability="unknown_parse_failure",
+    )
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        OracleRecord.model_validate(payload)
+
+
+def test_observed_oracle_v10_migrates_only_during_strict_jsonl_readback(tmp_path) -> None:
+    from secaware.io.jsonl import read_jsonl, write_jsonl
+
+    legacy = _canonical_oracle_payload(security_label="secure")
+    legacy["schema_version"] = "1.0"
+    legacy.pop("evaluability")
+    path = tmp_path / "legacy-oracle.jsonl"
+    write_jsonl(path, [legacy])
+
+    with pytest.raises(ValidationError):
+        OracleRecord.model_validate(legacy)
+    migrated = read_jsonl(path, OracleRecord, required=True, allow_empty=False)
+    assert len(migrated) == 1
+    assert migrated[0].schema_version == "1.1"
+    assert migrated[0].evaluability is OracleEvaluability.EVALUABLE
+
+
+def test_observed_v10_completed_parse_failure_migrates_to_typed_unknown(tmp_path) -> None:
+    from secaware.io.jsonl import read_jsonl, write_jsonl
+
+    legacy = _canonical_oracle_payload(security_label="secure")
+    legacy.update(schema_version="1.0", parse_ok=False, functional_ok=False)
+    legacy.pop("evaluability")
+    path = tmp_path / "legacy-parse-failure.jsonl"
+    write_jsonl(path, [legacy])
+
+    migrated = read_jsonl(path, OracleRecord, required=True, allow_empty=False)
+
+    assert len(migrated) == 1
+    assert migrated[0].security_label is SecurityLabel.UNKNOWN
+    assert migrated[0].evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+
+
+def test_invalid_or_counterfactual_oracle_v10_is_not_accepted_as_migration(tmp_path) -> None:
+    from secaware.errors import SecAwareError
+    from secaware.io.jsonl import read_jsonl, write_jsonl
+
+    legacy = _canonical_oracle_payload(condition="counterfactual", security_label="secure")
+    legacy["schema_version"] = "1.0"
+    legacy.pop("evaluability")
+    path = tmp_path / "legacy-counterfactual.jsonl"
+    write_jsonl(path, [legacy])
+
+    with pytest.raises(SecAwareError):
+        read_jsonl(path, OracleRecord, required=True, allow_empty=False)
 
 
 @pytest.mark.parametrize(

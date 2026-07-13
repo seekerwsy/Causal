@@ -56,6 +56,9 @@ def _validate_record(
     stage: str,
 ) -> T:
     try:
+        migrate = getattr(model, "migrate_persisted_payload", None)
+        if callable(migrate):
+            data = migrate(data)
         return model.model_validate(data)  # type: ignore[attr-defined,no-any-return]
     except ValidationError:
         pass

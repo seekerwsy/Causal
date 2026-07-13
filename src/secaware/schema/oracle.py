@@ -24,6 +24,11 @@ class SecurityLabel(str, Enum):
     UNKNOWN = "unknown"
 
 
+class OracleEvaluability(str, Enum):
+    EVALUABLE = "evaluable"
+    UNKNOWN_PARSE_FAILURE = "unknown_parse_failure"
+
+
 class AnalyzerFindingRecord(SafeValidationMixin, VersionedModel):
     _safe_validation_message = _INVALID_FINDING_MESSAGE
 
@@ -128,7 +133,7 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
         strict=True,
     )
 
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.1"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     code_id: str = Field(pattern=_CANONICAL_CODE_ID_PATTERN)
     code_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
@@ -141,6 +146,7 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
     parse_ok: StrictBool
     functional_ok: StrictBool
     security_label: SecurityLabel
+    evaluability: OracleEvaluability
     severity: Literal["none", "low", "medium", "high"]
     findings: tuple[AnalyzerFindingRecord, ...] = Field(default_factory=tuple)
     analyzers: tuple[AnalyzerProvenanceRecord, ...]
@@ -168,6 +174,15 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
             return SecurityLabel(value)
         raise TypeError(_INVALID_ORACLE_MESSAGE)
 
+    @field_validator("evaluability", mode="before")
+    @classmethod
+    def parse_evaluability(cls, value: object) -> OracleEvaluability:
+        if type(value) is OracleEvaluability:
+            return value
+        if type(value) is str:
+            return OracleEvaluability(value)
+        raise TypeError(_INVALID_ORACLE_MESSAGE)
+
     @field_validator("findings", mode="before")
     @classmethod
     def snapshot_findings(cls, value: object) -> tuple[AnalyzerFindingRecord, ...]:
@@ -180,6 +195,30 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
         value: object,
     ) -> tuple[AnalyzerProvenanceRecord, ...]:
         return _snapshot_analyzers(value)
+
+    @classmethod
+    def migrate_persisted_payload(cls, value: object) -> object:
+        """Migrate one valid observed v1.0 payload at the JSONL read boundary only."""
+        if type(value) is not dict or value.get("schema_version") != "1.0":
+            return value
+        snapshot = dict(value)
+        if snapshot.get("condition") != "observed" or "evaluability" in snapshot:
+            return value
+        snapshot["schema_version"] = "1.1"
+        if snapshot.get("parse_ok") is False:
+            if (
+                snapshot.get("functional_ok") is not False
+                or snapshot.get("security_label") != SecurityLabel.SECURE.value
+                or snapshot.get("severity") != "none"
+                or type(snapshot.get("findings")) not in {list, tuple}
+                or len(snapshot["findings"]) != 0
+            ):
+                return value
+            snapshot["security_label"] = SecurityLabel.UNKNOWN
+            snapshot["evaluability"] = OracleEvaluability.UNKNOWN_PARSE_FAILURE
+        else:
+            snapshot["evaluability"] = OracleEvaluability.EVALUABLE
+        return cls.model_validate(snapshot)
 
     @model_validator(mode="after")
     def validate_integrity(self) -> "OracleRecord":
@@ -200,6 +239,16 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
 
         if self.security_label is SecurityLabel.UNKNOWN:
+            if (
+                self.evaluability is not OracleEvaluability.UNKNOWN_PARSE_FAILURE
+                or self.parse_ok
+                or self.functional_ok
+                or self.severity != "none"
+                or self.findings
+            ):
+                raise ValueError(_INVALID_ORACLE_MESSAGE)
+            return self
+        if self.evaluability is not OracleEvaluability.EVALUABLE or not self.parse_ok:
             raise ValueError(_INVALID_ORACLE_MESSAGE)
         if self.security_label is SecurityLabel.SECURE:
             if self.findings or self.severity != "none":
@@ -219,6 +268,7 @@ __all__ = [
     "AnalyzerFindingRecord",
     "AnalyzerProvenanceRecord",
     "FindingRecord",
+    "OracleEvaluability",
     "OracleRecord",
     "SecurityLabel",
 ]

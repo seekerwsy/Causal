@@ -25,7 +25,7 @@ from secaware.schema.generation import (
     build_generation_request_id,
     sha256_text,
 )
-from secaware.schema.oracle import SecurityLabel
+from secaware.schema.oracle import OracleEvaluability, SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord, GeneratedCodeRecord
 
 
@@ -474,22 +474,23 @@ def test_batch_rejects_iterator_failure_without_leaking_source(
     assert secret not in _safe_surfaces(exc_info.value)
 
 
-def test_syntax_error_fails_before_analyzer_launch_without_source_leak(
+def test_completed_syntax_error_is_typed_unknown_without_source_leak(
     policy: LoadedOraclePolicy,
 ) -> None:
     secret = "PRIVATE-SYNTAX-SOURCE"
     runner = FakeRunner()
 
-    with pytest.raises(SecAwareError) as exc_info:
-        run_oracle_batch(
-            [_code(code=f"def {secret}(:\n    pass\n")],
-            policy,
-            runner=runner,
-        )
+    record = run_oracle_batch(
+        [_code(code=f"def {secret}(:\n    pass\n")],
+        policy,
+        runner=runner,
+    )[0]
 
-    assert exc_info.value.code is ErrorCode.CONTRACT
-    assert runner.calls == []
-    assert secret not in _safe_surfaces(exc_info.value)
+    assert len(runner.calls) == 2
+    assert record.parse_ok is False
+    assert record.functional_ok is False
+    assert record.security_label is SecurityLabel.UNKNOWN
+    assert record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
 
 
 def test_refusal_words_are_not_a_functionality_or_security_fallback(
