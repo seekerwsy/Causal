@@ -33,7 +33,6 @@ from secaware.tsg.graph import (
 from secaware.tsg.motifs import (
     MOTIF_SPECS,
     factor_query_vector,
-    feature_state,
     find_motif_matches,
     has_factor_requirement,
     motif_query_vector,
@@ -84,7 +83,7 @@ def _add_edge(
     return edge_id
 
 
-def test_feature_state_reads_one_finite_canonical_state_node() -> None:
+def test_feature_state_node_survives_prompt_tsg_round_trip() -> None:
     graph = nx.MultiDiGraph()
     requirement = _add_node(
         graph,
@@ -122,7 +121,18 @@ def test_feature_state_reads_one_finite_canonical_state_node() -> None:
     assert record.schema_version == "2.1"
     assert record.task_id == "task-path-001"
     assert record.extractor_backend is PromptExtractorBackend.LLM_FACTS_V1
-    assert feature_state(restored, feature_id) is FeatureState.PRESENT
+    states = tuple(
+        attributes["attributes"]["feature_state"]
+        for _, attributes in restored.nodes(data=True)
+        if attributes["node_type"] is NodeType.FEATURE
+        and attributes["attributes"]["feature_id"] == feature_id
+    )
+    assert states == (FeatureState.PRESENT.value,)
+
+
+def test_task2_does_not_publish_feature_state_query() -> None:
+    assert not hasattr(motif_queries, "feature_state")
+    assert "feature_state" not in motif_queries.__all__
 
 
 def _unsafe_flow(

@@ -46,6 +46,22 @@ def test_prompt_record_requires_canonical_task_id(task_id: object) -> None:
         PromptRecord.model_validate(payload)
 
 
+@pytest.mark.parametrize("task_id", (b"task-path-001", 123, True))
+def test_prompt_record_rejects_non_string_task_id(task_id: object) -> None:
+    with pytest.raises(ValueError):
+        PromptRecord.model_validate(
+            {
+                "prompt_id": "p001",
+                "task_id": task_id,
+                "split": "discover",
+                "language": "python",
+                "task_family": "path_handling",
+                "cwe": "CWE-22",
+                "prompt": "Read a user supplied path.",
+            }
+        )
+
+
 def test_prompt_tsg_record_serializes_graph_fields() -> None:
     tsg = PromptTSGRecord.model_validate(
         {

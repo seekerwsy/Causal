@@ -27,7 +27,7 @@ class PromptRecord(BaseModel):
     )
 
     prompt_id: str
-    task_id: str
+    task_id: str = Field(strict=True)
     split: Literal["discover", "confirm"]
     language: str
     task_family: str
