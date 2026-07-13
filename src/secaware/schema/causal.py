@@ -5,11 +5,13 @@ from enum import Enum
 import hashlib
 import json
 import re
+from datetime import datetime, timedelta
 from typing import Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.features import FeatureFamily, FeatureOperation
 
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -20,6 +22,7 @@ _BK_ID_PATTERN = r"^bk_[0-9a-f]{64}$"
 _DRAW_ID_PATTERN = r"^draw_[0-9a-f]{64}$"
 _BOOTSTRAP_PAG_ID_PATTERN = r"^bootstrap_pag_[0-9a-f]{64}$"
 _PATH_ID_PATTERN = r"^path_[0-9a-f]{64}$"
+_HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _VARIABLE_ID_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_PATTERN = re.compile(r"^CWE-[1-9][0-9]*$")
@@ -954,6 +957,144 @@ class PathSupportRecord(_CausalVersionedContract):
             self.support_numerator > self.support_denominator
             or self.support_sha256 != expected
             or self.support_id != f"path_support_{expected}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class ExpectedOperationContrast(_CausalContract):
+    """One frozen randomized target-minus-noop estimand for an allowed operation."""
+
+    operation: FeatureOperation
+    contrast_id: Literal["target_minus_noop"] = "target_minus_noop"
+    outcome_estimand_id: Literal["y_secure_functional", "y_cwe_secure"]
+    expected_sign: Literal["positive", "negative", "null", "two_sided"]
+
+    @field_validator("operation", mode="before")
+    @classmethod
+    def parse_operation(cls, value: object) -> object:
+        return _exact_enum_value(value, FeatureOperation)
+
+
+class FrozenHypothesisRecord(_CausalVersionedContract):
+    """Content-addressed Prompt-side discovery hypothesis frozen before confirmation."""
+
+    schema_version: Literal["1.0"]
+    hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
+    hypothesis_sha256: str = Field(pattern=_SHA256_PATTERN)
+    target_feature_id: str
+    feature_family: FeatureFamily
+    permitted_operations: tuple[FeatureOperation, ...] = Field(min_length=1, max_length=2)
+    scope_id: str
+    cwe: str
+    model_id: str
+    outcome_variable_id: Literal["y.secure_functional", "y.cwe_security"]
+    reference_pag_id: str = Field(pattern=_PAG_ID_PATTERN)
+    path: PathPatternRecord
+    support_numerator: int = Field(ge=0, le=10_000)
+    support_denominator: int = Field(gt=0, le=10_000)
+    table_sha256: str = Field(pattern=_SHA256_PATTERN)
+    catalog_sha256: str = Field(pattern=_SHA256_PATTERN)
+    extractor_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
+    fci_config_sha256: str = Field(pattern=_SHA256_PATTERN)
+    background_knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
+    expected_contrasts: tuple[ExpectedOperationContrast, ...] = Field(
+        min_length=1, max_length=2
+    )
+    freeze_batch_sha256: str = Field(pattern=_SHA256_PATTERN)
+    # Provenance only. This field and freeze_batch_sha256 are intentionally excluded
+    # from the semantic hypothesis digest; the batch digest is derived from all
+    # semantic hypothesis hashes, avoiding a hash cycle.
+    frozen_at_utc: datetime
+
+    @field_validator("feature_family", mode="before")
+    @classmethod
+    def parse_feature_family(cls, value: object) -> object:
+        return _exact_enum_value(value, FeatureFamily)
+
+    @field_validator("permitted_operations", mode="before")
+    @classmethod
+    def parse_operations(cls, value: object) -> object:
+        snapshot = _snapshot_json_arrays(value)
+        if type(snapshot) is not tuple:
+            return snapshot
+        return tuple(_exact_enum_value(item, FeatureOperation) for item in snapshot)
+
+    @classmethod
+    def semantic_sha256_from_content(cls, content: Mapping[str, object]) -> str:
+        payload = dict(content)
+        for field in (
+            "hypothesis_id",
+            "hypothesis_sha256",
+            "freeze_batch_sha256",
+            "frozen_at_utc",
+        ):
+            payload.pop(field, None)
+        payload["schema_version"] = "1.0"
+        return _digest(payload)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        try:
+            payload = {"schema_version": "1.0", **content}
+            digest = cls.semantic_sha256_from_content(payload)
+            return cls(
+                **payload,
+                hypothesis_id=f"hypothesis_{digest}",
+                hypothesis_sha256=digest,
+            )
+        except Exception:
+            raise cls._safe_error() from None
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        family_prefix = {
+            FeatureFamily.TASK_FUNCTION: "task.",
+            FeatureFamily.SAFETY_CONTROL: "safety.",
+            FeatureFamily.PRESENTATION_CONTROL: "presentation.",
+        }[self.feature_family]
+        operations = tuple(item.operation for item in self.expected_contrasts)
+        expected_estimand = {
+            "y.secure_functional": "y_secure_functional",
+            "y.cwe_security": "y_cwe_secure",
+        }[self.outcome_variable_id]
+        expected_sign_by_operation = {
+            operation: (
+                "positive"
+                if self.feature_family is FeatureFamily.SAFETY_CONTROL
+                and operation is FeatureOperation.ADD
+                else "negative"
+                if self.feature_family is FeatureFamily.SAFETY_CONTROL
+                else "null"
+                if self.feature_family is FeatureFamily.PRESENTATION_CONTROL
+                else "two_sided"
+            )
+            for operation in self.permitted_operations
+        }
+        semantic_sha256 = self.semantic_sha256_from_content(self.model_dump(mode="json"))
+        if (
+            not self.target_feature_id.startswith(family_prefix)
+            or not _valid_identifier(self.target_feature_id)
+            or not _valid_identifier(self.scope_id)
+            or not _CWE_PATTERN.fullmatch(self.cwe)
+            or not _valid_identifier(self.model_id)
+            or self.path.variable_ids[0] != f"x.{self.target_feature_id}"
+            or self.path.variable_ids[-1] != self.outcome_variable_id
+            or self.support_numerator > self.support_denominator
+            or self.permitted_operations
+            != tuple(sorted(self.permitted_operations, key=lambda item: item.value))
+            or len(self.permitted_operations) != len(set(self.permitted_operations))
+            or operations != self.permitted_operations
+            or any(
+                contrast.outcome_estimand_id != expected_estimand
+                or contrast.expected_sign
+                != expected_sign_by_operation[contrast.operation]
+                for contrast in self.expected_contrasts
+            )
+            or self.hypothesis_sha256 != semantic_sha256
+            or self.hypothesis_id != f"hypothesis_{semantic_sha256}"
+            or self.frozen_at_utc.tzinfo is None
+            or self.frozen_at_utc.utcoffset() != timedelta(0)
         ):
             raise ValueError(self._safe_validation_message)
         return self
