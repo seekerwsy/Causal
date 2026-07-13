@@ -40,6 +40,8 @@ def _prompt(text: str) -> PromptRecord:
         task_family="file_access",
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 

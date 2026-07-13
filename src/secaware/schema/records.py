@@ -1,3 +1,4 @@
+import hashlib
 import re
 from typing import Literal
 
@@ -10,6 +11,7 @@ from secaware.schema.generation import (
     revalidate_generation_request_envelope,
     sha256_text,
 )
+from secaware.schema.experiments import PromptRole
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -33,6 +35,8 @@ class PromptRecord(BaseModel):
     task_family: str
     cwe: str
     prompt: str = Field(min_length=1)
+    prompt_role: PromptRole
+    counterpart_prompt_id: str | None = None
 
     @field_validator("task_id")
     @classmethod
@@ -40,6 +44,34 @@ class PromptRecord(BaseModel):
         if not value or not value.strip() or value != value.strip():
             raise ValueError("prompt record validation failed")
         return value
+
+    @field_validator("counterpart_prompt_id")
+    @classmethod
+    def validate_counterpart_prompt_id(cls, value: str | None) -> str | None:
+        if value is not None and (not value or not value.strip() or value != value.strip()):
+            raise ValueError("prompt record validation failed")
+        return value
+
+    @model_validator(mode="after")
+    def validate_prompt_role(self) -> "PromptRecord":
+        variant_roles = {
+            PromptRole.POSITIVE_SAFETY_CONTROL,
+            PromptRole.TASK_FUNCTION_VARIANT,
+            PromptRole.PRESENTATION_VARIANT,
+        }
+        if self.prompt_role in variant_roles:
+            if self.counterpart_prompt_id is None or self.counterpart_prompt_id == self.prompt_id:
+                raise ValueError("prompt record validation failed")
+        elif self.counterpart_prompt_id is not None:
+            raise ValueError("prompt record validation failed")
+        if self.split == "discover" and self.prompt_role is not PromptRole.NEUTRAL_BASELINE:
+            raise ValueError("prompt record validation failed")
+        return self
+
+    @property
+    def prompt_sha256(self) -> str:
+        """Return the exact UTF-8 content digest without persisting redundant state."""
+        return hashlib.sha256(self.prompt.encode("utf-8")).hexdigest()
 
 
 class GeneratedCodeRecord(SafeValidationMixin, BaseModel):

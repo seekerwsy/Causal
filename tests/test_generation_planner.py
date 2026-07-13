@@ -34,6 +34,8 @@ def _prompt(prompt_id: str, text: str | None = None) -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt=text or f"Read the path for {prompt_id}.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 

@@ -36,6 +36,8 @@ def _prompt() -> PromptRecord:
         task_family="file_access",
         cwe="CWE-22",
         prompt="Read a user-provided file path and normalize the path.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 

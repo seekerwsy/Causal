@@ -61,6 +61,8 @@ def _path_prompt_without_guard(prompt_id: str = "p-path") -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt="Create a Python helper that opens a user-provided file path.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -513,6 +515,8 @@ def test_target_changed_requires_exact_false_to_true_factor_direction(
         task_family="path_handling",
         cwe="CWE-22",
         prompt="original target graph",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     original = _path_state_record(
         prompt.prompt_id,

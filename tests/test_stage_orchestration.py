@@ -89,7 +89,10 @@ def _store(tmp_path: Path, *, bootstrap_samples: int = 200) -> RunStore:
     config = AppConfig.model_validate(
         {
             "run": {"name": "stage-test", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(tmp_path / "source-prompts.jsonl")},
+            "data": {
+                "prompts_path": str(tmp_path / "source-prompts.jsonl"),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "analysis": {"bootstrap_samples": bootstrap_samples},
         }
@@ -193,13 +196,18 @@ def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig,
                 task_family="path_handling",
                 cwe="CWE-22",
                 prompt="write a helper",
+                prompt_role="neutral_baseline",
+                counterpart_prompt_id=None,
             )
         ],
     )
     config = AppConfig.model_validate(
         {
             "run": {"name": "file-provider", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "file",
@@ -1224,13 +1232,18 @@ def test_compatibility_generation_seals_canonical_output_before_commit(
                 task_family="path_handling",
                 cwe="CWE-22",
                 prompt="Return a Python function.",
+                prompt_role="neutral_baseline",
+                counterpart_prompt_id=None,
             )
         ],
     )
     config = AppConfig.model_validate(
         {
             "run": {"name": "compat", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {"provider": "mock", "models": ["model-a"], "seeds": [1]},
         }

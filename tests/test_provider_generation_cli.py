@@ -103,14 +103,20 @@ def _prompt(prompt_id: str, split: str = "confirm") -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt=f"Open the path for {prompt_id}.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
 def _config(tmp_path: Path, prompts_path: Path) -> AppConfig:
+    write_jsonl(tmp_path / "attestations.jsonl", [])
     return AppConfig.model_validate(
         {
             "run": {"name": "provider", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "openai_compatible",
@@ -131,7 +137,7 @@ def _config(tmp_path: Path, prompts_path: Path) -> AppConfig:
 def _prepared_store(
     tmp_path: Path,
 ) -> tuple[AppConfig, RunStore, list[PromptRecord]]:
-    prompts = [_prompt("prompt-b"), _prompt("prompt-a", "discover")]
+    prompts = [_prompt("prompt-b", "discover"), _prompt("prompt-a", "discover")]
     prompts_path = tmp_path / "source-prompts.jsonl"
     write_jsonl(prompts_path, prompts)
     config = _config(tmp_path, prompts_path)

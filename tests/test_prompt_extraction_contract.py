@@ -35,6 +35,8 @@ def _prompt(text: str = "Read a user-provided file path and normalize the path."
         task_family="file_access",
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 

@@ -227,7 +227,10 @@ def test_app_config_rejects_unknown_nested_keys() -> None:
         AppConfig.model_validate(
             {
                 "run": {"name": "strict", "unexpected": True},
-                "data": {"prompts_path": "prompts.jsonl"},
+                "data": {
+                    "prompts_path": "prompts.jsonl",
+                    "prompt_attestations_path": "attestations.jsonl",
+                },
             }
         )
 
@@ -240,7 +243,10 @@ def test_run_random_seed_is_a_strict_signed_64_bit_integer(random_seed: object) 
         AppConfig.model_validate(
             {
                 "run": {"name": "strict", "random_seed": random_seed},
-                "data": {"prompts_path": "prompts.jsonl"},
+                "data": {
+                    "prompts_path": "prompts.jsonl",
+                    "prompt_attestations_path": "attestations.jsonl",
+                },
                 "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             }
         )
@@ -251,7 +257,10 @@ def test_run_random_seed_accepts_signed_64_bit_boundaries(random_seed: int) -> N
     config = AppConfig.model_validate(
         {
             "run": {"name": "strict", "random_seed": random_seed},
-            "data": {"prompts_path": "prompts.jsonl"},
+            "data": {
+                "prompts_path": "prompts.jsonl",
+                "prompt_attestations_path": "attestations.jsonl",
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
         }
     )
@@ -267,7 +276,10 @@ def test_app_config_rejects_removed_tsg_field() -> None:
         AppConfig.model_validate(
             {
                 "run": {"name": "strict"},
-                "data": {"prompts_path": "prompts.jsonl"},
+                "data": {
+                    "prompts_path": "prompts.jsonl",
+                    "prompt_attestations_path": "attestations.jsonl",
+                },
                 "tsg": {removed_field: removed_value},
             }
         )
@@ -279,7 +291,10 @@ def test_app_config_uses_exact_bounded_fci_discovery_contract() -> None:
     config = AppConfig.model_validate(
         {
             "run": {"name": "strict"},
-            "data": {"prompts_path": "prompts.jsonl"},
+            "data": {
+                "prompts_path": "prompts.jsonl",
+                "prompt_attestations_path": "attestations.jsonl",
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
         }
     )
@@ -312,7 +327,10 @@ def test_app_config_rejects_removed_heuristic_discovery_fields(removed_field: st
         AppConfig.model_validate(
             {
                 "run": {"name": "strict"},
-                "data": {"prompts_path": "prompts.jsonl"},
+                "data": {
+                    "prompts_path": "prompts.jsonl",
+                    "prompt_attestations_path": "attestations.jsonl",
+                },
                 "discovery": {removed_field: 1},
             }
         )
@@ -324,3 +342,4 @@ def test_existing_config_files_still_load(config_name: str) -> None:
 
     assert config.run.name == Path(config_name).stem
     assert config.data.prompts_path == "data/examples/prompts_demo.jsonl"
+    assert config.data.prompt_attestations_path == "data/examples/prompt_attestations_demo.jsonl"

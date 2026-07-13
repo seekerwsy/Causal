@@ -34,6 +34,8 @@ def _path_prompt(prompt_id: str, *, guarded: bool) -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -232,6 +234,8 @@ def test_coordinate_errors_do_not_retain_raw_prompt_in_discovery_frames() -> Non
         task_family="path_handling",
         cwe="CWE-22",
         prompt=sentinel,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
     with pytest.raises(SecAwareError) as exc_info:

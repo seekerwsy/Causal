@@ -11,6 +11,10 @@ from pydantic import ConfigDict
 from secaware.config import AppConfig, OpenAICompatibleConfig, OracleConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
+from secaware.intervention.attestation import (
+    PromptRoleAttestationRecord,
+    validate_prompt_role_attestations,
+)
 from secaware.oracle.policy import LoadedOraclePolicy, load_policy_bundle
 from secaware.oracle.runner import (
     AnalyzerProcessResult,
@@ -18,6 +22,7 @@ from secaware.oracle.runner import (
     validate_analyzer_runtime,
 )
 from secaware.schema.common import StrictModel
+from secaware.schema.experiments import FunctionalOutcomeContractRecord
 from secaware.schema.records import PromptRecord
 
 
@@ -314,6 +319,34 @@ def run_preflight(config: AppConfig) -> PreflightReport:
                 stage="preflight",
                 message="file provider directory is unavailable",
                 details={"path": str(provider_path)},
+            )
+
+    attestations = read_jsonl(
+        config.data.prompt_attestations_path,
+        PromptRoleAttestationRecord,
+        required=True,
+        allow_empty=True,
+        stage="preflight",
+    )
+    validate_prompt_role_attestations(prompts, attestations)
+
+    contracts_path = config.data.functional_outcome_contracts_path
+    if contracts_path is not None:
+        contracts = read_jsonl(
+            contracts_path,
+            FunctionalOutcomeContractRecord,
+            required=True,
+            allow_empty=False,
+            stage="preflight",
+        )
+        contract_ids = tuple(item.contract_id for item in contracts)
+        task_features = tuple(item.task_feature_id for item in contracts)
+        if len(contract_ids) != len(set(contract_ids)) or len(task_features) != len(
+            set(task_features)
+        ):
+            raise _error(
+                ErrorCode.CONTRACT,
+                "functional outcome contracts must have unique provenance coordinates",
             )
 
     return PreflightReport(

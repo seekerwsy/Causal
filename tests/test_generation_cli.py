@@ -75,6 +75,8 @@ def _prompt(prompt_id: str, split: str, text: str) -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -82,7 +84,10 @@ def _config(tmp_path: Path, prompts_path: Path) -> AppConfig:
     return AppConfig.model_validate(
         {
             "run": {"name": "offline-generation", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "prompt-attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "mock",

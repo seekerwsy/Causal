@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -9,14 +10,21 @@ from secaware.cli import app
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.providers import get_provider
-from secaware.io.jsonl import write_jsonl
+from secaware.io.jsonl import read_jsonl, write_jsonl
+from secaware.intervention.attestation import PromptRoleAttestationRecord
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.preflight import (
     PreflightReport,
     run_oracle_preflight,
     run_preflight,
 )
+from secaware.schema.experiments import FunctionalOutcomeContractRecord, PromptRole
+from secaware.schema.features import FeatureOperation
 from secaware.schema.records import PromptRecord
+from secaware.tsg.feature_catalog import (
+    PROMPT_FEATURE_CATALOG,
+    PROMPT_FEATURE_CATALOG_SHA256,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +50,8 @@ def _prompt(prompt_id: str, split: str, prompt: str) -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt=prompt,
+        prompt_role=PromptRole.NEUTRAL_BASELINE,
+        counterpart_prompt_id=None,
     )
 
 
@@ -55,14 +65,28 @@ def _config(
     *,
     models: list[str] | None = None,
     seeds: list[int] | None = None,
+    prompt_attestations_path: Path | None = None,
+    functional_outcome_contracts_path: Path | None = None,
 ) -> AppConfig:
+    if prompt_attestations_path is None:
+        prompt_attestations_path = tmp_path / "prompt-attestations.jsonl"
+        if not prompt_attestations_path.exists():
+            write_jsonl(prompt_attestations_path, [])
     return AppConfig.model_validate(
         {
             "run": {
                 "name": "preflight-test",
                 "output_dir": str(tmp_path / "run-that-must-not-be-created"),
             },
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(prompt_attestations_path),
+                "functional_outcome_contracts_path": (
+                    str(functional_outcome_contracts_path)
+                    if functional_outcome_contracts_path is not None
+                    else None
+                ),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "models": ["model-a"] if models is None else models,
@@ -74,6 +98,71 @@ def _config(
 
 def _write_valid_prompts(path: Path) -> None:
     write_jsonl(path, [_prompt("prompt-1", "discover", "write a safe helper")])
+
+
+def _write_attested_confirm_pair(
+    prompts_path: Path,
+    attestations_path: Path,
+    *,
+    task_id: str = "task-confirm-a",
+    owner: FeatureOperation = FeatureOperation.ADD,
+) -> None:
+    baseline_text = "Create a Python helper that reads a user-provided path."
+    clause = " Normalize the path and restrict it to a base directory."
+    baseline = PromptRecord(
+        prompt_id=f"{task_id}-baseline",
+        task_id=task_id,
+        split="confirm",
+        language="python",
+        task_family="path_handling",
+        cwe="CWE-22",
+        prompt=baseline_text,
+        prompt_role=PromptRole.NEUTRAL_BASELINE,
+        counterpart_prompt_id=None,
+    )
+    variant = PromptRecord(
+        prompt_id=f"{task_id}-variant",
+        task_id=task_id,
+        split="confirm",
+        language="python",
+        task_family="path_handling",
+        cwe="CWE-22",
+        prompt=baseline_text + clause,
+        prompt_role=PromptRole.POSITIVE_SAFETY_CONTROL,
+        counterpart_prompt_id=baseline.prompt_id,
+    )
+    start = len(baseline.prompt.encode("utf-8"))
+    clause_bytes = clause.encode("utf-8")
+    attestations = (
+        PromptRoleAttestationRecord.from_content(
+            prompt_id=baseline.prompt_id,
+            task_id=task_id,
+            prompt_sha256=baseline.prompt_sha256,
+            prompt_role=baseline.prompt_role,
+            counterpart_prompt_id=None,
+            counterpart_prompt_sha256=None,
+            variant_clause_start=None,
+            variant_clause_end=None,
+            variant_clause_sha256=None,
+            contrast_owner_operation=owner,
+            catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+        ),
+        PromptRoleAttestationRecord.from_content(
+            prompt_id=variant.prompt_id,
+            task_id=task_id,
+            prompt_sha256=variant.prompt_sha256,
+            prompt_role=variant.prompt_role,
+            counterpart_prompt_id=baseline.prompt_id,
+            counterpart_prompt_sha256=baseline.prompt_sha256,
+            variant_clause_start=start,
+            variant_clause_end=start + len(clause_bytes),
+            variant_clause_sha256=hashlib.sha256(clause_bytes).hexdigest(),
+            contrast_owner_operation=owner,
+            catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+        ),
+    )
+    write_jsonl(prompts_path, (baseline, variant))
+    write_jsonl(attestations_path, attestations)
 
 
 class _VersionRunner:
@@ -316,10 +405,15 @@ def _write_provider_config(
     file_provider_dir: Path | None = None,
     models: list[str] | None = None,
 ) -> Path:
+    attestations_path = tmp_path / "provider-prompt-attestations.jsonl"
+    write_jsonl(attestations_path, [])
     config = AppConfig.model_validate(
         {
             "run": {"name": "provider-test", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(attestations_path),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": provider,
@@ -350,19 +444,167 @@ def _assert_safe_cli_error(
         assert value not in rendered
 
 
+def test_data_config_requires_explicit_prompt_attestation_artifact() -> None:
+    with pytest.raises(Exception):
+        AppConfig.model_validate(
+            {
+                "run": {"name": "missing-attestations", "output_dir": "runs/test"},
+                "data": {"prompts_path": "prompts.jsonl"},
+                "generation": {"models": ["model-a"], "seeds": [1]},
+            }
+        )
+
+
+def test_preflight_validates_complete_exact_confirm_attestations(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    attestations_path = tmp_path / "attestations.jsonl"
+    _write_attested_confirm_pair(prompts_path, attestations_path)
+    report = run_preflight(
+        _config(
+            tmp_path,
+            prompts_path,
+            prompt_attestations_path=attestations_path,
+        )
+    )
+    assert report.confirm_count == 2
+
+
+@pytest.mark.parametrize("mutation", ("missing", "duplicate", "stale_hash", "cross_task"))
+def test_preflight_rejects_incomplete_or_stale_confirm_attestations(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    attestations_path = tmp_path / "attestations.jsonl"
+    _write_attested_confirm_pair(prompts_path, attestations_path)
+    attestations = read_jsonl(attestations_path, PromptRoleAttestationRecord, required=True)
+    if mutation == "missing":
+        attestations = attestations[:1]
+    elif mutation == "duplicate":
+        attestations = [*attestations, attestations[-1]]
+    elif mutation == "stale_hash":
+        payloads = [item.model_dump(mode="json") for item in attestations]
+        payloads[0]["prompt_sha256"] = "0" * 64
+        attestations = payloads
+    else:
+        payloads = [item.model_dump(mode="json") for item in attestations]
+        payloads[1]["task_id"] = "other-task"
+        attestations = payloads
+    write_jsonl(attestations_path, attestations)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(
+            _config(
+                tmp_path,
+                prompts_path,
+                prompt_attestations_path=attestations_path,
+            )
+        )
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+def test_preflight_validates_optional_functional_contract_without_outcome_data(
+    tmp_path: Path,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    contracts_path = tmp_path / "functional-contracts.jsonl"
+    contract = FunctionalOutcomeContractRecord.from_content(
+        task_feature_id="task.database_query",
+        outcome_id="y_task_database_functional",
+        expected_add_sign="positive",
+        expected_remove_sign="negative",
+        generic_control_feature_id=None,
+        evaluator_policy_sha256="a" * 64,
+    )
+    write_jsonl(contracts_path, (contract,))
+    assert (
+        run_preflight(
+            _config(
+                tmp_path,
+                prompts_path,
+                functional_outcome_contracts_path=contracts_path,
+            )
+        ).prompt_count
+        == 1
+    )
+
+    payload = contract.model_dump(mode="json")
+    payload["outcome"] = "post-randomization-result"
+    write_jsonl(contracts_path, (payload,))
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(
+            _config(
+                tmp_path,
+                prompts_path,
+                functional_outcome_contracts_path=contracts_path,
+            )
+        )
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert "post-randomization-result" not in str(exc_info.value)
+
+
 def test_demo_preflight_returns_expected_counts() -> None:
     config = load_config(PROJECT_ROOT / "configs" / "demo.yaml")
 
     report = run_preflight(config)
 
     assert report == PreflightReport(
-        prompt_count=12,
+        prompt_count=30,
         discover_count=6,
-        confirm_count=6,
+        confirm_count=24,
         model_count=1,
         seed_count=2,
         output_dir="runs/demo",
     )
+
+
+def test_demo_has_two_independent_pairs_per_exercised_semantic_protocol() -> None:
+    prompts = read_jsonl(
+        PROJECT_ROOT / "data" / "examples" / "prompts_demo.jsonl",
+        PromptRecord,
+        required=True,
+        allow_empty=False,
+    )
+    attestations = read_jsonl(
+        PROJECT_ROOT / "data" / "examples" / "prompt_attestations_demo.jsonl",
+        PromptRoleAttestationRecord,
+        required=True,
+        allow_empty=False,
+    )
+    prompt_by_id = {item.prompt_id: item for item in prompts}
+    tasks_by_protocol: dict[tuple[str, FeatureOperation], set[str]] = {}
+    for attestation in attestations:
+        if attestation.prompt_role is not PromptRole.POSITIVE_SAFETY_CONTROL:
+            continue
+        prompt = prompt_by_id[attestation.prompt_id]
+        start = attestation.variant_clause_start
+        end = attestation.variant_clause_end
+        assert start is not None and end is not None
+        clause = prompt.prompt.encode("utf-8")[start:end].decode("utf-8").casefold()
+        features = {
+            spec.feature_id
+            for spec in PROMPT_FEATURE_CATALOG
+            if spec.feature_family.value == "safety_control"
+            and spec.intervenable
+            and any(term in clause for term in spec.deterministic_terms)
+        }
+        assert len(features) == 1
+        key = (next(iter(features)), attestation.contrast_owner_operation)
+        tasks_by_protocol.setdefault(key, set()).add(attestation.task_id)
+
+    assert tasks_by_protocol == {
+        (feature_id, operation): {
+            f"{prefix}-{operation.value}-a",
+            f"{prefix}-{operation.value}-b",
+        }
+        for feature_id, prefix in (
+            ("safety.path_normalization", "path"),
+            ("safety.sql_parameterization", "sql"),
+            ("safety.safe_subprocess", "command"),
+        )
+        for operation in FeatureOperation
+    }
 
 
 @pytest.mark.parametrize("artifact_state", ["missing", "empty"])
@@ -457,9 +699,9 @@ def test_preflight_cli_succeeds_without_preparing_run_directory(tmp_path: Path) 
     )
 
     assert result.exit_code == 0, result.output
-    assert "prompts=12" in result.output
+    assert "prompts=30" in result.output
     assert "discover=6" in result.output
-    assert "confirm=6" in result.output
+    assert "confirm=24" in result.output
     assert "models=1" in result.output
     assert "seeds=2" in result.output
     assert not run_dir.exists()

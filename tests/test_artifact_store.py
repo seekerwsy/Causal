@@ -316,6 +316,8 @@ def test_write_jsonl_revalidates_base_models_before_publishing(
         task_family="path_handling",
         cwe="CWE-22",
         prompt="Read a path.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     record = plan_observed_requests(
         [prompt],

@@ -36,6 +36,8 @@ def _prompt(
         task_family=task_family,
         cwe=cwe,
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 

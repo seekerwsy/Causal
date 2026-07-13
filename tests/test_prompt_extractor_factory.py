@@ -116,7 +116,13 @@ def test_prompt_extractor_llm_config_rejects_unsafe_values(
 
 
 def test_app_config_requires_backend_specific_llm_coordinates() -> None:
-    base = {"run": {"name": "strict"}, "data": {"prompts_path": "prompts.jsonl"}}
+    base = {
+        "run": {"name": "strict"},
+        "data": {
+            "prompts_path": "prompts.jsonl",
+            "prompt_attestations_path": "prompt-attestations.jsonl",
+        },
+    }
     with pytest.raises(ValidationError):
         AppConfig.model_validate(base)
     with pytest.raises(ValidationError):

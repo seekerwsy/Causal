@@ -99,13 +99,18 @@ def _config(tmp_path: Path, *, exact_tools: bool = False) -> AppConfig:
                 task_family="path_handling",
                 cwe="CWE-22",
                 prompt="Return one Python function.",
+                prompt_role="neutral_baseline",
+                counterpart_prompt_id=None,
             )
         ],
     )
     return AppConfig.model_validate(
         {
             "run": {"name": "oracle-cli", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": {
                 "provider": "mock",
@@ -1208,6 +1213,8 @@ def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
                     task_family="path_handling",
                     cwe="CWE-22",
                     prompt=unknown_prompt_text,
+                    prompt_role="neutral_baseline",
+                    counterpart_prompt_id=None,
                 )
             ),
         ]

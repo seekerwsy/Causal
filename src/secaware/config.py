@@ -41,6 +41,8 @@ class RunConfig(StrictModel):
 
 class DataConfig(StrictModel):
     prompts_path: str
+    prompt_attestations_path: str = Field(min_length=1)
+    functional_outcome_contracts_path: str | None = Field(default=None, min_length=1)
 
 
 class PromptExtractorLLMConfig(SafeValidationMixin, StrictModel):

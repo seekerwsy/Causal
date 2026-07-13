@@ -30,6 +30,8 @@ def _prompts(indices: tuple[int, ...] = (1, 2)) -> tuple[PromptRecord, ...]:
             task_family="file_access",
             cwe="CWE-22",
             prompt=_prompt().prompt,
+            prompt_role="neutral_baseline",
+            counterpart_prompt_id=None,
         )
         for index in indices
     )

@@ -174,6 +174,8 @@ def _validate_prepared(
                 "task_family": prepared.prompt.task_family,
                 "cwe": prepared.prompt.cwe,
                 "prompt": counterfactual_prompt,
+                "prompt_role": prepared.prompt.prompt_role,
+                "counterpart_prompt_id": prepared.prompt.counterpart_prompt_id,
             },
             strict=True,
         )

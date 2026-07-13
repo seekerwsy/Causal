@@ -38,6 +38,8 @@ def _sentinel_prompt() -> PromptRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt=f"Open a user-provided file path containing {_SENTINEL}.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -65,6 +67,8 @@ def test_path_intervention_changes_target_without_side_effect() -> None:
         task_family="path_handling",
         cwe="CWE-22",
         prompt="Create a Python helper that reads a user-provided file path.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     hypothesis = _hypothesis(FactorType.PATH_NORMALIZATION)
 
@@ -400,6 +404,8 @@ def test_existing_reviewed_guard_is_idempotent_patch_failure(
         task_family=FACTOR_SPECS[factor_type].task_family,
         cwe=entry.cwe,
         prompt=original_text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
     assert verbalize_counterfactual(original_text, factor_type) == original_text
@@ -423,6 +429,8 @@ def test_all_factor_verbalizations_append_catalog_guard_and_validate(
         task_family=FACTOR_SPECS[factor_type].task_family,
         cwe=entry.cwe,
         prompt=f"Implement a Python helper to {entry.domain_terms[0]}.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
     intervention = apply_intervention(

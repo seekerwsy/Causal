@@ -210,7 +210,10 @@ def _store(tmp_path: Path, name: str) -> RunStore:
     config = AppConfig.model_validate(
         {
             "run": {"name": name, "output_dir": str(tmp_path / name)},
-            "data": {"prompts_path": str(tmp_path / "prompts.jsonl")},
+            "data": {
+                "prompts_path": str(tmp_path / "prompts.jsonl"),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
         }
     )

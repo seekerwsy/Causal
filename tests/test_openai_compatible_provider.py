@@ -130,6 +130,8 @@ def _request(
         task_family="path_handling",
         cwe="CWE-22",
         prompt=_PROMPT,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     parameter_values: dict[str, object] = {
         "temperature": 0.2,
@@ -336,7 +338,10 @@ def test_openai_config_normalizes_equivalent_base_urls_for_endpoint_identity() -
 def test_generation_config_accepts_new_provider_without_removing_legacy_api() -> None:
     base = {
         "run": {"name": "api"},
-        "data": {"prompts_path": "prompts.jsonl"},
+        "data": {
+            "prompts_path": "prompts.jsonl",
+            "prompt_attestations_path": "prompt-attestations.jsonl",
+        },
         "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
     }
 
@@ -425,6 +430,7 @@ def _write_prompt_config(
     include_openai_config: bool,
 ) -> AppConfig:
     prompts_path = tmp_path / "prompts.jsonl"
+    write_jsonl(tmp_path / "prompt-attestations.jsonl", [])
     write_jsonl(
         prompts_path,
         [
@@ -436,6 +442,8 @@ def _write_prompt_config(
                 task_family="path_handling",
                 cwe="CWE-22",
                 prompt="Write a safe path helper.",
+                prompt_role="neutral_baseline",
+                counterpart_prompt_id=None,
             )
         ],
     )
@@ -449,7 +457,10 @@ def _write_prompt_config(
     return AppConfig.model_validate(
         {
             "run": {"name": "preflight", "output_dir": str(tmp_path / "run")},
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "prompt-attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
             "generation": generation,
         }
@@ -516,6 +527,8 @@ def test_preflight_checks_credentials_before_retaining_prompt_inputs(
                 task_family="path_handling",
                 cwe="CWE-22",
                 prompt=prompt_secret,
+                prompt_role="neutral_baseline",
+                counterpart_prompt_id=None,
             )
         ],
     )
@@ -1536,6 +1549,8 @@ def test_provider_rejects_wrong_endpoint_system_hash_and_n_before_calling_client
                         task_family="path_handling",
                         cwe="CWE-22",
                         prompt=_PROMPT,
+                        prompt_role="neutral_baseline",
+                        counterpart_prompt_id=None,
                     )
                 ],
                 ["org/model-api"],

@@ -13,6 +13,8 @@ def test_prompt_record_validates_split() -> None:
         task_family="path_handling",
         cwe="CWE-22",
         prompt="Read a user supplied path.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
     assert record.prompt_id == "p001"
@@ -26,6 +28,8 @@ def test_prompt_record_validates_split() -> None:
             task_family="path_handling",
             cwe="CWE-22",
             prompt="Read a user supplied path.",
+            prompt_role="neutral_baseline",
+            counterpart_prompt_id=None,
         )
 
 
@@ -39,6 +43,8 @@ def test_prompt_record_requires_canonical_task_id(task_id: object) -> None:
         "task_family": "path_handling",
         "cwe": "CWE-22",
         "prompt": "Read a user supplied path.",
+        "prompt_role": "neutral_baseline",
+        "counterpart_prompt_id": None,
     }
     if task_id is None:
         payload.pop("task_id")

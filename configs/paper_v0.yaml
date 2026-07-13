@@ -5,6 +5,8 @@ run:
 
 data:
   prompts_path: data/examples/prompts_demo.jsonl
+  prompt_attestations_path: data/examples/prompt_attestations_demo.jsonl
+  functional_outcome_contracts_path: null
 
 tsg:
   prompt_extractor: llm_facts_v1

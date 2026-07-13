@@ -81,6 +81,8 @@ def _path_prompt(
         task_family=task_family,
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -93,6 +95,8 @@ def _unrelated_prompt(prompt_id: str = "p-other") -> PromptRecord:
         task_family="other",
         cwe="CWE-20",
         prompt="Return the number seven.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -517,6 +521,8 @@ def test_discovery_decodes_each_prompt_graph_exactly_once_for_one_local_scope(
             task_family="path_handling",
             cwe="CWE-22",
             prompt=domain_text if index < 6 else f"{domain_text}. {guard_text}",
+            prompt_role="neutral_baseline",
+            counterpart_prompt_id=None,
         )
         for index in range(12)
     ]

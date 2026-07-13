@@ -48,6 +48,8 @@ def _prompt(
         task_family="path_handling",
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -168,6 +170,8 @@ def _applicable_prompt_for_feature(feature_id: str) -> PromptRecord:
         ),
         cwe=spec.applicable_cwes[0] if spec.applicable_cwes else "CWE-22",
         prompt="Read the user path and return the user path contents.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 
@@ -496,6 +500,8 @@ def test_direct_request_advertises_only_prompt_applicable_closed_templates() -> 
         task_family="sql_query",
         cwe="CWE-89",
         prompt="Run a database query with the supplied value.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     sql_request = direct_graph_request_payload(sql_prompt, _policy())
     sql_feature_ids = {item["feature_id"] for item in sql_request["allowed_node_templates"]}

@@ -34,6 +34,8 @@ def _prompt(text: str = "Read the user path and return its contents.") -> Prompt
         task_family="path_handling",
         cwe="CWE-22",
         prompt=text,
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
 
 

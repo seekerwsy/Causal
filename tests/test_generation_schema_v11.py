@@ -50,6 +50,8 @@ def _request() -> GenerationRequestRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt="Open a path safely.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     return plan_observed_requests(
         [prompt],
@@ -85,6 +87,8 @@ def _chat_request() -> GenerationRequestRecord:
         task_family="path_handling",
         cwe="CWE-22",
         prompt="Return a safe path helper.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
     )
     return plan_observed_requests(
         [prompt],

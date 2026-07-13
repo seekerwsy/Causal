@@ -31,7 +31,10 @@ def _prepared_store(tmp_path: Path) -> RunStore:
                 "name": "jsonl-transaction-test",
                 "output_dir": str(tmp_path / "run"),
             },
-            "data": {"prompts_path": str(prompts_path)},
+            "data": {
+                "prompts_path": str(prompts_path),
+                "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
+            },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
         }
     )
