@@ -14,6 +14,7 @@ from secaware.schema.prompt_extraction import (
     proposal_id_for_payload,
 )
 from secaware.schema.records import PromptRecord
+from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
@@ -176,7 +177,7 @@ def test_proposal_id_and_model_canonicalize_nested_evidence_order() -> None:
     assert PromptExtractionProposalRecord.model_validate(payload).proposal_id == forward_id
 
 
-def test_parallel_direct_edges_sort_after_child_evidence_canonicalization() -> None:
+def test_direct_contract_rejects_duplicate_edge_slot_with_different_evidence() -> None:
     prompt = _prompt()
 
     def span(text: str) -> dict[str, object]:
@@ -235,15 +236,76 @@ def test_parallel_direct_edges_sort_after_child_evidence_canonicalization() -> N
         ],
     }
     payload["proposal_id"] = proposal_id_for_payload(payload)
+
+    with pytest.raises(ValidationError):
+        PromptExtractionProposalRecord.model_validate(payload)
+
+
+def test_one_direct_edge_slot_accepts_multiple_order_invariant_evidence_spans() -> None:
+    prompt = _prompt()
+
+    def span(text: str) -> dict[str, object]:
+        start = prompt.prompt.index(text)
+        return {
+            "start": start,
+            "end": start + len(text),
+            "text": text,
+            "text_sha256": _sha(text),
+        }
+
+    evidence = [span("normalize"), span("Read")]
+    payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "prompt_id": prompt.prompt_id,
+        "task_id": prompt.task_id,
+        "prompt_sha256": _sha(prompt.prompt),
+        "backend": PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+        "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
+        "policy_sha256": "9" * 64,
+        "response_sha256": _sha("single-direct-edge"),
+        "raw_response": "single-direct-edge",
+        "facts": [],
+        "direct_nodes": [
+            {
+                "local_id": "v1",
+                "node_type": "prompt_requirement",
+                "label": "safety.path_normalization:prompt_requirement",
+                "feature_id": "safety.path_normalization",
+                "evidence": [span("normalize")],
+            },
+            {
+                "local_id": "v2",
+                "node_type": "guard",
+                "label": "safety.path_normalization:guard",
+                "feature_id": "safety.path_normalization",
+                "evidence": [span("normalize")],
+            },
+        ],
+        "direct_edges": [
+            {
+                "src_local_id": "v1",
+                "dst_local_id": "v2",
+                "edge_type": "requires",
+                "evidence": evidence,
+            }
+        ],
+    }
+    payload["proposal_id"] = proposal_id_for_payload(payload)
     reverse = deepcopy(payload)
     reverse["direct_edges"][0]["evidence"].reverse()
     reverse["proposal_id"] = proposal_id_for_payload(reverse)
 
     one = PromptExtractionProposalRecord.model_validate(payload)
     two = PromptExtractionProposalRecord.model_validate(reverse)
-
     assert one.proposal_id == two.proposal_id
-    assert one.model_dump_json() == two.model_dump_json()
+    assert one.direct_edges == two.direct_edges
+    assert len(one.direct_edges[0].evidence) == 2
+
+    one_record = build_prompt_tsg(one, prompt)
+    two_record = build_prompt_tsg(two, prompt)
+    assert one_record.graph_sha256 == two_record.graph_sha256
+    assert one_record.nodes == two_record.nodes
+    assert one_record.edges == two_record.edges
 
 
 def test_validate_proposal_rejects_prompt_binding_and_fabricated_evidence() -> None:

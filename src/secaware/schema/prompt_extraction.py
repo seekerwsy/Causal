@@ -465,9 +465,7 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
 
         node_types_by_feature: dict[str, set[NodeType]] = {}
         edge_types_by_feature: dict[str, set[EdgeType]] = {}
-        edge_identities: set[tuple[str, str, EdgeType, tuple[tuple[int, int, str, str], ...]]] = (
-            set()
-        )
+        edge_identities: set[tuple[str, EdgeType]] = set()
         for node in self.direct_nodes:
             node_types_by_feature.setdefault(node.feature_id, set()).add(node.node_type)
         for edge in self.direct_edges:
@@ -485,14 +483,7 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
                 edge_slot.dst_node_type,
             ):
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
-            identity = (
-                edge.src_local_id,
-                edge.dst_local_id,
-                edge.edge_type,
-                tuple(
-                    (span.start, span.end, span.text_sha256, span.text) for span in edge.evidence
-                ),
-            )
+            identity = (src.feature_id, edge_slot.edge_type)
             if identity in edge_identities:
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
             edge_identities.add(identity)

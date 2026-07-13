@@ -435,6 +435,19 @@ def test_direct_graph_rejects_duplicate_semantic_slot_with_different_label() -> 
     assert len(transport.requests) == 1
 
 
+def test_direct_graph_rejects_duplicate_edge_slot_with_different_evidence() -> None:
+    prompt = _prompt()
+    payload = _graph_payload(prompt)
+    duplicate = deepcopy(payload["edges"][0])  # type: ignore[index]
+    duplicate["evidence"] = [deepcopy(_evidence(prompt)[1])]
+    payload["edges"].append(duplicate)  # type: ignore[union-attr]
+    transport = CapturingTransport(_response(prompt, payload))
+
+    with pytest.raises(SecAwareError):
+        LLMDirectGraphExtractor(transport, _structured()).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+
 @pytest.mark.parametrize(
     "label",
     [
