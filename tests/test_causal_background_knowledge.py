@@ -57,8 +57,10 @@ def _variables() -> tuple[CausalVariableSpec, ...]:
     )
 
 
-def _table() -> CausalTableRecord:
-    variables = _variables()
+def _table(
+    variables: tuple[CausalVariableSpec, ...] | None = None,
+) -> CausalTableRecord:
+    selected_variables = variables or _variables()
     values = ((0, 0, 1, 1), (1, 1, 0, 0))
     payload = tuple(
         (
@@ -80,7 +82,7 @@ def _table() -> CausalTableRecord:
         scope_id="scope.sql",
         cwe="CWE-89",
         model_id="model-a",
-        variables=variables,
+        variables=selected_variables,
         row_count=2,
         independent_task_count=2,
         observation_payload=payload,
@@ -238,3 +240,20 @@ def test_background_builder_revalidates_tampered_table_without_leaking_input() -
 
     assert exc_info.value.__cause__ is None
     assert "private-table-payload" not in str(exc_info.value)
+
+
+def test_background_builder_rejects_rehashed_role_tier_reversal() -> None:
+    from secaware.causal.background import build_background_knowledge
+
+    swapped = []
+    for variable in _variables():
+        payload = variable.model_dump(mode="python", round_trip=True)
+        if variable.role is VariableRole.X:
+            payload["temporal_tier"] = 2
+        elif variable.role is VariableRole.Y:
+            payload["temporal_tier"] = 1
+        swapped.append(CausalVariableSpec.model_validate(payload))
+    forged_table = _table(tuple(swapped))
+
+    with pytest.raises(SecAwareError):
+        build_background_knowledge(forged_table)

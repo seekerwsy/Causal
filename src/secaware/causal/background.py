@@ -21,6 +21,12 @@ from secaware.schema.causal import (
 
 
 _MAX_VARIABLES = 64
+_TEMPORAL_TIER_BY_ROLE = {
+    VariableRole.W: 0,
+    VariableRole.X: 1,
+    VariableRole.Y: 2,
+}
+_TEMPORAL_TIER_BY_PREFIX = {f"{role.value}.": tier for role, tier in _TEMPORAL_TIER_BY_ROLE.items()}
 _OBSERVATIONAL_RUN_KINDS = frozenset(
     {
         PAGRunKind.OBSERVATIONAL_REFERENCE,
@@ -106,6 +112,13 @@ def typed_adjacency_exclusions(
 def _build_background_knowledge(table: CausalTableRecord) -> BackgroundKnowledgeRecord:
     checked = CausalTableRecord.model_validate(table)
     variables = checked.variables
+    if any(
+        variable.role not in _TEMPORAL_TIER_BY_ROLE
+        or not variable.variable_id.startswith(f"{variable.role.value}.")
+        or variable.temporal_tier != _TEMPORAL_TIER_BY_ROLE[variable.role]
+        for variable in variables
+    ):
+        raise ValueError
     tiers = tuple((variable.variable_id, variable.temporal_tier) for variable in variables)
     forbidden = tuple(
         sorted(
@@ -160,9 +173,17 @@ def _validate_knowledge_structure(
     tiered = {variable_id for variable_id, _tier in knowledge.tiers}
     unconstrained = set(knowledge.unconstrained_variable_ids)
     known = tiered | unconstrained
+    tiers_match_roles = all(
+        any(
+            variable_id.startswith(prefix) and tier == expected
+            for prefix, expected in _TEMPORAL_TIER_BY_PREFIX.items()
+        )
+        for variable_id, tier in knowledge.tiers
+    )
     if (
         tiered & unconstrained
         or not 2 <= len(known) <= _MAX_VARIABLES
+        or not tiers_match_roles
         or any(not variable_id.startswith("c.") for variable_id in unconstrained)
         or (observational and unconstrained)
         or knowledge.required_directions

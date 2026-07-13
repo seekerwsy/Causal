@@ -238,6 +238,40 @@ def test_pag_rejects_incomplete_tier_constraints_and_accidental_required_edges()
         validate_pag_against_background(_pag(table, required), required)
 
 
+def test_pag_rejects_rehashed_background_with_swapped_x_y_tiers() -> None:
+    from secaware.causal.background import build_background_knowledge
+    from secaware.causal.background import validate_pag_against_background
+
+    table = _table()
+    original = build_background_knowledge(table)
+    swapped_tiers = tuple(
+        (
+            variable_id,
+            2 if variable_id.startswith("x.") else 1 if variable_id.startswith("y.") else tier,
+        )
+        for variable_id, tier in original.tiers
+    )
+    swapped_forbidden = tuple(
+        sorted(
+            (later_id, earlier_id)
+            for later_id, later_tier in swapped_tiers
+            for earlier_id, earlier_tier in swapped_tiers
+            if later_tier > earlier_tier
+        )
+    )
+    forged_knowledge = BackgroundKnowledgeRecord.from_content(
+        table_id=table.table_id,
+        tiers=swapped_tiers,
+        forbidden_directions=swapped_forbidden,
+        forbidden_adjacencies=original.forbidden_adjacencies,
+        required_directions=(),
+    )
+    forged_pag = _pag(table, forged_knowledge)
+
+    with pytest.raises(SecAwareError):
+        validate_pag_against_background(forged_pag, forged_knowledge)
+
+
 @pytest.mark.parametrize("mutation", ["table", "background", "variables", "digest"])
 def test_pag_rejects_provenance_closure_and_digest_mutations(mutation: str) -> None:
     from secaware.causal.background import build_background_knowledge
