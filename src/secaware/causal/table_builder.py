@@ -203,19 +203,23 @@ def _variable_specs(
     cwe: str,
 ) -> tuple[CausalVariableSpec, ...]:
     return tuple(
-        CausalVariableSpec(
-            schema_version="1.0",
-            variable_id=item.variable_id,
-            role=item.role,
-            states=item.states,
-            source_query_id=item.query_id,
-            scope_id=scope_id,
-            temporal_tier=item.tier,
-            adjacency_type=item.adjacency_type,
-            producer_sha256=declaration_sha256(item),
-        )
+        _variable_spec(item, scope_id=scope_id)
         for item in declarations
         if _declaration_applies(item, cwe)
+    )
+
+
+def _variable_spec(item: VariableDeclaration, *, scope_id: str) -> CausalVariableSpec:
+    return CausalVariableSpec(
+        schema_version="1.0",
+        variable_id=item.variable_id,
+        role=item.role,
+        states=item.states,
+        source_query_id=item.query_id,
+        scope_id=scope_id,
+        temporal_tier=item.tier,
+        adjacency_type=item.adjacency_type,
+        producer_sha256=declaration_sha256(item),
     )
 
 
@@ -579,6 +583,24 @@ def validate_local_table_bundle(
         table_coordinates = tuple(
             (item.scope_id, item.cwe, item.model_id) for item in checked_tables
         )
+        variables_by_scope: dict[tuple[str, str], tuple[CausalVariableSpec, ...]] = {}
+        required_outcomes = {PRIMARY_OUTCOME.variable_id, CWE_SECURITY_OUTCOME.variable_id}
+        for table in checked_tables:
+            if table.scope_id != _scope_id(table.cwe):
+                raise ValueError
+            variable_ids = {item.variable_id for item in table.variables}
+            if not required_outcomes <= variable_ids:
+                raise ValueError
+            for variable in table.variables:
+                declaration = declaration_by_id(variable.variable_id)
+                if not _declaration_applies(declaration, table.cwe) or variable != _variable_spec(
+                    declaration, scope_id=table.scope_id
+                ):
+                    raise ValueError
+            scope_key = (table.scope_id, table.cwe)
+            previous = variables_by_scope.setdefault(scope_key, table.variables)
+            if previous != table.variables:
+                raise ValueError
         if (
             not checked_tables
             or not checked_rows
@@ -654,18 +676,22 @@ def validate_local_table_bundle(
         if any(len(items) != 1 for items in matrices.values()):
             raise ValueError
         observed_coordinates: set[SourceCoordinate] = set()
+        rows_by_coordinate: dict[SourceCoordinate, CausalObservationRecord] = {}
         for row in checked_rows:
             table = table_by_id[row.table_id]
-            observed_coordinates.add(
-                (
-                    table.scope_id,
-                    table.cwe,
-                    table.model_id,
-                    row.task_id,
-                    row.prompt_id,
-                    row.seed_id,
-                )
+            coordinate = (
+                table.scope_id,
+                table.cwe,
+                table.model_id,
+                row.task_id,
+                row.prompt_id,
+                row.seed_id,
             )
+            if coordinate in rows_by_coordinate:
+                raise ValueError
+            rows_by_coordinate[coordinate] = row
+            observed_coordinates.add(coordinate)
+        exclusions_by_coordinate: dict[SourceCoordinate, list[CausalExclusionRecord]] = {}
         for item in checked_exclusions:
             table = tables_by_coordinate[(item.scope_id, item.cwe, item.model_id)]
             variables = {variable.variable_id: variable for variable in table.variables}
@@ -677,18 +703,66 @@ def validate_local_table_bundle(
                 or variable.states != ("absent", "present")
             ):
                 raise ValueError
-            observed_coordinates.add(
-                (
-                    item.scope_id,
-                    item.cwe,
-                    item.model_id,
-                    item.task_id,
-                    item.prompt_id,
-                    item.seed_id,
-                )
+            coordinate = (
+                item.scope_id,
+                item.cwe,
+                item.model_id,
+                item.task_id,
+                item.prompt_id,
+                item.seed_id,
             )
+            exclusions_by_coordinate.setdefault(coordinate, []).append(item)
+            observed_coordinates.add(coordinate)
         if observed_coordinates != set(expected_coordinates):
             raise ValueError
+        coordinates_by_prompt: dict[tuple[str, str, str, str], list[SourceCoordinate]] = {}
+        for coordinate in expected_coordinates:
+            prompt_key = (coordinate[0], coordinate[1], coordinate[3], coordinate[4])
+            coordinates_by_prompt.setdefault(prompt_key, []).append(coordinate)
+        for prompt_coordinates in coordinates_by_prompt.values():
+            statuses = {
+                "row" if coordinate in rows_by_coordinate else "exclusion"
+                for coordinate in prompt_coordinates
+            }
+            if len(statuses) != 1:
+                raise ValueError
+            if statuses == {"row"}:
+                pre_outcome_values: set[tuple[int, ...]] = set()
+                for coordinate in prompt_coordinates:
+                    if coordinate in exclusions_by_coordinate:
+                        raise ValueError
+                    row = rows_by_coordinate[coordinate]
+                    table = tables_by_coordinate[coordinate[:3]]
+                    indices = tuple(
+                        index
+                        for index, variable in enumerate(table.variables)
+                        if variable.role in {VariableRole.W, VariableRole.X}
+                    )
+                    pre_outcome_values.add(tuple(row.values[index] for index in indices))
+                if len(pre_outcome_values) != 1:
+                    raise ValueError
+            else:
+                profiles: set[tuple[tuple[str, str, str], ...]] = set()
+                for coordinate in prompt_coordinates:
+                    if coordinate in rows_by_coordinate:
+                        raise ValueError
+                    local = exclusions_by_coordinate.get(coordinate)
+                    if not local:
+                        raise ValueError
+                    profiles.add(
+                        tuple(
+                            sorted(
+                                (
+                                    item.variable_id,
+                                    item.reason_code.value,
+                                    item.producer_sha256,
+                                )
+                                for item in local
+                            )
+                        )
+                    )
+                if len(profiles) != 1:
+                    raise ValueError
     except Exception:
         raise _error() from None
 

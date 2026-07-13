@@ -540,6 +540,399 @@ def _changed_table_and_rows(table, rows):
     return changed, changed_rows
 
 
+def _rebuild_table(table, source_rows, *, variables=None, retained_rows=None, values_by_row=None):
+    from secaware.schema.causal import CausalObservationRecord, CausalTableRecord
+
+    selected_rows = tuple(
+        retained_rows
+        if retained_rows is not None
+        else (item for item in source_rows if item.table_id == table.table_id)
+    )
+    selected_variables = tuple(variables if variables is not None else table.variables)
+    replacements = values_by_row or {}
+    payload = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=item.task_id,
+                prompt_id=item.prompt_id,
+                model_id=item.model_id,
+                seed_id=item.seed_id,
+                values=replacements.get(item.row_id, item.values),
+            ),
+            item.task_id,
+            item.prompt_id,
+            item.seed_id,
+            replacements.get(item.row_id, item.values),
+        )
+        for item in selected_rows
+    )
+    rebuilt = CausalTableRecord.from_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        variables=selected_variables,
+        row_count=len(payload),
+        independent_task_count=len({item[1] for item in payload}),
+        observation_payload=payload,
+    )
+    rebuilt_rows = tuple(
+        CausalObservationRecord.from_content(
+            table=rebuilt,
+            task_id=task_id,
+            prompt_id=prompt_id,
+            model_id=rebuilt.model_id,
+            seed_id=seed_id,
+            values=values,
+        )
+        for _row_id, task_id, prompt_id, seed_id, values in payload
+    )
+    return rebuilt, rebuilt_rows
+
+
+def test_bundle_rejects_self_consistent_forged_variable_spec_and_rehashed_tables() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.schema.causal import CausalVariableSpec
+
+    tables, rows, exclusions = _build()
+    changed_tables = []
+    changed_rows = []
+    for table in tables:
+        original = next(item for item in table.variables if item.role.value == "x")
+        forged = CausalVariableSpec(
+            schema_version="1.0",
+            variable_id="x.dynamic.forged",
+            role=original.role,
+            states=original.states,
+            source_query_id="prompt.feature_state.dynamic.forged.v1",
+            scope_id=original.scope_id,
+            temporal_tier=original.temporal_tier,
+            adjacency_type=original.adjacency_type,
+            producer_sha256="f" * 64,
+        )
+        variables = tuple(forged if item == original else item for item in table.variables)
+        rebuilt, local_rows = _rebuild_table(table, rows, variables=variables)
+        changed_tables.append(rebuilt)
+        changed_rows.extend(local_rows)
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tuple(sorted(changed_tables, key=lambda item: (item.scope_id, item.model_id))),
+            tuple(sorted(changed_rows, key=lambda item: (item.table_id, item.row_id))),
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("states", ("off", "on")),
+        ("source_query_id", "prompt.feature_state.forged.v1"),
+        ("temporal_tier", 0),
+        ("adjacency_type", "prompt_forged"),
+        ("producer_sha256", "f" * 64),
+        ("scope_id", "scope.forged"),
+    ],
+)
+def test_bundle_rejects_known_catalog_variable_spec_field_forgery(
+    field: str,
+    value: object,
+) -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.schema.causal import CausalVariableSpec
+
+    tables, rows, exclusions = _build()
+    changed_tables = []
+    changed_rows = []
+    for table in tables:
+        original = next(item for item in table.variables if item.role.value == "x")
+        payload = original.model_dump(mode="python", round_trip=True)
+        payload[field] = value
+        forged = CausalVariableSpec.model_validate(payload)
+        variables = tuple(forged if item == original else item for item in table.variables)
+        rebuilt, local_rows = _rebuild_table(table, rows, variables=variables)
+        changed_tables.append(rebuilt)
+        changed_rows.extend(local_rows)
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tuple(sorted(changed_tables, key=lambda item: (item.scope_id, item.model_id))),
+            tuple(sorted(changed_rows, key=lambda item: (item.table_id, item.row_id))),
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+def test_bundle_rejects_catalog_variable_outside_table_cwe_scope() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.causal.variable_catalog import declaration_by_id, declaration_sha256
+    from secaware.schema.causal import CausalVariableSpec
+
+    declaration = declaration_by_id("x.safety.sql_parameterization")
+    tables, rows, exclusions = _build()
+    changed_tables = []
+    changed_rows = []
+    for table in tables:
+        original = next(item for item in table.variables if item.role.value == "x")
+        forged = CausalVariableSpec(
+            schema_version="1.0",
+            variable_id=declaration.variable_id,
+            role=declaration.role,
+            states=declaration.states,
+            source_query_id=declaration.query_id,
+            scope_id=table.scope_id,
+            temporal_tier=declaration.tier,
+            adjacency_type=declaration.adjacency_type,
+            producer_sha256=declaration_sha256(declaration),
+        )
+        variables = tuple(forged if item == original else item for item in table.variables)
+        rebuilt, local_rows = _rebuild_table(table, rows, variables=variables)
+        changed_tables.append(rebuilt)
+        changed_rows.extend(local_rows)
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tuple(sorted(changed_tables, key=lambda item: (item.scope_id, item.model_id))),
+            tuple(sorted(changed_rows, key=lambda item: (item.table_id, item.row_id))),
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+def test_bundle_rejects_missing_required_security_outcome() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+
+    tables, rows, exclusions = _build()
+    changed_tables = []
+    changed_rows = []
+    for table in tables:
+        removed_index = next(
+            index
+            for index, item in enumerate(table.variables)
+            if item.variable_id == "y.cwe_security"
+        )
+        variables = tuple(
+            item for index, item in enumerate(table.variables) if index != removed_index
+        )
+        local = tuple(item for item in rows if item.table_id == table.table_id)
+        values_by_row = {
+            item.row_id: tuple(
+                value for index, value in enumerate(item.values) if index != removed_index
+            )
+            for item in local
+        }
+        rebuilt, rebuilt_rows = _rebuild_table(
+            table,
+            rows,
+            variables=variables,
+            values_by_row=values_by_row,
+        )
+        changed_tables.append(rebuilt)
+        changed_rows.extend(rebuilt_rows)
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tuple(sorted(changed_tables, key=lambda item: (item.scope_id, item.model_id))),
+            tuple(sorted(changed_rows, key=lambda item: (item.table_id, item.row_id))),
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+def test_bundle_rejects_different_legal_variable_subsets_across_models() -> None:
+    from secaware.causal.table_builder import build_local_tables, validate_local_table_bundle
+    from secaware.causal.variable_catalog import declaration_by_id
+
+    declarations = (*_declarations(), declaration_by_id("x.task.file_read"))
+    tables, rows, exclusions = build_local_tables(
+        _prompts(),
+        _graphs(),
+        _oracles(),
+        declarations,
+        min_independent_tasks=2,
+    )
+    target = next(item for item in tables if item.model_id == "model-b")
+    removed_index = next(
+        index
+        for index, item in enumerate(target.variables)
+        if item.variable_id == "x.task.file_read"
+    )
+    variables = tuple(item for index, item in enumerate(target.variables) if index != removed_index)
+    local = tuple(item for item in rows if item.table_id == target.table_id)
+    values_by_row = {
+        item.row_id: tuple(
+            value for index, value in enumerate(item.values) if index != removed_index
+        )
+        for item in local
+    }
+    replacement, replacement_rows = _rebuild_table(
+        target,
+        rows,
+        variables=variables,
+        values_by_row=values_by_row,
+    )
+    changed_tables = tuple(
+        sorted(
+            (replacement if item == target else item for item in tables),
+            key=lambda item: (item.scope_id, item.model_id),
+        )
+    )
+    changed_rows = tuple(
+        sorted(
+            (
+                *(item for item in rows if item.table_id != target.table_id),
+                *replacement_rows,
+            ),
+            key=lambda item: (item.table_id, item.row_id),
+        )
+    )
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            changed_tables,
+            changed_rows,
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+def test_bundle_rejects_rehashed_pre_outcome_value_drift_across_model_seed() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+
+    tables, rows, exclusions = _build()
+    target = next(item for item in tables if item.model_id == "model-b")
+    target_row = next(item for item in rows if item.table_id == target.table_id)
+    x_index = next(
+        index for index, variable in enumerate(target.variables) if variable.role.value == "x"
+    )
+    changed_values = list(target_row.values)
+    changed_values[x_index] = 1 - changed_values[x_index]
+    replacement, replacement_rows = _rebuild_table(
+        target,
+        rows,
+        values_by_row={target_row.row_id: tuple(changed_values)},
+    )
+    changed_tables = tuple(
+        sorted(
+            (replacement if item == target else item for item in tables),
+            key=lambda item: (item.scope_id, item.model_id),
+        )
+    )
+    changed_rows = tuple(
+        sorted(
+            (
+                *(item for item in rows if item.table_id != target.table_id),
+                *replacement_rows,
+            ),
+            key=lambda item: (item.table_id, item.row_id),
+        )
+    )
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            changed_tables,
+            changed_rows,
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+def test_bundle_rejects_partial_row_and_exclusion_status_for_one_prompt() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.schema.causal import CausalExclusionRecord
+
+    prompts = _prompts((1, 2, 3))
+    tables, rows, exclusions = _build(prompts=prompts)
+    target = next(item for item in tables if item.model_id == "model-b")
+    removed = next(
+        item for item in rows if item.table_id == target.table_id and item.prompt_id == "prompt-1"
+    )
+    retained = tuple(item for item in rows if item.table_id == target.table_id and item != removed)
+    replacement, replacement_rows = _rebuild_table(target, rows, retained_rows=retained)
+    x_variable = next(item for item in target.variables if item.role.value == "x")
+    exclusion = CausalExclusionRecord.from_content(
+        scope_id=target.scope_id,
+        cwe=target.cwe,
+        model_id=removed.model_id,
+        task_id=removed.task_id,
+        prompt_id=removed.prompt_id,
+        seed_id=removed.seed_id,
+        variable_id=x_variable.variable_id,
+        reason_code="unresolved_feature",
+        producer_sha256="a" * 64,
+    )
+    changed_tables = tuple(
+        sorted(
+            (replacement if item == target else item for item in tables),
+            key=lambda item: (item.scope_id, item.model_id),
+        )
+    )
+    changed_rows = tuple(
+        sorted(
+            (
+                *(item for item in rows if item.table_id != target.table_id),
+                *replacement_rows,
+            ),
+            key=lambda item: (item.table_id, item.row_id),
+        )
+    )
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            changed_tables,
+            changed_rows,
+            (exclusion,),
+            source_coordinates=_source_coordinates(prompts),
+        )
+
+
+@pytest.mark.parametrize("drift", ["variable", "reason", "producer"])
+def test_bundle_rejects_exclusion_profile_drift_across_model_seed(drift: str) -> None:
+    from secaware.causal.table_builder import build_local_tables, validate_local_table_bundle
+    from secaware.causal.variable_catalog import declaration_by_id
+    from secaware.schema.causal import CausalExclusionRecord
+
+    prompts = _prompts((1, 2, 3))
+    graphs = (
+        _graph_for(prompts[0], state=FeatureState.UNRESOLVED),
+        _graph_for(prompts[1]),
+        _graph_for(prompts[2]),
+    )
+    declarations = (*_declarations(), declaration_by_id("x.task.file_read"))
+    tables, rows, exclusions = build_local_tables(
+        prompts,
+        graphs,
+        _oracles(prompts),
+        declarations,
+        min_independent_tasks=2,
+    )
+    target = next(item for item in exclusions if item.model_id == "model-b")
+    payload = target.model_dump(mode="python", round_trip=True)
+    payload.pop("schema_version")
+    payload.pop("exclusion_id")
+    if drift == "variable":
+        payload["variable_id"] = "x.task.file_read"
+    elif drift == "reason":
+        payload["reason_code"] = "not_applicable_feature"
+    else:
+        payload["producer_sha256"] = "f" * 64
+    changed = CausalExclusionRecord.from_content(**payload)
+    changed_exclusions = tuple(
+        sorted(
+            (changed if item == target else item for item in exclusions),
+            key=lambda item: item.exclusion_id,
+        )
+    )
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tables,
+            rows,
+            changed_exclusions,
+            source_coordinates=_source_coordinates(prompts),
+        )
+
+
 def test_bundle_rejects_multiple_tables_for_one_scope_model_coordinate() -> None:
     from secaware.causal.table_builder import validate_local_table_bundle
 
