@@ -82,6 +82,66 @@ def _table_and_rows() -> tuple[CausalTableRecord, tuple[CausalObservationRecord,
     return table, rows
 
 
+def _rebuild_bundle(
+    table: CausalTableRecord,
+    rows: tuple[CausalObservationRecord, ...],
+    *,
+    flip_outcome: bool = False,
+    change_first_prompt: bool = False,
+) -> tuple[CausalTableRecord, tuple[CausalObservationRecord, ...]]:
+    y_index = next(
+        index for index, variable in enumerate(table.variables) if variable.role is VariableRole.Y
+    )
+    rebuilt_coordinates: list[tuple[str, str, int, tuple[int, ...]]] = []
+    for row in rows:
+        prompt_id = (
+            "prompt-coordinate-changed"
+            if change_first_prompt and row.task_id == "task-0"
+            else row.prompt_id
+        )
+        values = list(row.values)
+        if flip_outcome:
+            values[y_index] = 1 - values[y_index]
+        rebuilt_coordinates.append((row.task_id, prompt_id, row.seed_id, tuple(values)))
+    payload = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=task_id,
+                prompt_id=prompt_id,
+                model_id=table.model_id,
+                seed_id=seed_id,
+                values=values,
+            ),
+            task_id,
+            prompt_id,
+            seed_id,
+            values,
+        )
+        for task_id, prompt_id, seed_id, values in rebuilt_coordinates
+    )
+    rebuilt_table = CausalTableRecord.from_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        variables=table.variables,
+        row_count=table.row_count,
+        independent_task_count=table.independent_task_count,
+        observation_payload=payload,
+    )
+    rebuilt_rows = tuple(
+        CausalObservationRecord.from_content(
+            table=rebuilt_table,
+            task_id=task_id,
+            prompt_id=prompt_id,
+            model_id=rebuilt_table.model_id,
+            seed_id=seed_id,
+            values=values,
+        )
+        for task_id, prompt_id, seed_id, values in rebuilt_coordinates
+    )
+    return rebuilt_table, rebuilt_rows
+
+
 def _config(*, bootstrap_samples: int = 4) -> FCIDiscoveryConfig:
     return FCIDiscoveryConfig(
         bootstrap_samples=bootstrap_samples,
@@ -215,7 +275,7 @@ class _FailingRunner(_RecordingRunner):
 
 
 def test_reference_draw_selects_one_seed_for_each_sorted_task() -> None:
-    from secaware.causal.bootstrap import build_reference_draw
+    from secaware.causal.bootstrap import build_reference_draw, sampling_frame_sha256
 
     table, rows = _table_and_rows()
     draw = build_reference_draw(table, rows, global_seed=7)
@@ -226,20 +286,19 @@ def test_reference_draw_selects_one_seed_for_each_sorted_task() -> None:
     assert tuple(item.draw_index for item in draw.items) == (0, 1, 2)
     assert len({item.task_id for item in draw.items}) == table.independent_task_count
     assert all(item.row_id in {row.row_id for row in rows} for item in draw.items)
-    assert (
-        draw.seed_material_sha256
-        == hashlib.sha256(f'[7,"{table.table_id}","reference"]'.encode()).hexdigest()
-    )
+    frame_sha256 = sampling_frame_sha256(table, rows)
+    expected = f'[7,"{table.scope_id}","{table.model_id}","{frame_sha256}","reference"]'
+    assert draw.seed_material_sha256 == hashlib.sha256(expected.encode()).hexdigest()
 
 
 def test_bootstrap_selects_one_seed_per_sampled_task_occurrence() -> None:
-    from secaware.causal.bootstrap import build_bootstrap_draw
+    from secaware.causal.bootstrap import build_bootstrap_draw, sampling_frame_sha256
 
     table, rows = _table_and_rows()
-    draw = build_bootstrap_draw(table, rows, global_seed=0, replicate=1)
+    draw = build_bootstrap_draw(table, rows, global_seed=0, replicate=0)
 
     assert draw.run_kind is PAGRunKind.OBSERVATIONAL_BOOTSTRAP
-    assert draw.replicate_index == 1
+    assert draw.replicate_index == 0
     assert len(draw.items) == table.independent_task_count
     assert [item.draw_index for item in draw.items] == list(range(len(draw.items)))
     by_task = {
@@ -247,13 +306,12 @@ def test_bootstrap_selects_one_seed_per_sampled_task_occurrence() -> None:
         for task_id in {row.task_id for row in rows}
     }
     assert all(item.row_id in by_task[item.task_id] for item in draw.items)
-    repeated = [item for item in draw.items if item.task_id == "task-1"]
+    repeated = [item for item in draw.items if item.task_id == "task-0"]
     assert len(repeated) == 2
     assert repeated[0].seed_id != repeated[1].seed_id
-    assert (
-        draw.seed_material_sha256
-        == hashlib.sha256(f'[0,"{table.table_id}","bootstrap",1]'.encode()).hexdigest()
-    )
+    frame_sha256 = sampling_frame_sha256(table, rows)
+    expected = f'[0,"{table.scope_id}","{table.model_id}","{frame_sha256}","bootstrap",0]'
+    assert draw.seed_material_sha256 == hashlib.sha256(expected.encode()).hexdigest()
 
 
 def test_bootstrap_is_clustered_not_row_wise_on_adversarial_rows() -> None:
@@ -278,6 +336,34 @@ def test_draws_are_input_order_invariant_and_content_addressed() -> None:
     assert build_bootstrap_draw(table, rows, 91, 5) == build_bootstrap_draw(
         table, reversed_rows, 91, 5
     )
+
+
+def test_sampling_is_pre_outcome_and_changes_only_with_coordinate_frame() -> None:
+    from secaware.causal.bootstrap import (
+        build_bootstrap_draw,
+        build_reference_draw,
+        sampling_frame_sha256,
+    )
+
+    table, rows = _table_and_rows()
+    flipped_table, flipped_rows = _rebuild_bundle(table, rows, flip_outcome=True)
+    changed_table, changed_rows = _rebuild_bundle(table, rows, change_first_prompt=True)
+
+    assert table.table_id != flipped_table.table_id
+    assert sampling_frame_sha256(table, rows) == sampling_frame_sha256(flipped_table, flipped_rows)
+    assert sampling_frame_sha256(table, rows) != sampling_frame_sha256(changed_table, changed_rows)
+    for builder, trailing in ((build_reference_draw, ()), (build_bootstrap_draw, (4,))):
+        original = builder(table, rows, 73, *trailing)
+        flipped = builder(flipped_table, flipped_rows, 73, *trailing)
+        original_coordinates = tuple(
+            (item.task_id, item.prompt_id, item.seed_id) for item in original.items
+        )
+        flipped_coordinates = tuple(
+            (item.task_id, item.prompt_id, item.seed_id) for item in flipped.items
+        )
+        assert original.seed_material_sha256 == flipped.seed_material_sha256
+        assert original_coordinates == flipped_coordinates
+        assert original.selected_row_ids != flipped.selected_row_ids
 
 
 def test_draws_reject_inexact_or_tampered_table_row_bundles() -> None:
@@ -412,6 +498,41 @@ def test_runner_receives_reference_then_exact_configured_replicate_count() -> No
     )
 
 
+def test_successes_are_draw_and_matrix_bound_pag_envelopes() -> None:
+    from secaware.causal.bootstrap import (
+        authenticated_matrix_from_draw,
+        run_task_cluster_fci_bootstrap,
+    )
+    from secaware.schema.causal import BootstrapPAGRecord
+
+    table, rows = _table_and_rows()
+    result = run_task_cluster_fci_bootstrap(
+        table,
+        rows,
+        build_background_knowledge(table),
+        _config(bootstrap_samples=3),
+        global_seed=17,
+        runner=_RecordingRunner(),
+    )
+
+    assert all(isinstance(item, BootstrapPAGRecord) for item in result.bootstrap_pags)
+    assert tuple(item.draw_id for item in result.bootstrap_pags) == tuple(
+        item.draw.draw_id for item in result.replicates
+    )
+    assert len({item.bootstrap_pag_id for item in result.bootstrap_pags}) == 3
+    assert len({item.pag.pag_id for item in result.bootstrap_pags}) == 1
+    assert result.pag_records == tuple(item.pag for item in result.bootstrap_pags)
+    for envelope, replicate in zip(result.bootstrap_pags, result.replicates, strict=True):
+        matrix = authenticated_matrix_from_draw(table, rows, replicate.draw)
+        assert envelope.matrix_sha256 == canonical_sha256(
+            {
+                "table_sha256": table.table_sha256,
+                "draw_sha256": replicate.draw.draw_sha256,
+                "values": matrix.tolist(),
+            }
+        )
+
+
 def test_injected_runner_produces_identical_canonical_results_across_runs() -> None:
     from secaware.causal.bootstrap import run_task_cluster_fci_bootstrap
 
@@ -432,6 +553,32 @@ def test_injected_runner_produces_identical_canonical_results_across_runs() -> N
     )
 
     assert first == second
+
+
+def test_run_authenticates_the_full_table_bundle_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.causal.bootstrap as bootstrap
+
+    table, rows = _table_and_rows()
+    original = bootstrap._authenticate_bundle
+    calls: list[object] = []
+
+    def counted(*args: object, **kwargs: object) -> object:
+        calls.append(args)
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(bootstrap, "_authenticate_bundle", counted)
+    bootstrap.run_task_cluster_fci_bootstrap(
+        table,
+        rows,
+        build_background_knowledge(table),
+        _config(bootstrap_samples=2),
+        global_seed=19,
+        runner=_RecordingRunner(),
+    )
+
+    assert len(calls) == 1
 
 
 def test_failed_replicate_remains_in_order_and_denominator() -> None:

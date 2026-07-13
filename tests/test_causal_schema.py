@@ -14,6 +14,7 @@ from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
     BootstrapFailureReason,
     BootstrapFailureRecord,
+    BootstrapPAGRecord,
     BootstrapDrawItem,
     BootstrapDrawRecord,
     CausalExclusionReason,
@@ -589,6 +590,47 @@ def test_bootstrap_draw_items_are_sorted_unique_and_content_addressed() -> None:
             rng_version="sha256-rejection-fisher-yates-v1",
             seed_material_sha256=SHA_A,
             items=(item_0, item_0),
+        )
+
+
+def test_bootstrap_pag_envelope_binds_draw_matrix_and_roundtrips(tmp_path) -> None:
+    from secaware.schema import BootstrapPAGRecord as ExportedBootstrapPAGRecord
+
+    assert ExportedBootstrapPAGRecord is BootstrapPAGRecord
+    table = _table()
+    pag = PAGRecord.from_content(
+        run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
+        table_id=table.table_id,
+        backend="causal_learn_fci_v1",
+        backend_version="0.1.4.7",
+        ci_test="gsq",
+        config_sha256=SHA_A,
+        background_knowledge_sha256=SHA_B,
+        variable_ids=tuple(item.variable_id for item in table.variables),
+        edges=(),
+    )
+    record = BootstrapPAGRecord.from_content(
+        table_id=table.table_id,
+        replicate_index=3,
+        draw_id="draw_" + "d" * 64,
+        matrix_sha256="c" * 64,
+        pag=pag,
+    )
+
+    assert record.bootstrap_pag_id == f"bootstrap_pag_{record.bootstrap_pag_sha256}"
+    assert record.pag == pag
+    path = tmp_path / "bootstrap_pags.jsonl"
+    write_jsonl(path, [record], stage="test.bootstrap_pag")
+    assert read_jsonl(path, BootstrapPAGRecord, required=True, stage="test.bootstrap_pag") == [
+        record
+    ]
+    with pytest.raises(ValidationError):
+        BootstrapPAGRecord.from_content(
+            table_id="table_" + "f" * 64,
+            replicate_index=3,
+            draw_id="draw_" + "d" * 64,
+            matrix_sha256="c" * 64,
+            pag=pag,
         )
 
 

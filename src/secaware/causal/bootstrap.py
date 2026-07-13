@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
+from types import MappingProxyType
 
 import numpy as np
 
@@ -21,10 +22,12 @@ from secaware.schema.causal import (
     BootstrapDrawRecord,
     BootstrapFailureReason,
     BootstrapFailureRecord,
+    BootstrapPAGRecord,
     CausalObservationRecord,
     CausalTableRecord,
     PAGRecord,
     PAGRunKind,
+    VariableRole,
 )
 
 
@@ -48,13 +51,13 @@ class BootstrapReplicateResult:
     """One persisted draw paired with exactly one PAG or typed failure."""
 
     draw: BootstrapDrawRecord
-    pag: PAGRecord | None = None
+    pag: BootstrapPAGRecord | None = None
     failure: BootstrapFailureRecord | None = None
 
     def __post_init__(self) -> None:
         try:
             draw = BootstrapDrawRecord.model_validate(self.draw)
-            pag = None if self.pag is None else PAGRecord.model_validate(self.pag)
+            pag = None if self.pag is None else BootstrapPAGRecord.model_validate(self.pag)
             failure = (
                 None
                 if self.failure is None
@@ -67,8 +70,9 @@ class BootstrapReplicateResult:
                 or (
                     pag is not None
                     and (
-                        pag.run_kind is not PAGRunKind.OBSERVATIONAL_BOOTSTRAP
-                        or pag.table_id != draw.table_id
+                        pag.table_id != draw.table_id
+                        or pag.replicate_index != draw.replicate_index
+                        or pag.draw_id != draw.draw_id
                     )
                 )
                 or (
@@ -119,8 +123,12 @@ class TaskClusterFCIBootstrapResult:
         return tuple(item.draw for item in self.replicates)
 
     @property
-    def bootstrap_pags(self) -> tuple[PAGRecord, ...]:
+    def bootstrap_pags(self) -> tuple[BootstrapPAGRecord, ...]:
         return tuple(item.pag for item in self.replicates if item.pag is not None)
+
+    @property
+    def pag_records(self) -> tuple[PAGRecord, ...]:
+        return tuple(item.pag.pag for item in self.replicates if item.pag is not None)
 
     @property
     def bootstrap_failures(self) -> tuple[BootstrapFailureRecord, ...]:
@@ -132,6 +140,8 @@ class _AuthenticatedBundle:
     table: CausalTableRecord
     rows: tuple[CausalObservationRecord, ...]
     rows_by_task: tuple[tuple[str, tuple[CausalObservationRecord, ...]], ...]
+    row_by_id: Mapping[str, CausalObservationRecord]
+    sampling_frame_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +178,29 @@ def _canonical_seed_material(parts: tuple[object, ...]) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _sampling_frame_digest(
+    table: CausalTableRecord,
+    rows_by_task: tuple[tuple[str, tuple[CausalObservationRecord, ...]], ...],
+) -> str:
+    return canonical_sha256(
+        {
+            "scope_id": table.scope_id,
+            "cwe": table.cwe,
+            "model_id": table.model_id,
+            "pre_outcome_variables": [
+                variable.model_dump(mode="json")
+                for variable in table.variables
+                if variable.role is not VariableRole.Y
+            ],
+            "coordinate_universe": [
+                [row.task_id, row.prompt_id, row.seed_id]
+                for _task_id, task_rows in rows_by_task
+                for row in task_rows
+            ],
+        }
+    )
 
 
 def _authenticate_bundle(
@@ -207,7 +240,7 @@ def _authenticate_bundle(
             task_rows = tuple(
                 sorted(
                     groups[task_id],
-                    key=lambda item: (item.seed_id, item.prompt_id, item.row_id),
+                    key=lambda item: (item.prompt_id, item.seed_id),
                 )
             )
             if (
@@ -235,11 +268,19 @@ def _authenticate_bundle(
         )
         if rebuilt != checked_table:
             raise ValueError
-        ordered_rows = tuple(sorted(checked_rows, key=lambda item: item.row_id))
+        frozen_groups = tuple(ordered_groups)
+        ordered_rows = tuple(
+            sorted(
+                checked_rows,
+                key=lambda item: (item.task_id, item.prompt_id, item.seed_id),
+            )
+        )
         return _AuthenticatedBundle(
             table=checked_table,
             rows=ordered_rows,
-            rows_by_task=tuple(ordered_groups),
+            rows_by_task=frozen_groups,
+            row_by_id=MappingProxyType({row.row_id: row for row in ordered_rows}),
+            sampling_frame_sha256=_sampling_frame_digest(checked_table, frozen_groups),
         )
     except (KeyboardInterrupt, SystemExit):
         raise
@@ -257,6 +298,42 @@ def _draw_item(index: int, row: CausalObservationRecord) -> BootstrapDrawItem:
     )
 
 
+def sampling_frame_sha256(
+    table: CausalTableRecord,
+    rows: Sequence[CausalObservationRecord],
+) -> str:
+    """Hash only pre-outcome schema and task/prompt/seed coordinates."""
+    return _authenticate_bundle(table, rows).sampling_frame_sha256
+
+
+def _reference_draw_from_bundle(
+    bundle: _AuthenticatedBundle,
+    global_seed: int,
+) -> BootstrapDrawRecord:
+    seed_material = _canonical_seed_material(
+        (
+            global_seed,
+            bundle.table.scope_id,
+            bundle.table.model_id,
+            bundle.sampling_frame_sha256,
+            "reference",
+        )
+    )
+    rng = DeterministicRNG(seed_material)
+    items = tuple(
+        _draw_item(index, rng.choice(task_rows))
+        for index, (_task_id, task_rows) in enumerate(bundle.rows_by_task)
+    )
+    return BootstrapDrawRecord.from_content(
+        table_id=bundle.table.table_id,
+        run_kind=PAGRunKind.OBSERVATIONAL_REFERENCE,
+        replicate_index=None,
+        rng_version=RNG_VERSION,
+        seed_material_sha256=hashlib.sha256(seed_material).hexdigest(),
+        items=items,
+    )
+
+
 def build_reference_draw(
     table: CausalTableRecord,
     rows: Sequence[CausalObservationRecord],
@@ -264,21 +341,9 @@ def build_reference_draw(
 ) -> BootstrapDrawRecord:
     """Select exactly one seed row for every sorted task without replacement."""
     try:
-        bundle = _authenticate_bundle(table, rows)
-        checked_seed = _checked_global_seed(global_seed)
-        seed_material = _canonical_seed_material((checked_seed, bundle.table.table_id, "reference"))
-        rng = DeterministicRNG(seed_material)
-        items = tuple(
-            _draw_item(index, rng.choice(task_rows))
-            for index, (_task_id, task_rows) in enumerate(bundle.rows_by_task)
-        )
-        return BootstrapDrawRecord.from_content(
-            table_id=bundle.table.table_id,
-            run_kind=PAGRunKind.OBSERVATIONAL_REFERENCE,
-            replicate_index=None,
-            rng_version=RNG_VERSION,
-            seed_material_sha256=hashlib.sha256(seed_material).hexdigest(),
-            items=items,
+        return _reference_draw_from_bundle(
+            _authenticate_bundle(table, rows),
+            _checked_global_seed(global_seed),
         )
     except (KeyboardInterrupt, SystemExit):
         raise
@@ -286,6 +351,37 @@ def build_reference_draw(
         raise
     except Exception:
         raise _bootstrap_error() from None
+
+
+def _bootstrap_draw_from_bundle(
+    bundle: _AuthenticatedBundle,
+    global_seed: int,
+    replicate: int,
+) -> BootstrapDrawRecord:
+    seed_material = _canonical_seed_material(
+        (
+            global_seed,
+            bundle.table.scope_id,
+            bundle.table.model_id,
+            bundle.sampling_frame_sha256,
+            "bootstrap",
+            replicate,
+        )
+    )
+    rng = DeterministicRNG(seed_material)
+    tasks = bundle.rows_by_task
+    items: list[BootstrapDrawItem] = []
+    for draw_index in range(bundle.table.independent_task_count):
+        _task_id, task_rows = rng.choice(tasks)
+        items.append(_draw_item(draw_index, rng.choice(task_rows)))
+    return BootstrapDrawRecord.from_content(
+        table_id=bundle.table.table_id,
+        run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
+        replicate_index=replicate,
+        rng_version=RNG_VERSION,
+        seed_material_sha256=hashlib.sha256(seed_material).hexdigest(),
+        items=tuple(items),
+    )
 
 
 def build_bootstrap_draw(
@@ -296,25 +392,10 @@ def build_bootstrap_draw(
 ) -> BootstrapDrawRecord:
     """Sample task IDs with replacement, then independently select one task seed."""
     try:
-        bundle = _authenticate_bundle(table, rows)
-        checked_seed = _checked_global_seed(global_seed)
-        checked_replicate = _checked_replicate(replicate)
-        seed_material = _canonical_seed_material(
-            (checked_seed, bundle.table.table_id, "bootstrap", checked_replicate)
-        )
-        rng = DeterministicRNG(seed_material)
-        tasks = bundle.rows_by_task
-        items: list[BootstrapDrawItem] = []
-        for draw_index in range(bundle.table.independent_task_count):
-            _task_id, task_rows = rng.choice(tasks)
-            items.append(_draw_item(draw_index, rng.choice(task_rows)))
-        return BootstrapDrawRecord.from_content(
-            table_id=bundle.table.table_id,
-            run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
-            replicate_index=checked_replicate,
-            rng_version=RNG_VERSION,
-            seed_material_sha256=hashlib.sha256(seed_material).hexdigest(),
-            items=tuple(items),
+        return _bootstrap_draw_from_bundle(
+            _authenticate_bundle(table, rows),
+            _checked_global_seed(global_seed),
+            _checked_replicate(replicate),
         )
     except (KeyboardInterrupt, SystemExit):
         raise
@@ -324,13 +405,11 @@ def build_bootstrap_draw(
         raise _bootstrap_error() from None
 
 
-def _authenticated_matrix_from_draw(
-    table: CausalTableRecord,
-    rows: Sequence[CausalObservationRecord],
+def _authenticated_matrix_from_bundle(
+    bundle: _AuthenticatedBundle,
     draw: BootstrapDrawRecord,
 ) -> _AuthenticatedMatrix:
     try:
-        bundle = _authenticate_bundle(table, rows)
         checked_draw = BootstrapDrawRecord.model_validate(draw)
         if (
             checked_draw.table_id != bundle.table.table_id
@@ -338,10 +417,9 @@ def _authenticated_matrix_from_draw(
             or len(checked_draw.items) != bundle.table.independent_task_count
         ):
             raise ValueError
-        row_by_id = {row.row_id: row for row in bundle.rows}
         selected: list[CausalObservationRecord] = []
         for item in checked_draw.items:
-            row = row_by_id.get(item.row_id)
+            row = bundle.row_by_id.get(item.row_id)
             if row is None or (
                 item.task_id,
                 item.prompt_id,
@@ -371,6 +449,14 @@ def _authenticated_matrix_from_draw(
         raise
     except Exception:
         raise _bootstrap_error() from None
+
+
+def _authenticated_matrix_from_draw(
+    table: CausalTableRecord,
+    rows: Sequence[CausalObservationRecord],
+    draw: BootstrapDrawRecord,
+) -> _AuthenticatedMatrix:
+    return _authenticated_matrix_from_bundle(_authenticate_bundle(table, rows), draw)
 
 
 def authenticated_matrix_from_draw(
@@ -432,29 +518,31 @@ def _validated_pag(
 
 def _run_authenticated_draw(
     *,
-    table: CausalTableRecord,
-    rows: Sequence[CausalObservationRecord],
+    bundle: _AuthenticatedBundle,
     draw: BootstrapDrawRecord,
     knowledge: BackgroundKnowledgeRecord,
     config: FCIDiscoveryConfig,
     runner: FCIRunner,
-) -> PAGRecord:
-    authenticated = _authenticated_matrix_from_draw(table, rows, draw)
+) -> tuple[PAGRecord, str]:
+    authenticated = _authenticated_matrix_from_bundle(bundle, draw)
     pag = runner.run(
         authenticated.matrix,
-        table,
+        bundle.table,
         knowledge,
         config,
         draw.run_kind,
     )
-    if _matrix_digest(table, draw, authenticated.matrix) != authenticated.matrix_sha256:
+    if _matrix_digest(bundle.table, draw, authenticated.matrix) != authenticated.matrix_sha256:
         raise _InvalidPAG
-    return _validated_pag(
-        pag,
-        table=table,
-        knowledge=knowledge,
-        config=config,
-        run_kind=draw.run_kind,
+    return (
+        _validated_pag(
+            pag,
+            table=bundle.table,
+            knowledge=knowledge,
+            config=config,
+            run_kind=draw.run_kind,
+        ),
+        authenticated.matrix_sha256,
     )
 
 
@@ -528,11 +616,10 @@ def run_task_cluster_fci_bootstrap(
     except Exception:
         raise _bootstrap_error() from None
 
-    reference_draw = build_reference_draw(bundle.table, bundle.rows, checked_seed)
+    reference_draw = _reference_draw_from_bundle(bundle, checked_seed)
     try:
-        reference_pag = _run_authenticated_draw(
-            table=bundle.table,
-            rows=bundle.rows,
+        reference_pag, _reference_matrix_sha256 = _run_authenticated_draw(
+            bundle=bundle,
             draw=reference_draw,
             knowledge=checked_knowledge,
             config=checked_config,
@@ -545,17 +632,25 @@ def run_task_cluster_fci_bootstrap(
 
     results: list[BootstrapReplicateResult] = []
     for replicate in range(checked_config.bootstrap_samples):
-        draw = build_bootstrap_draw(bundle.table, bundle.rows, checked_seed, replicate)
+        draw = _bootstrap_draw_from_bundle(bundle, checked_seed, replicate)
         try:
-            pag = _run_authenticated_draw(
-                table=bundle.table,
-                rows=bundle.rows,
+            pag, matrix_sha256 = _run_authenticated_draw(
+                bundle=bundle,
                 draw=draw,
                 knowledge=checked_knowledge,
                 config=checked_config,
                 runner=runner,
             )
-            results.append(BootstrapReplicateResult(draw=draw, pag=pag))
+            if draw.replicate_index is None:
+                raise _InvalidPAG
+            envelope = BootstrapPAGRecord.from_content(
+                table_id=bundle.table.table_id,
+                replicate_index=draw.replicate_index,
+                draw_id=draw.draw_id,
+                matrix_sha256=matrix_sha256,
+                pag=pag,
+            )
+            results.append(BootstrapReplicateResult(draw=draw, pag=envelope))
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as error:
@@ -584,4 +679,5 @@ __all__ = [
     "build_bootstrap_draw",
     "build_reference_draw",
     "run_task_cluster_fci_bootstrap",
+    "sampling_frame_sha256",
 ]

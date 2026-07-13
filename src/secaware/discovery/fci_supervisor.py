@@ -245,9 +245,7 @@ class SpawnedFCIRunner:
                     timed_out = True
                     break
                 try:
-                    event, payload = events.get(
-                        timeout=min(_POLL_INTERVAL_SECONDS, remaining)
-                    )
+                    event, payload = events.get(timeout=min(_POLL_INTERVAL_SECONDS, remaining))
                 except Empty:
                     event, payload = "", None
                 if event == "payload":
@@ -280,10 +278,8 @@ class SpawnedFCIRunner:
                 or record.backend != checked_config.backend
                 or record.backend_version != checked_config.backend_version
                 or record.ci_test != checked_config.ci_test
-                or record.config_sha256
-                != canonical_sha256(checked_config.model_dump(mode="json"))
-                or record.background_knowledge_sha256
-                != checked_knowledge.knowledge_sha256
+                or record.config_sha256 != canonical_sha256(checked_config.model_dump(mode="json"))
+                or record.background_knowledge_sha256 != checked_knowledge.knowledge_sha256
                 or record.variable_ids != expected_variables
                 or record.run_kind is not checked_run_kind
             ):

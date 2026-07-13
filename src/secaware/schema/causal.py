@@ -18,6 +18,7 @@ _ROW_ID_PATTERN = r"^row_[0-9a-f]{64}$"
 _PAG_ID_PATTERN = r"^pag_[0-9a-f]{64}$"
 _BK_ID_PATTERN = r"^bk_[0-9a-f]{64}$"
 _DRAW_ID_PATTERN = r"^draw_[0-9a-f]{64}$"
+_BOOTSTRAP_PAG_ID_PATTERN = r"^bootstrap_pag_[0-9a-f]{64}$"
 _PATH_ID_PATTERN = r"^path_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _VARIABLE_ID_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
@@ -750,6 +751,46 @@ class BootstrapDrawRecord(_CausalVersionedContract):
             or (not reference and self.replicate_index is None)
             or self.draw_sha256 != expected
             or self.draw_id != f"draw_{expected}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class BootstrapPAGRecord(_CausalVersionedContract):
+    """Content-addressed binding of one successful draw to its exact PAG input matrix."""
+
+    schema_version: Literal["1.0"]
+    bootstrap_pag_id: str = Field(pattern=_BOOTSTRAP_PAG_ID_PATTERN)
+    table_id: str = Field(pattern=_TABLE_ID_PATTERN)
+    replicate_index: int = Field(ge=0, le=9999)
+    draw_id: str = Field(pattern=_DRAW_ID_PATTERN)
+    matrix_sha256: str = Field(pattern=_SHA256_PATTERN)
+    pag: PAGRecord
+    bootstrap_pag_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        try:
+            payload = {"schema_version": "1.0", **content}
+            pag = PAGRecord.model_validate(payload["pag"])
+            payload["pag"] = pag
+            digest = _digest(payload)
+            return cls(
+                **payload,
+                bootstrap_pag_id=f"bootstrap_pag_{digest}",
+                bootstrap_pag_sha256=digest,
+            )
+        except Exception:
+            raise cls._safe_error() from None
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        expected = _digest(_content(self, "bootstrap_pag_id", "bootstrap_pag_sha256"))
+        if (
+            self.pag.run_kind is not PAGRunKind.OBSERVATIONAL_BOOTSTRAP
+            or self.pag.table_id != self.table_id
+            or self.bootstrap_pag_sha256 != expected
+            or self.bootstrap_pag_id != f"bootstrap_pag_{expected}"
         ):
             raise ValueError(self._safe_validation_message)
         return self

@@ -31,9 +31,9 @@ from secaware.schema.causal import (
 
 
 def _canonical_json(payload: object) -> bytes:
-    return json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
 
 
 def _valid_payload(job_json: bytes) -> bytes:
@@ -275,9 +275,7 @@ def test_supervisor_safely_rejects_crash_oversize_malformed_or_multiple_payloads
         )
 
 
-@pytest.mark.parametrize(
-    "mutation", ("table", "config", "background", "run_kind", "bk_edge")
-)
+@pytest.mark.parametrize("mutation", ("table", "config", "background", "run_kind", "bk_edge"))
 def test_supervisor_parent_rejects_child_provenance_mutations(mutation: str) -> None:
     from secaware.discovery.fci_supervisor import SpawnedFCIRunner
 

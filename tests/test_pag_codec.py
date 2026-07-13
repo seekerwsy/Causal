@@ -123,9 +123,7 @@ def _table() -> CausalTableRecord:
     ("backend_left", "backend_right", "expected_left", "expected_right"),
     tuple(
         (left, right, EndpointMark(left.name.lower()), EndpointMark(right.name.lower()))
-        for left, right in product(
-            (Endpoint.TAIL, Endpoint.ARROW, Endpoint.CIRCLE), repeat=2
-        )
+        for left, right in product((Endpoint.TAIL, Endpoint.ARROW, Endpoint.CIRCLE), repeat=2)
     ),
 )
 def test_pag_codec_preserves_every_supported_endpoint_pair_without_inference(
@@ -223,16 +221,13 @@ def test_pag_codec_rejects_unsupported_or_composite_endpoints(endpoint: Endpoint
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
 
+
 @pytest.mark.parametrize(
     "graph",
     (
         _Graph(["x.safety.sql_parameterization"], []),
-        _Graph(
-            ["x.safety.sql_parameterization", "y.secure_functional", "x.unknown"], []
-        ),
-        _Graph(
-            ["x.safety.sql_parameterization", "x.safety.sql_parameterization"], []
-        ),
+        _Graph(["x.safety.sql_parameterization", "y.secure_functional", "x.unknown"], []),
+        _Graph(["x.safety.sql_parameterization", "x.safety.sql_parameterization"], []),
         _Graph(
             ["x.safety.sql_parameterization", "y.secure_functional"],
             [

@@ -187,9 +187,7 @@ def test_fci_adapter_calls_exact_gsq_configuration(monkeypatch: pytest.MonkeyPat
         return _Graph([item.variable_id for item in table.variables]), []
 
     monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", capture)
-    pag = run_causal_learn_fci(
-        _matrix(), table, build_background_knowledge(table), _config()
-    )
+    pag = run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
 
     assert len(calls) == 1
     dataset, kwargs = calls[0]
@@ -211,9 +209,7 @@ def test_pinned_real_fci_backend_is_runnable_with_background_knowledge() -> None
     from secaware.discovery.causal_learn_backend import run_causal_learn_fci
 
     table = _table()
-    pag = run_causal_learn_fci(
-        _matrix(), table, build_background_knowledge(table), _config()
-    )
+    pag = run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
 
     assert pag.table_id == table.table_id
     assert pag.backend_version == "0.1.4.7"
@@ -262,9 +258,7 @@ def test_fci_adapter_rejects_unknown_forbidden_or_malformed_bk_orientation_outpu
 
     monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", diagnostic)
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            _matrix(), table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
 
 
 def test_fci_adapter_rejects_orientation_output_for_forbidden_adjacency(
@@ -277,18 +271,13 @@ def test_fci_adapter_rejects_orientation_output_for_forbidden_adjacency(
     def diagnostic(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
         for _round in range(2):
             print("Starting BK Orientation.")
-            print(
-                "Orienting edge (Knowledge): "
-                "w.language_family --> x.safety.sql_parameterization"
-            )
+            print("Orienting edge (Knowledge): w.language_family --> x.safety.sql_parameterization")
             print("Finishing BK Orientation.")
         return _Graph([item.variable_id for item in table.variables]), []
 
     monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", diagnostic)
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            matrix, table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(matrix, table, build_background_knowledge(table), _config())
 
 
 def test_fci_adapter_rejects_unjustified_same_tier_knowledge_orientation(
@@ -301,18 +290,13 @@ def test_fci_adapter_rejects_unjustified_same_tier_knowledge_orientation(
     def diagnostic(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
         for _round in range(2):
             print("Starting BK Orientation.")
-            print(
-                "Orienting edge (Knowledge): "
-                "y.cwe_security --> y.secure_functional"
-            )
+            print("Orienting edge (Knowledge): y.cwe_security --> y.secure_functional")
             print("Finishing BK Orientation.")
         return _Graph([item.variable_id for item in table.variables]), []
 
     monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", diagnostic)
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            matrix, table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(matrix, table, build_background_knowledge(table), _config())
 
 
 def test_stdout_grammar_accepts_a_future_explicitly_required_orientation() -> None:
@@ -358,9 +342,7 @@ def test_fci_adapter_rejects_library_version_drift_before_backend(
     )
     table = _table()
     with pytest.raises(SecAwareError, match="version mismatch"):
-        run_causal_learn_fci(
-            _matrix(), table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
     assert called is False
 
 
@@ -402,12 +384,12 @@ def test_fci_adapter_rejects_table_background_and_config_mismatch_before_backend
     forged_table = deepcopy(table)
     object.__setattr__(forged_table, "row_count", 5)
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            _matrix(), forged_table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(_matrix(), forged_table, build_background_knowledge(table), _config())
     with pytest.raises(SecAwareError):
         run_causal_learn_fci(
-            _matrix(), table, build_background_knowledge(table),
+            _matrix(),
+            table,
+            build_background_knowledge(table),
             FCIDiscoveryConfig(max_variables=2, max_rows=3, min_independent_tasks=2),
         )
 
@@ -433,9 +415,7 @@ def test_fci_adapter_rejects_unexpected_backend_diagnostics(
 
     monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", noisy)
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            _matrix(), table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
 
 
 def test_fci_adapter_rejects_unrecognized_library_edge_properties(
@@ -459,9 +439,7 @@ def test_fci_adapter_rejects_unrecognized_library_edge_properties(
     )
 
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            _matrix(), table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
 
 
 def test_fci_adapter_rejects_postrun_background_violation(
@@ -487,9 +465,7 @@ def test_fci_adapter_rejects_postrun_background_violation(
     )
 
     with pytest.raises(SecAwareError):
-        run_causal_learn_fci(
-            _matrix(), table, build_background_knowledge(table), _config()
-        )
+        run_causal_learn_fci(_matrix(), table, build_background_knowledge(table), _config())
 
 
 def test_causal_learn_fci_adapter_rejects_rfci_run_kind_before_backend(

@@ -234,6 +234,31 @@ def test_app_config_rejects_unknown_nested_keys() -> None:
     assert ("run", "unexpected") in {tuple(error["loc"]) for error in exc_info.value.errors()}
 
 
+@pytest.mark.parametrize("random_seed", (True, 1.0, -(2**63) - 1, 2**63))
+def test_run_random_seed_is_a_strict_signed_64_bit_integer(random_seed: object) -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(
+            {
+                "run": {"name": "strict", "random_seed": random_seed},
+                "data": {"prompts_path": "prompts.jsonl"},
+                "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            }
+        )
+
+
+@pytest.mark.parametrize("random_seed", (-(2**63), 0, 2**63 - 1))
+def test_run_random_seed_accepts_signed_64_bit_boundaries(random_seed: int) -> None:
+    config = AppConfig.model_validate(
+        {
+            "run": {"name": "strict", "random_seed": random_seed},
+            "data": {"prompts_path": "prompts.jsonl"},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+        }
+    )
+
+    assert config.run.random_seed == random_seed
+
+
 def test_app_config_rejects_removed_tsg_field() -> None:
     removed_field = "code_" + "extractor"
     removed_value = "python_" + "ast_v0"

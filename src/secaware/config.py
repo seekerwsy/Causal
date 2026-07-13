@@ -35,7 +35,7 @@ def _normalized_base_url(parsed: SplitResult) -> str:
 
 class RunConfig(StrictModel):
     name: str = "demo"
-    random_seed: int = 123
+    random_seed: int = Field(default=123, ge=-(2**63), le=2**63 - 1, strict=True)
     output_dir: str = "runs/demo"
 
 
