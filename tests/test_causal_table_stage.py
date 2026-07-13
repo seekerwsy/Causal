@@ -110,9 +110,13 @@ def _oracle(prompt: PromptRecord) -> OracleRecord:
     )
 
 
-def _prepared_store(tmp_path: Path) -> tuple[AppConfig, RunStore]:
+def _prepared_store(
+    tmp_path: Path,
+    prompts: tuple[PromptRecord, ...] | None = None,
+) -> tuple[AppConfig, RunStore]:
+    selected_prompts = _prompts() if prompts is None else prompts
     source = tmp_path / "prompts.jsonl"
-    write_jsonl(source, _prompts())
+    write_jsonl(source, selected_prompts)
     config = _config(source, tmp_path / "run")
     store = RunStore(config)
     store.prepare()
@@ -127,10 +131,30 @@ def _prepared_store(tmp_path: Path) -> tuple[AppConfig, RunStore]:
         False,
         policy_sha256="d" * 64,
     )
-    write_jsonl(oracle_output, tuple(_oracle(prompt) for prompt in _prompts()))
+    write_jsonl(oracle_output, tuple(_oracle(prompt) for prompt in selected_prompts))
     store.seal_stage_outputs(stage, (oracle_output,))
     store.record_stage(stage, inputs, (oracle_output,), policy_sha256="d" * 64)
     return config, store
+
+
+def test_causal_table_stage_rejects_an_empty_discovery_split_without_outputs(
+    tmp_path: Path,
+) -> None:
+    import secaware.pipeline.stages.causal_tables as stage_module
+
+    confirm_only = tuple(
+        prompt.model_copy(update={"split": "confirm"}) for prompt in _prompts()
+    )
+    config, store = _prepared_store(tmp_path, confirm_only)
+
+    with pytest.raises(SecAwareError):
+        stage_module.assemble_causal_tables_stage(config, store, force=False)
+
+    assert not store.path(".stages", "assemble-causal-tables.json").exists()
+    assert not any(
+        store.path("discovery", name).exists()
+        for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
+    )
 
 
 def test_causal_table_stage_publishes_the_closed_output_contract() -> None:
@@ -143,13 +167,18 @@ def test_causal_table_stage_publishes_the_closed_output_contract() -> None:
     )
 
 
-def test_observational_stage_uses_closed_pretreatment_declarations_only() -> None:
-    from secaware.causal.variable_catalog import OBSERVATIONAL_CAUSAL_VARIABLES
+def test_observational_stage_uses_the_complete_prompt_variable_catalog() -> None:
+    from secaware.causal.variable_catalog import PROMPT_CAUSAL_VARIABLES
 
-    variable_ids = {item.variable_id for item in OBSERVATIONAL_CAUSAL_VARIABLES}
+    variable_ids = {item.variable_id for item in PROMPT_CAUSAL_VARIABLES}
     assert "y.secure_functional" in variable_ids
     assert "y.cwe_security" in variable_ids
-    assert not any(item.startswith("x.presentation.") for item in variable_ids)
+    assert {
+        "x.presentation.noop_rewrite",
+        "x.presentation.length_matched_placebo",
+        "x.presentation.sham_edit",
+        "x.presentation.matched_control",
+    } <= variable_ids
 
 
 def test_causal_table_stage_commits_exact_discover_only_bundle(
@@ -180,6 +209,10 @@ def test_causal_table_stage_commits_exact_discover_only_bundle(
         allow_empty=True,
     )
     assert {row.prompt_id for row in rows} == {"discover-1", "discover-2"}
+    assert all(
+        any(variable.variable_id.startswith("x.presentation.") for variable in table.variables)
+        for table in tables
+    )
     source_coordinates = tuple(
         sorted(
             (
@@ -346,6 +379,62 @@ def test_causal_table_force_failure_restores_committed_bundle(
 
     assert tuple(path.read_bytes() for path in paths) == before
     assert store.path(".stages", "assemble-causal-tables.json").read_bytes() == manifest_before
+
+
+def test_causal_table_middle_output_install_failure_rolls_back_complete_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stages.causal_tables as stage_module
+    from secaware.io.transaction import ArtifactTransaction, TransactionStateError
+
+    config, store = _prepared_store(tmp_path)
+    stage_module.assemble_causal_tables_stage(config, store, force=False)
+    paths = tuple(
+        store.path("discovery", name) for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
+    )
+    before = tuple(path.read_bytes() for path in paths)
+    manifest_path = store.path(".stages", "assemble-causal-tables.json")
+    manifest_before = manifest_path.read_bytes()
+    real_install = ArtifactTransaction.install
+
+    def fail_middle(self: ArtifactTransaction, index: int, candidate: Path) -> None:
+        if index == 1:
+            raise TransactionStateError
+        real_install(self, index, candidate)
+
+    monkeypatch.setattr(ArtifactTransaction, "install", fail_middle)
+
+    with pytest.raises(SecAwareError, match="could not be committed"):
+        stage_module.assemble_causal_tables_stage(config, store, force=True)
+
+    assert tuple(path.read_bytes() for path in paths) == before
+    assert manifest_path.read_bytes() == manifest_before
+
+
+@pytest.mark.parametrize(
+    "drift_field",
+    ("PROMPT_FEATURE_CATALOG_SHA256", "PROMPT_TSG_STAGE_CONTRACT_SHA256"),
+)
+def test_causal_table_contract_drift_invalidates_manifest_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_field: str,
+) -> None:
+    import secaware.pipeline.stage_contracts as contracts
+    import secaware.pipeline.stages.causal_tables as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    stage_module.assemble_causal_tables_stage(config, store, force=False)
+
+    def fail_build(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("contract drift forced table rebuild")
+
+    monkeypatch.setattr(contracts, drift_field, "0" * 64)
+    monkeypatch.setattr(stage_module, "build_local_tables", fail_build)
+
+    with pytest.raises(RuntimeError, match="contract drift forced"):
+        stage_module.assemble_causal_tables_stage(config, store, force=False)
 
 
 def test_causal_table_stage_holds_producer_leases_in_sorted_order(

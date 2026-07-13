@@ -101,7 +101,7 @@ def test_deterministic_backend_emits_closed_catalog_states_and_exact_evidence() 
     assert states["task.file_read"] is FeatureState.PRESENT
     assert states["safety.path_normalization"] is FeatureState.PRESENT
     assert states["task.database_query"] is FeatureState.NOT_APPLICABLE
-    assert states["presentation.noop_rewrite"] is FeatureState.UNRESOLVED
+    assert states["presentation.noop_rewrite"] is FeatureState.ABSENT
 
     fact = next(item for item in proposal.facts if item.feature_id == "task.file_read")
     assert len(fact.evidence) == 1
@@ -109,6 +109,27 @@ def test_deterministic_backend_emits_closed_catalog_states_and_exact_evidence() 
     assert prompt.prompt[span.start : span.end] == "user-provided file path"
     assert span.text == "user-provided file path"
     assert span.text_sha256 == hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("phrase", "feature_id"),
+    (
+        ("no-op rewrite", "presentation.noop_rewrite"),
+        ("length matched placebo", "presentation.length_matched_placebo"),
+        ("sham edit", "presentation.sham_edit"),
+        ("matched control", "presentation.matched_control"),
+    ),
+)
+def test_deterministic_backend_resolves_reviewed_presentation_terms(
+    phrase: str,
+    feature_id: str,
+) -> None:
+    proposal = DeterministicCatalogExtractor().extract(
+        _prompt(f"Apply a {phrase} to this request."),
+        _policy(),
+    )
+
+    assert _states(proposal)[feature_id] is FeatureState.PRESENT
 
 
 def test_detached_safety_term_does_not_become_a_present_control() -> None:

@@ -169,6 +169,16 @@ def _generation_condition(value: str) -> GenerationCondition:
     )
 
 
+def _cli_generation_condition(value: str) -> GenerationCondition:
+    if value == "observed":
+        return cast(GenerationCondition, value)
+    raise SecAwareError(
+        code=ErrorCode.CONFIG,
+        stage="generation",
+        message="only the observed condition is reachable before randomized confirmation",
+    )
+
+
 def _generation_mode(value: str) -> GenerationMode:
     if value == "offline" or value == "provider":
         return cast(GenerationMode, value)
@@ -1921,7 +1931,7 @@ def plan_generation_command(
     mode: str = typer.Option("offline", "--mode", hidden=True),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    validated_condition = _generation_condition(condition)
+    validated_condition = _cli_generation_condition(condition)
     validated_mode = _generation_mode(mode)
     cfg, store = _load(config, run_dir)
     _prepare(cfg, store)
@@ -1942,7 +1952,7 @@ def generate_command(
     condition: str = typer.Option("observed", "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    validated_condition = _generation_condition(condition)
+    validated_condition = _cli_generation_condition(condition)
     cfg, store = _load(config, run_dir)
     _prepare(cfg, store)
     plan_generation_stage(
@@ -1969,7 +1979,7 @@ def import_generation_command(
     condition: str = typer.Option("observed", "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    validated_condition = _generation_condition(condition)
+    validated_condition = _cli_generation_condition(condition)
     cfg, store = _load(config, run_dir)
     import_generation_stage(
         cfg,
@@ -1988,7 +1998,7 @@ def run_oracle_command(
     condition: str = typer.Option("observed", "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    validated_condition = _generation_condition(condition)
+    validated_condition = _cli_generation_condition(condition)
     cfg, store = _load(config, run_dir)
     run_oracle_stage(cfg, store, condition=validated_condition, force=force)
 
@@ -2002,28 +2012,6 @@ def discover_command(
 ) -> None:
     cfg, store = _load(config, run_dir)
     discover_stage(cfg, store, force=force)
-
-
-@app.command("confirm")
-@cli_action
-def confirm_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    cfg, store = _load(config, run_dir)
-    confirm_stage(cfg, store, force=force)
-
-
-@app.command("report")
-@cli_action
-def report_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    cfg, store = _load(config, run_dir)
-    report_stage(cfg, store, force=force)
 
 
 @app.command("run-all")

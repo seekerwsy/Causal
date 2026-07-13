@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 
-from secaware.causal.variable_catalog import (
-    OBSERVATIONAL_VARIABLE_CATALOG_SHA256,
-    VARIABLE_CATALOG_SHA256,
-)
+from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
 from secaware.config import FCIDiscoveryConfig
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.randomness import RNG_VERSION
@@ -50,7 +47,6 @@ def discovery_stage_contract_payload(stage: str) -> dict[str, object]:
         "stage": stage,
         "prompt_feature_catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
         "variable_catalog_sha256": VARIABLE_CATALOG_SHA256,
-        "observational_variable_catalog_sha256": OBSERVATIONAL_VARIABLE_CATALOG_SHA256,
         "prompt_tsg_stage_contract_sha256": PROMPT_TSG_STAGE_CONTRACT_SHA256,
     }
     if stage == _CAUSAL_TABLE_STAGE:

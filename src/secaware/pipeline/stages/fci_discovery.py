@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from collections.abc import Sequence
@@ -195,6 +196,8 @@ def _validate_discovery_bundle(
 ) -> FCIDiscoveryStageResult:
     try:
         table_by_id = {item.table_id: item for item in snapshot.tables}
+        table_by_sha256 = {item.table_sha256: item for item in snapshot.tables}
+        table_ids = set(table_by_id)
         rows_by_table = {
             table_id: tuple(item for item in snapshot.rows if item.table_id == table_id)
             for table_id in table_by_id
@@ -203,15 +206,50 @@ def _validate_discovery_bundle(
         reference_by_table = {item.table_id: item for item in reference_pags}
         if (
             len(table_by_id) != len(snapshot.tables)
+            or len(table_by_sha256) != len(snapshot.tables)
             or len(knowledge_by_table) != len(knowledge_records)
             or len(reference_by_table) != len(reference_pags)
-            or set(knowledge_by_table) != set(table_by_id)
-            or set(reference_by_table) != set(table_by_id)
+            or set(knowledge_by_table) != table_ids
+            or set(reference_by_table) != table_ids
+            or {item.table_id for item in draws} - table_ids
+            or {item.table_id for item in bootstrap_pags} - table_ids
+            or {item.table_id for item in bootstrap_failures} - table_ids
+            or {item.table_id for item in supports} - table_ids
+            or {item.table_id for item in discovery_failures} - table_ids
+            or any(item.table_sha256 not in table_by_sha256 for item in hypotheses)
             or knowledge_records != tuple(sorted(knowledge_records, key=lambda item: item.table_id))
             or reference_pags != tuple(sorted(reference_pags, key=lambda item: item.table_id))
             or draws != tuple(sorted(draws, key=_ordered_draw_key))
+            or bootstrap_pags
+            != tuple(sorted(bootstrap_pags, key=lambda item: (item.table_id, item.replicate_index)))
+            or bootstrap_failures
+            != tuple(
+                sorted(
+                    bootstrap_failures,
+                    key=lambda item: (item.table_id, item.replicate_index),
+                )
+            )
+            or supports
+            != tuple(sorted(supports, key=lambda item: (item.table_id, item.path.variable_ids)))
+            or hypotheses
+            != tuple(
+                sorted(
+                    hypotheses,
+                    key=lambda item: (item.scope_id, item.model_id, item.path.variable_ids),
+                )
+            )
+            or discovery_failures
+            != tuple(
+                sorted(
+                    discovery_failures,
+                    key=lambda item: (item.table_id, item.reason_code.value, item.failure_id),
+                )
+            )
         ):
             raise ValueError
+        config_sha256 = canonical_sha256(config.discovery.model_dump(mode="json"))
+        catalog_sha256 = snapshot.extraction_manifest.catalog_sha256 or ""
+        extractor_policy_sha256 = snapshot.extraction_manifest.policy_sha256 or ""
         for table_id, table in table_by_id.items():
             knowledge = knowledge_by_table[table_id]
             if knowledge != build_background_knowledge(table):
@@ -251,6 +289,36 @@ def _validate_discovery_bundle(
             local_hypotheses = tuple(
                 item for item in hypotheses if item.table_sha256 == table.table_sha256
             )
+            local_discovery_failures = tuple(
+                item for item in discovery_failures if item.table_id == table_id
+            )
+            failed_count = len(local_bootstrap_failures)
+            too_many_failed = (
+                failed_count / config.discovery.bootstrap_samples
+                > config.discovery.max_failed_bootstrap_fraction
+            )
+            stable_path_ids = {
+                item.path.path_id
+                for item in local_supports
+                if Decimal(item.support_numerator)
+                >= Decimal(str(config.discovery.stability_threshold))
+                * Decimal(item.support_denominator)
+            }
+            if too_many_failed:
+                if (
+                    local_hypotheses
+                    or local_discovery_failures
+                    != (
+                        _too_many_failures(
+                            table,
+                            knowledge,
+                            config.discovery,
+                            failed_count,
+                        ),
+                    )
+                ):
+                    raise ValueError
+                continue
             if local_hypotheses:
                 revalidate_frozen_hypothesis_batch(
                     local_hypotheses,
@@ -258,11 +326,32 @@ def _validate_discovery_bundle(
                     reference_pag=reference_by_table[table_id],
                     knowledge=knowledge,
                     config=config.discovery,
-                    catalog_sha256=snapshot.extraction_manifest.catalog_sha256 or "",
-                    extractor_policy_sha256=snapshot.extraction_manifest.policy_sha256 or "",
+                    catalog_sha256=catalog_sha256,
+                    extractor_policy_sha256=extractor_policy_sha256,
                 )
+            if (
+                {item.path.path_id for item in local_hypotheses} != stable_path_ids
+                or bool(local_discovery_failures) == bool(local_hypotheses)
+            ):
+                raise ValueError
+            if local_discovery_failures:
+                if len(local_discovery_failures) != 1:
+                    raise ValueError
+                failure = local_discovery_failures[0]
+                if (
+                    failure.reason_code.value != "no_stable_hypothesis"
+                    or failure.scope_id != table.scope_id
+                    or failure.model_id != table.model_id
+                    or failure.table_sha256 != table.table_sha256
+                    or failure.fci_config_sha256 != config_sha256
+                    or failure.background_knowledge_sha256 != knowledge.knowledge_sha256
+                ):
+                    raise ValueError
         if (
-            len({item.bootstrap_pag_id for item in bootstrap_pags}) != len(bootstrap_pags)
+            len({item.knowledge_id for item in knowledge_records}) != len(knowledge_records)
+            or len({item.pag_id for item in reference_pags}) != len(reference_pags)
+            or len({item.draw_id for item in draws}) != len(draws)
+            or len({item.bootstrap_pag_id for item in bootstrap_pags}) != len(bootstrap_pags)
             or len({item.failure_id for item in bootstrap_failures}) != len(bootstrap_failures)
             or len({item.support_id for item in supports}) != len(supports)
             or len({item.hypothesis_id for item in hypotheses}) != len(hypotheses)
@@ -406,7 +495,7 @@ def fci_discovery_stage(
             )
             hypotheses.extend(frozen.hypotheses)
             discovery_failures.extend(frozen.failures)
-        return (
+        bundle = (
             tuple(sorted(knowledge_records, key=lambda item: item.table_id)),
             tuple(sorted(reference_pags, key=lambda item: item.table_id)),
             tuple(sorted(draws, key=_ordered_draw_key)),
@@ -428,6 +517,19 @@ def fci_discovery_stage(
                 )
             ),
         )
+        _validate_discovery_bundle(
+            snapshot=snapshot,
+            config=config,
+            knowledge_records=bundle[0],
+            reference_pags=bundle[1],
+            draws=bundle[2],
+            bootstrap_pags=bundle[3],
+            bootstrap_failures=bundle[4],
+            supports=bundle[5],
+            hypotheses=bundle[6],
+            discovery_failures=bundle[7],
+        )
+        return bundle
 
     producer_outputs = {
         "assemble-causal-tables": causal_paths,

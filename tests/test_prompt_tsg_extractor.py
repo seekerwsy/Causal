@@ -295,11 +295,11 @@ def test_unknown_language_marks_in_scope_finite_features_unresolved(
     assert not _feature_structure(graph, safety.feature_id)
 
 
-def test_features_without_finite_terms_are_unresolved_not_invented_absent() -> None:
+def test_reviewed_presentation_terms_make_ordinary_prompt_explicitly_absent() -> None:
     graph = record_to_multidigraph(extract_prompt_tsg(_prompt("Open a user-provided file path.")))
 
-    assert feature_state(graph, "presentation.noop_rewrite") is FeatureState.UNRESOLVED
-    assert feature_state(graph, "presentation.matched_control") is FeatureState.UNRESOLVED
+    assert feature_state(graph, "presentation.noop_rewrite") is FeatureState.ABSENT
+    assert feature_state(graph, "presentation.matched_control") is FeatureState.ABSENT
 
 
 def test_out_of_scope_terms_remain_not_applicable_and_output_is_deterministic() -> None:

@@ -29,8 +29,6 @@ CLI_COMMANDS = [
     "import-generation",
     "run-oracle",
     "discover",
-    "confirm",
-    "report",
     "run-all",
 ]
 

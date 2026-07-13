@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from secaware.causal.table_builder import build_local_tables, validate_local_table_bundle
-from secaware.causal.variable_catalog import OBSERVATIONAL_CAUSAL_VARIABLES
+from secaware.causal.variable_catalog import PROMPT_CAUSAL_VARIABLES
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.factory import extraction_policy
@@ -197,7 +197,7 @@ def assemble_causal_tables_stage(
             discover_prompts,
             discover_graphs,
             discover_oracles,
-            OBSERVATIONAL_CAUSAL_VARIABLES,
+            PROMPT_CAUSAL_VARIABLES,
             max_variables=config.discovery.max_variables,
             max_rows=config.discovery.max_rows,
             min_independent_tasks=config.discovery.min_independent_tasks,

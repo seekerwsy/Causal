@@ -241,10 +241,26 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.SECURITY_ASSUMPTION,),
         terms=("expected to pass", "expected to fail"),
     ),
-    _feature("presentation.noop_rewrite", FeatureFamily.PRESENTATION_CONTROL),
-    _feature("presentation.length_matched_placebo", FeatureFamily.PRESENTATION_CONTROL),
-    _feature("presentation.sham_edit", FeatureFamily.PRESENTATION_CONTROL),
-    _feature("presentation.matched_control", FeatureFamily.PRESENTATION_CONTROL),
+    _feature(
+        "presentation.noop_rewrite",
+        FeatureFamily.PRESENTATION_CONTROL,
+        terms=("no-op rewrite", "noop rewrite", "no op rewrite"),
+    ),
+    _feature(
+        "presentation.length_matched_placebo",
+        FeatureFamily.PRESENTATION_CONTROL,
+        terms=("length-matched placebo", "length matched placebo"),
+    ),
+    _feature(
+        "presentation.sham_edit",
+        FeatureFamily.PRESENTATION_CONTROL,
+        terms=("sham edit",),
+    ),
+    _feature(
+        "presentation.matched_control",
+        FeatureFamily.PRESENTATION_CONTROL,
+        terms=("matched control",),
+    ),
 )
 
 

@@ -122,8 +122,27 @@ def test_heuristic_and_two_arm_commands_are_not_cli_reachable() -> None:
     assert help_result.exit_code == 0
     assert "discover_hypotheses" not in source
     assert "tsg-qcd" not in help_result.output.casefold()
-    assert "intervene" not in {item.name for item in app.registered_commands}
-    assert "generate-counterfactual" not in {item.name for item in app.registered_commands}
+    registered = {item.name for item in app.registered_commands}
+    assert {
+        "confirm",
+        "report",
+        "intervene",
+        "generate-counterfactual",
+    }.isdisjoint(registered)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ("plan-generation", "generate", "import-generation", "run-oracle"),
+)
+def test_generic_cli_rejects_counterfactual_condition(command: str) -> None:
+    arguments = [command, "--condition", "counterfactual", "--config", "missing.yaml"]
+    if command == "import-generation":
+        arguments.extend(("--results", "missing.jsonl"))
+    result = CliRunner().invoke(app, arguments)
+
+    assert result.exit_code == int(ErrorCode.CONFIG)
+    assert "only the observed condition is reachable" in result.output
 
 
 def test_fci_stage_commits_reference_bootstrap_support_and_freeze(
@@ -261,6 +280,119 @@ def test_fci_force_failure_restores_the_complete_committed_bundle(
     assert manifest_path.read_bytes() == manifest_before
 
 
+def test_fci_middle_output_install_failure_rolls_back_complete_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stages.fci_discovery as stage_module
+    from secaware.io.transaction import ArtifactTransaction, TransactionStateError
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    stage_module.fci_discovery_stage(config, store, force=False, runner=_StablePathRunner())
+    paths = tuple(
+        store.path("discovery", name) for name, _model in stage_module.FCI_DISCOVERY_OUTPUTS
+    )
+    before = tuple(path.read_bytes() for path in paths)
+    manifest_path = store.path(".stages", "fci-discovery.json")
+    manifest_before = manifest_path.read_bytes()
+    real_install = ArtifactTransaction.install
+
+    def fail_middle(self: ArtifactTransaction, index: int, candidate: Path) -> None:
+        if index == 4:
+            raise TransactionStateError
+        real_install(self, index, candidate)
+
+    monkeypatch.setattr(ArtifactTransaction, "install", fail_middle)
+
+    with pytest.raises(SecAwareError, match="could not be committed"):
+        stage_module.fci_discovery_stage(
+            config,
+            store,
+            force=True,
+            runner=_StablePathRunner(),
+        )
+
+    assert tuple(path.read_bytes() for path in paths) == before
+    assert manifest_path.read_bytes() == manifest_before
+
+
+def test_fci_stage_rejects_unknown_global_failure_association_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stages.fci_discovery as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    real_freeze = stage_module.freeze_hypotheses
+
+    def inject_unknown_failure(**kwargs: object):
+        frozen = real_freeze(**kwargs)  # type: ignore[arg-type]
+        failure = frozen.failures[0]
+        unknown = DiscoveryFailureRecord.from_content(
+            **failure.model_dump(mode="python", exclude={"failure_id", "table_id"}),
+            table_id=f"table_{'a' * 64}",
+        )
+        return type(frozen)(
+            hypotheses=frozen.hypotheses,
+            failures=(*frozen.failures, unknown),
+            freeze_batch_sha256=frozen.freeze_batch_sha256,
+        )
+
+    monkeypatch.setattr(stage_module, "freeze_hypotheses", inject_unknown_failure)
+
+    with pytest.raises(SecAwareError, match="readback validation"):
+        stage_module.fci_discovery_stage(
+            config,
+            store,
+            force=False,
+            runner=_NoPathRunner(),
+        )
+
+    assert not store.path(".stages", "fci-discovery.json").exists()
+    assert not any(
+        store.path("discovery", name).exists()
+        for name, _model in stage_module.FCI_DISCOVERY_OUTPUTS
+    )
+
+
+def test_fci_stage_rejects_failure_provenance_mismatch_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stages.fci_discovery as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    real_freeze = stage_module.freeze_hypotheses
+
+    def inject_mismatch(**kwargs: object):
+        frozen = real_freeze(**kwargs)  # type: ignore[arg-type]
+        failure = frozen.failures[0]
+        mismatched = DiscoveryFailureRecord.from_content(
+            **failure.model_dump(mode="python", exclude={"failure_id", "scope_id"}),
+            scope_id="scope.mismatched",
+        )
+        return type(frozen)(
+            hypotheses=frozen.hypotheses,
+            failures=(mismatched,),
+            freeze_batch_sha256=frozen.freeze_batch_sha256,
+        )
+
+    monkeypatch.setattr(stage_module, "freeze_hypotheses", inject_mismatch)
+
+    with pytest.raises(SecAwareError, match="readback validation"):
+        stage_module.fci_discovery_stage(
+            config,
+            store,
+            force=False,
+            runner=_NoPathRunner(),
+        )
+
+    assert not store.path(".stages", "fci-discovery.json").exists()
+
+
 def test_fci_skip_uses_manifest_but_library_drift_forces_reexecution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -281,6 +413,34 @@ def test_fci_skip_uses_manifest_but_library_drift_forces_reexecution(
     ).status.value == "ready"
 
     monkeypatch.setattr(contracts.importlib.metadata, "version", lambda _name: "drifted")
+    with pytest.raises(SecAwareError, match="reference FCI run failed"):
+        fci_discovery_stage(
+            config,
+            store,
+            force=False,
+            runner=_ReferenceCrashRunner(),
+        )
+
+
+def test_fci_config_schema_drift_invalidates_manifest_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stage_contracts as contracts
+    from secaware.pipeline.stages.fci_discovery import fci_discovery_stage
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    fci_discovery_stage(config, store, force=False, runner=_StablePathRunner())
+    real_schema_sha256 = contracts._schema_sha256
+
+    def drift_config_schema(model: type) -> str:
+        if model is FCIDiscoveryConfig:
+            return "0" * 64
+        return real_schema_sha256(model)
+
+    monkeypatch.setattr(contracts, "_schema_sha256", drift_config_schema)
+
     with pytest.raises(SecAwareError, match="reference FCI run failed"):
         fci_discovery_stage(
             config,
