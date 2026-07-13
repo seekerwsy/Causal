@@ -150,6 +150,29 @@ class _AuthenticatedMatrix:
     matrix_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class BootstrapDrawReplay:
+    """One deterministic Task-5 draw and its authenticated matrix commitment."""
+
+    draw: BootstrapDrawRecord
+    matrix_sha256: str
+
+    def __post_init__(self) -> None:
+        try:
+            draw = BootstrapDrawRecord.model_validate(self.draw)
+            if (
+                draw.run_kind is not PAGRunKind.OBSERVATIONAL_BOOTSTRAP
+                or draw.replicate_index is None
+                or len(self.matrix_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in self.matrix_sha256)
+            ):
+                raise ValueError
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise _bootstrap_error("bootstrap replay failed validation") from None
+
+
 class _InvalidPAG(Exception):
     pass
 
@@ -468,6 +491,37 @@ def authenticated_matrix_from_draw(
     return _authenticated_matrix_from_draw(table, rows, draw).matrix
 
 
+def replay_bootstrap_draws(
+    table: CausalTableRecord,
+    rows: Sequence[CausalObservationRecord],
+    global_seed: int,
+    bootstrap_samples: int,
+) -> tuple[BootstrapDrawReplay, ...]:
+    """Authenticate a bundle once and replay its complete deterministic denominator."""
+    bundle = _authenticate_bundle(table, rows)
+    try:
+        checked_seed = _checked_global_seed(global_seed)
+        if type(bootstrap_samples) is not int or not 1 <= bootstrap_samples <= _MAX_REPLICATES:
+            raise ValueError
+        result: list[BootstrapDrawReplay] = []
+        for replicate in range(bootstrap_samples):
+            draw = _bootstrap_draw_from_bundle(bundle, checked_seed, replicate)
+            authenticated = _authenticated_matrix_from_bundle(bundle, draw)
+            result.append(
+                BootstrapDrawReplay(
+                    draw=draw,
+                    matrix_sha256=authenticated.matrix_sha256,
+                )
+            )
+        return tuple(result)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _bootstrap_error("bootstrap replay failed validation") from None
+
+
 def _matrix_digest(
     table: CausalTableRecord,
     draw: BootstrapDrawRecord,
@@ -673,11 +727,13 @@ def run_task_cluster_fci_bootstrap(
 
 
 __all__ = [
+    "BootstrapDrawReplay",
     "BootstrapReplicateResult",
     "TaskClusterFCIBootstrapResult",
     "authenticated_matrix_from_draw",
     "build_bootstrap_draw",
     "build_reference_draw",
     "run_task_cluster_fci_bootstrap",
+    "replay_bootstrap_draws",
     "sampling_frame_sha256",
 ]

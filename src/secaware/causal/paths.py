@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from secaware.causal.background import validate_pag_against_background
+from secaware.causal.bootstrap import BootstrapDrawReplay, replay_bootstrap_draws
 from secaware.causal.variable_catalog import (
     CWE_SECURITY_OUTCOME,
     PRIMARY_OUTCOME,
@@ -19,6 +20,7 @@ from secaware.schema.causal import (
     BootstrapFailureRecord,
     BootstrapPAGRecord,
     CausalTableRecord,
+    CausalObservationRecord,
     EndpointMark,
     PAGEdgeRecord,
     PAGRecord,
@@ -214,12 +216,16 @@ def _validate_support_coordinates(
     bootstrap_draws: tuple[BootstrapDrawRecord, ...],
     bootstrap_pags: tuple[BootstrapPAGRecord, ...],
     bootstrap_failures: tuple[BootstrapFailureRecord, ...],
+    expected_replays: tuple[BootstrapDrawReplay, ...],
 ) -> str:
     config_sha256 = canonical_sha256(config.model_dump(mode="json"))
     variable_ids = tuple(item.variable_id for item in table.variables)
     if (
         reference_pag.run_kind is not PAGRunKind.OBSERVATIONAL_REFERENCE
         or reference_pag.table_id != table.table_id
+        or reference_pag.backend != config.backend
+        or reference_pag.backend_version != config.backend_version
+        or reference_pag.ci_test != config.ci_test
         or reference_pag.variable_ids != variable_ids
         or reference_pag.config_sha256 != config_sha256
         or reference_pag.background_knowledge_sha256 != knowledge.knowledge_sha256
@@ -227,6 +233,7 @@ def _validate_support_coordinates(
         or len(bootstrap_draws) != config.bootstrap_samples
         or tuple(item.replicate_index for item in bootstrap_draws)
         != tuple(range(config.bootstrap_samples))
+        or bootstrap_draws != tuple(item.draw for item in expected_replays)
         or any(
             draw.table_id != table.table_id
             or draw.run_kind is not PAGRunKind.OBSERVATIONAL_BOOTSTRAP
@@ -245,8 +252,12 @@ def _validate_support_coordinates(
             or not 0 <= index < config.bootstrap_samples
             or envelope.table_id != table.table_id
             or envelope.draw_id != bootstrap_draws[index].draw_id
+            or envelope.matrix_sha256 != expected_replays[index].matrix_sha256
             or pag.run_kind is not PAGRunKind.OBSERVATIONAL_BOOTSTRAP
             or pag.table_id != table.table_id
+            or pag.backend != config.backend
+            or pag.backend_version != config.backend_version
+            or pag.ci_test != config.ci_test
             or pag.variable_ids != variable_ids
             or pag.config_sha256 != config_sha256
             or pag.background_knowledge_sha256 != knowledge.knowledge_sha256
@@ -273,6 +284,8 @@ def _validate_support_coordinates(
 def compute_bootstrap_path_support(
     *,
     table: CausalTableRecord,
+    observations: Sequence[CausalObservationRecord],
+    global_seed: int,
     knowledge: BackgroundKnowledgeRecord,
     config: FCIDiscoveryConfig,
     reference_pag: PAGRecord,
@@ -285,6 +298,12 @@ def compute_bootstrap_path_support(
         checked_table = CausalTableRecord.model_validate(table)
         checked_knowledge = BackgroundKnowledgeRecord.model_validate(knowledge)
         checked_config = FCIDiscoveryConfig.model_validate(config)
+        expected_replays = replay_bootstrap_draws(
+            table,
+            observations,
+            global_seed,
+            checked_config.bootstrap_samples,
+        )
         checked_reference = PAGRecord.model_validate(reference_pag)
         draws = tuple(BootstrapDrawRecord.model_validate(item) for item in bootstrap_draws)
         envelopes = tuple(BootstrapPAGRecord.model_validate(item) for item in bootstrap_pags)
@@ -297,6 +316,7 @@ def compute_bootstrap_path_support(
             bootstrap_draws=draws,
             bootstrap_pags=envelopes,
             bootstrap_failures=failures,
+            expected_replays=expected_replays,
         )
         references = enumerate_possible_prompt_paths(
             checked_reference,
