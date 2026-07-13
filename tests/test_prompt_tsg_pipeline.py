@@ -7,8 +7,10 @@ import pytest
 from typer.testing import CliRunner
 
 from secaware.cli import _prompt_records, app, extract_prompt_tsg_stage
-from secaware.config import load_config
+from secaware.config import AppConfig, TSGConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
+from secaware.extractors import factory as extractor_factory_module
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.io import run_store as run_store_module
@@ -30,6 +32,20 @@ from secaware.tsg.contract import (
 from secaware.extractors.factory import extraction_policy
 
 
+_TEST_LLM_COORDINATES = {
+    "provider": "openai_compatible",
+    "model_id": "prompt-stage-test-model",
+    "base_url": "https://prompt-stage.invalid/v1",
+    "api_key_env": "SECAWARE_PROMPT_STAGE_TEST_KEY",
+    "timeout_seconds": 30.0,
+    "max_attempts": 1,
+    "max_response_bytes": 262_144,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 0,
+}
+
+
 def _prepared_store(tmp_path: Path) -> tuple[object, RunStore]:
     config = load_config("configs/demo.yaml", run_dir=tmp_path / "run")
     store = RunStore(config)
@@ -42,6 +58,48 @@ def _prompt_extraction_outputs(store: RunStore) -> list[Path]:
         store.path("tsg", "prompt_extraction_proposals.jsonl"),
         store.path("tsg", "prompt_tsg.jsonl"),
     ]
+
+
+def _llm_config(
+    config: AppConfig,
+    backend: PromptExtractorBackend,
+) -> AppConfig:
+    payload = config.model_dump(mode="python", round_trip=True, warnings=False)
+    payload["tsg"] = {
+        "prompt_extractor": backend,
+        "llm": dict(_TEST_LLM_COORDINATES),
+    }
+    return AppConfig.model_validate(payload)
+
+
+class _DeterministicFactsTransport:
+    def __init__(self, prompts: tuple[object, ...]) -> None:
+        self.prompts = {prompt.prompt_id: prompt for prompt in prompts}  # type: ignore[attr-defined]
+        self.calls = 0
+        self.policy = extraction_policy(
+            TSGConfig(prompt_extractor=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1)
+        )
+
+    def complete(self, request_bytes: bytes, policy: object) -> bytes:
+        del policy
+        self.calls += 1
+        request = json.loads(request_bytes)
+        proposal = DeterministicCatalogExtractor().extract(
+            self.prompts[request["prompt_id"]],  # type: ignore[arg-type]
+            self.policy,
+        )
+        assert proposal.raw_response is not None
+        return proposal.raw_response.encode("utf-8")
+
+
+class _FailingTransport:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, request_bytes: bytes, policy: object) -> bytes:
+        del request_bytes, policy
+        self.calls += 1
+        raise RuntimeError("selected transport failed")
 
 
 def test_prompt_tsg_stage_records_catalog_bound_exact_v2_artifact(tmp_path: Path) -> None:
@@ -82,6 +140,59 @@ def test_prompt_extraction_stage_commits_exact_proposal_and_graph_coverage(
         "tsg/prompt_tsg.jsonl",
     ]
     assert manifest.policy_sha256 == extraction_policy(config.tsg).policy_sha256  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("force", [False, True], ids=["resume", "force"])
+def test_real_backend_drift_never_skips_or_mixes_extraction_records(
+    tmp_path: Path,
+    force: bool,
+) -> None:
+    original_config, original_store = _prepared_store(tmp_path)
+    run_prompt_extraction_stage(original_config, original_store, force=False)  # type: ignore[arg-type]
+    original_proposals = read_jsonl(
+        original_store.path("tsg", "prompt_extraction_proposals.jsonl"),
+        PromptExtractionProposalRecord,
+        required=True,
+        allow_empty=False,
+    )
+
+    facts_config = _llm_config(
+        original_config,  # type: ignore[arg-type]
+        PromptExtractorBackend.LLM_FACTS_V1,
+    )
+    facts_store = RunStore(facts_config)
+    facts_store.prepare()
+    prompts = tuple(_prompt_records(facts_store))
+    transport = _DeterministicFactsTransport(prompts)
+    run_prompt_extraction_stage(
+        facts_config,
+        facts_store,
+        force=force,
+        transport=transport,
+    )
+
+    proposals = read_jsonl(
+        facts_store.path("tsg", "prompt_extraction_proposals.jsonl"),
+        PromptExtractionProposalRecord,
+        required=True,
+        allow_empty=False,
+    )
+    graphs = read_jsonl(
+        facts_store.path("tsg", "prompt_tsg.jsonl"),
+        PromptTSGRecord,
+        required=True,
+        allow_empty=False,
+    )
+    current_policy = extraction_policy(facts_config.tsg)
+    assert transport.calls == len(prompts)
+    assert {item.backend for item in proposals} == {PromptExtractorBackend.LLM_FACTS_V1}
+    assert {item.extractor_backend for item in graphs} == {PromptExtractorBackend.LLM_FACTS_V1}
+    assert {item.policy_sha256 for item in proposals} == {current_policy.policy_sha256}
+    assert {item.extractor_policy_sha256 for item in graphs} == {current_policy.policy_sha256}
+    assert [item.proposal_id for item in proposals] == [item.proposal_id for item in graphs]
+    assert {item.proposal_id for item in proposals}.isdisjoint(
+        {item.proposal_id for item in original_proposals}
+    )
 
 
 def test_exact_coverage_rejects_omission_duplicate_extra_mixed_and_stale_records(
@@ -170,6 +281,111 @@ def test_prompt_extraction_force_failure_restores_both_artifacts_and_manifest(
     assert not store.stage_is_active("extract-prompt-tsg")
 
 
+@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+def test_post_install_canonical_readback_interrupt_restores_complete_prior_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    config, store = _prepared_store(tmp_path)
+    run_prompt_extraction_stage(config, store, force=False)  # type: ignore[arg-type]
+    outputs = _prompt_extraction_outputs(store)
+    manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    protected = (*outputs, manifest_path)
+    previous = tuple(path.read_bytes() for path in protected)
+    real_readback = jsonl_stage_module._read_jsonl_output
+    calls: list[Path] = []
+
+    def interrupt_post_install(
+        spec: object,
+        path: Path,
+        *,
+        stage: str,
+    ) -> object:
+        calls.append(path)
+        if len(calls) == len(outputs) + 1:
+            assert path == outputs[0]
+            assert all(output.exists() for output in outputs)
+            raise signal_type("post-install canonical readback interrupted")
+        return real_readback(spec, path, stage=stage)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(jsonl_stage_module, "_read_jsonl_output", interrupt_post_install)
+    with pytest.raises(signal_type):
+        run_prompt_extraction_stage(config, store, force=True)  # type: ignore[arg-type]
+
+    assert len(calls) == len(outputs) + 1
+    assert tuple(path.read_bytes() for path in protected) == previous
+    assert not store.path(".stages", ".extract-prompt-tsg.transaction.json").exists()
+    assert not list(store.root.rglob("*.recovery.backup"))
+    assert not list(store.path("tsg").glob(".*.stage.candidate"))
+    assert not store.stage_is_active("extract-prompt-tsg")
+
+
+@pytest.mark.parametrize(
+    "selected_backend",
+    [
+        PromptExtractorBackend.LLM_FACTS_V1,
+        PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+    ],
+)
+def test_real_factory_never_constructs_or_calls_fallback_after_selected_llm_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected_backend: PromptExtractorBackend,
+) -> None:
+    original_config, original_store = _prepared_store(tmp_path)
+    run_prompt_extraction_stage(original_config, original_store, force=False)  # type: ignore[arg-type]
+    outputs = _prompt_extraction_outputs(original_store)
+    manifest_path = original_store.path(".stages", "extract-prompt-tsg.json")
+    protected = (*outputs, manifest_path)
+    previous = tuple(path.read_bytes() for path in protected)
+
+    selected_config = _llm_config(original_config, selected_backend)  # type: ignore[arg-type]
+    selected_store = RunStore(selected_config)
+    selected_store.prepare()
+    unexpected = {"deterministic": 0, "facts": 0, "direct": 0}
+
+    def fail_if_constructed(name: str):
+        def constructor(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            unexpected[name] += 1
+            raise AssertionError(f"unexpected {name} fallback construction")
+
+        return constructor
+
+    monkeypatch.setattr(
+        extractor_factory_module,
+        "DeterministicCatalogExtractor",
+        fail_if_constructed("deterministic"),
+    )
+    if selected_backend is PromptExtractorBackend.LLM_FACTS_V1:
+        monkeypatch.setattr(
+            extractor_factory_module,
+            "LLMDirectGraphExtractor",
+            fail_if_constructed("direct"),
+        )
+    else:
+        monkeypatch.setattr(
+            extractor_factory_module,
+            "LLMFactsExtractor",
+            fail_if_constructed("facts"),
+        )
+    transport = _FailingTransport()
+
+    with pytest.raises(SecAwareError):
+        run_prompt_extraction_stage(
+            selected_config,
+            selected_store,
+            force=True,
+            transport=transport,
+        )
+
+    assert transport.calls == 1
+    assert unexpected == {"deterministic": 0, "facts": 0, "direct": 0}
+    assert tuple(path.read_bytes() for path in protected) == previous
+    assert not selected_store.stage_is_active("extract-prompt-tsg")
+
+
 def test_prompt_extraction_policy_drift_invalidates_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -224,6 +440,78 @@ def test_prompt_tsg_contract_digest_binds_extractor_schema_and_catalog_versions(
         != baseline
     )
     assert build_prompt_tsg_stage_contract_sha256(catalog_sha256="0" * 64) != baseline
+
+
+@pytest.mark.parametrize(
+    ("contract_field", "replacement"),
+    [
+        ("facts_template_sha256", "0" * 64),
+        ("facts_output_schema_sha256", "1" * 64),
+        ("direct_template_sha256", "2" * 64),
+        ("direct_output_schema_sha256", "3" * 64),
+    ],
+)
+def test_each_template_and_schema_digest_invalidates_records_and_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    contract_field: str,
+    replacement: str,
+) -> None:
+    config, store = _prepared_store(tmp_path)
+    run_prompt_extraction_stage(config, store, force=False)  # type: ignore[arg-type]
+    baseline = build_prompt_tsg_stage_contract_sha256()
+    changed = build_prompt_tsg_stage_contract_sha256(
+        **{contract_field: replacement},
+    )
+    assert changed != baseline
+
+    prompts = tuple(_prompt_records(store))
+    proposals = tuple(
+        read_jsonl(
+            store.path("tsg", "prompt_extraction_proposals.jsonl"),
+            PromptExtractionProposalRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    graphs = tuple(
+        read_jsonl(
+            store.path("tsg", "prompt_tsg.jsonl"),
+            PromptTSGRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    stale_proposals = tuple(
+        proposal.model_copy(update={"policy_sha256": changed}) for proposal in proposals
+    )
+    stale_graphs = tuple(
+        graph.model_copy(update={"extractor_policy_sha256": changed}) for graph in graphs
+    )
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_exact_extraction_coverage(
+            prompts,
+            stale_proposals,
+            stale_graphs,
+            extraction_policy(config.tsg),  # type: ignore[union-attr]
+        )
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+    monkeypatch.setattr(
+        run_store_module,
+        "PROMPT_TSG_STAGE_CONTRACT_SHA256",
+        changed,
+    )
+    assert not store.should_skip_stage(
+        "extract-prompt-tsg",
+        [store.path("inputs", "prompts.jsonl")],
+        _prompt_extraction_outputs(store),
+        force=False,
+        policy_sha256=extraction_policy(config.tsg).policy_sha256,  # type: ignore[union-attr]
+        catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
+        preserve_committed=True,
+    )
+    store.abort_stage("extract-prompt-tsg")
 
 
 def test_prompt_tsg_committed_output_rejects_catalog_mismatch(tmp_path: Path) -> None:

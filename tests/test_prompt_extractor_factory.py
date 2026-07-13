@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 import math
 
 import pytest
@@ -14,8 +14,12 @@ from secaware.extractors.factory import (
     extractor_for_config,
     structured_policy_for_config,
 )
-from secaware.extractors.llm_direct_graph import LLMDirectGraphExtractor
-from secaware.extractors.llm_facts import LLMFactsExtractor
+from secaware.extractors.llm_direct_graph import (
+    LLMDirectGraphExtractor,
+    llm_direct_graph_policy_sha256,
+)
+from secaware.extractors.llm_facts import LLMFactsExtractor, llm_facts_policy_sha256
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.prompt_extraction import MAX_RAW_RESPONSE_CHARS
 
@@ -207,3 +211,48 @@ def test_facts_and_direct_backends_select_distinct_template_and_schema_policies(
         "max_attempts",
         "max_response_bytes",
     }
+
+
+@pytest.mark.parametrize(
+    ("backend", "structured_field", "replacement"),
+    [
+        (PromptExtractorBackend.LLM_FACTS_V1, "system_template_sha256", "0" * 64),
+        (PromptExtractorBackend.LLM_FACTS_V1, "output_schema_sha256", "1" * 64),
+        (
+            PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+            "system_template_sha256",
+            "2" * 64,
+        ),
+        (
+            PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+            "output_schema_sha256",
+            "3" * 64,
+        ),
+    ],
+)
+def test_backend_policy_digest_changes_for_each_actual_template_and_schema_digest(
+    backend: PromptExtractorBackend,
+    structured_field: str,
+    replacement: str,
+) -> None:
+    config = _tsg(backend, llm=_llm_payload())
+    baseline_structured = structured_policy_for_config(config)
+    changed_structured = replace(
+        baseline_structured,
+        **{structured_field: replacement},
+    )
+    digest = (
+        llm_facts_policy_sha256
+        if backend is PromptExtractorBackend.LLM_FACTS_V1
+        else llm_direct_graph_policy_sha256
+    )
+
+    assert digest(
+        changed_structured,
+        PROMPT_FEATURE_CATALOG_SHA256,
+        MAX_RAW_RESPONSE_CHARS,
+    ) != digest(
+        baseline_structured,
+        PROMPT_FEATURE_CATALOG_SHA256,
+        MAX_RAW_RESPONSE_CHARS,
+    )
