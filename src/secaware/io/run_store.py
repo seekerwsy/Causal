@@ -507,6 +507,48 @@ class RunStore:
                 ) from None
         return inputs
 
+    def _stage_inputs_from_snapshot(
+        self,
+        paths: Sequence[str | Path],
+        input_sha256: Sequence[str],
+    ) -> dict[str, str]:
+        try:
+            digests = tuple(input_sha256)
+        except (TypeError, ValueError):
+            raise self._manifest_conflict(
+                "run_store",
+                "stage input snapshot is invalid",
+            ) from None
+        if len(digests) != len(paths):
+            raise self._manifest_conflict(
+                "run_store",
+                "stage input snapshot is invalid",
+            )
+        inputs: dict[str, str] = {}
+        for path_value, digest in zip(paths, digests, strict=True):
+            try:
+                relative_path = self._relative_path(
+                    Path(path_value),
+                    kind="input",
+                    allow_outside=True,
+                )
+            except SecAwareError:
+                raise self._manifest_conflict(
+                    "run_store",
+                    "stage input snapshot is invalid",
+                ) from None
+            if (
+                relative_path in inputs
+                or type(digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                raise self._manifest_conflict(
+                    "run_store",
+                    "stage input snapshot is invalid",
+                )
+            inputs[relative_path] = digest
+        return inputs
+
     def _fingerprint_from_inputs(
         self,
         stage: str,
@@ -776,6 +818,7 @@ class RunStore:
         catalog_sha256: str | None = None,
         preserve_committed: bool = False,
         after_lease_acquired: Callable[[], None] | None = None,
+        input_snapshot: Callable[[], Sequence[str]] | None = None,
     ) -> bool:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
         catalog_sha256 = self._catalog_binding(stage, catalog_sha256)
@@ -795,6 +838,8 @@ class RunStore:
             raise self._manifest_conflict(stage, "stage transaction mode is invalid")
         if after_lease_acquired is not None and not callable(after_lease_acquired):
             raise self._manifest_conflict(stage, "stage lease action is invalid")
+        if input_snapshot is not None and not callable(input_snapshot):
+            raise self._manifest_conflict(stage, "stage input snapshot is invalid")
         if (
             stage in self._pending_snapshots
             or stage in self._sealed_outputs
@@ -809,7 +854,11 @@ class RunStore:
             outputs = [Path(path) for path in output_paths]
             relative_outputs = [self._relative_path(path, kind="output") for path in outputs]
             self._validate_stage_output_contract(stage, relative_outputs)
-            inputs = self.stage_inputs(input_paths)
+            inputs = (
+                self.stage_inputs(input_paths)
+                if input_snapshot is None
+                else self._stage_inputs_from_snapshot(input_paths, input_snapshot())
+            )
             config = self.config.model_dump(mode="json")
             fingerprint = self._fingerprint_from_inputs(
                 stage,
@@ -981,6 +1030,7 @@ class RunStore:
         policy_sha256: str | None = None,
         catalog_sha256: str | None = None,
         lease: StageCommitLease | None = None,
+        input_snapshot_sha256: Sequence[str] | None = None,
     ) -> None:
         trusted_lease: StageCommitLease | None = None
         if lease is not None:
@@ -1004,6 +1054,7 @@ class RunStore:
                 output_paths,
                 policy_sha256=policy_sha256,
                 catalog_sha256=catalog_sha256,
+                input_snapshot_sha256=input_snapshot_sha256,
             )
             recorded = True
             if trusted_lease is not None:
@@ -1022,6 +1073,7 @@ class RunStore:
         *,
         policy_sha256: str | None,
         catalog_sha256: str | None,
+        input_snapshot_sha256: Sequence[str] | None,
     ) -> None:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
         catalog_sha256 = self._catalog_binding(stage, catalog_sha256)
@@ -1067,12 +1119,13 @@ class RunStore:
                 "stage was not preceded by an execution snapshot",
             )
         try:
-            inputs = self.stage_inputs(input_paths)
-        except SecAwareError:
-            self._reject_stage_record(
-                stage,
-                "stage inputs changed during execution",
+            inputs = (
+                self.stage_inputs(input_paths)
+                if input_snapshot_sha256 is None
+                else self._stage_inputs_from_snapshot(input_paths, input_snapshot_sha256)
             )
+        except SecAwareError:
+            self._reject_stage_record(stage, "stage inputs changed during execution")
         config = self.config.model_dump(mode="json")
         current_config_sha256 = canonical_sha256(config)
         current_fingerprint = self._fingerprint_from_inputs(

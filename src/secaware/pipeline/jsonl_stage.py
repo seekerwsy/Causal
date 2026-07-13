@@ -33,6 +33,8 @@ class JsonlOutputSpec:
 
 
 BuildRecords = Callable[[], Sequence[Sequence[BaseModel | dict[str, object]]]]
+CaptureInputSnapshot = Callable[[], Sequence[str]]
+VerifyInputSnapshot = Callable[[], None]
 
 
 def _stage_error(code: ErrorCode, stage: str, message: str) -> SecAwareError:
@@ -165,12 +167,23 @@ def execute_jsonl_stage_transaction(
     build: BuildRecords,
     policy_sha256: str | None = None,
     catalog_sha256: str | None = None,
+    capture_input_snapshot: CaptureInputSnapshot | None = None,
+    verify_input_snapshot: VerifyInputSnapshot | None = None,
 ) -> None:
     if not outputs:
         raise SecAwareError(
             code=ErrorCode.CONTRACT,
             stage=stage,
             message="stage output transaction is invalid",
+        )
+    if (capture_input_snapshot is None) != (verify_input_snapshot is None) or (
+        capture_input_snapshot is not None
+        and (not callable(capture_input_snapshot) or not callable(verify_input_snapshot))
+    ):
+        raise SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage=stage,
+            message="stage input snapshot contract is invalid",
         )
     _execute_transaction_body(
         store=store,
@@ -181,6 +194,8 @@ def execute_jsonl_stage_transaction(
         build=build,
         policy_sha256=policy_sha256,
         catalog_sha256=catalog_sha256,
+        capture_input_snapshot=capture_input_snapshot,
+        verify_input_snapshot=verify_input_snapshot,
     )
 
 
@@ -194,6 +209,8 @@ def _execute_transaction_body(
     build: BuildRecords,
     policy_sha256: str | None,
     catalog_sha256: str | None,
+    capture_input_snapshot: CaptureInputSnapshot | None,
+    verify_input_snapshot: VerifyInputSnapshot | None,
 ) -> None:
     output_paths = tuple(output.path for output in outputs)
     manifest_path = store.path(".stages", f"{stage}.json")
@@ -231,6 +248,19 @@ def _execute_transaction_body(
         if stale_control is not None:
             raise stale_control
 
+    captured_input_sha256: tuple[str, ...] | None = None
+
+    def capture_snapshot_once() -> tuple[str, ...]:
+        nonlocal captured_input_sha256
+        if capture_input_snapshot is None or captured_input_sha256 is not None:
+            raise _stage_error(
+                ErrorCode.CONTRACT,
+                stage,
+                "stage input snapshot contract is invalid",
+            )
+        captured_input_sha256 = tuple(capture_input_snapshot())
+        return captured_input_sha256
+
     if store.should_skip_stage(
         stage,
         inputs,
@@ -240,6 +270,7 @@ def _execute_transaction_body(
         catalog_sha256=catalog_sha256,
         preserve_committed=True,
         after_lease_acquired=recover_or_cleanup_transaction,
+        input_snapshot=(capture_snapshot_once if capture_input_snapshot is not None else None),
     ):
         return
 
@@ -314,6 +345,14 @@ def _execute_transaction_body(
                     "stage artifact failed canonical readback",
                 )
         store.verify_sealed_outputs(stage, output_paths)
+        if verify_input_snapshot is not None:
+            if captured_input_sha256 is None:
+                raise _stage_error(
+                    ErrorCode.CONTRACT,
+                    stage,
+                    "stage input snapshot contract is invalid",
+                )
+            verify_input_snapshot()
         stage_commit_lease = store.begin_stage_commit(stage)
         store.record_stage(
             stage,
@@ -322,6 +361,7 @@ def _execute_transaction_body(
             policy_sha256=policy_sha256,
             catalog_sha256=catalog_sha256,
             lease=stage_commit_lease,
+            input_snapshot_sha256=captured_input_sha256,
         )
         try:
             transaction.mark_postcommit()
@@ -374,6 +414,8 @@ def _execute_transaction_body(
 
 __all__ = [
     "BuildRecords",
+    "CaptureInputSnapshot",
     "JsonlOutputSpec",
+    "VerifyInputSnapshot",
     "execute_jsonl_stage_transaction",
 ]

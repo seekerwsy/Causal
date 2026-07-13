@@ -195,6 +195,66 @@ def test_real_backend_drift_never_skips_or_mixes_extraction_records(
     )
 
 
+def test_complete_llm_resume_skips_without_constructing_backend_or_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_config, original_store = _prepared_store(tmp_path)
+    facts_config = _llm_config(
+        original_config,  # type: ignore[arg-type]
+        PromptExtractorBackend.LLM_FACTS_V1,
+    )
+    facts_store = RunStore(facts_config)
+    facts_store.prepare()
+    prompts = tuple(_prompt_records(facts_store))
+    transport = _DeterministicFactsTransport(prompts)
+    run_prompt_extraction_stage(
+        facts_config,
+        facts_store,
+        force=False,
+        transport=transport,
+    )
+    assert transport.calls == len(prompts)
+
+    calls = {"transport": 0, "extractor": 0, "complete": 0}
+
+    class UnexpectedTransport:
+        def complete(self, request_bytes: bytes, policy: object) -> bytes:
+            del request_bytes, policy
+            calls["complete"] += 1
+            raise AssertionError("skipped transport was called")
+
+    def construct_transport(*args: object, **kwargs: object) -> UnexpectedTransport:
+        del args, kwargs
+        calls["transport"] += 1
+        return UnexpectedTransport()
+
+    def construct_extractor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls["extractor"] += 1
+        raise AssertionError("skipped extractor was constructed")
+
+    monkeypatch.delenv(_TEST_LLM_COORDINATES["api_key_env"], raising=False)
+    monkeypatch.setattr(
+        extractor_factory_module,
+        "OpenAICompatibleStructuredTransport",
+        construct_transport,
+    )
+    monkeypatch.setattr(
+        extractor_factory_module,
+        "LLMFactsExtractor",
+        construct_extractor,
+    )
+
+    run_prompt_extraction_stage(
+        facts_config,
+        RunStore(facts_config),
+        force=False,
+    )
+
+    assert calls == {"transport": 0, "extractor": 0, "complete": 0}
+
+
 def test_exact_coverage_rejects_omission_duplicate_extra_mixed_and_stale_records(
     tmp_path: Path,
 ) -> None:
@@ -278,6 +338,113 @@ def test_prompt_extraction_force_failure_restores_both_artifacts_and_manifest(
 
     assert calls == ["selected-backend"]
     assert tuple(path.read_bytes() for path in paths) == previous
+    assert not store.stage_is_active("extract-prompt-tsg")
+
+
+def test_prompt_input_aba_rewrite_fails_closed_and_restores_prior_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from secaware.pipeline.stages import prompt_extraction as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    run_prompt_extraction_stage(config, store, force=False)  # type: ignore[arg-type]
+    input_path = store.path("inputs", "prompts.jsonl")
+    outputs = _prompt_extraction_outputs(store)
+    manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    protected = (*outputs, manifest_path)
+    previous = tuple(path.read_bytes() for path in protected)
+    original_input = input_path.read_bytes()
+    changed_records = [
+        json.loads(line) for line in original_input.decode("utf-8").splitlines() if line.strip()
+    ]
+    changed_records[0]["prompt"] += " Include the file metadata in the return value."
+    changed_input = (
+        "\n".join(
+            json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            for record in changed_records
+        )
+        + "\n"
+    ).encode("utf-8")
+    assert changed_input != original_input
+
+    real_begin = jsonl_stage_module.ArtifactTransaction.begin
+    real_factory = stage_module.extractor_for_config
+    write_changed = threading.Event()
+    changed_written = threading.Event()
+    write_original = threading.Event()
+    original_written = threading.Event()
+    writer_errors: list[BaseException] = []
+    restored = False
+
+    def external_writer() -> None:
+        nonlocal restored
+        try:
+            if not write_changed.wait(timeout=5):
+                raise AssertionError("external rewrite was not requested")
+            input_path.write_bytes(changed_input)
+            changed_written.set()
+            if not write_original.wait(timeout=5):
+                raise AssertionError("external restore was not requested")
+            input_path.write_bytes(original_input)
+            restored = True
+        except BaseException as error:
+            writer_errors.append(error)
+        finally:
+            changed_written.set()
+            original_written.set()
+
+    writer = threading.Thread(target=external_writer, daemon=True)
+    writer.start()
+
+    def begin_with_external_rewrite(
+        journal_path: Path,
+        artifacts: tuple[object, ...],
+    ) -> object:
+        transaction = real_begin(journal_path, artifacts)  # type: ignore[arg-type]
+        write_changed.set()
+        if not changed_written.wait(timeout=5) or writer_errors:
+            raise AssertionError("external rewrite failed")
+        return transaction
+
+    class RestoringExtractor:
+        def __init__(self, nested: object) -> None:
+            self.nested = nested
+
+        def extract(self, prompt: object, policy: object) -> object:
+            if not restored:
+                write_original.set()
+                if not original_written.wait(timeout=5) or writer_errors:
+                    raise AssertionError("external restore failed")
+            return self.nested.extract(prompt, policy)  # type: ignore[attr-defined]
+
+    def construct_restoring_extractor(*args: object, **kwargs: object) -> RestoringExtractor:
+        return RestoringExtractor(real_factory(*args, **kwargs))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        jsonl_stage_module.ArtifactTransaction,
+        "begin",
+        staticmethod(begin_with_external_rewrite),
+    )
+    monkeypatch.setattr(stage_module, "extractor_for_config", construct_restoring_extractor)
+
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_prompt_extraction_stage(config, store, force=True)  # type: ignore[arg-type]
+    finally:
+        write_changed.set()
+        write_original.set()
+        writer.join(timeout=5)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert not writer.is_alive()
+    assert not writer_errors
+    assert restored
+    assert input_path.read_bytes() == original_input
+    assert tuple(path.read_bytes() for path in protected) == previous
+    assert not store.path(".stages", ".extract-prompt-tsg.transaction.json").exists()
+    assert not list(store.root.rglob("*.recovery.backup"))
+    assert not list(store.path("tsg").glob(".*.stage.candidate"))
     assert not store.stage_is_active("extract-prompt-tsg")
 
 
@@ -521,7 +688,7 @@ def test_prompt_tsg_committed_output_rejects_catalog_mismatch(tmp_path: Path) ->
     with pytest.raises(SecAwareError) as exc_info:
         with store.hold_committed_output(
             "extract-prompt-tsg",
-            [store.path("tsg", "prompt_tsg.jsonl")],
+            _prompt_extraction_outputs(store),
             expected_catalog_sha256="0" * 64,
         ):
             pytest.fail("catalog mismatch was accepted")
@@ -571,7 +738,7 @@ def test_prompt_tsg_committed_output_rejects_real_output_tamper(tmp_path: Path) 
     with pytest.raises(SecAwareError) as exc_info:
         with store.hold_committed_output(
             "extract-prompt-tsg",
-            [output],
+            _prompt_extraction_outputs(store),
             expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
         ):
             pytest.fail("tampered Prompt TSG output was accepted")
