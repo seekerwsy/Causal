@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -19,6 +20,19 @@ from secaware.io.jsonl import read_jsonl
 from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
+from secaware.pipeline import artifact as artifact_module
+from secaware.pipeline.stages import fci_discovery as fci_stage_module
+from secaware.config import FCIDiscoveryConfig
+from secaware.schema.causal import (
+    BackgroundKnowledgeRecord,
+    BootstrapDrawRecord,
+    CausalTableRecord,
+    EndpointMark,
+    FrozenHypothesisRecord,
+    PAGEdgeRecord,
+    PAGRecord,
+    PAGRunKind,
+)
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.oracle import OracleRecord
 from secaware.schema.features import PromptExtractorBackend
@@ -321,6 +335,43 @@ class _RunAllOracleRunner:
         return AnalyzerProcessResult(0, json.dumps(payload).encode(), "a" * 64)
 
 
+class _RunAllFCIRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, PAGRunKind]] = []
+
+    def run(
+        self,
+        matrix: np.ndarray,
+        table: CausalTableRecord,
+        knowledge: BackgroundKnowledgeRecord,
+        config: FCIDiscoveryConfig,
+        run_kind: PAGRunKind,
+    ) -> PAGRecord:
+        assert matrix.shape == (table.independent_task_count, len(table.variables))
+        self.calls.append((table.table_id, run_kind))
+        variables = tuple(item.variable_id for item in table.variables)
+        target = "x.safety.generic_security_reminder"
+        assert target in variables
+        return PAGRecord.from_content(
+            run_kind=run_kind,
+            table_id=table.table_id,
+            backend=config.backend,
+            backend_version=config.backend_version,
+            ci_test=config.ci_test,
+            config_sha256=artifact_module.canonical_sha256(config.model_dump(mode="json")),
+            background_knowledge_sha256=knowledge.knowledge_sha256,
+            variable_ids=variables,
+            edges=(
+                PAGEdgeRecord(
+                    left=target,
+                    right="y.secure_functional",
+                    left_mark=EndpointMark.TAIL,
+                    right_mark=EndpointMark.ARROW,
+                ),
+            ),
+        )
+
+
 def test_run_all_demo_uses_canonical_oracle_end_to_end(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -331,6 +382,8 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     monkeypatch.setattr(cli_module, "validate_analyzer_runtime", lambda: None)
     monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    fci_runner = _RunAllFCIRunner()
+    monkeypatch.setattr(fci_stage_module, "SpawnedFCIRunner", lambda: fci_runner)
 
     def reject_llm_transport(**_kwargs: object) -> None:
         pytest.fail("offline deterministic demo must not construct an LLM transport")
@@ -347,14 +400,9 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     )
 
     assert result.exit_code == 0, result.output
+    assert "SecAware discovery complete" in result.output
     observed = read_jsonl(
         run_dir / "oracle" / "observed_oracle.jsonl",
-        OracleRecord,
-        required=True,
-        allow_empty=False,
-    )
-    counterfactual = read_jsonl(
-        run_dir / "oracle" / "counterfactual_oracle.jsonl",
         OracleRecord,
         required=True,
         allow_empty=False,
@@ -365,13 +413,7 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         required=True,
         allow_empty=False,
     )
-    counterfactual_code = read_jsonl(
-        run_dir / "generation" / "counterfactual_code.jsonl",
-        CanonicalGeneratedCodeRecord,
-        required=True,
-        allow_empty=False,
-    )
-    assert observed and counterfactual
+    assert observed and observed_code
     proposals = read_jsonl(
         run_dir / "tsg" / "prompt_extraction_proposals.jsonl",
         PromptExtractionProposalRecord,
@@ -383,147 +425,37 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
     }
     assert "OPENAI_API_KEY" not in os.environ
-    interventions = read_jsonl(
+    tables = read_jsonl(
+        run_dir / "discovery" / "causal_tables.jsonl",
+        CausalTableRecord,
+        required=True,
+        allow_empty=False,
+    )
+    draws = read_jsonl(
+        run_dir / "discovery" / "bootstrap_draws.jsonl",
+        BootstrapDrawRecord,
+        required=True,
+        allow_empty=False,
+    )
+    hypotheses = read_jsonl(
+        run_dir / "discovery" / "hypotheses_frozen.jsonl",
+        FrozenHypothesisRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert len(tables) == 3
+    assert len(hypotheses) == 3
+    assert len(draws) == len(tables) * (1 + 20)
+    assert len(fci_runner.calls) == len(tables) * (1 + 20)
+    assert read_stage_manifest(run_dir / ".stages" / "run-oracle-observed.json").policy_sha256
+    for absent in (
+        run_dir / "oracle" / "counterfactual_oracle.jsonl",
+        run_dir / "generation" / "counterfactual_code.jsonl",
         run_dir / "interventions" / "interventions.jsonl",
-        InterventionRecord,
-        required=True,
-        allow_empty=False,
-    )
-    pairs = read_jsonl(
         run_dir / "analysis" / "pair_results.jsonl",
-        PairResult,
-        required=True,
-        allow_empty=False,
-    )
-    _assert_pair_security_matches_oracle(
-        pairs,
-        observed,
-        counterfactual,
-        interventions,
-        observed_code,
-        counterfactual_code,
-    )
-    hardcoded_secure = [
-        pair.model_copy(update={"security_observed": "secure", "security_counterfactual": "secure"})
-        for pair in pairs
-    ]
-    swapped = [
-        pair.model_copy(
-            update={
-                "security_observed": pair.security_counterfactual,
-                "security_counterfactual": pair.security_observed,
-            }
-        )
-        for pair in pairs
-    ]
-    with pytest.raises(AssertionError):
-        _assert_pair_security_matches_oracle(
-            hardcoded_secure,
-            observed,
-            counterfactual,
-            interventions,
-            observed_code,
-            counterfactual_code,
-        )
-    with pytest.raises(AssertionError):
-        _assert_pair_security_matches_oracle(
-            swapped,
-            observed,
-            counterfactual,
-            interventions,
-            observed_code,
-            counterfactual_code,
-        )
-    extra_digest = "f" * 64
-    extra_observed = observed[0].model_copy(
-        update={
-            "request_id": f"req_{extra_digest}",
-            "code_id": f"code_{extra_digest}",
-            "prompt_id": "extra-observed",
-        }
-    )
-    for mutation in (
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            [*observed, observed[0]],
-            counterfactual,
-            interventions,
-            observed_code,
-            counterfactual_code,
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            [*observed, extra_observed],
-            counterfactual,
-            interventions,
-            observed_code,
-            counterfactual_code,
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            observed[1:],
-            counterfactual,
-            interventions,
-            observed_code,
-            counterfactual_code,
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            observed,
-            counterfactual,
-            [*interventions, interventions[0]],
-            observed_code,
-            counterfactual_code,
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            observed,
-            counterfactual,
-            interventions,
-            [*observed_code, observed_code[0]],
-            counterfactual_code,
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            observed,
-            counterfactual,
-            interventions,
-            observed_code,
-            [*counterfactual_code, counterfactual_code[0]],
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            pairs,
-            observed,
-            [*counterfactual, counterfactual[0]],
-            interventions,
-            observed_code,
-            counterfactual_code,
-        ),
-        lambda: _assert_pair_security_matches_oracle(
-            [*pairs, pairs[0]],
-            observed,
-            counterfactual,
-            interventions,
-            observed_code,
-            counterfactual_code,
-        ),
+        run_dir / "reports" / "summary.md",
     ):
-        with pytest.raises(AssertionError):
-            mutation()
-    for condition in ("observed", "counterfactual"):
-        manifest = read_stage_manifest(run_dir / ".stages" / f"run-oracle-{condition}.json")
-        assert manifest.policy_sha256 is not None
-    assert (run_dir / "reports" / "summary.md").exists()
-    removed_artifacts = [
-        run_dir / "tsg" / (condition + "_" + "code_" + "tsg.jsonl")
-        for condition in ("observed", "counterfactual")
-    ]
-    removed_stage_prefix = "extract-" + "code-" + "tsg"
-    assert all(not path.exists() for path in removed_artifacts)
-    assert all(
-        not path.stem.startswith(removed_stage_prefix)
-        for path in run_dir.joinpath(".stages").glob("*.json")
-    )
+        assert not absent.exists()
 
 
 def test_final_architecture_has_no_flat_projection_or_removed_stage_authority() -> None:

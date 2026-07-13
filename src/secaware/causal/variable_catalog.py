@@ -174,6 +174,24 @@ VARIABLE_CATALOG_SHA256 = hashlib.sha256(
     ).encode("utf-8")
 ).hexdigest()
 
+# Presentation controls are assigned only by randomized confirmation. They remain
+# in the unified Prompt feature/catalog graph, but are not observational
+# pre-treatment variables before an arm exists.
+OBSERVATIONAL_CAUSAL_VARIABLES = tuple(
+    item
+    for item in PROMPT_CAUSAL_VARIABLES
+    if not item.variable_id.startswith("x.presentation.")
+)
+OBSERVATIONAL_VARIABLE_CATALOG_SHA256 = hashlib.sha256(
+    json.dumps(
+        [_json_entry(item) for item in OBSERVATIONAL_CAUSAL_VARIABLES],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+).hexdigest()
+
 
 def declaration_by_id(variable_id: str) -> VariableDeclaration:
     """Return one exact reviewed declaration; arbitrary IDs fail closed."""
@@ -202,6 +220,8 @@ def declaration_sha256(item: VariableDeclaration) -> str:
 
 __all__ = [
     "CWE_SECURITY_OUTCOME",
+    "OBSERVATIONAL_CAUSAL_VARIABLES",
+    "OBSERVATIONAL_VARIABLE_CATALOG_SHA256",
     "PRIMARY_OUTCOME",
     "PROMPT_CAUSAL_VARIABLES",
     "VARIABLE_CATALOG_SHA256",

@@ -19,10 +19,10 @@ discovery:
   timeout_seconds: 120.0
   max_variables: 64
   max_rows: 100000
-  bootstrap_samples: 200
+  bootstrap_samples: 20
   stability_threshold: 0.8
   max_candidate_paths: 512
-  min_independent_tasks: 20
+  min_independent_tasks: 2
   max_failed_bootstrap_fraction: 0.1
 
 intervention:

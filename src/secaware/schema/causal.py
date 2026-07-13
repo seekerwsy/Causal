@@ -1007,6 +1007,18 @@ class FrozenHypothesisRecord(_CausalVersionedContract):
     # semantic hypothesis hashes, avoiding a hash cycle.
     frozen_at_utc: datetime
 
+    @field_validator("frozen_at_utc", mode="before")
+    @classmethod
+    def parse_frozen_at_utc(cls, value: object) -> object:
+        if type(value) is not str:
+            return value
+        try:
+            if not value.endswith("Z") or value != value.strip():
+                raise ValueError
+            return datetime.fromisoformat(value[:-1] + "+00:00")
+        except Exception:
+            raise ValueError(cls._safe_validation_message) from None
+
     @field_validator("feature_family", mode="before")
     @classmethod
     def parse_feature_family(cls, value: object) -> object:

@@ -12,7 +12,6 @@ from secaware.analysis.effects import estimate_effects
 from secaware.analysis.pairing import build_pairs
 from secaware.commands.common import cli_action
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
-from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.providers import get_provider
 from secaware.generation.openai_compatible_provider import (
@@ -52,6 +51,11 @@ from secaware.pipeline.jsonl_stage import (
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
 from secaware.pipeline.stages.prompt_extraction import (
     run_prompt_extraction_stage as extract_prompt_tsg_stage,
+)
+from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
+from secaware.pipeline.stages.fci_discovery import (
+    FCIDiscoveryTerminalStatus,
+    fci_discovery_stage,
 )
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
@@ -1540,80 +1544,13 @@ def run_oracle_stage(
 
 
 def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    stage = "discover"
-    inputs = [
-        store.path("inputs", "prompts.jsonl"),
-        store.path("tsg", "prompt_tsg.jsonl"),
-        store.path("oracle", "observed_oracle.jsonl"),
-    ]
-    all_output = store.path("discovery", "hypotheses_all.jsonl")
-    selected_output = store.path("discovery", "hypotheses_selected.jsonl")
-    outputs = [all_output, selected_output]
-    oracle_output = store.path("oracle", "observed_oracle.jsonl")
-
-    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        all_prompts, prompt_tsg_by_id = _validated_prompt_tsg_coordinates(
-            store,
-            stage=stage,
-        )
-        prompts = [prompt for prompt in all_prompts if prompt.split == "discover"]
-        prompt_ids = {prompt.prompt_id for prompt in prompts}
-        prompt_tsgs = [prompt_tsg_by_id[prompt.prompt_id] for prompt in prompts]
-        oracles = [
-            record
-            for record in _read_oracle_output(
-                oracle_output,
-                stage=stage,
-                condition="observed",
-            )
-            if record.prompt_id in prompt_ids
-        ]
-        all_h, selected_h = discover_hypotheses(
-            prompts,
-            prompt_tsgs,
-            oracles,
-            min_support_total=4,
-            min_support_each_side=1,
-            top_k_per_scope=2,
-            score_weights=None,
-        )
-        return [
-            all_h,
-            selected_h[: config.intervention.max_hypotheses],
-        ]
-
-    producer_outputs = {
-        "extract-prompt-tsg": [
-            store.path("tsg", "prompt_extraction_proposals.jsonl"),
-            store.path("tsg", "prompt_tsg.jsonl"),
-        ],
-        "run-oracle-observed": [oracle_output],
-    }
-    with ExitStack() as stack:
-        for producer_stage in sorted(producer_outputs):
-            if producer_stage == "extract-prompt-tsg":
-                producer_context = store.hold_committed_stage(
-                    producer_stage,
-                    [store.path("inputs", "prompts.jsonl")],
-                    producer_outputs[producer_stage],
-                    expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
-                )
-            else:
-                producer_context = store.hold_committed_output(
-                    producer_stage,
-                    producer_outputs[producer_stage],
-                )
-            stack.enter_context(producer_context)
-        execute_jsonl_stage_transaction(
-            store,
-            stage=stage,
-            inputs=inputs,
-            outputs=(
-                JsonlOutputSpec(outputs[0], HypothesisRecord),
-                JsonlOutputSpec(outputs[1], HypothesisRecord),
-            ),
-            force=force,
-            build=build,
+    assemble_causal_tables_stage(config, store, force=force)
+    result = fci_discovery_stage(config, store, force=force)
+    if result.status is not FCIDiscoveryTerminalStatus.READY:
+        raise SecAwareError(
+            code=ErrorCode.ANALYSIS_INVALID,
+            stage="discover",
+            message=f"FCI discovery terminated: {result.status.value}",
         )
 
 
@@ -2067,28 +2004,6 @@ def discover_command(
     discover_stage(cfg, store, force=force)
 
 
-@app.command("intervene")
-@cli_action
-def intervene_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    cfg, store = _load(config, run_dir)
-    intervene_stage(cfg, store, force=force)
-
-
-@app.command("generate-counterfactual")
-@cli_action
-def generate_counterfactual_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    cfg, store = _load(config, run_dir)
-    generate_counterfactual_stage(cfg, store, force=force)
-
-
 @app.command("confirm")
 @cli_action
 def confirm_command(
@@ -2124,12 +2039,7 @@ def run_all_command(
     generate_observed_stage(cfg, store, force=force)
     run_oracle_stage(cfg, store, condition="observed", force=force)
     discover_stage(cfg, store, force=force)
-    intervene_stage(cfg, store, force=force)
-    generate_counterfactual_stage(cfg, store, force=force)
-    run_oracle_stage(cfg, store, condition="counterfactual", force=force)
-    confirm_stage(cfg, store, force=force)
-    report_stage(cfg, store, force=force)
-    console.print(f"SecAware run complete: {store.root}")
+    console.print(f"SecAware discovery complete: {store.root}")
 
 
 if __name__ == "__main__":

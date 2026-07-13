@@ -17,7 +17,6 @@ from secaware import cli as pipeline_cli
 from secaware.cli import app as pipeline_app
 from secaware.cli import (
     confirm_stage,
-    discover_stage,
     extract_prompt_tsg_stage,
     generate_counterfactual_stage,
     generate_observed_stage,
@@ -26,6 +25,8 @@ from secaware.cli import (
     plan_generation_stage,
     run_oracle_stage,
 )
+from secaware.pipeline import legacy_discovery as legacy_discovery_module
+from secaware.pipeline.legacy_discovery import discover_stage
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.discovery.candidate_enum import FACTOR_SPECS
 from secaware.errors import ErrorCode, SecAwareError
@@ -1490,7 +1491,7 @@ def test_downstream_force_failure_preserves_previous_commit(
             store.path("discovery", "hypotheses_selected.jsonl"),
         ]
         monkeypatch.setattr(
-            pipeline_cli,
+            legacy_discovery_module,
             "discover_hypotheses",
             lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("private-failure")),
         )
@@ -1535,7 +1536,7 @@ def test_discover_holds_committed_oracle_snapshot_against_force_rerun(
     entered = threading.Event()
     release = threading.Event()
     errors: list[BaseException] = []
-    real_discover = pipeline_cli.discover_hypotheses
+    real_discover = legacy_discovery_module.discover_hypotheses
 
     def blocked_discover(*args: object, **kwargs: object) -> object:
         assert oracle_output.read_bytes() == previous[0]
@@ -1550,7 +1551,7 @@ def test_discover_holds_committed_oracle_snapshot_against_force_rerun(
         except BaseException as error:
             errors.append(error)
 
-    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", blocked_discover)
+    monkeypatch.setattr(legacy_discovery_module, "discover_hypotheses", blocked_discover)
     thread = threading.Thread(target=consume_snapshot)
     thread.start()
     assert entered.wait(timeout=5)
@@ -2019,7 +2020,7 @@ def test_downstream_postcommit_cleanup_failure_keeps_new_commit_and_retries_late
         real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(
-        pipeline_cli,
+        legacy_discovery_module,
         "discover_hypotheses",
         lambda *args, **kwargs: ([], []),
     )
@@ -2077,7 +2078,7 @@ def test_downstream_postcommit_control_keeps_new_commit(
         real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(
-        pipeline_cli,
+        legacy_discovery_module,
         "discover_hypotheses",
         lambda *args, **kwargs: ([], []),
     )
@@ -2111,7 +2112,7 @@ def test_downstream_manifest_postverify_failure_rolls_back_before_commit_point(
 
     monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_corrupt)
     monkeypatch.setattr(
-        pipeline_cli,
+        legacy_discovery_module,
         "discover_hypotheses",
         lambda *args, **kwargs: ([], []),
     )
@@ -2237,7 +2238,7 @@ def test_downstream_precommit_control_rolls_back_old_commit(
         del args, kwargs
         raise control
 
-    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", interrupt_build)
+    monkeypatch.setattr(legacy_discovery_module, "discover_hypotheses", interrupt_build)
 
     with pytest.raises(type(control)) as exc_info:
         discover_stage(config, store, force=True)
@@ -2473,7 +2474,7 @@ def test_pipeline_skip_cleans_stale_backup_without_reexecution(
         )
     elif surface == "discover":
         monkeypatch.setattr(
-            pipeline_cli,
+            legacy_discovery_module,
             "discover_hypotheses",
             lambda *args, **kwargs: ([], []),
         )
@@ -2514,7 +2515,7 @@ def test_pipeline_skip_cleans_stale_backup_without_reexecution(
         raise AssertionError("valid committed stage must skip computation")
 
     if surface == "discover":
-        monkeypatch.setattr(pipeline_cli, "discover_hypotheses", forbidden_compute)
+        monkeypatch.setattr(legacy_discovery_module, "discover_hypotheses", forbidden_compute)
     elif surface == "confirm":
         monkeypatch.setattr(pipeline_cli, "build_pairs", forbidden_compute)
 
@@ -2874,7 +2875,11 @@ def test_multioutput_partial_restore_preserves_backup_and_next_skip_recovers(
             raise OSError("private-second-restore-failure")
         real_replace(source, target)
 
-    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(
+        legacy_discovery_module,
+        "discover_hypotheses",
+        lambda *args, **kwargs: ([], []),
+    )
     monkeypatch.setattr(pipeline_cli.os, "replace", fail_second_install_and_restore)
     with pytest.raises(SecAwareError):
         discover_stage(config, store, force=True)
@@ -2889,7 +2894,7 @@ def test_multioutput_partial_restore_preserves_backup_and_next_skip_recovers(
         del args, kwargs
         raise AssertionError("recovered commit must skip computation")
 
-    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", forbidden_compute)
+    monkeypatch.setattr(legacy_discovery_module, "discover_hypotheses", forbidden_compute)
     discover_stage(config, store, force=False)
     assert [path.read_bytes() for path in outputs] == previous[0]
     assert manifest.read_bytes() == previous[1]
@@ -3032,7 +3037,11 @@ def test_downstream_manifest_restore_failure_preserves_backup_for_next_recovery(
         real_replace(source, target)
 
     monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_corrupt)
-    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(
+        legacy_discovery_module,
+        "discover_hypotheses",
+        lambda *args, **kwargs: ([], []),
+    )
     monkeypatch.setattr(pipeline_cli.os, "replace", fail_manifest_restore)
     with pytest.raises(SecAwareError):
         discover_stage(config, store, force=True)
@@ -3049,7 +3058,7 @@ def test_downstream_manifest_restore_failure_preserves_backup_for_next_recovery(
         del args, kwargs
         raise AssertionError("recovered commit must skip computation")
 
-    monkeypatch.setattr(pipeline_cli, "discover_hypotheses", forbidden_compute)
+    monkeypatch.setattr(legacy_discovery_module, "discover_hypotheses", forbidden_compute)
     discover_stage(config, store, force=False)
     assert [path.read_bytes() for path in outputs] == previous[0]
     assert manifest.read_bytes() == previous[1]

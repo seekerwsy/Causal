@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 import time
 
+import numpy as np
 import pytest
 from typer.testing import CliRunner
 
@@ -28,6 +29,7 @@ from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline.artifact import canonical_sha256, sha256_path
+from secaware.pipeline.stages import fci_discovery as fci_stage_module
 from secaware.pipeline.manifest import (
     StageManifest,
     build_stage_fingerprint,
@@ -42,6 +44,14 @@ from secaware.schema.generation import (
     sha256_text,
 )
 from secaware.schema.hypotheses import FactorType
+from secaware.schema.causal import (
+    BackgroundKnowledgeRecord,
+    CausalTableRecord,
+    EndpointMark,
+    PAGEdgeRecord,
+    PAGRecord,
+    PAGRunKind,
+)
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 
@@ -1445,7 +1455,7 @@ def test_legacy_api_stub_has_no_provider_fallback_and_cleans_failed_execution(
     assert second.value.code is ErrorCode.CONFIG
 
 
-def test_run_all_dispatches_both_conditions_through_provider_without_network(
+def test_run_all_dispatches_observed_provider_then_stops_at_discovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1515,16 +1525,48 @@ def test_run_all_dispatches_both_conditions_through_provider_without_network(
     monkeypatch.setattr(cli_module, "validate_analyzer_runtime", lambda: None)
     monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
 
+    class FakeFCIRunner:
+        def run(
+            self,
+            matrix: np.ndarray,
+            table: CausalTableRecord,
+            knowledge: BackgroundKnowledgeRecord,
+            discovery_config: object,
+            run_kind: PAGRunKind,
+        ) -> PAGRecord:
+            del matrix
+            target = "x.safety.generic_security_reminder"
+            return PAGRecord.from_content(
+                run_kind=run_kind,
+                table_id=table.table_id,
+                backend=discovery_config.backend,
+                backend_version=discovery_config.backend_version,
+                ci_test=discovery_config.ci_test,
+                config_sha256=canonical_sha256(discovery_config.model_dump(mode="json")),
+                background_knowledge_sha256=knowledge.knowledge_sha256,
+                variable_ids=tuple(item.variable_id for item in table.variables),
+                edges=(
+                    PAGEdgeRecord(
+                        left=target,
+                        right="y.secure_functional",
+                        left_mark=EndpointMark.TAIL,
+                        right_mark=EndpointMark.ARROW,
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(fci_stage_module, "SpawnedFCIRunner", FakeFCIRunner)
+
     result = CliRunner().invoke(app, ["run-all", "--config", str(config_path), "--force"])
 
     assert result.exit_code == 0, result.output + result.stderr
-    assert len(providers) == 2
+    assert len(providers) == 1
     run_dir = tmp_path / "run"
-    for condition in ("observed", "counterfactual"):
-        assert (run_dir / ".stages" / f"plan-provider-generation-{condition}.json").exists()
-        assert (run_dir / ".stages" / f"generate-provider-{condition}.json").exists()
-        assert not (run_dir / ".stages" / f"generate-{condition}.json").exists()
-    assert (run_dir / "reports" / "summary.md").exists()
+    assert (run_dir / ".stages" / "plan-provider-generation-observed.json").exists()
+    assert (run_dir / ".stages" / "generate-provider-observed.json").exists()
+    assert (run_dir / ".stages" / "fci-discovery.json").exists()
+    assert not (run_dir / ".stages" / "plan-provider-generation-counterfactual.json").exists()
+    assert not (run_dir / "reports" / "summary.md").exists()
 
 
 def test_missing_offline_results_attempts_to_revoke_every_generation_producer(

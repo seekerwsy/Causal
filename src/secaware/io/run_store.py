@@ -21,6 +21,7 @@ from secaware.pipeline.manifest import (
     read_stage_manifest,
     write_stage_manifest,
 )
+from secaware.pipeline.stage_contracts import discovery_stage_contract_sha256
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
 
@@ -28,6 +29,21 @@ _Result = TypeVar("_Result")
 _PROMPT_EXTRACTION_OUTPUTS = (
     "tsg/prompt_extraction_proposals.jsonl",
     "tsg/prompt_tsg.jsonl",
+)
+_CAUSAL_TABLE_OUTPUTS = (
+    "discovery/causal_tables.jsonl",
+    "discovery/causal_observations.jsonl",
+    "discovery/causal_exclusions.jsonl",
+)
+_FCI_DISCOVERY_OUTPUTS = (
+    "discovery/background_knowledge.jsonl",
+    "discovery/reference_pags.jsonl",
+    "discovery/bootstrap_draws.jsonl",
+    "discovery/bootstrap_pags.jsonl",
+    "discovery/bootstrap_failures.jsonl",
+    "discovery/path_support.jsonl",
+    "discovery/hypotheses_frozen.jsonl",
+    "discovery/discovery_failures.jsonl",
 )
 
 
@@ -404,6 +420,8 @@ class RunStore:
     @staticmethod
     def _requires_output_seal(stage: str) -> bool:
         return stage in {
+            "assemble-causal-tables",
+            "fci-discovery",
             "generate-observed",
             "generate-counterfactual",
             "extract-prompt-tsg",
@@ -438,6 +456,10 @@ class RunStore:
         relative_outputs: Sequence[str],
     ) -> None:
         if stage == "extract-prompt-tsg" and tuple(relative_outputs) != _PROMPT_EXTRACTION_OUTPUTS:
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "assemble-causal-tables" and tuple(relative_outputs) != _CAUSAL_TABLE_OUTPUTS:
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "fci-discovery" and tuple(relative_outputs) != _FCI_DISCOVERY_OUTPUTS:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
@@ -567,7 +589,9 @@ class RunStore:
             policy_sha256=policy_sha256,
             catalog_sha256=catalog_sha256,
             stage_contract_sha256=(
-                PROMPT_TSG_STAGE_CONTRACT_SHA256 if stage == "extract-prompt-tsg" else None
+                PROMPT_TSG_STAGE_CONTRACT_SHA256
+                if stage == "extract-prompt-tsg"
+                else discovery_stage_contract_sha256(stage)
             ),
             code_version=__version__,
         )
@@ -830,6 +854,8 @@ class RunStore:
             or stage
             in {
                 "discover",
+                "assemble-causal-tables",
+                "fci-discovery",
                 "extract-prompt-tsg",
                 "intervene",
                 "confirm",
