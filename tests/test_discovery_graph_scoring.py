@@ -221,13 +221,14 @@ def _many_path_matches_record(graph_index: int, match_count: int = 100):
     return multidigraph_to_record(builder, prompt_id=f"p-high-volume-{graph_index}")
 
 
-def test_path_score_changes_when_graph_changes_even_if_shadow_is_hostile() -> None:
+def test_present_feature_graph_rejects_required_flow_edge_removal() -> None:
     unsafe = extract_prompt_tsg(_path_prompt())
-    changed = _remove_edge_and_recanonicalize(unsafe, EdgeType.FLOWS_TO)
     oracle_map = _oracle_by_prompt(_oracle(unsafe.prompt_id, insecure=True))
 
     assert path_score(PATH_SPEC, [unsafe], oracle_map) > 0.0
-    assert path_score(PATH_SPEC, [changed], oracle_map) == 0.0
+    with pytest.raises(SecAwareError) as exc_info:
+        _remove_edge_and_recanonicalize(unsafe, EdgeType.FLOWS_TO)
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
 def test_scoring_uses_only_reconstructed_graph_after_codec_boundary(
@@ -406,33 +407,28 @@ def test_scoring_rejects_structurally_valid_counterfactual_oracles(score) -> Non
     assert "OracleRecord" not in rendered
 
 
-def test_nuisance_penalty_uses_live_factor_queries() -> None:
+def test_present_feature_graph_rejects_required_guard_edge_removal() -> None:
     absent_prompt = _path_prompt("p-a")
     present_prompt = _path_prompt("p-b", guarded=True)
     absent = extract_prompt_tsg(absent_prompt)
     present = extract_prompt_tsg(present_prompt)
-    changed = _remove_edge_and_recanonicalize(present, EdgeType.REQUIRES)
-
     live = nuisance_penalty(
         PATH_SPEC,
         [absent_prompt, present_prompt],
         {"p-a": absent, "p-b": present},
     )
-    changed_score = nuisance_penalty(
-        PATH_SPEC,
-        [absent_prompt, present_prompt],
-        {"p-a": absent, "p-b": changed},
-    )
-
-    assert live > changed_score == 0.0
+    assert live > 0.0
+    with pytest.raises(SecAwareError) as exc_info:
+        _remove_edge_and_recanonicalize(present, EdgeType.REQUIRES)
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
 def test_stability_score_uses_live_factor_queries() -> None:
     prompts = [
-        _path_prompt("p-a-absent", task_family="family-a"),
-        _path_prompt("p-a-present", guarded=True, task_family="family-a"),
-        _path_prompt("p-b-absent", task_family="family-b"),
-        _path_prompt("p-b-present", guarded=True, task_family="family-b"),
+        _path_prompt("p-a-absent", task_family="path_handling"),
+        _path_prompt("p-a-present", guarded=True, task_family="path_handling"),
+        _path_prompt("p-b-absent", task_family="file_access"),
+        _path_prompt("p-b-present", guarded=True, task_family="file_access"),
     ]
     records = {prompt.prompt_id: extract_prompt_tsg(prompt) for prompt in prompts}
     oracle_map = _oracle_by_prompt(
@@ -440,15 +436,10 @@ def test_stability_score_uses_live_factor_queries() -> None:
     )
 
     assert stability_score(PATH_SPEC, prompts, records, oracle_map) == 1.0
-    changed = {
-        prompt_id: (
-            _remove_edge_and_recanonicalize(record, EdgeType.REQUIRES)
-            if "present" in prompt_id
-            else record
-        )
-        for prompt_id, record in records.items()
-    }
-    assert stability_score(PATH_SPEC, prompts, changed, oracle_map) == 0.0
+    for prompt_id, record in records.items():
+        if "present" in prompt_id:
+            with pytest.raises(SecAwareError):
+                _remove_edge_and_recanonicalize(record, EdgeType.REQUIRES)
 
 
 def test_internal_graph_query_errors_are_not_mislabeled_as_tsg_invalid(
@@ -510,19 +501,20 @@ def test_motif_evidence_contains_only_bounded_deterministic_graph_and_path_ids()
     assert "Reviewed security finding." not in rendered
 
 
-def test_discovery_decodes_each_prompt_graph_exactly_once_for_all_six_factors(
+def test_discovery_decodes_each_prompt_graph_exactly_once_for_one_local_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    domain_text = ". ".join(entry.domain_terms[0] for entry in PROMPT_TSG_CATALOG)
-    guard_text = ". ".join(entry.guard_terms[0] for entry in PROMPT_TSG_CATALOG)
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.cwe == "CWE-22")
+    domain_text = entry.domain_terms[0]
+    guard_text = entry.guard_terms[0]
     prompts = [
         PromptRecord(
             prompt_id=f"p-cache-{index:02}",
             task_id=f"task-cache-{index:02}",
             split="discover",
             language="python",
-            task_family="all_factors",
-            cwe="CWE-999",
+            task_family="path_handling",
+            cwe="CWE-22",
             prompt=domain_text if index < 6 else f"{domain_text}. {guard_text}",
         )
         for index in range(12)
@@ -553,7 +545,7 @@ def test_discovery_decodes_each_prompt_graph_exactly_once_for_all_six_factors(
         min_support_total=12,
     )
 
-    assert len(actual) == 6
+    assert len(actual) == 1
     assert [item.model_dump() for item in actual] == [item.model_dump() for item in baseline]
     assert [item.hypothesis_id for item in actual_selected] == [
         item.hypothesis_id for item in baseline_selected

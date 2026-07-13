@@ -9,11 +9,13 @@ import pytest
 import secaware.extractors.prompt_tsg_extractor as prompt_extractor
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
-from secaware.schema.hypotheses import FactorType
+from secaware.schema.features import FeatureState, PromptExtractorBackend
 from secaware.schema.records import PromptRecord
-from secaware.schema.tsg import EdgeType, NodeType
-from secaware.tsg.catalog import PROMPT_TSG_CATALOG
+from secaware.schema.tsg import EdgeType
+from secaware.tsg.catalog import PROMPT_TSG_CATALOG, PromptOntologyEntry
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG, FeatureSpec
 from secaware.tsg.graph import record_to_multidigraph
+from secaware.tsg.queries import feature_state
 
 
 _DOMAIN_BOUNDARY_CASES = tuple(
@@ -34,50 +36,72 @@ def _prompt(
     text: str,
     *,
     language: str = "python",
-    cwe: str = "CWE-20",
+    task_family: str = "path_handling",
+    cwe: str = "CWE-22",
 ) -> PromptRecord:
     return PromptRecord(
         prompt_id="p001",
         task_id="task-p001",
         split="discover",
         language=language,
-        task_family="reviewed_task",
+        task_family=task_family,
         cwe=cwe,
         prompt=text,
     )
 
 
-def _nodes(graph: object, node_type: NodeType) -> list[tuple[str, dict[str, object]]]:
+def _feature_specs(entry: PromptOntologyEntry) -> tuple[FeatureSpec, FeatureSpec]:
+    task = next(
+        spec for spec in PROMPT_FEATURE_CATALOG if spec.deterministic_terms == entry.domain_terms
+    )
+    safety = next(
+        spec for spec in PROMPT_FEATURE_CATALOG if spec.deterministic_terms == entry.guard_terms
+    )
+    return task, safety
+
+
+def _entry_prompt(
+    entry: PromptOntologyEntry,
+    text: str,
+    *,
+    language: str = "python",
+) -> PromptRecord:
+    task, _ = _feature_specs(entry)
+    return _prompt(
+        text,
+        language=language,
+        task_family=task.applicable_task_families[0],
+        cwe=entry.cwe,
+    )
+
+
+def _feature_structure(graph: object, feature_id: str) -> list[tuple[str, dict[str, object]]]:
+    labels: set[str] = set()
+    for entry in PROMPT_TSG_CATALOG:
+        task, safety = _feature_specs(entry)
+        if feature_id == task.feature_id:
+            labels = {
+                entry.operation_label,
+                f"{entry.factor_type.value}_source",
+                entry.data_label,
+                entry.sink_label,
+                entry.cwe,
+            }
+        elif feature_id == safety.feature_id:
+            labels = {entry.requirement_label, entry.guard_label}
     return [
-        (attributes["label"], attributes)
-        for _, attributes in graph.nodes(data=True)  # type: ignore[union-attr]
-        if attributes["node_type"] is node_type
+        (node_id, attributes)
+        for node_id, attributes in graph.nodes(data=True)  # type: ignore[union-attr]
+        if attributes["label"] in labels or str(attributes["label"]).startswith(f"{feature_id}:")
     ]
 
 
-def _typed_edges(graph: object) -> set[tuple[str, str, EdgeType]]:
-    result: set[tuple[str, str, EdgeType]] = set()
-    for src, dst, attributes in graph.edges(data=True):  # type: ignore[union-attr]
-        result.add(
-            (
-                graph.nodes[src]["node_type"].value,  # type: ignore[union-attr]
-                graph.nodes[dst]["node_type"].value,  # type: ignore[union-attr]
-                attributes["edge_type"],
-            )
-        )
-    return result
-
-
-def _guard_targets(graph: object, guard_label: str) -> set[str]:
-    guard = next(
-        node_id
-        for node_id, attributes in graph.nodes(data=True)  # type: ignore[union-attr]
-        if attributes["node_type"] is NodeType.GUARD and attributes["label"] == guard_label
-    )
+def _feature_edges(graph: object, feature_id: str) -> set[EdgeType]:
+    node_ids = {node_id for node_id, _ in _feature_structure(graph, feature_id)}
     return {
-        graph.nodes[src]["label"]  # type: ignore[union-attr]
+        attributes["edge_type"]
         for src, dst, attributes in graph.edges(data=True)  # type: ignore[union-attr]
-        if dst == guard and attributes["edge_type"] is EdgeType.GUARDED_BY
+        if src in node_ids and dst in node_ids
     }
 
 
@@ -101,215 +125,201 @@ def _assert_sanitized_error(
         traceback_cursor = traceback_cursor.tb_next
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
-def test_each_family_domain_prompt_emits_graph_facts(entry: object) -> None:
-    record = extract_prompt_tsg(_prompt(f"Please {entry.domain_terms[0]}."))
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+def test_each_cwe_domain_phrase_emits_one_present_task_feature(
+    entry: PromptOntologyEntry,
+) -> None:
+    task, safety = _feature_specs(entry)
+    record = extract_prompt_tsg(_entry_prompt(entry, f"Please {entry.domain_terms[0]}."))
     graph = record_to_multidigraph(record)
 
-    assert _typed_edges(graph) >= {
-        ("source", "data_object", EdgeType.SOURCE_OF),
-        ("data_object", "sink", EdgeType.FLOWS_TO),
-        ("task_operation", "data_object", EdgeType.OPERATES_ON),
-        ("sink", "cwe", EdgeType.MAPS_TO),
-    }
-    assert {label for label, _ in _nodes(graph, NodeType.DATA_OBJECT)} == {entry.data_label}
-    assert {label for label, _ in _nodes(graph, NodeType.SINK)} == {entry.sink_label}
+    assert record.extractor_backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
+    assert feature_state(graph, task.feature_id) is FeatureState.PRESENT
+    assert feature_state(graph, safety.feature_id) is FeatureState.ABSENT
+    assert {data["node_type"] for _, data in _feature_structure(graph, task.feature_id)} >= set(
+        task.structural_node_types
+    )
+    assert _feature_edges(graph, task.feature_id) >= set(task.structural_edge_types)
     assert record.shadow["graph.node_count"] == len(record.nodes)
-    assert record.shadow[f"factor.{entry.factor_type.value}_required"] is False
-    assert not hasattr(record, "features")
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
-def test_each_family_explicit_guard_connects_to_same_flow(entry: object) -> None:
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+def test_each_cwe_guard_phrase_emits_task_and_safety_feature_states(
+    entry: PromptOntologyEntry,
+) -> None:
+    task, safety = _feature_specs(entry)
     text = f"Please {entry.domain_terms[0]}; {entry.guard_terms[0]}."
-    graph = record_to_multidigraph(extract_prompt_tsg(_prompt(text)))
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
 
-    assert _guard_targets(graph, entry.guard_label) == {entry.data_label, entry.sink_label}
-    assert any(
-        graph.nodes[src]["label"] == entry.requirement_label
-        and graph.nodes[dst]["label"] == entry.guard_label
-        and attributes["edge_type"] is EdgeType.REQUIRES
-        for src, dst, attributes in graph.edges(data=True)
+    assert feature_state(graph, task.feature_id) is FeatureState.PRESENT
+    assert feature_state(graph, safety.feature_id) is FeatureState.PRESENT
+    assert {data["node_type"] for _, data in _feature_structure(graph, safety.feature_id)} >= set(
+        safety.structural_node_types
     )
+    assert _feature_edges(graph, safety.feature_id) >= set(safety.structural_edge_types)
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
-def test_absent_domain_evidence_emits_no_family(entry: object) -> None:
-    graph = record_to_multidigraph(extract_prompt_tsg(_prompt("Return the number seven.")))
-
-    labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
-    assert labels.isdisjoint(
-        {
-            entry.operation_label,
-            entry.data_label,
-            entry.sink_label,
-            entry.requirement_label,
-            entry.guard_label,
-        }
-    )
-
-
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
-def test_detached_guard_evidence_emits_no_family(entry: object) -> None:
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+def test_absent_domain_evidence_is_an_explicit_absent_state(entry: PromptOntologyEntry) -> None:
+    task, safety = _feature_specs(entry)
     graph = record_to_multidigraph(
-        extract_prompt_tsg(_prompt(f"Please {entry.guard_terms[0]} carefully."))
+        extract_prompt_tsg(_entry_prompt(entry, "Return the number seven."))
     )
 
-    labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
-    assert entry.guard_label not in labels
-    assert entry.requirement_label not in labels
+    assert feature_state(graph, task.feature_id) is FeatureState.ABSENT
+    assert feature_state(graph, safety.feature_id) is FeatureState.ABSENT
+    assert not _feature_structure(graph, task.feature_id)
+    assert not _feature_structure(graph, safety.feature_id)
 
 
-@pytest.mark.parametrize(
-    ("entry", "term", "prefix", "suffix"),
-    _DOMAIN_BOUNDARY_CASES,
-)
-def test_embedded_domain_terms_do_not_emit_family_facts(
-    entry: object,
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+def test_detached_guard_evidence_does_not_create_a_present_control(
+    entry: PromptOntologyEntry,
+) -> None:
+    task, safety = _feature_specs(entry)
+    graph = record_to_multidigraph(
+        extract_prompt_tsg(_entry_prompt(entry, f"Please {entry.guard_terms[0]} carefully."))
+    )
+
+    assert feature_state(graph, task.feature_id) is FeatureState.ABSENT
+    assert feature_state(graph, safety.feature_id) is FeatureState.ABSENT
+
+
+@pytest.mark.parametrize(("entry", "term", "prefix", "suffix"), _DOMAIN_BOUNDARY_CASES)
+def test_embedded_domain_terms_do_not_match(
+    entry: PromptOntologyEntry,
     term: str,
     prefix: str,
     suffix: str,
 ) -> None:
-    graph = record_to_multidigraph(
-        extract_prompt_tsg(_prompt(f"Please process {prefix}{term}{suffix}."))
-    )
-    labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
+    task, _ = _feature_specs(entry)
+    text = f"Please process {prefix}{term}{suffix}."
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
 
-    assert entry.data_label not in labels
-    assert entry.sink_label not in labels
+    assert feature_state(graph, task.feature_id) is FeatureState.ABSENT
 
 
-@pytest.mark.parametrize(
-    ("entry", "term", "prefix", "suffix"),
-    _GUARD_BOUNDARY_CASES,
-)
-def test_embedded_guard_terms_do_not_emit_guard_facts(
-    entry: object,
+@pytest.mark.parametrize(("entry", "term", "prefix", "suffix"), _GUARD_BOUNDARY_CASES)
+def test_embedded_guard_terms_do_not_match(
+    entry: PromptOntologyEntry,
     term: str,
     prefix: str,
     suffix: str,
 ) -> None:
+    task, safety = _feature_specs(entry)
     text = f"Please {entry.domain_terms[0]}; then {prefix}{term}{suffix}."
-    graph = record_to_multidigraph(extract_prompt_tsg(_prompt(text)))
-    labels = {attributes["label"] for _, attributes in graph.nodes(data=True)}
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
 
-    assert entry.data_label in labels
-    assert entry.guard_label not in labels
+    assert feature_state(graph, task.feature_id) is FeatureState.PRESENT
+    assert feature_state(graph, safety.feature_id) is FeatureState.ABSENT
 
 
-def test_punctuated_shell_guard_matches_case_insensitively_with_raw_evidence() -> None:
-    shell = next(
-        entry for entry in PROMPT_TSG_CATALOG if entry.factor_type is FactorType.SAFE_SUBPROCESS
-    )
+def test_punctuated_guard_matches_case_insensitively_with_raw_evidence() -> None:
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.cwe == "CWE-78")
+    _, safety = _feature_specs(entry)
     raw_guard = "SHELL=FALSE"
     text = f"Please RUN A COMMAND; ({raw_guard})!"
-    graph = record_to_multidigraph(extract_prompt_tsg(_prompt(text)))
-    guard_attributes = next(
-        attributes["attributes"]
-        for _, attributes in graph.nodes(data=True)
-        if attributes["node_type"] is NodeType.GUARD and attributes["label"] == shell.guard_label
-    )
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
+    attributes = _feature_structure(graph, safety.feature_id)[0][1]["attributes"]
     start = text.index(raw_guard)
 
-    assert guard_attributes == {
+    assert attributes == {
         "evidence_start": start,
         "evidence_end": start + len(raw_guard),
         "evidence_sha256": hashlib.sha256(raw_guard.encode("utf-8")).hexdigest(),
     }
 
 
-def test_path_prompt_emits_flow_facts_without_feature_decisions() -> None:
-    record = extract_prompt_tsg(_prompt("Open a user-provided file path."))
-    graph = record_to_multidigraph(record)
-    assert _typed_edges(graph) >= {
-        ("source", "data_object", EdgeType.SOURCE_OF),
-        ("data_object", "sink", EdgeType.FLOWS_TO),
-    }
-    assert not hasattr(record, "features")
-
-
-def test_guard_requirement_connects_to_the_same_path() -> None:
-    record = extract_prompt_tsg(
-        _prompt("Open a user path; normalize it and restrict it to a base directory.")
+def test_path_prompt_emits_catalog_typed_flow_and_feature_state() -> None:
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.cwe == "CWE-22")
+    task, _ = _feature_specs(entry)
+    graph = record_to_multidigraph(
+        extract_prompt_tsg(_entry_prompt(entry, "Open a user-provided file path."))
     )
-    graph = record_to_multidigraph(record)
-    assert _guard_targets(graph, "path_normalization") == {"user_path", "file_open"}
+
+    assert feature_state(graph, task.feature_id) is FeatureState.PRESENT
+    assert _feature_edges(graph, task.feature_id) >= {
+        EdgeType.OPERATES_ON,
+        EdgeType.FLOWS_TO,
+    }
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
-def test_unknown_language_yields_valid_minimal_graph(entry: object) -> None:
-    record = extract_prompt_tsg(
-        _prompt(
-            f"Please {entry.domain_terms[0]} and report whether it is insecure.",
-            language="brainfuck",
+def test_guard_and_task_evidence_can_overlap_without_losing_either_fact() -> None:
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.cwe == "CWE-22")
+    task, safety = _feature_specs(entry)
+    text = "Open a user path; normalize the path and restrict it to a base directory."
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
+
+    assert feature_state(graph, task.feature_id) is FeatureState.PRESENT
+    assert feature_state(graph, safety.feature_id) is FeatureState.PRESENT
+    assert _feature_structure(graph, task.feature_id)
+    assert _feature_structure(graph, safety.feature_id)
+
+
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+def test_unknown_language_marks_in_scope_finite_features_unresolved(
+    entry: PromptOntologyEntry,
+) -> None:
+    task, safety = _feature_specs(entry)
+    graph = record_to_multidigraph(
+        extract_prompt_tsg(
+            _entry_prompt(
+                entry,
+                f"Please {entry.domain_terms[0]}; {entry.guard_terms[0]}.",
+                language="brainfuck",
+            )
         )
     )
 
-    assert record.nodes == ()
-    assert record.edges == ()
-    assert record.shadow["graph.node_count"] == 0
-    assert record.shadow["graph.edge_count"] == 0
-    assert not any(
-        value for key, value in record.shadow.items() if key.startswith(("factor.", "motif."))
-    )
-    assert not hasattr(record, "features")
+    assert feature_state(graph, task.feature_id) is FeatureState.UNRESOLVED
+    assert feature_state(graph, safety.feature_id) is FeatureState.UNRESOLVED
+    assert not _feature_structure(graph, task.feature_id)
+    assert not _feature_structure(graph, safety.feature_id)
 
 
-def test_multi_family_prompt_is_deterministic_and_catalog_ordered() -> None:
-    path = next(
-        entry for entry in PROMPT_TSG_CATALOG if entry.factor_type is FactorType.PATH_NORMALIZATION
-    )
-    sql = next(
-        entry
-        for entry in PROMPT_TSG_CATALOG
-        if entry.factor_type is FactorType.SQL_PARAMETERIZATION
-    )
-    text = (
-        f"{sql.domain_terms[1]}; {path.domain_terms[1]}; "
-        f"{sql.guard_terms[1]}; {path.guard_terms[1]}."
-    )
+def test_features_without_finite_terms_are_unresolved_not_invented_absent() -> None:
+    graph = record_to_multidigraph(extract_prompt_tsg(_prompt("Open a user-provided file path.")))
 
+    assert feature_state(graph, "presentation.noop_rewrite") is FeatureState.UNRESOLVED
+    assert feature_state(graph, "presentation.matched_control") is FeatureState.UNRESOLVED
+
+
+def test_out_of_scope_terms_remain_not_applicable_and_output_is_deterministic() -> None:
+    text = "Build a SQL query and open a user path; use a prepared statement and normalize it."
     one = extract_prompt_tsg(_prompt(text))
     two = extract_prompt_tsg(_prompt(text))
     graph = record_to_multidigraph(one)
 
-    assert one == two
-    assert {label for label, _ in _nodes(graph, NodeType.SINK)} == {
-        path.sink_label,
-        sql.sink_label,
-    }
-    assert _guard_targets(graph, path.guard_label) == {path.data_label, path.sink_label}
-    assert _guard_targets(graph, sql.guard_label) == {sql.data_label, sql.sink_label}
+    assert one.model_dump_json() == two.model_dump_json()
+    assert feature_state(graph, "task.file_read") is FeatureState.PRESENT
+    assert feature_state(graph, "safety.path_normalization") is FeatureState.PRESENT
+    assert feature_state(graph, "task.database_query") is FeatureState.NOT_APPLICABLE
+    assert feature_state(graph, "safety.sql_parameterization") is FeatureState.NOT_APPLICABLE
 
 
-def test_evidence_uses_first_match_order_and_raw_span_digest() -> None:
-    path = next(
-        entry for entry in PROMPT_TSG_CATALOG if entry.factor_type is FactorType.PATH_NORMALIZATION
-    )
-    later = path.domain_terms[0]
-    first = path.domain_terms[1].upper()
+def test_evidence_uses_earliest_match_and_preserves_raw_span_digest() -> None:
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.cwe == "CWE-22")
+    task, _ = _feature_specs(entry)
+    later = entry.domain_terms[0]
+    first = entry.domain_terms[1].upper()
     text = f"First {first}; later {later}; again {first}."
-    graph = record_to_multidigraph(extract_prompt_tsg(_prompt(text)))
-    data_attributes = next(
-        attributes["attributes"]
-        for _, attributes in graph.nodes(data=True)
-        if attributes["node_type"] is NodeType.DATA_OBJECT
-        and attributes["label"] == path.data_label
-    )
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
+    attributes = _feature_structure(graph, task.feature_id)[0][1]["attributes"]
     start = text.index(first)
-    end = start + len(first)
 
-    assert data_attributes == {
+    assert attributes == {
         "evidence_start": start,
-        "evidence_end": end,
+        "evidence_end": start + len(first),
         "evidence_sha256": hashlib.sha256(first.encode("utf-8")).hexdigest(),
     }
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda entry: entry.factor_type.value)
-def test_only_bounded_evidence_commitments_are_persisted(entry: object) -> None:
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+def test_only_bounded_evidence_and_finite_feature_states_are_persisted(
+    entry: PromptOntologyEntry,
+) -> None:
     sentinel = "RAW_PROMPT_SENTINEL_7b3424"
-    record = extract_prompt_tsg(_prompt(f"Please {entry.domain_terms[0]}. {sentinel}"))
+    record = extract_prompt_tsg(_entry_prompt(entry, f"Please {entry.domain_terms[0]}. {sentinel}"))
     rendered = repr(record) + record.model_dump_json()
 
     assert sentinel not in rendered
@@ -318,6 +328,9 @@ def test_only_bounded_evidence_commitments_are_persisted(entry: object) -> None:
             "evidence_start",
             "evidence_end",
             "evidence_sha256",
+            "feature_id",
+            "feature_family",
+            "feature_state",
             "cwe_id",
         }
     for edge in record.edges:
@@ -325,8 +338,8 @@ def test_only_bounded_evidence_commitments_are_persisted(entry: object) -> None:
             "evidence_start",
             "evidence_end",
             "evidence_sha256",
-            "mapping_kind",
             "relation_kind",
+            "mapping_kind",
         }
 
 
@@ -338,21 +351,18 @@ def test_invalid_prompt_record_error_surfaces_are_sanitized() -> None:
     with pytest.raises(SecAwareError) as exc_info:
         extract_prompt_tsg(prompt)
 
-    _assert_sanitized_error(
-        exc_info.value,
-        code=ErrorCode.TSG_INVALID,
-        sentinel=sentinel,
-    )
+    _assert_sanitized_error(exc_info.value, code=ErrorCode.TSG_INVALID, sentinel=sentinel)
 
 
 @pytest.mark.parametrize(
     ("field_name", "wrong_value"),
     (
         ("prompt_id", b"p001"),
+        ("task_id", b"task-p001"),
         ("split", b"discover"),
         ("language", b"python"),
-        ("task_family", b"reviewed_task"),
-        ("cwe", b"CWE-20"),
+        ("task_family", b"path_handling"),
+        ("cwe", b"CWE-22"),
         ("prompt", b"Return the number seven. RAW_PROMPT_SENTINEL_431e"),
     ),
 )
@@ -416,11 +426,19 @@ def test_unexpected_snapshot_failure_is_sanitized_analysis_error(
     )
 
 
-def test_extractor_source_contains_no_decision_assignment() -> None:
+def test_compatibility_wrapper_contains_no_matcher_or_decision_assignment() -> None:
     source = (
         Path(__file__).parents[1] / "src" / "secaware" / "extractors" / "prompt_tsg_extractor.py"
     ).read_text(encoding="utf-8")
     lowered = source.casefold()
 
-    for forbidden in ("features =", "motif", "secure", "insecure", "shadow="):
+    for forbidden in (
+        "first_reviewed_term_match",
+        "domain_terms",
+        "guard_terms",
+        "features =",
+        "secure",
+        "insecure",
+        "shadow=",
+    ):
         assert forbidden not in lowered

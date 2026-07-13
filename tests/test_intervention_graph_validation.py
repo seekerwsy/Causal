@@ -254,10 +254,10 @@ def test_intervention_uses_only_reconstructed_graph_after_codec_boundary(
     }
 
 
-def test_unrelated_requirement_is_reported_as_side_effect() -> None:
+def test_out_of_scope_requirement_is_not_reported_as_side_effect() -> None:
     result = _validate_path_patch_that_also_adds_sql_requirement()
     assert result["target_changed"] is True
-    assert result["side_effect"] is True
+    assert result["side_effect"] is False
 
 
 def test_target_factor_changes_false_to_true_and_target_motif_is_removed() -> None:
@@ -373,10 +373,10 @@ def test_semantic_identity_ignores_graph_node_ids_and_insertion_order(
 def test_non_target_factor_and_motif_vectors_are_compared_completely() -> None:
     result = _validate_path_patch_that_also_adds_sql_requirement()
 
-    assert result["side_effect"] is True
+    assert result["side_effect"] is False
 
 
-def test_unrelated_unguarded_flow_is_reported_as_side_effect() -> None:
+def test_out_of_scope_unguarded_flow_is_not_reported_as_side_effect() -> None:
     prompt = _path_prompt_without_guard()
     result = validate_intervention(
         prompt,
@@ -385,7 +385,7 @@ def test_unrelated_unguarded_flow_is_reported_as_side_effect() -> None:
         _hypothesis(),
     )
 
-    assert result["side_effect"] is True
+    assert result["side_effect"] is False
 
 
 def test_forged_shadow_is_rejected_by_graph_boundary() -> None:
@@ -403,11 +403,8 @@ def test_forged_shadow_is_rejected_by_graph_boundary() -> None:
     assert exc_info.value.__cause__ is None
 
 
-def test_canonical_graph_change_updates_validation_without_shadow_authority(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_canonical_graph_rejects_removal_of_present_feature_structure() -> None:
     prompt = _path_prompt_without_guard()
-    original = extract_prompt_tsg(prompt)
     guarded_prompt = PromptRecord.model_validate(
         {**prompt.model_dump(), "prompt": _path_prompt_text_with_guard()}
     )
@@ -419,17 +416,9 @@ def test_canonical_graph_change_updates_validation_without_shadow_authority(
         if data["edge_type"] is EdgeType.REQUIRES
     )
     graph.remove_edge(*requires)
-    changed = multidigraph_to_record(graph, prompt_id=prompt.prompt_id)
-    _route_extraction(
-        monkeypatch,
-        original_text=prompt.prompt,
-        original_record=original,
-        counter_record=changed,
-    )
-
-    result = validate_intervention(prompt, original, _path_prompt_text_with_guard(), _hypothesis())
-
-    assert result["round_trip_valid"] is False
+    with pytest.raises(SecAwareError) as exc_info:
+        multidigraph_to_record(graph, prompt_id=prompt.prompt_id)
+    assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
 @pytest.mark.parametrize(

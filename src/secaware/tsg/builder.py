@@ -9,6 +9,7 @@ from secaware.schema.features import FeatureFamily, FeatureState, PromptExtracto
 from secaware.schema.prompt_extraction import EvidenceSpan, PromptExtractionProposalRecord
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import EdgeType, NodeType, PromptTSGRecord
+from secaware.tsg.catalog import PROMPT_TSG_CATALOG, PromptOntologyEntry
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG, FeatureSpec
 from secaware.tsg.graph import multidigraph_to_record, record_to_multidigraph
 from secaware.tsg.proposal_validator import (
@@ -26,6 +27,29 @@ _EDGE_ENDPOINT_TYPES = {
     EdgeType.GUARDED_BY: (NodeType.DATA_OBJECT, NodeType.GUARD),
     EdgeType.REQUIRES: (NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
 }
+
+
+def _legacy_feature_pairs() -> tuple[tuple[FeatureSpec, FeatureSpec, PromptOntologyEntry], ...]:
+    pairs = []
+    for entry in PROMPT_TSG_CATALOG:
+        task = next(
+            spec
+            for spec in PROMPT_FEATURE_CATALOG
+            if spec.deterministic_terms == entry.domain_terms
+        )
+        safety = next(
+            spec for spec in PROMPT_FEATURE_CATALOG if spec.deterministic_terms == entry.guard_terms
+        )
+        pairs.append((task, safety, entry))
+    return tuple(pairs)
+
+
+_LEGACY_FEATURE_PAIRS = _legacy_feature_pairs()
+_LEGACY_FEATURE_IDS = frozenset(
+    spec.feature_id
+    for task_spec, safety_spec, _ in _LEGACY_FEATURE_PAIRS
+    for spec in (task_spec, safety_spec)
+)
 
 
 def _internal_error() -> SecAwareError:
@@ -75,6 +99,139 @@ def _add_fact_structure(
         )
 
 
+def _legacy_node(
+    graph: nx.MultiDiGraph,
+    feature_id: str,
+    role: str,
+    node_type: NodeType,
+    label: str,
+    attributes: dict[str, str | int],
+) -> str:
+    key = f"proposal-legacy:{feature_id}:{role}"
+    graph.add_node(
+        key,
+        node_type=node_type,
+        label=label,
+        attributes=dict(attributes),
+    )
+    return key
+
+
+def _add_legacy_domain_flow(
+    graph: nx.MultiDiGraph,
+    task_spec: FeatureSpec,
+    entry: PromptOntologyEntry,
+    span: EvidenceSpan,
+) -> tuple[str, str]:
+    attributes = _evidence_attributes(span)
+    operation = _legacy_node(
+        graph,
+        task_spec.feature_id,
+        "operation",
+        NodeType.TASK_OPERATION,
+        entry.operation_label,
+        attributes,
+    )
+    source = _legacy_node(
+        graph,
+        task_spec.feature_id,
+        "source",
+        NodeType.SOURCE,
+        f"{entry.factor_type.value}_source",
+        attributes,
+    )
+    data = _legacy_node(
+        graph,
+        task_spec.feature_id,
+        "data",
+        NodeType.DATA_OBJECT,
+        entry.data_label,
+        attributes,
+    )
+    sink = _legacy_node(
+        graph,
+        task_spec.feature_id,
+        "sink",
+        NodeType.SINK,
+        entry.sink_label,
+        attributes,
+    )
+    cwe = _legacy_node(
+        graph,
+        task_spec.feature_id,
+        "cwe",
+        NodeType.CWE,
+        entry.cwe,
+        {**attributes, "cwe_id": entry.cwe},
+    )
+    graph.add_edge(operation, data, edge_type=EdgeType.OPERATES_ON, attributes=dict(attributes))
+    graph.add_edge(source, data, edge_type=EdgeType.SOURCE_OF, attributes=dict(attributes))
+    graph.add_edge(data, sink, edge_type=EdgeType.FLOWS_TO, attributes=dict(attributes))
+    graph.add_edge(
+        sink,
+        cwe,
+        edge_type=EdgeType.MAPS_TO,
+        attributes={**attributes, "mapping_kind": "reviewed_catalog_cwe"},
+    )
+    return data, sink
+
+
+def _add_legacy_guard(
+    graph: nx.MultiDiGraph,
+    task_spec: FeatureSpec,
+    safety_spec: FeatureSpec,
+    entry: PromptOntologyEntry,
+    span: EvidenceSpan,
+) -> None:
+    attributes = _evidence_attributes(span)
+    requirement = _legacy_node(
+        graph,
+        safety_spec.feature_id,
+        "requirement",
+        NodeType.PROMPT_REQUIREMENT,
+        entry.requirement_label,
+        attributes,
+    )
+    guard = _legacy_node(
+        graph,
+        safety_spec.feature_id,
+        "guard",
+        NodeType.GUARD,
+        entry.guard_label,
+        attributes,
+    )
+    graph.add_edge(
+        requirement,
+        guard,
+        edge_type=EdgeType.REQUIRES,
+        attributes=dict(attributes),
+    )
+    for role in ("data", "sink"):
+        target = f"proposal-legacy:{task_spec.feature_id}:{role}"
+        if target in graph:
+            graph.add_edge(
+                target,
+                guard,
+                edge_type=EdgeType.GUARDED_BY,
+                attributes=dict(attributes),
+            )
+
+
+def _add_legacy_fact_compatibility(
+    graph: nx.MultiDiGraph,
+    trusted: PromptExtractionProposalRecord,
+) -> None:
+    facts = {fact.feature_id: fact for fact in trusted.facts}
+    for task_spec, _, entry in _LEGACY_FEATURE_PAIRS:
+        fact = facts[task_spec.feature_id]
+        if fact.state is FeatureState.PRESENT:
+            _add_legacy_domain_flow(graph, task_spec, entry, fact.evidence[0])
+    for task_spec, safety_spec, entry in _LEGACY_FEATURE_PAIRS:
+        fact = facts[safety_spec.feature_id]
+        if fact.state is FeatureState.PRESENT:
+            _add_legacy_guard(graph, task_spec, safety_spec, entry, fact.evidence[0])
+
+
 def _build_structural_graph(
     trusted: PromptExtractionProposalRecord,
 ) -> tuple[nx.MultiDiGraph, dict[str, FeatureState]]:
@@ -90,7 +247,9 @@ def _build_structural_graph(
                 spec = next(
                     item for item in PROMPT_FEATURE_CATALOG if item.feature_id == fact.feature_id
                 )
-                _add_fact_structure(graph, spec, fact.evidence[0])
+                if spec.feature_id not in _LEGACY_FEATURE_IDS:
+                    _add_fact_structure(graph, spec, fact.evidence[0])
+        _add_legacy_fact_compatibility(graph, trusted)
         return graph, states
 
     aliases: dict[str, str] = {}
