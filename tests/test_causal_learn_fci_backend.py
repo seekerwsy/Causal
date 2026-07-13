@@ -15,6 +15,7 @@ from secaware.causal.variable_catalog import declaration_by_id, declaration_sha2
 from secaware.config import FCIDiscoveryConfig
 from secaware.errors import SecAwareError
 from secaware.schema.causal import (
+    BackgroundKnowledgeRecord,
     CausalObservationRecord,
     CausalTableRecord,
     CausalVariableSpec,
@@ -114,6 +115,40 @@ def _table_with_forbidden_adjacency() -> tuple[CausalTableRecord, np.ndarray]:
             ),
             f"task-adj-{index}",
             f"prompt-adj-{index}",
+            index,
+            values,
+        )
+        for index, values in enumerate(values_by_row)
+    )
+    table = CausalTableRecord.from_content(
+        scope_id="scope.cwe_89",
+        cwe="CWE-89",
+        model_id="model-a",
+        variables=variables,
+        row_count=4,
+        independent_task_count=4,
+        observation_payload=observations,
+    )
+    return table, np.asarray(values_by_row, dtype=np.int64)
+
+
+def _same_tier_outcome_table() -> tuple[CausalTableRecord, np.ndarray]:
+    variables = (
+        _variable("y.cwe_security"),
+        _variable("y.secure_functional"),
+    )
+    values_by_row = ((0, 0), (1, 0), (0, 1), (1, 1))
+    observations = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=f"task-tier-{index}",
+                prompt_id=f"prompt-tier-{index}",
+                model_id="model-a",
+                seed_id=index,
+                values=values,
+            ),
+            f"task-tier-{index}",
+            f"prompt-tier-{index}",
             index,
             values,
         )
@@ -254,6 +289,54 @@ def test_fci_adapter_rejects_orientation_output_for_forbidden_adjacency(
         run_causal_learn_fci(
             matrix, table, build_background_knowledge(table), _config()
         )
+
+
+def test_fci_adapter_rejects_unjustified_same_tier_knowledge_orientation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from secaware.discovery.causal_learn_backend import run_causal_learn_fci
+
+    table, matrix = _same_tier_outcome_table()
+
+    def diagnostic(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
+        for _round in range(2):
+            print("Starting BK Orientation.")
+            print(
+                "Orienting edge (Knowledge): "
+                "y.cwe_security --> y.secure_functional"
+            )
+            print("Finishing BK Orientation.")
+        return _Graph([item.variable_id for item in table.variables]), []
+
+    monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", diagnostic)
+    with pytest.raises(SecAwareError):
+        run_causal_learn_fci(
+            matrix, table, build_background_knowledge(table), _config()
+        )
+
+
+def test_stdout_grammar_accepts_a_future_explicitly_required_orientation() -> None:
+    from secaware.discovery.causal_learn_backend import _validate_pinned_backend_stdout
+
+    table, _matrix_values = _same_tier_outcome_table()
+    original = build_background_knowledge(table)
+    required = BackgroundKnowledgeRecord.from_content(
+        table_id=table.table_id,
+        tiers=original.tiers,
+        forbidden_directions=original.forbidden_directions,
+        forbidden_adjacencies=original.forbidden_adjacencies,
+        required_directions=(("y.cwe_security", "y.secure_functional"),),
+    )
+    output = "".join(
+        (
+            "Starting BK Orientation.\n",
+            "Orienting edge (Knowledge): y.cwe_security --> y.secure_functional\n",
+            "Finishing BK Orientation.\n",
+        )
+        * 2
+    )
+
+    _validate_pinned_backend_stdout(output, table, required)
 
 
 def test_fci_adapter_rejects_library_version_drift_before_backend(

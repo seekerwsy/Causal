@@ -190,6 +190,7 @@ def _validate_pinned_backend_stdout(
     known = {item.variable_id for item in table.variables}
     forbidden_directions = set(knowledge.forbidden_directions)
     forbidden_adjacencies = set(knowledge.forbidden_adjacencies)
+    required_directions = set(knowledge.required_directions)
     index = 0
     for _round in range(2):
         if index >= len(lines) or lines[index] != _BK_START_LINE:
@@ -208,6 +209,10 @@ def _validate_pinned_backend_stdout(
                 or target not in known
                 or (source, target) in forbidden_directions
                 or pair in forbidden_adjacencies
+                or (
+                    (target, source) not in forbidden_directions
+                    and (source, target) not in required_directions
+                )
             ):
                 raise ValueError
             index += 1
