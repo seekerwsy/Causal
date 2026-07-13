@@ -534,7 +534,10 @@ class PromptTSGRecord(SafeValidationMixin, VersionedModel):
         from secaware.tsg.feature_catalog import prompt_feature_spec
 
         for node in feature_nodes:
-            if FeatureState(cast(str, node.attributes["feature_state"])) is not FeatureState.PRESENT:
+            if (
+                FeatureState(cast(str, node.attributes["feature_state"]))
+                is not FeatureState.PRESENT
+            ):
                 continue
             spec = prompt_feature_spec(cast(str, node.attributes["feature_id"]))
             if (

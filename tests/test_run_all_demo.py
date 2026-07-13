@@ -2,6 +2,7 @@ import ast
 from collections.abc import Sequence
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from secaware import cli as cli_module
 from secaware.cli import app
 from secaware.config import TSGConfig, load_config, write_resolved_config
 from secaware import extractors as extractors_module
+from secaware.extractors import factory as extractor_factory_module
 from secaware.errors import ErrorCode
 from secaware.io.jsonl import read_jsonl
 from secaware.oracle import aggregator as aggregator_module
@@ -19,6 +21,8 @@ from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.oracle import OracleRecord
+from secaware.schema.features import PromptExtractorBackend
+from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.schema.results import PairResult
 
@@ -326,6 +330,16 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     monkeypatch.setattr(cli_module, "run_analyzer_process", runner)
     monkeypatch.setattr(cli_module, "validate_analyzer_runtime", lambda: None)
     monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def reject_llm_transport(**_kwargs: object) -> None:
+        pytest.fail("offline deterministic demo must not construct an LLM transport")
+
+    monkeypatch.setattr(
+        extractor_factory_module,
+        "OpenAICompatibleStructuredTransport",
+        reject_llm_transport,
+    )
 
     result = CliRunner().invoke(
         app,
@@ -358,6 +372,17 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         allow_empty=False,
     )
     assert observed and counterfactual
+    proposals = read_jsonl(
+        run_dir / "tsg" / "prompt_extraction_proposals.jsonl",
+        PromptExtractionProposalRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert proposals
+    assert {proposal.backend for proposal in proposals} == {
+        PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
+    }
+    assert "OPENAI_API_KEY" not in os.environ
     interventions = read_jsonl(
         run_dir / "interventions" / "interventions.jsonl",
         InterventionRecord,
@@ -627,6 +652,18 @@ def test_prompt_graph_outcome_boundary_and_breaking_migration_are_documented() -
     )
     assert "PROMPT_TSG_CATALOG_SHA256" in migration
     assert "re.fullmatch" in migration
+    assert "Prompt TSG 2.1" in migration
+    assert "task_id" in migration
+    for backend in (
+        "llm_facts_v1",
+        "llm_direct_graph_v1",
+        "deterministic_catalog_v1",
+    ):
+        assert backend in migration
+    assert "prompt_extraction_proposals.jsonl" in migration
+    assert "prompt_tsg.jsonl" in migration
+    assert "no per-prompt fallback" in normalized_migration
+    assert "not automatically upgraded" in normalized_migration
 
 
 def test_run_all_demo_fails_closed_before_legacy_oracle_publication(tmp_path: Path) -> None:

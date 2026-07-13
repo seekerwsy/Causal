@@ -148,9 +148,7 @@ def test_public_record_builder_has_no_caller_authored_shadow_api() -> None:
     assert "shadow" not in inspect.signature(multidigraph_to_record).parameters
 
     with pytest.raises(TypeError):
-        multidigraph_to_record(
-            nx.MultiDiGraph(), **_record_coordinates(), shadow={}
-        )  # type: ignore[call-arg]
+        multidigraph_to_record(nx.MultiDiGraph(), **_record_coordinates(), shadow={})  # type: ignore[call-arg]
 
 
 def test_unexpected_shadow_derivation_failure_is_analysis_invalid(

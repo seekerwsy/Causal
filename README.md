@@ -24,6 +24,37 @@ shadow prevents downstream publication rather than falling back to v1 data or fl
 See [Prompt TSG v2 migration](docs/migrations/prompt-tsg-v2.md) before opening or rerunning an
 existing run directory.
 
+## Prompt extraction in M4A
+
+M4A implements Prompt TSG 2.1 extraction. The `extract-prompt-tsg` command reads the configured
+prompt input and publishes exactly two run-locked artifacts:
+
+- `tsg/prompt_extraction_proposals.jsonl`, the bounded backend proposal and its provenance;
+- `tsg/prompt_tsg.jsonl`, the validated canonical Prompt TSG used by graph queries.
+
+Each input prompt requires `task_id`. Select one extractor explicitly with
+`tsg.prompt_extractor`: `llm_facts_v1` (the default), `llm_direct_graph_v1`, or
+`deterministic_catalog_v1`. The offline `configs/demo.yaml` deliberately overrides the default
+with `deterministic_catalog_v1`, so prompt extraction does not require a network call or API key.
+The LLM configuration in `configs/paper_v0.yaml` records an OpenAI-compatible `base_url`,
+`model_id`, and the non-secret `api_key_env` environment-variable name; credentials belong only in
+that named environment variable.
+
+Run extraction alone with:
+
+```bash
+secaware extract-prompt-tsg --config configs/demo.yaml --run-dir runs/demo --force
+```
+
+Backend selection is exact and run-wide. There is no per-prompt fallback, ranking, winner, or
+automatic selection. Invalid proposals fail closed before either output is committed.
+
+The existing `discover`, `intervene`, `confirm`, and `run-all` commands remain available for the
+pre-M4B prototype workflow. FCI discovery is not implemented in M4A; it is reserved for M4B, so
+current discovery artifacts must not be described as FCI/PAG results. `run-all` currently executes
+Prompt TSG extraction, observed generation and Oracle, the existing discovery/intervention path,
+counterfactual generation and Oracle, confirmation, and reporting in that order.
+
 Install the core development environment and run the unit suite with:
 
 ```bash
