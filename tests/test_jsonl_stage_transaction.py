@@ -1,10 +1,12 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.io import transaction as transaction_module
 from secaware.io.run_store import RunStore
 from secaware.io.transaction import ArtifactTransaction, TransactionStateError
 from secaware.pipeline import jsonl_stage as jsonl_stage_module
@@ -76,6 +78,45 @@ def test_jsonl_stage_requires_one_record_group_per_output(tmp_path: Path) -> Non
     assert exc_info.value.stage == "transaction-test"
     assert not one.exists()
     assert not two.exists()
+
+
+def test_jsonl_stage_attributes_candidate_creation_failure_to_calling_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _prepared_store(tmp_path)
+    output = store.path("tsg", "one.jsonl")
+
+    def fail_candidate_creation(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("private-candidate-creation-failure")
+
+    real_named_temporary_file = jsonl_stage_module.tempfile.NamedTemporaryFile
+    monkeypatch.setattr(
+        transaction_module,
+        "tempfile",
+        SimpleNamespace(NamedTemporaryFile=real_named_temporary_file),
+    )
+    monkeypatch.setattr(
+        jsonl_stage_module.tempfile,
+        "NamedTemporaryFile",
+        fail_candidate_creation,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        execute_jsonl_stage_transaction(
+            store,
+            stage="transaction-test",
+            inputs=(store.path("inputs", "prompts.jsonl"),),
+            outputs=(JsonlOutputSpec(output, ProbeRecord),),
+            force=True,
+            build=lambda: ((ProbeRecord(value=10),),),
+        )
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.stage == "transaction-test"
+    assert exc_info.value.message == "stage output transaction is unavailable"
+    assert "Oracle" not in str(exc_info.value)
 
 
 def test_jsonl_stage_reads_each_candidate_through_its_declared_model(

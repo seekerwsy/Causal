@@ -45,7 +45,7 @@ def _stage_error(code: ErrorCode, stage: str, message: str) -> SecAwareError:
     )
 
 
-def _transaction_path(output: Path, suffix: str) -> Path:
+def _transaction_path(output: Path, suffix: str, *, stage: str) -> Path:
     handle = None
     try:
         handle = tempfile.NamedTemporaryFile(
@@ -63,8 +63,8 @@ def _transaction_path(output: Path, suffix: str) -> Path:
     except OSError:
         raise _stage_error(
             ErrorCode.CONTRACT,
-            "oracle",
-            "Oracle output transaction is unavailable",
+            stage,
+            "stage output transaction is unavailable",
         ) from None
     finally:
         if handle is not None:
@@ -276,7 +276,7 @@ def _execute_transaction_body(
         for index, (output, expected) in enumerate(
             zip(outputs, expected_groups, strict=True)
         ):
-            candidate = _transaction_path(output.path, ".stage.candidate")
+            candidate = _transaction_path(output.path, ".stage.candidate", stage=stage)
             candidates[index] = candidate
             write_jsonl(candidate, expected, stage=stage)
             if _read_jsonl_output(output, candidate, stage=stage) != expected:
