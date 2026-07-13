@@ -179,6 +179,23 @@ def test_threshold_is_inclusive_and_all_stable_paths_are_frozen(tmp_path: Path) 
     )
 
 
+def test_m4b_hypothesis_digest_commits_current_feature_catalog(tmp_path: Path) -> None:
+    from secaware.causal.freeze import revalidate_frozen_hypothesis
+
+    result, _bundle_items = _freeze(tmp_path)
+    hypothesis = result.hypotheses[0]
+    content = hypothesis.model_dump(
+        mode="python",
+        exclude={"schema_version", "hypothesis_id", "hypothesis_sha256"},
+    )
+    content["catalog_sha256"] = "0" * 64
+    stale = type(hypothesis).from_content(**content)
+
+    assert stale.hypothesis_sha256 != hypothesis.hypothesis_sha256
+    with pytest.raises(SecAwareError, match="frozen hypothesis failed revalidation"):
+        revalidate_frozen_hypothesis(stale)
+
+
 @pytest.mark.parametrize(
     ("target", "expected_family", "expected_signs"),
     (

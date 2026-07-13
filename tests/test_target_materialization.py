@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import inspect
 
 import pytest
 from pydantic import ValidationError
@@ -33,6 +34,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 import secaware.intervention as intervention_api
+import secaware.intervention.targeting as targeting_module
 
 
 SHA_A = "a" * 64
@@ -191,6 +193,20 @@ def _pair(
     return baseline, variant, attestations
 
 
+def _discover_prompt(prompt_id: str = "discover-a") -> PromptRecord:
+    return PromptRecord(
+        prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
+        split="discover",
+        language="python",
+        task_family="path_handling",
+        cwe="CWE-22",
+        prompt="Describe a Python path-handling helper.",
+        prompt_role=PromptRole.NEUTRAL_BASELINE,
+        counterpart_prompt_id=None,
+    )
+
+
 @pytest.mark.parametrize("operation", tuple(FeatureOperation))
 def test_materialize_target_spec_is_semantic_and_hypothesis_bound(
     operation: FeatureOperation,
@@ -266,6 +282,7 @@ def test_family_operation_prompt_role_matrix(
         target,
         hypothesis,
         (baseline, variant)[source_index],
+        (baseline, variant),
         attestations,
     )
     assert instance.source_prompt_role is expected_role
@@ -281,7 +298,13 @@ def test_safety_remove_requires_exact_positive_to_neutral_counterpart() -> None:
     positive_source = _pair(operation=FeatureOperation.REMOVE)
     baseline, positive, attestations = positive_source
     target = materialize_target_spec(hypothesis, FeatureOperation.REMOVE)
-    instance = materialize_target_instance(target, hypothesis, positive, attestations)
+    instance = materialize_target_instance(
+        target,
+        hypothesis,
+        positive,
+        (baseline, positive),
+        attestations,
+    )
     assert instance.source_prompt_role is PromptRole.POSITIVE_SAFETY_CONTROL
     assert instance.counterpart_required is True
     assert counterpart_for(instance, attestations).prompt_id == baseline.prompt_id
@@ -291,10 +314,22 @@ def test_two_tasks_share_semantic_ids_but_not_instance_ids() -> None:
     hypothesis = _hypothesis()
     target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
     protocol = materialize_arm_protocol(hypothesis, target)
-    left_baseline, _, left_attestations = _pair(task_id="task-a")
-    right_baseline, _, right_attestations = _pair(task_id="task-b")
-    left = materialize_target_instance(target, hypothesis, left_baseline, left_attestations)
-    right = materialize_target_instance(target, hypothesis, right_baseline, right_attestations)
+    left_baseline, left_variant, left_attestations = _pair(task_id="task-a")
+    right_baseline, right_variant, right_attestations = _pair(task_id="task-b")
+    left = materialize_target_instance(
+        target,
+        hypothesis,
+        left_baseline,
+        (left_baseline, left_variant),
+        left_attestations,
+    )
+    right = materialize_target_instance(
+        target,
+        hypothesis,
+        right_baseline,
+        (right_baseline, right_variant),
+        right_attestations,
+    )
     assert left.target_spec_id == right.target_spec_id == target.target_spec_id
     assert left.target_instance_id != right.target_instance_id
     left_protocol = materialize_protocol_instance(protocol, left)
@@ -310,20 +345,33 @@ def test_non_owner_reverse_cannot_form_assignable_target_instance() -> None:
     baseline, variant, attestations = _pair(operation=FeatureOperation.ADD)
     reverse_target = materialize_target_spec(hypothesis, FeatureOperation.REMOVE)
     with pytest.raises(SecAwareError) as exc_info:
-        materialize_target_instance(reverse_target, hypothesis, variant, attestations)
+        materialize_target_instance(
+            reverse_target,
+            hypothesis,
+            variant,
+            (baseline, variant),
+            attestations,
+        )
     assert exc_info.value.code is ErrorCode.CONTRACT
 
 
 def test_target_instance_rejects_pair_attested_for_a_different_feature() -> None:
-    hypothesis = _hypothesis()
+    hypothesis = _hypothesis(FeatureFamily.PRESENTATION_CONTROL)
     target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
-    baseline, _, attestations = _pair(
+    baseline, variant, attestations = _pair(
+        FeatureFamily.PRESENTATION_CONTROL,
         operation=FeatureOperation.ADD,
-        clause_override=" Follow security best practices.",
+        clause_override=" Apply a sham edit.",
     )
 
     with pytest.raises(SecAwareError) as exc_info:
-        materialize_target_instance(target, hypothesis, baseline, attestations)
+        materialize_target_instance(
+            target,
+            hypothesis,
+            baseline,
+            (baseline, variant),
+            attestations,
+        )
     assert exc_info.value.code is ErrorCode.CONTRACT
 
 
@@ -378,7 +426,13 @@ def test_target_instance_rejects_invalid_scope_role_or_provenance(mutation: str)
         )
     target = materialize_target_spec(hypothesis, operation)
     with pytest.raises(SecAwareError) as exc_info:
-        materialize_target_instance(target, hypothesis, prompt, supplied)
+        materialize_target_instance(
+            target,
+            hypothesis,
+            prompt,
+            (baseline, variant),
+            supplied,
+        )
     assert exc_info.value.code is ErrorCode.CONTRACT
 
 
@@ -422,13 +476,25 @@ def test_materializers_revalidate_all_semantic_and_instance_coordinates(
     hypothesis = _hypothesis()
     target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
     protocol = materialize_arm_protocol(hypothesis, target)
-    baseline, _, attestations = _pair()
+    baseline, variant, attestations = _pair()
     if record_kind == "target":
         forged_target = target.model_copy(update={field: replacement})
         with pytest.raises(SecAwareError):
-            materialize_target_instance(forged_target, hypothesis, baseline, attestations)
+            materialize_target_instance(
+                forged_target,
+                hypothesis,
+                baseline,
+                (baseline, variant),
+                attestations,
+            )
         return
-    instance = materialize_target_instance(target, hypothesis, baseline, attestations)
+    instance = materialize_target_instance(
+        target,
+        hypothesis,
+        baseline,
+        (baseline, variant),
+        attestations,
+    )
     if record_kind == "instance":
         instance = instance.model_copy(update={field: replacement})
         with pytest.raises(SecAwareError):
@@ -443,8 +509,14 @@ def test_materialized_instances_bind_same_prompt_digest_without_redundant_drift(
     hypothesis = _hypothesis()
     target = materialize_target_spec(hypothesis, FeatureOperation.REMOVE)
     protocol = materialize_arm_protocol(hypothesis, target)
-    _, variant, attestations = _pair(operation=FeatureOperation.REMOVE)
-    target_instance = materialize_target_instance(target, hypothesis, variant, attestations)
+    baseline, variant, attestations = _pair(operation=FeatureOperation.REMOVE)
+    target_instance = materialize_target_instance(
+        target,
+        hypothesis,
+        variant,
+        (baseline, variant),
+        attestations,
+    )
     protocol_instance = materialize_protocol_instance(protocol, target_instance)
     assert target_instance.source_prompt_sha256 == variant.prompt_sha256
     assert protocol_instance.source_prompt_sha256 == variant.prompt_sha256
@@ -462,8 +534,14 @@ def test_materialized_instances_bind_same_prompt_digest_without_redundant_drift(
 def test_instance_ids_are_content_addressed_and_mutations_fail_validation() -> None:
     hypothesis = _hypothesis()
     target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
-    baseline, _, attestations = _pair()
-    instance = materialize_target_instance(target, hypothesis, baseline, attestations)
+    baseline, variant, attestations = _pair()
+    instance = materialize_target_instance(
+        target,
+        hypothesis,
+        baseline,
+        (baseline, variant),
+        attestations,
+    )
     payload = instance.model_dump(mode="json")
     payload["target_instance_id"] = "target_instance_" + "0" * 64
     with pytest.raises(ValidationError):
@@ -481,3 +559,127 @@ def test_task2_public_intervention_api_is_explicit_and_finite() -> None:
         "materialize_target_instance",
         "materialize_protocol_instance",
     } <= set(intervention_api.__all__)
+
+    parameters = inspect.signature(materialize_target_instance).parameters
+    assert tuple(parameters) == (
+        "target",
+        "hypothesis",
+        "prompt",
+        "prompts",
+        "attestations",
+    )
+    assert all(item.default is inspect.Parameter.empty for item in parameters.values())
+
+
+@pytest.mark.parametrize("operation", tuple(FeatureOperation))
+def test_target_materializer_validates_complete_prompt_artifact_before_pair_resolution(
+    operation: FeatureOperation,
+) -> None:
+    hypothesis = _hypothesis()
+    target = materialize_target_spec(hypothesis, operation)
+    baseline, variant, attestations = _pair(operation=operation)
+    source = baseline if operation is FeatureOperation.ADD else variant
+    prompts = (_discover_prompt(), baseline, variant)
+
+    instance = materialize_target_instance(
+        target,
+        hypothesis,
+        source,
+        prompts,
+        attestations,
+    )
+
+    assert instance.target_spec_id == target.target_spec_id
+    assert instance.source_prompt_id == source.prompt_id
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "ghost_variant",
+        "source_not_in_artifact",
+        "extra_stale_confirm_prompt",
+        "duplicate_prompt",
+        "source_object_drift",
+        "cross_bundle_attestations",
+    ),
+)
+def test_target_materializer_rejects_incomplete_or_cross_bundle_prompt_artifacts(
+    mutation: str,
+) -> None:
+    hypothesis = _hypothesis()
+    target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
+    baseline, variant, attestations = _pair(task_id="task-a")
+    source = baseline
+    prompts: tuple[PromptRecord, ...] = (baseline, variant)
+    supplied = attestations
+    if mutation == "ghost_variant":
+        prompts = (baseline,)
+    elif mutation == "source_not_in_artifact":
+        other_baseline, other_variant, supplied = _pair(task_id="task-b")
+        prompts = (other_baseline, other_variant)
+    elif mutation == "extra_stale_confirm_prompt":
+        extra_baseline, _, _ = _pair(task_id="task-extra")
+        prompts = (baseline, variant, extra_baseline)
+    elif mutation == "duplicate_prompt":
+        prompts = (baseline, variant, baseline)
+    elif mutation == "source_object_drift":
+        source = baseline.model_copy(update={"prompt": baseline.prompt + " Drift."})
+    else:
+        _, _, supplied = _pair(task_id="task-b")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        materialize_target_instance(
+            target,
+            hypothesis,
+            source,
+            prompts,
+            supplied,
+        )
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+@pytest.mark.parametrize("fatal", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_target_materializer_propagates_fatal_validation_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    fatal: type[BaseException],
+) -> None:
+    hypothesis = _hypothesis()
+    target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
+    baseline, variant, attestations = _pair()
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise fatal
+
+    monkeypatch.setattr(targeting_module, "validate_prompt_role_attestations", fail)
+    with pytest.raises(fatal):
+        materialize_target_instance(
+            target,
+            hypothesis,
+            baseline,
+            (baseline, variant),
+            attestations,
+        )
+
+
+def test_target_materializer_sanitizes_nonfatal_bundle_validation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hypothesis = _hypothesis()
+    target = materialize_target_spec(hypothesis, FeatureOperation.ADD)
+    baseline, variant, attestations = _pair()
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("sensitive prompt bundle")
+
+    monkeypatch.setattr(targeting_module, "validate_prompt_role_attestations", fail)
+    with pytest.raises(SecAwareError) as exc_info:
+        materialize_target_instance(
+            target,
+            hypothesis,
+            baseline,
+            (baseline, variant),
+            attestations,
+        )
+    assert "sensitive prompt bundle" not in str(exc_info.value)
+    assert exc_info.value.details == {}

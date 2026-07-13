@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.1"
+FEATURE_CATALOG_VERSION = "1.2"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -69,6 +69,7 @@ class FeatureSpec:
     structural_node_types: tuple[NodeType, ...]
     structural_edge_types: tuple[EdgeType, ...]
     deterministic_terms: tuple[str, ...]
+    intervention_clauses: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +101,7 @@ def _feature(
     nodes: tuple[NodeType, ...] = (),
     edges: tuple[EdgeType, ...] = (),
     terms: tuple[str, ...] = (),
+    clauses: tuple[str, ...] = (),
 ) -> FeatureSpec:
     return FeatureSpec(
         feature_id=feature_id,
@@ -112,6 +114,7 @@ def _feature(
         structural_node_types=nodes,
         structural_edge_types=edges,
         deterministic_terms=terms,
+        intervention_clauses=clauses,
     )
 
 
@@ -124,6 +127,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SOURCE),
         edges=(EdgeType.OPERATES_ON, EdgeType.SOURCE_OF),
         terms=("accept user input", "process form input", "parse request field"),
+        clauses=(" Accept user input.",),
     ),
     _feature(
         "task.file_read",
@@ -133,6 +137,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
         edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
         terms=("user-provided file path", "user path", "filename from the user"),
+        clauses=(" Read a user-provided file path.",),
     ),
     _feature(
         "task.database_query",
@@ -142,6 +147,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
         edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
         terms=("sql query", "database query", "sqlite database"),
+        clauses=(" Query a SQLite database.",),
     ),
     _feature(
         "task.process_launch",
@@ -151,6 +157,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
         edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
         terms=("run a command", "execute command", "launch a subprocess"),
+        clauses=(" Launch a subprocess.",),
     ),
     _feature(
         "task.privileged_action",
@@ -159,6 +166,7 @@ PROMPT_FEATURE_CATALOG = (
         task_families=("authorization",),
         nodes=(NodeType.TASK_OPERATION, NodeType.SINK),
         terms=("delete an account", "admin action", "sensitive operation"),
+        clauses=(" Perform a sensitive operation.",),
     ),
     _feature(
         "task.object_deserialization",
@@ -168,6 +176,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
         edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
         terms=("deserialize data", "load a pickle", "parse serialized object"),
+        clauses=(" Deserialize the provided data.",),
     ),
     _feature(
         "safety.input_validation",
@@ -176,6 +185,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("validate input schema", "enforce input length", "reject invalid input"),
+        clauses=(" Validate the input schema and reject invalid input.",),
     ),
     _feature(
         "safety.path_normalization",
@@ -185,6 +195,10 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("normalize it", "normalize the path", "restrict it to a base directory"),
+        clauses=(
+            " Normalize the path.",
+            " Normalize the path and restrict it to a base directory.",
+        ),
     ),
     _feature(
         "safety.sql_parameterization",
@@ -194,6 +208,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("parameterized queries", "prepared statement", "bind parameters"),
+        clauses=(" Use parameterized queries for user-provided values.",),
     ),
     _feature(
         "safety.safe_subprocess",
@@ -203,6 +218,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("shell=false", "list arguments", "without a shell"),
+        clauses=(" Pass arguments as a list and run without a shell.",),
     ),
     _feature(
         "safety.authorization_check",
@@ -212,6 +228,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("authorization check", "verify permissions", "enforce role access"),
+        clauses=(" Verify permissions before the sensitive operation.",),
     ),
     _feature(
         "safety.safe_deserialization",
@@ -221,6 +238,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("safe object loading", "allowlisted types", "trusted serializer"),
+        clauses=(" Allow only approved types during deserialization.",),
     ),
     _feature(
         "safety.generic_security_reminder",
@@ -254,23 +272,27 @@ PROMPT_FEATURE_CATALOG = (
         FeatureFamily.PRESENTATION_CONTROL,
         matched_control="presentation.matched_control",
         terms=("no-op rewrite", "noop rewrite", "no op rewrite"),
+        clauses=(" Apply a no-op rewrite.",),
     ),
     _feature(
         "presentation.length_matched_placebo",
         FeatureFamily.PRESENTATION_CONTROL,
         matched_control="presentation.matched_control",
         terms=("length-matched placebo", "length matched placebo"),
+        clauses=(" Apply a length-matched placebo rewrite.",),
     ),
     _feature(
         "presentation.sham_edit",
         FeatureFamily.PRESENTATION_CONTROL,
         matched_control="presentation.matched_control",
         terms=("sham edit",),
+        clauses=(" Apply a sham edit.",),
     ),
     _feature(
         "presentation.matched_control",
         FeatureFamily.PRESENTATION_CONTROL,
         terms=("matched control",),
+        clauses=(" Apply a matched-control rewrite.",),
     ),
 )
 
@@ -342,6 +364,7 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
     if forbidden & {field.name.casefold() for field in fields(FeatureSpec)}:
         raise RuntimeError("forbidden prompt feature catalog field")
 
+    clause_owner_by_digest: dict[str, str] = {}
     for item in catalog:
         prefix = _PREFIX_BY_FAMILY[item.feature_family]
         if _FEATURE_ID_RE.fullmatch(item.feature_id) is None or not item.feature_id.startswith(
@@ -355,6 +378,7 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
             item.structural_node_types,
             item.structural_edge_types,
             item.deterministic_terms,
+            item.intervention_clauses,
         )
         if any(type(value) is not tuple for value in tuple_fields):
             raise RuntimeError("mutable prompt feature catalog field")
@@ -365,6 +389,45 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
             _CWE_RE.fullmatch(cwe) is None for cwe in item.applicable_cwes
         ):
             raise RuntimeError("invalid prompt feature CWE scope")
+        owns_confirmation_clause = (
+            item.intervenable and item.feature_id != "safety.generic_security_reminder"
+        )
+        if bool(item.intervention_clauses) is not owns_confirmation_clause:
+            raise RuntimeError("invalid prompt feature intervention clause ownership")
+        if item.intervention_clauses and (
+            (
+                item.feature_family is FeatureFamily.TASK_FUNCTION
+                and (not item.applicable_cwes or not item.applicable_task_families)
+            )
+            or (item.feature_family is FeatureFamily.SAFETY_CONTROL and not item.applicable_cwes)
+            or (
+                item.feature_family is FeatureFamily.PRESENTATION_CONTROL
+                and (item.applicable_cwes or item.applicable_task_families)
+            )
+        ):
+            raise RuntimeError("invalid prompt feature intervention clause scope")
+        if len(item.intervention_clauses) != len(set(item.intervention_clauses)):
+            raise RuntimeError("duplicate prompt feature intervention clause")
+        for clause in item.intervention_clauses:
+            try:
+                encoded_clause = clause.encode("utf-8")
+            except (AttributeError, UnicodeEncodeError):
+                raise RuntimeError("invalid prompt feature intervention clause") from None
+            if (
+                type(clause) is not str
+                or len(encoded_clause) > _MAX_TEXT_BYTES
+                or not clause.startswith(" ")
+                or clause.startswith("  ")
+                or clause != clause.rstrip()
+                or not clause[1:]
+                or clause[1:] != clause[1:].strip()
+                or any(ord(character) < 0x20 or ord(character) == 0x7F for character in clause)
+            ):
+                raise RuntimeError("invalid prompt feature intervention clause")
+            digest = hashlib.sha256(encoded_clause).hexdigest()
+            if digest in clause_owner_by_digest:
+                raise RuntimeError("ambiguous prompt feature intervention clause")
+            clause_owner_by_digest[digest] = item.feature_id
         text = (*item.applicable_task_families, *item.deterministic_terms)
         if len(text) != len(set(text)) or any(
             type(value) is not str

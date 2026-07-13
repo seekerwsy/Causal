@@ -262,3 +262,24 @@ def test_backend_policy_digest_changes_for_each_actual_template_and_schema_diges
         PROMPT_FEATURE_CATALOG_SHA256,
         MAX_RAW_RESPONSE_CHARS,
     )
+
+
+@pytest.mark.parametrize(
+    ("backend", "digest"),
+    (
+        (PromptExtractorBackend.LLM_FACTS_V1, llm_facts_policy_sha256),
+        (PromptExtractorBackend.LLM_DIRECT_GRAPH_V1, llm_direct_graph_policy_sha256),
+    ),
+)
+def test_m4a_policy_digest_changes_with_versioned_feature_catalog(
+    backend: PromptExtractorBackend,
+    digest: object,
+) -> None:
+    structured = structured_policy_for_config(_tsg(backend, llm=_llm_payload()))
+
+    assert callable(digest)
+    assert digest(
+        structured,
+        PROMPT_FEATURE_CATALOG_SHA256,
+        MAX_RAW_RESPONSE_CHARS,
+    ) != digest(structured, "0" * 64, MAX_RAW_RESPONSE_CHARS)

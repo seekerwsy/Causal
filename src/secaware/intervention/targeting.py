@@ -9,6 +9,7 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.intervention.attestation import (
     PromptRoleAttestationRecord,
     attested_feature_id,
+    validate_prompt_role_attestations,
 )
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.causal import FrozenHypothesisRecord
@@ -92,25 +93,24 @@ def _checked_prompt(value: object) -> PromptRecord:
     )
 
 
-def _checked_attestations(
-    values: Sequence[PromptRoleAttestationRecord],
-) -> tuple[PromptRoleAttestationRecord, ...]:
+def _checked_prompts(values: Sequence[PromptRecord]) -> tuple[PromptRecord, ...]:
     if type(values) not in {tuple, list}:
         raise ValueError
-    checked: list[PromptRoleAttestationRecord] = []
+    checked: list[PromptRecord] = []
     for value in values:
-        if type(value) is not PromptRoleAttestationRecord or not model_shape_is_intact(value):
-            raise ValueError
-        checked.append(
-            PromptRoleAttestationRecord.model_validate(
-                value.model_dump(mode="python", round_trip=True, warnings=False)
-            )
-        )
-    ids = tuple(item.attestation_id for item in checked)
-    prompt_ids = tuple(item.prompt_id for item in checked)
-    if len(ids) != len(set(ids)) or len(prompt_ids) != len(set(prompt_ids)):
-        raise ValueError
+        checked.append(_checked_prompt(value))
     return tuple(checked)
+
+
+def _require_source_in_prompt_artifact(
+    source: PromptRecord,
+    prompts: tuple[PromptRecord, ...],
+) -> None:
+    matches = tuple(item for item in prompts if item.prompt_id == source.prompt_id)
+    if len(matches) != 1 or matches[0].model_dump(
+        mode="python", round_trip=True, warnings=False
+    ) != source.model_dump(mode="python", round_trip=True, warnings=False):
+        raise ValueError
 
 
 def _require_target_matches_hypothesis(
@@ -257,16 +257,22 @@ def materialize_target_instance(
     target: TargetSpecRecord,
     hypothesis: FrozenHypothesisRecord,
     prompt: PromptRecord,
+    prompts: Sequence[PromptRecord],
     attestations: Sequence[PromptRoleAttestationRecord],
 ) -> TargetInstanceRecord:
-    """Bind one semantic target to an exact held-out prompt pair."""
+    """Bind one semantic target through a complete validated prompt artifact."""
 
     try:
         checked_hypothesis = _checked_hypothesis(hypothesis)
         checked_target = _checked_target(target)
         checked_prompt = _checked_prompt(prompt)
-        checked_attestations = _checked_attestations(attestations)
         _require_target_matches_hypothesis(checked_target, checked_hypothesis)
+        checked_prompts = _checked_prompts(prompts)
+        checked_attestations = validate_prompt_role_attestations(
+            checked_prompts,
+            attestations,
+        )
+        _require_source_in_prompt_artifact(checked_prompt, checked_prompts)
         _require_prompt_scope(checked_hypothesis, checked_target, checked_prompt)
         source, peer = _source_pair(
             checked_prompt,

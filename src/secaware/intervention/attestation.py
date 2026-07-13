@@ -38,13 +38,6 @@ _ROLE_FAMILY = {
     PromptRole.TASK_FUNCTION_VARIANT: FeatureFamily.TASK_FUNCTION,
     PromptRole.PRESENTATION_VARIANT: FeatureFamily.PRESENTATION_CONTROL,
 }
-_SPECIAL_REVIEWED_CLAUSES = {
-    "task.database_query": (" Query a SQLite database.",),
-    "safety.path_normalization": (" Normalize the path and restrict it to a base directory.",),
-    "safety.sql_parameterization": (" Use parameterized queries for user-provided values.",),
-    "safety.safe_subprocess": (" Pass arguments as a list and run without a shell.",),
-    "presentation.noop_rewrite": (" Apply a no-op rewrite.",),
-}
 
 
 def _jsonable(value: object) -> object:
@@ -89,29 +82,13 @@ def _valid_identifier(value: object) -> bool:
     )
 
 
-def _canonical_clause(term: str) -> str:
-    return f" {term[0].upper()}{term[1:]}."
-
-
 def _build_reviewed_clause_index() -> dict[str, str]:
     """Bind exact finite renderer clauses to one catalog feature."""
 
-    catalog_by_id = {item.feature_id: item for item in PROMPT_FEATURE_CATALOG}
-    if any(
-        feature_id not in catalog_by_id or not catalog_by_id[feature_id].intervenable
-        for feature_id in _SPECIAL_REVIEWED_CLAUSES
-    ):
-        raise RuntimeError("invalid reviewed prompt clause catalog")
     result: dict[str, str] = {}
     content_by_digest: dict[str, bytes] = {}
     for spec in PROMPT_FEATURE_CATALOG:
-        if not spec.intervenable:
-            continue
-        clauses = (
-            *(_canonical_clause(term) for term in spec.deterministic_terms),
-            *_SPECIAL_REVIEWED_CLAUSES.get(spec.feature_id, ()),
-        )
-        for text in clauses:
+        for text in spec.intervention_clauses:
             clause = text.encode("utf-8")
             digest = hashlib.sha256(clause).hexdigest()
             existing_feature = result.get(digest)

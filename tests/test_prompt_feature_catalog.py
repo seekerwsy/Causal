@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, fields, replace
+import hashlib
+import inspect
+import json
 
 import pytest
 
@@ -8,11 +11,13 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.tsg.feature_catalog import (
     FEATURE_CATALOG_VERSION,
     PROMPT_FEATURE_CATALOG,
+    PROMPT_FEATURE_CATALOG_SHA256,
     FeatureSpec,
     _digest_entry,
     _validate_feature_catalog,
     prompt_feature_spec,
 )
+import secaware.intervention.attestation as attestation_module
 
 
 EXPECTED_FEATURE_IDS = (
@@ -58,7 +63,7 @@ def test_catalog_is_exactly_the_finite_immutable_feature_set() -> None:
 
 
 def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> None:
-    assert FEATURE_CATALOG_VERSION == "1.1"
+    assert FEATURE_CATALOG_VERSION == "1.2"
     mapping = {
         item.feature_id: item.matched_control_feature_id
         for item in PROMPT_FEATURE_CATALOG
@@ -116,6 +121,116 @@ def test_catalog_digest_payload_commits_matched_control_mapping() -> None:
     mutated = replace(source, matched_control_feature_id=None)
 
     assert _digest_entry(source) != _digest_entry(mutated)
+
+
+def test_catalog_owns_exact_versioned_intervention_clauses_without_shadow_table() -> None:
+    assert "_SPECIAL_REVIEWED_CLAUSES" not in inspect.getsource(attestation_module)
+    assert prompt_feature_spec("safety.path_normalization").intervention_clauses == (
+        " Normalize the path.",
+        " Normalize the path and restrict it to a base directory.",
+    )
+    assert (
+        " Use parameterized queries for user-provided values."
+        in prompt_feature_spec("safety.sql_parameterization").intervention_clauses
+    )
+    assert (
+        " Pass arguments as a list and run without a shell."
+        in prompt_feature_spec("safety.safe_subprocess").intervention_clauses
+    )
+
+
+def test_catalog_digest_payload_commits_intervention_clause_drift() -> None:
+    source = prompt_feature_spec("safety.path_normalization")
+    mutated = replace(
+        source,
+        intervention_clauses=(" Normalize the path and restrict it to a fixed root.",),
+    )
+
+    mutated_catalog = tuple(
+        mutated if item.feature_id == source.feature_id else item for item in PROMPT_FEATURE_CATALOG
+    )
+    mutated_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "catalog_version": FEATURE_CATALOG_VERSION,
+                "entries": [_digest_entry(item) for item in mutated_catalog],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    assert _digest_entry(source) != _digest_entry(mutated)
+    assert mutated_digest != PROMPT_FEATURE_CATALOG_SHA256
+
+
+def test_catalog_rejects_global_clause_digest_ambiguity() -> None:
+    source = prompt_feature_spec("safety.path_normalization")
+    duplicate_clause = source.intervention_clauses[0]
+    mutated = tuple(
+        replace(item, intervention_clauses=(duplicate_clause,))
+        if item.feature_id == "safety.sql_parameterization"
+        else item
+        for item in PROMPT_FEATURE_CATALOG
+    )
+
+    with pytest.raises(RuntimeError):
+        _validate_feature_catalog(mutated)
+
+
+@pytest.mark.parametrize(
+    "clauses",
+    (
+        ("Normalize the path.",),
+        ("  Normalize the path.",),
+        (" Normalize the path. ",),
+        (" \nNormalize the path.",),
+        (" Normalize the path.", " Normalize the path."),
+        (" " + "x" * 128,),
+    ),
+)
+def test_catalog_rejects_noncanonical_or_duplicate_intervention_clauses(
+    clauses: tuple[str, ...],
+) -> None:
+    mutated = tuple(
+        replace(item, intervention_clauses=clauses)
+        if item.feature_id == "safety.path_normalization"
+        else item
+        for item in PROMPT_FEATURE_CATALOG
+    )
+
+    with pytest.raises(RuntimeError):
+        _validate_feature_catalog(mutated)
+
+
+@pytest.mark.parametrize(
+    "feature_id",
+    (
+        "safety.generic_security_reminder",
+        "safety.prohibited_unsafe_request",
+    ),
+)
+def test_only_confirmation_targets_may_own_intervention_clauses(feature_id: str) -> None:
+    mutated = tuple(
+        replace(item, intervention_clauses=(" Follow security best practices.",))
+        if item.feature_id == feature_id
+        else item
+        for item in PROMPT_FEATURE_CATALOG
+    )
+
+    with pytest.raises(RuntimeError):
+        _validate_feature_catalog(mutated)
+
+
+def test_catalog_clause_digest_is_unique_and_feature_owned() -> None:
+    by_digest: dict[str, str] = {}
+    for spec in PROMPT_FEATURE_CATALOG:
+        for clause in spec.intervention_clauses:
+            digest = hashlib.sha256(clause.encode("utf-8")).hexdigest()
+            assert digest not in by_digest
+            by_digest[digest] = spec.feature_id
 
 
 def test_catalog_rejects_duplicate_feature_ids() -> None:
