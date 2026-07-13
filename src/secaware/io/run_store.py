@@ -819,6 +819,7 @@ class RunStore:
         preserve_committed: bool = False,
         after_lease_acquired: Callable[[], None] | None = None,
         input_snapshot: Callable[[], Sequence[str]] | None = None,
+        before_skip: Callable[[], None] | None = None,
     ) -> bool:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
         catalog_sha256 = self._catalog_binding(stage, catalog_sha256)
@@ -840,6 +841,8 @@ class RunStore:
             raise self._manifest_conflict(stage, "stage lease action is invalid")
         if input_snapshot is not None and not callable(input_snapshot):
             raise self._manifest_conflict(stage, "stage input snapshot is invalid")
+        if before_skip is not None and not callable(before_skip):
+            raise self._manifest_conflict(stage, "stage skip verification is invalid")
         if (
             stage in self._pending_snapshots
             or stage in self._sealed_outputs
@@ -888,6 +891,8 @@ class RunStore:
                 manifest_outputs=relative_outputs,
             )
             if allows_skip:
+                if before_skip is not None:
+                    before_skip()
                 self._clear_stage_state(stage)
                 self._release_stage_lease(stage)
                 return True

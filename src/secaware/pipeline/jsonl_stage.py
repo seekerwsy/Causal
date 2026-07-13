@@ -271,6 +271,7 @@ def _execute_transaction_body(
         preserve_committed=True,
         after_lease_acquired=recover_or_cleanup_transaction,
         input_snapshot=(capture_snapshot_once if capture_input_snapshot is not None else None),
+        before_skip=verify_input_snapshot,
     ):
         return
 

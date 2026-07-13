@@ -11,17 +11,19 @@ from secaware.config import AppConfig, TSGConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
 from secaware.extractors import factory as extractor_factory_module
-from secaware.io.jsonl import read_jsonl
+from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
 from secaware.io import run_store as run_store_module
 from secaware.pipeline import jsonl_stage as jsonl_stage_module
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline.stages.prompt_extraction import (
+    read_source_prompts,
     run_prompt_extraction_stage,
     validate_exact_extraction_coverage,
 )
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
+from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
 from secaware.tsg.contract import (
@@ -253,6 +255,88 @@ def test_complete_llm_resume_skips_without_constructing_backend_or_transport(
     )
 
     assert calls == {"transport": 0, "extractor": 0, "complete": 0}
+
+
+@pytest.mark.parametrize("restore_original", [False, True], ids=["a-to-b", "a-to-b-to-a"])
+def test_resume_revalidates_snapshot_before_returning_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restore_original: bool,
+) -> None:
+    from secaware.pipeline.stages import prompt_extraction as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    run_prompt_extraction_stage(config, store, force=False)  # type: ignore[arg-type]
+    input_path = store.path("inputs", "prompts.jsonl")
+    outputs = _prompt_extraction_outputs(store)
+    manifest_path = store.path(".stages", "extract-prompt-tsg.json")
+    protected = (*outputs, manifest_path)
+    previous = tuple(path.read_bytes() for path in protected)
+    original_input = input_path.read_bytes()
+    changed_input = original_input.replace(
+        b"opens a file path provided by the user",
+        b"opens a named file provided by the user",
+        1,
+    )
+    assert changed_input != original_input
+    real_allows_skip = run_store_module.manifest_allows_skip
+    backend_calls = 0
+    skip_checks = 0
+
+    def mutate_before_skip_check(*args: object, **kwargs: object) -> bool:
+        nonlocal skip_checks
+        skip_checks += 1
+        input_path.write_bytes(changed_input)
+        if restore_original:
+            input_path.write_bytes(original_input)
+        return real_allows_skip(*args, **kwargs)  # type: ignore[arg-type]
+
+    def reject_backend_construction(*args: object, **kwargs: object) -> object:
+        nonlocal backend_calls
+        del args, kwargs
+        backend_calls += 1
+        raise AssertionError("resume failure constructed the backend")
+
+    monkeypatch.setattr(run_store_module, "manifest_allows_skip", mutate_before_skip_check)
+    monkeypatch.setattr(stage_module, "extractor_for_config", reject_backend_construction)
+    resume_store = RunStore(config)  # type: ignore[arg-type]
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_prompt_extraction_stage(config, resume_store, force=False)  # type: ignore[arg-type]
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert skip_checks == 1
+    assert backend_calls == 0
+    assert tuple(path.read_bytes() for path in protected) == previous
+    assert not store.path(".stages", ".extract-prompt-tsg.transaction.json").exists()
+    assert not list(store.root.rglob("*.recovery.backup"))
+    assert not list(store.path("tsg").glob(".*.stage.candidate"))
+    assert not resume_store.stage_is_active("extract-prompt-tsg")
+
+
+def test_prompt_snapshot_parser_preserves_json_string_line_separators(tmp_path: Path) -> None:
+    _config, store = _prepared_store(tmp_path)
+    source = tuple(_prompt_records(store))[0]
+    special_prompt = "first\u2028second\u2029third"
+    expected = source.model_copy(update={"prompt": special_prompt})
+    input_path = store.path("inputs", "prompts.jsonl")
+    write_jsonl(input_path, [expected], stage="extract-prompt-tsg")
+    payload = input_path.read_bytes()
+    assert "\u2028" in payload.decode("utf-8")
+    assert "\u2029" in payload.decode("utf-8")
+
+    regular = read_jsonl(
+        input_path,
+        PromptRecord,
+        required=True,
+        allow_empty=False,
+        stage="extract-prompt-tsg",
+    )
+    snapshot = read_source_prompts(store, payload=payload)
+
+    assert snapshot == tuple(regular)
+    assert snapshot == (expected,)
+    assert snapshot[0].prompt == special_prompt
 
 
 def test_exact_coverage_rejects_omission_duplicate_extra_mixed_and_stale_records(

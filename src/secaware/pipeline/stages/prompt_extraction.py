@@ -127,7 +127,7 @@ def _parse_source_prompt_bytes(payload: bytes) -> tuple[PromptRecord, ...]:
         if type(payload) is not bytes or not payload:
             raise ValueError
         text = payload.decode("utf-8", errors="strict")
-        for raw_line in text.splitlines():
+        for raw_line in text.split("\n"):
             stripped = raw_line.strip()
             if not stripped:
                 continue
