@@ -766,7 +766,8 @@ class RunStore:
     ) -> bool:
         policy_sha256 = self._policy_binding(stage, policy_sha256)
         catalog_sha256 = self._catalog_binding(stage, catalog_sha256)
-        transactional_stage = stage.startswith("run-oracle-") or stage in {
+        recovery_authorized = preserve_committed is True and callable(after_lease_acquired)
+        transactional_stage = recovery_authorized or stage.startswith("run-oracle-") or stage in {
             "discover",
             "extract-prompt-tsg",
             "intervene",

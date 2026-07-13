@@ -1394,7 +1394,7 @@ def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
         discover_stage(config, store, force=False)
     real_hold_output = store.hold_committed_output
     real_hold_stage = store.hold_committed_stage
-    real_execute = pipeline_cli._execute_jsonl_stage_transaction
+    real_execute = pipeline_cli.execute_jsonl_stage_transaction
     active: list[str] = []
     entered: list[str] = []
     bindings: dict[str, str | None] = {}
@@ -1451,7 +1451,7 @@ def test_prompt_graph_consumers_hold_producer_leases_in_fixed_order(
 
     monkeypatch.setattr(store, "hold_committed_output", tracked_output_hold)
     monkeypatch.setattr(store, "hold_committed_stage", tracked_stage_hold)
-    monkeypatch.setattr(pipeline_cli, "_execute_jsonl_stage_transaction", checked_execute)
+    monkeypatch.setattr(pipeline_cli, "execute_jsonl_stage_transaction", checked_execute)
 
     if consumer == "discover":
         discover_stage(config, store, force=True)

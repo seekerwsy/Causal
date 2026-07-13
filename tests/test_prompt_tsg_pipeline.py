@@ -12,6 +12,7 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.io import run_store as run_store_module
+from secaware.pipeline import jsonl_stage as jsonl_stage_module
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
@@ -257,7 +258,7 @@ def test_prompt_tsg_seal_rejection_retains_lease_until_rollback_finishes(
     owner_done = threading.Event()
     owner_errors: list[BaseException] = []
     real_verify = owner.verify_sealed_outputs
-    real_recover = cli_module.recover_transaction
+    real_recover = jsonl_stage_module.recover_transaction
 
     def tamper_after_seal(*args: object, **kwargs: object) -> None:
         output.write_bytes(output.read_bytes() + b"\n")
@@ -278,7 +279,7 @@ def test_prompt_tsg_seal_rejection_retains_lease_until_rollback_finishes(
             owner_done.set()
 
     monkeypatch.setattr(owner, "verify_sealed_outputs", tamper_after_seal)
-    monkeypatch.setattr(cli_module, "recover_transaction", blocked_recover)
+    monkeypatch.setattr(jsonl_stage_module, "recover_transaction", blocked_recover)
     thread = threading.Thread(target=run_owner, daemon=True)
     thread.start()
     assert rollback_entered.wait(timeout=5)

@@ -46,6 +46,10 @@ from secaware.logging_utils import console
 from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.pipeline.artifact import sha256_path
+from secaware.pipeline.jsonl_stage import (
+    JsonlOutputSpec,
+    execute_jsonl_stage_transaction,
+)
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
@@ -792,215 +796,6 @@ def _stale_transaction_paths(path: Path, *suffixes: str) -> list[Path]:
     return stale
 
 
-def _read_jsonl_output(
-    path: Path,
-    model: type[_Record] | None,
-    *,
-    stage: str,
-) -> list[_Record]:
-    return cast(
-        list[_Record],
-        read_jsonl(
-            path,
-            model,
-            required=True,
-            allow_empty=True,
-            max_records=MAX_GENERATION_REQUESTS,
-            max_line_chars=MAX_GENERATION_JSONL_LINE_CHARS,
-            max_total_chars=MAX_GENERATION_JSONL_TOTAL_CHARS,
-            stage=stage,
-        ),
-    )
-
-
-def _execute_jsonl_stage_transaction(
-    store: RunStore,
-    *,
-    stage: str,
-    inputs: Sequence[Path],
-    outputs: Sequence[Path],
-    models: Sequence[type[Any] | None],
-    force: bool,
-    build: Callable[[], Sequence[Sequence[BaseModel | dict[Any, Any]]]],
-    catalog_sha256: str | None = None,
-    require_nonempty: bool = False,
-) -> None:
-    if len(outputs) != len(models):
-        raise _oracle_stage_error(
-            ErrorCode.CONTRACT,
-            stage,
-            "stage output transaction is invalid",
-        )
-    manifest_path = store.path(".stages", f"{stage}.json")
-    journal_path = store.path(".stages", f".{stage}.transaction.json")
-    try:
-        artifacts = tuple(
-            [TransactionArtifact(output, f"output{index}") for index, output in enumerate(outputs)]
-            + [TransactionArtifact(manifest_path, "manifest")]
-        )
-    except TransactionStateError:
-        raise _oracle_stage_error(
-            ErrorCode.CONTRACT,
-            stage,
-            "stage output transaction is invalid",
-        ) from None
-
-    def recover_or_cleanup_transaction() -> None:
-        try:
-            resolve_pending_transaction(journal_path, artifacts)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except TransactionStateError:
-            raise _oracle_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "stage output transaction recovery failed",
-            ) from None
-        stale_paths: list[Path] = []
-        for output in outputs:
-            stale_paths.extend(_stale_transaction_paths(output, ".stage.candidate"))
-        stale_control = _cleanup_transaction_paths(stale_paths)
-        if stale_control is not None:
-            raise stale_control
-
-    if store.should_skip_stage(
-        stage,
-        inputs,
-        outputs,
-        force,
-        catalog_sha256=catalog_sha256,
-        preserve_committed=True,
-        after_lease_acquired=recover_or_cleanup_transaction,
-    ):
-        return
-
-    candidates: list[Path | None] = [None] * len(outputs)
-    transaction: ArtifactTransaction | None = None
-    stage_commit_lease = None
-    commit_point = False
-    try:
-        try:
-            transaction = ArtifactTransaction.begin(journal_path, artifacts)
-            transaction.backup(len(outputs))
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except TransactionStateError:
-            raise _oracle_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "stage output transaction could not be started",
-            ) from None
-
-        record_groups = list(build())
-        if len(record_groups) != len(outputs):
-            raise _oracle_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "stage output transaction is invalid",
-            )
-        expected_groups = [list(records) for records in record_groups]
-        if require_nonempty and any(not records for records in expected_groups):
-            raise _oracle_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "stage artifact must not be empty",
-            )
-        for index, (output, model, expected) in enumerate(
-            zip(outputs, models, expected_groups, strict=True)
-        ):
-            candidate = _oracle_transaction_path(output, ".stage.candidate")
-            candidates[index] = candidate
-            write_jsonl(candidate, expected, stage=stage)
-            if _read_jsonl_output(candidate, model, stage=stage) != expected:
-                raise _oracle_stage_error(
-                    ErrorCode.CONTRACT,
-                    stage,
-                    "stage artifact failed canonical readback",
-                )
-
-        for index, _output in enumerate(outputs):
-            try:
-                candidate = candidates[index]
-                if candidate is None:
-                    raise TransactionStateError
-                transaction.install(index, candidate)
-                candidates[index] = None
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except TransactionStateError:
-                raise _oracle_stage_error(
-                    ErrorCode.CONTRACT,
-                    stage,
-                    "stage artifact could not be committed",
-                ) from None
-
-        store.seal_stage_outputs(stage, outputs)
-        for output, model, expected in zip(outputs, models, expected_groups, strict=True):
-            if _read_jsonl_output(output, model, stage=stage) != expected:
-                store.verify_sealed_outputs(stage, outputs)
-                raise _oracle_stage_error(
-                    ErrorCode.CONTRACT,
-                    stage,
-                    "stage artifact failed canonical readback",
-                )
-        store.verify_sealed_outputs(stage, outputs)
-        stage_commit_lease = store.begin_stage_commit(stage)
-        store.record_stage(
-            stage,
-            inputs,
-            outputs,
-            catalog_sha256=catalog_sha256,
-            lease=stage_commit_lease,
-        )
-        try:
-            transaction.mark_postcommit()
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except TransactionStateError:
-            raise _oracle_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "stage commit verification failed",
-            ) from None
-        commit_point = True
-        _finalize_stage_commit(store, stage_commit_lease)
-        stage_commit_lease = None
-        try:
-            cleanup_committed_transaction(transaction)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except TransactionStateError:
-            raise _oracle_stage_error(
-                ErrorCode.CONTRACT,
-                stage,
-                "stage commit verification failed",
-            ) from None
-    except BaseException as error:
-        if transaction is not None and not commit_point:
-            try:
-                recover_transaction(transaction)
-            except (KeyboardInterrupt, SystemExit):
-                _cleanup_failed_oracle_stage(store, stage)
-                if isinstance(error, (KeyboardInterrupt, SystemExit)):
-                    raise error
-                raise
-            except TransactionStateError:
-                _cleanup_failed_oracle_stage(store, stage)
-                if isinstance(error, (KeyboardInterrupt, SystemExit)):
-                    raise error
-                raise _oracle_stage_error(
-                    ErrorCode.CONTRACT,
-                    stage,
-                    "stage output transaction rollback failed",
-                ) from None
-        if not commit_point:
-            _cleanup_failed_oracle_stage(store, stage)
-        raise
-    finally:
-        if not commit_point:
-            _cleanup_transaction_paths(candidates)
-
-
 def plan_generation_stage(
     config: AppConfig,
     store: RunStore,
@@ -1360,21 +1155,20 @@ def extract_prompt_tsg_stage(config: AppConfig, store: RunStore, *, force: bool)
     stage = "extract-prompt-tsg"
     inputs = [store.path("inputs", "prompts.jsonl")]
     output = store.path("tsg", "prompt_tsg.jsonl")
-    outputs = [output]
 
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
         return [[extract_prompt_tsg(prompt) for prompt in _prompt_records(store)]]
 
-    _execute_jsonl_stage_transaction(
+    execute_jsonl_stage_transaction(
         store,
         stage=stage,
         inputs=inputs,
-        outputs=outputs,
-        models=[PromptTSGRecord],
+        outputs=(
+            JsonlOutputSpec(output, PromptTSGRecord, require_nonempty=True),
+        ),
         force=force,
         build=build,
         catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
-        require_nonempty=True,
     )
 
 
@@ -1827,12 +1621,14 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
                     producer_outputs[producer_stage],
                 )
             stack.enter_context(producer_context)
-        _execute_jsonl_stage_transaction(
+        execute_jsonl_stage_transaction(
             store,
             stage=stage,
             inputs=inputs,
-            outputs=outputs,
-            models=[HypothesisRecord, HypothesisRecord],
+            outputs=(
+                JsonlOutputSpec(outputs[0], HypothesisRecord),
+                JsonlOutputSpec(outputs[1], HypothesisRecord),
+            ),
             force=force,
             build=build,
         )
@@ -1847,7 +1643,6 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     ]
     output = store.path("interventions", "interventions.jsonl")
     paired_output = store.path("interventions", "paired_prompts.jsonl")
-    outputs = [output, paired_output]
 
     def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
         all_prompts, prompt_tsg_by_id = _validated_prompt_tsg_coordinates(
@@ -1906,12 +1701,14 @@ def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
                     producer_outputs[producer_stage],
                 )
             stack.enter_context(producer_context)
-        _execute_jsonl_stage_transaction(
+        execute_jsonl_stage_transaction(
             store,
             stage=stage,
             inputs=inputs,
-            outputs=outputs,
-            models=[InterventionRecord, None],
+            outputs=(
+                JsonlOutputSpec(output, InterventionRecord),
+                JsonlOutputSpec(paired_output, None),
+            ),
             force=force,
             build=build,
         )
@@ -2083,12 +1880,14 @@ def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
                 [counterfactual_output],
             )
         )
-        _execute_jsonl_stage_transaction(
+        execute_jsonl_stage_transaction(
             store,
             stage=stage,
             inputs=inputs,
-            outputs=outputs,
-            models=[PairResult, EffectRecord],
+            outputs=(
+                JsonlOutputSpec(outputs[0], PairResult),
+                JsonlOutputSpec(outputs[1], EffectRecord),
+            ),
             force=force,
             build=build,
         )

@@ -9,6 +9,7 @@ from dataclasses import replace
 import pytest
 
 from secaware import __version__
+import secaware.cli as pipeline_cli
 from secaware.cli import generate_observed_stage
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
@@ -21,6 +22,54 @@ from secaware.schema.records import GeneratedCodeRecord, PromptRecord
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_cli_does_not_define_jsonl_stage_transaction_runner() -> None:
+    assert not hasattr(pipeline_cli, "_execute_jsonl_stage_transaction")
+
+
+def test_recovery_callback_authorizes_transaction_mode_for_a_new_stage(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+    recovered = False
+
+    def recover() -> None:
+        nonlocal recovered
+        recovered = True
+
+    assert (
+        store.should_skip_stage(
+            "transaction-test",
+            [input_path],
+            [output_path],
+            force=True,
+            preserve_committed=True,
+            after_lease_acquired=recover,
+        )
+        is False
+    )
+    assert recovered is True
+    store.abort_stage("transaction-test")
+
+
+def test_new_stage_cannot_enable_transaction_mode_without_a_recovery_callback(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    input_path, output_path = _input_and_output(store)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store.should_skip_stage(
+            "transaction-test",
+            [input_path],
+            [output_path],
+            force=True,
+            preserve_committed=True,
+        )
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
 def _assert_manifest_error_is_safe(error: SecAwareError, *hidden: str) -> None:
