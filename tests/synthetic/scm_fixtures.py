@@ -22,12 +22,12 @@ def true_chain_scm(n: int, seed: int) -> pd.DataFrame:
 
 
 def latent_confounding_scm(n: int, seed: int) -> pd.DataFrame:
-    """Return two observables with a shared unobserved binary parent."""
+    """Return two same-tier prompt proxies with a shared unobserved binary parent."""
     rng = np.random.default_rng(seed)
     u = rng.integers(0, 2, size=n)
     x = np.bitwise_xor(u, rng.binomial(1, 0.10, size=n))
     y = np.bitwise_xor(u, rng.binomial(1, 0.10, size=n))
-    return pd.DataFrame({"x.feature": x, "y.secure_functional": y})
+    return pd.DataFrame({"x.feature": x, "x.peer": y})
 
 
 def null_factor_scm(n: int, seed: int) -> pd.DataFrame:

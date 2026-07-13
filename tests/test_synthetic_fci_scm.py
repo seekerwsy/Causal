@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -19,6 +18,7 @@ from secaware.config import AppConfig, FCIDiscoveryConfig
 from secaware.discovery.causal_learn_backend import run_causal_learn_fci
 from secaware.io.run_store import RunStore
 from secaware.schema.causal import (
+    BackgroundKnowledgeRecord,
     CausalObservationRecord,
     CausalTableRecord,
     CausalVariableSpec,
@@ -26,6 +26,7 @@ from secaware.schema.causal import (
     PAGRecord,
     PAGRunKind,
     PathSupportRecord,
+    VariableRole,
 )
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 from tests.synthetic.scm_fixtures import (
@@ -41,10 +42,10 @@ _TRUE_CHAIN_COLUMNS = {
     "y.secure_functional": "y.secure_functional",
 }
 _LATENT_COLUMNS = {
-    # Both observables occupy one temporal tier. The synthetic gate therefore checks
-    # FCI uncertainty itself instead of asking temporal BK to choose a direction.
-    "x.feature": "y.cwe_security",
-    "y.secure_functional": "y.secure_functional",
+    # These are two observed Prompt X proxies in the same temporal tier. This fixture
+    # gates latent-endpoint uncertainty only; typed X-to-Y BK is covered elsewhere.
+    "x.feature": "x.safety.sql_parameterization",
+    "x.peer": "x.motif.user_string_to_sql_without_parameterization",
 }
 _NULL_COLUMNS = {
     "x.null": "x.presentation.noop_rewrite",
@@ -57,7 +58,7 @@ class _RealCausalLearnRunner:
         self,
         matrix: np.ndarray,
         table: CausalTableRecord,
-        knowledge: Any,
+        knowledge: BackgroundKnowledgeRecord,
         config: FCIDiscoveryConfig,
         run_kind: PAGRunKind,
     ) -> PAGRecord:
@@ -152,7 +153,7 @@ def _bootstrap(
 ) -> tuple[
     CausalTableRecord,
     tuple[CausalObservationRecord, ...],
-    Any,
+    BackgroundKnowledgeRecord,
     FCIDiscoveryConfig,
     TaskClusterFCIBootstrapResult,
     tuple[PathSupportRecord, ...],
@@ -182,7 +183,10 @@ def _bootstrap(
     return table, rows, knowledge, config, result, supports
 
 
-def _canonical_bundle(result: TaskClusterFCIBootstrapResult, supports: tuple) -> dict[str, object]:
+def _canonical_bundle(
+    result: TaskClusterFCIBootstrapResult,
+    supports: tuple[PathSupportRecord, ...],
+) -> dict[str, object]:
     return {
         "reference_draw": result.reference_draw.model_dump(mode="json"),
         "reference_pag": result.reference_pag.model_dump(mode="json"),
@@ -191,6 +195,15 @@ def _canonical_bundle(result: TaskClusterFCIBootstrapResult, supports: tuple) ->
         "failures": [item.model_dump(mode="json") for item in result.bootstrap_failures],
         "supports": [item.model_dump(mode="json") for item in supports],
     }
+
+
+def _assert_complete_bootstrap(
+    result: TaskClusterFCIBootstrapResult,
+    supports: tuple[PathSupportRecord, ...],
+    config: FCIDiscoveryConfig,
+) -> None:
+    assert len(result.bootstrap_pags) + len(result.bootstrap_failures) == config.bootstrap_samples
+    assert all(item.support_denominator == config.bootstrap_samples for item in supports)
 
 
 def _store(tmp_path: Path, name: str) -> RunStore:
@@ -212,6 +225,8 @@ def test_true_chain_recovers_stable_possible_x_z_y_path_with_real_fci(tmp_path: 
     second = _bootstrap(frame, _TRUE_CHAIN_COLUMNS)
     table, _rows, knowledge, config, result, supports = first
 
+    _assert_complete_bootstrap(result, supports, config)
+    _assert_complete_bootstrap(second[4], second[5], second[3])
     assert _canonical_bundle(result, supports) == _canonical_bundle(second[4], second[5])
     target_path = (
         "x.safety.sql_parameterization",
@@ -246,6 +261,9 @@ def test_latent_confounding_preserves_pag_uncertainty_with_real_fci() -> None:
     config = _config()
     matrix = np.asarray(tuple(row.values for row in rows), dtype=np.int64)
 
+    assert {item.role for item in table.variables} == {VariableRole.X}
+    assert {item.temporal_tier for item in table.variables} == {1}
+
     first = run_causal_learn_fci(matrix, table, knowledge, config)
     second = run_causal_learn_fci(matrix, table, knowledge, config)
 
@@ -263,6 +281,8 @@ def test_null_factor_freezes_no_hypothesis_and_is_canonical(tmp_path: Path) -> N
     second = _bootstrap(frame, _NULL_COLUMNS)
     table, _rows, knowledge, config, result, supports = first
 
+    _assert_complete_bootstrap(result, supports, config)
+    _assert_complete_bootstrap(second[4], second[5], second[3])
     assert _canonical_bundle(result, supports) == _canonical_bundle(second[4], second[5])
     frozen = freeze_hypotheses(
         reference_pag=result.reference_pag,
