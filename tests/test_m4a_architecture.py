@@ -302,7 +302,7 @@ def test_m4a_migration_policy_is_complete_and_explicit() -> None:
         assert regenerated in normalized
 
 
-def test_readme_describes_only_the_current_m4a_pipeline() -> None:
+def test_readme_preserves_m4a_extraction_and_describes_the_m4b_boundary() -> None:
     readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     normalized = " ".join(readme.split()).casefold()
 
@@ -310,7 +310,10 @@ def test_readme_describes_only_the_current_m4a_pipeline() -> None:
     assert "prompt_extractor" in readme
     assert "prompt_extraction_proposals.jsonl" in readme
     assert "prompt_tsg.jsonl" in readme
-    assert "fci" in normalized and "not implemented" in normalized
+    assert "causal-learn==0.1.4.7" in normalized
+    assert "g-square" in normalized
+    assert "fci discovery in m4b" in normalized
+    assert "fci discovery is not implemented" not in normalized
     assert "m4b" in normalized
 
 

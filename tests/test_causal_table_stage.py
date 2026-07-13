@@ -151,9 +151,7 @@ def test_causal_table_stage_rejects_an_empty_discovery_split_without_outputs(
 ) -> None:
     import secaware.pipeline.stages.causal_tables as stage_module
 
-    confirm_only = tuple(
-        prompt.model_copy(update={"split": "confirm"}) for prompt in _prompts()
-    )
+    confirm_only = tuple(prompt.model_copy(update={"split": "confirm"}) for prompt in _prompts())
     config, store = _prepared_store(tmp_path, confirm_only)
 
     with pytest.raises(SecAwareError):
@@ -161,8 +159,7 @@ def test_causal_table_stage_rejects_an_empty_discovery_split_without_outputs(
 
     assert not store.path(".stages", "assemble-causal-tables.json").exists()
     assert not any(
-        store.path("discovery", name).exists()
-        for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
+        store.path("discovery", name).exists() for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
     )
 
 
@@ -184,8 +181,7 @@ def test_causal_table_stage_rejects_new_prompt_tsg_with_stale_code_and_oracle(
 
     assert not store.path(".stages", "assemble-causal-tables.json").exists()
     assert not any(
-        store.path("discovery", name).exists()
-        for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
+        store.path("discovery", name).exists() for name, _model in stage_module.CAUSAL_TABLE_OUTPUTS
     )
 
     generate_observed_stage(config, store, force=True)
@@ -484,7 +480,8 @@ def test_causal_table_stage_rejects_committed_inexact_producer_coverage(
 
     assert not store.path(".stages", "assemble-causal-tables.json").exists()
     assert not any(
-        store.path("discovery", name).exists() for name, _model in __import__(
+        store.path("discovery", name).exists()
+        for name, _model in __import__(
             "secaware.pipeline.stages.causal_tables", fromlist=["CAUSAL_TABLE_OUTPUTS"]
         ).CAUSAL_TABLE_OUTPUTS
     )

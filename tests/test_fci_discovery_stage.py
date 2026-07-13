@@ -343,10 +343,7 @@ def test_fci_stage_rejects_old_causal_bundle_with_current_extractor_provenance(
         fci_discovery_stage(config, store, force=False, runner=_StablePathRunner())
 
     assert not store.path(".stages", "fci-discovery.json").exists()
-    assert not any(
-        store.path("discovery", name).exists()
-        for name, _model in FCI_DISCOVERY_OUTPUTS
-    )
+    assert not any(store.path("discovery", name).exists() for name, _model in FCI_DISCOVERY_OUTPUTS)
 
 
 def test_fci_middle_output_install_failure_rolls_back_complete_bundle(
@@ -539,12 +536,15 @@ def test_fci_skip_uses_manifest_but_library_drift_forces_reexecution(
     fci_discovery_stage(config, store, force=False, runner=_StablePathRunner())
 
     # Identical committed inputs skip before invoking the backend.
-    assert fci_discovery_stage(
-        config,
-        store,
-        force=False,
-        runner=_ReferenceCrashRunner(),
-    ).status.value == "ready"
+    assert (
+        fci_discovery_stage(
+            config,
+            store,
+            force=False,
+            runner=_ReferenceCrashRunner(),
+        ).status.value
+        == "ready"
+    )
 
     monkeypatch.setattr(contracts.importlib.metadata, "version", lambda _name: "drifted")
     with pytest.raises(SecAwareError, match="reference FCI run failed"):
@@ -660,9 +660,12 @@ def test_discover_cli_exits_nonzero_only_after_no_stable_artifacts_commit(
     assert result.exit_code == int(ErrorCode.ANALYSIS_INVALID)
     assert store.path(".stages", "fci-discovery.json").exists()
     assert store.path("discovery", "reference_pags.jsonl").exists()
-    assert read_jsonl(
-        store.path("discovery", "hypotheses_frozen.jsonl"),
-        FrozenHypothesisRecord,
-        required=True,
-        allow_empty=True,
-    ) == []
+    assert (
+        read_jsonl(
+            store.path("discovery", "hypotheses_frozen.jsonl"),
+            FrozenHypothesisRecord,
+            required=True,
+            allow_empty=True,
+        )
+        == []
+    )

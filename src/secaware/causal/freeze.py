@@ -124,9 +124,7 @@ def guard_no_future_confirmation_or_analysis(store: RunStore) -> None:
                 continue
             for candidate in root.rglob("*"):
                 if candidate.is_file() and candidate.name.casefold().startswith(prefixes):
-                    raise _freeze_error(
-                        "future confirmation or analysis artifact already exists"
-                    )
+                    raise _freeze_error("future confirmation or analysis artifact already exists")
     except (KeyboardInterrupt, SystemExit, SecAwareError):
         raise
     except Exception:
@@ -227,10 +225,7 @@ def _validate_freeze_coordinates(
     )
     candidate_by_id = {item.path_id: item for item in candidates}
     path_ids = tuple(item.path.path_id for item in supports)
-    if (
-        len(path_ids) != len(set(path_ids))
-        or set(path_ids) != set(candidate_by_id)
-    ):
+    if len(path_ids) != len(set(path_ids)) or set(path_ids) != set(candidate_by_id):
         raise ValueError
     for support in supports:
         if (
@@ -328,8 +323,7 @@ def build_no_stable_hypothesis_failure(
         if (
             checked_reference.table_id != checked_table.table_id
             or checked_reference.config_sha256 != config_sha256
-            or checked_reference.background_knowledge_sha256
-            != checked_knowledge.knowledge_sha256
+            or checked_reference.background_knowledge_sha256 != checked_knowledge.knowledge_sha256
             or checked_knowledge.table_id != checked_table.table_id
             or catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
             or type(extractor_policy_sha256) is not str
@@ -396,8 +390,7 @@ def revalidate_frozen_hypothesis_batch(
             or checked_reference.table_id != checked_table.table_id
             or checked_reference.variable_ids != variable_ids
             or checked_reference.config_sha256 != config_sha256
-            or checked_reference.background_knowledge_sha256
-            != checked_knowledge.knowledge_sha256
+            or checked_reference.background_knowledge_sha256 != checked_knowledge.knowledge_sha256
             or checked_knowledge.table_id != checked_table.table_id
             or catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
         ):
@@ -408,9 +401,7 @@ def revalidate_frozen_hypothesis_batch(
                 checked,
                 key=lambda item: (
                     item.path.variable_ids,
-                    tuple(
-                        (left.value, right.value) for left, right in item.path.endpoint_marks
-                    ),
+                    tuple((left.value, right.value) for left, right in item.path.endpoint_marks),
                 ),
             )
         )
@@ -463,9 +454,7 @@ def freeze_hypotheses(
     guard_no_future_confirmation_or_analysis(store)
     try:
         checked_reference = PAGRecord.model_validate(reference_pag)
-        checked_supports = tuple(
-            PathSupportRecord.model_validate(item) for item in path_supports
-        )
+        checked_supports = tuple(PathSupportRecord.model_validate(item) for item in path_supports)
         checked_table = CausalTableRecord.model_validate(table)
         checked_knowledge = BackgroundKnowledgeRecord.model_validate(knowledge)
         checked_config = FCIDiscoveryConfig.model_validate(config)
@@ -491,9 +480,7 @@ def freeze_hypotheses(
                 ),
                 key=lambda item: (
                     item.path.variable_ids,
-                    tuple(
-                        (left.value, right.value) for left, right in item.path.endpoint_marks
-                    ),
+                    tuple((left.value, right.value) for left, right in item.path.endpoint_marks),
                 ),
             )
         )

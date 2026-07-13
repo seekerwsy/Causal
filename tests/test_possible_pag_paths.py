@@ -170,8 +170,7 @@ def _envelope(
                 "values": matrix.tolist(),
             }
         ),
-        pag=pag
-        or _pag(table, edges, run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP, config=config),
+        pag=pag or _pag(table, edges, run_kind=PAGRunKind.OBSERVATIONAL_BOOTSTRAP, config=config),
     )
 
 
@@ -248,9 +247,9 @@ def test_rejects_motif_code_context_and_internal_outcome_variables(internal: str
     payload["edges"] = (_edge(x, internal), _edge(internal, y))
     reference = PAGRecord.from_content(**payload)
 
-    assert enumerate_possible_prompt_paths(
-        reference, max_path_length=3, max_candidate_paths=10
-    ) == ()
+    assert (
+        enumerate_possible_prompt_paths(reference, max_path_length=3, max_candidate_paths=10) == ()
+    )
 
 
 def test_reviewed_prompt_motif_may_mediate_but_never_becomes_a_start() -> None:
@@ -283,9 +282,7 @@ def test_preregistered_outcome_cannot_be_used_as_an_internal_node() -> None:
     final_y = "y.secure_functional"
     reference = _pag(table, (_edge(x, internal_y), _edge(internal_y, final_y)))
 
-    paths = enumerate_possible_prompt_paths(
-        reference, max_path_length=3, max_candidate_paths=10
-    )
+    paths = enumerate_possible_prompt_paths(reference, max_path_length=3, max_candidate_paths=10)
 
     assert tuple(item.variable_ids for item in paths) == ((x, internal_y),)
 
@@ -363,12 +360,8 @@ def test_bootstrap_support_uses_exact_denominator_circle_compatibility_and_faile
     reference = _pag(table, (_edge(x, y, "tail", "arrow"),), config=config)
     draws = tuple(_draw(table, observations, index) for index in range(3))
     envelopes = (
-        _envelope(
-            table, observations, config, draws[0], (_edge(x, y, "tail", "arrow"),)
-        ),
-        _envelope(
-            table, observations, config, draws[1], (_edge(x, y, "circle", "arrow"),)
-        ),
+        _envelope(table, observations, config, draws[0], (_edge(x, y, "tail", "arrow"),)),
+        _envelope(table, observations, config, draws[1], (_edge(x, y, "circle", "arrow"),)),
     )
     failure = BootstrapFailureRecord.from_content(
         table_id=table.table_id,

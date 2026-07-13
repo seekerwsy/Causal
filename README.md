@@ -49,11 +49,34 @@ secaware extract-prompt-tsg --config configs/demo.yaml --run-dir runs/demo --for
 Backend selection is exact and run-wide. There is no per-prompt fallback, ranking, winner, or
 automatic selection. Invalid proposals fail closed before either output is committed.
 
-The existing `discover`, `intervene`, `confirm`, and `run-all` commands remain available for the
-pre-M4B prototype workflow. FCI discovery is not implemented in M4A; it is reserved for M4B, so
-current discovery artifacts must not be described as FCI/PAG results. `run-all` currently executes
-Prompt TSG extraction, observed generation and Oracle, the existing discovery/intervention path,
-counterfactual generation and Oracle, confirmation, and reporting in that order.
+## Prompt-only FCI discovery in M4B
+
+M4B replaces heuristic discovery with the pinned no-Java minimum backend
+`causal-learn==0.1.4.7`. `secaware discover` constructs one local categorical table per CWE scope
+and model, derives temporal tiers, forbidden directions, and typed two-way adjacency exclusions
+from the Prompt TSG contract, and runs FCI with the G-square conditional-independence test. The
+background knowledge never requires a candidate edge or a selected path edge, and every returned
+PAG is checked against it. PAG circle endpoints are preserved as uncertainty rather than converted
+to a DAG.
+
+Reference and task-cluster bootstrap matrices select one seed per task occurrence. Failed replicate
+runs remain in the configured denominator and contribute zero path support. Stable possible
+Prompt-side paths are frozen as `discovery/hypotheses_frozen.jsonl` before any randomized
+confirmation artifact can exist. `NO_STABLE_HYPOTHESIS` and excessive bootstrap failures are
+committed terminal diagnostics: discovery artifacts remain inspectable, but the CLI exits nonzero
+and M5 cannot begin.
+
+The discovery transaction publishes 11 JSONL artifacts: three local-table artifacts and eight
+FCI/bootstrap/path/freeze artifacts. See [FCI discovery migration](docs/migrations/fci-discovery.md)
+for their exact names, assumptions, and provenance. This is a Prompt-only causal-variable layer:
+there is no Code TSG. Generated code is used only to bind Prompt generation to the independent
+Oracle result through provenance metadata; code text, structure, findings, and mechanisms are not
+causal variables.
+
+At the M4B boundary, the public discovery workflow entry points are `discover` and `run-all`; the
+old heuristic and two-arm intervention/confirmation commands are not CLI-reachable. `run-all` stops
+after the frozen discovery transaction and prints `SecAware discovery complete`. M5 will extend that
+boundary with randomized confirmation.
 
 Install the core development environment and run the unit suite with:
 

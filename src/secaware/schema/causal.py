@@ -998,9 +998,7 @@ class FrozenHypothesisRecord(_CausalVersionedContract):
     extractor_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
     fci_config_sha256: str = Field(pattern=_SHA256_PATTERN)
     background_knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
-    expected_contrasts: tuple[ExpectedOperationContrast, ...] = Field(
-        min_length=1, max_length=2
-    )
+    expected_contrasts: tuple[ExpectedOperationContrast, ...] = Field(min_length=1, max_length=2)
     freeze_batch_sha256: str = Field(pattern=_SHA256_PATTERN)
     # Provenance only. This field and freeze_batch_sha256 are intentionally excluded
     # from the semantic hypothesis digest; the batch digest is derived from all
@@ -1099,8 +1097,7 @@ class FrozenHypothesisRecord(_CausalVersionedContract):
             or operations != self.permitted_operations
             or any(
                 contrast.outcome_estimand_id != expected_estimand
-                or contrast.expected_sign
-                != expected_sign_by_operation[contrast.operation]
+                or contrast.expected_sign != expected_sign_by_operation[contrast.operation]
                 for contrast in self.expected_contrasts
             )
             or self.hypothesis_sha256 != semantic_sha256

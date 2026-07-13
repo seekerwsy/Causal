@@ -124,8 +124,7 @@ def _validate_exact_observed_chain(
                 or request.prompt != prompt.prompt
                 or request.prompt_sha256 != record.prompt_sha256
                 or request.language != prompt.language
-                or record.prompt_sha256
-                != hashlib.sha256(prompt.prompt.encode("utf-8")).hexdigest()
+                or record.prompt_sha256 != hashlib.sha256(prompt.prompt.encode("utf-8")).hexdigest()
             ):
                 raise ValueError
             code_by_coordinate[coordinate] = record

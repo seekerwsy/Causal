@@ -34,9 +34,7 @@ from secaware.tsg.feature_catalog import prompt_feature_spec
 
 _MAX_PATH_LENGTH = 16
 _MAX_CANDIDATE_PATHS = 4096
-_PREREGISTERED_OUTCOMES = frozenset(
-    {PRIMARY_OUTCOME.variable_id, CWE_SECURITY_OUTCOME.variable_id}
-)
+_PREREGISTERED_OUTCOMES = frozenset({PRIMARY_OUTCOME.variable_id, CWE_SECURITY_OUTCOME.variable_id})
 
 
 def _path_error(message: str) -> SecAwareError:
@@ -138,7 +136,9 @@ def enumerate_possible_prompt_paths(
         candidates: list[PathPatternRecord] = []
         search_expansions = 0
         search_expansion_budget = max_candidate_paths * max_path_length
-        starts = tuple(sorted(item for item in checked.variable_ids if _is_intervenable_feature(item)))
+        starts = tuple(
+            sorted(item for item in checked.variable_ids if _is_intervenable_feature(item))
+        )
 
         def walk(variable_ids: tuple[str, ...]) -> None:
             nonlocal search_expansions
@@ -156,9 +156,7 @@ def enumerate_possible_prompt_paths(
                 if target in _PREREGISTERED_OUTCOMES:
                     marks = tuple(
                         _edge_for(edges, source, destination).marks_from(source, destination)
-                        for source, destination in zip(
-                            extended[:-1], extended[1:], strict=True
-                        )
+                        for source, destination in zip(extended[:-1], extended[1:], strict=True)
                     )
                     candidates.append(
                         PathPatternRecord.from_content(
@@ -177,9 +175,7 @@ def enumerate_possible_prompt_paths(
 
         for start in starts:
             walk((start,))
-        by_semantics = {
-            (item.variable_ids, item.endpoint_marks): item for item in candidates
-        }
+        by_semantics = {(item.variable_ids, item.endpoint_marks): item for item in candidates}
         if len(by_semantics) != len(candidates):
             raise _path_error("duplicate candidate path detected")
         return tuple(

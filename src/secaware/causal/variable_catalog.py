@@ -174,6 +174,7 @@ VARIABLE_CATALOG_SHA256 = hashlib.sha256(
     ).encode("utf-8")
 ).hexdigest()
 
+
 def declaration_by_id(variable_id: str) -> VariableDeclaration:
     """Return one exact reviewed declaration; arbitrary IDs fail closed."""
     if type(variable_id) is not str:

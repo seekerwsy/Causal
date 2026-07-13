@@ -177,9 +177,7 @@ def _validate_causal_extractor_provenance(
                 "import-generation-observed",
             )
         }
-        causal_output_keys = tuple(
-            _relative_manifest_path(store, path) for path in causal_paths
-        )
+        causal_output_keys = tuple(_relative_manifest_path(store, path) for path in causal_paths)
         extraction_output_keys = (proposal_key, graph_key)
         causal_input_keys = set(causal_manifest.inputs)
         extra_causal_inputs = causal_input_keys - base_causal_inputs
@@ -381,17 +379,13 @@ def _validate_discovery_bundle(
                 * Decimal(item.support_denominator)
             }
             if too_many_failed:
-                if (
-                    local_hypotheses
-                    or local_discovery_failures
-                    != (
-                        _too_many_failures(
-                            table,
-                            knowledge,
-                            config.discovery,
-                            failed_count,
-                        ),
-                    )
+                if local_hypotheses or local_discovery_failures != (
+                    _too_many_failures(
+                        table,
+                        knowledge,
+                        config.discovery,
+                        failed_count,
+                    ),
                 ):
                     raise ValueError
                 continue
@@ -440,8 +434,7 @@ def _validate_discovery_bundle(
             or len({item.failure_id for item in bootstrap_failures}) != len(bootstrap_failures)
             or len({item.support_id for item in supports}) != len(supports)
             or len({item.hypothesis_id for item in hypotheses}) != len(hypotheses)
-            or len({item.failure_id for item in discovery_failures})
-            != len(discovery_failures)
+            or len({item.failure_id for item in discovery_failures}) != len(discovery_failures)
         ):
             raise ValueError
         return _terminal_result(hypotheses, discovery_failures)
@@ -465,7 +458,8 @@ def fci_discovery_stage(
         raise _stage_error("FCI runner failed validation")
     guard_no_future_confirmation_or_analysis(store)
     causal_paths = tuple(
-        store.path("discovery", filename) for filename, _model in (
+        store.path("discovery", filename)
+        for filename, _model in (
             ("causal_tables.jsonl", CausalTableRecord),
             ("causal_observations.jsonl", None),
             ("causal_exclusions.jsonl", None),

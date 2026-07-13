@@ -211,9 +211,9 @@ def test_expected_contrast_contract_is_family_specific(
 def test_cwe_outcome_maps_to_explicit_secure_indicator(tmp_path: Path) -> None:
     result, _bundle_items = _freeze(tmp_path, outcome_variable="y.cwe_security")
 
-    assert {
-        item.outcome_estimand_id for item in result.hypotheses[0].expected_contrasts
-    } == {"y_cwe_secure"}
+    assert {item.outcome_estimand_id for item in result.hypotheses[0].expected_contrasts} == {
+        "y_cwe_secure"
+    }
 
 
 def test_hypothesis_and_batch_ids_ignore_clock_but_timestamp_is_utc_provenance(
@@ -272,15 +272,18 @@ def test_complete_batch_revalidation_rejects_derived_batch_digest_mutation(
     from secaware.causal.freeze import revalidate_frozen_hypothesis_batch
 
     result, (table, knowledge, config, reference, _support) = _freeze(tmp_path)
-    assert revalidate_frozen_hypothesis_batch(
-        result.hypotheses,
-        table=table,
-        reference_pag=reference,
-        knowledge=knowledge,
-        config=config,
-        catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
-        extractor_policy_sha256="e" * 64,
-    ) == result.hypotheses
+    assert (
+        revalidate_frozen_hypothesis_batch(
+            result.hypotheses,
+            table=table,
+            reference_pag=reference,
+            knowledge=knowledge,
+            config=config,
+            catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+            extractor_policy_sha256="e" * 64,
+        )
+        == result.hypotheses
+    )
 
     payload = result.hypotheses[0].model_dump(mode="python")
     payload["freeze_batch_sha256"] = "f" * 64
@@ -295,6 +298,7 @@ def test_complete_batch_revalidation_rejects_derived_batch_digest_mutation(
             catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
             extractor_policy_sha256="e" * 64,
         )
+
 
 def test_duplicate_path_or_target_pair_is_rejected(tmp_path: Path) -> None:
     from secaware.causal.freeze import freeze_hypotheses
