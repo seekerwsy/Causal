@@ -129,6 +129,28 @@ def _declarations():
     )
 
 
+def _source_coordinates(
+    prompts: tuple[PromptRecord, ...] | None = None,
+    oracles: tuple[OracleRecord, ...] | None = None,
+) -> tuple[tuple[str, str, str, str, str, int], ...]:
+    selected_prompts = prompts or _prompts()
+    selected_oracles = oracles or _oracles(selected_prompts)
+    by_prompt = {item.prompt_id: item for item in selected_prompts}
+    return tuple(
+        sorted(
+            (
+                f"scope.cwe_{by_prompt[item.prompt_id].cwe.removeprefix('CWE-')}",
+                by_prompt[item.prompt_id].cwe,
+                item.model_id,
+                by_prompt[item.prompt_id].task_id,
+                item.prompt_id,
+                item.seed_id,
+            )
+            for item in selected_oracles
+        )
+    )
+
+
 def _build(
     *,
     prompts: tuple[PromptRecord, ...] | None = None,
@@ -192,7 +214,12 @@ def test_local_tables_are_per_scope_and_model_and_contain_no_model_column() -> N
     by_id = {table.table_id: table for table in tables}
     assert all(len(row.values) == len(by_id[row.table_id].variables) for row in rows)
     assert exclusions == ()
-    validate_local_table_bundle(tables, rows, exclusions)
+    validate_local_table_bundle(
+        tables,
+        rows,
+        exclusions,
+        source_coordinates=_source_coordinates(),
+    )
 
 
 def test_feature_and_outcome_codes_are_read_from_live_graph_and_typed_oracle() -> None:
@@ -335,9 +362,14 @@ def test_table_and_rows_are_deterministic_under_input_order_and_fail_joint_tampe
     )
     tampered = CausalObservationRecord.model_validate(payload)
     with pytest.raises(SecAwareError):
-        validate_local_table_bundle(tables, (tampered, *rows[1:]), exclusions)
+        validate_local_table_bundle(
+            tables,
+            (tampered, *rows[1:]),
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
     with pytest.raises(SecAwareError):
-        validate_local_table_bundle((), (), ())
+        validate_local_table_bundle((), (), (), source_coordinates=())
 
 
 def test_joint_verifier_rejects_logical_duplicate_and_row_overlapping_exclusions() -> None:
@@ -363,6 +395,7 @@ def test_joint_verifier_rejects_logical_duplicate_and_row_overlapping_exclusions
             tables,
             rows,
             tuple(sorted((*exclusions, logical_duplicate), key=lambda item: item.exclusion_id)),
+            source_coordinates=_source_coordinates(prompts),
         )
 
     row = rows[0]
@@ -383,4 +416,246 @@ def test_joint_verifier_rejects_logical_duplicate_and_row_overlapping_exclusions
             tables,
             rows,
             tuple(sorted((*exclusions, overlap), key=lambda item: item.exclusion_id)),
+            source_coordinates=_source_coordinates(prompts),
         )
+
+
+@pytest.mark.parametrize(
+    "variable_id",
+    ["x.safety.input_validation", "y.secure_functional"],
+)
+def test_bundle_rejects_unknown_or_non_x_exclusion_variables(
+    variable_id: str,
+) -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.schema.causal import CausalExclusionRecord
+
+    prompts = _prompts((1, 2, 3))
+    graphs = (
+        _graph_for(prompts[0], state=FeatureState.UNRESOLVED),
+        _graph_for(prompts[1]),
+        _graph_for(prompts[2]),
+    )
+    tables, rows, exclusions = _build(prompts=prompts, graphs=graphs)
+    first = exclusions[0]
+    invalid = CausalExclusionRecord.from_content(
+        scope_id=first.scope_id,
+        cwe=first.cwe,
+        model_id=first.model_id,
+        task_id=first.task_id,
+        prompt_id=first.prompt_id,
+        seed_id=first.seed_id,
+        variable_id=variable_id,
+        reason_code=first.reason_code,
+        producer_sha256="f" * 64,
+    )
+    changed = tuple(sorted((invalid, *exclusions[1:]), key=lambda item: item.exclusion_id))
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tables,
+            rows,
+            changed,
+            source_coordinates=_source_coordinates(prompts),
+        )
+
+
+def test_bundle_rejects_foreign_exclusion_outside_exact_source_commitment() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.schema.causal import CausalExclusionRecord
+
+    prompts = _prompts((1, 2, 3))
+    graphs = (
+        _graph_for(prompts[0], state=FeatureState.UNRESOLVED),
+        _graph_for(prompts[1]),
+        _graph_for(prompts[2]),
+    )
+    tables, rows, exclusions = _build(prompts=prompts, graphs=graphs)
+    first = exclusions[0]
+    foreign = CausalExclusionRecord.from_content(
+        scope_id=first.scope_id,
+        cwe=first.cwe,
+        model_id=first.model_id,
+        task_id="foreign-task",
+        prompt_id="foreign-prompt",
+        seed_id=999,
+        variable_id=first.variable_id,
+        reason_code=first.reason_code,
+        producer_sha256="f" * 64,
+    )
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tables,
+            rows,
+            tuple(sorted((*exclusions, foreign), key=lambda item: item.exclusion_id)),
+            source_coordinates=_source_coordinates(prompts),
+        )
+
+
+def _changed_table_and_rows(table, rows):
+    from secaware.schema.causal import CausalObservationRecord, CausalTableRecord
+
+    local = [item for item in rows if item.table_id == table.table_id]
+    changed_values = list(local[0].values)
+    changed_values[0] = 1 - changed_values[0]
+    changed_payload = []
+    for index, row in enumerate(local):
+        values = tuple(changed_values) if index == 0 else row.values
+        changed_payload.append(
+            (
+                CausalObservationRecord.row_id_from_content(
+                    task_id=row.task_id,
+                    prompt_id=row.prompt_id,
+                    model_id=row.model_id,
+                    seed_id=row.seed_id,
+                    values=values,
+                ),
+                row.task_id,
+                row.prompt_id,
+                row.seed_id,
+                values,
+            )
+        )
+    changed = CausalTableRecord.from_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        variables=table.variables,
+        row_count=len(changed_payload),
+        independent_task_count=len({item[1] for item in changed_payload}),
+        observation_payload=changed_payload,
+    )
+    changed_rows = tuple(
+        CausalObservationRecord.from_content(
+            table=changed,
+            task_id=task_id,
+            prompt_id=prompt_id,
+            model_id=changed.model_id,
+            seed_id=seed_id,
+            values=values,
+        )
+        for _row_id, task_id, prompt_id, seed_id, values in changed_payload
+    )
+    return changed, changed_rows
+
+
+def test_bundle_rejects_multiple_tables_for_one_scope_model_coordinate() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+
+    tables, rows, exclusions = _build()
+    changed, changed_rows = _changed_table_and_rows(tables[0], rows)
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            tuple(sorted((*tables, changed), key=lambda item: (item.scope_id, item.model_id))),
+            tuple(sorted((*rows, *changed_rows), key=lambda item: (item.table_id, item.row_id))),
+            exclusions,
+            source_coordinates=_source_coordinates(),
+        )
+
+
+def test_bundle_rejects_inconsistent_source_coordinate_matrices_across_models() -> None:
+    from secaware.causal.table_builder import validate_local_table_bundle
+    from secaware.schema.causal import CausalObservationRecord, CausalTableRecord
+
+    prompts = _prompts((1, 2, 3))
+    tables, rows, exclusions = _build(prompts=prompts)
+    target = next(item for item in tables if item.model_id == "model-b")
+    retained = tuple(
+        item for item in rows if item.table_id == target.table_id and item.prompt_id != "prompt-3"
+    )
+    payload = tuple(
+        (item.row_id, item.task_id, item.prompt_id, item.seed_id, item.values) for item in retained
+    )
+    replacement = CausalTableRecord.from_content(
+        scope_id=target.scope_id,
+        cwe=target.cwe,
+        model_id=target.model_id,
+        variables=target.variables,
+        row_count=len(retained),
+        independent_task_count=len({item.task_id for item in retained}),
+        observation_payload=payload,
+    )
+    replacement_rows = tuple(
+        CausalObservationRecord.from_content(
+            table=replacement,
+            task_id=item.task_id,
+            prompt_id=item.prompt_id,
+            model_id=item.model_id,
+            seed_id=item.seed_id,
+            values=item.values,
+        )
+        for item in retained
+    )
+    changed_tables = tuple(
+        sorted(
+            (replacement if item.table_id == target.table_id else item for item in tables),
+            key=lambda item: (item.scope_id, item.model_id),
+        )
+    )
+    changed_rows = tuple(
+        sorted(
+            (
+                *(item for item in rows if item.table_id != target.table_id),
+                *replacement_rows,
+            ),
+            key=lambda item: (item.table_id, item.row_id),
+        )
+    )
+    coordinates = tuple(
+        item
+        for item in _source_coordinates(prompts)
+        if not (item[2] == "model-b" and item[4] == "prompt-3")
+    )
+
+    with pytest.raises(SecAwareError):
+        validate_local_table_bundle(
+            changed_tables,
+            changed_rows,
+            exclusions,
+            source_coordinates=coordinates,
+        )
+
+
+def test_live_prompt_projections_are_cached_per_prompt_and_requested_query(monkeypatch) -> None:
+    import secaware.causal.table_builder as table_builder_module
+    from secaware.causal.variable_catalog import declaration_by_id
+
+    feature_calls = 0
+    motif_calls = 0
+    original_feature = table_builder_module.feature_state
+    original_motif = table_builder_module.motif_query_vector
+
+    def counted_feature(*args, **kwargs):
+        nonlocal feature_calls
+        feature_calls += 1
+        return original_feature(*args, **kwargs)
+
+    def counted_motif(*args, **kwargs):
+        nonlocal motif_calls
+        motif_calls += 1
+        return original_motif(*args, **kwargs)
+
+    monkeypatch.setattr(table_builder_module, "feature_state", counted_feature)
+    monkeypatch.setattr(table_builder_module, "motif_query_vector", counted_motif)
+
+    _build()
+    assert feature_calls == len(_prompts())
+    assert motif_calls == 0
+
+    feature_calls = 0
+    motif_calls = 0
+    declarations = (
+        *_declarations(),
+        declaration_by_id("x.motif.user_path_to_file_open_without_guard"),
+    )
+    table_builder_module.build_local_tables(
+        _prompts(),
+        _graphs(),
+        _oracles(),
+        declarations,
+        min_independent_tasks=2,
+    )
+    assert feature_calls == len(_prompts())
+    assert motif_calls == len(_prompts())

@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Iterable, TextIO, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from secaware.errors import ErrorCode, SecAwareError
 
@@ -55,22 +55,35 @@ def _validate_record(
     line: int,
     stage: str,
 ) -> T:
+    result: T | None = None
+    failed = False
+    migrate = None
     try:
         migrate = getattr(model, "migrate_persisted_payload", None)
         if callable(migrate):
             data = migrate(data)
-        return model.model_validate(data)  # type: ignore[attr-defined,no-any-return]
-    except ValidationError:
-        pass
-    raise _contract_error(
-        stage=stage,
-        message="JSONL record failed schema validation",
-        path=path,
-        line=line,
-    ) from None
+        result = model.model_validate(data)  # type: ignore[attr-defined,no-any-return]
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as error:
+        error.__traceback__ = None
+        error.__cause__ = None
+        error.__context__ = None
+        failed = True
+    finally:
+        data = None
+        migrate = None
+    if failed or result is None:
+        raise _contract_error(
+            stage=stage,
+            message="JSONL record failed schema validation",
+            path=path,
+            line=line,
+        ) from None
+    return result
 
 
-def read_jsonl(
+def _read_jsonl_impl(
     path: str | Path,
     model: type[T] | None = None,
     *,
@@ -170,6 +183,80 @@ def read_jsonl(
             path=path,
         )
     return records
+
+
+def _clear_exception_graph(error: BaseException) -> None:
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+        current.__traceback__ = None
+        current.__cause__ = None
+        current.__context__ = None
+
+
+def read_jsonl(
+    path: str | Path,
+    model: type[T] | None = None,
+    *,
+    required: bool = False,
+    allow_empty: bool = True,
+    max_records: int | None = None,
+    max_line_chars: int | None = None,
+    max_total_chars: int | None = None,
+    stage: str = "io",
+) -> list[T] | list[dict]:
+    """Read JSONL while preventing model-owned migration failures from retaining payloads."""
+    result: list[T] | list[dict] | None = None
+    safe_error: SecAwareError | None = None
+    try:
+        result = _read_jsonl_impl(
+            path,
+            model,
+            required=required,
+            allow_empty=allow_empty,
+            max_records=max_records,
+            max_line_chars=max_line_chars,
+            max_total_chars=max_total_chars,
+            stage=stage,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError as error:
+        safe_error = SecAwareError(
+            code=error.code,
+            stage=error.stage,
+            message=error.message,
+            details=error.details,
+            retryable=error.retryable,
+        )
+        _clear_exception_graph(error)
+    except Exception as error:
+        safe_error = _contract_error(
+            stage=stage,
+            message="JSONL record failed schema validation",
+            path=Path(path),
+        )
+        _clear_exception_graph(error)
+    finally:
+        path = ""
+        model = None
+    if safe_error is not None:
+        raise safe_error from None
+    if result is None:  # pragma: no cover - all ordinary failures construct a safe error
+        raise _contract_error(
+            stage=stage,
+            message="JSONL record failed schema validation",
+            path=Path("jsonl"),
+        ) from None
+    return result
 
 
 def _dump_record(record: BaseModel | dict) -> str:
