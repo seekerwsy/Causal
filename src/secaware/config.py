@@ -116,11 +116,36 @@ class TSGConfig(StrictModel):
     llm: PromptExtractorLLMConfig | None = None
 
 
-class DiscoveryConfig(StrictModel):
-    min_support_total: int = 4
-    min_support_each_side: int = 1
-    top_k_per_scope: int = 2
-    score_weights: dict[str, float] = Field(default_factory=dict)
+class FCIDiscoveryConfig(SafeValidationMixin, StrictModel):
+    _safe_validation_message = "FCI discovery configuration failed validation"
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    backend: Literal["causal_learn_fci_v1"] = "causal_learn_fci_v1"
+    backend_version: Literal["0.1.4.7"] = "0.1.4.7"
+    ci_test: Literal["gsq"] = "gsq"
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0, allow_inf_nan=False)
+    depth: int = Field(default=3, ge=0, le=8)
+    max_path_length: int = Field(default=6, ge=1, le=16)
+    timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0, allow_inf_nan=False)
+    max_variables: int = Field(default=64, ge=2, le=64)
+    max_rows: int = Field(default=100_000, ge=2, le=100_000)
+    bootstrap_samples: int = Field(default=200, ge=1, le=10_000)
+    stability_threshold: float = Field(default=0.80, gt=0.0, le=1.0, allow_inf_nan=False)
+    max_candidate_paths: int = Field(default=512, ge=1, le=4096)
+    min_independent_tasks: int = Field(default=20, ge=2, le=100_000)
+    max_failed_bootstrap_fraction: float = Field(
+        default=0.10,
+        ge=0.0,
+        lt=1.0,
+        allow_inf_nan=False,
+    )
 
 
 class InterventionConfig(StrictModel):
@@ -297,7 +322,7 @@ class AppConfig(StrictModel):
     run: RunConfig
     data: DataConfig
     tsg: TSGConfig = Field(default_factory=TSGConfig)
-    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
+    discovery: FCIDiscoveryConfig = Field(default_factory=FCIDiscoveryConfig)
     intervention: InterventionConfig = Field(default_factory=InterventionConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     oracle: OracleConfig = Field(default_factory=OracleConfig)

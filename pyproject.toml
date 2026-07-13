@@ -9,6 +9,7 @@ description = "TSG-driven prompt-side security mechanism discovery and confirmat
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "causal-learn==0.1.4.7",
   "pydantic>=2.5,<3",
   "typer>=0.9",
   "pandas>=2",

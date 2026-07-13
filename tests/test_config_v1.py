@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 import secaware.errors as errors
-from secaware.config import AppConfig, load_config
+from secaware.config import AppConfig, FCIDiscoveryConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 
 
@@ -248,6 +248,49 @@ def test_app_config_rejects_removed_tsg_field() -> None:
         )
 
     assert ("tsg", removed_field) in {tuple(error["loc"]) for error in exc_info.value.errors()}
+
+
+def test_app_config_uses_exact_bounded_fci_discovery_contract() -> None:
+    config = AppConfig.model_validate(
+        {
+            "run": {"name": "strict"},
+            "data": {"prompts_path": "prompts.jsonl"},
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+        }
+    )
+
+    assert type(config.discovery) is FCIDiscoveryConfig
+    assert config.discovery.model_dump(mode="json") == {
+        "backend": "causal_learn_fci_v1",
+        "backend_version": "0.1.4.7",
+        "ci_test": "gsq",
+        "alpha": 0.05,
+        "depth": 3,
+        "max_path_length": 6,
+        "timeout_seconds": 120.0,
+        "max_variables": 64,
+        "max_rows": 100_000,
+        "bootstrap_samples": 200,
+        "stability_threshold": 0.80,
+        "max_candidate_paths": 512,
+        "min_independent_tasks": 20,
+        "max_failed_bootstrap_fraction": 0.10,
+    }
+
+
+@pytest.mark.parametrize(
+    "removed_field",
+    ("min_support_total", "min_support_each_side", "top_k_per_scope", "score_weights"),
+)
+def test_app_config_rejects_removed_heuristic_discovery_fields(removed_field: str) -> None:
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(
+            {
+                "run": {"name": "strict"},
+                "data": {"prompts_path": "prompts.jsonl"},
+                "discovery": {removed_field: 1},
+            }
+        )
 
 
 @pytest.mark.parametrize("config_name", ["demo.yaml", "paper_v0.yaml"])

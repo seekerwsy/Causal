@@ -246,6 +246,15 @@ def test_project_declares_exact_oracle_extra_and_test_marker() -> None:
     assert '"oracle_tools: requires the exact locked Semgrep and Bandit executables"' in project
 
 
+def test_project_declares_exact_no_java_minimum_causal_backend() -> None:
+    package_requirements = requires("secaware") or []
+
+    assert "causal-learn==0.1.4.7" in package_requirements
+    lowered = "\n".join(package_requirements).casefold()
+    assert "py-tetrad" not in lowered
+    assert "jpype" not in lowered
+
+
 def test_project_pins_offline_wheel_build_toolchain() -> None:
     project = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 

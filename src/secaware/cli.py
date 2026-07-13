@@ -1572,10 +1572,10 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
             prompts,
             prompt_tsgs,
             oracles,
-            min_support_total=config.discovery.min_support_total,
-            min_support_each_side=config.discovery.min_support_each_side,
-            top_k_per_scope=config.discovery.top_k_per_scope,
-            score_weights=config.discovery.score_weights,
+            min_support_total=4,
+            min_support_each_side=1,
+            top_k_per_scope=2,
+            score_weights=None,
         )
         return [
             all_h,
