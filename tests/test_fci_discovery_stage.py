@@ -15,6 +15,7 @@ from secaware.config import write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
+from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
     CausalTableRecord,
@@ -98,6 +99,47 @@ class _BootstrapTimeoutRunner(_StablePathRunner):
 class _ReferenceCrashRunner(_StablePathRunner):
     def run(self, *_args: object, **_kwargs: object) -> PAGRecord:
         raise RuntimeError("injected reference crash")
+
+
+def _rehash_hypothesis_with_support_mutation(
+    frozen: object,
+    freeze_kwargs: dict[str, object],
+    field: str,
+) -> object:
+    hypotheses = frozen.hypotheses  # type: ignore[attr-defined]
+    assert len(hypotheses) == 1
+    original = hypotheses[0]
+    content = original.model_dump(
+        mode="python",
+        exclude={"hypothesis_id", "hypothesis_sha256", "freeze_batch_sha256"},
+    )
+    content[field] = content[field] - 1 if field == "support_numerator" else content[field] + 1
+    semantic_sha256 = FrozenHypothesisRecord.semantic_sha256_from_content(content)
+    table = freeze_kwargs["table"]
+    reference_pag = freeze_kwargs["reference_pag"]
+    knowledge = freeze_kwargs["knowledge"]
+    config = freeze_kwargs["config"]
+    content["freeze_batch_sha256"] = canonical_sha256(
+        {
+            "schema_version": "1.0",
+            "semantic_hypothesis_sha256": [semantic_sha256],
+            "table_id": table.table_id,  # type: ignore[attr-defined]
+            "table_sha256": table.table_sha256,  # type: ignore[attr-defined]
+            "reference_pag_id": reference_pag.pag_id,  # type: ignore[attr-defined]
+            "catalog_sha256": freeze_kwargs["catalog_sha256"],
+            "extractor_policy_sha256": freeze_kwargs["extractor_policy_sha256"],
+            "fci_config_sha256": canonical_sha256(
+                config.model_dump(mode="json")  # type: ignore[attr-defined]
+            ),
+            "background_knowledge_sha256": knowledge.knowledge_sha256,  # type: ignore[attr-defined]
+        }
+    )
+    mutated = FrozenHypothesisRecord.from_content(**content)
+    return type(frozen)(
+        hypotheses=(mutated,),
+        failures=frozen.failures,  # type: ignore[attr-defined]
+        freeze_batch_sha256=content["freeze_batch_sha256"],
+    )
 
 
 def test_fci_stage_publishes_the_closed_output_contract() -> None:
@@ -381,6 +423,71 @@ def test_fci_stage_rejects_failure_provenance_mismatch_before_commit(
         )
 
     monkeypatch.setattr(stage_module, "freeze_hypotheses", inject_mismatch)
+
+    with pytest.raises(SecAwareError, match="readback validation"):
+        stage_module.fci_discovery_stage(
+            config,
+            store,
+            force=False,
+            runner=_NoPathRunner(),
+        )
+
+    assert not store.path(".stages", "fci-discovery.json").exists()
+
+
+@pytest.mark.parametrize("field", ("support_numerator", "support_denominator"))
+def test_fci_stage_rejects_self_rehashed_hypothesis_support_mutation_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    import secaware.pipeline.stages.fci_discovery as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    real_freeze = stage_module.freeze_hypotheses
+
+    def inject_mutation(**kwargs: object):
+        frozen = real_freeze(**kwargs)  # type: ignore[arg-type]
+        return _rehash_hypothesis_with_support_mutation(frozen, kwargs, field)
+
+    monkeypatch.setattr(stage_module, "freeze_hypotheses", inject_mutation)
+
+    with pytest.raises(SecAwareError, match="readback validation"):
+        stage_module.fci_discovery_stage(
+            config,
+            store,
+            force=False,
+            runner=_StablePathRunner(),
+        )
+
+    assert not store.path(".stages", "fci-discovery.json").exists()
+
+
+def test_fci_stage_rejects_self_rehashed_no_stable_failure_detail_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.pipeline.stages.fci_discovery as stage_module
+
+    config, store = _prepared_store(tmp_path)
+    causal_stage.assemble_causal_tables_stage(config, store, force=False)
+    real_freeze = stage_module.freeze_hypotheses
+
+    def inject_detail_mutation(**kwargs: object):
+        frozen = real_freeze(**kwargs)  # type: ignore[arg-type]
+        failure = frozen.failures[0]
+        mutated = DiscoveryFailureRecord.from_content(
+            **failure.model_dump(mode="python", exclude={"failure_id", "detail_sha256"}),
+            detail_sha256="e" * 64,
+        )
+        return type(frozen)(
+            hypotheses=frozen.hypotheses,
+            failures=(mutated,),
+            freeze_batch_sha256=frozen.freeze_batch_sha256,
+        )
+
+    monkeypatch.setattr(stage_module, "freeze_hypotheses", inject_detail_mutation)
 
     with pytest.raises(SecAwareError, match="readback validation"):
         stage_module.fci_discovery_stage(

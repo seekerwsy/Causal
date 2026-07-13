@@ -309,6 +309,65 @@ def _freeze_batch_sha256(
     )
 
 
+def build_no_stable_hypothesis_failure(
+    *,
+    table: CausalTableRecord,
+    reference_pag: PAGRecord,
+    knowledge: BackgroundKnowledgeRecord,
+    config: FCIDiscoveryConfig,
+    catalog_sha256: str,
+    extractor_policy_sha256: str,
+) -> DiscoveryFailureRecord:
+    """Build the exact deterministic terminal record for an empty stable set."""
+    try:
+        checked_table = CausalTableRecord.model_validate(table)
+        checked_reference = PAGRecord.model_validate(reference_pag)
+        checked_knowledge = BackgroundKnowledgeRecord.model_validate(knowledge)
+        checked_config = FCIDiscoveryConfig.model_validate(config)
+        config_sha256 = canonical_sha256(checked_config.model_dump(mode="json"))
+        if (
+            checked_reference.table_id != checked_table.table_id
+            or checked_reference.config_sha256 != config_sha256
+            or checked_reference.background_knowledge_sha256
+            != checked_knowledge.knowledge_sha256
+            or checked_knowledge.table_id != checked_table.table_id
+            or catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
+            or type(extractor_policy_sha256) is not str
+            or len(extractor_policy_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in extractor_policy_sha256)
+        ):
+            raise ValueError
+        batch_sha256 = _freeze_batch_sha256(
+            semantic_sha256=(),
+            table=checked_table,
+            reference_pag=checked_reference,
+            knowledge=checked_knowledge,
+            config_sha256=config_sha256,
+            catalog_sha256=catalog_sha256,
+            extractor_policy_sha256=extractor_policy_sha256,
+        )
+        return DiscoveryFailureRecord.from_content(
+            table_id=checked_table.table_id,
+            scope_id=checked_table.scope_id,
+            model_id=checked_table.model_id,
+            reason_code=DiscoveryFailureReason.NO_STABLE_HYPOTHESIS,
+            table_sha256=checked_table.table_sha256,
+            fci_config_sha256=config_sha256,
+            background_knowledge_sha256=checked_knowledge.knowledge_sha256,
+            detail_sha256=canonical_sha256(
+                {
+                    "reason": DiscoveryFailureReason.NO_STABLE_HYPOTHESIS.value,
+                    "reference_pag_id": checked_reference.pag_id,
+                    "freeze_batch_sha256": batch_sha256,
+                }
+            ),
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _freeze_error("no-stable failure inputs failed validation") from None
+
+
 def revalidate_frozen_hypothesis_batch(
     hypotheses: Sequence[FrozenHypothesisRecord],
     *,
@@ -486,21 +545,13 @@ def freeze_hypotheses(
         failures: tuple[DiscoveryFailureRecord, ...] = ()
         if not hypotheses:
             failures = (
-                DiscoveryFailureRecord.from_content(
-                    table_id=checked_table.table_id,
-                    scope_id=checked_table.scope_id,
-                    model_id=checked_table.model_id,
-                    reason_code=DiscoveryFailureReason.NO_STABLE_HYPOTHESIS,
-                    table_sha256=checked_table.table_sha256,
-                    fci_config_sha256=config_sha256,
-                    background_knowledge_sha256=checked_knowledge.knowledge_sha256,
-                    detail_sha256=canonical_sha256(
-                        {
-                            "reason": DiscoveryFailureReason.NO_STABLE_HYPOTHESIS.value,
-                            "reference_pag_id": checked_reference.pag_id,
-                            "freeze_batch_sha256": batch_sha256,
-                        }
-                    ),
+                build_no_stable_hypothesis_failure(
+                    table=checked_table,
+                    reference_pag=checked_reference,
+                    knowledge=checked_knowledge,
+                    config=checked_config,
+                    catalog_sha256=catalog_sha256,
+                    extractor_policy_sha256=extractor_policy_sha256,
                 ),
             )
         return HypothesisFreezeResult(
@@ -516,6 +567,7 @@ def freeze_hypotheses(
 
 __all__ = [
     "HypothesisFreezeResult",
+    "build_no_stable_hypothesis_failure",
     "expected_operation_contrasts",
     "freeze_hypotheses",
     "guard_no_future_confirmation_or_analysis",

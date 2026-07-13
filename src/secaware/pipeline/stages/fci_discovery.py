@@ -18,6 +18,7 @@ from secaware.causal.bootstrap import (
     run_task_cluster_fci_bootstrap,
 )
 from secaware.causal.freeze import (
+    build_no_stable_hypothesis_failure,
     freeze_hypotheses,
     guard_no_future_confirmation_or_analysis,
     revalidate_frozen_hypothesis_batch,
@@ -247,7 +248,6 @@ def _validate_discovery_bundle(
             )
         ):
             raise ValueError
-        config_sha256 = canonical_sha256(config.discovery.model_dump(mode="json"))
         catalog_sha256 = snapshot.extraction_manifest.catalog_sha256 or ""
         extractor_policy_sha256 = snapshot.extraction_manifest.policy_sha256 or ""
         for table_id, table in table_by_id.items():
@@ -297,8 +297,8 @@ def _validate_discovery_bundle(
                 failed_count / config.discovery.bootstrap_samples
                 > config.discovery.max_failed_bootstrap_fraction
             )
-            stable_path_ids = {
-                item.path.path_id
+            stable_support_by_path_id = {
+                item.path.path_id: item
                 for item in local_supports
                 if Decimal(item.support_numerator)
                 >= Decimal(str(config.discovery.stability_threshold))
@@ -329,23 +329,32 @@ def _validate_discovery_bundle(
                     catalog_sha256=catalog_sha256,
                     extractor_policy_sha256=extractor_policy_sha256,
                 )
+            hypothesis_by_path_id = {item.path.path_id: item for item in local_hypotheses}
             if (
-                {item.path.path_id for item in local_hypotheses} != stable_path_ids
+                len(hypothesis_by_path_id) != len(local_hypotheses)
+                or set(hypothesis_by_path_id) != set(stable_support_by_path_id)
                 or bool(local_discovery_failures) == bool(local_hypotheses)
             ):
                 raise ValueError
-            if local_discovery_failures:
-                if len(local_discovery_failures) != 1:
-                    raise ValueError
-                failure = local_discovery_failures[0]
+            for path_id, hypothesis in hypothesis_by_path_id.items():
+                support = stable_support_by_path_id[path_id]
                 if (
-                    failure.reason_code.value != "no_stable_hypothesis"
-                    or failure.scope_id != table.scope_id
-                    or failure.model_id != table.model_id
-                    or failure.table_sha256 != table.table_sha256
-                    or failure.fci_config_sha256 != config_sha256
-                    or failure.background_knowledge_sha256 != knowledge.knowledge_sha256
+                    hypothesis.path != support.path
+                    or hypothesis.reference_pag_id != support.reference_pag_id
+                    or hypothesis.support_numerator != support.support_numerator
+                    or hypothesis.support_denominator != support.support_denominator
                 ):
+                    raise ValueError
+            if local_discovery_failures:
+                expected_failure = build_no_stable_hypothesis_failure(
+                    table=table,
+                    reference_pag=reference_by_table[table_id],
+                    knowledge=knowledge,
+                    config=config.discovery,
+                    catalog_sha256=catalog_sha256,
+                    extractor_policy_sha256=extractor_policy_sha256,
+                )
+                if local_discovery_failures != (expected_failure,):
                     raise ValueError
         if (
             len({item.knowledge_id for item in knowledge_records}) != len(knowledge_records)
