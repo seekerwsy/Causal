@@ -241,15 +241,17 @@ def _build_structural_graph(
         PromptExtractorBackend.LLM_FACTS_V1,
         PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
     }:
+        deterministic_legacy = trusted.backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
         for fact in trusted.facts:
             states[fact.feature_id] = fact.state
             if fact.state is FeatureState.PRESENT:
                 spec = next(
                     item for item in PROMPT_FEATURE_CATALOG if item.feature_id == fact.feature_id
                 )
-                if spec.feature_id not in _LEGACY_FEATURE_IDS:
+                if not deterministic_legacy or spec.feature_id not in _LEGACY_FEATURE_IDS:
                     _add_fact_structure(graph, spec, fact.evidence[0])
-        _add_legacy_fact_compatibility(graph, trusted)
+        if deterministic_legacy:
+            _add_legacy_fact_compatibility(graph, trusted)
         return graph, states
 
     aliases: dict[str, str] = {}

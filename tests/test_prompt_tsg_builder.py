@@ -121,6 +121,29 @@ def test_fact_proposal_builds_canonical_graph_independent_of_fact_order() -> Non
     )
 
 
+def test_llm_facts_without_relations_do_not_infer_deterministic_legacy_paths() -> None:
+    proposal = _facts_proposal()
+    assert proposal.backend is PromptExtractorBackend.LLM_FACTS_V1
+
+    graph = record_to_multidigraph(build_prompt_tsg(proposal, _prompt()))
+    edge_types = {data["edge_type"] for _, _, data in graph.edges(data=True)}
+    labels = {data["label"] for _, data in graph.nodes(data=True)}
+
+    assert feature_state(graph, "task.file_read") is FeatureState.PRESENT
+    assert feature_state(graph, "safety.path_normalization") is FeatureState.PRESENT
+    assert {
+        "task.file_read:task_operation",
+        "task.file_read:data_object",
+        "task.file_read:sink",
+        "safety.path_normalization:prompt_requirement",
+        "safety.path_normalization:guard",
+    } <= labels
+    assert {EdgeType.OPERATES_ON, EdgeType.FLOWS_TO, EdgeType.REQUIRES} <= edge_types
+    assert EdgeType.SOURCE_OF not in edge_types
+    assert EdgeType.MAPS_TO not in edge_types
+    assert EdgeType.GUARDED_BY not in edge_types
+
+
 def test_fact_relations_materialize_into_canonical_typed_feature_edges() -> None:
     prompt = _prompt()
     baseline = build_prompt_tsg(_facts_proposal(), prompt)

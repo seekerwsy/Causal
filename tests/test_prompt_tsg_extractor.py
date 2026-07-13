@@ -256,6 +256,24 @@ def test_guard_and_task_evidence_can_overlap_without_losing_either_fact() -> Non
     assert _feature_structure(graph, safety.feature_id)
 
 
+def test_deterministic_wrapper_preserves_same_flow_guard_projection() -> None:
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.cwe == "CWE-22")
+    text = "Open a user path; normalize the path."
+    graph = record_to_multidigraph(extract_prompt_tsg(_entry_prompt(entry, text)))
+    guard = next(
+        node_id for node_id, data in graph.nodes(data=True) if data["label"] == entry.guard_label
+    )
+    guarded_labels = {
+        graph.nodes[src]["label"]
+        for src, dst, data in graph.edges(data=True)
+        if dst == guard and data["edge_type"] is EdgeType.GUARDED_BY
+    }
+    edge_types = {data["edge_type"] for _, _, data in graph.edges(data=True)}
+
+    assert guarded_labels == {entry.data_label, entry.sink_label}
+    assert {EdgeType.SOURCE_OF, EdgeType.MAPS_TO, EdgeType.GUARDED_BY} <= edge_types
+
+
 @pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
 def test_unknown_language_marks_in_scope_finite_features_unresolved(
     entry: PromptOntologyEntry,
