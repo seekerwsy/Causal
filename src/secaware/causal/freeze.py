@@ -227,7 +227,10 @@ def _validate_freeze_coordinates(
     )
     candidate_by_id = {item.path_id: item for item in candidates}
     path_ids = tuple(item.path.path_id for item in supports)
-    if len(path_ids) != len(set(path_ids)):
+    if (
+        len(path_ids) != len(set(path_ids))
+        or set(path_ids) != set(candidate_by_id)
+    ):
         raise ValueError
     for support in supports:
         if (

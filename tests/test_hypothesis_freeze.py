@@ -314,6 +314,25 @@ def test_duplicate_path_or_target_pair_is_rejected(tmp_path: Path) -> None:
         )
 
 
+def test_freeze_rejects_a_support_subset_of_reference_candidates(tmp_path: Path) -> None:
+    from secaware.causal.freeze import freeze_hypotheses
+
+    table, knowledge, config, reference, _support = _bundle()
+
+    with pytest.raises(SecAwareError, match="freeze inputs failed validation"):
+        freeze_hypotheses(
+            reference_pag=reference,
+            path_supports=(),
+            table=table,
+            knowledge=knowledge,
+            config=config,
+            catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+            extractor_policy_sha256="e" * 64,
+            store=_store(tmp_path),
+            frozen_at_utc=datetime(2026, 7, 14, tzinfo=timezone.utc),
+        )
+
+
 @pytest.mark.parametrize(
     "future_path",
     (

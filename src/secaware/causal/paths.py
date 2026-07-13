@@ -89,10 +89,8 @@ def _is_intervenable_feature(variable_id: str) -> bool:
 
 
 def _is_allowed_internal(variable_id: str) -> bool:
-    if _is_intervenable_feature(variable_id):
-        return True
     try:
-        return declaration_by_id(variable_id).role is VariableRole.W
+        return declaration_by_id(variable_id).role in {VariableRole.W, VariableRole.X}
     except KeyError:
         return False
 

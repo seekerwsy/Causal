@@ -208,7 +208,6 @@ def test_enumerates_sorted_direct_mediated_and_long_prompt_paths() -> None:
 @pytest.mark.parametrize(
     "internal",
     (
-        "x.motif.user_string_to_sql_without_parameterization",
         "x.code.guard_present",
         "w.code_trace",
         "w.dynamic_runtime",
@@ -229,6 +228,27 @@ def test_rejects_motif_code_context_and_internal_outcome_variables(internal: str
     assert enumerate_possible_prompt_paths(
         reference, max_path_length=3, max_candidate_paths=10
     ) == ()
+
+
+def test_reviewed_prompt_motif_may_mediate_but_never_becomes_a_start() -> None:
+    from secaware.causal.paths import enumerate_possible_prompt_paths
+
+    table = _table()
+    x = "x.safety.sql_parameterization"
+    motif = "x.motif.user_string_to_sql_without_parameterization"
+    y = "y.secure_functional"
+    payload = _pag(table, ()).model_dump(mode="json", exclude={"pag_id"})
+    payload["variable_ids"] = (*payload["variable_ids"], motif)
+    payload["edges"] = (_edge(x, motif), _edge(motif, y))
+    reference = PAGRecord.from_content(**payload)
+
+    paths = enumerate_possible_prompt_paths(
+        reference,
+        max_path_length=2,
+        max_candidate_paths=10,
+    )
+
+    assert tuple(item.variable_ids for item in paths) == ((x, motif, y),)
 
 
 def test_preregistered_outcome_cannot_be_used_as_an_internal_node() -> None:
