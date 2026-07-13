@@ -6,7 +6,16 @@ import json
 import pytest
 
 from secaware.errors import SecAwareError
-from test_llm_facts_backend import CapturingTransport, _extractor, _policy, _prompt, _response
+from secaware.extractors.llm_facts import LLMFactsExtractor
+from test_llm_facts_backend import (
+    CapturingTransport,
+    _extractor,
+    _policy,
+    _prompt,
+    _response,
+    _structured,
+)
+from test_structured_llm_transport import _exception_chain_text
 
 
 def _mutated(mutator) -> CapturingTransport:
@@ -68,3 +77,25 @@ def test_prompt_injection_is_never_promoted_to_request_control_fields() -> None:
     assert "outcome" not in request
     assert "tool_calls" not in request
     assert isinstance(request["allowed_features"], list)
+
+
+def test_parser_and_transport_failure_chains_do_not_retain_raw_secrets() -> None:
+    parser_secret = "raw-parser-response-secret-value"
+    malformed = CapturingTransport((f'{{"facts":"{parser_secret}"').encode())
+    with pytest.raises(SecAwareError) as parser_error:
+        _extractor(malformed).extract(_prompt(), _policy())
+    assert parser_error.value.__cause__ is None
+    assert parser_error.value.__context__ is None
+    assert parser_secret not in _exception_chain_text(parser_error.value)
+
+    transport_secret = "raw-extractor-transport-secret-value"
+
+    class FailingTransport:
+        def complete(self, _request_bytes: bytes, _policy: object) -> bytes:
+            raise RuntimeError(transport_secret)
+
+    with pytest.raises(SecAwareError) as transport_error:
+        LLMFactsExtractor(FailingTransport(), _structured()).extract(_prompt(), _policy())
+    assert transport_error.value.__cause__ is None
+    assert transport_error.value.__context__ is None
+    assert transport_secret not in _exception_chain_text(transport_error.value)

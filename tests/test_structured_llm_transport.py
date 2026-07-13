@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from collections import UserDict
 from types import SimpleNamespace
 
 import pytest
@@ -46,7 +47,7 @@ def _response(content: object = '{"facts":[]}', *, finish_reason: object = "stop
         "choices": [
             {
                 "finish_reason": finish_reason,
-                "message": {"content": content},
+                "message": {"role": "assistant", "content": content},
             }
         ]
     }
@@ -56,6 +57,27 @@ class _StatusFailure(Exception):
     def __init__(self, status_code: int, message: str = "provider failure") -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def _exception_chain_text(error: BaseException) -> str:
+    pending = [error]
+    seen: set[int] = set()
+    parts: list[str] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        parts.extend((str(current), repr(current)))
+        try:
+            parts.append(repr(vars(current)))
+        except Exception:
+            parts.append("<unavailable exception state>")
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return "\n".join(parts)
 
 
 class _Completions:
@@ -95,14 +117,64 @@ def test_canonical_request_bytes_are_exact_deterministic_utf8_json() -> None:
         canonical_request_bytes({"bad": float("nan")})
 
 
+def test_canonical_request_bytes_snapshots_nested_general_mappings() -> None:
+    payload = UserDict(
+        {
+            "nested": UserDict({"snow": "雪", "flags": (True, False, None)}),
+            "number": 7,
+        }
+    )
+    expected = b'{"nested":{"flags":[true,false,null],"snow":"\xe9\x9b\xaa"},"number":7}'
+    assert canonical_request_bytes(payload) == expected
+    assert canonical_request_bytes(UserDict(reversed(list(payload.items())))) == expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"nested": {1: "integer-key", "1": "string-key"}},
+        {"nested": {True: "boolean-key"}},
+        {"set": {1, 2}},
+        {"custom": SimpleNamespace(value=1)},
+        {"infinite": float("inf")},
+        {"negative_infinite": float("-inf")},
+        {"surrogate": "\ud800"},
+    ],
+)
+def test_canonical_request_bytes_rejects_values_outside_strict_json_domain(
+    payload: object,
+) -> None:
+    with pytest.raises(ValueError, match="^structured request payload validation failed$"):
+        canonical_request_bytes(payload)  # type: ignore[arg-type]
+
+
+def test_canonical_request_mapping_iteration_failure_is_normalized_without_context() -> None:
+    secret = "hostile-mapping-iteration-secret"
+
+    class HostileMapping(UserDict):
+        def items(self):
+            raise RuntimeError(secret)
+
+    with pytest.raises(ValueError) as exc_info:
+        canonical_request_bytes(HostileMapping({"safe": 1}))
+
+    assert str(exc_info.value) == "structured request payload validation failed"
+    assert secret not in _exception_chain_text(exc_info.value)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("endpoint_sha256", "x" * 64),
         ("model_id", " "),
+        ("model_id", "model\x00id"),
+        ("model_id", "model\nid"),
+        ("model_id", "model\u202eid"),
         ("temperature", float("nan")),
         ("top_p", 0.0),
         ("seed", True),
+        ("seed", -(2**63) - 1),
+        ("seed", 2**63),
         ("timeout_seconds", 0.0),
         ("max_attempts", 0),
         ("max_response_bytes", 0),
@@ -113,6 +185,11 @@ def test_structured_policy_rejects_invalid_runtime_values(field: str, value: obj
         _policy(**{field: value})
 
 
+@pytest.mark.parametrize("seed", [-(2**63), -1, 0, 2**63 - 1])
+def test_structured_policy_accepts_signed_64_bit_seed_boundaries(seed: int) -> None:
+    assert _policy(seed=seed).seed == seed
+
+
 def test_retry_resends_identical_locked_payload_and_uses_deterministic_backoff() -> None:
     sleeps: list[float] = []
     client = _Client([_StatusFailure(429), _response()])
@@ -121,12 +198,64 @@ def test_retry_resends_identical_locked_payload_and_uses_deterministic_backoff()
 
     assert transport.complete(request, _policy()) == b'{"facts":[]}'
     assert client.completions.requests[0] == client.completions.requests[1]
-    assert client.completions.requests[0]["messages"] is client.completions.requests[1]["messages"]
     assert sleeps == [1.0]
+
+
+def test_retry_rebuilds_isolated_sdk_containers_after_client_mutation() -> None:
+    class MutatingCompletions:
+        def __init__(self) -> None:
+            self.snapshots: list[bytes] = []
+            self.calls = 0
+
+        def create(self, **kwargs: object) -> object:
+            self.calls += 1
+            self.snapshots.append(canonical_request_bytes(kwargs))
+            if self.calls == 1:
+                messages = kwargs["messages"]
+                assert isinstance(messages, list)
+                messages[1]["content"] = "client-mutated-request"
+                response_format = kwargs["response_format"]
+                assert isinstance(response_format, dict)
+                response_format["type"] = "client_mutated"
+                raise _StatusFailure(429)
+            return _response()
+
+    completions = MutatingCompletions()
+    client = type(
+        "MutatingClient",
+        (),
+        {"chat": type("Chat", (), {"completions": completions})()},
+    )()
+    transport = OpenAICompatibleStructuredTransport(
+        base_url=_BASE_URL,
+        api_key_env=_ENV_NAME,
+        system_template=_TEMPLATE,
+        client=client,
+        sleeper=lambda _seconds: None,
+    )
+
+    assert transport.complete(b'{"prompt_text":"locked"}', _policy()) == b'{"facts":[]}'
+    assert completions.snapshots[0] == completions.snapshots[1]
 
 
 def test_transport_accepts_exactly_one_stopped_text_choice() -> None:
     transport = _transport(_Client([_response('{"ok":true}')]))
+    assert transport.complete(b"{}", _policy()) == b'{"ok":true}'
+
+
+def test_transport_accepts_pure_text_sdk_object_shape() -> None:
+    message = SimpleNamespace(
+        role="assistant",
+        content='{"ok":true}',
+        annotations=[],
+        audio=None,
+        tool_calls=None,
+        function_call=None,
+        refusal=None,
+    )
+    choice = SimpleNamespace(finish_reason="stop", message=message)
+    transport = _transport(_Client([SimpleNamespace(choices=[choice])]))
+
     assert transport.complete(b"{}", _policy()) == b'{"ok":true}'
 
 
@@ -161,6 +290,51 @@ def test_transport_rejects_non_single_text_stop_without_retry(response: object) 
         _transport(client).complete(b"{}", _policy())
     assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
     assert len(client.completions.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"role": "assistant", "content": "{}", "annotations": [{"kind": "citation"}]},
+        {"role": "assistant", "content": "{}", "audio": {"id": "audio-1"}},
+        {"role": "assistant", "content": "{}", "reasoning_content": "hidden"},
+        SimpleNamespace(
+            role="assistant",
+            content="{}",
+            annotations=[SimpleNamespace(kind="citation")],
+            audio=None,
+            tool_calls=None,
+            function_call=None,
+            refusal=None,
+        ),
+        SimpleNamespace(
+            role="assistant",
+            content="{}",
+            annotations=[],
+            audio=SimpleNamespace(id="audio-1"),
+            tool_calls=None,
+            function_call=None,
+            refusal=None,
+        ),
+    ],
+)
+def test_transport_rejects_auxiliary_message_content_for_dict_and_sdk_objects(
+    message: object,
+) -> None:
+    response = {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": message,
+            }
+        ]
+    }
+    client = _Client([response])
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _transport(client).complete(b"{}", _policy())
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
 
 
 def test_response_byte_limit_is_enforced_without_retry() -> None:
@@ -211,3 +385,61 @@ def test_sdk_client_reads_api_key_only_from_configured_environment(monkeypatch) 
     assert captured == {"api_key": secret, "base_url": _BASE_URL, "max_retries": 0}
     assert secret not in repr(transport)
     assert transport.complete(b"{}", _policy()) == b'{"facts":[]}'
+
+
+@pytest.mark.parametrize("boundary", ["provider", "scheduler", "response"])
+def test_external_failure_exception_chains_are_secret_free(boundary: str) -> None:
+    secret = f"raw-{boundary}-secret-value"
+
+    if boundary == "provider":
+        client = _Client([RuntimeError(secret)])
+        transport = _transport(client)
+    elif boundary == "scheduler":
+        client = _Client([_StatusFailure(429)])
+
+        def sleeper(_seconds: float) -> None:
+            raise RuntimeError(secret)
+
+        transport = OpenAICompatibleStructuredTransport(
+            base_url=_BASE_URL,
+            api_key_env=_ENV_NAME,
+            system_template=_TEMPLATE,
+            client=client,
+            sleeper=sleeper,
+        )
+    else:
+
+        class HostileResponse:
+            @property
+            def choices(self) -> object:
+                raise RuntimeError(secret)
+
+        client = _Client([HostileResponse()])
+        transport = _transport(client)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        transport.complete(b"{}", _policy())
+
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in _exception_chain_text(exc_info.value)
+
+
+def test_sdk_constructor_failure_exception_chain_is_secret_free(monkeypatch) -> None:
+    secret = "raw-sdk-constructor-secret-value"
+
+    def failing_factory(**_kwargs: object) -> object:
+        raise RuntimeError(secret)
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=failing_factory))
+    with pytest.raises(SecAwareError) as exc_info:
+        OpenAICompatibleStructuredTransport(
+            base_url=_BASE_URL,
+            api_key_env=_ENV_NAME,
+            system_template=_TEMPLATE,
+            environ={_ENV_NAME: "credential"},
+        )
+
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert secret not in _exception_chain_text(exc_info.value)

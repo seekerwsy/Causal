@@ -121,6 +121,7 @@ def llm_facts_policy_sha256(
 def _trusted_policy(policy: object) -> ExtractionPolicy:
     if type(policy) is not ExtractionPolicy:
         raise _error(ErrorCode.POLICY_MISMATCH) from None
+    invalid = False
     try:
         if (
             policy.backend is not PromptExtractorBackend.LLM_FACTS_V1
@@ -132,6 +133,8 @@ def _trusted_policy(policy: object) -> ExtractionPolicy:
         ):
             raise ValueError
     except Exception:
+        invalid = True
+    if invalid:
         raise _error(ErrorCode.POLICY_MISMATCH) from None
     return policy
 
@@ -201,6 +204,11 @@ def parse_facts_response(
     """Parse and bind one response exactly once; no repair interaction is performed."""
     source: PromptRecord | None = None
     raw_text = ""
+    proposal: PromptExtractionProposalRecord | None = None
+    failure: SecAwareError | None = None
+    response: Mapping[str, object] | None = None
+    payload: dict[str, object] = {}
+    candidate: PromptExtractionProposalRecord | None = None
     try:
         trusted = _trusted_policy(policy)
         source = _snapshot_prompt(prompt)
@@ -210,7 +218,7 @@ def parse_facts_response(
         if len(raw_text) > trusted.max_response_chars:
             raise ValueError
         response = _json_payload(raw_text)
-        payload: dict[str, object] = {
+        payload = {
             "schema_version": "1.0",
             "prompt_id": source.prompt_id,
             "task_id": source.task_id,
@@ -225,16 +233,26 @@ def parse_facts_response(
             "direct_edges": [],
         }
         payload["proposal_id"] = proposal_id_for_payload(payload)
-        proposal = PromptExtractionProposalRecord.model_validate(payload)
-        return validate_proposal(proposal, source)
+        candidate = PromptExtractionProposalRecord.model_validate(payload)
+        proposal = validate_proposal(candidate, source)
     except Exception:
-        raise _error() from None
+        failure = _error()
     finally:
         raw = b""
         raw_text = ""
         source = None
+        response = None
+        payload = {}
+        candidate = None
         prompt = None  # type: ignore[assignment]
         policy = None  # type: ignore[assignment]
+    if failure is not None:
+        failure.__cause__ = None
+        failure.__context__ = None
+        raise failure from None
+    if proposal is None:
+        raise _error() from None
+    return proposal
 
 
 class LLMFactsExtractor:
@@ -247,6 +265,8 @@ class LLMFactsExtractor:
         transport: StructuredJSONTransport,
         structured_policy: StructuredLLMPolicy,
     ) -> None:
+        failure: SecAwareError | None = None
+        trusted_structured: StructuredLLMPolicy | None = None
         try:
             if not callable(getattr(transport, "complete", None)):
                 raise TypeError
@@ -256,7 +276,13 @@ class LLMFactsExtractor:
                 **_structured_policy_payload(structured_policy)
             )
         except Exception:
-            raise _error(ErrorCode.CONFIG) from None
+            failure = _error(ErrorCode.CONFIG)
+        if failure is not None or trusted_structured is None:
+            if failure is None:
+                failure = _error(ErrorCode.CONFIG)
+            failure.__cause__ = None
+            failure.__context__ = None
+            raise failure from None
         self._transport = transport
         self._structured_policy = trusted_structured
 
@@ -270,6 +296,10 @@ class LLMFactsExtractor:
     ) -> PromptExtractionProposalRecord:
         request_bytes = b""
         raw = b""
+        result: PromptExtractionProposalRecord | None = None
+        failure: SecAwareError | None = None
+        source: PromptRecord | None = None
+        trusted: ExtractionPolicy | None = None
         try:
             trusted = _trusted_policy(policy)
             _validate_policy_binding(trusted, self._structured_policy)
@@ -278,16 +308,25 @@ class LLMFactsExtractor:
             raw = self._transport.complete(request_bytes, self._structured_policy)
             if type(raw) is not bytes or len(raw) > self._structured_policy.max_response_bytes:
                 raise _error()
-            return parse_facts_response(raw, source, trusted)
-        except SecAwareError:
-            raise
+            result = parse_facts_response(raw, source, trusted)
+        except SecAwareError as error:
+            failure = error
         except Exception:
-            raise _error() from None
+            failure = _error()
         finally:
             request_bytes = b""
             raw = b""
+            source = None
+            trusted = None
             prompt = None  # type: ignore[assignment]
             policy = None  # type: ignore[assignment]
+        if failure is not None:
+            failure.__cause__ = None
+            failure.__context__ = None
+            raise failure from None
+        if result is None:
+            raise _error() from None
+        return result
 
 
 __all__ = [

@@ -193,6 +193,17 @@ def test_model_template_output_schema_and_config_are_policy_bound() -> None:
         _extractor(CapturingTransport(_response(_prompt())), changed[0]).extract(_prompt(), stale)
 
 
+@pytest.mark.parametrize("seed", [-(2**63), 2**63 - 1])
+def test_legal_seed_boundary_has_a_stable_policy_digest(seed: int) -> None:
+    digest = llm_facts_policy_sha256(
+        _structured(seed=seed),
+        PROMPT_FEATURE_CATALOG_SHA256,
+        262_144,
+    )
+    assert len(digest) == 64
+    assert set(digest) <= set("0123456789abcdef")
+
+
 def test_response_character_limit_drift_is_rejected_before_transport() -> None:
     transport = CapturingTransport(_response(_prompt()))
     stale_digest = replace(_policy(), max_response_chars=131_072)
