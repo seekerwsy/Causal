@@ -100,15 +100,19 @@ def _structured_policy_payload(policy: StructuredLLMPolicy) -> dict[str, object]
 def llm_facts_policy_sha256(
     policy: StructuredLLMPolicy,
     catalog_sha256: str,
+    max_response_chars: int,
 ) -> str:
     """Bind every provider and decoding coordinate to one extractor policy digest."""
     if type(policy) is not StructuredLLMPolicy:
         raise ValueError("LLM facts policy validation failed")
     if type(catalog_sha256) is not str or _SHA256.fullmatch(catalog_sha256) is None:
         raise ValueError("LLM facts policy validation failed")
+    if type(max_response_chars) is not int or not 1 <= max_response_chars <= MAX_RAW_RESPONSE_CHARS:
+        raise ValueError("LLM facts policy validation failed")
     payload = {
         "backend": PromptExtractorBackend.LLM_FACTS_V1.value,
         "catalog_sha256": catalog_sha256,
+        "max_response_chars": max_response_chars,
         "structured_llm_policy": _structured_policy_payload(policy),
     }
     return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
@@ -139,7 +143,12 @@ def _validate_policy_binding(
     if (
         structured.system_template_sha256 != LLM_FACTS_SYSTEM_TEMPLATE_SHA256
         or structured.output_schema_sha256 != LLM_FACTS_OUTPUT_SCHEMA_SHA256
-        or policy.policy_sha256 != llm_facts_policy_sha256(structured, policy.catalog_sha256)
+        or policy.policy_sha256
+        != llm_facts_policy_sha256(
+            structured,
+            policy.catalog_sha256,
+            policy.max_response_chars,
+        )
     ):
         raise _error(ErrorCode.POLICY_MISMATCH) from None
 

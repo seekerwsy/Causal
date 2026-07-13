@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from secaware.errors import SecAwareError
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.llm_facts import (
     LLM_FACTS_OUTPUT_SCHEMA_SHA256,
@@ -58,7 +58,11 @@ def _policy(structured: StructuredLLMPolicy | None = None) -> ExtractionPolicy:
     llm = structured or _structured()
     return ExtractionPolicy(
         backend=PromptExtractorBackend.LLM_FACTS_V1,
-        policy_sha256=llm_facts_policy_sha256(llm, PROMPT_FEATURE_CATALOG_SHA256),
+        policy_sha256=llm_facts_policy_sha256(
+            llm,
+            PROMPT_FEATURE_CATALOG_SHA256,
+            262_144,
+        ),
         catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
         max_response_chars=262_144,
     )
@@ -179,13 +183,25 @@ def test_model_template_output_schema_and_config_are_policy_bound() -> None:
         replace(base, seed=99),
     ]
     digests = {
-        llm_facts_policy_sha256(item, PROMPT_FEATURE_CATALOG_SHA256) for item in (base, *changed)
+        llm_facts_policy_sha256(item, PROMPT_FEATURE_CATALOG_SHA256, 262_144)
+        for item in (base, *changed)
     }
     assert len(digests) == 4
 
     stale = _policy(base)
     with pytest.raises(SecAwareError):
         _extractor(CapturingTransport(_response(_prompt())), changed[0]).extract(_prompt(), stale)
+
+
+def test_response_character_limit_drift_is_rejected_before_transport() -> None:
+    transport = CapturingTransport(_response(_prompt()))
+    stale_digest = replace(_policy(), max_response_chars=131_072)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _extractor(transport).extract(_prompt(), stale_digest)
+
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
+    assert transport.requests == []
 
 
 @pytest.mark.parametrize(
