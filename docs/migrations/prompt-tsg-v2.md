@@ -90,8 +90,8 @@ If either analyzer is invalid, migration fails closed and publishes no Oracle re
 If policy requires reusing the same directory name, first archive the whole directory, verify the
 archive, and recreate the original path as an empty directory. Partial cleanup is unsupported
 because Prompt TSG, generation, Oracle, discovery, intervention, confirmation, and report
-manifests all fingerprint upstream artifacts. At minimum, all of these v1 outputs and downstream
-stages must be removed and regenerated:
+manifests all fingerprint upstream artifacts. At minimum, all of these pre-2.1 outputs and
+downstream stages must be removed and regenerated:
 
 1. All TSG artifacts, manifests, seals, snapshots, backups, and transaction files.
 2. Observed generation and Oracle outputs.
@@ -100,7 +100,7 @@ stages must be removed and regenerated:
 5. All confirmation, analysis, and report outputs.
 6. Every removed Code TSG artifact and manifest listed above.
 
-Never retain a downstream result from a v1 run, even if its filename and JSON shape appear
+Never retain a downstream result from a pre-2.1 run, even if its filename and JSON shape appear
 unchanged.
 
 ## Verify the migration

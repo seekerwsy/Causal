@@ -25,7 +25,10 @@ secaware-oracle = "secaware.oracle.cli:app"
 [project.optional-dependencies]
 api = ["openai>=1.55.3,<3"]
 dev = [
+  "pip==25.0.1",
   "pytest>=8",
+  "setuptools==83.0.0",
+  "wheel==0.47.0",
 ]
 oracle = [
   "semgrep==1.168.0",
