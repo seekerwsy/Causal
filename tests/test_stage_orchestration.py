@@ -186,6 +186,7 @@ def _file_provider_store(tmp_path: Path, provider_dir: Path) -> tuple[AppConfig,
         [
             PromptRecord(
                 prompt_id="prompt-1",
+                task_id="task-prompt-1",
                 split="discover",
                 language="python",
                 task_family="path_handling",
@@ -1146,6 +1147,7 @@ def test_compatibility_generation_seals_canonical_output_before_commit(
         [
             PromptRecord(
                 prompt_id="prompt-a",
+                task_id="task-prompt-a",
                 split="discover",
                 language="python",
                 task_family="path_handling",

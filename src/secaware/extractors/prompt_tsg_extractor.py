@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import model_shape_is_intact
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import (
     MAX_TSG_EVIDENCE_OFFSET,
@@ -27,6 +28,7 @@ from secaware.tsg.graph import multidigraph_to_record
 
 _SUPPORTED_LANGUAGE_ALIASES = frozenset({"py", "python", "python3"})
 _VALID_CWE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
+_LEGACY_POLICY_SHA256 = hashlib.sha256(b"deterministic_catalog_v1").hexdigest()
 
 
 class _InvalidInput(Exception):
@@ -59,6 +61,7 @@ def _snapshot_prompt(value: object) -> PromptRecord:
         raise _InvalidInput from None
     runtime_fields = (
         value.prompt_id,
+        value.task_id,
         value.split,
         value.language,
         value.task_family,
@@ -74,6 +77,7 @@ def _snapshot_prompt(value: object) -> PromptRecord:
         raise _InvalidInput from None
     string_fields = (
         snapshot.prompt_id,
+        snapshot.task_id,
         snapshot.split,
         snapshot.language,
         snapshot.task_family,
@@ -88,6 +92,7 @@ def _snapshot_prompt(value: object) -> PromptRecord:
         raise _InvalidInput from None
     if (
         not snapshot.prompt_id
+        or not snapshot.task_id
         or snapshot.prompt_id != snapshot.prompt_id.strip()
         or len(encoded_fields[0]) > MAX_TSG_STRING_BYTES
         or len(snapshot.prompt) > MAX_TSG_EVIDENCE_OFFSET
@@ -238,8 +243,20 @@ def _add_guard_requirement(
 
 def _extract(snapshot: PromptRecord) -> PromptTSGRecord:
     graph = nx.MultiDiGraph()
+    metadata = {
+        "prompt_id": snapshot.prompt_id,
+        "task_id": snapshot.task_id,
+        "task_family": snapshot.task_family,
+        "cwe": snapshot.cwe,
+        "extractor_backend": PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        "extractor_policy_sha256": _LEGACY_POLICY_SHA256,
+        "proposal_id": "proposal_"
+        + hashlib.sha256(
+            f"{snapshot.prompt_id}\0{snapshot.task_id}\0{_LEGACY_POLICY_SHA256}".encode("utf-8")
+        ).hexdigest(),
+    }
     if snapshot.language.casefold() not in _SUPPORTED_LANGUAGE_ALIASES:
-        return multidigraph_to_record(graph, prompt_id=snapshot.prompt_id)
+        return multidigraph_to_record(graph, **metadata)
 
     for entry in PROMPT_TSG_CATALOG:
         domain_match = first_reviewed_term_match(snapshot.prompt, entry.domain_terms)
@@ -255,7 +272,7 @@ def _extract(snapshot: PromptRecord) -> PromptTSGRecord:
                 sink,
                 _evidence(snapshot.prompt, guard_match),
             )
-    return multidigraph_to_record(graph, prompt_id=snapshot.prompt_id)
+    return multidigraph_to_record(graph, **metadata)
 
 
 def _try_snapshot_prompt(value: object) -> PromptRecord | _FailureKind:

@@ -12,13 +12,28 @@ from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.intervention import validator
 from secaware.intervention.validator import validate_intervention
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import EdgeType, NodeType
-from secaware.tsg.graph import multidigraph_to_record, record_to_multidigraph
+from secaware.tsg.graph import multidigraph_to_record as _multidigraph_to_record
+from secaware.tsg.graph import record_to_multidigraph
 from secaware.tsg.motifs import factor_query_vector, motif_query_vector
 
 
 PATH_SPEC = FACTOR_SPECS[FactorType.PATH_NORMALIZATION]
+
+
+def multidigraph_to_record(graph: nx.MultiDiGraph, *, prompt_id: str):
+    return _multidigraph_to_record(
+        graph,
+        prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
+        task_family="path_handling",
+        cwe="CWE-22",
+        extractor_backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        extractor_policy_sha256="8" * 64,
+        proposal_id="proposal_" + "7" * 64,
+    )
 
 
 class _PostCodecProjectionSentinel:
@@ -40,6 +55,7 @@ class _PostCodecProjectionSentinel:
 def _path_prompt_without_guard(prompt_id: str = "p-path") -> PromptRecord:
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split="confirm",
         language="python",
         task_family="path_handling",
@@ -502,6 +518,7 @@ def test_target_changed_requires_exact_false_to_true_factor_direction(
 ) -> None:
     prompt = PromptRecord(
         prompt_id="p-target-direction",
+        task_id="task-target-direction",
         split="confirm",
         language="python",
         task_family="path_handling",

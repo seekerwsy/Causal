@@ -11,6 +11,11 @@ import pytest
 import secaware.tsg.motifs as motif_queries
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.hypotheses import FactorType
+from secaware.schema.features import (
+    FeatureFamily,
+    FeatureState,
+    PromptExtractorBackend,
+)
 from secaware.schema.tsg import (
     EdgeType,
     MAX_TSG_EDGES,
@@ -19,10 +24,16 @@ from secaware.schema.tsg import (
     NodeType,
 )
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG
-from secaware.tsg.graph import canonical_edge_id, canonical_node_id
+from secaware.tsg.graph import (
+    canonical_edge_id,
+    canonical_node_id,
+    multidigraph_to_record,
+    record_to_multidigraph,
+)
 from secaware.tsg.motifs import (
     MOTIF_SPECS,
     factor_query_vector,
+    feature_state,
     find_motif_matches,
     has_factor_requirement,
     motif_query_vector,
@@ -71,6 +82,47 @@ def _add_edge(
     edge_id = canonical_edge_id(src, dst, edge_type, {}, ordinal)
     graph.add_edge(src, dst, key=edge_id, edge_type=edge_type, attributes={})
     return edge_id
+
+
+def test_feature_state_reads_one_finite_canonical_state_node() -> None:
+    graph = nx.MultiDiGraph()
+    requirement = _add_node(
+        graph,
+        "path-requirement",
+        NodeType.PROMPT_REQUIREMENT,
+        "require_path_normalization",
+    )
+    guard = _add_node(graph, "path-guard", NodeType.GUARD, "path_normalization")
+    _add_edge(graph, requirement, guard, EdgeType.REQUIRES)
+    feature_id = "safety.path_normalization"
+    node_id = canonical_node_id(NodeType.FEATURE, feature_id, "path-state")
+    graph.add_node(
+        node_id,
+        semantic_key_sha256=_semantic_commitment("path-state"),
+        node_type=NodeType.FEATURE,
+        label=feature_id,
+        attributes={
+            "feature_id": feature_id,
+            "feature_family": FeatureFamily.SAFETY_CONTROL.value,
+            "feature_state": FeatureState.PRESENT.value,
+        },
+    )
+    record = multidigraph_to_record(
+        graph,
+        prompt_id="p001",
+        task_id="task-path-001",
+        task_family="path_handling",
+        cwe="CWE-22",
+        extractor_backend=PromptExtractorBackend.LLM_FACTS_V1,
+        extractor_policy_sha256="8" * 64,
+        proposal_id="proposal_" + "7" * 64,
+    )
+    restored = record_to_multidigraph(record)
+
+    assert record.schema_version == "2.1"
+    assert record.task_id == "task-path-001"
+    assert record.extractor_backend is PromptExtractorBackend.LLM_FACTS_V1
+    assert feature_state(restored, feature_id) is FeatureState.PRESENT
 
 
 def _unsafe_flow(

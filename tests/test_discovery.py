@@ -28,6 +28,7 @@ def _path_prompt(prompt_id: str, *, guarded: bool) -> PromptRecord:
         text += " Normalize the path."
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split="discover",
         language="python",
         task_family="path_handling",
@@ -224,6 +225,7 @@ def test_coordinate_errors_do_not_retain_raw_prompt_in_discovery_frames() -> Non
     sentinel = "RAW_PROMPT_SENTINEL_98341"
     prompt = PromptRecord(
         prompt_id="p-sensitive",
+        task_id="task-sensitive",
         split="discover",
         language="python",
         task_family="path_handling",

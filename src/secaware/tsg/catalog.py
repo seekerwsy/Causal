@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
-import hashlib
-import json
+from dataclasses import dataclass, fields
 import re
 
 from secaware.schema.hypotheses import FactorType
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 
 ONTOLOGY_VERSION = "1.0"
@@ -106,16 +105,6 @@ PROMPT_TSG_CATALOG = (
 )
 
 
-def _canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-
-
 def _validate_catalog() -> None:
     expected_factors = tuple(FactorType)
     if (
@@ -172,14 +161,7 @@ def _validate_catalog() -> None:
 
 _validate_catalog()
 
-_CATALOG_DIGEST_PAYLOAD = {
-    "entries": [
-        {**asdict(entry), "factor_type": entry.factor_type.value} for entry in PROMPT_TSG_CATALOG
-    ],
-    "motif_version": MOTIF_VERSION,
-    "ontology_version": ONTOLOGY_VERSION,
-}
-PROMPT_TSG_CATALOG_SHA256 = hashlib.sha256(_canonical_json(_CATALOG_DIGEST_PAYLOAD)).hexdigest()
+PROMPT_TSG_CATALOG_SHA256 = PROMPT_FEATURE_CATALOG_SHA256
 
 
 def prompt_ontology_entry(factor_type: FactorType) -> PromptOntologyEntry:

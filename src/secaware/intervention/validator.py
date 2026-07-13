@@ -168,6 +168,7 @@ def _validate_prepared(
         counterfactual_record = PromptRecord.model_validate(
             {
                 "prompt_id": prepared.prompt.prompt_id,
+                "task_id": prepared.prompt.task_id,
                 "split": prepared.prompt.split,
                 "language": prepared.prompt.language,
                 "task_family": prepared.prompt.task_family,

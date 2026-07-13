@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, asdict
-import hashlib
-import json
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -17,28 +15,7 @@ from secaware.tsg.catalog import (
 )
 from secaware.tsg.graph import MOTIF_VERSION as GRAPH_MOTIF_VERSION
 from secaware.tsg.graph import ONTOLOGY_VERSION as GRAPH_ONTOLOGY_VERSION
-
-
-def _canonical_digest() -> str:
-    payload = {
-        "entries": [
-            {
-                **asdict(entry),
-                "factor_type": entry.factor_type.value,
-            }
-            for entry in PROMPT_TSG_CATALOG
-        ],
-        "motif_version": MOTIF_VERSION,
-        "ontology_version": ONTOLOGY_VERSION,
-    }
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 
 def test_catalog_is_exactly_six_immutable_entries() -> None:
@@ -90,6 +67,6 @@ def test_catalog_lookup_is_total_and_rejects_non_factors() -> None:
 def test_catalog_digest_and_versions_are_canonical_and_centralized() -> None:
     assert ONTOLOGY_VERSION == "1.0"
     assert MOTIF_VERSION == "1.0"
-    assert PROMPT_TSG_CATALOG_SHA256 == _canonical_digest()
+    assert PROMPT_TSG_CATALOG_SHA256 == PROMPT_FEATURE_CATALOG_SHA256
     assert GRAPH_ONTOLOGY_VERSION is ONTOLOGY_VERSION
     assert GRAPH_MOTIF_VERSION is MOTIF_VERSION

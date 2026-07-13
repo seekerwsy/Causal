@@ -22,15 +22,30 @@ from secaware.discovery.tsg_qcd import discover_hypotheses
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.schema.hypotheses import FactorType
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import EdgeType, NodeType
-from secaware.tsg.graph import multidigraph_to_record, record_to_multidigraph
+from secaware.tsg.graph import multidigraph_to_record as _multidigraph_to_record
+from secaware.tsg.graph import record_to_multidigraph
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.motifs import find_motif_matches, has_factor_requirement
 
 
 PATH_SPEC = FACTOR_SPECS[FactorType.PATH_NORMALIZATION]
+
+
+def multidigraph_to_record(graph: nx.MultiDiGraph, *, prompt_id: str):
+    return _multidigraph_to_record(
+        graph,
+        prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
+        task_family="path_handling",
+        cwe="CWE-22",
+        extractor_backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        extractor_policy_sha256="8" * 64,
+        proposal_id="proposal_" + "7" * 64,
+    )
 
 
 class _PostCodecProjectionSentinel:
@@ -60,6 +75,7 @@ def _path_prompt(
         text += " Normalize the path."
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split="discover",
         language="python",
         task_family=task_family,
@@ -71,6 +87,7 @@ def _path_prompt(
 def _unrelated_prompt(prompt_id: str = "p-other") -> PromptRecord:
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split="discover",
         language="python",
         task_family="other",
@@ -501,6 +518,7 @@ def test_discovery_decodes_each_prompt_graph_exactly_once_for_all_six_factors(
     prompts = [
         PromptRecord(
             prompt_id=f"p-cache-{index:02}",
+            task_id=f"task-cache-{index:02}",
             split="discover",
             language="python",
             task_family="all_factors",

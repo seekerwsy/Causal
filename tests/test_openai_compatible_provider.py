@@ -124,6 +124,7 @@ def _request(
 ) -> GenerationRequestRecord:
     prompt = PromptRecord(
         prompt_id="prompt-api",
+        task_id="task-prompt-api",
         split="confirm",
         language="python",
         task_family="path_handling",
@@ -425,6 +426,7 @@ def _write_prompt_config(
         [
             PromptRecord(
                 prompt_id="prompt-preflight",
+                task_id="task-prompt-preflight",
                 split="discover",
                 language="python",
                 task_family="path_handling",
@@ -503,6 +505,7 @@ def test_preflight_checks_credentials_before_retaining_prompt_inputs(
         [
             PromptRecord(
                 prompt_id="prompt-sensitive-preflight",
+                task_id="task-prompt-sensitive-preflight",
                 split="discover",
                 language="python",
                 task_family="path_handling",
@@ -1522,6 +1525,7 @@ def test_provider_rejects_wrong_endpoint_system_hash_and_n_before_calling_client
                 [
                     PromptRecord(
                         prompt_id="wrong-endpoint",
+                        task_id="task-wrong-endpoint",
                         split="confirm",
                         language="python",
                         task_family="path_handling",

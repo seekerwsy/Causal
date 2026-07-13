@@ -7,6 +7,7 @@ from secaware.schema.tsg import PromptTSGRecord
 def test_prompt_record_validates_split() -> None:
     record = PromptRecord(
         prompt_id="p001",
+        task_id="task-path-001",
         split="discover",
         language="python",
         task_family="path_handling",
@@ -19,6 +20,7 @@ def test_prompt_record_validates_split() -> None:
     with pytest.raises(ValueError):
         PromptRecord(
             prompt_id="p002",
+            task_id="task-path-002",
             split="train",
             language="python",
             task_family="path_handling",
@@ -27,13 +29,36 @@ def test_prompt_record_validates_split() -> None:
         )
 
 
+@pytest.mark.parametrize("task_id", (None, "", " ", " task-path-001", "task-path-001 "))
+def test_prompt_record_requires_canonical_task_id(task_id: object) -> None:
+    payload = {
+        "prompt_id": "p001",
+        "task_id": task_id,
+        "split": "discover",
+        "language": "python",
+        "task_family": "path_handling",
+        "cwe": "CWE-22",
+        "prompt": "Read a user supplied path.",
+    }
+    if task_id is None:
+        payload.pop("task_id")
+    with pytest.raises(ValueError):
+        PromptRecord.model_validate(payload)
+
+
 def test_prompt_tsg_record_serializes_graph_fields() -> None:
     tsg = PromptTSGRecord.model_validate(
         {
-            "schema_version": "2.0",
+            "schema_version": "2.1",
             "graph_id": "prompt:p001",
             "source_type": "prompt",
             "prompt_id": "p001",
+            "task_id": "task-path-001",
+            "task_family": "path_handling",
+            "cwe": "CWE-22",
+            "extractor_backend": "llm_facts_v1",
+            "extractor_policy_sha256": "8" * 64,
+            "proposal_id": "proposal_" + "7" * 64,
             "ontology_version": "1.0",
             "motif_version": "1.0",
             "graph_sha256": "0" * 64,

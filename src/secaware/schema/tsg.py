@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from secaware.errors import ErrorCode
+from secaware.schema.features import FeatureFamily, FeatureState, PromptExtractorBackend
 from secaware.schema.common import (
     SafeValidationMixin,
     StrictModel,
@@ -25,7 +26,7 @@ from secaware.schema.common import (
 )
 
 
-TSG_SCHEMA_VERSION = "2.0"
+TSG_SCHEMA_VERSION = "2.1"
 MAX_TSG_NODES = 512
 MAX_TSG_EDGES = 2_048
 MAX_TSG_ATTRIBUTES = 32
@@ -37,6 +38,7 @@ MAX_TSG_EVIDENCE_OFFSET = 2**31 - 1
 _NODE_ID_PATTERN = r"^n_[0-9a-f]{64}$"
 _EDGE_ID_PATTERN = r"^e_[0-9a-f]{64}$"
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_PROPOSAL_ID_PATTERN = r"^proposal_[0-9a-f]{64}$"
 _INVALID_TSG_MESSAGE = f"{ErrorCode.TSG_INVALID.name}: prompt TSG validation failed"
 _MIN_SIGNED_64_BIT = -(2**63)
 _MAX_SIGNED_64_BIT = 2**63 - 1
@@ -53,6 +55,8 @@ class NodeType(str, Enum):
     SECURITY_ASSUMPTION = "security_assumption"
     API = "api"
     CWE = "cwe"
+    FEATURE = "feature"
+    PRESENTATION_FEATURE = "presentation_feature"
 
 
 class EdgeType(str, Enum):
@@ -81,6 +85,7 @@ class MotifId(str, Enum):
 _EVIDENCE_ATTRIBUTE_KEYS = frozenset(
     {"evidence_start", "evidence_end", "evidence_sha256", "confidence"}
 )
+_FEATURE_ATTRIBUTE_KEYS = frozenset({"feature_id", "feature_family", "feature_state"})
 _NODE_TYPE_ATTRIBUTE_KEYS: Mapping[NodeType, frozenset[str]] = MappingProxyType(
     {
         NodeType.TASK_OPERATION: _EVIDENCE_ATTRIBUTE_KEYS,
@@ -93,6 +98,8 @@ _NODE_TYPE_ATTRIBUTE_KEYS: Mapping[NodeType, frozenset[str]] = MappingProxyType(
         NodeType.SECURITY_ASSUMPTION: _EVIDENCE_ATTRIBUTE_KEYS,
         NodeType.API: _EVIDENCE_ATTRIBUTE_KEYS | {"api_name"},
         NodeType.CWE: _EVIDENCE_ATTRIBUTE_KEYS | {"cwe_id"},
+        NodeType.FEATURE: _FEATURE_ATTRIBUTE_KEYS,
+        NodeType.PRESENTATION_FEATURE: _FEATURE_ATTRIBUTE_KEYS,
     }
 )
 _EDGE_TYPE_ATTRIBUTE_KEYS: Mapping[EdgeType, frozenset[str]] = MappingProxyType(
@@ -229,6 +236,21 @@ def _validate_attribute_values(attributes: Mapping[str, TSGScalar]) -> None:
         if type(cwe_id) is not str or re.fullmatch(r"CWE-[1-9][0-9]{0,5}", cwe_id) is None:
             raise ValueError(_INVALID_TSG_MESSAGE)
 
+    feature_keys = attributes.keys() & _FEATURE_ATTRIBUTE_KEYS
+    if feature_keys:
+        if feature_keys != _FEATURE_ATTRIBUTE_KEYS:
+            raise ValueError(_INVALID_TSG_MESSAGE)
+        feature_id = attributes["feature_id"]
+        family = attributes["feature_family"]
+        state = attributes["feature_state"]
+        if not all(type(value) is str for value in (feature_id, family, state)):
+            raise ValueError(_INVALID_TSG_MESSAGE)
+        try:
+            FeatureFamily(cast(str, family))
+            FeatureState(cast(str, state))
+        except ValueError:
+            raise ValueError(_INVALID_TSG_MESSAGE) from None
+
 
 def _parse_enum(value: object, enum_type: type[Enum]) -> Enum:
     if type(value) is enum_type:
@@ -341,6 +363,31 @@ class TSGNode(_ImmutableTSGModel):
     def serialize_attributes(self, value: FrozenTSGAttributes) -> dict[str, TSGScalar]:
         return dict(value.items())
 
+    @model_validator(mode="after")
+    def validate_feature_identity(self) -> "TSGNode":
+        if self.node_type not in {NodeType.FEATURE, NodeType.PRESENTATION_FEATURE}:
+            return self
+        from secaware.tsg.feature_catalog import prompt_feature_spec
+
+        feature_id = cast(str, self.attributes["feature_id"])
+        try:
+            spec = prompt_feature_spec(feature_id)
+        except KeyError:
+            raise ValueError(_INVALID_TSG_MESSAGE) from None
+        family = FeatureFamily(cast(str, self.attributes["feature_family"]))
+        expected_node_type = (
+            NodeType.PRESENTATION_FEATURE
+            if family is FeatureFamily.PRESENTATION_CONTROL
+            else NodeType.FEATURE
+        )
+        if (
+            self.label != feature_id
+            or spec.feature_family is not family
+            or self.node_type is not expected_node_type
+        ):
+            raise ValueError(_INVALID_TSG_MESSAGE)
+        return self
+
 
 class TSGEdge(_ImmutableTSGModel):
     edge_id: str = Field(pattern=_EDGE_ID_PATTERN)
@@ -391,10 +438,16 @@ class PromptTSGRecord(SafeValidationMixin, VersionedModel):
         strict=True,
     )
 
-    schema_version: Literal["2.0"]
+    schema_version: Literal["2.1"]
     graph_id: str
     source_type: Literal["prompt"]
     prompt_id: str
+    task_id: str
+    task_family: str
+    cwe: str
+    extractor_backend: PromptExtractorBackend
+    extractor_policy_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
+    proposal_id: str = Field(pattern=_PROPOSAL_ID_PATTERN)
     ontology_version: str
     motif_version: str
     graph_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
@@ -402,10 +455,26 @@ class PromptTSGRecord(SafeValidationMixin, VersionedModel):
     edges: tuple[TSGEdge, ...]
     shadow: FrozenTSGAttributes = Field(repr=False)
 
-    @field_validator("graph_id", "prompt_id", "ontology_version", "motif_version")
+    @field_validator(
+        "graph_id",
+        "prompt_id",
+        "task_id",
+        "task_family",
+        "cwe",
+        "ontology_version",
+        "motif_version",
+    )
     @classmethod
     def validate_identifiers(cls, value: str) -> str:
         return _require_canonical_text(value)
+
+    @field_validator("extractor_backend", mode="before")
+    @classmethod
+    def parse_extractor_backend(cls, value: object) -> PromptExtractorBackend:
+        return cast(
+            PromptExtractorBackend,
+            _parse_enum(value, PromptExtractorBackend),
+        )
 
     @field_validator("nodes", mode="before")
     @classmethod
@@ -448,6 +517,31 @@ class PromptTSGRecord(SafeValidationMixin, VersionedModel):
         known_nodes = set(node_ids)
         if any(edge.src not in known_nodes or edge.dst not in known_nodes for edge in self.edges):
             raise ValueError(_INVALID_TSG_MESSAGE)
+        feature_nodes = tuple(
+            node
+            for node in self.nodes
+            if node.node_type in {NodeType.FEATURE, NodeType.PRESENTATION_FEATURE}
+        )
+        feature_ids = tuple(cast(str, node.attributes["feature_id"]) for node in feature_nodes)
+        if len(set(feature_ids)) != len(feature_ids):
+            raise ValueError(_INVALID_TSG_MESSAGE)
+        structural_node_types = {
+            node.node_type
+            for node in self.nodes
+            if node.node_type not in {NodeType.FEATURE, NodeType.PRESENTATION_FEATURE}
+        }
+        structural_edge_types = {edge.edge_type for edge in self.edges}
+        from secaware.tsg.feature_catalog import prompt_feature_spec
+
+        for node in feature_nodes:
+            if FeatureState(cast(str, node.attributes["feature_state"])) is not FeatureState.PRESENT:
+                continue
+            spec = prompt_feature_spec(cast(str, node.attributes["feature_id"]))
+            if (
+                not set(spec.structural_node_types) <= structural_node_types
+                or not set(spec.structural_edge_types) <= structural_edge_types
+            ):
+                raise ValueError(_INVALID_TSG_MESSAGE)
         return self
 
 

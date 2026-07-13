@@ -69,6 +69,7 @@ def _clean_oracle_runner(
 def _prompt(prompt_id: str, split: str, text: str) -> PromptRecord:
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split=split,
         language="python",
         task_family="path_handling",

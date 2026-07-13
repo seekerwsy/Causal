@@ -87,6 +87,7 @@ _SYSTEM_TEMPLATE = "Return only Python source code."
 def _prompt(prompt_id: str, split: str = "confirm") -> PromptRecord:
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split=split,  # type: ignore[arg-type]
         language="python",
         task_family="path_handling",

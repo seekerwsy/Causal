@@ -44,6 +44,7 @@ _LEGACY_IDENTITY_FIELDS = (
 def _request() -> GenerationRequestRecord:
     prompt = PromptRecord(
         prompt_id="schema-v11",
+        task_id="task-schema-v11",
         split="confirm",
         language="python",
         task_family="path_handling",
@@ -78,6 +79,7 @@ def _legacy_payload(
 def _chat_request() -> GenerationRequestRecord:
     prompt = PromptRecord(
         prompt_id="schema-v11-chat",
+        task_id="task-schema-v11-chat",
         split="confirm",
         language="python",
         task_family="path_handling",

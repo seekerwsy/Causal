@@ -68,6 +68,7 @@ def _config(tmp_path: Path, *, exact_tools: bool = False) -> AppConfig:
         [
             PromptRecord(
                 prompt_id="prompt-a",
+                task_id="task-prompt-a",
                 split="discover",
                 language="python",
                 task_family="path_handling",
@@ -1182,6 +1183,7 @@ def test_intervention_rejects_invalid_prompt_graph_coordinates_without_leaks(
             extract_prompt_tsg(
                 PromptRecord(
                     prompt_id=unknown_prompt_id,
+                    task_id=f"task-{unknown_prompt_id}",
                     split="confirm",
                     language="python",
                     task_family="path_handling",

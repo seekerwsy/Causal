@@ -40,7 +40,7 @@ def test_prompt_tsg_stage_records_catalog_bound_exact_v2_artifact(tmp_path: Path
     manifest = read_stage_manifest(store.path(".stages", "extract-prompt-tsg.json"))
     assert records
     assert all(type(record) is PromptTSGRecord for record in records)
-    assert all(record.schema_version == "2.0" for record in records)
+    assert all(record.schema_version == "2.1" for record in records)
     assert manifest.catalog_sha256 == PROMPT_TSG_CATALOG_SHA256
 
 

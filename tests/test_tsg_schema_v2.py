@@ -13,6 +13,7 @@ from secaware.schema.tsg import (
     TSGEdge,
     TSGNode,
 )
+from secaware.schema.features import FeatureState, PromptExtractorBackend
 
 
 def _node(index: int, *, attributes: dict[str, object] | None = None) -> dict[str, object]:
@@ -38,10 +39,16 @@ def _edge(index: int, *, src: str, dst: str) -> dict[str, object]:
 def _minimal_prompt_tsg() -> dict[str, object]:
     node_id = "n_" + "a" * 64
     return {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "graph_id": "prompt:p001",
         "source_type": "prompt",
         "prompt_id": "p001",
+        "task_id": "task-path-001",
+        "task_family": "path_handling",
+        "cwe": "CWE-22",
+        "extractor_backend": "llm_facts_v1",
+        "extractor_policy_sha256": "8" * 64,
+        "proposal_id": "proposal_" + "7" * 64,
         "ontology_version": "1.0",
         "motif_version": "1.0",
         "graph_sha256": "b" * 64,
@@ -71,13 +78,94 @@ def _minimal_prompt_tsg() -> dict[str, object]:
     }
 
 
-def test_prompt_tsg_v2_is_frozen_and_rejects_code_shape() -> None:
+def test_prompt_tsg_21_is_frozen_and_rejects_code_shape() -> None:
     record = PromptTSGRecord.model_validate(_minimal_prompt_tsg())
-    assert record.schema_version == "2.0"
+    assert record.schema_version == "2.1"
+    assert record.task_id == "task-path-001"
+    assert record.extractor_backend is PromptExtractorBackend.LLM_FACTS_V1
     with pytest.raises((TypeError, ValidationError)):
         record.nodes = ()
     with pytest.raises(ValidationError):
         PromptTSGRecord.model_validate({**_minimal_prompt_tsg(), "source_type": "code"})
+
+
+@pytest.mark.parametrize("task_id", (None, "", " ", " task-path-001", "task-path-001 "))
+def test_prompt_tsg_21_requires_canonical_task_id(task_id: object) -> None:
+    payload = _minimal_prompt_tsg()
+    if task_id is None:
+        payload.pop("task_id")
+    else:
+        payload["task_id"] = task_id
+    with pytest.raises(ValidationError):
+        PromptTSGRecord.model_validate(payload)
+
+
+def test_feature_state_nodes_reject_unknown_attributes() -> None:
+    payload = _minimal_prompt_tsg()
+    payload["nodes"][0].update(
+        node_type="feature",
+        label="safety.path_normalization",
+        attributes={
+            "feature_id": "safety.path_normalization",
+            "feature_family": "safety_control",
+            "feature_state": "absent",
+            "unknown": True,
+        },
+    )
+    with pytest.raises(ValidationError):
+        PromptTSGRecord.model_validate(payload)
+
+
+def test_feature_state_nodes_require_the_complete_finite_attribute_set() -> None:
+    payload = _minimal_prompt_tsg()
+    payload["nodes"][0].update(
+        node_type="feature",
+        label="safety.path_normalization",
+        attributes={},
+    )
+    with pytest.raises(ValidationError):
+        PromptTSGRecord.model_validate(payload)
+
+
+def test_prompt_tsg_rejects_duplicate_state_nodes_for_one_feature() -> None:
+    payload = _minimal_prompt_tsg()
+    state_attributes = {
+        "feature_id": "safety.path_normalization",
+        "feature_family": "safety_control",
+        "feature_state": FeatureState.ABSENT.value,
+    }
+    first = {
+        "node_id": "n_" + "1" * 64,
+        "semantic_key_sha256": "1" * 64,
+        "node_type": "feature",
+        "label": "safety.path_normalization",
+        "attributes": state_attributes,
+    }
+    second = {
+        **first,
+        "node_id": "n_" + "2" * 64,
+        "semantic_key_sha256": "2" * 64,
+    }
+    payload["nodes"] = [first, second]
+    payload["edges"] = []
+    with pytest.raises(ValidationError):
+        PromptTSGRecord.model_validate(payload)
+
+
+def test_present_feature_requires_catalog_structural_node_types() -> None:
+    payload = _minimal_prompt_tsg()
+    payload["nodes"][0].update(
+        node_type="feature",
+        label="safety.path_normalization",
+        attributes={
+            "feature_id": "safety.path_normalization",
+            "feature_family": "safety_control",
+            "feature_state": FeatureState.PRESENT.value,
+        },
+    )
+    payload["edges"] = []
+    with pytest.raises(ValidationError):
+        PromptTSGRecord.model_validate(payload)
 
 
 def test_prompt_tsg_json_round_trip_preserves_shadow_boolean_types() -> None:

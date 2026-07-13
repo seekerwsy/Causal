@@ -310,6 +310,7 @@ def test_write_jsonl_revalidates_base_models_before_publishing(
     secret = "forged-generation-record-secret"
     prompt = PromptRecord(
         prompt_id="prompt-a",
+        task_id="task-prompt-a",
         split="confirm",
         language="python",
         task_family="path_handling",

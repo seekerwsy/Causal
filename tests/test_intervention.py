@@ -32,6 +32,7 @@ def _hypothesis(factor_type: FactorType) -> HypothesisRecord:
 def _sentinel_prompt() -> PromptRecord:
     return PromptRecord(
         prompt_id=f"p-{_SENTINEL}",
+        task_id=f"task-{_SENTINEL}",
         split="confirm",
         language="python",
         task_family="path_handling",
@@ -58,6 +59,7 @@ def _assert_sanitized_operator_error(error: SecAwareError, code: ErrorCode) -> N
 def test_path_intervention_changes_target_without_side_effect() -> None:
     prompt = PromptRecord(
         prompt_id="p101",
+        task_id="task-p101",
         split="confirm",
         language="python",
         task_family="path_handling",
@@ -392,6 +394,7 @@ def test_existing_reviewed_guard_is_idempotent_patch_failure(
     original_text = f"Implement {entry.domain_terms[0]}. Already {guard_term}."
     prompt = PromptRecord(
         prompt_id=f"p-idempotent-{factor_type.value}",
+        task_id=f"task-idempotent-{factor_type.value}",
         split="confirm",
         language="python",
         task_family=FACTOR_SPECS[factor_type].task_family,
@@ -414,6 +417,7 @@ def test_all_factor_verbalizations_append_catalog_guard_and_validate(
     entry = prompt_ontology_entry(factor_type)
     prompt = PromptRecord(
         prompt_id=f"p-{factor_type.value}",
+        task_id=f"task-{factor_type.value}",
         split="confirm",
         language="python",
         task_family=FACTOR_SPECS[factor_type].task_family,

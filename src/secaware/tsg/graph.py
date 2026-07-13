@@ -14,6 +14,7 @@ import networkx as nx
 from pydantic import BaseModel, ValidationError
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.tsg import (
     EdgeType,
     MAX_TSG_EDGES,
@@ -140,6 +141,20 @@ def _node_id_from_commitment(
 ) -> str:
     if type(semantic_key_sha256) is not str or _SHA256_RE.fullmatch(semantic_key_sha256) is None:
         raise _InvalidInput from None
+    validation_attributes: dict[str, TSGScalar] = {}
+    if node_type in {NodeType.FEATURE, NodeType.PRESENTATION_FEATURE}:
+        from secaware.schema.features import FeatureState
+        from secaware.tsg.feature_catalog import prompt_feature_spec
+
+        try:
+            spec = prompt_feature_spec(label)
+        except KeyError:
+            raise _InvalidInput from None
+        validation_attributes = {
+            "feature_id": spec.feature_id,
+            "feature_family": spec.feature_family.value,
+            "feature_state": FeatureState.ABSENT.value,
+        }
     _validate_model(
         TSGNode,
         {
@@ -147,7 +162,7 @@ def _node_id_from_commitment(
             "semantic_key_sha256": semantic_key_sha256,
             "node_type": node_type,
             "label": label,
-            "attributes": {},
+            "attributes": validation_attributes,
         },
     )
     identity = {
@@ -574,9 +589,18 @@ def graph_sha256(graph: nx.MultiDiGraph) -> str:
 def _try_multidigraph_to_record(
     graph: nx.MultiDiGraph,
     prompt_id: str,
+    task_id: str,
+    task_family: str,
+    cwe: str,
+    extractor_backend: PromptExtractorBackend,
+    extractor_policy_sha256: str,
+    proposal_id: str,
 ) -> PromptTSGRecord | _FailureKind:
     try:
         prompt_id = _require_text(prompt_id)
+        task_id = _require_text(task_id)
+        task_family = _require_text(task_family)
+        cwe = _require_text(cwe)
         nodes, edges = _canonicalize_graph(graph)
         canonical_graph = _graph_from_models(nodes, edges)
         candidate = _validate_model(
@@ -586,6 +610,12 @@ def _try_multidigraph_to_record(
                 "graph_id": _graph_id(prompt_id),
                 "source_type": "prompt",
                 "prompt_id": prompt_id,
+                "task_id": task_id,
+                "task_family": task_family,
+                "cwe": cwe,
+                "extractor_backend": extractor_backend,
+                "extractor_policy_sha256": extractor_policy_sha256,
+                "proposal_id": proposal_id,
                 "ontology_version": ONTOLOGY_VERSION,
                 "motif_version": MOTIF_VERSION,
                 "graph_sha256": _digest(nodes, edges),
@@ -605,12 +635,33 @@ def multidigraph_to_record(
     graph: nx.MultiDiGraph,
     *,
     prompt_id: str,
+    task_id: str,
+    task_family: str,
+    cwe: str,
+    extractor_backend: PromptExtractorBackend,
+    extractor_policy_sha256: str,
+    proposal_id: str,
 ) -> PromptTSGRecord:
     """Snapshot and canonicalize an internally built ``MultiDiGraph`` record."""
-    result = _try_multidigraph_to_record(graph, prompt_id)
+    result = _try_multidigraph_to_record(
+        graph,
+        prompt_id,
+        task_id,
+        task_family,
+        cwe,
+        extractor_backend,
+        extractor_policy_sha256,
+        proposal_id,
+    )
     if isinstance(result, _FailureKind):
         graph = cast(nx.MultiDiGraph, None)
         prompt_id = cast(str, None)
+        task_id = cast(str, None)
+        task_family = cast(str, None)
+        cwe = cast(str, None)
+        extractor_backend = cast(PromptExtractorBackend, None)
+        extractor_policy_sha256 = cast(str, None)
+        proposal_id = cast(str, None)
         _raise_failure(result)
     return result
 

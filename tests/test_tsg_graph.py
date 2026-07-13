@@ -13,14 +13,34 @@ import pytest
 
 import secaware.tsg.graph as graph_codec
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.tsg import EdgeType, MAX_TSG_EDGES, MAX_TSG_NODES, NodeType
 from secaware.tsg.graph import (
     canonical_edge_id,
     canonical_node_id,
     graph_sha256,
-    multidigraph_to_record,
+    multidigraph_to_record as _multidigraph_to_record,
     record_to_multidigraph,
 )
+
+
+def multidigraph_to_record(
+    graph: nx.MultiDiGraph,
+    *,
+    prompt_id: str,
+    **kwargs: object,
+):
+    return _multidigraph_to_record(
+        graph,
+        prompt_id=prompt_id,
+        task_id="task-p001",
+        task_family="path_handling",
+        cwe="CWE-22",
+        extractor_backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        extractor_policy_sha256="8" * 64,
+        proposal_id="proposal_" + "7" * 64,
+        **kwargs,
+    )
 
 
 def _minimal_graph() -> nx.MultiDiGraph:
@@ -205,6 +225,7 @@ def test_parallel_edge_ordinals_are_deterministic_and_keys_are_canonical_ids() -
 def test_hash_randomization_does_not_change_record_json() -> None:
     script = """
 import networkx as nx
+from secaware.schema.features import PromptExtractorBackend
 from secaware.tsg.graph import multidigraph_to_record
 
 graph = nx.MultiDiGraph()
@@ -221,7 +242,16 @@ edges = {
 }
 for src, dst, edge_type in edges:
     graph.add_edge(src, dst, edge_type=edge_type, attributes={})
-print(multidigraph_to_record(graph, prompt_id="p001").model_dump_json())
+print(multidigraph_to_record(
+    graph,
+    prompt_id="p001",
+    task_id="task-p001",
+    task_family="path_handling",
+    cwe="CWE-22",
+    extractor_backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+    extractor_policy_sha256="8" * 64,
+    proposal_id="proposal_" + "7" * 64,
+).model_dump_json())
 """
     outputs = []
     project_root = Path(__file__).resolve().parents[1]

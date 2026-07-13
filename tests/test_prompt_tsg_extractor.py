@@ -38,6 +38,7 @@ def _prompt(
 ) -> PromptRecord:
     return PromptRecord(
         prompt_id="p001",
+        task_id="task-p001",
         split="discover",
         language=language,
         task_family="reviewed_task",
@@ -421,5 +422,5 @@ def test_extractor_source_contains_no_decision_assignment() -> None:
     ).read_text(encoding="utf-8")
     lowered = source.casefold()
 
-    for forbidden in ("features", "motif", "secure", "insecure", "shadow="):
+    for forbidden in ("features =", "motif", "secure", "insecure", "shadow="):
         assert forbidden not in lowered

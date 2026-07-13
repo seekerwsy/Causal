@@ -12,15 +12,29 @@ import secaware.tsg.motifs as motif_queries
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
 from secaware.schema.hypotheses import FactorType
+from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import MotifId
 from secaware.tsg.features import derive_shadow
 from secaware.tsg.graph import graph_sha256, multidigraph_to_record, record_to_multidigraph
 
 
+def _record_coordinates(prompt_id: str = "p") -> dict[str, object]:
+    return {
+        "prompt_id": prompt_id,
+        "task_id": f"task-{prompt_id}",
+        "task_family": "path_handling",
+        "cwe": "CWE-22",
+        "extractor_backend": PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        "extractor_policy_sha256": "8" * 64,
+        "proposal_id": "proposal_" + "7" * 64,
+    }
+
+
 def _prompt(text: str) -> PromptRecord:
     return PromptRecord(
         prompt_id="p-shadow",
+        task_id="task-p-shadow",
         split="discover",
         language="python",
         task_family="file_access",
@@ -134,7 +148,9 @@ def test_public_record_builder_has_no_caller_authored_shadow_api() -> None:
     assert "shadow" not in inspect.signature(multidigraph_to_record).parameters
 
     with pytest.raises(TypeError):
-        multidigraph_to_record(nx.MultiDiGraph(), prompt_id="p", shadow={})  # type: ignore[call-arg]
+        multidigraph_to_record(
+            nx.MultiDiGraph(), **_record_coordinates(), shadow={}
+        )  # type: ignore[call-arg]
 
 
 def test_unexpected_shadow_derivation_failure_is_analysis_invalid(
@@ -147,7 +163,7 @@ def test_unexpected_shadow_derivation_failure_is_analysis_invalid(
 
     monkeypatch.setattr(graph_codec, "_derive_shadow", fail)
     for invoke in (
-        lambda: multidigraph_to_record(nx.MultiDiGraph(), prompt_id="p"),
+        lambda: multidigraph_to_record(nx.MultiDiGraph(), **_record_coordinates()),
         lambda: record_to_multidigraph(record),
     ):
         with pytest.raises(SecAwareError) as exc_info:
@@ -162,7 +178,7 @@ def test_malformed_internal_shadow_projection_is_analysis_invalid(
     monkeypatch.setattr(shadow_features, "derive_shadow", lambda _graph: {"bad": object()})
 
     with pytest.raises(SecAwareError) as exc_info:
-        multidigraph_to_record(nx.MultiDiGraph(), prompt_id="p")
+        multidigraph_to_record(nx.MultiDiGraph(), **_record_coordinates())
 
     assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID
 

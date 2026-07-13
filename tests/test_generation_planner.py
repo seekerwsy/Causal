@@ -28,6 +28,7 @@ from secaware.schema.records import PromptRecord
 def _prompt(prompt_id: str, text: str | None = None) -> PromptRecord:
     return PromptRecord(
         prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
         split="confirm",
         language="python",
         task_family="path_handling",

@@ -10,6 +10,7 @@ from typing import cast
 import networkx as nx
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.features import FeatureState
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.tsg import (
     EdgeType,
@@ -21,6 +22,7 @@ from secaware.schema.tsg import (
     NodeType,
 )
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG, prompt_ontology_entry
+from secaware.tsg.feature_catalog import prompt_feature_spec
 from secaware.tsg.graph import _InvalidInput as _GraphInvalidInput
 from secaware.tsg.graph import _canonical_query_graph
 
@@ -375,6 +377,36 @@ def has_factor_requirement(graph: nx.MultiDiGraph, factor_type: FactorType) -> b
     return result
 
 
+def _try_feature_state(graph: nx.MultiDiGraph, feature_id: str) -> FeatureState | _FailureKind:
+    try:
+        prompt_feature_spec(feature_id)
+        snapshot = _snapshot_graph(graph)
+        states = tuple(
+            attributes["attributes"]["feature_state"]
+            for _, attributes in sorted(snapshot.nodes(data=True), key=lambda item: item[0])
+            if attributes["node_type"]
+            in {NodeType.FEATURE, NodeType.PRESENTATION_FEATURE}
+            and attributes["attributes"]["feature_id"] == feature_id
+        )
+        if len(states) != 1:
+            raise _InvalidQuery from None
+        return FeatureState(states[0])
+    except (KeyError, ValueError, _InvalidQuery):
+        return _FailureKind.INVALID_INPUT
+    except Exception:
+        return _FailureKind.INTERNAL
+
+
+def feature_state(graph: nx.MultiDiGraph, feature_id: str) -> FeatureState:
+    """Return the single catalog-bound state encoded in a canonical feature node."""
+    result = _try_feature_state(graph, feature_id)
+    if isinstance(result, _FailureKind):
+        graph = cast(nx.MultiDiGraph, None)
+        feature_id = cast(str, None)
+        _raise_failure(result)
+    return result
+
+
 def _try_factor_query_vector(
     graph: nx.MultiDiGraph,
 ) -> tuple[tuple[FactorType, bool], ...] | _FailureKind:
@@ -472,6 +504,7 @@ __all__ = [
     "MOTIF_SPECS",
     "MotifSpec",
     "factor_query_vector",
+    "feature_state",
     "find_motif_matches",
     "has_factor_requirement",
     "motif_query_vector",

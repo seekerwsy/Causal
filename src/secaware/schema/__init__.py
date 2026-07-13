@@ -5,6 +5,12 @@ from secaware.schema.generation import (
     GenerationRequestRecord,
     OfflineGenerationResultRecord,
 )
+from secaware.schema.features import (
+    FeatureFamily,
+    FeatureOperation,
+    FeatureState,
+    PromptExtractorBackend,
+)
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
 from secaware.schema.interventions import FailureReason, InterventionRecord
 from secaware.schema.oracle import (
@@ -39,6 +45,9 @@ __all__ = [
     "EffectRecord",
     "EdgeType",
     "FactorType",
+    "FeatureFamily",
+    "FeatureOperation",
+    "FeatureState",
     "FailureReason",
     "FindingRecord",
     "FrozenTSGAttributes",
@@ -56,6 +65,7 @@ __all__ = [
     "OfflineGenerationResultRecord",
     "PairResult",
     "PromptRecord",
+    "PromptExtractorBackend",
     "PromptTSGRecord",
     "SecurityLabel",
     "TSGEdge",

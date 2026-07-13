@@ -20,14 +20,26 @@ _INVALID_CANONICAL_CODE_MESSAGE = "canonical generated code record validation fa
 
 
 class PromptRecord(BaseModel):
-    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+    model_config = ConfigDict(
+        extra="forbid",
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+    )
 
     prompt_id: str
+    task_id: str
     split: Literal["discover", "confirm"]
     language: str
     task_family: str
     cwe: str
     prompt: str = Field(min_length=1)
+
+    @field_validator("task_id")
+    @classmethod
+    def validate_task_id(cls, value: str) -> str:
+        if not value or not value.strip() or value != value.strip():
+            raise ValueError("prompt record validation failed")
+        return value
 
 
 class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
