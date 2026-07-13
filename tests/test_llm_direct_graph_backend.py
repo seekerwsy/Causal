@@ -8,6 +8,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+import secaware.extractors.llm_direct_graph as direct_graph_module
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.llm_direct_graph import (
@@ -151,6 +152,73 @@ def _response(prompt: PromptRecord, payload: dict[str, object] | None = None) ->
     ).encode()
 
 
+_CATALOG_FEATURE_IDS = tuple(spec.feature_id for spec in PROMPT_FEATURE_CATALOG)
+
+
+def _applicable_prompt_for_feature(feature_id: str) -> PromptRecord:
+    spec = next(item for item in PROMPT_FEATURE_CATALOG if item.feature_id == feature_id)
+    suffix = feature_id.replace(".", "-")
+    return PromptRecord(
+        prompt_id=f"prompt-{suffix}",
+        task_id=f"task-{suffix}",
+        split="discover",
+        language="python",
+        task_family=(
+            spec.applicable_task_families[0] if spec.applicable_task_families else "path_handling"
+        ),
+        cwe=spec.applicable_cwes[0] if spec.applicable_cwes else "CWE-22",
+        prompt="Read the user path and return the user path contents.",
+    )
+
+
+def _minimal_feature_payload_from_request(
+    prompt: PromptRecord,
+    feature_id: str,
+) -> dict[str, object]:
+    request = direct_graph_request_payload(prompt, _policy())
+    node_templates = [
+        item for item in request["allowed_node_templates"] if item["feature_id"] == feature_id
+    ]
+    edge_templates = [
+        item for item in request["allowed_edge_templates"] if item["feature_id"] == feature_id
+    ]
+    assert node_templates
+    required_node_types = tuple(node_templates[0]["required_node_types"])
+    required_edge_types = tuple(node_templates[0]["required_edge_types"])
+    assert {item["node_type"] for item in node_templates} == set(required_node_types)
+    assert {item["edge_type"] for item in edge_templates} == set(required_edge_types)
+    assert all(
+        tuple(item["required_node_types"]) == required_node_types
+        and tuple(item["required_edge_types"]) == required_edge_types
+        and item["feature_closure"] == node_templates[0]["feature_closure"]
+        for item in node_templates
+    )
+
+    aliases = {item["node_type"]: f"v{index}" for index, item in enumerate(node_templates, start=1)}
+    evidence = _evidence(prompt)
+    return {
+        "nodes": [
+            {
+                "local_id": aliases[item["node_type"]],
+                "node_type": item["node_type"],
+                "label": item["canonical_label"],
+                "feature_id": feature_id,
+                "evidence": deepcopy(evidence),
+            }
+            for item in node_templates
+        ],
+        "edges": [
+            {
+                "src_local_id": aliases[item["src_node_type"]],
+                "dst_local_id": aliases[item["dst_node_type"]],
+                "edge_type": item["edge_type"],
+                "evidence": deepcopy(evidence),
+            }
+            for item in edge_templates
+        ],
+    }
+
+
 class CapturingTransport:
     def __init__(self, response: bytes) -> None:
         self.response = response
@@ -246,6 +314,9 @@ def test_direct_template_views_are_finite_typed_catalog_projections() -> None:
             "node_type",
             "canonical_label",
             "slot_kind",
+            "feature_closure",
+            "required_node_types",
+            "required_edge_types",
         }
         for item in nodes
     )
@@ -268,6 +339,57 @@ def test_direct_template_views_are_finite_typed_catalog_projections() -> None:
         "code",
         "causes",
     } & set(json.dumps({"nodes": nodes, "edges": edges}).casefold().split('"'))
+
+
+def test_advertised_structural_slot_declares_all_or_none_feature_closure() -> None:
+    prompt = _prompt()
+    request = direct_graph_request_payload(prompt, _policy())
+    template = next(
+        item
+        for item in request["allowed_node_templates"]
+        if item["feature_id"] == "task.file_read" and item["node_type"] == "task_operation"
+    )
+    assert template["feature_closure"] == "all_or_none_structural"
+    assert set(template["required_node_types"]) == {
+        "task_operation",
+        "data_object",
+        "sink",
+    }
+    assert set(template["required_edge_types"]) == {"operates_on", "flows_to"}
+
+    partial = {
+        "nodes": [
+            {
+                "local_id": "v1",
+                "node_type": template["node_type"],
+                "label": template["canonical_label"],
+                "feature_id": template["feature_id"],
+                "evidence": deepcopy(_evidence(prompt)),
+            }
+        ],
+        "edges": [],
+    }
+    transport = CapturingTransport(_response(prompt, partial))
+    with pytest.raises(SecAwareError):
+        LLMDirectGraphExtractor(transport, _structured()).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+
+@pytest.mark.parametrize("feature_id", _CATALOG_FEATURE_IDS)
+def test_every_advertised_feature_contract_builds_one_minimal_valid_instance(
+    feature_id: str,
+) -> None:
+    prompt = _applicable_prompt_for_feature(feature_id)
+    advertised = {
+        item["feature_id"]
+        for item in direct_graph_request_payload(prompt, _policy())["allowed_node_templates"]
+    }
+    assert feature_id in advertised
+    payload = _minimal_feature_payload_from_request(prompt, feature_id)
+    proposal, _, _ = _extract(payload, prompt=prompt)
+    record = build_prompt_tsg(proposal, prompt)  # type: ignore[arg-type]
+    graph = record_to_multidigraph(record)
+    assert feature_state(graph, feature_id) is FeatureState.PRESENT
 
 
 def test_direct_alias_order_and_evidence_order_have_identical_semantic_records() -> None:
@@ -499,6 +621,64 @@ def test_direct_semantic_failure_and_multiple_candidates_are_never_retried() -> 
         with pytest.raises(SecAwareError):
             LLMDirectGraphExtractor(transport, _structured()).extract(_prompt(), _policy())
         assert len(transport.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "field,replacement",
+    [
+        ("node_type", "mutated_node_type"),
+        ("canonical_label", "mutated-canonical-label"),
+        ("is_presence_marker", True),
+    ],
+)
+def test_actual_feature_node_slot_projection_changes_schema_digest_and_fails_pretransport(
+    field: str,
+    replacement: object,
+) -> None:
+    projection = direct_graph_module.direct_graph_contract_projection()
+    assert (
+        direct_graph_module.direct_graph_output_schema_sha256(projection)
+        == LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256
+    )
+    mutated = deepcopy(projection)
+    structural = next(
+        item for item in mutated["feature_contracts"] if item["feature_id"] == "task.file_read"
+    )
+    structural["node_slots"][0][field] = replacement
+    changed_digest = direct_graph_module.direct_graph_output_schema_sha256(mutated)
+    assert changed_digest != LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256
+
+    structured = _structured(output_schema_sha256=changed_digest)
+    transport = CapturingTransport(_response(_prompt()))
+    with pytest.raises(SecAwareError) as exc_info:
+        LLMDirectGraphExtractor(transport, structured).extract(_prompt(), _policy(structured))
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
+    assert transport.requests == []
+
+
+@pytest.mark.parametrize(
+    "field,replacement",
+    [
+        ("edge_type", "mutated_edge"),
+        ("src_node_type", "mutated_source"),
+        ("dst_node_type", "mutated_destination"),
+    ],
+)
+def test_actual_edge_contract_projection_changes_direct_schema_digest(
+    field: str,
+    replacement: str,
+) -> None:
+    projection = direct_graph_module.direct_graph_contract_projection()
+    mutated = deepcopy(projection)
+    structural = next(
+        item for item in mutated["feature_contracts"] if item["feature_id"] == "task.file_read"
+    )
+    structural["edge_templates"][0][field] = replacement
+
+    assert (
+        direct_graph_module.direct_graph_output_schema_sha256(mutated)
+        != LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256
+    )
 
 
 def test_direct_policy_binds_backend_catalog_limit_and_all_structured_coordinates() -> None:

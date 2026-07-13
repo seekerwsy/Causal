@@ -7,6 +7,7 @@ import hashlib
 from importlib import resources
 import json
 import re
+from typing import cast
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
@@ -22,10 +23,11 @@ from secaware.schema.prompt_extraction import (
     proposal_id_for_payload,
 )
 from secaware.schema.records import PromptRecord
-from secaware.schema.tsg import EdgeType, NodeType
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
+    FeatureSpec,
+    prompt_feature_edge_slots,
     prompt_feature_node_slots,
 )
 from secaware.tsg.proposal_validator import (
@@ -38,14 +40,7 @@ from secaware.tsg.proposal_validator import (
 _STAGE = "tsg.extract_prompt.llm_direct_graph"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _DIRECT_RESPONSE_KEYS = frozenset({"nodes", "edges"})
-_EDGE_ENDPOINT_TYPES = {
-    EdgeType.OPERATES_ON: (NodeType.TASK_OPERATION, NodeType.DATA_OBJECT),
-    EdgeType.SOURCE_OF: (NodeType.SOURCE, NodeType.DATA_OBJECT),
-    EdgeType.FLOWS_TO: (NodeType.DATA_OBJECT, NodeType.SINK),
-    EdgeType.GUARDED_BY: (NodeType.DATA_OBJECT, NodeType.GUARD),
-    EdgeType.REQUIRES: (NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
-}
-_OUTPUT_SCHEMA = {
+_OUTPUT_SCHEMA_BASE = {
     "schema_version": "1.0",
     "top_level_keys": ["edges", "nodes"],
     "node_keys": ["evidence", "feature_id", "label", "local_id", "node_type"],
@@ -53,8 +48,58 @@ _OUTPUT_SCHEMA = {
     "evidence_keys": ["end", "start", "text", "text_sha256"],
     "local_id_pattern": "^v[0-9]{1,4}$",
     "output_kind": "typed_graph",
-    "semantic_slot_contract": "catalog_feature_node_slots_v1",
 }
+
+
+def _feature_contract_projection(spec: FeatureSpec) -> dict[str, object]:
+    feature_id = spec.feature_id
+    family = spec.feature_family.value
+    slots = prompt_feature_node_slots(feature_id)
+    node_slots = [
+        {
+            "node_type": slot.node_type.value,
+            "canonical_label": slot.canonical_label,
+            "is_presence_marker": slot.is_presence_marker,
+        }
+        for slot in slots
+    ]
+    edge_templates: list[dict[str, str]] = []
+    for edge_slot in prompt_feature_edge_slots(feature_id):
+        edge_templates.append(
+            {
+                "edge_type": edge_slot.edge_type.value,
+                "src_node_type": edge_slot.src_node_type.value,
+                "dst_node_type": edge_slot.dst_node_type.value,
+            }
+        )
+    presence_marker = any(slot.is_presence_marker for slot in slots)
+    return {
+        "feature_id": feature_id,
+        "feature_family": family,
+        "applicable_cwes": list(spec.applicable_cwes),
+        "applicable_task_families": list(spec.applicable_task_families),
+        "feature_closure": (
+            "single_presence_marker" if presence_marker else "all_or_none_structural"
+        ),
+        "node_slots": sorted(node_slots, key=lambda item: item["node_type"]),
+        "edge_templates": sorted(edge_templates, key=lambda item: item["edge_type"]),
+    }
+
+
+def direct_graph_contract_projection() -> dict[str, object]:
+    """Return the full canonical slot, edge, scope, and closure contract."""
+    return {
+        "feature_contracts": [_feature_contract_projection(spec) for spec in PROMPT_FEATURE_CATALOG]
+    }
+
+
+def direct_graph_output_schema_sha256(contract_projection: Mapping[str, object]) -> str:
+    """Bind the response shape to one concrete canonical direct-graph contract."""
+    payload = {
+        **_OUTPUT_SCHEMA_BASE,
+        "direct_graph_contract": contract_projection,
+    }
+    return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
 
 
 def _template_text() -> str:
@@ -69,9 +114,9 @@ LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE = _template_text()
 LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE_SHA256 = hashlib.sha256(
     LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE.encode("utf-8")
 ).hexdigest()
-LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256 = hashlib.sha256(
-    canonical_request_bytes(_OUTPUT_SCHEMA)
-).hexdigest()
+LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256 = direct_graph_output_schema_sha256(
+    direct_graph_contract_projection()
+)
 
 
 def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
@@ -82,55 +127,67 @@ def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
     )
 
 
-def _catalog_node_template_view(source: PromptRecord) -> list[dict[str, str]]:
+def _catalog_node_template_view(source: PromptRecord) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for spec in PROMPT_FEATURE_CATALOG:
+        if not feature_is_applicable(spec, source):
+            continue
+        contract = _feature_contract_projection(spec)
+        node_slots = cast(list[dict[str, object]], contract["node_slots"])
+        edge_templates = cast(list[dict[str, str]], contract["edge_templates"])
+        required_node_types = [cast(str, item["node_type"]) for item in node_slots]
+        required_edge_types = [item["edge_type"] for item in edge_templates]
+        for slot in node_slots:
+            marker = cast(bool, slot["is_presence_marker"])
+            result.append(
+                {
+                    "feature_id": spec.feature_id,
+                    "feature_family": spec.feature_family.value,
+                    "node_type": slot["node_type"],
+                    "canonical_label": slot["canonical_label"],
+                    "slot_kind": "presence_marker" if marker else "structural",
+                    "feature_closure": contract["feature_closure"],
+                    "required_node_types": list(required_node_types),
+                    "required_edge_types": list(required_edge_types),
+                }
+            )
     return sorted(
-        (
-            {
-                "feature_id": spec.feature_id,
-                "feature_family": spec.feature_family.value,
-                "node_type": slot.node_type.value,
-                "canonical_label": slot.canonical_label,
-                "slot_kind": ("presence_marker" if slot.is_presence_marker else "structural"),
-            }
-            for spec in PROMPT_FEATURE_CATALOG
-            if feature_is_applicable(spec, source)
-            for slot in prompt_feature_node_slots(spec.feature_id)
-        ),
-        key=lambda item: (item["feature_id"], item["node_type"]),
+        result,
+        key=lambda item: (cast(str, item["feature_id"]), cast(str, item["node_type"])),
     )
 
 
-def catalog_node_template_view(prompt: PromptRecord) -> list[dict[str, str]]:
+def catalog_node_template_view(prompt: PromptRecord) -> list[dict[str, object]]:
     """Return prompt-applicable finite node slots accepted by the shared validator."""
     return _catalog_node_template_view(_snapshot_prompt(prompt))
 
 
 def _catalog_edge_template_view(
     source: PromptRecord,
-    node_templates: list[dict[str, str]],
+    node_templates: list[dict[str, object]],
 ) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
-    advertised_slots = {(item["feature_id"], item["node_type"]) for item in node_templates}
+    advertised_slots = {
+        (cast(str, item["feature_id"]), cast(str, item["node_type"])) for item in node_templates
+    }
     for spec in PROMPT_FEATURE_CATALOG:
         if not feature_is_applicable(spec, source):
             continue
-        for edge_type in spec.structural_edge_types:
-            endpoint_types = _EDGE_ENDPOINT_TYPES.get(edge_type)
-            if endpoint_types is None:
-                raise RuntimeError("invalid prompt feature edge template")
-            src_type, dst_type = endpoint_types
-            if (spec.feature_id, src_type.value) not in advertised_slots or (
+        contract = _feature_contract_projection(spec)
+        edge_templates = cast(list[dict[str, str]], contract["edge_templates"])
+        for edge in edge_templates:
+            if (spec.feature_id, edge["src_node_type"]) not in advertised_slots or (
                 spec.feature_id,
-                dst_type.value,
+                edge["dst_node_type"],
             ) not in advertised_slots:
                 raise RuntimeError("invalid prompt feature edge template")
             result.append(
                 {
                     "feature_id": spec.feature_id,
                     "feature_family": spec.feature_family.value,
-                    "edge_type": edge_type.value,
-                    "src_node_type": src_type.value,
-                    "dst_node_type": dst_type.value,
+                    "edge_type": edge["edge_type"],
+                    "src_node_type": edge["src_node_type"],
+                    "dst_node_type": edge["dst_node_type"],
                 }
             )
     return sorted(result, key=lambda item: (item["feature_id"], item["edge_type"]))
@@ -391,6 +448,8 @@ __all__ = [
     "LLMDirectGraphExtractor",
     "catalog_edge_template_view",
     "catalog_node_template_view",
+    "direct_graph_contract_projection",
+    "direct_graph_output_schema_sha256",
     "direct_graph_request_payload",
     "llm_direct_graph_policy_sha256",
     "parse_direct_graph_response",

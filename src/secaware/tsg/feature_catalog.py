@@ -20,6 +20,13 @@ _PREFIX_BY_FAMILY = {
     FeatureFamily.SAFETY_CONTROL: "safety.",
     FeatureFamily.PRESENTATION_CONTROL: "presentation.",
 }
+_EDGE_ENDPOINT_TYPES = {
+    EdgeType.OPERATES_ON: (NodeType.TASK_OPERATION, NodeType.DATA_OBJECT),
+    EdgeType.SOURCE_OF: (NodeType.SOURCE, NodeType.DATA_OBJECT),
+    EdgeType.FLOWS_TO: (NodeType.DATA_OBJECT, NodeType.SINK),
+    EdgeType.GUARDED_BY: (NodeType.DATA_OBJECT, NodeType.GUARD),
+    EdgeType.REQUIRES: (NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
+}
 _ALL_OPERATIONS = (FeatureOperation.ADD, FeatureOperation.REMOVE)
 _EXPECTED_FEATURE_IDS = (
     "task.input_consumption",
@@ -65,6 +72,15 @@ class FeatureNodeSlot:
     node_type: NodeType
     canonical_label: str
     is_presence_marker: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureEdgeSlot:
+    """One finite direct-graph edge slot derived from a catalog feature."""
+
+    edge_type: EdgeType
+    src_node_type: NodeType
+    dst_node_type: NodeType
 
 
 def _feature(
@@ -261,6 +277,28 @@ _PROMPT_FEATURE_NODE_SLOTS = {
 }
 
 
+def _edge_slots_for_spec(spec: FeatureSpec) -> tuple[FeatureEdgeSlot, ...]:
+    result: list[FeatureEdgeSlot] = []
+    for edge_type in spec.structural_edge_types:
+        endpoint_types = _EDGE_ENDPOINT_TYPES.get(edge_type)
+        if endpoint_types is None:
+            raise RuntimeError("invalid prompt feature edge slot")
+        src_node_type, dst_node_type = endpoint_types
+        result.append(
+            FeatureEdgeSlot(
+                edge_type=edge_type,
+                src_node_type=src_node_type,
+                dst_node_type=dst_node_type,
+            )
+        )
+    return tuple(result)
+
+
+_PROMPT_FEATURE_EDGE_SLOTS = {
+    spec.feature_id: _edge_slots_for_spec(spec) for spec in PROMPT_FEATURE_CATALOG
+}
+
+
 def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
     if type(catalog) is not tuple or len(catalog) != 20:
         raise RuntimeError("invalid prompt feature catalog shape")
@@ -337,6 +375,22 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
             raise RuntimeError("invalid prompt feature node slots")
         if bool(item.structural_node_types) == any(slot.is_presence_marker for slot in slots):
             raise RuntimeError("invalid prompt feature presence marker")
+        edge_slots = _PROMPT_FEATURE_EDGE_SLOTS[item.feature_id]
+        node_types = {slot.node_type for slot in slots}
+        if (
+            len({slot.edge_type for slot in edge_slots}) != len(edge_slots)
+            or tuple(slot.edge_type for slot in edge_slots) != item.structural_edge_types
+            or any(
+                type(slot) is not FeatureEdgeSlot
+                or type(slot.edge_type) is not EdgeType
+                or type(slot.src_node_type) is not NodeType
+                or type(slot.dst_node_type) is not NodeType
+                or slot.src_node_type not in node_types
+                or slot.dst_node_type not in node_types
+                for slot in edge_slots
+            )
+        ):
+            raise RuntimeError("invalid prompt feature edge slots")
 
     non_intervenable = {item.feature_id for item in catalog if not item.intervenable}
     if non_intervenable != {
@@ -402,12 +456,31 @@ def prompt_feature_node_slot(feature_id: str, node_type: NodeType) -> FeatureNod
     raise KeyError("unknown prompt feature node slot")
 
 
+def prompt_feature_edge_slots(feature_id: str) -> tuple[FeatureEdgeSlot, ...]:
+    """Return the exact finite direct-graph edge slots for one catalog feature."""
+    prompt_feature_spec(feature_id)
+    return _PROMPT_FEATURE_EDGE_SLOTS[feature_id]
+
+
+def prompt_feature_edge_slot(feature_id: str, edge_type: EdgeType) -> FeatureEdgeSlot:
+    """Return one exact feature/edge slot; unknown combinations fail closed."""
+    if type(edge_type) is not EdgeType:
+        raise KeyError("unknown prompt feature edge slot")
+    for slot in prompt_feature_edge_slots(feature_id):
+        if slot.edge_type is edge_type:
+            return slot
+    raise KeyError("unknown prompt feature edge slot")
+
+
 __all__ = [
     "FEATURE_CATALOG_VERSION",
+    "FeatureEdgeSlot",
     "FeatureNodeSlot",
     "FeatureSpec",
     "PROMPT_FEATURE_CATALOG",
     "PROMPT_FEATURE_CATALOG_SHA256",
+    "prompt_feature_edge_slot",
+    "prompt_feature_edge_slots",
     "prompt_feature_node_slot",
     "prompt_feature_node_slots",
     "prompt_feature_spec",

@@ -34,13 +34,6 @@ _FEATURE_ID_PATTERN = r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$"
 _SEMANTIC_ROLE_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 _LOCAL_ID_PATTERN = r"^v[0-9]{1,4}$"
 _INVALID_PROPOSAL_MESSAGE = "prompt extraction proposal validation failed"
-_DIRECT_EDGE_ENDPOINT_TYPES = {
-    EdgeType.OPERATES_ON: (NodeType.TASK_OPERATION, NodeType.DATA_OBJECT),
-    EdgeType.SOURCE_OF: (NodeType.SOURCE, NodeType.DATA_OBJECT),
-    EdgeType.FLOWS_TO: (NodeType.DATA_OBJECT, NodeType.SINK),
-    EdgeType.GUARDED_BY: (NodeType.DATA_OBJECT, NodeType.GUARD),
-    EdgeType.REQUIRES: (NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
-}
 
 
 class _ImmutableProposalModel(SafeValidationMixin, StrictModel):
@@ -410,6 +403,7 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
         from secaware.tsg.feature_catalog import (
             PROMPT_FEATURE_CATALOG,
             PROMPT_FEATURE_CATALOG_SHA256,
+            prompt_feature_edge_slot,
             prompt_feature_node_slot,
             prompt_feature_spec,
         )
@@ -481,11 +475,15 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
             dst = aliases.get(edge.dst_local_id)
             if src is None or dst is None or src.feature_id != dst.feature_id:
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
-            spec = prompt_feature_spec(src.feature_id)
-            if edge.edge_type not in spec.structural_edge_types:
+            prompt_feature_spec(src.feature_id)
+            try:
+                edge_slot = prompt_feature_edge_slot(src.feature_id, edge.edge_type)
+            except KeyError:
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
-            endpoint_types = _DIRECT_EDGE_ENDPOINT_TYPES.get(edge.edge_type)
-            if endpoint_types is None or (src.node_type, dst.node_type) != endpoint_types:
+            if (src.node_type, dst.node_type) != (
+                edge_slot.src_node_type,
+                edge_slot.dst_node_type,
+            ):
                 raise ValueError(_INVALID_PROPOSAL_MESSAGE)
             identity = (
                 edge.src_local_id,
