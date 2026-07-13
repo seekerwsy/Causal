@@ -1,0 +1,293 @@
+"""Blind structured-facts extraction through the shared proposal boundary."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+import hashlib
+from importlib import resources
+import json
+import re
+
+from secaware.errors import ErrorCode, SecAwareError
+from secaware.extractors.base import ExtractionPolicy
+from secaware.llm.structured_transport import (
+    StructuredJSONTransport,
+    StructuredLLMPolicy,
+    canonical_request_bytes,
+)
+from secaware.schema.features import FeatureState, PromptExtractorBackend
+from secaware.schema.prompt_extraction import (
+    MAX_RAW_RESPONSE_CHARS,
+    PromptExtractionProposalRecord,
+    proposal_id_for_payload,
+)
+from secaware.schema.records import PromptRecord
+from secaware.tsg.feature_catalog import (
+    PROMPT_FEATURE_CATALOG,
+    PROMPT_FEATURE_CATALOG_SHA256,
+)
+from secaware.tsg.proposal_validator import _snapshot_prompt, validate_proposal
+
+
+_STAGE = "tsg.extract_prompt.llm_facts"
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_FACT_RESPONSE_KEYS = frozenset({"facts"})
+_OUTPUT_SCHEMA = {
+    "schema_version": "1.0",
+    "top_level_keys": ["facts"],
+    "fact_keys": [
+        "evidence",
+        "feature_id",
+        "relation_feature_ids",
+        "semantic_role",
+        "state",
+    ],
+    "semantic_role": "feature_state",
+    "states": [state.value for state in FeatureState],
+}
+
+
+def _template_text() -> str:
+    return (
+        resources.files("secaware.extractors")
+        .joinpath("prompts/llm_facts_v1.txt")
+        .read_text(encoding="utf-8")
+    )
+
+
+LLM_FACTS_SYSTEM_TEMPLATE = _template_text()
+LLM_FACTS_SYSTEM_TEMPLATE_SHA256 = hashlib.sha256(
+    LLM_FACTS_SYSTEM_TEMPLATE.encode("utf-8")
+).hexdigest()
+LLM_FACTS_OUTPUT_SCHEMA_SHA256 = hashlib.sha256(canonical_request_bytes(_OUTPUT_SCHEMA)).hexdigest()
+
+
+def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
+    return SecAwareError(
+        code=code,
+        stage=_STAGE,
+        message="LLM facts extraction validation failed",
+    )
+
+
+def catalog_prompt_view() -> list[dict[str, object]]:
+    """Return the finite, outcome-blind catalog projection supplied to the model."""
+    by_family = {
+        spec.feature_family: tuple(
+            candidate.feature_id
+            for candidate in PROMPT_FEATURE_CATALOG
+            if candidate.feature_family is spec.feature_family
+        )
+        for spec in PROMPT_FEATURE_CATALOG
+    }
+    return [
+        {
+            "feature_id": spec.feature_id,
+            "feature_family": spec.feature_family.value,
+            "applicable_cwes": list(spec.applicable_cwes),
+            "applicable_task_families": list(spec.applicable_task_families),
+            "allowed_states": [state.value for state in FeatureState],
+            "allowed_relation_feature_ids": list(by_family[spec.feature_family]),
+        }
+        for spec in PROMPT_FEATURE_CATALOG
+    ]
+
+
+def _structured_policy_payload(policy: StructuredLLMPolicy) -> dict[str, object]:
+    return {field: getattr(policy, field) for field in StructuredLLMPolicy.__dataclass_fields__}
+
+
+def llm_facts_policy_sha256(
+    policy: StructuredLLMPolicy,
+    catalog_sha256: str,
+) -> str:
+    """Bind every provider and decoding coordinate to one extractor policy digest."""
+    if type(policy) is not StructuredLLMPolicy:
+        raise ValueError("LLM facts policy validation failed")
+    if type(catalog_sha256) is not str or _SHA256.fullmatch(catalog_sha256) is None:
+        raise ValueError("LLM facts policy validation failed")
+    payload = {
+        "backend": PromptExtractorBackend.LLM_FACTS_V1.value,
+        "catalog_sha256": catalog_sha256,
+        "structured_llm_policy": _structured_policy_payload(policy),
+    }
+    return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
+
+
+def _trusted_policy(policy: object) -> ExtractionPolicy:
+    if type(policy) is not ExtractionPolicy:
+        raise _error(ErrorCode.POLICY_MISMATCH) from None
+    try:
+        if (
+            policy.backend is not PromptExtractorBackend.LLM_FACTS_V1
+            or policy.catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
+            or type(policy.policy_sha256) is not str
+            or _SHA256.fullmatch(policy.policy_sha256) is None
+            or type(policy.max_response_chars) is not int
+            or not 1 <= policy.max_response_chars <= MAX_RAW_RESPONSE_CHARS
+        ):
+            raise ValueError
+    except Exception:
+        raise _error(ErrorCode.POLICY_MISMATCH) from None
+    return policy
+
+
+def _validate_policy_binding(
+    policy: ExtractionPolicy,
+    structured: StructuredLLMPolicy,
+) -> None:
+    if (
+        structured.system_template_sha256 != LLM_FACTS_SYSTEM_TEMPLATE_SHA256
+        or structured.output_schema_sha256 != LLM_FACTS_OUTPUT_SCHEMA_SHA256
+        or policy.policy_sha256 != llm_facts_policy_sha256(structured, policy.catalog_sha256)
+    ):
+        raise _error(ErrorCode.POLICY_MISMATCH) from None
+
+
+def facts_request_payload(
+    prompt: PromptRecord,
+    policy: ExtractionPolicy,
+) -> dict[str, object]:
+    source = _snapshot_prompt(prompt)
+    trusted = _trusted_policy(policy)
+    return {
+        "schema_version": "1.0",
+        "prompt_id": source.prompt_id,
+        "task_id": source.task_id,
+        "prompt_sha256": hashlib.sha256(source.prompt.encode("utf-8")).hexdigest(),
+        "prompt_text": source.prompt,
+        "catalog_sha256": trusted.catalog_sha256,
+        "allowed_features": catalog_prompt_view(),
+        "output_kind": "semantic_facts",
+    }
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _json_payload(raw_text: str) -> Mapping[str, object]:
+    payload = json.loads(
+        raw_text,
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=lambda _value: (_ for _ in ()).throw(ValueError("non-finite JSON")),
+    )
+    if not isinstance(payload, Mapping) or frozenset(payload) != _FACT_RESPONSE_KEYS:
+        raise ValueError("invalid facts response envelope")
+    if type(payload["facts"]) is not list:
+        raise ValueError("invalid facts response collection")
+    return payload
+
+
+def parse_facts_response(
+    raw: bytes,
+    prompt: PromptRecord,
+    policy: ExtractionPolicy,
+) -> PromptExtractionProposalRecord:
+    """Parse and bind one response exactly once; no repair interaction is performed."""
+    source: PromptRecord | None = None
+    raw_text = ""
+    try:
+        trusted = _trusted_policy(policy)
+        source = _snapshot_prompt(prompt)
+        if type(raw) is not bytes or not raw:
+            raise ValueError
+        raw_text = raw.decode("utf-8")
+        if len(raw_text) > trusted.max_response_chars:
+            raise ValueError
+        response = _json_payload(raw_text)
+        payload: dict[str, object] = {
+            "schema_version": "1.0",
+            "prompt_id": source.prompt_id,
+            "task_id": source.task_id,
+            "prompt_sha256": hashlib.sha256(source.prompt.encode("utf-8")).hexdigest(),
+            "backend": PromptExtractorBackend.LLM_FACTS_V1,
+            "catalog_sha256": trusted.catalog_sha256,
+            "policy_sha256": trusted.policy_sha256,
+            "response_sha256": hashlib.sha256(raw).hexdigest(),
+            "raw_response": raw_text,
+            "facts": response["facts"],
+            "direct_nodes": [],
+            "direct_edges": [],
+        }
+        payload["proposal_id"] = proposal_id_for_payload(payload)
+        proposal = PromptExtractionProposalRecord.model_validate(payload)
+        return validate_proposal(proposal, source)
+    except Exception:
+        raise _error() from None
+    finally:
+        raw = b""
+        raw_text = ""
+        source = None
+        prompt = None  # type: ignore[assignment]
+        policy = None  # type: ignore[assignment]
+
+
+class LLMFactsExtractor:
+    """Emit a complete facts-only proposal from one blind structured LLM response."""
+
+    __slots__ = ("_structured_policy", "_transport")
+
+    def __init__(
+        self,
+        transport: StructuredJSONTransport,
+        structured_policy: StructuredLLMPolicy,
+    ) -> None:
+        try:
+            if not callable(getattr(transport, "complete", None)):
+                raise TypeError
+            if type(structured_policy) is not StructuredLLMPolicy:
+                raise TypeError
+            trusted_structured = StructuredLLMPolicy(
+                **_structured_policy_payload(structured_policy)
+            )
+        except Exception:
+            raise _error(ErrorCode.CONFIG) from None
+        self._transport = transport
+        self._structured_policy = trusted_structured
+
+    def __repr__(self) -> str:
+        return "LLMFactsExtractor()"
+
+    def extract(
+        self,
+        prompt: PromptRecord,
+        policy: ExtractionPolicy,
+    ) -> PromptExtractionProposalRecord:
+        request_bytes = b""
+        raw = b""
+        try:
+            trusted = _trusted_policy(policy)
+            _validate_policy_binding(trusted, self._structured_policy)
+            source = _snapshot_prompt(prompt)
+            request_bytes = canonical_request_bytes(facts_request_payload(source, trusted))
+            raw = self._transport.complete(request_bytes, self._structured_policy)
+            if type(raw) is not bytes or len(raw) > self._structured_policy.max_response_bytes:
+                raise _error()
+            return parse_facts_response(raw, source, trusted)
+        except SecAwareError:
+            raise
+        except Exception:
+            raise _error() from None
+        finally:
+            request_bytes = b""
+            raw = b""
+            prompt = None  # type: ignore[assignment]
+            policy = None  # type: ignore[assignment]
+
+
+__all__ = [
+    "LLM_FACTS_OUTPUT_SCHEMA_SHA256",
+    "LLM_FACTS_SYSTEM_TEMPLATE",
+    "LLM_FACTS_SYSTEM_TEMPLATE_SHA256",
+    "LLMFactsExtractor",
+    "catalog_prompt_view",
+    "facts_request_payload",
+    "llm_facts_policy_sha256",
+    "parse_facts_response",
+]
