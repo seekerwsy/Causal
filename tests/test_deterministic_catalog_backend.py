@@ -15,6 +15,7 @@ from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
+    prompt_feature_spec,
 )
 
 
@@ -57,6 +58,41 @@ def _policy(
 
 def _states(proposal) -> dict[str, FeatureState]:
     return {fact.feature_id: fact.state for fact in proposal.facts}
+
+
+_SAFETY_PREREQUISITE = {
+    "safety.input_validation": "task.input_consumption",
+    "safety.path_normalization": "task.file_read",
+    "safety.sql_parameterization": "task.database_query",
+    "safety.safe_subprocess": "task.process_launch",
+    "safety.authorization_check": "task.privileged_action",
+    "safety.safe_deserialization": "task.object_deserialization",
+}
+_INTERVENTION_CLAUSE_CASES = tuple(
+    (spec.feature_id, clause)
+    for spec in PROMPT_FEATURE_CATALOG
+    for clause in spec.intervention_clauses
+)
+
+
+def _clause_context(feature_id: str, clause: str) -> tuple[PromptRecord, PromptRecord]:
+    spec = prompt_feature_spec(feature_id)
+    prerequisite_id = _SAFETY_PREREQUISITE.get(feature_id)
+    prerequisite = prompt_feature_spec(prerequisite_id) if prerequisite_id is not None else None
+    cwe = spec.applicable_cwes[0] if spec.applicable_cwes else "CWE-999"
+    task_families = spec.applicable_task_families or (
+        prerequisite.applicable_task_families if prerequisite is not None else ()
+    )
+    task_family = task_families[0] if task_families else "generic"
+    baseline_text = (
+        f"Implement a Python helper that must {prerequisite.deterministic_terms[0]}."
+        if prerequisite is not None
+        else "Implement a Python helper."
+    )
+    return (
+        _prompt(baseline_text, task_family=task_family, cwe=cwe),
+        _prompt(baseline_text + clause, task_family=task_family, cwe=cwe),
+    )
 
 
 def test_extraction_policy_is_the_exact_frozen_slots_contract() -> None:
@@ -111,6 +147,24 @@ def test_deterministic_backend_emits_closed_catalog_states_and_exact_evidence() 
     assert prompt.prompt[span.start : span.end] == "user-provided file path"
     assert span.text == "user-provided file path"
     assert span.text_sha256 == hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize(("feature_id", "clause"), _INTERVENTION_CLAUSE_CASES)
+def test_every_catalog_intervention_clause_closes_through_its_owner_only(
+    feature_id: str,
+    clause: str,
+) -> None:
+    baseline, variant = _clause_context(feature_id, clause)
+    extractor = DeterministicCatalogExtractor()
+    baseline_states = _states(extractor.extract(baseline, _policy()))
+    variant_states = _states(extractor.extract(variant, _policy()))
+
+    assert variant_states[feature_id] is FeatureState.PRESENT
+    assert {
+        candidate
+        for candidate, state in variant_states.items()
+        if state is FeatureState.PRESENT and baseline_states[candidate] is not FeatureState.PRESENT
+    } == {feature_id}
 
 
 @pytest.mark.parametrize(

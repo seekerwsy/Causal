@@ -25,6 +25,7 @@ from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
 )
+import secaware.pipeline.preflight as preflight_module
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -542,6 +543,127 @@ def test_preflight_validates_optional_functional_contract_without_outcome_data(
         )
     assert exc_info.value.code is ErrorCode.CONTRACT
     assert "post-randomization-result" not in str(exc_info.value)
+
+
+def _write_functional_contract(path: Path) -> None:
+    write_jsonl(
+        path,
+        (
+            FunctionalOutcomeContractRecord.from_content(
+                task_feature_id="task.database_query",
+                outcome_id="y_task_database_functional",
+                expected_add_sign="positive",
+                expected_remove_sign="negative",
+                generic_control_feature_id=None,
+                evaluator_policy_sha256="a" * 64,
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("artifact", ("prompts", "attestations", "contracts"))
+def test_preflight_rejects_artifact_byte_drift_during_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact: str,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    attestations_path = tmp_path / "attestations.jsonl"
+    contracts_path = tmp_path / "contracts.jsonl"
+    _write_attested_confirm_pair(prompts_path, attestations_path)
+    _write_functional_contract(contracts_path)
+    target = {
+        "prompts": prompts_path,
+        "attestations": attestations_path,
+        "contracts": contracts_path,
+    }[artifact]
+    real_read_jsonl = preflight_module.read_jsonl
+    changed = False
+
+    def drifting_read(path: str | Path, *args: object, **kwargs: object):
+        nonlocal changed
+        result = real_read_jsonl(path, *args, **kwargs)
+        if Path(path) == target and not changed:
+            with target.open("a", encoding="utf-8", newline="") as handle:
+                handle.write("\n")
+            changed = True
+        return result
+
+    monkeypatch.setattr(preflight_module, "read_jsonl", drifting_read)
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(
+            _config(
+                tmp_path,
+                prompts_path,
+                prompt_attestations_path=attestations_path,
+                functional_outcome_contracts_path=contracts_path,
+            )
+        )
+    assert changed is True
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+def test_preflight_supplies_explicit_bounds_for_every_jsonl_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    attestations_path = tmp_path / "attestations.jsonl"
+    contracts_path = tmp_path / "contracts.jsonl"
+    _write_attested_confirm_pair(prompts_path, attestations_path)
+    _write_functional_contract(contracts_path)
+    real_read_jsonl = preflight_module.read_jsonl
+    observed: dict[Path, dict[str, object]] = {}
+
+    def bounded_read(path: str | Path, *args: object, **kwargs: object):
+        observed[Path(path)] = dict(kwargs)
+        return real_read_jsonl(path, *args, **kwargs)
+
+    monkeypatch.setattr(preflight_module, "read_jsonl", bounded_read)
+    run_preflight(
+        _config(
+            tmp_path,
+            prompts_path,
+            prompt_attestations_path=attestations_path,
+            functional_outcome_contracts_path=contracts_path,
+        )
+    )
+
+    assert set(observed) == {prompts_path, attestations_path, contracts_path}
+    for limits in observed.values():
+        assert type(limits.get("max_records")) is int
+        assert int(limits["max_records"]) > 0
+        assert type(limits.get("max_line_chars")) is int
+        assert int(limits["max_line_chars"]) > 0
+        assert type(limits.get("max_total_chars")) is int
+        assert int(limits["max_total_chars"]) >= int(limits["max_line_chars"])
+
+
+@pytest.mark.parametrize("artifact", ("attestations", "contracts"))
+def test_preflight_rejects_oversized_attestation_and_contract_lines(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    attestations_path = tmp_path / "attestations.jsonl"
+    contracts_path = tmp_path / "contracts.jsonl"
+    _write_attested_confirm_pair(prompts_path, attestations_path)
+    _write_functional_contract(contracts_path)
+    target = attestations_path if artifact == "attestations" else contracts_path
+    lines = target.read_text(encoding="utf-8").splitlines()
+    lines[0] += " " * (1024 * 1024 + 1 - len(lines[0]))
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(
+            _config(
+                tmp_path,
+                prompts_path,
+                prompt_attestations_path=attestations_path,
+                functional_outcome_contracts_path=contracts_path,
+            )
+        )
+    assert exc_info.value.code is ErrorCode.CONTRACT
 
 
 def test_demo_preflight_returns_expected_counts() -> None:

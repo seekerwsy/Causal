@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.3"
+FEATURE_CATALOG_VERSION = "1.4"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -176,7 +176,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
         edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
         terms=("deserialize data", "load a pickle", "parse serialized object"),
-        clauses=(" Deserialize the provided data.",),
+        clauses=(" Deserialize data.",),
     ),
     _feature(
         "safety.input_validation",
@@ -238,7 +238,7 @@ PROMPT_FEATURE_CATALOG = (
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("safe object loading", "allowlisted types", "trusted serializer"),
-        clauses=(" Allow only approved types during deserialization.",),
+        clauses=(" Use allowlisted types during deserialization.",),
     ),
     _feature(
         "safety.generic_security_reminder",
@@ -293,7 +293,7 @@ PROMPT_FEATURE_CATALOG = (
         "presentation.matched_control",
         FeatureFamily.PRESENTATION_CONTROL,
         terms=("matched control",),
-        clauses=(" Apply a matched-control rewrite.",),
+        clauses=(" Apply a matched control rewrite.",),
     ),
 )
 

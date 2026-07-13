@@ -21,9 +21,15 @@ from secaware.oracle.runner import (
     run_analyzer_process,
     validate_analyzer_runtime,
 )
+from secaware.pipeline.artifact import sha256_file
 from secaware.schema.common import StrictModel
 from secaware.schema.experiments import FunctionalOutcomeContractRecord
 from secaware.schema.records import PromptRecord
+
+
+MAX_PREFLIGHT_JSONL_RECORDS = 100_000
+MAX_PREFLIGHT_JSONL_LINE_CHARS = 1024 * 1024
+MAX_PREFLIGHT_JSONL_TOTAL_CHARS = 128 * 1024 * 1024
 
 
 class PreflightReport(StrictModel):
@@ -56,6 +62,40 @@ def _error(code: ErrorCode, message: str) -> SecAwareError:
 def _normalized_prompt_sha256(prompt: str) -> str:
     normalized = " ".join(prompt.strip().split()).lower()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _read_stable_jsonl(
+    path: str | Path,
+    model: type,
+    *,
+    required: bool,
+    allow_empty: bool,
+) -> list:
+    try:
+        before_sha256 = sha256_file(path)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _error(ErrorCode.CONTRACT, "preflight input artifact is unavailable") from None
+    records = read_jsonl(
+        path,
+        model,
+        required=required,
+        allow_empty=allow_empty,
+        max_records=MAX_PREFLIGHT_JSONL_RECORDS,
+        max_line_chars=MAX_PREFLIGHT_JSONL_LINE_CHARS,
+        max_total_chars=MAX_PREFLIGHT_JSONL_TOTAL_CHARS,
+        stage="preflight",
+    )
+    try:
+        after_sha256 = sha256_file(path)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _error(ErrorCode.CONTRACT, "preflight input artifact changed") from None
+    if before_sha256 != after_sha256:
+        raise _error(ErrorCode.CONTRACT, "preflight input artifact changed")
+    return records
 
 
 def _oracle_error(code: ErrorCode) -> SecAwareError:
@@ -270,12 +310,11 @@ def run_preflight(config: AppConfig) -> PreflightReport:
                 "provider authentication is unavailable",
             )
 
-    prompts = read_jsonl(
+    prompts = _read_stable_jsonl(
         config.data.prompts_path,
         PromptRecord,
         required=True,
         allow_empty=False,
-        stage="preflight",
     )
     prompt_ids = [prompt.prompt_id for prompt in prompts]
     if len(set(prompt_ids)) != len(prompt_ids):
@@ -321,23 +360,21 @@ def run_preflight(config: AppConfig) -> PreflightReport:
                 details={"path": str(provider_path)},
             )
 
-    attestations = read_jsonl(
+    attestations = _read_stable_jsonl(
         config.data.prompt_attestations_path,
         PromptRoleAttestationRecord,
         required=True,
         allow_empty=True,
-        stage="preflight",
     )
     validate_prompt_role_attestations(prompts, attestations)
 
     contracts_path = config.data.functional_outcome_contracts_path
     if contracts_path is not None:
-        contracts = read_jsonl(
+        contracts = _read_stable_jsonl(
             contracts_path,
             FunctionalOutcomeContractRecord,
             required=True,
             allow_empty=False,
-            stage="preflight",
         )
         contract_ids = tuple(item.contract_id for item in contracts)
         task_features = tuple(item.task_feature_id for item in contracts)

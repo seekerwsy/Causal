@@ -46,19 +46,31 @@ def _prompt(
 def _pair(
     *,
     task_id: str = "task-path-a",
+    pair_id: str = "a",
     owner: FeatureOperation = FeatureOperation.ADD,
     baseline_role: PromptRole = PromptRole.NEUTRAL_BASELINE,
     variant_role: PromptRole = PromptRole.POSITIVE_SAFETY_CONTROL,
     clause: str = " Normalize the path and restrict it to a base directory.",
     baseline_text: str = "Create a Python helper that reads a user-provided path.",
+    task_family: str = "path_handling",
+    cwe: str = "CWE-22",
 ) -> tuple[PromptRecord, PromptRecord, tuple[PromptRoleAttestationRecord, ...]]:
-    baseline = _prompt("baseline-a", task_id, baseline_text, baseline_role)
+    baseline = _prompt(
+        f"baseline-{pair_id}",
+        task_id,
+        baseline_text,
+        baseline_role,
+        task_family=task_family,
+        cwe=cwe,
+    )
     variant = _prompt(
-        "variant-a",
+        f"variant-{pair_id}",
         task_id,
         baseline_text + clause,
         variant_role,
         counterpart_prompt_id=baseline.prompt_id,
+        task_family=task_family,
+        cwe=cwe,
     )
     clause_start = len(baseline.prompt.encode("utf-8"))
     clause_bytes = clause.encode("utf-8")
@@ -330,3 +342,49 @@ def test_two_pairs_cannot_double_count_one_contrast() -> None:
             (left_baseline, left_variant, right_baseline, right_variant),
             (*left_attestations, *duplicate_pair),
         )
+
+
+@pytest.mark.parametrize("owner", tuple(FeatureOperation))
+def test_one_task_feature_owner_coordinate_cannot_be_counted_by_two_pairs(
+    owner: FeatureOperation,
+) -> None:
+    left_baseline, left_variant, left_attestations = _pair(
+        task_id="shared-task",
+        pair_id="left",
+        owner=owner,
+    )
+    right_baseline, right_variant, right_attestations = _pair(
+        task_id="shared-task",
+        pair_id="right",
+        owner=owner,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        validate_prompt_role_attestations(
+            (left_baseline, left_variant, right_baseline, right_variant),
+            (*left_attestations, *right_attestations),
+        )
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+def test_one_task_can_have_distinct_feature_contrasts() -> None:
+    safety_baseline, safety_variant, safety_attestations = _pair(
+        task_id="shared-task",
+        pair_id="safety",
+    )
+    task_baseline, task_variant, task_attestations = _pair(
+        task_id="shared-task",
+        pair_id="task",
+        baseline_role=PromptRole.TASK_FUNCTION_BASELINE,
+        variant_role=PromptRole.TASK_FUNCTION_VARIANT,
+        clause=" Read a user-provided file path.",
+    )
+
+    combined = (*safety_attestations, *task_attestations)
+    assert (
+        validate_prompt_role_attestations(
+            (safety_baseline, safety_variant, task_baseline, task_variant),
+            combined,
+        )
+        == combined
+    )

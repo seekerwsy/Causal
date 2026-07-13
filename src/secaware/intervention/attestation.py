@@ -359,6 +359,7 @@ def validate_prompt_role_attestations(
         )
         referenced_baselines: list[str] = []
         contrast_ids: list[str] = []
+        contrast_coordinates: list[tuple[str, str, FeatureOperation]] = []
         for variant in variants:
             variant_attestation = attestation_by_prompt_id[variant.prompt_id]
             counterpart_id = variant.counterpart_prompt_id
@@ -368,13 +369,26 @@ def validate_prompt_role_attestations(
             baseline_attestation = attestation_by_prompt_id.get(counterpart_id)
             if baseline is None or baseline_attestation is None:
                 raise ValueError
-            _validate_pair(variant, baseline, variant_attestation, baseline_attestation)
+            feature_id = _validate_pair(
+                variant,
+                baseline,
+                variant_attestation,
+                baseline_attestation,
+            )
             referenced_baselines.append(counterpart_id)
             contrast_ids.append(contrast_id(variant_attestation, FeatureOperation.ADD))
+            contrast_coordinates.append(
+                (
+                    variant.task_id,
+                    feature_id,
+                    variant_attestation.contrast_owner_operation,
+                )
+            )
         if (
             len(referenced_baselines) != len(set(referenced_baselines))
             or set(referenced_baselines) != {item.prompt_id for item in baselines}
             or len(contrast_ids) != len(set(contrast_ids))
+            or len(contrast_coordinates) != len(set(contrast_coordinates))
         ):
             raise ValueError
         return checked_attestations
@@ -431,17 +445,51 @@ def counterpart_for(
         checked_instance = TargetInstanceRecord.model_validate(
             instance.model_dump(mode="python", round_trip=True, warnings=False)
         )
+        if type(attestations) not in {tuple, list}:
+            raise ValueError
         checked = tuple(_revalidate_attestation(item) for item in attestations)
-        matches = tuple(
+        source_matches = tuple(
+            item
+            for item in checked
+            if item.prompt_id == checked_instance.source_prompt_id
+            and item.prompt_sha256 == checked_instance.source_prompt_sha256
+            and item.task_id == checked_instance.task_id
+            and item.prompt_role is checked_instance.source_prompt_role
+        )
+        counterpart_matches = tuple(
             item
             for item in checked
             if item.prompt_id == checked_instance.counterpart_prompt_id
             and item.prompt_sha256 == checked_instance.counterpart_prompt_sha256
             and item.task_id == checked_instance.task_id
         )
-        if not checked_instance.counterpart_required or len(matches) != 1:
+        if (
+            not checked_instance.counterpart_required
+            or len(source_matches) != 1
+            or len(counterpart_matches) != 1
+        ):
             raise ValueError
-        return matches[0]
+        source = source_matches[0]
+        counterpart = counterpart_matches[0]
+        expected_baseline_role = _VARIANT_BASELINE_ROLE.get(source.prompt_role)
+        clause_sha256 = source.variant_clause_sha256
+        if (
+            expected_baseline_role is None
+            or counterpart.prompt_role is not expected_baseline_role
+            or source.counterpart_prompt_id != counterpart.prompt_id
+            or source.counterpart_prompt_sha256 != counterpart.prompt_sha256
+            or source.contrast_owner_operation is not FeatureOperation.REMOVE
+            or counterpart.contrast_owner_operation is not FeatureOperation.REMOVE
+            or counterpart.counterpart_prompt_id is not None
+            or counterpart.counterpart_prompt_sha256 is not None
+            or counterpart.variant_clause_start is not None
+            or counterpart.variant_clause_end is not None
+            or counterpart.variant_clause_sha256 is not None
+            or clause_sha256 is None
+        ):
+            raise ValueError
+        _catalog_feature_for_digest(clause_sha256, source.prompt_role)
+        return counterpart
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:

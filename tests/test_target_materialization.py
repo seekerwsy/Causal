@@ -35,6 +35,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 import secaware.intervention as intervention_api
+import secaware.intervention.attestation as attestation_module
 import secaware.intervention.targeting as targeting_module
 
 
@@ -309,6 +310,154 @@ def test_safety_remove_requires_exact_positive_to_neutral_counterpart() -> None:
     assert instance.source_prompt_role is PromptRole.POSITIVE_SAFETY_CONTROL
     assert instance.counterpart_required is True
     assert counterpart_for(instance, attestations).prompt_id == baseline.prompt_id
+
+
+def _remove_instance_bundle() -> tuple[
+    TargetInstanceRecord,
+    tuple[PromptRoleAttestationRecord, ...],
+]:
+    hypothesis = _hypothesis()
+    target = materialize_target_spec(hypothesis, FeatureOperation.REMOVE)
+    baseline, positive, attestations = _pair(operation=FeatureOperation.REMOVE)
+    instance = materialize_target_instance(
+        target,
+        hypothesis,
+        positive,
+        (baseline, positive),
+        attestations,
+    )
+    return instance, attestations
+
+
+def _rebind_instance(
+    instance: TargetInstanceRecord,
+    **updates: object,
+) -> TargetInstanceRecord:
+    payload = instance.model_dump(mode="python", exclude={"target_instance_id"})
+    payload.update(updates)
+    return TargetInstanceRecord.from_content(**payload)
+
+
+def _rebind_attestation(
+    attestation: PromptRoleAttestationRecord,
+    **updates: object,
+) -> PromptRoleAttestationRecord:
+    payload = attestation.model_dump(mode="python", exclude={"attestation_id"})
+    payload.update(updates)
+    return PromptRoleAttestationRecord.from_content(**payload)
+
+
+@pytest.mark.parametrize(
+    "forgery",
+    (
+        "missing_source",
+        "duplicate_source",
+        "reverse_coordinates",
+        "source_role",
+        "source_link",
+        "owner_add",
+        "owner_mismatch",
+        "feature_family",
+    ),
+)
+def test_counterpart_resolution_rejects_incomplete_or_forged_remove_proof(
+    forgery: str,
+) -> None:
+    instance, attestations = _remove_instance_bundle()
+    baseline_attestation, source_attestation = attestations
+    supplied: tuple[PromptRoleAttestationRecord, ...] = attestations
+    if forgery == "missing_source":
+        supplied = (baseline_attestation,)
+    elif forgery == "duplicate_source":
+        supplied = (*attestations, source_attestation)
+    elif forgery == "reverse_coordinates":
+        instance = _rebind_instance(
+            instance,
+            source_prompt_id=baseline_attestation.prompt_id,
+            source_prompt_sha256=baseline_attestation.prompt_sha256,
+            source_prompt_role=baseline_attestation.prompt_role,
+            counterpart_prompt_id=source_attestation.prompt_id,
+            counterpart_prompt_sha256=source_attestation.prompt_sha256,
+        )
+    elif forgery == "source_role":
+        instance = _rebind_instance(
+            instance,
+            source_prompt_role=PromptRole.NEUTRAL_BASELINE,
+        )
+    elif forgery == "source_link":
+        supplied = (
+            baseline_attestation,
+            _rebind_attestation(
+                source_attestation,
+                counterpart_prompt_id="forged-baseline",
+            ),
+        )
+    elif forgery == "owner_add":
+        supplied = tuple(
+            _rebind_attestation(
+                item,
+                contrast_owner_operation=FeatureOperation.ADD,
+            )
+            for item in attestations
+        )
+    elif forgery == "owner_mismatch":
+        supplied = (
+            baseline_attestation,
+            _rebind_attestation(
+                source_attestation,
+                contrast_owner_operation=FeatureOperation.ADD,
+            ),
+        )
+    else:
+        supplied = (
+            baseline_attestation,
+            _rebind_attestation(
+                source_attestation,
+                variant_clause_sha256=hashlib.sha256(b" Query a SQLite database.").hexdigest(),
+            ),
+        )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        counterpart_for(instance, supplied)
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+def test_counterpart_resolution_rejects_positive_to_positive_pair() -> None:
+    instance, attestations = _remove_instance_bundle()
+    baseline_attestation, source_attestation = attestations
+    clause = b" Normalize the path."
+    forged_positive = PromptRoleAttestationRecord.from_content(
+        prompt_id=baseline_attestation.prompt_id,
+        task_id=baseline_attestation.task_id,
+        prompt_sha256=baseline_attestation.prompt_sha256,
+        prompt_role=PromptRole.POSITIVE_SAFETY_CONTROL,
+        counterpart_prompt_id="forged-peer",
+        counterpart_prompt_sha256="9" * 64,
+        variant_clause_start=0,
+        variant_clause_end=len(clause),
+        variant_clause_sha256=hashlib.sha256(clause).hexdigest(),
+        contrast_owner_operation=FeatureOperation.REMOVE,
+        catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        counterpart_for(instance, (source_attestation, forged_positive))
+    assert exc_info.value.code is ErrorCode.CONTRACT
+
+
+@pytest.mark.parametrize("fatal", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_counterpart_resolution_propagates_fatal_attestation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    fatal: type[BaseException],
+) -> None:
+    instance, attestations = _remove_instance_bundle()
+
+    def fail(_value: object) -> PromptRoleAttestationRecord:
+        raise fatal
+
+    monkeypatch.setattr(attestation_module, "_revalidate_attestation", fail)
+    with pytest.raises(fatal):
+        counterpart_for(instance, attestations)
 
 
 def test_two_tasks_share_semantic_ids_but_not_instance_ids() -> None:
