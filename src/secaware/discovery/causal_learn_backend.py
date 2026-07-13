@@ -84,11 +84,19 @@ def _validated_fci_inputs(
         raise ValueError
     if type(matrix) is not np.ndarray or matrix.dtype != np.dtype(np.int64):
         raise ValueError
-    expected_shape = (checked_table.row_count, len(checked_table.variables))
+    # Observational matrices are authenticated task-cluster draws: one selected
+    # generation seed for each task occurrence, not every source-table seed row.
+    expected_rows = (
+        checked_table.independent_task_count
+        if checked_run_kind in _OBSERVATIONAL_RUN_KINDS
+        else checked_table.row_count
+    )
+    expected_shape = (expected_rows, len(checked_table.variables))
     if (
         matrix.ndim != 2
         or matrix.shape != expected_shape
         or checked_table.row_count > checked_config.max_rows
+        or checked_table.row_count % checked_table.independent_task_count != 0
         or len(checked_table.variables) > checked_config.max_variables
         or checked_table.independent_task_count < checked_config.min_independent_tasks
         or checked_knowledge.table_id != checked_table.table_id
@@ -105,7 +113,10 @@ def _validated_fci_inputs(
     )
     if knowledge_variables != expected_variables:
         raise ValueError
-    if checked_run_kind in _OBSERVATIONAL_RUN_KINDS and checked_knowledge.unconstrained_variable_ids:
+    if (
+        checked_run_kind in _OBSERVATIONAL_RUN_KINDS
+        and checked_knowledge.unconstrained_variable_ids
+    ):
         raise ValueError
     # Translation authenticates the finite tier and adjacency contract before FCI.
     to_causal_learn_background(checked_knowledge)
@@ -175,7 +186,9 @@ def _validate_library_edges(graph: object, library_edges: object) -> None:
     allowed_properties = tuple(Edge.Property)
     for edge in library_edges:
         properties = getattr(edge, "properties", None)
-        if type(properties) is not list or any(item not in allowed_properties for item in properties):
+        if type(properties) is not list or any(
+            item not in allowed_properties for item in properties
+        ):
             raise ValueError
 
 
