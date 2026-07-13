@@ -7,6 +7,8 @@ import json
 import multiprocessing
 from multiprocessing.connection import Connection
 from multiprocessing.reduction import ForkingPickler
+from queue import Empty, Queue
+import threading
 import time
 from typing import Protocol
 
@@ -124,6 +126,24 @@ def _terminate_and_join(process: multiprocessing.Process) -> None:
         pass
 
 
+def _read_pipe_messages(
+    receive_connection: Connection,
+    events: Queue[tuple[str, bytes | None]],
+) -> None:
+    """Read at most two framed payloads without blocking the deadline owner."""
+    try:
+        for _index in range(2):
+            payload = receive_connection.recv_bytes(_MAX_PAYLOAD_BYTES)
+            events.put_nowait(("payload", payload))
+    except EOFError:
+        events.put_nowait(("eof", None))
+    except BaseException:
+        try:
+            events.put_nowait(("error", None))
+        except BaseException:
+            pass
+
+
 class SpawnedFCIRunner:
     """Run a validated FCI job in a fresh bounded spawn child."""
 
@@ -150,26 +170,42 @@ class SpawnedFCIRunner:
         config: FCIDiscoveryConfig,
         run_kind: PAGRunKind,
     ) -> PAGRecord:
+        """Run FCI after the caller authenticates matrix rows to ``table``.
+
+        This boundary validates shape and categorical bounds only. The Task 5
+        draw/run wrapper remains responsible for matrix-content provenance.
+        """
         process: multiprocessing.Process | None = None
         receive_connection: Connection | None = None
         send_connection: Connection | None = None
+        reader: threading.Thread | None = None
         timed_out = False
         invalid_transport = False
-        pipe_eof = False
         payloads: list[bytes] = []
         try:
+            base_config = FCIDiscoveryConfig.model_validate(config)
+            effective_config = base_config
+            if self._timeout_seconds is not None:
+                effective_config = FCIDiscoveryConfig.model_validate(
+                    {
+                        **base_config.model_dump(mode="json"),
+                        "timeout_seconds": self._timeout_seconds,
+                    }
+                )
             (
                 checked_matrix,
                 checked_table,
                 checked_knowledge,
                 checked_config,
                 checked_run_kind,
-            ) = validate_fci_inputs(matrix, table, knowledge, config, run_kind)
-            timeout = (
-                checked_config.timeout_seconds
-                if self._timeout_seconds is None
-                else self._timeout_seconds
+            ) = validate_fci_inputs(
+                matrix,
+                table,
+                knowledge,
+                effective_config,
+                run_kind,
             )
+            timeout = checked_config.timeout_seconds
             job_json = _canonical_json(
                 {
                     "table": checked_table.model_dump(mode="json"),
@@ -194,6 +230,14 @@ class SpawnedFCIRunner:
             process.start()
             send_connection.close()
             send_connection = None
+            events: Queue[tuple[str, bytes | None]] = Queue(maxsize=3)
+            reader = threading.Thread(
+                target=_read_pipe_messages,
+                args=(receive_connection, events),
+                name="secaware-fci-pipe-reader",
+                daemon=True,
+            )
+            reader.start()
 
             while True:
                 remaining = deadline - time.monotonic()
@@ -201,51 +245,26 @@ class SpawnedFCIRunner:
                     timed_out = True
                     break
                 try:
-                    has_payload = not pipe_eof and receive_connection.poll(
-                        min(_POLL_INTERVAL_SECONDS, remaining)
+                    event, payload = events.get(
+                        timeout=min(_POLL_INTERVAL_SECONDS, remaining)
                     )
-                except OSError:
-                    has_payload = False
-                    pipe_eof = True
-                if pipe_eof and process.is_alive():
-                    time.sleep(min(_POLL_INTERVAL_SECONDS, remaining))
-                if has_payload:
-                    try:
-                        payloads.append(receive_connection.recv_bytes(_MAX_PAYLOAD_BYTES))
-                    except EOFError:
-                        pipe_eof = True
-                    except OSError:
+                except Empty:
+                    event, payload = "", None
+                if event == "payload":
+                    if payload is None:
                         invalid_transport = True
                         break
+                    payloads.append(payload)
                     if len(payloads) > 1:
                         invalid_transport = True
                         break
+                elif event == "error":
+                    invalid_transport = True
+                    break
                 if not process.is_alive():
                     process.join(_JOIN_GRACE_SECONDS)
-                    # Drain messages queued just before child exit. A second message
-                    # is always a protocol violation.
-                    while not pipe_eof:
-                        try:
-                            queued = receive_connection.poll(0)
-                        except OSError:
-                            pipe_eof = True
-                            break
-                        if not queued:
-                            break
-                        try:
-                            payloads.append(
-                                receive_connection.recv_bytes(_MAX_PAYLOAD_BYTES)
-                            )
-                        except EOFError:
-                            pipe_eof = True
-                            break
-                        except OSError:
-                            invalid_transport = True
-                            break
-                        if len(payloads) > 1:
-                            invalid_transport = True
-                            break
-                    break
+                    if reader is not None and not reader.is_alive() and events.empty():
+                        break
 
             if timed_out:
                 raise _supervisor_error("FCI worker timed out")
@@ -283,16 +302,22 @@ class SpawnedFCIRunner:
         finally:
             if process is not None:
                 _terminate_and_join(process)
-                try:
-                    process.close()
-                except BaseException:
-                    pass
             for connection in (receive_connection, send_connection):
                 if connection is not None:
                     try:
                         connection.close()
                     except BaseException:
                         pass
+            if reader is not None:
+                try:
+                    reader.join(_JOIN_GRACE_SECONDS)
+                except BaseException:
+                    pass
+            if process is not None:
+                try:
+                    process.close()
+                except BaseException:
+                    pass
             matrix = None  # type: ignore[assignment]
             table = None  # type: ignore[assignment]
             knowledge = None  # type: ignore[assignment]

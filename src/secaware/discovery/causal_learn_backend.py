@@ -27,17 +27,21 @@ from secaware.schema.causal import (
 
 
 CAUSAL_LEARN_VERSION = "0.1.4.7"
-_PINNED_BK_STDOUT = (
-    "Starting BK Orientation.\n"
-    "Finishing BK Orientation.\n"
-    "Starting BK Orientation.\n"
-    "Finishing BK Orientation.\n"
+_BK_START_LINE = "Starting BK Orientation.\n"
+_BK_FINISH_LINE = "Finishing BK Orientation.\n"
+_BK_ORIENTATION_PREFIX = "Orienting edge (Knowledge): "
+_FCI_RUN_KINDS = frozenset(
+    {
+        PAGRunKind.OBSERVATIONAL_REFERENCE,
+        PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
+        PAGRunKind.JCI_RAW,
+        PAGRunKind.JCI_CONSTRAINED,
+    }
 )
 _OBSERVATIONAL_RUN_KINDS = frozenset(
     {
         PAGRunKind.OBSERVATIONAL_REFERENCE,
         PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
-        PAGRunKind.RFCI_SENSITIVITY,
     }
 )
 
@@ -76,6 +80,8 @@ def _validated_fci_inputs(
     checked_knowledge = BackgroundKnowledgeRecord.model_validate(knowledge)
     checked_config = FCIDiscoveryConfig.model_validate(config)
     checked_run_kind = PAGRunKind(run_kind)
+    if checked_run_kind not in _FCI_RUN_KINDS:
+        raise ValueError
     if type(matrix) is not np.ndarray or matrix.dtype != np.dtype(np.int64):
         raise ValueError
     expected_shape = (checked_table.row_count, len(checked_table.variables))
@@ -131,7 +137,12 @@ def validate_fci_inputs(
     FCIDiscoveryConfig,
     PAGRunKind,
 ]:
-    """Validate all FCI inputs and return an isolated immutable matrix copy."""
+    """Validate FCI input shape/categories and return an isolated matrix copy.
+
+    The caller must authenticate matrix rows against the table observations before
+    this boundary. Matrix-to-table content binding belongs to the Task 5 draw/run
+    wrapper; this adapter deliberately does not claim that shape checks provide it.
+    """
     try:
         return _validated_fci_inputs(matrix, table, knowledge, config, run_kind)
     except (KeyboardInterrupt, SystemExit):
@@ -168,6 +179,45 @@ def _validate_library_edges(graph: object, library_edges: object) -> None:
             raise ValueError
 
 
+def _validate_pinned_backend_stdout(
+    output: str,
+    table: CausalTableRecord,
+    knowledge: BackgroundKnowledgeRecord,
+) -> None:
+    lines = output.splitlines(keepends=True)
+    if not lines or any(not line.endswith("\n") or "\r" in line for line in lines):
+        raise ValueError
+    known = {item.variable_id for item in table.variables}
+    forbidden_directions = set(knowledge.forbidden_directions)
+    forbidden_adjacencies = set(knowledge.forbidden_adjacencies)
+    index = 0
+    for _round in range(2):
+        if index >= len(lines) or lines[index] != _BK_START_LINE:
+            raise ValueError
+        index += 1
+        while index < len(lines) and lines[index].startswith(_BK_ORIENTATION_PREFIX):
+            line = lines[index]
+            orientation = line[len(_BK_ORIENTATION_PREFIX) : -1]
+            if orientation.count(" --> ") != 1:
+                raise ValueError
+            source, target = orientation.split(" --> ")
+            pair = (source, target) if source < target else (target, source)
+            if (
+                source == target
+                or source not in known
+                or target not in known
+                or (source, target) in forbidden_directions
+                or pair in forbidden_adjacencies
+            ):
+                raise ValueError
+            index += 1
+        if index >= len(lines) or lines[index] != _BK_FINISH_LINE:
+            raise ValueError
+        index += 1
+    if index != len(lines):
+        raise ValueError
+
+
 def run_causal_learn_fci(
     matrix: np.ndarray,
     table: CausalTableRecord,
@@ -202,12 +252,9 @@ def run_causal_learn_fci(
                     show_progress=False,
                     node_names=[item.variable_id for item in checked_table.variables],
                 )
-        if (
-            captured_warnings
-            or stdout.getvalue() not in ("", _PINNED_BK_STDOUT)
-            or stderr.getvalue()
-        ):
+        if captured_warnings or stderr.getvalue():
             raise ValueError
+        _validate_pinned_backend_stdout(stdout.getvalue(), checked_table, checked_knowledge)
         _validate_library_edges(graph, library_edges)
         pag = pag_from_causal_learn(
             graph,

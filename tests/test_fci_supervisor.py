@@ -5,6 +5,8 @@ from functools import partial
 import json
 import multiprocessing
 import os
+import struct
+import threading
 import time
 from typing import Any
 
@@ -61,6 +63,17 @@ def _returns_valid(send_connection: Any, job_json: bytes, _matrix: np.ndarray) -
 
 
 def _never_returns(_send_connection: Any, _job_json: bytes, _matrix: np.ndarray) -> None:
+    while True:
+        time.sleep(0.05)
+
+
+def _partial_frame_then_hangs(
+    send_connection: Any,
+    _job_json: bytes,
+    _matrix: np.ndarray,
+) -> None:
+    os.write(send_connection.fileno(), struct.pack("!i", 64))
+    os.write(send_connection.fileno(), b"{")
     while True:
         time.sleep(0.05)
 
@@ -215,6 +228,31 @@ def test_supervisor_terminates_a_hung_worker_without_leaking_children() -> None:
         )
     assert time.monotonic() - started < 2.0
     assert {child.pid for child in multiprocessing.active_children()} <= baseline
+    assert not any(
+        thread.name == "secaware-fci-pipe-reader" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX Connection framing uses a byte-stream pipe")
+def test_supervisor_times_out_on_a_partial_pipe_frame_without_blocking_parent() -> None:
+    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+
+    table = _table()
+    started = time.monotonic()
+    with pytest.raises(SecAwareError, match="timed out"):
+        SpawnedFCIRunner(timeout_seconds=0.1, worker=_partial_frame_then_hangs).run(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.OBSERVATIONAL_REFERENCE,
+        )
+    assert time.monotonic() - started < 2.0
+    assert not any(
+        thread.name == "secaware-fci-pipe-reader" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
 
 
 @pytest.mark.parametrize(
@@ -285,6 +323,50 @@ def test_production_supervisor_selects_real_pinned_worker() -> None:
     )
 
     assert pag.backend_version == "0.1.4.7"
+
+
+def test_supervisor_timeout_override_is_part_of_effective_config_provenance() -> None:
+    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+
+    table = _table()
+    original = _config()
+    effective = FCIDiscoveryConfig.model_validate(
+        {**original.model_dump(mode="json"), "timeout_seconds": 2.0}
+    )
+    pag = SpawnedFCIRunner(timeout_seconds=2.0, worker=_returns_valid).run(
+        _matrix(),
+        table,
+        build_background_knowledge(table),
+        original,
+        PAGRunKind.OBSERVATIONAL_REFERENCE,
+    )
+
+    assert pag.config_sha256 == canonical_sha256(effective.model_dump(mode="json"))
+    assert pag.config_sha256 != canonical_sha256(original.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize("timeout", (0.0, -1.0, float("nan"), float("inf")))
+def test_supervisor_rejects_nonfinite_or_out_of_bounds_timeout_override(
+    timeout: float,
+) -> None:
+    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+
+    with pytest.raises(SecAwareError):
+        SpawnedFCIRunner(timeout_seconds=timeout)
+
+
+def test_supervisor_rejects_rfci_run_kind_before_spawn() -> None:
+    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+
+    table = _table()
+    with pytest.raises(SecAwareError):
+        SpawnedFCIRunner(timeout_seconds=2.0, worker=_returns_valid).run(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.RFCI_SENSITIVITY,
+        )
 
 
 def test_supervisor_rejects_tampered_parent_inputs_before_spawn() -> None:

@@ -34,6 +34,12 @@ class _Graph:
         return self._edges
 
 
+def _print_empty_bk_orientation_blocks() -> None:
+    for _round in range(2):
+        print("Starting BK Orientation.")
+        print("Finishing BK Orientation.")
+
+
 def _variable(variable_id: str) -> CausalVariableSpec:
     declaration = declaration_by_id(variable_id)
     return CausalVariableSpec(
@@ -50,13 +56,16 @@ def _variable(variable_id: str) -> CausalVariableSpec:
 
 
 def _table() -> CausalTableRecord:
+    return _table_for_values(((0, 0), (1, 0), (0, 1), (1, 1)))
+
+
+def _table_for_values(values_by_row: tuple[tuple[int, int], ...]) -> CausalTableRecord:
     variables = (
         _variable("x.safety.sql_parameterization"),
         _variable("y.secure_functional"),
     )
     observations = []
-    for index in range(4):
-        values = (index % 2, (index // 2) % 2)
+    for index, values in enumerate(values_by_row):
         observations.append(
             (
                 CausalObservationRecord.row_id_from_content(
@@ -77,14 +86,49 @@ def _table() -> CausalTableRecord:
         cwe="CWE-89",
         model_id="model-a",
         variables=variables,
-        row_count=4,
-        independent_task_count=4,
+        row_count=len(values_by_row),
+        independent_task_count=len(values_by_row),
         observation_payload=observations,
     )
 
 
 def _matrix() -> np.ndarray:
     return np.asarray(((0, 0), (1, 0), (0, 1), (1, 1)), dtype=np.int64)
+
+
+def _table_with_forbidden_adjacency() -> tuple[CausalTableRecord, np.ndarray]:
+    variables = (
+        _variable("w.language_family"),
+        _variable("x.safety.sql_parameterization"),
+        _variable("y.secure_functional"),
+    )
+    values_by_row = ((0, 0, 0), (1, 0, 1), (0, 1, 1), (1, 1, 0))
+    observations = tuple(
+        (
+            CausalObservationRecord.row_id_from_content(
+                task_id=f"task-adj-{index}",
+                prompt_id=f"prompt-adj-{index}",
+                model_id="model-a",
+                seed_id=index,
+                values=values,
+            ),
+            f"task-adj-{index}",
+            f"prompt-adj-{index}",
+            index,
+            values,
+        )
+        for index, values in enumerate(values_by_row)
+    )
+    table = CausalTableRecord.from_content(
+        scope_id="scope.cwe_89",
+        cwe="CWE-89",
+        model_id="model-a",
+        variables=variables,
+        row_count=4,
+        independent_task_count=4,
+        observation_payload=observations,
+    )
+    return table, np.asarray(values_by_row, dtype=np.int64)
 
 
 def _config() -> FCIDiscoveryConfig:
@@ -104,6 +148,7 @@ def test_fci_adapter_calls_exact_gsq_configuration(monkeypatch: pytest.MonkeyPat
 
     def capture(dataset: np.ndarray, **kwargs: object) -> tuple[_Graph, list[Edge]]:
         calls.append((dataset, kwargs))
+        _print_empty_bk_orientation_blocks()
         return _Graph([item.variable_id for item in table.variables]), []
 
     monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", capture)
@@ -137,6 +182,78 @@ def test_pinned_real_fci_backend_is_runnable_with_background_knowledge() -> None
 
     assert pag.table_id == table.table_id
     assert pag.backend_version == "0.1.4.7"
+
+
+def test_pinned_real_fci_accepts_audited_bk_orientation_lines_for_known_nodes() -> None:
+    from secaware.discovery.causal_learn_backend import run_causal_learn_fci
+
+    values = tuple((index % 2, index % 2) for index in range(40))
+    table = _table_for_values(values)
+    pag = run_causal_learn_fci(
+        np.asarray(values, dtype=np.int64),
+        table,
+        build_background_knowledge(table),
+        _config(),
+    )
+
+    assert len(pag.edges) == 1
+    assert pag.edges[0].left == "x.safety.sql_parameterization"
+    assert pag.edges[0].right == "y.secure_functional"
+
+
+@pytest.mark.parametrize(
+    "orientation",
+    (
+        "x.unknown --> y.secure_functional",
+        "y.secure_functional --> x.safety.sql_parameterization",
+        "x.safety.sql_parameterization o-> y.secure_functional",
+        "x.safety.sql_parameterization --> y.secure_functional extra",
+    ),
+)
+def test_fci_adapter_rejects_unknown_forbidden_or_malformed_bk_orientation_output(
+    monkeypatch: pytest.MonkeyPatch,
+    orientation: str,
+) -> None:
+    from secaware.discovery.causal_learn_backend import run_causal_learn_fci
+
+    table = _table()
+
+    def diagnostic(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
+        for _round in range(2):
+            print("Starting BK Orientation.")
+            print(f"Orienting edge (Knowledge): {orientation}")
+            print("Finishing BK Orientation.")
+        return _Graph([item.variable_id for item in table.variables]), []
+
+    monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", diagnostic)
+    with pytest.raises(SecAwareError):
+        run_causal_learn_fci(
+            _matrix(), table, build_background_knowledge(table), _config()
+        )
+
+
+def test_fci_adapter_rejects_orientation_output_for_forbidden_adjacency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from secaware.discovery.causal_learn_backend import run_causal_learn_fci
+
+    table, matrix = _table_with_forbidden_adjacency()
+
+    def diagnostic(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
+        for _round in range(2):
+            print("Starting BK Orientation.")
+            print(
+                "Orienting edge (Knowledge): "
+                "w.language_family --> x.safety.sql_parameterization"
+            )
+            print("Finishing BK Orientation.")
+        return _Graph([item.variable_id for item in table.variables]), []
+
+    monkeypatch.setattr("secaware.discovery.causal_learn_backend.fci", diagnostic)
+    with pytest.raises(SecAwareError):
+        run_causal_learn_fci(
+            matrix, table, build_background_knowledge(table), _config()
+        )
 
 
 def test_fci_adapter_rejects_library_version_drift_before_backend(
@@ -222,6 +339,7 @@ def test_fci_adapter_rejects_unexpected_backend_diagnostics(
     table = _table()
 
     def noisy(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
+        _print_empty_bk_orientation_blocks()
         if emission == "warning":
             warnings.warn("unexpected backend warning")
         elif emission == "stdout":
@@ -247,12 +365,14 @@ def test_fci_adapter_rejects_unrecognized_library_edge_properties(
     right = GraphNode("y.secure_functional")
     edge = Edge(left, right, Endpoint.TAIL, Endpoint.ARROW)
     edge.properties.append(object())
+
+    def unexpected_property(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
+        _print_empty_bk_orientation_blocks()
+        return _Graph([item.variable_id for item in table.variables], [edge]), [edge]
+
     monkeypatch.setattr(
         "secaware.discovery.causal_learn_backend.fci",
-        lambda *_args, **_kwargs: (
-            _Graph([item.variable_id for item in table.variables], [edge]),
-            [edge],
-        ),
+        unexpected_property,
     )
 
     with pytest.raises(SecAwareError):
@@ -270,15 +390,40 @@ def test_fci_adapter_rejects_postrun_background_violation(
     left = GraphNode("x.safety.sql_parameterization")
     right = GraphNode("y.secure_functional")
     forbidden_reverse = Edge(left, right, Endpoint.ARROW, Endpoint.TAIL)
-    monkeypatch.setattr(
-        "secaware.discovery.causal_learn_backend.fci",
-        lambda *_args, **_kwargs: (
+
+    def forbidden_graph(*_args: object, **_kwargs: object) -> tuple[_Graph, list[Edge]]:
+        _print_empty_bk_orientation_blocks()
+        return (
             _Graph([item.variable_id for item in table.variables], [forbidden_reverse]),
             [forbidden_reverse],
-        ),
+        )
+
+    monkeypatch.setattr(
+        "secaware.discovery.causal_learn_backend.fci",
+        forbidden_graph,
     )
 
     with pytest.raises(SecAwareError):
         run_causal_learn_fci(
             _matrix(), table, build_background_knowledge(table), _config()
+        )
+
+
+def test_causal_learn_fci_adapter_rejects_rfci_run_kind_before_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from secaware.discovery.causal_learn_backend import run_causal_learn_fci
+
+    monkeypatch.setattr(
+        "secaware.discovery.causal_learn_backend.fci",
+        lambda *_args, **_kwargs: pytest.fail("FCI must not label output as RFCI"),
+    )
+    table = _table()
+    with pytest.raises(SecAwareError):
+        run_causal_learn_fci(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.RFCI_SENSITIVITY,
         )
