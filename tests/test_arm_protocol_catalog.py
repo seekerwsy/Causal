@@ -32,6 +32,7 @@ import secaware.schema.experiments as experiment_schema
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
+    prompt_feature_spec,
 )
 
 
@@ -302,6 +303,9 @@ def test_generic_security_reminder_stays_observable_and_arm_only_not_a_target() 
     assert "x.safety.generic_security_reminder" in {
         item.variable_id for item in PROMPT_CAUSAL_VARIABLES
     }
+    assert prompt_feature_spec("safety.generic_security_reminder").intervention_clauses == (
+        " Follow security best practices.",
+    )
     hypothesis = _hypothesis(
         "safety.generic_security_reminder",
         FeatureFamily.SAFETY_CONTROL,
@@ -334,6 +338,28 @@ def test_generic_security_reminder_stays_observable_and_arm_only_not_a_target() 
     assert tuple(item.feature_id for item in control.allowed_delta.allowed_transitions) == (
         "safety.generic_security_reminder",
     )
+
+
+@pytest.mark.parametrize(
+    ("operation", "role"),
+    (
+        (FeatureOperation.ADD, ArmRole.GENERIC_SECURITY_REMINDER),
+        (FeatureOperation.REMOVE, ArmRole.GENERIC_SECURITY_REPLACEMENT),
+    ),
+)
+def test_safety_add_and_remove_protocols_keep_catalog_owned_generic_control(
+    operation: FeatureOperation,
+    role: ArmRole,
+) -> None:
+    hypothesis = _hypothesis()
+    protocol = materialize_arm_protocol(
+        hypothesis,
+        _target("safety.path_normalization", operation, hypothesis=hypothesis),
+    )
+
+    assert "safety.generic_security_reminder" in {
+        item.feature_id for item in _arm(protocol, role).allowed_delta.allowed_transitions
+    }
 
 
 @pytest.mark.parametrize(

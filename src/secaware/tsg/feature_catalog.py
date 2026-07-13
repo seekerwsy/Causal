@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.2"
+FEATURE_CATALOG_VERSION = "1.3"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -245,6 +245,7 @@ PROMPT_FEATURE_CATALOG = (
         FeatureFamily.SAFETY_CONTROL,
         nodes=(NodeType.PROMPT_REQUIREMENT,),
         terms=("follow security best practices", "write secure code"),
+        clauses=(" Follow security best practices.",),
     ),
     _feature(
         "safety.prohibited_unsafe_request",
@@ -389,9 +390,7 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
             _CWE_RE.fullmatch(cwe) is None for cwe in item.applicable_cwes
         ):
             raise RuntimeError("invalid prompt feature CWE scope")
-        owns_confirmation_clause = (
-            item.intervenable and item.feature_id != "safety.generic_security_reminder"
-        )
+        owns_confirmation_clause = item.intervenable
         if bool(item.intervention_clauses) is not owns_confirmation_clause:
             raise RuntimeError("invalid prompt feature intervention clause ownership")
         if item.intervention_clauses and (
@@ -399,7 +398,11 @@ def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
                 item.feature_family is FeatureFamily.TASK_FUNCTION
                 and (not item.applicable_cwes or not item.applicable_task_families)
             )
-            or (item.feature_family is FeatureFamily.SAFETY_CONTROL and not item.applicable_cwes)
+            or (
+                item.feature_family is FeatureFamily.SAFETY_CONTROL
+                and not item.applicable_cwes
+                and item.feature_id != "safety.generic_security_reminder"
+            )
             or (
                 item.feature_family is FeatureFamily.PRESENTATION_CONTROL
                 and (item.applicable_cwes or item.applicable_task_families)

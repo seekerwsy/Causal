@@ -63,7 +63,7 @@ def test_catalog_is_exactly_the_finite_immutable_feature_set() -> None:
 
 
 def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> None:
-    assert FEATURE_CATALOG_VERSION == "1.2"
+    assert FEATURE_CATALOG_VERSION == "1.3"
     mapping = {
         item.feature_id: item.matched_control_feature_id
         for item in PROMPT_FEATURE_CATALOG
@@ -139,6 +139,13 @@ def test_catalog_owns_exact_versioned_intervention_clauses_without_shadow_table(
     )
 
 
+def test_generic_security_control_owns_one_exact_versioned_catalog_clause() -> None:
+    generic = prompt_feature_spec("safety.generic_security_reminder")
+
+    assert generic.intervention_clauses == (" Follow security best practices.",)
+    assert _digest_entry(generic)["intervention_clauses"] == (" Follow security best practices.",)
+
+
 def test_catalog_digest_payload_commits_intervention_clause_drift() -> None:
     source = prompt_feature_spec("safety.path_normalization")
     mutated = replace(
@@ -208,11 +215,12 @@ def test_catalog_rejects_noncanonical_or_duplicate_intervention_clauses(
 @pytest.mark.parametrize(
     "feature_id",
     (
-        "safety.generic_security_reminder",
         "safety.prohibited_unsafe_request",
+        "safety.vulnerability_disclosure",
+        "safety.expected_outcome_leakage",
     ),
 )
-def test_only_confirmation_targets_may_own_intervention_clauses(feature_id: str) -> None:
+def test_nonintervenable_sentinels_must_not_own_intervention_clauses(feature_id: str) -> None:
     mutated = tuple(
         replace(item, intervention_clauses=(" Follow security best practices.",))
         if item.feature_id == feature_id
@@ -227,6 +235,7 @@ def test_only_confirmation_targets_may_own_intervention_clauses(feature_id: str)
 def test_catalog_clause_digest_is_unique_and_feature_owned() -> None:
     by_digest: dict[str, str] = {}
     for spec in PROMPT_FEATURE_CATALOG:
+        assert bool(spec.intervention_clauses) is spec.intervenable
         for clause in spec.intervention_clauses:
             digest = hashlib.sha256(clause.encode("utf-8")).hexdigest()
             assert digest not in by_digest
@@ -264,3 +273,4 @@ def test_protocol_sentinels_are_non_intervenable() -> None:
     assert {
         item.feature_id for item in PROMPT_FEATURE_CATALOG if not item.intervenable
     } == sentinels
+    assert all(not prompt_feature_spec(feature_id).intervention_clauses for feature_id in sentinels)

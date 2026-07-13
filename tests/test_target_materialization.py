@@ -29,6 +29,7 @@ from secaware.schema.experiments import (
     ConfirmationProtocolInstanceRecord,
     PromptRole,
     TargetInstanceRecord,
+    TargetSpecRecord,
 )
 from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.records import PromptRecord
@@ -454,6 +455,40 @@ def test_target_spec_rejects_unpermitted_operation_and_forged_hypothesis() -> No
     forged = hypothesis.model_copy(update={"model_id": "other-model"})
     with pytest.raises(SecAwareError):
         materialize_target_spec(forged, FeatureOperation.ADD)
+
+
+def test_generic_control_is_rejected_by_target_spec_and_materializer_target_gate() -> None:
+    hypothesis = _hypothesis(feature_id="safety.generic_security_reminder")
+    with pytest.raises(SecAwareError):
+        materialize_target_spec(hypothesis, FeatureOperation.ADD)
+
+    selected = hypothesis.expected_contrasts[0]
+    forged = TargetSpecRecord.model_construct(
+        schema_version="1.0",
+        target_spec_id="target_" + "0" * 64,
+        hypothesis_id=hypothesis.hypothesis_id,
+        frozen_hypothesis_sha256=hypothesis.hypothesis_sha256,
+        feature_family=FeatureFamily.SAFETY_CONTROL,
+        feature_id="safety.generic_security_reminder",
+        operation=FeatureOperation.ADD,
+        hypothesis_outcome_variable_id=hypothesis.outcome_variable_id,
+        hypothesis_outcome_estimand_id=selected.outcome_estimand_id,
+        expected_hypothesis_contrast_sign=selected.expected_sign,
+    )
+    with pytest.raises(ValueError):
+        targeting_module._require_target_matches_hypothesis(forged, hypothesis)
+
+    baseline, variant, attestations = _pair(
+        clause_override=" Follow security best practices.",
+    )
+    with pytest.raises(SecAwareError):
+        materialize_target_instance(
+            forged,
+            hypothesis,
+            baseline,
+            (baseline, variant),
+            attestations,
+        )
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.intervention.attestation import (
     PromptRoleAttestationRecord,
+    attested_feature_id,
     contrast_id,
     validate_prompt_role_attestations,
 )
@@ -145,6 +146,13 @@ def test_exact_attestation_pair_validates_and_is_content_addressed() -> None:
     payload["prompt_sha256"] = "0" * 64
     with pytest.raises(ValidationError):
         PromptRoleAttestationRecord.model_validate(payload)
+
+
+def test_generic_control_clause_resolves_to_catalog_owned_feature() -> None:
+    baseline, variant, attestations = _pair(clause=" Follow security best practices.")
+
+    assert validate_prompt_role_attestations((baseline, variant), attestations) == attestations
+    assert attested_feature_id(attestations[1]) == "safety.generic_security_reminder"
 
 
 @pytest.mark.parametrize(

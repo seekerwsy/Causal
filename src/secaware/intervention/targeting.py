@@ -21,6 +21,7 @@ from secaware.schema.experiments import (
     PromptRole,
     TargetInstanceRecord,
     TargetSpecRecord,
+    is_confirmation_target_feature,
 )
 from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import (
@@ -135,6 +136,7 @@ def _require_target_matches_hypothesis(
         or spec.feature_family is not target.feature_family
         or not spec.intervenable
         or target.operation not in spec.operations
+        or not is_confirmation_target_feature(target.feature_id, target.operation)
     ):
         raise ValueError
 
