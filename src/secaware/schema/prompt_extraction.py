@@ -360,11 +360,23 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
             return value
         result = dict(value)
         if "facts" in result:
-            result["facts"] = tuple(sorted(result["facts"], key=_fact_sort_key))
+            facts = tuple(
+                SemanticFact.model_validate(item)
+                for item in _bounded_tuple(result["facts"], MAX_PROPOSAL_FACTS)
+            )
+            result["facts"] = tuple(sorted(facts, key=_fact_sort_key))
         if "direct_nodes" in result:
-            result["direct_nodes"] = tuple(sorted(result["direct_nodes"], key=_node_sort_key))
+            nodes = tuple(
+                DirectNodeProposal.model_validate(item)
+                for item in _bounded_tuple(result["direct_nodes"], MAX_PROPOSAL_NODES)
+            )
+            result["direct_nodes"] = tuple(sorted(nodes, key=_node_sort_key))
         if "direct_edges" in result:
-            result["direct_edges"] = tuple(sorted(result["direct_edges"], key=_edge_sort_key))
+            edges = tuple(
+                DirectEdgeProposal.model_validate(item)
+                for item in _bounded_tuple(result["direct_edges"], MAX_PROPOSAL_EDGES)
+            )
+            result["direct_edges"] = tuple(sorted(edges, key=_edge_sort_key))
         return result
 
     @field_validator("backend", mode="before")

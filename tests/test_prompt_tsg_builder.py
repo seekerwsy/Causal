@@ -121,6 +121,98 @@ def test_fact_proposal_builds_canonical_graph_independent_of_fact_order() -> Non
     )
 
 
+def test_fact_relations_materialize_into_canonical_typed_feature_edges() -> None:
+    prompt = _prompt()
+    baseline = build_prompt_tsg(_facts_proposal(), prompt)
+    payload = _facts_proposal().model_dump(mode="python", round_trip=True)
+    source = next(item for item in payload["facts"] if item["feature_id"] == "task.file_read")
+    source["relation_feature_ids"] = [
+        "task.input_consumption",
+        "task.database_query",
+    ]
+    payload["proposal_id"] = proposal_id_for_payload(payload)
+    forward = PromptExtractionProposalRecord.model_validate(payload)
+    reverse_payload = deepcopy(payload)
+    source = next(
+        item for item in reverse_payload["facts"] if item["feature_id"] == "task.file_read"
+    )
+    source["relation_feature_ids"].reverse()
+    reverse_payload["proposal_id"] = proposal_id_for_payload(reverse_payload)
+    reverse = PromptExtractionProposalRecord.model_validate(reverse_payload)
+
+    one = build_prompt_tsg(forward, prompt)
+    two = build_prompt_tsg(reverse, prompt)
+    graph = record_to_multidigraph(one)
+    related = sorted(
+        (
+            graph.nodes[src]["label"],
+            graph.nodes[dst]["label"],
+            data["attributes"],
+        )
+        for src, dst, data in graph.edges(data=True)
+        if data["edge_type"] is EdgeType.RELATED_TO
+    )
+
+    assert forward.proposal_id == reverse.proposal_id
+    assert one.graph_sha256 == two.graph_sha256
+    assert one.nodes == two.nodes
+    assert one.edges == two.edges
+    assert baseline.graph_sha256 != one.graph_sha256
+    assert related == [
+        (
+            "task.file_read",
+            target,
+            {
+                "evidence_start": prompt.prompt.index("user-provided file path"),
+                "evidence_end": prompt.prompt.index("user-provided file path")
+                + len("user-provided file path"),
+                "evidence_sha256": _sha("user-provided file path"),
+                "relation_kind": "feature_state",
+            },
+        )
+        for target in ("task.database_query", "task.input_consumption")
+    ]
+
+    one_relation = forward.model_dump(mode="python", round_trip=True)
+    source = next(item for item in one_relation["facts"] if item["feature_id"] == "task.file_read")
+    source["relation_feature_ids"] = ["task.input_consumption"]
+    one_relation["proposal_id"] = proposal_id_for_payload(one_relation)
+    changed = build_prompt_tsg(PromptExtractionProposalRecord.model_validate(one_relation), prompt)
+    assert changed.graph_sha256 not in {baseline.graph_sha256, one.graph_sha256}
+
+
+def test_fact_relations_support_presentation_feature_endpoints() -> None:
+    prompt = _prompt()
+    payload = _facts_proposal().model_dump(mode="python", round_trip=True)
+    source = next(
+        item for item in payload["facts"] if item["feature_id"] == "presentation.noop_rewrite"
+    )
+    text = "Read"
+    source["state"] = FeatureState.PRESENT
+    source["evidence"] = [
+        {
+            "start": 0,
+            "end": len(text),
+            "text": text,
+            "text_sha256": _sha(text),
+        }
+    ]
+    source["relation_feature_ids"] = ["presentation.sham_edit"]
+    payload["proposal_id"] = proposal_id_for_payload(payload)
+
+    graph = record_to_multidigraph(
+        build_prompt_tsg(PromptExtractionProposalRecord.model_validate(payload), prompt)
+    )
+    src, dst, data = next(
+        (src, dst, data)
+        for src, dst, data in graph.edges(data=True)
+        if data["edge_type"] is EdgeType.RELATED_TO
+    )
+
+    assert graph.nodes[src]["node_type"] is NodeType.PRESENTATION_FEATURE
+    assert graph.nodes[dst]["node_type"] is NodeType.PRESENTATION_FEATURE
+
+
 def test_built_graph_round_trips_with_exact_provenance() -> None:
     proposal = _facts_proposal()
     record = build_prompt_tsg(proposal, _prompt())

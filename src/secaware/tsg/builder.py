@@ -144,6 +144,32 @@ def _add_complete_feature_state_nodes(
         )
 
 
+def _add_fact_relations(
+    graph: nx.MultiDiGraph,
+    trusted: PromptExtractionProposalRecord,
+) -> None:
+    if trusted.backend not in {
+        PromptExtractorBackend.LLM_FACTS_V1,
+        PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+    }:
+        return
+    for fact in trusted.facts:
+        if not fact.relation_feature_ids:
+            continue
+        span = fact.evidence[0] if fact.evidence else None
+        attributes = {
+            **_evidence_attributes(span),
+            "relation_kind": fact.semantic_role,
+        }
+        for related_feature_id in fact.relation_feature_ids:
+            graph.add_edge(
+                f"feature-state:{fact.feature_id}",
+                f"feature-state:{related_feature_id}",
+                edge_type=EdgeType.RELATED_TO,
+                attributes=dict(attributes),
+            )
+
+
 def build_prompt_tsg(
     proposal: PromptExtractionProposalRecord,
     prompt: PromptRecord,
@@ -154,6 +180,7 @@ def build_prompt_tsg(
     try:
         graph, states = _build_structural_graph(trusted)
         _add_complete_feature_state_nodes(graph, states, source)
+        _add_fact_relations(graph, trusted)
         record = multidigraph_to_record(
             graph,
             prompt_id=source.prompt_id,

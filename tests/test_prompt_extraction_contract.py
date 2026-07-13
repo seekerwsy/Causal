@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 
 import pytest
@@ -173,6 +174,76 @@ def test_proposal_id_and_model_canonicalize_nested_evidence_order() -> None:
 
     assert forward_id == reverse_id
     assert PromptExtractionProposalRecord.model_validate(payload).proposal_id == forward_id
+
+
+def test_parallel_direct_edges_sort_after_child_evidence_canonicalization() -> None:
+    prompt = _prompt()
+
+    def span(text: str) -> dict[str, object]:
+        start = prompt.prompt.index(text)
+        return {
+            "start": start,
+            "end": start + len(text),
+            "text": text,
+            "text_sha256": _sha(text),
+        }
+
+    early = span("Read")
+    middle = span("file path")
+    late = span("normalize")
+    node_evidence = [late]
+    payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "prompt_id": prompt.prompt_id,
+        "task_id": prompt.task_id,
+        "prompt_sha256": _sha(prompt.prompt),
+        "backend": PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
+        "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
+        "policy_sha256": "9" * 64,
+        "response_sha256": _sha("parallel-direct"),
+        "raw_response": "parallel-direct",
+        "facts": [],
+        "direct_nodes": [
+            {
+                "local_id": "v1",
+                "node_type": "prompt_requirement",
+                "label": "path normalization requirement",
+                "feature_id": "safety.path_normalization",
+                "evidence": node_evidence,
+            },
+            {
+                "local_id": "v2",
+                "node_type": "guard",
+                "label": "path normalization guard",
+                "feature_id": "safety.path_normalization",
+                "evidence": node_evidence,
+            },
+        ],
+        "direct_edges": [
+            {
+                "src_local_id": "v1",
+                "dst_local_id": "v2",
+                "edge_type": "requires",
+                "evidence": [late, early],
+            },
+            {
+                "src_local_id": "v1",
+                "dst_local_id": "v2",
+                "edge_type": "requires",
+                "evidence": [middle],
+            },
+        ],
+    }
+    payload["proposal_id"] = proposal_id_for_payload(payload)
+    reverse = deepcopy(payload)
+    reverse["direct_edges"][0]["evidence"].reverse()
+    reverse["proposal_id"] = proposal_id_for_payload(reverse)
+
+    one = PromptExtractionProposalRecord.model_validate(payload)
+    two = PromptExtractionProposalRecord.model_validate(reverse)
+
+    assert one.proposal_id == two.proposal_id
+    assert one.model_dump_json() == two.model_dump_json()
 
 
 def test_validate_proposal_rejects_prompt_binding_and_fabricated_evidence() -> None:
