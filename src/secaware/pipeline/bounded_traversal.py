@@ -31,9 +31,7 @@ def _close_preserving_active_fatal(
 
     try:
         close(resource)
-    except _FATAL_EXCEPTIONS:
-        raise
-    except Exception:
+    except BaseException:
         if isinstance(active_exception, _FATAL_EXCEPTIONS):
             return
         raise

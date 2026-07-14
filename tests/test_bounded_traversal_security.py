@@ -347,6 +347,70 @@ def test_windows_active_fatal_identity_survives_ordinary_close_failures(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor close semantics")
+@pytest.mark.parametrize("active_type", (MemoryError, KeyboardInterrupt, SystemExit))
+@pytest.mark.parametrize("close_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_posix_active_fatal_identity_wins_over_fatal_close_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_type: type[BaseException],
+    close_type: type[BaseException],
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    active = active_type("private-posix-active-fatal")
+    close_failure = close_type("private-posix-close-fatal")
+    assert close_failure is not active
+    real_close = os.close
+
+    def close_then_interrupt(descriptor: int) -> None:
+        real_close(descriptor)
+        raise close_failure
+
+    monkeypatch.setattr(os, "close", close_then_interrupt)
+    try:
+        traversal.throw(active)
+    except BaseException as error:
+        assert error is active
+    else:
+        pytest.fail("active fatal did not propagate")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle close semantics")
+@pytest.mark.parametrize("active_type", (MemoryError, KeyboardInterrupt, SystemExit))
+@pytest.mark.parametrize("close_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_windows_active_fatal_identity_wins_over_fatal_close_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_type: type[BaseException],
+    close_type: type[BaseException],
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    active = active_type("private-windows-active-fatal")
+    close_failure = close_type("private-windows-close-fatal")
+    assert close_failure is not active
+    real_close = bounded_traversal._windows_close
+
+    def close_then_interrupt(handle: int) -> None:
+        real_close(handle)
+        raise close_failure
+
+    monkeypatch.setattr(bounded_traversal, "_windows_close", close_then_interrupt)
+    try:
+        traversal.throw(active)
+    except BaseException as error:
+        assert error is active
+    else:
+        pytest.fail("active fatal did not propagate")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor close semantics")
 def test_posix_no_active_fatal_close_failure_remains_typed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
