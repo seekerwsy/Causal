@@ -65,6 +65,24 @@ generation:
   seeds:
     - 1
     - 2
+  confirmation_seeds:
+    - 101
+    - 102
+    - 103
+    - 104
+    - 105
+    - 106
+    - 107
+    - 108
+    - 109
+    - 110
+    - 111
+    - 112
+
+randomization:
+  rng_version: sha256-rejection-fisher-yates-v1
+  max_blocks: 10000
+  min_independent_tasks_per_semantic_protocol: 20
 
 # Used only by Oracle stages. Oracle execution additionally requires the runtime
 # capabilities documented in README.md; unsupported runtimes fail closed.

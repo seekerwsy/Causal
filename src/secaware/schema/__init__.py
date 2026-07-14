@@ -35,12 +35,14 @@ from secaware.schema.features import (
 )
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
+    AssignmentRecord,
     ArmRole,
     ArmSpecRecord,
     CONFIRMATION_CONTROL_ONLY_FEATURE_IDS,
     CONFIRMATION_TARGET_FEATURE_IDS,
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
+    ExperimentalUnit,
     FeatureTransition,
     FunctionalOutcomeContractRecord,
     GraphDeltaRecord,
@@ -52,6 +54,7 @@ from secaware.schema.experiments import (
     PreRegisteredContrastSpec,
     PromptRole,
     PromptVariantRecord,
+    RandomizationManifestRecord,
     TargetInstanceRecord,
     TargetSpecRecord,
     is_confirmation_target_feature,
@@ -86,6 +89,7 @@ from secaware.schema.tsg import (
 
 __all__ = [
     "AllowedDeltaRecord",
+    "AssignmentRecord",
     "ArmRole",
     "ArmSpecRecord",
     "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
@@ -104,6 +108,7 @@ __all__ = [
     "CausalVariableSpec",
     "ConfirmationProtocolInstanceRecord",
     "ConfirmationProtocolRecord",
+    "ExperimentalUnit",
     "AnalyzerFindingRecord",
     "AnalyzerProvenanceRecord",
     "EffectRecord",
@@ -146,6 +151,7 @@ __all__ = [
     "PathSupportRecord",
     "PromptRecord",
     "PromptVariantRecord",
+    "RandomizationManifestRecord",
     "PreRegisteredContrastSpec",
     "PreRandomizationExclusionRecord",
     "PreRandomizationFailureCode",

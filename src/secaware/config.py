@@ -403,8 +403,32 @@ class GenerationConfig(StrictModel):
     provider: Literal["mock", "file", "api", "openai_compatible"] = "mock"
     models: list[str] = Field(default_factory=lambda: ["mock-secaware-v0"])
     seeds: list[int] = Field(default_factory=lambda: [1])
+    confirmation_seeds: list[int] = Field(default_factory=lambda: list(range(101, 113)))
     file_provider_dir: str | None = None
     openai_compatible: OpenAICompatibleConfig | None = None
+
+    @field_validator("confirmation_seeds")
+    @classmethod
+    def validate_confirmation_seeds(cls, value: list[int]) -> list[int]:
+        if (
+            not value
+            or len(value) > 100_000
+            or len(value) != len(set(value))
+            or any(type(seed) is not int or not -(2**63) <= seed <= 2**63 - 1 for seed in value)
+        ):
+            raise ValueError("confirmation seed configuration failed validation")
+        return value
+
+
+class RandomizationConfig(StrictModel):
+    rng_version: Literal["sha256-rejection-fisher-yates-v1"] = "sha256-rejection-fisher-yates-v1"
+    max_blocks: int = Field(default=10_000, ge=1, le=100_000, strict=True)
+    min_independent_tasks_per_semantic_protocol: int = Field(
+        default=20,
+        ge=2,
+        le=100_000,
+        strict=True,
+    )
 
 
 class OracleConfig(SafeValidationMixin, StrictModel):
@@ -481,6 +505,7 @@ class AppConfig(StrictModel):
     discovery: FCIDiscoveryConfig = Field(default_factory=FCIDiscoveryConfig)
     intervention: InterventionConfig
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    randomization: RandomizationConfig = Field(default_factory=RandomizationConfig)
     oracle: OracleConfig = Field(default_factory=OracleConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
 

@@ -24,6 +24,7 @@ from secaware.pipeline.manifest import (
 from secaware.pipeline.stage_contracts import (
     discovery_stage_contract_sha256,
     prompt_variant_stage_contract_sha256,
+    randomization_stage_contract_sha256,
 )
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
@@ -60,6 +61,10 @@ _PROMPT_VARIANT_OUTPUTS = (
     "interventions/prompt_variants.jsonl",
     "interventions/length_matches.jsonl",
     "interventions/pre_randomization_exclusions.jsonl",
+)
+_RANDOMIZATION_OUTPUTS = (
+    "interventions/randomization_manifest.jsonl",
+    "interventions/assignments.jsonl",
 )
 
 
@@ -439,6 +444,7 @@ class RunStore:
             "assemble-causal-tables",
             "fci-discovery",
             "build-confirmation-variants",
+            "randomize-confirmation",
             "generate-observed",
             "generate-counterfactual",
             "extract-prompt-tsg",
@@ -485,6 +491,8 @@ class RunStore:
             stage == "build-confirmation-variants"
             and tuple(relative_outputs) != _PROMPT_VARIANT_OUTPUTS
         ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "randomize-confirmation" and tuple(relative_outputs) != _RANDOMIZATION_OUTPUTS:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
@@ -618,6 +626,7 @@ class RunStore:
                 if stage == "extract-prompt-tsg"
                 else (
                     prompt_variant_stage_contract_sha256(stage)
+                    or randomization_stage_contract_sha256(stage)
                     or discovery_stage_contract_sha256(stage)
                 )
             ),
@@ -944,6 +953,7 @@ class RunStore:
                 "assemble-causal-tables",
                 "fci-discovery",
                 "build-confirmation-variants",
+                "randomize-confirmation",
                 "extract-prompt-tsg",
                 "intervene",
                 "confirm",

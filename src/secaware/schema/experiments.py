@@ -28,6 +28,9 @@ _VARIANT_PROMPT_ID_PATTERN = r"^variant_prompt_[0-9a-f]{64}$"
 _LENGTH_MATCH_ID_PATTERN = r"^length_match_[0-9a-f]{64}$"
 _EXCLUSION_ID_PATTERN = r"^pre_randomization_exclusion_[0-9a-f]{64}$"
 _PROPOSAL_ID_PATTERN = r"^proposal_[0-9a-f]{64}$"
+_ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
+_BLOCK_ID_PATTERN = r"^block_[0-9a-f]{64}$"
+_RANDOMIZATION_ID_PATTERN = r"^randomization_[0-9a-f]{64}$"
 _MULTIPLICITY_ID_RE = re.compile(r"^multiplicity_[0-9a-f]{64}$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _OUTCOME_ID_RE = re.compile(r"^y_[a-z0-9][a-z0-9_]{0,126}$")
@@ -206,6 +209,140 @@ class ArmRole(str, Enum):
     PRESENTATION_TARGET = "presentation_target"
     PRESENTATION_NOOP = "presentation_noop"
     PRESENTATION_MATCHED_CONTROL = "presentation_matched_control"
+
+
+class ExperimentalUnit(_ExperimentContract):
+    """A seed-slot unit fixed before an arm role is assigned."""
+
+    task_id: str
+    hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    model_id: str
+    seed_slot: int = Field(ge=0, le=99_999, strict=True)
+
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> Self:
+        if not _valid_identifier(self.task_id) or not _valid_identifier(self.model_id):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class AssignmentRecord(_ExperimentVersionedContract):
+    """One immutable, content-addressed randomized arm assignment."""
+
+    schema_version: Literal["1.0"]
+    assignment_id: str = Field(pattern=_ASSIGNMENT_ID_PATTERN)
+    block_id: str = Field(pattern=_BLOCK_ID_PATTERN)
+    experimental_unit: ExperimentalUnit
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    target_instance_id: str = Field(pattern=_TARGET_INSTANCE_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
+    variant_id: str = Field(pattern=_VARIANT_ID_PATTERN)
+    arm_role: ArmRole
+    seed_id: int = Field(ge=-(2**63), le=2**63 - 1, strict=True)
+    rng_version: Literal["sha256-rejection-fisher-yates-v1"]
+    randomization_plan_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        return _exact_enum(value, ArmRole)
+
+    @staticmethod
+    def block_id_from_key(
+        task_id: str,
+        hypothesis_id: str,
+        target_spec_id: str,
+        arm_protocol_id: str,
+        model_id: str,
+    ) -> str:
+        return "block_" + _digest(
+            {
+                "block_key_version": "confirmation-block-key-v1",
+                "task_id": task_id,
+                "hypothesis_id": hypothesis_id,
+                "target_spec_id": target_spec_id,
+                "arm_protocol_id": arm_protocol_id,
+                "model_id": model_id,
+            }
+        )
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        try:
+            payload = {"schema_version": "1.0", **content}
+            return cls(**payload, assignment_id=f"assignment_{_digest(payload)}")
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        unit = self.experimental_unit
+        expected_block_id = self.block_id_from_key(
+            unit.task_id,
+            unit.hypothesis_id,
+            unit.target_spec_id,
+            self.arm_protocol_id,
+            unit.model_id,
+        )
+        if (
+            self.target_spec_id != unit.target_spec_id
+            or self.block_id != expected_block_id
+            or self.assignment_id != f"assignment_{_digest(_content(self, 'assignment_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class RandomizationManifestRecord(_ExperimentVersionedContract):
+    """Content-addressed commitment to one acyclic randomization plan."""
+
+    schema_version: Literal["1.0"]
+    manifest_id: str = Field(pattern=_RANDOMIZATION_ID_PATTERN)
+    global_seed: int = Field(ge=-(2**63), le=2**63 - 1, strict=True)
+    rng_version: Literal["sha256-rejection-fisher-yates-v1"]
+    randomization_plan_sha256: str = Field(pattern=_SHA256_PATTERN)
+    block_ids: tuple[str, ...]
+    assignment_ids: tuple[str, ...]
+    assignments_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        try:
+            payload = {"schema_version": "1.0", **content}
+            return cls(**payload, manifest_id=f"randomization_{_digest(payload)}")
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        if (
+            not self.block_ids
+            or not self.assignment_ids
+            or any(re.fullmatch(_BLOCK_ID_PATTERN, item) is None for item in self.block_ids)
+            or any(
+                re.fullmatch(_ASSIGNMENT_ID_PATTERN, item) is None for item in self.assignment_ids
+            )
+            or self.block_ids != tuple(sorted(self.block_ids))
+            or len(self.block_ids) != len(set(self.block_ids))
+            or len(self.assignment_ids) != len(set(self.assignment_ids))
+            or self.manifest_id != f"randomization_{_digest(_content(self, 'manifest_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
 
 
 class PreRandomizationFailureCode(str, Enum):
@@ -956,12 +1093,14 @@ class PreRandomizationExclusionRecord(_ExperimentVersionedContract):
 
 __all__ = [
     "AllowedDeltaRecord",
+    "AssignmentRecord",
     "ArmRole",
     "ArmSpecRecord",
     "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
     "CONFIRMATION_TARGET_FEATURE_IDS",
     "ConfirmationProtocolInstanceRecord",
     "ConfirmationProtocolRecord",
+    "ExperimentalUnit",
     "FeatureTransition",
     "FunctionalOutcomeContractRecord",
     "GraphDeltaRecord",
@@ -974,6 +1113,7 @@ __all__ = [
     "PreRegisteredContrastSpec",
     "PromptRole",
     "PromptVariantRecord",
+    "RandomizationManifestRecord",
     "TargetInstanceRecord",
     "TargetSpecRecord",
 ]

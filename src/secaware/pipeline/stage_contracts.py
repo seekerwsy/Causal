@@ -5,7 +5,14 @@ from __future__ import annotations
 import importlib.metadata
 
 from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
-from secaware.config import AppConfig, FCIDiscoveryConfig, InterventionConfig, TSGConfig
+from secaware.config import (
+    AppConfig,
+    FCIDiscoveryConfig,
+    GenerationConfig,
+    InterventionConfig,
+    RandomizationConfig,
+    TSGConfig,
+)
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.randomness import RNG_VERSION
 from secaware.schema.causal import (
@@ -25,15 +32,18 @@ from secaware.schema.causal import (
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
+    AssignmentRecord,
     ArmSpecRecord,
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
     FeatureTransition,
     FunctionalOutcomeContractRecord,
     GraphDeltaRecord,
+    ExperimentalUnit,
     LengthMatchRecord,
     PreRandomizationExclusionRecord,
     PromptVariantRecord,
+    RandomizationManifestRecord,
     TargetInstanceRecord,
     TargetSpecRecord,
 )
@@ -46,6 +56,7 @@ from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 _CAUSAL_TABLE_STAGE = "assemble-causal-tables"
 _FCI_STAGE = "fci-discovery"
 _PROMPT_VARIANT_STAGE = "build-confirmation-variants"
+_RANDOMIZATION_STAGE = "randomize-confirmation"
 
 
 def _schema_sha256(model: type) -> str:
@@ -157,9 +168,50 @@ def prompt_variant_stage_contract_sha256(stage: str) -> str | None:
     return canonical_sha256(prompt_variant_stage_contract_payload())
 
 
+def randomization_stage_contract_payload() -> dict[str, object]:
+    """Bind every direct schema/config/RNG contract for assignment freezing."""
+
+    from secaware.intervention.graph_patch import IntendedGraphPatchRecord
+    from secaware.pipeline.manifest import StageManifest
+
+    return {
+        "stage": _RANDOMIZATION_STAGE,
+        "contract_version": "confirmation-randomization-v1",
+        "rng_version": RNG_VERSION,
+        "prompt_feature_catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
+        "app_config_schema": _schema_sha256(AppConfig),
+        "generation_config_schema": _schema_sha256(GenerationConfig),
+        "randomization_config_schema": _schema_sha256(RandomizationConfig),
+        "hypothesis_schema": _schema_sha256(FrozenHypothesisRecord),
+        "target_schema": _schema_sha256(TargetSpecRecord),
+        "target_instance_schema": _schema_sha256(TargetInstanceRecord),
+        "protocol_schema": _schema_sha256(ConfirmationProtocolRecord),
+        "protocol_instance_schema": _schema_sha256(ConfirmationProtocolInstanceRecord),
+        "patch_schema": _schema_sha256(IntendedGraphPatchRecord),
+        "proposal_schema": _schema_sha256(PromptExtractionProposalRecord),
+        "prompt_tsg_schema": _schema_sha256(PromptTSGRecord),
+        "graph_delta_schema": _schema_sha256(GraphDeltaRecord),
+        "variant_schema": _schema_sha256(PromptVariantRecord),
+        "length_match_schema": _schema_sha256(LengthMatchRecord),
+        "exclusion_schema": _schema_sha256(PreRandomizationExclusionRecord),
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+        "experimental_unit_schema": _schema_sha256(ExperimentalUnit),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "manifest_schema": _schema_sha256(RandomizationManifestRecord),
+    }
+
+
+def randomization_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _RANDOMIZATION_STAGE:
+        return None
+    return canonical_sha256(randomization_stage_contract_payload())
+
+
 __all__ = [
     "discovery_stage_contract_payload",
     "discovery_stage_contract_sha256",
     "prompt_variant_stage_contract_payload",
     "prompt_variant_stage_contract_sha256",
+    "randomization_stage_contract_payload",
+    "randomization_stage_contract_sha256",
 ]
