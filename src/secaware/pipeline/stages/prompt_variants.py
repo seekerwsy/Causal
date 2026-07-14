@@ -457,10 +457,6 @@ def _materialize_definitions(
                 if operation not in hypothesis.permitted_operations:
                     continue
                 target = materialize_target_spec(hypothesis, operation)
-                if target.target_spec_id not in considered_target_ids:
-                    considered_target_ids.add(target.target_spec_id)
-                    if len(considered_target_ids) > config.intervention.max_protocols:
-                        raise _ProtocolResourceLimit
                 contract = (
                     contract_by_feature.get(target.feature_id)
                     if target.feature_family is FeatureFamily.TASK_FUNCTION
@@ -484,6 +480,10 @@ def _materialize_definitions(
                 )
                 if not eligible:
                     continue
+                if target.target_spec_id not in considered_target_ids:
+                    considered_target_ids.add(target.target_spec_id)
+                    if len(considered_target_ids) > config.intervention.max_protocols:
+                        raise _ProtocolResourceLimit
                 projected_instance_count = len(builds) + len(eligible)
                 projected_arm_execution_count = arm_execution_count + len(eligible) * len(
                     protocol.arms

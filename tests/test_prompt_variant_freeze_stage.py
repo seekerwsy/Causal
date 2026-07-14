@@ -587,39 +587,46 @@ def _stage_store(
     llm_executor: bool = False,
     graph_native: bool = False,
     task_count: int = 1,
+    confirmation_feature_ids: tuple[str, ...] | None = None,
+    hypothesis_records: tuple[FrozenHypothesisRecord, ...] | None = None,
+    max_protocols: int = 8,
     max_protocol_instances: int = 256,
     max_arm_executions: int = 2048,
 ) -> tuple[AppConfig, RunStore]:
-    baseline, variant, attestations = prompt_pair(
-        FeatureFamily.SAFETY_CONTROL,
-        FeatureOperation.ADD,
-    )
-    prompts: list[PromptRecord] = [baseline, variant]
-    attestation_records: list[PromptRoleAttestationRecord] = list(attestations)
-    if task_count < 1:
+    if task_count < 1 or (confirmation_feature_ids is not None and task_count != 1):
         raise ValueError("unsupported task count")
-    for task_index in range(1, task_count):
+    feature_ids = confirmation_feature_ids or ("safety.path_normalization",) * task_count
+    if not feature_ids:
+        raise ValueError("unsupported confirmation features")
+    prompts: list[PromptRecord] = []
+    attestation_records: list[PromptRoleAttestationRecord] = []
+    for task_index, feature_id in enumerate(feature_ids):
+        baseline, variant, attestations = prompt_pair(
+            FeatureFamily.SAFETY_CONTROL,
+            FeatureOperation.ADD,
+            feature_id=feature_id,
+        )
         task_suffix = chr(ord("a") + task_index)
         task_id = f"task-{task_suffix}"
-        second_baseline = PromptRecord.model_validate(
+        scoped_baseline = PromptRecord.model_validate(
             {
                 **baseline.model_dump(mode="python"),
                 "prompt_id": f"{task_id}-baseline",
                 "task_id": task_id,
             }
         )
-        second_variant = PromptRecord.model_validate(
+        scoped_variant = PromptRecord.model_validate(
             {
                 **variant.model_dump(mode="python"),
                 "prompt_id": f"{task_id}-variant",
                 "task_id": task_id,
-                "counterpart_prompt_id": second_baseline.prompt_id,
+                "counterpart_prompt_id": scoped_baseline.prompt_id,
             }
         )
-        second_attestations: list[PromptRoleAttestationRecord] = []
+        scoped_attestations: list[PromptRoleAttestationRecord] = []
         for attestation, prompt in zip(
             attestations,
-            (second_baseline, second_variant),
+            (scoped_baseline, scoped_variant),
             strict=True,
         ):
             payload = attestation.model_dump(
@@ -633,15 +640,15 @@ def _stage_store(
                     "prompt_sha256": prompt.prompt_sha256,
                     "counterpart_prompt_id": prompt.counterpart_prompt_id,
                     "counterpart_prompt_sha256": (
-                        second_baseline.prompt_sha256
+                        scoped_baseline.prompt_sha256
                         if prompt.counterpart_prompt_id is not None
                         else None
                     ),
                 }
             )
-            second_attestations.append(PromptRoleAttestationRecord.from_content(**payload))
-        prompts.extend((second_baseline, second_variant))
-        attestation_records.extend(second_attestations)
+            scoped_attestations.append(PromptRoleAttestationRecord.from_content(**payload))
+        prompts.extend((scoped_baseline, scoped_variant))
+        attestation_records.extend(scoped_attestations)
     prompts_path = tmp_path / "prompts.jsonl"
     attestations_path = tmp_path / "attestations.jsonl"
     write_jsonl(prompts_path, prompts)
@@ -665,7 +672,7 @@ def _stage_store(
             else None
         ),
         "operations": ["add", "remove"],
-        "max_protocols": 8,
+        "max_protocols": max_protocols,
         "max_protocol_instances": max_protocol_instances,
         "max_arm_executions": max_arm_executions,
     }
@@ -686,8 +693,12 @@ def _stage_store(
     run_prompt_extraction_stage(config, store, force=False)
     outputs = tuple(store.path("discovery", name) for name, _model in FCI_DISCOVERY_OUTPUTS)
     assert not store.should_skip_stage("fci-discovery", (), outputs, False)
+    frozen_hypotheses = hypothesis_records if hypothesis_records is not None else (hypothesis(),)
     for (name, _model), path in zip(FCI_DISCOVERY_OUTPUTS, outputs, strict=True):
-        write_jsonl(path, (hypothesis(),) if name == "hypotheses_frozen.jsonl" else ())
+        write_jsonl(
+            path,
+            frozen_hypotheses if name == "hypotheses_frozen.jsonl" else (),
+        )
     store.seal_stage_outputs("fci-discovery", outputs)
     store.record_stage("fci-discovery", (), outputs)
     return config, store
@@ -762,12 +773,107 @@ def test_execution_limits_fail_typed_before_executor_construction(
     )
 
 
+@pytest.mark.parametrize(
+    "hypothesis_feature_order",
+    (
+        (
+            "safety.input_validation",
+            "safety.safe_deserialization",
+            "safety.path_normalization",
+            "safety.sql_parameterization",
+        ),
+        (
+            "safety.sql_parameterization",
+            "safety.input_validation",
+            "safety.path_normalization",
+            "safety.safe_deserialization",
+        ),
+    ),
+)
+def test_ineligible_hypotheses_do_not_consume_semantic_protocol_limit(
+    tmp_path: Path,
+    hypothesis_feature_order: tuple[str, ...],
+) -> None:
+    eligible_features = (
+        "safety.path_normalization",
+        "safety.sql_parameterization",
+    )
+    config, store = _stage_store(
+        tmp_path,
+        confirmation_feature_ids=eligible_features,
+        hypothesis_records=tuple(
+            hypothesis(feature_id=feature_id) for feature_id in hypothesis_feature_order
+        ),
+        max_protocols=len(eligible_features),
+    )
+
+    result = run_prompt_variant_freeze_stage(config, store, force=False)
+
+    targets = read_jsonl(
+        store.path("interventions", "target_specs.jsonl"),
+        TargetSpecRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert result.protocol_instance_count == len(eligible_features)
+    assert {item.feature_id for item in targets} == set(eligible_features)
+
+
+def test_first_eligible_target_beyond_protocol_limit_fails_before_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eligible_features = (
+        "safety.path_normalization",
+        "safety.sql_parameterization",
+        "safety.safe_subprocess",
+    )
+    hypotheses = (
+        hypothesis(feature_id="safety.input_validation"),
+        hypothesis(feature_id="safety.safe_deserialization"),
+        *(hypothesis(feature_id=feature_id) for feature_id in eligible_features),
+    )
+    config, store = _stage_store(
+        tmp_path,
+        confirmation_feature_ids=eligible_features,
+        hypothesis_records=hypotheses,
+        max_protocols=2,
+    )
+    original_batch = prompt_variants_stage.materialize_target_instances
+    materialized_features: list[str] = []
+    executor_calls = 0
+
+    def spy_batch(target, hypothesis_record, prompts, index):
+        materialized_features.append(target.feature_id)
+        return original_batch(target, hypothesis_record, prompts, index)
+
+    def forbidden_executor(*_args, **_kwargs):
+        nonlocal executor_calls
+        executor_calls += 1
+        raise AssertionError("executor constructed after semantic protocol limit")
+
+    monkeypatch.setattr(prompt_variants_stage, "materialize_target_instances", spy_batch)
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", forbidden_executor)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.message == "prompt protocol resource limit exceeded"
+    assert materialized_features == list(eligible_features[:2])
+    assert executor_calls == 0
+    assert not store.path(".stages", "build-confirmation-variants.json").exists()
+    assert all(
+        not store.path("interventions", name).exists() for name, _model in PROMPT_VARIANT_OUTPUTS
+    )
+
+
 def test_large_prompt_bundle_is_indexed_and_materialized_once_linearly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task_count = 12
-    config, store = _stage_store(tmp_path, task_count=task_count)
+    config, store = _stage_store(tmp_path, task_count=task_count, max_protocols=1)
     original_index = prompt_variants_stage.build_target_materialization_index
     original_batch = prompt_variants_stage.materialize_target_instances
     index_calls = 0
