@@ -25,6 +25,7 @@ from secaware.intervention.graph_patch import IntendedGraphPatchRecord
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.pipeline.jsonl_stage import JsonlOutputSpec, execute_jsonl_stage_transaction
+from secaware.pipeline.bounded_traversal import BoundedTraversalError, iter_bounded_tree
 from secaware.pipeline.manifest import StageManifest
 from secaware.pipeline.stages.fci_discovery import FCI_DISCOVERY_OUTPUTS
 from secaware.pipeline.stages.prompt_variants import PROMPT_VARIANT_OUTPUTS
@@ -52,6 +53,10 @@ _MAX_COMBINED_INPUT_BYTES = 1_000_000_000
 _MAX_JSONL_RECORDS = 100_000
 _MAX_JSONL_LINE_BYTES = 4_000_000
 _MAX_ASSIGNMENTS = 100_000
+_MAX_FUTURE_TRAVERSAL_ENTRIES = 100_000
+_MAX_FUTURE_TRAVERSAL_DEPTH = 32
+_MAX_FUTURE_RELATIVE_PATH_CHARS = 4096
+_MAX_FUTURE_NAME_CHARS = 255
 _FUTURE_STAGE_NAMES = frozenset(
     {
         "generate-confirmation",
@@ -236,24 +241,50 @@ def _parse_manifest(payload: bytes) -> StageManifest:
 
 
 def _guard_no_generation_or_future_artifacts(store: RunStore) -> None:
+    total_entries = 0
+
+    def entries(directory: str):
+        nonlocal total_entries
+        for entry in iter_bounded_tree(
+            store.path(directory),
+            max_entries=_MAX_FUTURE_TRAVERSAL_ENTRIES,
+            max_depth=_MAX_FUTURE_TRAVERSAL_DEPTH,
+            max_relative_path_chars=_MAX_FUTURE_RELATIVE_PATH_CHARS,
+            max_name_chars=_MAX_FUTURE_NAME_CHARS,
+        ):
+            total_entries += 1
+            if total_entries > _MAX_FUTURE_TRAVERSAL_ENTRIES:
+                raise BoundedTraversalError(limit_exceeded=True)
+            yield entry
+
     try:
-        for candidate in store.path(".stages").iterdir():
-            if not candidate.is_file() or candidate.suffix != ".json":
+        for candidate in entries(".stages"):
+            path = Path(candidate.relative_path)
+            if not candidate.is_file or path.parent != Path(".") or path.suffix != ".json":
                 continue
-            stage_name = candidate.stem
+            stage_name = path.stem
             if stage_name in _FUTURE_STAGE_NAMES or any(
                 stage_name.startswith(prefix) for prefix in _FUTURE_STAGE_PREFIXES
             ):
                 raise ValueError
         for directory in ("analysis", "reports"):
-            if any(candidate.is_file() for candidate in store.path(directory).rglob("*")):
+            if any(candidate.is_file for candidate in entries(directory)):
                 raise ValueError
         for directory, prefixes in _FUTURE_ARTIFACT_PREFIXES.items():
-            for candidate in store.path(directory).rglob("*"):
-                if candidate.is_file() and candidate.name.casefold().startswith(prefixes):
+            for candidate in entries(directory):
+                if candidate.is_file and candidate.name.casefold().startswith(prefixes):
                     raise ValueError
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
+    except BoundedTraversalError as error:
+        raise _stage_error(
+            "future confirmation artifact traversal failed validation",
+            failure_code=(
+                "future_artifact_traversal_limit"
+                if error.limit_exceeded
+                else "future_artifact_traversal_unsafe"
+            ),
+        ) from None
     except Exception:
         raise _stage_error("future confirmation artifact already exists") from None
 

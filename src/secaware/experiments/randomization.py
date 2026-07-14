@@ -28,6 +28,56 @@ from secaware.schema.experiments import (
 
 
 _MAX_RECORDS = 100_000
+_SUPPORTED_ARM_FAMILIES = frozenset(
+    {
+        frozenset({ArmRole.TARGET_PATCH, ArmRole.NOOP_REWRITE}),
+        frozenset({ArmRole.TARGET_REMOVE, ArmRole.NOOP_RETAIN}),
+        frozenset(
+            {
+                ArmRole.TARGET_PATCH,
+                ArmRole.NOOP_REWRITE,
+                ArmRole.LENGTH_MATCHED_PLACEBO,
+                ArmRole.GENERIC_SECURITY_REMINDER,
+            }
+        ),
+        frozenset(
+            {
+                ArmRole.TARGET_REMOVE,
+                ArmRole.NOOP_RETAIN,
+                ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+                ArmRole.GENERIC_SECURITY_REPLACEMENT,
+            }
+        ),
+        frozenset(
+            {
+                ArmRole.TASK_TARGET,
+                ArmRole.TASK_NOOP,
+                ArmRole.TASK_LENGTH_PLACEBO,
+            }
+        ),
+        frozenset(
+            {
+                ArmRole.TASK_TARGET,
+                ArmRole.TASK_NOOP,
+                ArmRole.TASK_LENGTH_PLACEBO,
+                ArmRole.TASK_GENERIC_CONTROL,
+            }
+        ),
+        frozenset(
+            {
+                ArmRole.PRESENTATION_TARGET,
+                ArmRole.PRESENTATION_NOOP,
+            }
+        ),
+        frozenset(
+            {
+                ArmRole.PRESENTATION_TARGET,
+                ArmRole.PRESENTATION_NOOP,
+                ArmRole.PRESENTATION_MATCHED_CONTROL,
+            }
+        ),
+    }
+)
 
 
 def _json_sha256(value: object) -> str:
@@ -322,14 +372,16 @@ def build_randomization_blocks(
 
 def _validated_seed_slots(values: Sequence[int]) -> tuple[int, ...]:
     try:
+        value_count = len(values)
+        if value_count < 1 or value_count > _MAX_RECORDS:
+            _fail(RandomizationFailureCode.INVALID_SEED_SLOTS)
         result = tuple(sorted(values))
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         _fail(RandomizationFailureCode.INVALID_SEED_SLOTS)
     if (
-        not result
-        or len(result) > _MAX_RECORDS
+        len(result) != value_count
         or len(result) != len(set(result))
         or any(type(value) is not int or not -(2**63) <= value <= 2**63 - 1 for value in result)
     ):
@@ -345,6 +397,7 @@ def _validate_block(block: RandomizationBlock) -> None:
     if (
         block.variants != tuple(sorted(block.variants, key=lambda item: item[0].value))
         or len(roles) not in {2, 3, 4}
+        or frozenset(roles) not in _SUPPORTED_ARM_FAMILIES
         or len(roles) != len(set(roles))
         or len(variant_ids) != len(set(variant_ids))
         or re.fullmatch(r"hypothesis_[0-9a-f]{64}", block.hypothesis_id) is None
@@ -357,6 +410,58 @@ def _validate_block(block: RandomizationBlock) -> None:
         or not block.model_id
     ):
         _fail(RandomizationFailureCode.PROTOCOL_COVERAGE_INVALID)
+
+
+def _validate_preassignment_inputs(
+    blocks: Sequence[RandomizationBlock],
+    seeds: tuple[int, ...],
+    config: RandomizationConfig,
+) -> tuple[RandomizationBlock, ...]:
+    """Shared complete validator used before assignment and during readback."""
+
+    try:
+        block_count = len(blocks)
+        if block_count < 1 or block_count > min(config.max_blocks, _MAX_RECORDS):
+            _fail(RandomizationFailureCode.RESOURCE_LIMIT)
+        ordered_blocks = tuple(sorted(blocks, key=lambda item: item.block_id))
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except RandomizationError:
+        raise
+    except Exception:
+        _fail(RandomizationFailureCode.INVALID_INPUT)
+    if len(ordered_blocks) != block_count:
+        _fail(RandomizationFailureCode.INVALID_INPUT)
+    if len(ordered_blocks) > _MAX_RECORDS // len(seeds):
+        _fail(RandomizationFailureCode.RESOURCE_LIMIT)
+    if len({item.block_id for item in ordered_blocks}) != len(ordered_blocks):
+        _fail(RandomizationFailureCode.INSTANCE_RESOLUTION_INVALID)
+    if (
+        len({item.target_instance_id for item in ordered_blocks}) != len(ordered_blocks)
+        or len({item.protocol_instance_id for item in ordered_blocks}) != len(ordered_blocks)
+        or len({variant_id for item in ordered_blocks for _role, variant_id in item.variants})
+        != sum(len(item.variants) for item in ordered_blocks)
+    ):
+        _fail(RandomizationFailureCode.INSTANCE_RESOLUTION_INVALID)
+    family_tasks: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
+    for block in ordered_blocks:
+        _validate_block(block)
+        if len(seeds) % len(block.arm_roles):
+            _fail(RandomizationFailureCode.INVALID_SEED_SLOTS)
+        family_tasks[
+            (
+                block.hypothesis_id,
+                block.target_spec_id,
+                block.arm_protocol_id,
+                block.model_id,
+            )
+        ].add(block.task_id)
+    if any(
+        len(tasks) < config.min_independent_tasks_per_semantic_protocol
+        for tasks in family_tasks.values()
+    ):
+        _fail(RandomizationFailureCode.INSUFFICIENT_INDEPENDENT_TASKS)
+    return ordered_blocks
 
 
 def _plan_payload(
@@ -437,43 +542,7 @@ def randomize_protocols(
     ):
         _fail(RandomizationFailureCode.INVALID_INPUT)
     seeds = _validated_seed_slots(confirmation_seeds)
-    try:
-        ordered_blocks = tuple(sorted(blocks, key=lambda item: item.block_id))
-    except (MemoryError, KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        _fail(RandomizationFailureCode.INVALID_INPUT)
-    if not ordered_blocks or len(ordered_blocks) > effective.max_blocks:
-        _fail(RandomizationFailureCode.RESOURCE_LIMIT)
-    if len({item.block_id for item in ordered_blocks}) != len(ordered_blocks):
-        _fail(RandomizationFailureCode.INSTANCE_RESOLUTION_INVALID)
-    if (
-        len({item.target_instance_id for item in ordered_blocks}) != len(ordered_blocks)
-        or len({item.protocol_instance_id for item in ordered_blocks}) != len(ordered_blocks)
-        or len({variant_id for item in ordered_blocks for _role, variant_id in item.variants})
-        != sum(len(item.variants) for item in ordered_blocks)
-    ):
-        _fail(RandomizationFailureCode.INSTANCE_RESOLUTION_INVALID)
-    for block in ordered_blocks:
-        _validate_block(block)
-        if len(seeds) % len(block.arm_roles):
-            _fail(RandomizationFailureCode.INVALID_SEED_SLOTS)
-
-    family_tasks: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
-    for block in ordered_blocks:
-        family_tasks[
-            (
-                block.hypothesis_id,
-                block.target_spec_id,
-                block.arm_protocol_id,
-                block.model_id,
-            )
-        ].add(block.task_id)
-    if any(
-        len(tasks) < effective.min_independent_tasks_per_semantic_protocol
-        for tasks in family_tasks.values()
-    ):
-        _fail(RandomizationFailureCode.INSUFFICIENT_INDEPENDENT_TASKS)
+    ordered_blocks = _validate_preassignment_inputs(blocks, seeds, effective)
 
     plan_payload = _plan_payload(ordered_blocks, seeds, global_seed, effective)
     plan_sha256 = _json_sha256(plan_payload)
@@ -554,19 +623,29 @@ def validate_randomization_bundle(
         checked_manifest = RandomizationManifestRecord.model_validate(
             manifest.model_dump(mode="json")
         )
+        assignment_count = len(assignments)
+        if assignment_count < 1 or assignment_count > _MAX_RECORDS:
+            _fail(RandomizationFailureCode.RESOURCE_LIMIT)
         checked_assignments = tuple(
             AssignmentRecord.model_validate(item.model_dump(mode="json")) for item in assignments
         )
-        seeds = _validated_seed_slots(confirmation_seeds)
-        ordered_blocks = tuple(sorted(blocks, key=lambda item: item.block_id))
-        block_by_id = {item.block_id: item for item in ordered_blocks}
-        if len(block_by_id) != len(blocks):
+        if len(checked_assignments) != assignment_count:
             _fail(RandomizationFailureCode.INVALID_INPUT)
+        seeds = _validated_seed_slots(confirmation_seeds)
+        ordered_blocks = _validate_preassignment_inputs(blocks, seeds, checked_config)
+        block_by_id = {item.block_id: item for item in ordered_blocks}
+        canonical_assignments = tuple(
+            sorted(
+                checked_assignments,
+                key=lambda item: (item.block_id, item.experimental_unit.seed_slot),
+            )
+        )
         expected_plan_sha256 = _json_sha256(
             _plan_payload(ordered_blocks, seeds, checked_manifest.global_seed, checked_config)
         )
         if (
-            checked_manifest.block_ids != tuple(sorted(block_by_id))
+            checked_assignments != canonical_assignments
+            or checked_manifest.block_ids != tuple(sorted(block_by_id))
             or checked_manifest.rng_version != checked_config.rng_version
             or checked_manifest.randomization_plan_sha256 != expected_plan_sha256
             or checked_manifest.assignment_ids
@@ -588,6 +667,7 @@ def validate_randomization_bundle(
                 or assignment.experimental_unit.hypothesis_id != block.hypothesis_id
                 or assignment.experimental_unit.target_spec_id != block.target_spec_id
                 or assignment.experimental_unit.model_id != block.model_id
+                or assignment.target_spec_id != block.target_spec_id
                 or assignment.target_instance_id != block.target_instance_id
                 or assignment.arm_protocol_id != block.arm_protocol_id
                 or assignment.protocol_instance_id != block.protocol_instance_id

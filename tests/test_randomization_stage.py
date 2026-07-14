@@ -344,3 +344,269 @@ def test_randomization_stage_commits_balanced_assignments_before_generation(
         for name, _model in RANDOMIZATION_OUTPUTS
     }
     future.unlink()
+
+
+def test_real_stage_reuses_one_semantic_definition_across_independent_tasks(
+    frozen_task4_store,
+) -> None:
+    config, store = frozen_task4_store
+    result = run_confirmation_randomization_stage(config, store, force=False)
+    targets = read_jsonl(
+        store.path("interventions", "target_specs.jsonl"),
+        TargetSpecRecord,
+        required=True,
+        allow_empty=False,
+    )
+    target_instances = read_jsonl(
+        store.path("interventions", "target_instances.jsonl"),
+        TargetInstanceRecord,
+        required=True,
+        allow_empty=False,
+    )
+    protocols = read_jsonl(
+        store.path("interventions", "confirmation_protocols.jsonl"),
+        ConfirmationProtocolRecord,
+        required=True,
+        allow_empty=False,
+    )
+    protocol_instances = read_jsonl(
+        store.path("interventions", "confirmation_protocol_instances.jsonl"),
+        ConfirmationProtocolInstanceRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assignments = read_jsonl(
+        store.path("interventions", "assignments.jsonl"),
+        AssignmentRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert len(targets) == len(protocols) == 1
+    assert len(target_instances) == len(protocol_instances) == result.block_count == 20
+    assert {item.target_spec_id for item in target_instances} == {targets[0].target_spec_id}
+    assert {item.arm_protocol_id for item in protocol_instances} == {protocols[0].arm_protocol_id}
+    assert {item.target_instance_id for item in assignments} == {
+        item.target_instance_id for item in target_instances
+    }
+    assert {item.protocol_instance_id for item in assignments} == {
+        item.protocol_instance_id for item in protocol_instances
+    }
+    assert all(
+        sum(item.target_instance_id == instance.target_instance_id for item in assignments) == 12
+        for instance in target_instances
+    )
+
+
+def test_force_replacement_mid_install_failure_restores_old_outputs_and_manifest(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path / "force-rollback", task_count=20)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    run_confirmation_randomization_stage(config, store, force=False)
+    protected = {
+        store.path("interventions", name): store.path("interventions", name).read_bytes()
+        for name, _model in RANDOMIZATION_OUTPUTS
+    }
+    protected[store.path(".stages", "randomize-confirmation.json")] = store.path(
+        ".stages", "randomize-confirmation.json"
+    ).read_bytes()
+    real_install = ArtifactTransaction.install
+
+    def fail_mid_replacement(self, index, candidate):
+        if self.journal_path.name == ".randomize-confirmation.transaction.json" and index == 1:
+            raise TransactionStateError()
+        return real_install(self, index, candidate)
+
+    monkeypatch.setattr(ArtifactTransaction, "install", fail_mid_replacement)
+    with pytest.raises(SecAwareError):
+        run_confirmation_randomization_stage(config, store, force=True)
+    assert {path: path.read_bytes() for path in protected} == protected
+
+
+def test_randomization_holds_task4_producer_replacement_lease(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path / "task4-lease", task_count=20)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    real_randomize = randomization_stage.randomize_protocols
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked_randomize(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=30)
+        return real_randomize(*args, **kwargs)
+
+    monkeypatch.setattr(randomization_stage, "randomize_protocols", blocked_randomize)
+    failures: list[BaseException] = []
+
+    def run_stage() -> None:
+        try:
+            run_confirmation_randomization_stage(config, store, force=False)
+        except BaseException as error:
+            failures.append(error)
+
+    thread = threading.Thread(target=run_stage)
+    thread.start()
+    assert entered.wait(timeout=30)
+    competing_store = RunStore(config)
+    with pytest.raises(SecAwareError) as lease_error:
+        competing_store.invalidate_stage("build-confirmation-variants")
+    assert lease_error.value.code is ErrorCode.MANIFEST_CONFLICT
+    release.set()
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    assert failures == []
+
+
+@pytest.mark.parametrize("drift_kind", ("config", "rng", "schema"))
+def test_committed_stage_skip_is_invalidated_by_config_rng_and_schema_drift(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_kind: str,
+) -> None:
+    config, store = _stage_store(tmp_path / ("drift-" + drift_kind), task_count=20)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    run_confirmation_randomization_stage(config, store, force=False)
+    real_randomize = randomization_stage.randomize_protocols
+    calls = 0
+
+    def observed_randomize(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_randomize(*args, **kwargs)
+
+    monkeypatch.setattr(randomization_stage, "randomize_protocols", observed_randomize)
+    effective_config = config
+    effective_store = store
+    if drift_kind == "config":
+        payload = config.model_dump(mode="json")
+        payload["run"]["random_seed"] += 1
+        effective_config = AppConfig.model_validate(payload)
+        effective_store = RunStore(effective_config)
+    elif drift_kind == "rng":
+        monkeypatch.setattr(stage_contracts, "RNG_VERSION", "review-drift-rng")
+    else:
+        original_schema_digest = stage_contracts._schema_sha256
+
+        def drift_schema(model: type) -> str:
+            if model is AssignmentRecord:
+                return "e" * 64
+            return original_schema_digest(model)
+
+        monkeypatch.setattr(stage_contracts, "_schema_sha256", drift_schema)
+    if drift_kind in {"config", "rng"}:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_confirmation_randomization_stage(effective_config, effective_store, force=False)
+        # Full-config / RNG contract drift also invalidates at least one immutable
+        # producer, so the consumer must fail closed before it can rebuild.
+        assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert calls == 0
+    else:
+        run_confirmation_randomization_stage(effective_config, effective_store, force=False)
+        assert calls == 1
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit_value", "builder"),
+    (
+        ("_MAX_FUTURE_TRAVERSAL_DEPTH", 1, lambda root: (root / "a" / "b").mkdir(parents=True)),
+        (
+            "_MAX_FUTURE_RELATIVE_PATH_CHARS",
+            100,
+            lambda root: (root / ("a" * 60) / ("b" * 60)).mkdir(parents=True),
+        ),
+        ("_MAX_FUTURE_NAME_CHARS", 64, lambda root: (root / ("a" * 65)).mkdir()),
+    ),
+)
+def test_future_artifact_guard_fails_closed_on_each_traversal_limit(
+    frozen_task4_store,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+    limit_value: int,
+    builder,
+) -> None:
+    config, store = frozen_task4_store
+    root = store.path("analysis")
+    try:
+        for child in sorted(root.rglob("*"), reverse=True):
+            if child.is_dir():
+                child.rmdir()
+        builder(root)
+        monkeypatch.setattr(randomization_stage, limit_name, limit_value)
+        with pytest.raises(SecAwareError) as exc_info:
+            run_confirmation_randomization_stage(config, store, force=True)
+        assert exc_info.value.details.get("failure_code") == "future_artifact_traversal_limit"
+    finally:
+        for child in sorted(root.rglob("*"), reverse=True):
+            if child.is_dir():
+                child.rmdir()
+
+
+def test_future_artifact_guard_applies_one_total_entry_budget_across_roots(
+    frozen_task4_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = frozen_task4_store
+    run_confirmation_randomization_stage(config, store, force=False)
+    root = store.path("analysis")
+    stage_entry_count = sum(1 for _item in store.path(".stages").iterdir())
+    (root / "one-more-entry").mkdir()
+    monkeypatch.setattr(
+        randomization_stage,
+        "_MAX_FUTURE_TRAVERSAL_ENTRIES",
+        stage_entry_count,
+    )
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_confirmation_randomization_stage(config, store, force=True)
+        assert exc_info.value.details.get("failure_code") == "future_artifact_traversal_limit"
+    finally:
+        (root / "one-more-entry").rmdir()
+
+
+@pytest.mark.parametrize("signal_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_future_traversal_preserves_process_control_identity(
+    frozen_task4_store,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    config, store = frozen_task4_store
+
+    def interrupt(*_args, **_kwargs):
+        raise signal_type("private-future-traversal-interrupt")
+
+    monkeypatch.setattr(randomization_stage, "iter_bounded_tree", interrupt)
+    with pytest.raises(signal_type):
+        run_confirmation_randomization_stage(config, store, force=True)
+
+
+@pytest.mark.parametrize("limit_kind", ("assignments", "combined_input", "input_records"))
+def test_stage_enforces_preassignment_and_input_resource_limits(
+    frozen_task4_store,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_kind: str,
+) -> None:
+    config, store = frozen_task4_store
+    run_confirmation_randomization_stage(config, store, force=False)
+    effective_config = config
+    effective_store = store
+    if limit_kind == "assignments":
+        monkeypatch.setattr(randomization_stage, "_MAX_ASSIGNMENTS", 200)
+    elif limit_kind == "combined_input":
+        monkeypatch.setattr(randomization_stage, "_MAX_COMBINED_INPUT_BYTES", 1)
+    else:
+        monkeypatch.setattr(randomization_stage, "_MAX_JSONL_RECORDS", 1)
+    before = {
+        name: store.path("interventions", name).read_bytes()
+        for name, _model in RANDOMIZATION_OUTPUTS
+    }
+    with pytest.raises(SecAwareError) as exc_info:
+        run_confirmation_randomization_stage(effective_config, effective_store, force=True)
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert before == {
+        name: store.path("interventions", name).read_bytes()
+        for name, _model in RANDOMIZATION_OUTPUTS
+    }

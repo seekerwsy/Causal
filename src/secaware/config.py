@@ -5,7 +5,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 import unicodedata
 
 import yaml
-from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import ConfigDict, Field, StrictInt, ValidationError, field_validator, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import SafeValidationMixin, StrictModel
@@ -403,7 +403,7 @@ class GenerationConfig(StrictModel):
     provider: Literal["mock", "file", "api", "openai_compatible"] = "mock"
     models: list[str] = Field(default_factory=lambda: ["mock-secaware-v0"])
     seeds: list[int] = Field(default_factory=lambda: [1])
-    confirmation_seeds: list[int] = Field(default_factory=lambda: list(range(101, 113)))
+    confirmation_seeds: list[StrictInt] = Field(default_factory=lambda: list(range(101, 113)))
     file_provider_dir: str | None = None
     openai_compatible: OpenAICompatibleConfig | None = None
 
@@ -418,6 +418,12 @@ class GenerationConfig(StrictModel):
         ):
             raise ValueError("confirmation seed configuration failed validation")
         return value
+
+    @model_validator(mode="after")
+    def validate_disjoint_seed_namespaces(self) -> "GenerationConfig":
+        if set(self.seeds) & set(self.confirmation_seeds):
+            raise ValueError("generation seed namespaces must be disjoint")
+        return self
 
 
 class RandomizationConfig(StrictModel):
