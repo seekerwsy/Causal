@@ -4,9 +4,11 @@ from dataclasses import FrozenInstanceError, fields, replace
 import hashlib
 import inspect
 import json
+import math
 
 import pytest
 
+from secaware.schema.experiments import CONFIRMATION_TARGET_FEATURE_IDS
 from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.tsg.feature_catalog import (
     FEATURE_CATALOG_VERSION,
@@ -63,7 +65,7 @@ def test_catalog_is_exactly_the_finite_immutable_feature_set() -> None:
 
 
 def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> None:
-    assert FEATURE_CATALOG_VERSION == "1.4"
+    assert FEATURE_CATALOG_VERSION == "1.5"
     mapping = {
         item.feature_id: item.matched_control_feature_id
         for item in PROMPT_FEATURE_CATALOG
@@ -80,6 +82,36 @@ def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> N
         for item in PROMPT_FEATURE_CATALOG
         if item.feature_family is not FeatureFamily.PRESENTATION_CONTROL
     )
+
+
+@pytest.mark.parametrize(
+    "control_feature_id",
+    (
+        "presentation.length_matched_placebo",
+        "presentation.sham_edit",
+        "presentation.matched_control",
+    ),
+)
+def test_finite_neutral_control_clause_buckets_cover_every_target_length(
+    control_feature_id: str,
+) -> None:
+    control = prompt_feature_spec(control_feature_id)
+    assert 4 <= len(control.intervention_clauses) <= 16
+    assert len(control.intervention_clauses) == len(set(control.intervention_clauses))
+    for clause in control.intervention_clauses:
+        folded = clause.casefold()
+        assert any(term in folded for term in control.deterministic_terms)
+        assert all(
+            forbidden not in folded
+            for forbidden in ("secure", "unsafe", "vulnerab", "outcome", "oracle")
+        )
+
+    control_lengths = tuple(len(clause.encode("utf-8")) for clause in control.intervention_clauses)
+    for target_feature_id in CONFIRMATION_TARGET_FEATURE_IDS:
+        target_clause = prompt_feature_spec(target_feature_id).intervention_clauses[0]
+        reference = len(target_clause.encode("utf-8"))
+        tolerance = max(4, math.ceil(reference * 0.05))
+        assert min(abs(candidate - reference) for candidate in control_lengths) <= tolerance
 
 
 @pytest.mark.parametrize(

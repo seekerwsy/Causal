@@ -25,15 +25,66 @@ from secaware.schema.experiments import (
 from m5_executor_fixtures import CapturingTransport, structured_policy
 
 
-class RecordingRenderer:
-    def __init__(self) -> None:
-        self.calls: list[tuple[object, IntendedGraphPatchRecord]] = []
-        self.delegate = DeterministicInterventionExecutor()
+def test_graph_native_rejects_arbitrary_custom_renderer_at_construction() -> None:
+    class CustomRenderer:
+        policy_sha256 = "0" * 64
 
-    def render(self, execution_request: object, patch: IntendedGraphPatchRecord) -> PromptCandidate:
-        assert isinstance(patch, IntendedGraphPatchRecord)
-        self.calls.append((execution_request, patch))
-        return self.delegate.render(execution_request, patch)
+        def render(self, _request: object, _patch: object) -> PromptCandidate:
+            raise AssertionError("must not run")
+
+    with pytest.raises(SecAwareError) as exc_info:
+        GraphNativeExecutor(CustomRenderer())
+    assert exc_info.value.code is ErrorCode.CONFIG
+
+
+def test_graph_native_rejects_locked_renderer_subclasses() -> None:
+    class RendererSubclass(DeterministicInterventionExecutor):
+        pass
+
+    with pytest.raises(SecAwareError) as exc_info:
+        GraphNativeExecutor(RendererSubclass())
+    assert exc_info.value.code is ErrorCode.CONFIG
+
+
+def test_locked_renderers_expose_read_only_nonzero_policy_hashes() -> None:
+    deterministic = DeterministicInterventionExecutor()
+    llm = LLMInterventionExecutor(
+        CapturingTransport({"candidate_text": "valid"}),
+        structured_policy(),
+    )
+    for renderer in (deterministic, llm):
+        assert renderer.policy_sha256 != "0" * 64
+        with pytest.raises((AttributeError, ValidationError)):
+            renderer.policy_sha256 = "0" * 64  # type: ignore[misc]
+
+
+def test_graph_native_rejects_zero_hash_on_a_locked_renderer() -> None:
+    renderer = LLMInterventionExecutor(
+        CapturingTransport({"candidate_text": "valid"}),
+        structured_policy(),
+    )
+    object.__setattr__(renderer, "_executor_policy_sha256", "0" * 64)
+    with pytest.raises(SecAwareError) as exc_info:
+        GraphNativeExecutor(renderer)
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
+
+
+def test_graph_native_rejects_after_call_renderer_policy_mutation() -> None:
+    class MutatingTransport(CapturingTransport):
+        renderer: LLMInterventionExecutor | None = None
+
+        def complete(self, request_bytes: bytes, policy: object) -> bytes:
+            assert self.renderer is not None
+            object.__setattr__(self.renderer, "_executor_policy_sha256", "0" * 64)
+            return super().complete(request_bytes, policy)  # type: ignore[arg-type]
+
+    execution_request = request(mode=InterventionMode.GRAPH_NATIVE)
+    transport = MutatingTransport({"candidate_text": execution_request.source_prompt.prompt})
+    renderer = LLMInterventionExecutor(transport, structured_policy())
+    transport.renderer = renderer
+    with pytest.raises(SecAwareError) as exc_info:
+        GraphNativeExecutor(renderer).execute(execution_request)
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
 
 
 def test_graph_native_executor_records_intended_patch_before_rendering() -> None:
@@ -44,13 +95,10 @@ def test_graph_native_executor_records_intended_patch_before_rendering() -> None
         mode=InterventionMode.GRAPH_NATIVE,
     )
     source_before = execution_request.source_graph.model_dump(mode="json")
-    renderer = RecordingRenderer()
+    renderer = DeterministicInterventionExecutor()
 
     patch, candidate = GraphNativeExecutor(renderer).execute(execution_request)
 
-    assert len(renderer.calls) == 1
-    assert renderer.calls[0][0].target.target_spec_id == execution_request.target.target_spec_id
-    assert renderer.calls[0][1] == patch
     assert patch.before_graph_sha256 == execution_request.source_graph.graph_sha256
     assert patch.target_spec_id == execution_request.target.target_spec_id
     assert patch.target_instance_id == execution_request.target_instance.target_instance_id
@@ -154,39 +202,6 @@ def test_intended_graph_patch_round_trips_strict_json() -> None:
     assert restored == patch
 
 
-class ForgingRenderer:
-    def __init__(self, mutation: str) -> None:
-        self.mutation = mutation
-        self.delegate = DeterministicInterventionExecutor()
-
-    def render(self, execution_request: object, patch: IntendedGraphPatchRecord) -> PromptCandidate:
-        candidate = self.delegate.render(execution_request, patch)
-        if self.mutation == "patch_id":
-            return candidate.model_copy(update={"intended_patch_id": "patch_" + "0" * 64})
-        if self.mutation == "coordinate":
-            return candidate.model_copy(update={"target_spec_id": "target_" + "0" * 64})
-        if self.mutation == "mode":
-            return candidate.model_copy(update={"mode": InterventionMode.TEXT_NATIVE})
-        if self.mutation == "patch":
-            object.__setattr__(patch, "before_graph_sha256", "0" * 64)
-            return candidate
-        object.__setattr__(execution_request.source_graph, "graph_sha256", "0" * 64)
-        return candidate
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    ("patch_id", "coordinate", "mode", "patch", "source_graph"),
-)
-def test_graph_native_revalidates_renderer_output_and_source_immutability(
-    mutation: str,
-) -> None:
-    execution_request = request(mode=InterventionMode.GRAPH_NATIVE)
-    with pytest.raises(SecAwareError) as exc_info:
-        GraphNativeExecutor(ForgingRenderer(mutation)).execute(execution_request)
-    assert exc_info.value.code in {ErrorCode.CONTRACT, ErrorCode.POLICY_MISMATCH}
-
-
 def test_prompt_candidate_is_frozen_strict_and_hides_private_text() -> None:
     execution_request = request(mode=InterventionMode.GRAPH_NATIVE)
     _patch, candidate = GraphNativeExecutor(DeterministicInterventionExecutor()).execute(
@@ -206,18 +221,22 @@ def test_prompt_candidate_is_frozen_strict_and_hides_private_text() -> None:
 def test_graph_renderer_failure_is_sanitized_without_hiding_fatal_exceptions() -> None:
     secret = "private-renderer-failure"
 
-    class FailingRenderer:
-        def render(self, _request: object, _patch: object) -> PromptCandidate:
+    class FailingTransport:
+        def complete(self, _request: bytes, _policy: object) -> bytes:
             raise RuntimeError(secret)
 
     with pytest.raises(SecAwareError) as exc_info:
-        GraphNativeExecutor(FailingRenderer()).execute(request(mode=InterventionMode.GRAPH_NATIVE))
-    assert exc_info.value.code is ErrorCode.CONTRACT
+        GraphNativeExecutor(
+            LLMInterventionExecutor(FailingTransport(), structured_policy())
+        ).execute(request(mode=InterventionMode.GRAPH_NATIVE))
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
     assert secret not in str(exc_info.value)
 
-    class FatalRenderer:
-        def render(self, _request: object, _patch: object) -> PromptCandidate:
+    class FatalTransport:
+        def complete(self, _request: bytes, _policy: object) -> bytes:
             raise MemoryError
 
     with pytest.raises(MemoryError):
-        GraphNativeExecutor(FatalRenderer()).execute(request(mode=InterventionMode.GRAPH_NATIVE))
+        GraphNativeExecutor(LLMInterventionExecutor(FatalTransport(), structured_policy())).execute(
+            request(mode=InterventionMode.GRAPH_NATIVE)
+        )

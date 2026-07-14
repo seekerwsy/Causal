@@ -92,6 +92,10 @@ def test_text_native_llm_executor_receives_target_but_no_outcome() -> None:
         "expected_sign",
         "expected_outcome",
         "confirmation_status",
+        "hypothesis",
+        "functional_contract",
+        "source_proposal",
+        "prompt_bundle",
     ):
         assert forbidden not in serialized
     assert "safety.expected_outcome_leakage" not in serialized

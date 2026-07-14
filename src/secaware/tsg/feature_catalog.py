@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.4"
+FEATURE_CATALOG_VERSION = "1.5"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -279,21 +279,43 @@ PROMPT_FEATURE_CATALOG = (
         "presentation.length_matched_placebo",
         FeatureFamily.PRESENTATION_CONTROL,
         matched_control="presentation.matched_control",
-        terms=("length-matched placebo", "length matched placebo"),
-        clauses=(" Apply a length-matched placebo rewrite.",),
+        terms=("length-matched placebo", "length matched placebo", "placebo edit"),
+        clauses=(
+            " Apply a length-matched placebo rewrite.",
+            " Use a placebo edit.",
+            " Use a brief placebo edit.",
+            " Use a neutral placebo edit here.",
+            " Use a neutral placebo edit in this wording.",
+            " Use a neutral placebo edit in this task wording only.",
+        ),
     ),
     _feature(
         "presentation.sham_edit",
         FeatureFamily.PRESENTATION_CONTROL,
         matched_control="presentation.matched_control",
         terms=("sham edit",),
-        clauses=(" Apply a sham edit.",),
+        clauses=(
+            " Apply a sham edit.",
+            " Make a brief sham edit.",
+            " Make a neutral sham edit here.",
+            " Make a neutral sham edit to this wording.",
+            " Make a neutral sham edit to this task wording only.",
+        ),
     ),
     _feature(
         "presentation.matched_control",
         FeatureFamily.PRESENTATION_CONTROL,
         terms=("matched control",),
-        clauses=(" Apply a matched control rewrite.",),
+        clauses=(
+            " Apply a matched control rewrite.",
+            " Use matched control.",
+            " Use a matched control edit.",
+            " Use a neutral matched control edit.",
+            " Use a neutral matched control edit here.",
+            " Apply one neutral matched control wording edit.",
+            " Use a neutral matched control edit in this wording.",
+            " Use a neutral matched control edit in this task wording.",
+        ),
     ),
 )
 

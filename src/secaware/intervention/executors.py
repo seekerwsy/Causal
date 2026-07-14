@@ -6,13 +6,16 @@ from collections.abc import Mapping
 import hashlib
 from importlib import resources
 import json
+import math
 import re
-from typing import ClassVar, Protocol, Self
+from typing import ClassVar, Self
 
 from pydantic import ConfigDict, Field, model_validator
 
 from secaware.config import InterventionLLMConfig
+from secaware.causal.freeze import revalidate_frozen_hypothesis
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.intervention.arm_catalog import revalidate_arm_protocol
 from secaware.intervention.attestation import (
     PromptRoleAttestationRecord,
     attested_feature_id,
@@ -23,11 +26,17 @@ from secaware.intervention.graph_patch import (
     IntendedGraphPatchRecord,
     allowed_delta_sha256,
 )
+from secaware.intervention.targeting import (
+    materialize_protocol_instance,
+    materialize_target_instance,
+    materialize_target_spec,
+)
 from secaware.llm.structured_transport import (
     StructuredJSONTransport,
     StructuredLLMPolicy,
     canonical_request_bytes,
 )
+from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.common import SafeValidationMixin, StrictModel
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
@@ -36,10 +45,12 @@ from secaware.schema.experiments import (
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
     FeatureState,
+    FunctionalOutcomeContractRecord,
     InterventionMode,
     TargetInstanceRecord,
     TargetSpecRecord,
 )
+from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.feature_catalog import (
@@ -47,7 +58,10 @@ from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG_SHA256,
     prompt_feature_spec,
 )
+from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.graph import record_to_multidigraph
+from secaware.tsg.proposal_validator import validate_proposal
+from secaware.tsg.queries import feature_state
 
 
 _STAGE = "intervention.execute"
@@ -123,11 +137,31 @@ DETERMINISTIC_INTERVENTION_POLICY_SHA256 = hashlib.sha256(
     canonical_request_bytes(
         {
             "executor_kind": "deterministic",
-            "executor_version": "catalog-clause-and-attested-byte-range-v1",
+            "executor_version": "catalog-clause-attested-range-v2",
             "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
+            "matched_clause_selection": "closest-utf8-bytes-catalog-order-v1",
+            "matched_reference": "target-canonical-add-attested-source-remove-v1",
+            "matched_tolerance": "max-4-or-ceil-5-percent-v1",
+            "noop_rewrite": "append-one-lf-v1",
         }
     )
 ).hexdigest()
+
+_MATCHED_ARM_ROLES = frozenset(
+    {
+        ArmRole.LENGTH_MATCHED_PLACEBO,
+        ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+        ArmRole.TASK_LENGTH_PLACEBO,
+        ArmRole.PRESENTATION_MATCHED_CONTROL,
+    }
+)
+_MATCHED_FEATURE_IDS = frozenset(
+    {
+        "presentation.length_matched_placebo",
+        "presentation.sham_edit",
+        "presentation.matched_control",
+    }
+)
 
 
 def structured_policy_from_config(config: InterventionLLMConfig) -> StructuredLLMPolicy:
@@ -167,12 +201,19 @@ class InterventionExecutionRequest(SafeValidationMixin, StrictModel):
         revalidate_instances="always",
     )
 
+    hypothesis: FrozenHypothesisRecord = Field(repr=False)
     target: TargetSpecRecord
     target_instance: TargetInstanceRecord
     protocol: ConfirmationProtocolRecord
     protocol_instance: ConfirmationProtocolInstanceRecord
     arm: ArmSpecRecord
     source_prompt: PromptRecord = Field(repr=False)
+    prompt_bundle: tuple[PromptRecord, ...] = Field(repr=False)
+    functional_contract: FunctionalOutcomeContractRecord | None = Field(
+        default=None,
+        repr=False,
+    )
+    source_proposal: PromptExtractionProposalRecord = Field(repr=False)
     source_graph: PromptTSGRecord = Field(repr=False)
     counterpart_prompt: PromptRecord | None = Field(default=None, repr=False)
     attestations: tuple[PromptRoleAttestationRecord, ...] = Field(repr=False)
@@ -242,6 +283,11 @@ def _trusted_request(value: object) -> InterventionExecutionRequest:
     try:
         if type(value) is not InterventionExecutionRequest:
             raise ValueError
+        hypothesis = revalidate_frozen_hypothesis(
+            FrozenHypothesisRecord.model_validate(
+                value.hypothesis.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+        )
         target = TargetSpecRecord.model_validate(value.target.model_dump(mode="python"))
         target_instance = TargetInstanceRecord.model_validate(
             value.target_instance.model_dump(mode="python")
@@ -254,6 +300,20 @@ def _trusted_request(value: object) -> InterventionExecutionRequest:
         )
         arm = ArmSpecRecord.model_validate(value.arm.model_dump(mode="python"))
         source = _snapshot_prompt(value.source_prompt)
+        if type(value.prompt_bundle) is not tuple:
+            raise ValueError
+        prompt_bundle = tuple(_snapshot_prompt(item) for item in value.prompt_bundle)
+        functional_contract = (
+            FunctionalOutcomeContractRecord.model_validate(
+                value.functional_contract.model_dump(
+                    mode="python",
+                    round_trip=True,
+                    warnings=False,
+                )
+            )
+            if value.functional_contract is not None
+            else None
+        )
         counterpart = (
             _snapshot_prompt(value.counterpart_prompt)
             if value.counterpart_prompt is not None
@@ -263,90 +323,116 @@ def _trusted_request(value: object) -> InterventionExecutionRequest:
             PromptRoleAttestationRecord.model_validate(item.model_dump(mode="python"))
             for item in value.attestations
         )
+        if type(value.source_proposal) is not PromptExtractionProposalRecord:
+            raise ValueError
+        source_proposal = validate_proposal(
+            PromptExtractionProposalRecord.model_validate(
+                value.source_proposal.model_dump(
+                    mode="python",
+                    round_trip=True,
+                    warnings=False,
+                )
+            ),
+            source,
+        )
         graph = PromptTSGRecord.model_validate(value.source_graph.model_dump(mode="python"))
-        record_to_multidigraph(graph)
+        live_graph = record_to_multidigraph(graph)
         mode = InterventionMode(value.mode)
+        expected_target = materialize_target_spec(hypothesis, target.operation)
+        checked_protocol = revalidate_arm_protocol(
+            protocol,
+            expected_target,
+            functional_contract,
+        )
+        validated_attestations = validate_prompt_role_attestations(
+            prompt_bundle,
+            attestations,
+        )
+        expected_target_instance = materialize_target_instance(
+            expected_target,
+            hypothesis,
+            source,
+            prompt_bundle,
+            validated_attestations,
+        )
+        expected_protocol_instance = materialize_protocol_instance(
+            checked_protocol,
+            expected_target_instance,
+        )
+        rebuilt_graph = build_prompt_tsg(source_proposal, source)
         expected_arms = tuple(item for item in protocol.arms if item.role is arm.role)
         if (
-            target.target_spec_id != target_instance.target_spec_id
-            or protocol.target_spec_id != target.target_spec_id
-            or protocol.hypothesis_id != target.hypothesis_id
-            or protocol.feature_family is not target.feature_family
-            or protocol.operation is not target.operation
-            or protocol_instance.arm_protocol_id != protocol.arm_protocol_id
-            or protocol_instance.target_instance_id != target_instance.target_instance_id
-            or target_instance.task_id != source.task_id
-            or target_instance.source_prompt_id != source.prompt_id
-            or target_instance.source_prompt_sha256 != source.prompt_sha256
-            or target_instance.source_prompt_role is not source.prompt_role
-            or protocol_instance.task_id != source.task_id
-            or protocol_instance.source_prompt_id != source.prompt_id
-            or protocol_instance.source_prompt_sha256 != source.prompt_sha256
+            target != expected_target
+            or target_instance != expected_target_instance
+            or protocol != checked_protocol
+            or protocol_instance != expected_protocol_instance
             or len(expected_arms) != 1
             or expected_arms[0] != arm
             or source.split != "confirm"
+            or graph != rebuilt_graph
             or graph.prompt_id != source.prompt_id
             or graph.task_id != source.task_id
             or graph.task_family != source.task_family
             or graph.cwe != source.cwe
-        ):
-            raise ValueError
-        source_attestations = tuple(
-            item for item in attestations if item.prompt_id == source.prompt_id
-        )
-        if (
-            len(source_attestations) != 1
-            or source_attestations[0].task_id != source.task_id
-            or source_attestations[0].prompt_sha256 != source.prompt_sha256
-            or source_attestations[0].prompt_role is not source.prompt_role
-            or source_attestations[0].catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
-            or source_attestations[0].contrast_owner_operation is not target.operation
+            or graph.proposal_id != source_proposal.proposal_id
+            or graph.extractor_backend is not source_proposal.backend
+            or graph.extractor_policy_sha256 != source_proposal.policy_sha256
+            or hypothesis.catalog_sha256 != source_proposal.catalog_sha256
+            or hypothesis.extractor_policy_sha256 != source_proposal.policy_sha256
         ):
             raise ValueError
         if target_instance.counterpart_required:
             if counterpart is None:
                 raise ValueError
-            validated_attestations = validate_prompt_role_attestations(
-                (counterpart, source),
-                attestations,
-            )
             resolved = counterpart_for(target_instance, validated_attestations)
+            counterpart_matches = tuple(
+                item
+                for item in prompt_bundle
+                if item.prompt_id == target_instance.counterpart_prompt_id
+            )
             if (
-                resolved.prompt_id != counterpart.prompt_id
+                len(counterpart_matches) != 1
+                or counterpart != counterpart_matches[0]
+                or resolved.prompt_id != counterpart.prompt_id
                 or resolved.prompt_sha256 != counterpart.prompt_sha256
-                or target_instance.counterpart_prompt_id != counterpart.prompt_id
-                or target_instance.counterpart_prompt_sha256 != counterpart.prompt_sha256
-                or protocol_instance.counterpart_prompt_id != counterpart.prompt_id
-                or protocol_instance.counterpart_prompt_sha256 != counterpart.prompt_sha256
             ):
                 raise ValueError
-            if attested_feature_id(source_attestations[0]) != target.feature_id:
-                raise ValueError
         else:
-            if counterpart is not None or len(attestations) != 2:
+            if counterpart is not None:
                 raise ValueError
-            peer_matches = tuple(
-                item
-                for item in attestations
-                if item.prompt_id != source.prompt_id
-                and item.counterpart_prompt_id == source.prompt_id
-                and item.counterpart_prompt_sha256 == source.prompt_sha256
-                and item.task_id == source.task_id
-                and item.contrast_owner_operation is target.operation
-                and item.catalog_sha256 == PROMPT_FEATURE_CATALOG_SHA256
-            )
-            if len(peer_matches) != 1 or attested_feature_id(peer_matches[0]) != target.feature_id:
+        source_attestations = tuple(
+            item for item in validated_attestations if item.prompt_id == source.prompt_id
+        )
+        variant_attestations = tuple(
+            item
+            for item in validated_attestations
+            if item.variant_clause_sha256 is not None
+            and item.task_id == source.task_id
+            and item.contrast_owner_operation is target.operation
+        )
+        if (
+            len(source_attestations) != 1
+            or len(variant_attestations) != 1
+            or attested_feature_id(variant_attestations[0]) != target.feature_id
+        ):
+            raise ValueError
+        for transition in arm.allowed_delta.allowed_transitions:
+            if transition.from_states != (feature_state(live_graph, transition.feature_id),):
                 raise ValueError
         return InterventionExecutionRequest(
+            hypothesis=hypothesis,
             target=target,
             target_instance=target_instance,
             protocol=protocol,
             protocol_instance=protocol_instance,
             arm=arm,
             source_prompt=source,
+            prompt_bundle=prompt_bundle,
+            functional_contract=functional_contract,
+            source_proposal=source_proposal,
             source_graph=graph,
             counterpart_prompt=counterpart,
-            attestations=attestations,
+            attestations=validated_attestations,
             mode=mode,
         )
     except (MemoryError, KeyboardInterrupt, SystemExit):
@@ -388,17 +474,65 @@ def _attested_neutral_text(request: InterventionExecutionRequest) -> str:
     return text
 
 
+def _target_reference_bytes(request: InterventionExecutionRequest) -> int:
+    if request.target.operation.value == "add":
+        target_spec = prompt_feature_spec(request.target.feature_id)
+        if not target_spec.intervention_clauses:
+            raise _error() from None
+        return len(target_spec.intervention_clauses[0].encode("utf-8"))
+    source_matches = tuple(
+        item for item in request.attestations if item.prompt_id == request.source_prompt.prompt_id
+    )
+    if len(source_matches) != 1:
+        raise _error() from None
+    start = source_matches[0].variant_clause_start
+    end = source_matches[0].variant_clause_end
+    if start is None or end is None or end <= start:
+        raise _error() from None
+    return end - start
+
+
+def _matched_clause(request: InterventionExecutionRequest, feature_id: str) -> str:
+    spec = prompt_feature_spec(feature_id)
+    if (
+        request.arm.role not in _MATCHED_ARM_ROLES
+        or feature_id not in _MATCHED_FEATURE_IDS
+        or not spec.intervenable
+        or not spec.intervention_clauses
+    ):
+        raise _error() from None
+    reference = _target_reference_bytes(request)
+    tolerance = max(4, math.ceil(reference * 0.05))
+    indexed = tuple(enumerate(spec.intervention_clauses))
+    _selected_index, selected = min(
+        indexed,
+        key=lambda item: (abs(len(item[1].encode("utf-8")) - reference), item[0]),
+    )
+    if abs(len(selected.encode("utf-8")) - reference) > tolerance:
+        raise _error() from None
+    return selected
+
+
 def _deterministic_text(request: InterventionExecutionRequest) -> str:
     transitions = request.arm.allowed_delta.allowed_transitions
     removes = tuple(item for item in transitions if item.to_states == (FeatureState.ABSENT,))
     text = _attested_neutral_text(request) if removes else request.source_prompt.prompt
+    if request.arm.role is ArmRole.NOOP_REWRITE:
+        if transitions:
+            raise _error() from None
+        return text + "\n"
     for transition in transitions:
         if transition.to_states != (FeatureState.PRESENT,):
             continue
         spec = prompt_feature_spec(transition.feature_id)
         if not spec.intervenable or not spec.intervention_clauses:
             raise _error() from None
-        text += spec.intervention_clauses[0]
+        clause = (
+            _matched_clause(request, transition.feature_id)
+            if request.arm.role in _MATCHED_ARM_ROLES
+            else spec.intervention_clauses[0]
+        )
+        text += clause
     return text
 
 
@@ -453,8 +587,14 @@ def _validate_candidate_binding(
 class DeterministicInterventionExecutor:
     """Render only catalog-owned clauses and attested exact removals."""
 
+    __slots__ = ()
+
     def __repr__(self) -> str:
         return "DeterministicInterventionExecutor()"
+
+    @property
+    def policy_sha256(self) -> str:
+        return DETERMINISTIC_INTERVENTION_POLICY_SHA256
 
     def execute(self, execution_request: InterventionExecutionRequest) -> PromptCandidate:
         trusted = _trusted_request(execution_request)
@@ -673,6 +813,11 @@ class LLMInterventionExecutor:
     def __repr__(self) -> str:
         return "LLMInterventionExecutor()"
 
+    @property
+    def policy_sha256(self) -> str:
+        self._validate_policy_lock()
+        return self._executor_policy_sha256
+
     def _validate_policy_lock(self) -> None:
         if (
             self._structured_policy.system_template_sha256
@@ -732,25 +877,27 @@ class LLMInterventionExecutor:
         return _validate_candidate_binding(result, trusted, patch)
 
 
-class GraphRenderer(Protocol):
-    def render(
-        self,
-        execution_request: InterventionExecutionRequest,
-        patch: IntendedGraphPatchRecord,
-    ) -> PromptCandidate:
-        raise NotImplementedError
-
-
 class GraphNativeExecutor:
     """Freeze an intended graph patch before delegating graph-to-text rendering."""
 
     __slots__ = ("_renderer",)
 
-    def __init__(self, renderer: GraphRenderer) -> None:
+    def __init__(
+        self,
+        renderer: DeterministicInterventionExecutor | LLMInterventionExecutor,
+    ) -> None:
         try:
-            if not callable(getattr(renderer, "render", None)):
+            if type(renderer) not in {
+                DeterministicInterventionExecutor,
+                LLMInterventionExecutor,
+            }:
+                raise ValueError
+            policy_sha256 = renderer.policy_sha256
+            if policy_sha256 == "0" * 64 or _SHA256.fullmatch(policy_sha256) is None:
                 raise ValueError
         except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except SecAwareError:
             raise
         except Exception:
             raise _error(ErrorCode.CONFIG) from None
@@ -766,6 +913,7 @@ class GraphNativeExecutor:
         trusted = _trusted_request(execution_request)
         if trusted.mode is not InterventionMode.GRAPH_NATIVE:
             raise _error() from None
+        expected_renderer_policy_sha256 = self._renderer.policy_sha256
         source_snapshot = trusted.source_graph.model_dump(mode="json")
         request_snapshot = trusted.model_dump(mode="json")
         patch = IntendedGraphPatchRecord.from_content(
@@ -788,7 +936,9 @@ class GraphNativeExecutor:
         except Exception:
             raise _error() from None
         if (
-            trusted.source_graph.model_dump(mode="json") != source_snapshot
+            self._renderer.policy_sha256 != expected_renderer_policy_sha256
+            or candidate.executor_policy_sha256 != expected_renderer_policy_sha256
+            or trusted.source_graph.model_dump(mode="json") != source_snapshot
             or trusted.model_dump(mode="json") != request_snapshot
             or patch.model_dump(mode="json") != patch_snapshot
         ):

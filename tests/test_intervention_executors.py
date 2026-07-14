@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import math
 from pathlib import Path
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
-from m5_executor_fixtures import request
+from m5_executor_fixtures import proposal_graph, request
 from secaware.config import AppConfig, InterventionConfig, InterventionLLMConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.intervention.executors import (
@@ -15,12 +17,17 @@ from secaware.intervention.executors import (
     structured_policy_from_config,
 )
 from secaware.schema.experiments import (
+    CONFIRMATION_TARGET_FEATURE_IDS,
     ArmRole,
     FeatureFamily,
     FeatureOperation,
     InterventionExecutorKind,
     InterventionMode,
+    FunctionalOutcomeContractRecord,
 )
+from secaware.schema.records import PromptRecord
+from secaware.tsg.graph import record_to_multidigraph
+from secaware.tsg.queries import feature_state_vector
 from secaware.tsg.feature_catalog import prompt_feature_spec
 from secaware.intervention.attestation import PromptRoleAttestationRecord
 
@@ -44,11 +51,9 @@ ALL_ARM_COORDINATES = (
     (FeatureFamily.TASK_FUNCTION, FeatureOperation.ADD, ArmRole.TASK_TARGET),
     (FeatureFamily.TASK_FUNCTION, FeatureOperation.ADD, ArmRole.TASK_NOOP),
     (FeatureFamily.TASK_FUNCTION, FeatureOperation.ADD, ArmRole.TASK_LENGTH_PLACEBO),
-    (FeatureFamily.TASK_FUNCTION, FeatureOperation.ADD, ArmRole.TASK_GENERIC_CONTROL),
     (FeatureFamily.TASK_FUNCTION, FeatureOperation.REMOVE, ArmRole.TASK_TARGET),
     (FeatureFamily.TASK_FUNCTION, FeatureOperation.REMOVE, ArmRole.TASK_NOOP),
     (FeatureFamily.TASK_FUNCTION, FeatureOperation.REMOVE, ArmRole.TASK_LENGTH_PLACEBO),
-    (FeatureFamily.TASK_FUNCTION, FeatureOperation.REMOVE, ArmRole.TASK_GENERIC_CONTROL),
     (FeatureFamily.PRESENTATION_CONTROL, FeatureOperation.ADD, ArmRole.PRESENTATION_TARGET),
     (FeatureFamily.PRESENTATION_CONTROL, FeatureOperation.ADD, ArmRole.PRESENTATION_NOOP),
     (
@@ -64,6 +69,262 @@ ALL_ARM_COORDINATES = (
         ArmRole.PRESENTATION_MATCHED_CONTROL,
     ),
 )
+
+
+def _execute_rejects(execution_request: object) -> None:
+    with pytest.raises(SecAwareError) as exc_info:
+        DeterministicInterventionExecutor().execute(execution_request)
+    assert exc_info.value.code in {ErrorCode.CONTRACT, ErrorCode.POLICY_MISMATCH}
+
+
+def test_execution_request_requires_complete_sensitive_provenance() -> None:
+    execution_request = request()
+    rendered = repr(execution_request)
+    assert execution_request.hypothesis.hypothesis_id not in rendered
+    assert execution_request.source_prompt.prompt not in rendered
+    assert execution_request.source_proposal.proposal_id not in rendered
+
+    payload = execution_request.model_dump(mode="python")
+    for field in ("hypothesis", "prompt_bundle", "source_proposal"):
+        incomplete = dict(payload)
+        incomplete.pop(field)
+        with pytest.raises(ValidationError):
+            type(execution_request).model_validate(incomplete)
+
+
+def test_executor_rejects_forged_frozen_hypothesis_digest() -> None:
+    execution_request = request().model_copy(
+        update={
+            "hypothesis": request().hypothesis.model_copy(update={"hypothesis_sha256": "0" * 64})
+        }
+    )
+    _execute_rejects(execution_request)
+
+
+def test_executor_rejects_functional_contract_from_another_preregistration() -> None:
+    execution_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        ArmRole.TASK_TARGET,
+        with_functional_contract=True,
+    )
+    assert (
+        DeterministicInterventionExecutor().execute(execution_request).arm_role
+        is ArmRole.TASK_TARGET
+    )
+    forged_contract = FunctionalOutcomeContractRecord.from_content(
+        task_feature_id="task.database_query",
+        outcome_id="y_task_database_functional",
+        expected_add_sign="positive",
+        expected_remove_sign="negative",
+        generic_control_feature_id="task.input_consumption",
+        evaluator_policy_sha256="8" * 64,
+    )
+    _execute_rejects(execution_request.model_copy(update={"functional_contract": forged_contract}))
+
+
+@pytest.mark.parametrize("mutation", ("cross_cwe_peer", "counterpart_coordinates"))
+def test_executor_rejects_ghost_prompt_bundle_peers(mutation: str) -> None:
+    execution_request = request()
+    baseline, variant = execution_request.prompt_bundle
+    if mutation == "cross_cwe_peer":
+        forged_peer = PromptRecord.model_validate(
+            {**variant.model_dump(mode="python"), "cwe": "CWE-89"}
+        )
+    else:
+        forged_peer = PromptRecord.model_validate(
+            {
+                **variant.model_dump(mode="python"),
+                "counterpart_prompt_id": "ghost-baseline",
+            }
+        )
+    _execute_rejects(
+        execution_request.model_copy(update={"prompt_bundle": (baseline, forged_peer)})
+    )
+
+
+def test_executor_rejects_same_id_other_content_proposal_and_graph() -> None:
+    execution_request = request()
+    source = execution_request.source_prompt
+    other = PromptRecord.model_validate(
+        {
+            **source.model_dump(mode="python"),
+            "prompt": source.prompt + " This is unrelated content.",
+        }
+    )
+    proposal, graph = proposal_graph(other)
+    _execute_rejects(
+        execution_request.model_copy(update={"source_proposal": proposal, "source_graph": graph})
+    )
+
+
+def test_executor_rejects_allowed_transition_with_wrong_live_graph_state() -> None:
+    execution_request = request(
+        FeatureFamily.SAFETY_CONTROL,
+        FeatureOperation.ADD,
+        ArmRole.LENGTH_MATCHED_PLACEBO,
+        baseline_text=(
+            "Create a Python helper that reads a user-provided file path and mentions "
+            "a length matched placebo."
+        ),
+    )
+    _execute_rejects(execution_request)
+
+
+def _canonical_changed_span_utf8_bytes(before: str, after: str) -> int:
+    before_bytes = before.encode("utf-8")
+    after_bytes = after.encode("utf-8")
+    prefix = 0
+    while (
+        prefix < len(before_bytes)
+        and prefix < len(after_bytes)
+        and before_bytes[prefix] == after_bytes[prefix]
+    ):
+        prefix += 1
+    suffix = 0
+    while (
+        suffix < len(before_bytes) - prefix
+        and suffix < len(after_bytes) - prefix
+        and before_bytes[-1 - suffix] == after_bytes[-1 - suffix]
+    ):
+        suffix += 1
+    return (len(before_bytes) - prefix - suffix) + (len(after_bytes) - prefix - suffix)
+
+
+def _matched_coordinates() -> tuple[tuple[str, FeatureOperation, ArmRole, ArmRole], ...]:
+    result: list[tuple[str, FeatureOperation, ArmRole, ArmRole]] = []
+    for feature_id in CONFIRMATION_TARGET_FEATURE_IDS:
+        family = prompt_feature_spec(feature_id).feature_family
+        for operation in FeatureOperation:
+            if family is FeatureFamily.SAFETY_CONTROL:
+                target = (
+                    ArmRole.TARGET_PATCH
+                    if operation is FeatureOperation.ADD
+                    else ArmRole.TARGET_REMOVE
+                )
+                matched = (
+                    ArmRole.LENGTH_MATCHED_PLACEBO
+                    if operation is FeatureOperation.ADD
+                    else ArmRole.LENGTH_MATCHED_SHAM_EDIT
+                )
+            elif family is FeatureFamily.TASK_FUNCTION:
+                target = ArmRole.TASK_TARGET
+                matched = ArmRole.TASK_LENGTH_PLACEBO
+            else:
+                if prompt_feature_spec(feature_id).matched_control_feature_id is None:
+                    continue
+                target = ArmRole.PRESENTATION_TARGET
+                matched = ArmRole.PRESENTATION_MATCHED_CONTROL
+            result.append((feature_id, operation, target, matched))
+    return tuple(result)
+
+
+@pytest.mark.parametrize(
+    ("feature_id", "operation", "target_role", "matched_role"),
+    _matched_coordinates(),
+)
+def test_deterministic_matched_roles_fit_task4_canonical_changed_span_tolerance(
+    feature_id: str,
+    operation: FeatureOperation,
+    target_role: ArmRole,
+    matched_role: ArmRole,
+) -> None:
+    family = prompt_feature_spec(feature_id).feature_family
+    target_request = request(
+        family,
+        operation,
+        target_role,
+        feature_id=feature_id,
+    )
+    matched_request = request(
+        family,
+        operation,
+        matched_role,
+        feature_id=feature_id,
+    )
+    executor = DeterministicInterventionExecutor()
+    target_candidate = executor.execute(target_request)
+    matched_candidate = executor.execute(matched_request)
+    reference = _canonical_changed_span_utf8_bytes(
+        target_request.source_prompt.prompt,
+        target_candidate.text,
+    )
+    observed = _canonical_changed_span_utf8_bytes(
+        matched_request.source_prompt.prompt,
+        matched_candidate.text,
+    )
+    assert abs(reference - observed) <= max(4, math.ceil(reference * 0.05))
+    if operation is FeatureOperation.REMOVE:
+        assert matched_candidate.text.startswith(matched_request.source_prompt.prompt)
+
+
+def test_deterministic_noop_rewrite_changes_bytes_without_feature_state_change() -> None:
+    execution_request = request(
+        FeatureFamily.SAFETY_CONTROL,
+        FeatureOperation.ADD,
+        ArmRole.NOOP_REWRITE,
+    )
+    candidate = DeterministicInterventionExecutor().execute(execution_request)
+    assert candidate.text == execution_request.source_prompt.prompt + "\n"
+
+    candidate_prompt = PromptRecord.model_validate(
+        {
+            **execution_request.source_prompt.model_dump(mode="python"),
+            "prompt": candidate.text,
+        }
+    )
+    _proposal, candidate_graph = proposal_graph(candidate_prompt)
+    before = feature_state_vector(record_to_multidigraph(execution_request.source_graph))
+    after = feature_state_vector(record_to_multidigraph(candidate_graph))
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    ("family", "operation", "role"),
+    (
+        (FeatureFamily.SAFETY_CONTROL, FeatureOperation.REMOVE, ArmRole.NOOP_RETAIN),
+        (FeatureFamily.TASK_FUNCTION, FeatureOperation.ADD, ArmRole.TASK_NOOP),
+        (
+            FeatureFamily.PRESENTATION_CONTROL,
+            FeatureOperation.ADD,
+            ArmRole.PRESENTATION_NOOP,
+        ),
+    ),
+)
+def test_other_deterministic_noop_roles_retain_exact_source_bytes(
+    family: FeatureFamily,
+    operation: FeatureOperation,
+    role: ArmRole,
+) -> None:
+    execution_request = request(family, operation, role)
+    candidate = DeterministicInterventionExecutor().execute(execution_request)
+    assert candidate.text.encode("utf-8") == execution_request.source_prompt.prompt.encode("utf-8")
+
+
+def test_deterministic_matched_role_fails_closed_without_a_feasible_clause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.intervention.executors as executor_module
+
+    execution_request = request(
+        FeatureFamily.SAFETY_CONTROL,
+        FeatureOperation.ADD,
+        ArmRole.LENGTH_MATCHED_PLACEBO,
+    )
+    original = prompt_feature_spec("presentation.length_matched_placebo")
+
+    def infeasible(feature_id: str):
+        if feature_id == original.feature_id:
+            return replace(
+                original,
+                intervention_clauses=(
+                    " Use a placebo edit with deliberately excessive padding here.",
+                ),
+            )
+        return prompt_feature_spec(feature_id)
+
+    monkeypatch.setattr(executor_module, "prompt_feature_spec", infeasible)
+    _execute_rejects(execution_request)
 
 
 def _expected_deterministic_text(execution_request: object) -> str:
@@ -95,7 +356,26 @@ def test_deterministic_executor_closes_every_finite_arm_role(
     assert candidate.mode is InterventionMode.TEXT_NATIVE
     assert candidate.intended_patch_id is None
     assert candidate.executor_policy_sha256 == DETERMINISTIC_INTERVENTION_POLICY_SHA256
-    assert candidate.text == _expected_deterministic_text(execution_request)
+    if role not in {
+        ArmRole.NOOP_REWRITE,
+        ArmRole.LENGTH_MATCHED_PLACEBO,
+        ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+        ArmRole.TASK_LENGTH_PLACEBO,
+        ArmRole.PRESENTATION_MATCHED_CONTROL,
+    }:
+        assert candidate.text == _expected_deterministic_text(execution_request)
+
+
+@pytest.mark.parametrize("operation", tuple(FeatureOperation))
+def test_task_generic_control_fails_closed_when_feature_is_not_applicable(
+    operation: FeatureOperation,
+) -> None:
+    execution_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        operation,
+        ArmRole.TASK_GENERIC_CONTROL,
+    )
+    _execute_rejects(execution_request)
 
 
 def test_safety_remove_restores_exact_attested_utf8_counterpart() -> None:
