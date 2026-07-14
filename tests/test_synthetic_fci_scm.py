@@ -215,6 +215,7 @@ def _store(tmp_path: Path, name: str) -> RunStore:
                 "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
         }
     )
     store = RunStore(config)

@@ -236,9 +236,9 @@ class InterventionConfig(StrictModel):
     )
 
     mode: InterventionMode = InterventionMode.TEXT_NATIVE
-    # The migration default is intentionally usable without provider credentials.
-    # Production LLM execution must be selected explicitly with a complete policy.
-    executor: InterventionExecutorKind = InterventionExecutorKind.DETERMINISTIC
+    # AppConfig validation is fail-closed: LLM requires a complete policy, while
+    # deterministic execution must be selected explicitly.
+    executor: InterventionExecutorKind = InterventionExecutorKind.LLM
     llm: InterventionLLMConfig | None = None
     operations: tuple[FeatureOperation, ...] = (
         FeatureOperation.ADD,
@@ -477,7 +477,7 @@ class AppConfig(StrictModel):
     data: DataConfig
     tsg: TSGConfig = Field(default_factory=TSGConfig)
     discovery: FCIDiscoveryConfig = Field(default_factory=FCIDiscoveryConfig)
-    intervention: InterventionConfig = Field(default_factory=InterventionConfig)
+    intervention: InterventionConfig
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     oracle: OracleConfig = Field(default_factory=OracleConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)

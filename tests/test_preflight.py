@@ -89,6 +89,7 @@ def _config(
                 ),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
             "generation": {
                 "models": ["model-a"] if models is None else models,
                 "seeds": [7] if seeds is None else seeds,
@@ -416,6 +417,7 @@ def _write_provider_config(
                 "prompt_attestations_path": str(attestations_path),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
             "generation": {
                 "provider": provider,
                 "models": ["model-a"] if models is None else models,
@@ -451,6 +453,7 @@ def test_data_config_requires_explicit_prompt_attestation_artifact() -> None:
             {
                 "run": {"name": "missing-attestations", "output_dir": "runs/test"},
                 "data": {"prompts_path": "prompts.jsonl"},
+                "intervention": {"executor": "deterministic"},
                 "generation": {"models": ["model-a"], "seeds": [1]},
             }
         )

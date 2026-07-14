@@ -16,6 +16,7 @@ from secaware.intervention.executors import (
     LLMInterventionExecutor,
     intervention_executor_policy_sha256,
 )
+from secaware.intervention.graph_patch import allowed_delta_sha256
 from secaware.llm.structured_transport import OpenAICompatibleStructuredTransport
 from secaware.schema.experiments import ArmRole, FeatureFamily, FeatureOperation, InterventionMode
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
@@ -65,9 +66,17 @@ def test_text_native_llm_executor_receives_target_but_no_outcome() -> None:
     ]
     assert set(payload["allowed_delta"]) == {
         "allowed_transitions",
+        "allowed_delta_sha256",
         "all_unlisted_features_fixed",
+        "fixed_feature_count",
         "fixed_families",
     }
+    assert payload["allowed_delta"]["allowed_delta_sha256"] == allowed_delta_sha256(
+        execution_request.arm.allowed_delta
+    )
+    assert payload["allowed_delta"]["fixed_feature_count"] == len(
+        execution_request.arm.allowed_delta.fixed_feature_ids
+    )
     assert payload["allowed_delta"]["all_unlisted_features_fixed"] is True
     assert payload["source_prompt"] == {
         "content": execution_request.source_prompt.prompt,
@@ -85,8 +94,23 @@ def test_text_native_llm_executor_receives_target_but_no_outcome() -> None:
         "confirmation_status",
     ):
         assert forbidden not in serialized
+    assert "safety.expected_outcome_leakage" not in serialized
     assert candidate.mode is InterventionMode.TEXT_NATIVE
     assert candidate.executor_policy_sha256 == intervention_executor_policy_sha256(policy)
+
+
+def test_allowed_delta_projection_digest_mutation_fails_local_validation() -> None:
+    import secaware.intervention.executors as executor_module
+
+    execution_request = request()
+    projection = executor_module._allowed_delta_projection(execution_request.arm.allowed_delta)
+    mutated = {**projection, "allowed_delta_sha256": "0" * 64}
+    with pytest.raises(SecAwareError) as exc_info:
+        executor_module._validate_allowed_delta_projection(
+            mutated,
+            execution_request.arm.allowed_delta,
+        )
+    assert exc_info.value.code is ErrorCode.POLICY_MISMATCH
 
 
 def test_prompt_injection_is_transmitted_only_as_inert_source_data() -> None:

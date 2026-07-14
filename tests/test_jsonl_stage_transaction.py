@@ -35,6 +35,7 @@ def _prepared_store(tmp_path: Path) -> RunStore:
                 "prompts_path": str(prompts_path),
                 "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
             },
+            "intervention": {"executor": "deterministic"},
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
         }
     )

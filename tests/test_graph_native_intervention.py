@@ -82,6 +82,10 @@ def test_graph_native_llm_request_binds_the_frozen_intended_patch() -> None:
         ],
         "patch_id": patch.patch_id,
     }
+    assert (
+        payload["allowed_delta"]["allowed_delta_sha256"]
+        == payload["intended_patch"]["allowed_delta_sha256"]
+    )
     assert candidate.intended_patch_id == patch.patch_id
 
 

@@ -343,6 +343,7 @@ def test_generation_config_accepts_new_provider_without_removing_legacy_api() ->
             "prompt_attestations_path": "prompt-attestations.jsonl",
         },
         "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+        "intervention": {"executor": "deterministic"},
     }
 
     compatible = AppConfig.model_validate(
@@ -462,6 +463,7 @@ def _write_prompt_config(
                 "prompt_attestations_path": str(tmp_path / "prompt-attestations.jsonl"),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
             "generation": generation,
         }
     )

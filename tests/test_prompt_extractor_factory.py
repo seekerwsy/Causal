@@ -122,6 +122,7 @@ def test_app_config_requires_backend_specific_llm_coordinates() -> None:
             "prompts_path": "prompts.jsonl",
             "prompt_attestations_path": "prompt-attestations.jsonl",
         },
+        "intervention": {"executor": "deterministic"},
     }
     with pytest.raises(ValidationError):
         AppConfig.model_validate(base)

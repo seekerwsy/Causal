@@ -30,6 +30,7 @@ from secaware.llm.structured_transport import (
 )
 from secaware.schema.common import SafeValidationMixin, StrictModel
 from secaware.schema.experiments import (
+    AllowedDeltaRecord,
     ArmSpecRecord,
     ArmRole,
     ConfirmationProtocolInstanceRecord,
@@ -484,6 +485,8 @@ def _request_payload(
     patch: IntendedGraphPatchRecord | None,
 ) -> dict[str, object]:
     delta = request.arm.allowed_delta
+    delta_projection = _allowed_delta_projection(delta)
+    _validate_allowed_delta_projection(delta_projection, delta)
     payload: dict[str, object] = {
         "schema_version": "1.0",
         "request_kind": "bounded_prompt_intervention",
@@ -504,13 +507,7 @@ def _request_payload(
         "arm_role": request.arm.role.value,
         "mode": request.mode.value,
         "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
-        "allowed_delta": {
-            "allowed_transitions": [
-                item.model_dump(mode="json") for item in delta.allowed_transitions
-            ],
-            "fixed_families": [item.value for item in delta.fixed_families],
-            "all_unlisted_features_fixed": True,
-        },
+        "allowed_delta": delta_projection,
         "output_schema": _OUTPUT_SCHEMA,
     }
     if patch is not None:
@@ -523,6 +520,48 @@ def _request_payload(
             ],
         }
     return payload
+
+
+def _allowed_delta_projection(delta: AllowedDeltaRecord) -> dict[str, object]:
+    """Project a complete local delta without revealing fixed feature names."""
+
+    try:
+        checked = AllowedDeltaRecord.model_validate(
+            delta.model_dump(mode="python", round_trip=True, warnings=False)
+        )
+        return {
+            "allowed_transitions": [
+                item.model_dump(mode="json") for item in checked.allowed_transitions
+            ],
+            "fixed_families": [item.value for item in checked.fixed_families],
+            "all_unlisted_features_fixed": True,
+            "allowed_delta_sha256": allowed_delta_sha256(checked),
+            "fixed_feature_count": len(checked.fixed_feature_ids),
+        }
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _error(ErrorCode.POLICY_MISMATCH) from None
+
+
+def _validate_allowed_delta_projection(
+    projection: Mapping[str, object],
+    delta: AllowedDeltaRecord,
+) -> None:
+    """Bind the prompt-safe projection to the complete local AllowedDelta."""
+
+    try:
+        if type(projection) is not dict:
+            raise ValueError
+        expected = _allowed_delta_projection(delta)
+        if canonical_request_bytes(projection) != canonical_request_bytes(expected):
+            raise ValueError
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _error(ErrorCode.POLICY_MISMATCH) from None
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -660,7 +699,14 @@ class LLMInterventionExecutor:
         if (trusted.mode is InterventionMode.GRAPH_NATIVE) != (patch is not None):
             raise _error() from None
         self._validate_policy_lock()
-        request_bytes = canonical_request_bytes(_request_payload(trusted, patch))
+        request_payload = _request_payload(trusted, patch)
+        projection = request_payload["allowed_delta"]
+        if not isinstance(projection, Mapping):
+            raise _error(ErrorCode.POLICY_MISMATCH) from None
+        _validate_allowed_delta_projection(projection, trusted.arm.allowed_delta)
+        if patch is not None and projection["allowed_delta_sha256"] != patch.allowed_delta_sha256:
+            raise _error(ErrorCode.POLICY_MISMATCH) from None
+        request_bytes = canonical_request_bytes(request_payload)
         call_policy = StructuredLLMPolicy(**_structured_policy_payload(self._structured_policy))
         expected_call_policy = _structured_policy_payload(call_policy)
         try:
@@ -674,6 +720,7 @@ class LLMInterventionExecutor:
         if _structured_policy_payload(call_policy) != expected_call_policy:
             raise _error(ErrorCode.POLICY_MISMATCH) from None
         self._validate_policy_lock()
+        _validate_allowed_delta_projection(projection, trusted.arm.allowed_delta)
         text = _parse_response(raw, self._structured_policy.max_response_bytes)
         _validate_llm_text(text, trusted)
         result = _candidate(

@@ -231,6 +231,7 @@ def test_app_config_rejects_unknown_nested_keys() -> None:
                     "prompts_path": "prompts.jsonl",
                     "prompt_attestations_path": "attestations.jsonl",
                 },
+                "intervention": {"executor": "deterministic"},
             }
         )
 
@@ -248,6 +249,7 @@ def test_run_random_seed_is_a_strict_signed_64_bit_integer(random_seed: object) 
                     "prompt_attestations_path": "attestations.jsonl",
                 },
                 "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+                "intervention": {"executor": "deterministic"},
             }
         )
 
@@ -262,6 +264,7 @@ def test_run_random_seed_accepts_signed_64_bit_boundaries(random_seed: int) -> N
                 "prompt_attestations_path": "attestations.jsonl",
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
         }
     )
 
@@ -281,6 +284,7 @@ def test_app_config_rejects_removed_tsg_field() -> None:
                     "prompt_attestations_path": "attestations.jsonl",
                 },
                 "tsg": {removed_field: removed_value},
+                "intervention": {"executor": "deterministic"},
             }
         )
 
@@ -296,6 +300,7 @@ def test_app_config_uses_exact_bounded_fci_discovery_contract() -> None:
                 "prompt_attestations_path": "attestations.jsonl",
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
         }
     )
 
@@ -332,6 +337,7 @@ def test_app_config_rejects_removed_heuristic_discovery_fields(removed_field: st
                     "prompt_attestations_path": "attestations.jsonl",
                 },
                 "discovery": {removed_field: 1},
+                "intervention": {"executor": "deterministic"},
             }
         )
 

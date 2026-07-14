@@ -39,6 +39,7 @@ def _config(source: Path, run_dir: Path) -> AppConfig:
                 "prompt_attestations_path": str(source.parent / "attestations.jsonl"),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
             "discovery": {
                 "bootstrap_samples": 3,
                 "min_independent_tasks": 2,

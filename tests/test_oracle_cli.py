@@ -112,6 +112,7 @@ def _config(tmp_path: Path, *, exact_tools: bool = False) -> AppConfig:
                 "prompt_attestations_path": str(tmp_path / "attestations.jsonl"),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1"},
+            "intervention": {"executor": "deterministic"},
             "generation": {
                 "provider": "mock",
                 "models": ["model-a"],

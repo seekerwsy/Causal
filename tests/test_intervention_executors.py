@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from m5_executor_fixtures import request
@@ -242,11 +243,31 @@ def _llm_config() -> dict[str, object]:
     }
 
 
-def test_default_config_is_valid_explicit_deterministic_migration() -> None:
-    config = AppConfig.model_validate(_minimal_config())
+def test_app_config_requires_explicit_intervention_and_defaults_executor_to_llm() -> None:
+    assert InterventionConfig.model_fields["executor"].default is InterventionExecutorKind.LLM
+    assert AppConfig.model_fields["intervention"].is_required()
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(_minimal_config())
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(_minimal_config({}))
+
+    config = AppConfig.model_validate(_minimal_config({"executor": "deterministic"}))
     assert config.intervention.executor is InterventionExecutorKind.DETERMINISTIC
     assert config.intervention.llm is None
     assert config.intervention.mode is InterventionMode.TEXT_NATIVE
+
+
+def test_config_file_without_explicit_intervention_fails_closed(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "missing-intervention.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_minimal_config()),
+        encoding="utf-8",
+    )
+    with pytest.raises(SecAwareError) as exc_info:
+        load_config(config_path)
+    assert exc_info.value.code is ErrorCode.CONFIG
 
 
 @pytest.mark.parametrize(
