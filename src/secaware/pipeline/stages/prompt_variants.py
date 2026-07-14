@@ -44,9 +44,9 @@ from secaware.intervention.variant_validation import (
     BLIND_EXTRACTION_ORDER_VERSION,
     ProtocolFreezeError,
     VariantValidationInput,
-    blind_extractor_task_id,
-    blind_occurrence_ranks,
+    blind_variant_prompt_record_from_text,
     freeze_protocol_variants,
+    prepare_blind_extractions,
     validate_graph_delta_record,
     validate_length_match_record,
 )
@@ -757,16 +757,10 @@ def _validate_bundle_relations(
                 expected_length_id = (
                     expected_length.length_match_id if expected_length is not None else None
                 )
-                variant_prompt = PromptRecord.model_validate(
-                    {
-                        **source.model_dump(mode="python"),
-                        "prompt_id": variant.variant_prompt_id,
-                        "task_id": blind_extractor_task_id(
-                            source,
-                            snapshot.extractor_policy,
-                        ),
-                        "prompt": variant.prompt_text,
-                    }
+                variant_prompt = blind_variant_prompt_record_from_text(
+                    source,
+                    variant.prompt_text,
+                    snapshot.extractor_policy,
                 )
                 validate_proposal(proposal, variant_prompt)
                 if (
@@ -778,6 +772,7 @@ def _validate_bundle_relations(
                     or variant.arm_protocol_id != protocol.arm_protocol_id
                     or variant.protocol_instance_id != instance.protocol_instance_id
                     or variant.arm_role is not arm.role
+                    or variant.variant_prompt_id != variant_prompt.prompt_id
                     or variant.prompt_sha256 != variant_prompt.prompt_sha256
                     or variant.executor_policy_sha256 != expected_executor_policy
                     or variant.extractor_policy_sha256 != snapshot.extractor_policy.policy_sha256
@@ -1094,17 +1089,17 @@ def run_prompt_variant_freeze_stage(
                 )
                 continue
             pending_validation.append((item, tuple(validation_inputs)))
-        rank_by_candidate_sha256 = (
-            blind_occurrence_ranks(
-                tuple(
-                    value
-                    for _item, validation_inputs in pending_validation
-                    for value in validation_inputs
-                ),
-                policy,
+        all_validation_inputs = tuple(
+            value for _item, validation_inputs in pending_validation for value in validation_inputs
+        )
+        blind_extractions = (
+            prepare_blind_extractions(
+                all_validation_inputs,
+                extractor=extractor,
+                extraction_policy=policy,
             )
-            if pending_validation
-            else {}
+            if all_validation_inputs
+            else None
         )
         for item, validation_inputs in pending_validation:
             try:
@@ -1113,7 +1108,7 @@ def run_prompt_variant_freeze_stage(
                     extractor=extractor,
                     extraction_policy=policy,
                     expected_executor_policy_sha256=expected_executor_policy,
-                    blind_rank_by_candidate_sha256=rank_by_candidate_sha256,
+                    blind_extractions=blind_extractions,
                 )
             except (MemoryError, KeyboardInterrupt, SystemExit):
                 raise
@@ -1132,8 +1127,18 @@ def run_prompt_variant_freeze_stage(
             definitions[2],
             definitions[3],
             tuple(sorted(patches, key=lambda value: value.patch_id)),
-            tuple(sorted(proposals, key=lambda value: value.proposal_id)),
-            tuple(sorted(graphs, key=lambda value: value.graph_id)),
+            tuple(
+                sorted(
+                    {value.proposal_id: value for value in proposals}.values(),
+                    key=lambda value: value.proposal_id,
+                )
+            ),
+            tuple(
+                sorted(
+                    {value.graph_id: value for value in graphs}.values(),
+                    key=lambda value: value.graph_id,
+                )
+            ),
             tuple(sorted(deltas, key=lambda value: value.delta_id)),
             tuple(sorted(variants, key=lambda value: value.variant_id)),
             tuple(sorted(lengths, key=lambda value: value.length_match_id)),

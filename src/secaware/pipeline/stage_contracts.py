@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 
 from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
-from secaware.config import FCIDiscoveryConfig, InterventionConfig, TSGConfig
+from secaware.config import AppConfig, FCIDiscoveryConfig, InterventionConfig, TSGConfig
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.randomness import RNG_VERSION
 from secaware.schema.causal import (
@@ -125,6 +125,7 @@ def prompt_variant_stage_contract_payload() -> dict[str, object]:
         "deterministic_executor_policy_sha256": DETERMINISTIC_INTERVENTION_POLICY_SHA256,
         "executor_template_sha256": INTERVENTION_EXECUTOR_SYSTEM_TEMPLATE_SHA256,
         "executor_output_schema_sha256": INTERVENTION_EXECUTOR_OUTPUT_SCHEMA_SHA256,
+        "app_config_schema": _schema_sha256(AppConfig),
         "intervention_config_schema": _schema_sha256(InterventionConfig),
         "extractor_config_schema": _schema_sha256(TSGConfig),
         "candidate_schema": _schema_sha256(PromptCandidate),

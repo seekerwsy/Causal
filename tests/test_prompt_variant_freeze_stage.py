@@ -19,6 +19,7 @@ from secaware.intervention.variant_validation import (
     ProtocolFreezeError,
     VariantValidationInput,
     freeze_protocol_variants,
+    prepare_blind_extractions,
 )
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
@@ -172,7 +173,7 @@ def test_blind_extraction_order_aliases_and_artifacts_ignore_input_role_order() 
         assert all(token not in prompt.task_id for token in forbidden)
 
 
-def test_equal_blind_keys_use_stable_unique_opaque_occurrence_aliases() -> None:
+def test_equal_blind_keys_are_extracted_once_without_occurrence_aliases() -> None:
     values, policy = _validation_inputs()
     source_text = values[0].source_prompt.prompt
     tied = tuple(
@@ -208,11 +209,78 @@ def test_equal_blind_keys_use_stable_unique_opaque_occurrence_aliases() -> None:
     )
 
     assert left_extractor.aliases == right_extractor.aliases
-    assert len(set(left_extractor.aliases)) == len(tied)
+    assert len(left_extractor.aliases) == 1
     assert left == right
 
 
+def test_blind_extraction_deduplicates_task_aliases_without_leaking_identity() -> None:
+    values, policy = _validation_inputs()
+    original = values[0]
+    alias_source = original.source_prompt.model_copy(update={"task_id": "secret-alias-task"})
+    aliased = original.model_copy(update={"source_prompt": alias_source})
+
+    class CapturingStatefulExtractor:
+        def __init__(self) -> None:
+            self.calls: list[PromptRecord] = []
+
+        def extract(self, prompt, extraction_policy):
+            self.calls.append(prompt)
+            return DeterministicCatalogExtractor().extract(prompt, extraction_policy)
+
+    forward = CapturingStatefulExtractor()
+    reverse = CapturingStatefulExtractor()
+    forward_cache = prepare_blind_extractions(
+        (original, aliased),
+        extractor=forward,
+        extraction_policy=policy,
+    )
+    reverse_cache = prepare_blind_extractions(
+        (aliased, original),
+        extractor=reverse,
+        extraction_policy=policy,
+    )
+
+    assert forward_cache == reverse_cache
+    assert len(forward.calls) == len(reverse.calls) == 1
+    assert forward.calls == reverse.calls
+    visible = forward.calls[0]
+    assert original.source_prompt.task_id not in visible.prompt_id
+    assert original.source_prompt.task_id not in visible.task_id
+    assert alias_source.task_id not in visible.prompt_id
+    assert alias_source.task_id not in visible.task_id
+    assert visible.task_id.startswith("blind_task_")
+
+
+def test_stateful_extractor_sees_only_global_blind_key_order() -> None:
+    values, policy = _validation_inputs()
+
+    class OrderSensitiveExtractor:
+        def __init__(self) -> None:
+            self.visible: list[tuple[str, str, str]] = []
+
+        def extract(self, prompt, extraction_policy):
+            self.visible.append((prompt.prompt_id, prompt.task_id, prompt.prompt))
+            return DeterministicCatalogExtractor().extract(prompt, extraction_policy)
+
+    forward = OrderSensitiveExtractor()
+    reverse = OrderSensitiveExtractor()
+    prepare_blind_extractions(
+        values,
+        extractor=forward,
+        extraction_policy=policy,
+    )
+    prepare_blind_extractions(
+        tuple(reversed(values)),
+        extractor=reverse,
+        extraction_policy=policy,
+    )
+
+    assert forward.visible == reverse.visible
+    assert len(forward.visible) == len({item[0] for item in forward.visible})
+
+
 _PROMPT_VARIANT_SCHEMA_BINDINGS = (
+    ("app_config_schema", AppConfig),
     ("prompt_schema", PromptRecord),
     ("attestation_schema", PromptRoleAttestationRecord),
     ("functional_contract_schema", FunctionalOutcomeContractRecord),
@@ -483,10 +551,13 @@ def test_real_stage_blind_sorts_extractor_calls_without_fixed_arm_positions(
     calls_by_blind_task: dict[str, list[PromptRecord]] = {}
     for call in extractor.calls:
         calls_by_blind_task.setdefault(call.task_id, []).append(call)
-    assert len(calls_by_blind_task) == 2
+    # The two task records have identical source/candidate content.  They must
+    # share one blind task alias and one semantic extraction per content key.
+    assert len(calls_by_blind_task) == 1
     for calls in calls_by_blind_task.values():
         text_digests = [hashlib.sha256(item.prompt.encode("utf-8")).hexdigest() for item in calls]
         assert text_digests == sorted(text_digests)
+    assert len(extractor.calls) == 4
     assert len({item.prompt_id for item in extractor.calls}) == len(extractor.calls)
     assert all(item.task_id.startswith("blind_task_") for item in extractor.calls)
 
@@ -906,6 +977,28 @@ def test_direct_schema_drift_invalidates_real_stage_skip(
         run_prompt_variant_freeze_stage(config, store, force=False)
 
 
+def test_app_config_schema_drift_invalidates_real_stage_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    original = AppConfig.model_json_schema
+
+    def drifted(_cls, *args, **kwargs):
+        return {**original(*args, **kwargs), "x-secaware-drift": "app-config-schema"}
+
+    monkeypatch.setattr(AppConfig, "model_json_schema", classmethod(drifted))
+
+    def prove_rebuild(*_args, **_kwargs):
+        raise RuntimeError("app config schema drift rebuilt")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", prove_rebuild)
+
+    with pytest.raises(RuntimeError, match="app config schema drift rebuilt"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
 def test_producer_replacement_is_blocked_while_consumer_holds_lease(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -991,6 +1084,51 @@ def test_readback_rejects_content_address_mutation(
         "freeze_protocol_variants",
         mutate_delta_without_readdressing,
     )
+
+    with pytest.raises(SecAwareError, match="bundle"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
+def test_readback_rejects_duplicate_prompt_variant_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    original_read_jsonl = prompt_variants_stage.read_jsonl
+
+    def duplicate_variant(path, model, **kwargs):
+        values = tuple(original_read_jsonl(path, model, **kwargs))
+        if model is PromptVariantRecord:
+            assert values
+            return (*values, values[0])
+        return values
+
+    monkeypatch.setattr(prompt_variants_stage, "read_jsonl", duplicate_variant)
+
+    with pytest.raises(SecAwareError, match="bundle"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
+@pytest.mark.parametrize("field", ("prompt_text", "prompt_sha256"))
+def test_readback_rejects_prompt_text_hash_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    original_read_jsonl = prompt_variants_stage.read_jsonl
+
+    def corrupt_variant(path, model, **kwargs):
+        values = tuple(original_read_jsonl(path, model, **kwargs))
+        if model is not PromptVariantRecord:
+            return values
+        assert values
+        payload = values[0].model_dump(mode="python")
+        payload[field] = "corrupt text" if field == "prompt_text" else "f" * 64
+        corrupted = PromptVariantRecord.model_construct(**payload)
+        return (corrupted, *values[1:])
+
+    monkeypatch.setattr(prompt_variants_stage, "read_jsonl", corrupt_variant)
 
     with pytest.raises(SecAwareError, match="bundle"):
         run_prompt_variant_freeze_stage(config, store, force=False)
