@@ -6,10 +6,11 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from m5_executor_fixtures import hypothesis, prompt_pair
 from m5_executor_fixtures import request
-from secaware.config import AppConfig, TSGConfig
+from secaware.config import AppConfig, InterventionConfig, TSGConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
@@ -444,6 +445,67 @@ def test_stage_contract_directly_binds_every_parsed_and_semantic_schema() -> Non
     assert {key for key, _model in _PROMPT_VARIANT_SCHEMA_BINDINGS} <= set(payload)
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"max_protocol_instances": 0},
+        {"max_arm_executions": 0},
+        {"max_protocol_instances": True},
+        {"max_arm_executions": 1.5},
+    ),
+)
+def test_intervention_execution_limits_are_strict_positive_integers(payload: dict) -> None:
+    with pytest.raises(ValidationError):
+        InterventionConfig.model_validate(
+            {
+                "mode": "text_native",
+                "executor": "deterministic",
+                "llm": None,
+                "operations": ["add", "remove"],
+                "max_protocols": 8,
+                **payload,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("max_protocol_instances", 255),
+        ("max_arm_executions", 2047),
+    ),
+)
+def test_stage_policy_binds_every_execution_limit(field: str, value: int) -> None:
+    config = AppConfig.model_validate(
+        {
+            "run": {"name": "limits", "random_seed": 7, "output_dir": "runs/limits"},
+            "data": {
+                "prompts_path": "data/prompts.jsonl",
+                "prompt_attestations_path": "data/attestations.jsonl",
+            },
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1", "llm": None},
+            "intervention": {
+                "mode": "text_native",
+                "executor": "deterministic",
+                "llm": None,
+                "operations": ["add", "remove"],
+                "max_protocols": 8,
+                "max_protocol_instances": 256,
+                "max_arm_executions": 2048,
+            },
+        }
+    )
+    changed = config.model_copy(
+        update={
+            "intervention": config.intervention.model_copy(update={field: value}),
+        }
+    )
+
+    assert prompt_variants_stage.prompt_variant_stage_policy_sha256(
+        changed
+    ) != prompt_variants_stage.prompt_variant_stage_policy_sha256(config)
+
+
 @pytest.mark.parametrize(("schema_key", "model"), _PROMPT_VARIANT_SCHEMA_BINDINGS)
 def test_each_prompt_variant_schema_drift_changes_stage_contract(
     schema_key: str,
@@ -525,6 +587,8 @@ def _stage_store(
     llm_executor: bool = False,
     graph_native: bool = False,
     task_count: int = 1,
+    max_protocol_instances: int = 256,
+    max_arm_executions: int = 2048,
 ) -> tuple[AppConfig, RunStore]:
     baseline, variant, attestations = prompt_pair(
         FeatureFamily.SAFETY_CONTROL,
@@ -532,19 +596,23 @@ def _stage_store(
     )
     prompts: list[PromptRecord] = [baseline, variant]
     attestation_records: list[PromptRoleAttestationRecord] = list(attestations)
-    if task_count == 2:
+    if task_count < 1:
+        raise ValueError("unsupported task count")
+    for task_index in range(1, task_count):
+        task_suffix = chr(ord("a") + task_index)
+        task_id = f"task-{task_suffix}"
         second_baseline = PromptRecord.model_validate(
             {
                 **baseline.model_dump(mode="python"),
-                "prompt_id": "task-b-baseline",
-                "task_id": "task-b",
+                "prompt_id": f"{task_id}-baseline",
+                "task_id": task_id,
             }
         )
         second_variant = PromptRecord.model_validate(
             {
                 **variant.model_dump(mode="python"),
-                "prompt_id": "task-b-variant",
-                "task_id": "task-b",
+                "prompt_id": f"{task_id}-variant",
+                "task_id": task_id,
                 "counterpart_prompt_id": second_baseline.prompt_id,
             }
         )
@@ -574,8 +642,6 @@ def _stage_store(
             second_attestations.append(PromptRoleAttestationRecord.from_content(**payload))
         prompts.extend((second_baseline, second_variant))
         attestation_records.extend(second_attestations)
-    elif task_count != 1:
-        raise ValueError("unsupported task count")
     prompts_path = tmp_path / "prompts.jsonl"
     attestations_path = tmp_path / "attestations.jsonl"
     write_jsonl(prompts_path, prompts)
@@ -600,6 +666,8 @@ def _stage_store(
         ),
         "operations": ["add", "remove"],
         "max_protocols": 8,
+        "max_protocol_instances": max_protocol_instances,
+        "max_arm_executions": max_arm_executions,
     }
     config = AppConfig.model_validate(
         {
@@ -658,6 +726,78 @@ def test_stage_executes_then_independently_extracts_and_atomically_publishes(
         )
     )
     assert store.path(".stages", "build-confirmation-variants.json").exists()
+
+
+@pytest.mark.parametrize(
+    "limits",
+    (
+        {"task_count": 2, "max_protocol_instances": 1},
+        {"task_count": 1, "max_arm_executions": 3},
+    ),
+)
+def test_execution_limits_fail_typed_before_executor_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limits: dict[str, int],
+) -> None:
+    config, store = _stage_store(tmp_path, **limits)
+    constructor_calls = 0
+
+    def forbidden_executor(*_args, **_kwargs):
+        nonlocal constructor_calls
+        constructor_calls += 1
+        raise AssertionError("executor constructed after resource limit")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", forbidden_executor)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.message == "prompt protocol resource limit exceeded"
+    assert constructor_calls == 0
+    assert not store.path(".stages", "build-confirmation-variants.json").exists()
+    assert all(
+        not store.path("interventions", name).exists() for name, _model in PROMPT_VARIANT_OUTPUTS
+    )
+
+
+def test_large_prompt_bundle_is_indexed_and_materialized_once_linearly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_count = 12
+    config, store = _stage_store(tmp_path, task_count=task_count)
+    original_index = prompt_variants_stage.build_target_materialization_index
+    original_batch = prompt_variants_stage.materialize_target_instances
+    index_calls = 0
+    batch_source_counts: list[int] = []
+
+    def spy_index(*args, **kwargs):
+        nonlocal index_calls
+        index_calls += 1
+        return original_index(*args, **kwargs)
+
+    def spy_batch(target, hypothesis_record, prompts, index):
+        batch_source_counts.append(len(prompts))
+        return original_batch(target, hypothesis_record, prompts, index)
+
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "build_target_materialization_index",
+        spy_index,
+    )
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "materialize_target_instances",
+        spy_batch,
+    )
+
+    result = run_prompt_variant_freeze_stage(config, store, force=False)
+
+    assert result.protocol_instance_count == task_count
+    assert index_calls == 1
+    assert batch_source_counts == [task_count]
 
 
 def test_real_stage_blind_sorts_extractor_calls_without_fixed_arm_positions(
@@ -973,6 +1113,58 @@ def test_future_assignment_artifact_is_rejected_before_variant_execution(
         run_prompt_variant_freeze_stage(config, store, force=False)
 
     assert not store.path(".stages", "build-confirmation-variants.json").exists()
+
+
+@pytest.mark.parametrize(
+    "control",
+    (MemoryError("future-guard"), KeyboardInterrupt("future-guard"), SystemExit("future-guard")),
+)
+def test_future_artifact_guard_rethrows_process_control_by_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    control: BaseException,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    manifest_root = store.path(".stages")
+    original_iterdir = Path.iterdir
+
+    def fail_manifest_iterdir(path: Path):
+        if path == manifest_root:
+            raise control
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", fail_manifest_iterdir)
+
+    with pytest.raises(type(control)) as exc_info:
+        prompt_variants_stage._guard_no_randomization_or_future_artifacts(store)
+
+    assert exc_info.value is control
+
+
+@pytest.mark.parametrize(
+    "control",
+    (MemoryError("variant-hash"), KeyboardInterrupt("variant-hash"), SystemExit("variant-hash")),
+)
+def test_prompt_variant_hash_validator_rethrows_process_control_by_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    control: BaseException,
+) -> None:
+    import secaware.schema.experiments as experiment_schema
+
+    record = PromptVariantRecord.model_construct(
+        arm_role=ArmRole.TARGET_PATCH,
+        prompt_text="candidate",
+    )
+
+    def fail_sha256(*_args, **_kwargs):
+        raise control
+
+    monkeypatch.setattr(experiment_schema.hashlib, "sha256", fail_sha256)
+
+    with pytest.raises(type(control)) as exc_info:
+        record.validate_semantics_and_digest()
+
+    assert exc_info.value is control
 
 
 @pytest.mark.parametrize(
@@ -1302,6 +1494,42 @@ def test_readback_rejects_duplicate_prompt_variant_record(
 
     with pytest.raises(SecAwareError, match="bundle"):
         run_prompt_variant_freeze_stage(config, store, force=False)
+
+
+def test_relation_validation_failure_before_commit_publishes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    failure = SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage="build-confirmation-variants",
+        message="staged relation closure rejected",
+    )
+    relation_calls = 0
+
+    def reject_staged_relations(*_args, **_kwargs):
+        nonlocal relation_calls
+        relation_calls += 1
+        staged = tuple(store.path("interventions").glob(".*.stage.candidate"))
+        assert len(staged) == len(PROMPT_VARIANT_OUTPUTS)
+        raise failure
+
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "_validate_bundle_relations",
+        reject_staged_relations,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+    assert exc_info.value is failure
+    assert relation_calls == 1
+    assert not store.path(".stages", "build-confirmation-variants.json").exists()
+    assert all(
+        not store.path("interventions", name).exists() for name, _model in PROMPT_VARIANT_OUTPUTS
+    )
 
 
 @pytest.mark.parametrize("field", ("prompt_text", "prompt_sha256"))

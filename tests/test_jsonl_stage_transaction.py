@@ -159,6 +159,92 @@ def test_jsonl_stage_reads_each_candidate_through_its_declared_model(
     assert readback_models == [ProbeRecord, None, ProbeRecord, None]
 
 
+def test_staged_relation_callback_runs_before_any_output_install(
+    tmp_path: Path,
+) -> None:
+    store = _prepared_store(tmp_path)
+    one = store.path("tsg", "one.jsonl")
+    two = store.path("tsg", "two.jsonl")
+    failure = SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage="transaction-test",
+        message="staged relation rejected",
+    )
+    observed: list[tuple[tuple[BaseModel | dict[str, object], ...], ...]] = []
+
+    def reject(groups):
+        observed.append(groups)
+        assert not one.exists()
+        assert not two.exists()
+        raise failure
+
+    with pytest.raises(SecAwareError) as exc_info:
+        execute_jsonl_stage_transaction(
+            store,
+            stage="transaction-test",
+            inputs=(store.path("inputs", "prompts.jsonl"),),
+            outputs=(
+                JsonlOutputSpec(one, ProbeRecord, require_nonempty=True),
+                JsonlOutputSpec(two, ProbeRecord, require_nonempty=True),
+            ),
+            force=True,
+            build=lambda: ((ProbeRecord(value=10),), (ProbeRecord(value=20),)),
+            validate_staged_outputs=reject,
+        )
+
+    assert exc_info.value is failure
+    assert observed == [((ProbeRecord(value=10),), (ProbeRecord(value=20),))]
+    assert not one.exists()
+    assert not two.exists()
+    assert not store.path(".stages", "transaction-test.json").exists()
+
+
+@pytest.mark.parametrize(
+    "control",
+    (MemoryError("cleanup"), KeyboardInterrupt("cleanup"), SystemExit("cleanup")),
+)
+def test_candidate_cleanup_rethrows_process_control_by_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    control: BaseException,
+) -> None:
+    store = _prepared_store(tmp_path)
+    output = store.path("tsg", "one.jsonl")
+    callback_started = False
+    original_unlink = Path.unlink
+
+    def reject(_groups) -> None:
+        nonlocal callback_started
+        callback_started = True
+        raise SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage="transaction-test",
+            message="staged relation rejected",
+        )
+
+    def interrupt_candidate_cleanup(path: Path, *args, **kwargs) -> None:
+        if callback_started and path.name.endswith(".stage.candidate"):
+            raise control
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", interrupt_candidate_cleanup)
+
+    with pytest.raises(type(control)) as exc_info:
+        execute_jsonl_stage_transaction(
+            store,
+            stage="transaction-test",
+            inputs=(store.path("inputs", "prompts.jsonl"),),
+            outputs=(JsonlOutputSpec(output, ProbeRecord, require_nonempty=True),),
+            force=True,
+            build=lambda: ((ProbeRecord(value=10),),),
+            validate_staged_outputs=reject,
+        )
+
+    assert exc_info.value is control
+    assert not output.exists()
+    assert not store.path(".stages", "transaction-test.json").exists()
+
+
 def test_jsonl_stage_restores_all_outputs_when_second_install_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -198,7 +284,7 @@ def test_jsonl_stage_restores_all_outputs_when_second_install_fails(
     assert two.read_bytes() == b'{"old":2}\n'
 
 
-@pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
 def test_jsonl_stage_interrupt_restores_the_prior_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

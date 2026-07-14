@@ -245,6 +245,8 @@ class InterventionConfig(StrictModel):
         FeatureOperation.REMOVE,
     )
     max_protocols: int = Field(default=64, ge=1, le=512)
+    max_protocol_instances: int = Field(default=256, ge=1, le=4096)
+    max_arm_executions: int = Field(default=2048, ge=1, le=32768)
 
     @field_validator("mode", mode="before")
     @classmethod

@@ -1115,7 +1115,7 @@ class RunStore:
                 return
             try:
                 self._release_stage_handle(handle)
-            except (KeyboardInterrupt, SystemExit):
+            except (MemoryError, KeyboardInterrupt, SystemExit):
                 raise
             except Exception:
                 continue

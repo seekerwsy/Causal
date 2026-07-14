@@ -55,6 +55,8 @@ intervention:
     - add
     - remove
   max_protocols: 64
+  max_protocol_instances: 256
+  max_arm_executions: 2048
 
 generation:
   provider: mock

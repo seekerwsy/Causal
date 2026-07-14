@@ -35,6 +35,10 @@ class JsonlOutputSpec:
 BuildRecords = Callable[[], Sequence[Sequence[BaseModel | dict[str, object]]]]
 CaptureInputSnapshot = Callable[[], Sequence[str]]
 VerifyInputSnapshot = Callable[[], None]
+ValidateStagedOutputs = Callable[
+    [tuple[tuple[BaseModel | dict[str, object], ...], ...]],
+    None,
+]
 
 
 def _stage_error(code: ErrorCode, stage: str, message: str) -> SecAwareError:
@@ -96,8 +100,8 @@ def _finalize_stage_commit(store: RunStore, lease: StageCommitLease) -> None:
             store.ensure_stage_commit_released(lease)
         except BaseException as error:
             if failure is None or (
-                isinstance(error, (KeyboardInterrupt, SystemExit))
-                and not isinstance(failure, (KeyboardInterrupt, SystemExit))
+                isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit))
+                and not isinstance(failure, (MemoryError, KeyboardInterrupt, SystemExit))
             ):
                 failure = error
     if failure is not None:
@@ -106,15 +110,15 @@ def _finalize_stage_commit(store: RunStore, lease: StageCommitLease) -> None:
 
 def _cleanup_transaction_paths(
     paths: Sequence[Path | None],
-) -> KeyboardInterrupt | SystemExit | None:
+) -> MemoryError | KeyboardInterrupt | SystemExit | None:
     pending = list(dict.fromkeys(path for path in paths if path is not None))
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     for _ in range(_TRANSACTION_CLEANUP_ATTEMPTS):
         remaining: list[Path] = []
         for path in pending:
             try:
                 path.unlink(missing_ok=True)
-            except (KeyboardInterrupt, SystemExit) as error:
+            except (MemoryError, KeyboardInterrupt, SystemExit) as error:
                 if control is None:
                     control = error
                 remaining.append(path)
@@ -169,6 +173,7 @@ def execute_jsonl_stage_transaction(
     catalog_sha256: str | None = None,
     capture_input_snapshot: CaptureInputSnapshot | None = None,
     verify_input_snapshot: VerifyInputSnapshot | None = None,
+    validate_staged_outputs: ValidateStagedOutputs | None = None,
 ) -> None:
     if not outputs:
         raise SecAwareError(
@@ -185,6 +190,12 @@ def execute_jsonl_stage_transaction(
             stage=stage,
             message="stage input snapshot contract is invalid",
         )
+    if validate_staged_outputs is not None and not callable(validate_staged_outputs):
+        raise SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage=stage,
+            message="stage output validation contract is invalid",
+        )
     _execute_transaction_body(
         store=store,
         stage=stage,
@@ -196,6 +207,7 @@ def execute_jsonl_stage_transaction(
         catalog_sha256=catalog_sha256,
         capture_input_snapshot=capture_input_snapshot,
         verify_input_snapshot=verify_input_snapshot,
+        validate_staged_outputs=validate_staged_outputs,
     )
 
 
@@ -211,6 +223,7 @@ def _execute_transaction_body(
     catalog_sha256: str | None,
     capture_input_snapshot: CaptureInputSnapshot | None,
     verify_input_snapshot: VerifyInputSnapshot | None,
+    validate_staged_outputs: ValidateStagedOutputs | None,
 ) -> None:
     output_paths = tuple(output.path for output in outputs)
     manifest_path = store.path(".stages", f"{stage}.json")
@@ -233,7 +246,7 @@ def _execute_transaction_body(
     def recover_or_cleanup_transaction() -> None:
         try:
             resolve_pending_transaction(journal_path, artifacts)
-        except (KeyboardInterrupt, SystemExit):
+        except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except TransactionStateError:
             raise _stage_error(
@@ -279,11 +292,12 @@ def _execute_transaction_body(
     transaction: ArtifactTransaction | None = None
     stage_commit_lease = None
     commit_point = False
+    failure: BaseException | None = None
     try:
         try:
             transaction = ArtifactTransaction.begin(journal_path, artifacts)
             transaction.backup(len(outputs))
-        except (KeyboardInterrupt, SystemExit):
+        except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except TransactionStateError:
             raise _stage_error(
@@ -309,16 +323,22 @@ def _execute_transaction_body(
                 stage,
                 "stage artifact must not be empty",
             )
+        staged_groups: list[tuple[BaseModel | dict[str, object], ...]] = []
         for index, (output, expected) in enumerate(zip(outputs, expected_groups, strict=True)):
             candidate = _transaction_path(output.path, ".stage.candidate", stage=stage)
             candidates[index] = candidate
             write_jsonl(candidate, expected, stage=stage)
-            if _read_jsonl_output(output, candidate, stage=stage) != expected:
+            readback = _read_jsonl_output(output, candidate, stage=stage)
+            if readback != expected:
                 raise _stage_error(
                     ErrorCode.CONTRACT,
                     stage,
                     "stage artifact failed canonical readback",
                 )
+            staged_groups.append(tuple(readback))
+
+        if validate_staged_outputs is not None:
+            validate_staged_outputs(tuple(staged_groups))
 
         for index, _output in enumerate(outputs):
             try:
@@ -327,7 +347,7 @@ def _execute_transaction_body(
                     raise TransactionStateError
                 transaction.install(index, candidate)
                 candidates[index] = None
-            except (KeyboardInterrupt, SystemExit):
+            except (MemoryError, KeyboardInterrupt, SystemExit):
                 raise
             except TransactionStateError:
                 raise _stage_error(
@@ -366,7 +386,7 @@ def _execute_transaction_body(
         )
         try:
             transaction.mark_postcommit()
-        except (KeyboardInterrupt, SystemExit):
+        except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except TransactionStateError:
             raise _stage_error(
@@ -379,7 +399,7 @@ def _execute_transaction_body(
         stage_commit_lease = None
         try:
             cleanup_committed_transaction(transaction)
-        except (KeyboardInterrupt, SystemExit):
+        except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except TransactionStateError:
             raise _stage_error(
@@ -388,17 +408,18 @@ def _execute_transaction_body(
                 "stage commit verification failed",
             ) from None
     except BaseException as error:
+        failure = error
         if transaction is not None and not commit_point:
             try:
                 recover_transaction(transaction)
-            except (KeyboardInterrupt, SystemExit):
+            except (MemoryError, KeyboardInterrupt, SystemExit):
                 _cleanup_failed_stage(store, stage)
-                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                if isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit)):
                     raise error
                 raise
             except TransactionStateError:
                 _cleanup_failed_stage(store, stage)
-                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                if isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit)):
                     raise error
                 raise _stage_error(
                     ErrorCode.CONTRACT,
@@ -410,13 +431,19 @@ def _execute_transaction_body(
         raise
     finally:
         if not commit_point:
-            _cleanup_transaction_paths(candidates)
+            cleanup_control = _cleanup_transaction_paths(candidates)
+            if cleanup_control is not None and not isinstance(
+                failure,
+                (MemoryError, KeyboardInterrupt, SystemExit),
+            ):
+                raise cleanup_control
 
 
 __all__ = [
     "BuildRecords",
     "CaptureInputSnapshot",
     "JsonlOutputSpec",
+    "ValidateStagedOutputs",
     "VerifyInputSnapshot",
     "execute_jsonl_stage_transaction",
 ]

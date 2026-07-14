@@ -19,7 +19,6 @@ from secaware.extractors.factory import extraction_policy, extractor_for_config
 from secaware.intervention.arm_catalog import materialize_arm_protocol
 from secaware.intervention.attestation import (
     PromptRoleAttestationRecord,
-    validate_prompt_role_attestations,
 )
 from secaware.intervention.executors import (
     DETERMINISTIC_INTERVENTION_POLICY_SHA256,
@@ -32,8 +31,10 @@ from secaware.intervention.executors import (
     structured_policy_from_config,
 )
 from secaware.intervention.targeting import (
+    TargetMaterializationIndex,
+    build_target_materialization_index,
     materialize_protocol_instance,
-    materialize_target_instance,
+    materialize_target_instances,
     materialize_target_spec,
 )
 from secaware.intervention.graph_patch import (
@@ -180,7 +181,7 @@ def _guard_no_randomization_or_future_artifacts(store: RunStore) -> None:
             for candidate in root.rglob("*"):
                 if candidate.is_file() and candidate.name.casefold().startswith(prefixes):
                     raise ValueError
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise _stage_error("future randomization or analysis artifact already exists") from None
@@ -214,6 +215,7 @@ class _StageInputSnapshot:
     source_graphs: tuple[PromptTSGRecord, ...]
     hypotheses: tuple[FrozenHypothesisRecord, ...]
     extractor_policy: ExtractionPolicy
+    target_materialization_index: TargetMaterializationIndex
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -225,6 +227,19 @@ class _ProtocolInstanceBuild:
     protocol_instance: ConfirmationProtocolInstanceRecord
     source_prompt: PromptRecord
     functional_contract: FunctionalOutcomeContractRecord | None
+
+
+DefinitionBundle = tuple[
+    tuple[TargetSpecRecord, ...],
+    tuple[TargetInstanceRecord, ...],
+    tuple[ConfirmationProtocolRecord, ...],
+    tuple[ConfirmationProtocolInstanceRecord, ...],
+    tuple[_ProtocolInstanceBuild, ...],
+]
+
+
+class _ProtocolResourceLimit(Exception):
+    """Internal sentinel separating configured capacity from invalid input."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,11 +359,14 @@ def prompt_variant_stage_policy_sha256(config: AppConfig) -> str:
         return canonical_sha256(
             {
                 "schema_version": "1.0",
-                "policy_version": "prompt-variant-stage-policy-v1",
+                "policy_version": "prompt-variant-stage-policy-v2",
                 "extractor_policy_sha256": extractor.policy_sha256,
                 "executor_policy_sha256": executor_sha256,
                 "intervention_mode": config.intervention.mode.value,
                 "intervention_executor": config.intervention.executor.value,
+                "max_protocols": config.intervention.max_protocols,
+                "max_protocol_instances": config.intervention.max_protocol_instances,
+                "max_arm_executions": config.intervention.max_arm_executions,
                 "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
                 "blind_extraction_order_version": BLIND_EXTRACTION_ORDER_VERSION,
             }
@@ -402,20 +420,32 @@ _SOURCE_ROLE = {
 def _materialize_definitions(
     snapshot: _StageInputSnapshot,
     config: AppConfig,
-) -> tuple[
-    tuple[TargetSpecRecord, ...],
-    tuple[TargetInstanceRecord, ...],
-    tuple[ConfirmationProtocolRecord, ...],
-    tuple[ConfirmationProtocolInstanceRecord, ...],
-    tuple[_ProtocolInstanceBuild, ...],
-]:
+) -> DefinitionBundle:
     target_by_id: dict[str, TargetSpecRecord] = {}
     target_instance_by_id: dict[str, TargetInstanceRecord] = {}
     protocol_by_id: dict[str, ConfirmationProtocolRecord] = {}
     protocol_instance_by_id: dict[str, ConfirmationProtocolInstanceRecord] = {}
     builds: list[_ProtocolInstanceBuild] = []
-    attestation_by_prompt_id = {item.prompt_id: item for item in snapshot.attestations}
     contract_by_feature = {item.task_feature_id: item for item in snapshot.contracts}
+    eligible_by_scope: dict[tuple[PromptRole, str, FeatureOperation], list[PromptRecord]] = {}
+    for prompt in snapshot.prompts:
+        attestation = snapshot.target_materialization_index.attestation_by_prompt_id.get(
+            prompt.prompt_id
+        )
+        if prompt.split != "confirm" or attestation is None:
+            continue
+        eligible_by_scope.setdefault(
+            (
+                prompt.prompt_role,
+                prompt.cwe,
+                attestation.contrast_owner_operation,
+            ),
+            [],
+        ).append(prompt)
+    for prompts in eligible_by_scope.values():
+        prompts.sort(key=lambda item: (item.task_id, item.prompt_id))
+    considered_target_ids: set[str] = set()
+    arm_execution_count = 0
     try:
         for hypothesis in snapshot.hypotheses:
             if (
@@ -427,6 +457,10 @@ def _materialize_definitions(
                 if operation not in hypothesis.permitted_operations:
                     continue
                 target = materialize_target_spec(hypothesis, operation)
+                if target.target_spec_id not in considered_target_ids:
+                    considered_target_ids.add(target.target_spec_id)
+                    if len(considered_target_ids) > config.intervention.max_protocols:
+                        raise _ProtocolResourceLimit
                 contract = (
                     contract_by_feature.get(target.feature_id)
                     if target.feature_family is FeatureFamily.TASK_FUNCTION
@@ -438,38 +472,40 @@ def _materialize_definitions(
                     functional_contract=contract,
                 )
                 role = _SOURCE_ROLE[(target.feature_family, operation)]
-                eligible: list[PromptRecord] = []
                 spec = prompt_feature_spec(target.feature_id)
-                for prompt in snapshot.prompts:
-                    attestation = attestation_by_prompt_id.get(prompt.prompt_id)
-                    if (
-                        prompt.split != "confirm"
-                        or prompt.prompt_role is not role
-                        or prompt.cwe != hypothesis.cwe
-                        or attestation is None
-                        or attestation.contrast_owner_operation is not operation
-                        or (spec.applicable_cwes and prompt.cwe not in spec.applicable_cwes)
-                        or (
-                            spec.applicable_task_families
-                            and prompt.task_family not in spec.applicable_task_families
-                        )
-                    ):
-                        continue
-                    eligible.append(prompt)
+                eligible = tuple(
+                    prompt
+                    for prompt in eligible_by_scope.get((role, hypothesis.cwe, operation), ())
+                    if (not spec.applicable_cwes or prompt.cwe in spec.applicable_cwes)
+                    and (
+                        not spec.applicable_task_families
+                        or prompt.task_family in spec.applicable_task_families
+                    )
+                )
                 if not eligible:
                     continue
+                projected_instance_count = len(builds) + len(eligible)
+                projected_arm_execution_count = arm_execution_count + len(eligible) * len(
+                    protocol.arms
+                )
+                if (
+                    projected_instance_count > config.intervention.max_protocol_instances
+                    or projected_arm_execution_count > config.intervention.max_arm_executions
+                ):
+                    raise _ProtocolResourceLimit
                 existing_target = target_by_id.setdefault(target.target_spec_id, target)
                 existing_protocol = protocol_by_id.setdefault(protocol.arm_protocol_id, protocol)
                 if existing_target != target or existing_protocol != protocol:
                     raise ValueError
-                for prompt in sorted(eligible, key=lambda item: (item.task_id, item.prompt_id)):
-                    target_instance = materialize_target_instance(
-                        target,
-                        hypothesis,
-                        prompt,
-                        snapshot.prompts,
-                        snapshot.attestations,
-                    )
+                target_instances = materialize_target_instances(
+                    target,
+                    hypothesis,
+                    eligible,
+                    snapshot.target_materialization_index,
+                )
+                if len(target_instances) != len(eligible):
+                    raise ValueError
+                for prompt, target_instance in zip(eligible, target_instances, strict=True):
                     protocol_instance = materialize_protocol_instance(protocol, target_instance)
                     if (
                         target_instance.target_instance_id in target_instance_by_id
@@ -491,11 +527,8 @@ def _materialize_definitions(
                             functional_contract=contract,
                         )
                     )
-        if (
-            not builds
-            or len(target_by_id) > config.intervention.max_protocols
-            or len(protocol_by_id) != len(target_by_id)
-        ):
+                arm_execution_count = projected_arm_execution_count
+        if not builds or len(protocol_by_id) != len(target_by_id):
             raise ValueError
         builds.sort(
             key=lambda item: (
@@ -521,6 +554,8 @@ def _materialize_definitions(
             ),
             tuple(builds),
         )
+    except _ProtocolResourceLimit:
+        raise _stage_error("prompt protocol resource limit exceeded") from None
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
@@ -553,12 +588,9 @@ def _exclusion(
     )
 
 
-def _validate_bundle_relations(
-    *,
-    snapshot: _StageInputSnapshot,
-    config: AppConfig,
-    groups: Sequence[Sequence],
-) -> PromptVariantStageResult:
+def _snapshot_bundle_records(groups: Sequence[Sequence]) -> tuple[tuple, ...]:
+    """Validate record-local contracts without evaluating cross-record relations."""
+
     try:
         if len(groups) != len(PROMPT_VARIANT_OUTPUTS):
             raise ValueError
@@ -574,6 +606,22 @@ def _validate_bundle_relations(
                     )
                 )
             checked_groups.append(tuple(checked))
+        return tuple(checked_groups)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _stage_error("prompt variant bundle failed readback validation") from None
+
+
+def _validate_bundle_relations(
+    *,
+    snapshot: _StageInputSnapshot,
+    config: AppConfig,
+    expected_definitions: DefinitionBundle,
+    groups: Sequence[Sequence],
+) -> PromptVariantStageResult:
+    try:
+        checked_groups = _snapshot_bundle_records(groups)
         (
             target_specs,
             target_instances,
@@ -608,7 +656,7 @@ def _validate_bundle_relations(
             all_primary_ids.extend(identities)
         if len(all_primary_ids) != len(set(all_primary_ids)):
             raise ValueError
-        expected = _materialize_definitions(snapshot, config)
+        expected = expected_definitions
         if (
             target_specs != expected[0]
             or target_instances != expected[1]
@@ -923,10 +971,11 @@ def run_prompt_variant_freeze_stage(
         for index, (name, model) in enumerate(PROMPT_VARIANT_OUTPUTS)
     )
     snapshot: _StageInputSnapshot | None = None
+    definitions: DefinitionBundle | None = None
 
     def capture_input_snapshot() -> tuple[str, ...]:
-        nonlocal snapshot
-        if snapshot is not None:
+        nonlocal snapshot, definitions
+        if snapshot is not None or definitions is not None:
             raise _stage_error("prompt variant input snapshot failed validation")
         _guard_no_randomization_or_future_artifacts(store)
         captured_files: list[_FileSnapshot] = []
@@ -974,23 +1023,29 @@ def run_prompt_variant_freeze_stage(
                 allow_empty=False,
             )
         )
-        checked_attestations = validate_prompt_role_attestations(prompts, attestations)
-        validate_exact_extraction_coverage(prompts, proposals, graphs, policy)
+        target_materialization_index = build_target_materialization_index(
+            prompts,
+            attestations,
+        )
+        checked_prompts = target_materialization_index.prompts
+        checked_attestations = target_materialization_index.attestations
+        validate_exact_extraction_coverage(checked_prompts, proposals, graphs, policy)
         if len({item.contract_id for item in contracts}) != len(contracts) or len(
             {item.task_feature_id for item in contracts}
         ) != len(contracts):
             raise _stage_error("functional outcome contract coverage failed validation")
         snapshot = _StageInputSnapshot(
             files=files,
-            prompts=prompts,
+            prompts=checked_prompts,
             attestations=checked_attestations,
             contracts=contracts,
             source_proposals=proposals,
             source_graphs=graphs,
             hypotheses=hypotheses,
             extractor_policy=policy,
+            target_materialization_index=target_materialization_index,
         )
-        _materialize_definitions(snapshot, config)
+        definitions = _materialize_definitions(snapshot, config)
         return tuple(item.sha256 for item in files)
 
     def verify_input_snapshot() -> None:
@@ -1013,11 +1068,10 @@ def run_prompt_variant_freeze_stage(
             raise _stage_error("prompt variant inputs changed during execution")
 
     def build():
-        if snapshot is None:
+        if snapshot is None or definitions is None:
             raise _stage_error("prompt variant input snapshot failed validation")
         executor = _executor_for_config(config, executor_transport)
         extractor = extractor_for_config(config.tsg, transport=extractor_transport)
-        definitions = _materialize_definitions(snapshot, config)
         proposal_by_prompt = {item.prompt_id: item for item in snapshot.source_proposals}
         graph_by_prompt = {item.prompt_id: item for item in snapshot.source_graphs}
         prompt_by_id = {item.prompt_id: item for item in snapshot.prompts}
@@ -1162,8 +1216,17 @@ def run_prompt_variant_freeze_stage(
             tuple(sorted(lengths, key=lambda value: value.length_match_id)),
             tuple(sorted(exclusions, key=lambda value: value.exclusion_id)),
         )
-        _validate_bundle_relations(snapshot=snapshot, config=config, groups=bundle)
-        return bundle
+        return _snapshot_bundle_records(bundle)
+
+    def validate_staged_outputs(groups: Sequence[Sequence]) -> None:
+        if snapshot is None or definitions is None:
+            raise _stage_error("prompt variant input snapshot failed validation")
+        _validate_bundle_relations(
+            snapshot=snapshot,
+            config=config,
+            expected_definitions=definitions,
+            groups=groups,
+        )
 
     producer_outputs = {
         "extract-prompt-tsg": extraction_paths,
@@ -1190,8 +1253,9 @@ def run_prompt_variant_freeze_stage(
             catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
             capture_input_snapshot=capture_input_snapshot,
             verify_input_snapshot=verify_input_snapshot,
+            validate_staged_outputs=validate_staged_outputs,
         )
-        if snapshot is None:
+        if snapshot is None or definitions is None:
             raise _stage_error("prompt variant input snapshot failed validation")
         groups = tuple(
             tuple(
@@ -1208,7 +1272,12 @@ def run_prompt_variant_freeze_stage(
             )
             for spec in output_specs
         )
-        return _validate_bundle_relations(snapshot=snapshot, config=config, groups=groups)
+        return _validate_bundle_relations(
+            snapshot=snapshot,
+            config=config,
+            expected_definitions=definitions,
+            groups=groups,
+        )
 
 
 __all__ = [

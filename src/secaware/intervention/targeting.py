@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from types import MappingProxyType
 
 from secaware.causal.freeze import revalidate_frozen_hypothesis
 from secaware.errors import ErrorCode, SecAwareError
@@ -61,6 +63,18 @@ _VARIANT_FOR_BASELINE = {
 _BASELINE_FOR_VARIANT = {value: key for key, value in _VARIANT_FOR_BASELINE.items()}
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class TargetMaterializationIndex:
+    """One fully validated, immutable O(1) prompt/attestation lookup index."""
+
+    prompts: tuple[PromptRecord, ...]
+    attestations: tuple[PromptRoleAttestationRecord, ...]
+    prompt_by_id: Mapping[str, PromptRecord]
+    attestation_by_prompt_id: Mapping[str, PromptRoleAttestationRecord]
+    add_peer_by_baseline_id: Mapping[str, PromptRoleAttestationRecord]
+    feature_by_variant_id: Mapping[str, str]
+
+
 def _contract_error() -> SecAwareError:
     return SecAwareError(
         code=ErrorCode.CONTRACT,
@@ -101,17 +115,6 @@ def _checked_prompts(values: Sequence[PromptRecord]) -> tuple[PromptRecord, ...]
     for value in values:
         checked.append(_checked_prompt(value))
     return tuple(checked)
-
-
-def _require_source_in_prompt_artifact(
-    source: PromptRecord,
-    prompts: tuple[PromptRecord, ...],
-) -> None:
-    matches = tuple(item for item in prompts if item.prompt_id == source.prompt_id)
-    if len(matches) != 1 or matches[0].model_dump(
-        mode="python", round_trip=True, warnings=False
-    ) != source.model_dump(mode="python", round_trip=True, warnings=False):
-        raise ValueError
 
 
 def _require_target_matches_hypothesis(
@@ -197,62 +200,120 @@ def _require_prompt_scope(
         raise ValueError
 
 
-def _source_pair(
-    prompt: PromptRecord,
-    family: FeatureFamily,
-    feature_id: str,
-    operation: FeatureOperation,
-    attestations: tuple[PromptRoleAttestationRecord, ...],
-) -> tuple[PromptRoleAttestationRecord, PromptRoleAttestationRecord]:
-    source_matches = tuple(item for item in attestations if item.prompt_id == prompt.prompt_id)
-    if len(source_matches) != 1:
-        raise ValueError
-    source = source_matches[0]
-    expected_role = _ROLE_MATRIX[(family, operation)]
-    if (
-        prompt.prompt_role is not expected_role
-        or source.prompt_role is not prompt.prompt_role
-        or source.task_id != prompt.task_id
-        or source.prompt_sha256 != prompt.prompt_sha256
-        or source.counterpart_prompt_id != prompt.counterpart_prompt_id
-        or source.contrast_owner_operation is not operation
-    ):
-        raise ValueError
+def build_target_materialization_index(
+    prompts: Sequence[PromptRecord],
+    attestations: Sequence[PromptRoleAttestationRecord],
+) -> TargetMaterializationIndex:
+    """Validate a complete prompt artifact once and freeze all unique lookup indexes."""
 
-    if operation is FeatureOperation.ADD:
-        expected_variant = _VARIANT_FOR_BASELINE[expected_role]
-        peer_matches = tuple(
-            item
-            for item in attestations
-            if item.counterpart_prompt_id == prompt.prompt_id
-            and item.counterpart_prompt_sha256 == prompt.prompt_sha256
-            and item.task_id == prompt.task_id
-            and item.prompt_role is expected_variant
+    try:
+        checked_prompts = _checked_prompts(prompts)
+        checked_attestations = validate_prompt_role_attestations(
+            checked_prompts,
+            attestations,
         )
-        if len(peer_matches) != 1:
+        confirm = tuple(item for item in checked_prompts if item.split == "confirm")
+        prompt_by_id = {item.prompt_id: item for item in confirm}
+        attestation_by_prompt_id = {item.prompt_id: item for item in checked_attestations}
+        add_peer_by_baseline_id: dict[str, PromptRoleAttestationRecord] = {}
+        feature_by_variant_id: dict[str, str] = {}
+        for attestation in checked_attestations:
+            if attestation.prompt_role not in _BASELINE_FOR_VARIANT:
+                continue
+            counterpart_id = attestation.counterpart_prompt_id
+            if counterpart_id is None or counterpart_id in add_peer_by_baseline_id:
+                raise ValueError
+            add_peer_by_baseline_id[counterpart_id] = attestation
+            feature_by_variant_id[attestation.prompt_id] = attested_feature_id(attestation)
+        if (
+            len(prompt_by_id) != len(confirm)
+            or len(attestation_by_prompt_id) != len(checked_attestations)
+            or set(attestation_by_prompt_id) != set(prompt_by_id)
+        ):
             raise ValueError
-        peer = peer_matches[0]
-    else:
-        counterpart_id = source.counterpart_prompt_id
-        counterpart_sha256 = source.counterpart_prompt_sha256
-        expected_baseline = _BASELINE_FOR_VARIANT[expected_role]
-        peer_matches = tuple(
-            item
-            for item in attestations
-            if item.prompt_id == counterpart_id
-            and item.prompt_sha256 == counterpart_sha256
-            and item.task_id == prompt.task_id
-            and item.prompt_role is expected_baseline
+        return TargetMaterializationIndex(
+            prompts=checked_prompts,
+            attestations=checked_attestations,
+            prompt_by_id=MappingProxyType(prompt_by_id),
+            attestation_by_prompt_id=MappingProxyType(attestation_by_prompt_id),
+            add_peer_by_baseline_id=MappingProxyType(add_peer_by_baseline_id),
+            feature_by_variant_id=MappingProxyType(feature_by_variant_id),
         )
-        if len(peer_matches) != 1:
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _contract_error() from None
+
+
+def materialize_target_instances(
+    target: TargetSpecRecord,
+    hypothesis: FrozenHypothesisRecord,
+    prompts: Sequence[PromptRecord],
+    index: TargetMaterializationIndex,
+) -> tuple[TargetInstanceRecord, ...]:
+    """Materialize a source batch in linear time from one authenticated bundle index."""
+
+    try:
+        if type(index) is not TargetMaterializationIndex or type(prompts) not in {tuple, list}:
             raise ValueError
-        peer = peer_matches[0]
-    if peer.contrast_owner_operation is not operation:
-        raise ValueError
-    variant_attestation = peer if operation is FeatureOperation.ADD else source
-    if attested_feature_id(variant_attestation) != feature_id:
-        raise ValueError
-    return source, peer
+        checked_hypothesis = _checked_hypothesis(hypothesis)
+        checked_target = _checked_target(target)
+        _require_target_matches_hypothesis(checked_target, checked_hypothesis)
+        checked_sources = tuple(_checked_prompt(item) for item in prompts)
+        if len({item.prompt_id for item in checked_sources}) != len(checked_sources):
+            raise ValueError
+        result: list[TargetInstanceRecord] = []
+        for checked_prompt in checked_sources:
+            indexed_prompt = index.prompt_by_id.get(checked_prompt.prompt_id)
+            source = index.attestation_by_prompt_id.get(checked_prompt.prompt_id)
+            expected_role = _ROLE_MATRIX[(checked_target.feature_family, checked_target.operation)]
+            if (
+                indexed_prompt != checked_prompt
+                or source is None
+                or checked_prompt.prompt_role is not expected_role
+                or source.prompt_role is not checked_prompt.prompt_role
+                or source.task_id != checked_prompt.task_id
+                or source.prompt_sha256 != checked_prompt.prompt_sha256
+                or source.counterpart_prompt_id != checked_prompt.counterpart_prompt_id
+                or source.contrast_owner_operation is not checked_target.operation
+            ):
+                raise ValueError
+            _require_prompt_scope(checked_hypothesis, checked_target, checked_prompt)
+            if checked_target.operation is FeatureOperation.ADD:
+                peer = index.add_peer_by_baseline_id.get(checked_prompt.prompt_id)
+                variant_id = peer.prompt_id if peer is not None else None
+                counterpart = None
+            else:
+                peer = index.attestation_by_prompt_id.get(source.counterpart_prompt_id or "")
+                variant_id = source.prompt_id
+                counterpart = peer
+            if (
+                peer is None
+                or peer.task_id != checked_prompt.task_id
+                or peer.contrast_owner_operation is not checked_target.operation
+                or variant_id is None
+                or index.feature_by_variant_id.get(variant_id) != checked_target.feature_id
+            ):
+                raise ValueError
+            remove = checked_target.operation is FeatureOperation.REMOVE
+            instance = TargetInstanceRecord.from_content(
+                target_spec_id=checked_target.target_spec_id,
+                task_id=checked_prompt.task_id,
+                source_prompt_id=checked_prompt.prompt_id,
+                source_prompt_sha256=checked_prompt.prompt_sha256,
+                counterpart_prompt_id=(counterpart.prompt_id if counterpart is not None else None),
+                counterpart_prompt_sha256=(
+                    counterpart.prompt_sha256 if counterpart is not None else None
+                ),
+                source_prompt_role=source.prompt_role,
+                counterpart_required=remove,
+            )
+            result.append(TargetInstanceRecord.model_validate(instance.model_dump(mode="python")))
+        return tuple(result)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _contract_error() from None
 
 
 def materialize_target_instance(
@@ -265,39 +326,11 @@ def materialize_target_instance(
     """Bind one semantic target through a complete validated prompt artifact."""
 
     try:
-        checked_hypothesis = _checked_hypothesis(hypothesis)
-        checked_target = _checked_target(target)
-        checked_prompt = _checked_prompt(prompt)
-        _require_target_matches_hypothesis(checked_target, checked_hypothesis)
-        checked_prompts = _checked_prompts(prompts)
-        checked_attestations = validate_prompt_role_attestations(
-            checked_prompts,
-            attestations,
-        )
-        _require_source_in_prompt_artifact(checked_prompt, checked_prompts)
-        _require_prompt_scope(checked_hypothesis, checked_target, checked_prompt)
-        source, peer = _source_pair(
-            checked_prompt,
-            checked_target.feature_family,
-            checked_target.feature_id,
-            checked_target.operation,
-            checked_attestations,
-        )
-        remove = checked_target.operation is FeatureOperation.REMOVE
-        counterpart = peer if remove else None
-        instance = TargetInstanceRecord.from_content(
-            target_spec_id=checked_target.target_spec_id,
-            task_id=checked_prompt.task_id,
-            source_prompt_id=checked_prompt.prompt_id,
-            source_prompt_sha256=checked_prompt.prompt_sha256,
-            counterpart_prompt_id=(counterpart.prompt_id if counterpart is not None else None),
-            counterpart_prompt_sha256=(
-                counterpart.prompt_sha256 if counterpart is not None else None
-            ),
-            source_prompt_role=source.prompt_role,
-            counterpart_required=remove,
-        )
-        return TargetInstanceRecord.model_validate(instance.model_dump(mode="python"))
+        index = build_target_materialization_index(prompts, attestations)
+        instances = materialize_target_instances(target, hypothesis, (prompt,), index)
+        if len(instances) != 1:
+            raise ValueError
+        return instances[0]
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
@@ -345,7 +378,10 @@ def materialize_protocol_instance(
 
 
 __all__ = [
+    "TargetMaterializationIndex",
+    "build_target_materialization_index",
     "materialize_protocol_instance",
     "materialize_target_instance",
+    "materialize_target_instances",
     "materialize_target_spec",
 ]

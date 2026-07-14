@@ -879,6 +879,8 @@ class PromptVariantRecord(_ExperimentVersionedContract):
         matched = self.arm_role in _MATCHED_ROLE_REFERENCE
         try:
             prompt_sha256 = hashlib.sha256(self.prompt_text.encode("utf-8")).hexdigest()
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             raise ValueError(self._safe_validation_message) from None
         if (

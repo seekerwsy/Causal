@@ -130,7 +130,7 @@ def _read_regular_bytes(
         ):
             raise TransactionStateError
         return payload
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except TransactionStateError:
         raise
@@ -180,7 +180,7 @@ def _artifact_sha256(path: Path) -> str:
         if _fingerprint(after) != _fingerprint(opened) or total != opened.st_size:
             raise TransactionStateError
         return digest.hexdigest()
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except TransactionStateError:
         raise
@@ -266,7 +266,7 @@ def _parse_journal(payload: bytes, artifacts: tuple[TransactionArtifact, ...]) -
         if state == "postcommit" and any(item.committed_sha256 is None for item in parsed):
             raise TransactionStateError
         return _Journal(token=token, state=state, artifacts=parsed)
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except TransactionStateError:
         raise
@@ -316,7 +316,7 @@ def _write_journal(path: Path, journal: _Journal) -> None:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         temporary = None
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except TransactionStateError:
         raise
@@ -415,7 +415,7 @@ class ArtifactTransaction:
                 raise TransactionStateError
             try:
                 os.replace(artifact.target, backup)
-            except (KeyboardInterrupt, SystemExit):
+            except (MemoryError, KeyboardInterrupt, SystemExit):
                 raise
             except Exception:
                 raise TransactionStateError from None
@@ -428,7 +428,7 @@ class ArtifactTransaction:
         self.backup(index)
         try:
             os.replace(candidate, self.artifacts[index].target)
-        except (KeyboardInterrupt, SystemExit):
+        except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except Exception:
             raise TransactionStateError from None
@@ -469,13 +469,13 @@ def _recover(
                 if target.exists() or target.is_symlink():
                     try:
                         target.unlink()
-                    except (KeyboardInterrupt, SystemExit):
+                    except (MemoryError, KeyboardInterrupt, SystemExit):
                         raise
                     except Exception:
                         raise TransactionStateError from None
                 try:
                     os.replace(backup, target)
-                except (KeyboardInterrupt, SystemExit):
+                except (MemoryError, KeyboardInterrupt, SystemExit):
                     raise
                 except Exception:
                     raise TransactionStateError from None
@@ -491,13 +491,13 @@ def _recover(
             if target.exists() or target.is_symlink():
                 try:
                     target.unlink()
-                except (KeyboardInterrupt, SystemExit):
+                except (MemoryError, KeyboardInterrupt, SystemExit):
                     raise
                 except Exception:
                     raise TransactionStateError from None
     try:
         journal_path.unlink()
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise TransactionStateError from None
@@ -529,13 +529,13 @@ def _cleanup_postcommit(
         for artifact in artifacts
         if _backup_path(artifact, journal.token).exists()
     ]
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     for _ in range(_CLEANUP_ATTEMPTS):
         remaining: list[Path] = []
         for path in pending:
             try:
                 path.unlink(missing_ok=True)
-            except (KeyboardInterrupt, SystemExit) as error:
+            except (MemoryError, KeyboardInterrupt, SystemExit) as error:
                 if control is None:
                     control = error
                 remaining.append(path)
@@ -550,7 +550,7 @@ def _cleanup_postcommit(
         return
     try:
         journal_path.unlink(missing_ok=True)
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         if control is None:
             control = error
     except Exception:

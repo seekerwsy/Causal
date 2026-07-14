@@ -610,6 +610,8 @@ class InterventionConfig(StrictModel):
     llm: InterventionLLMConfig | None = None
     operations: tuple[FeatureOperation, ...] = (FeatureOperation.ADD, FeatureOperation.REMOVE)
     max_protocols: int = Field(default=64, ge=1, le=512)
+    max_protocol_instances: int = Field(default=256, ge=1, le=4096)
+    max_arm_executions: int = Field(default=2048, ge=1, le=32768)
 ```
 
 The `AppConfig` validator requires a distinct LLM policy when executor is LLM and forbids an LLM
