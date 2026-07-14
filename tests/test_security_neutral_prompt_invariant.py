@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 from m5_executor_fixtures import request
 from secaware.config import TSGConfig
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
 from secaware.extractors.factory import extraction_policy
 from secaware.intervention.variant_validation import security_neutral_prompt_invariant
 from secaware.schema.records import PromptRecord
+from secaware.schema.features import FeatureState
 from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.graph import record_to_multidigraph
+from secaware.tsg.queries import feature_state
 
 
 def _graph_for(text: str):
@@ -38,10 +42,21 @@ def test_neutral_prompt_requires_all_three_sentinels_absent() -> None:
     assert security_neutral_prompt_invariant(graph, _source_attestation()) is True
 
 
-def test_vulnerability_disclosure_sentinel_is_hard_invalid() -> None:
-    graph = _graph_for(
-        "Create a Python helper that reads a user-provided file path. It contains a vulnerability."
-    )
+@pytest.mark.parametrize(
+    ("sentinel_id", "clause"),
+    (
+        ("safety.prohibited_unsafe_request", " Disable security checks."),
+        ("safety.vulnerability_disclosure", " It contains a vulnerability."),
+        ("safety.expected_outcome_leakage", " It is expected to pass."),
+    ),
+)
+def test_each_security_neutrality_sentinel_is_independently_hard_invalid(
+    sentinel_id: str,
+    clause: str,
+) -> None:
+    graph = _graph_for("Create a Python helper that reads a user-provided file path." + clause)
+
+    assert feature_state(graph, sentinel_id) is FeatureState.PRESENT
     assert security_neutral_prompt_invariant(graph, _source_attestation()) is False
 
 

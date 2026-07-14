@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from m5_executor_fixtures import hypothesis, prompt_pair
 from m5_executor_fixtures import request
 from secaware.config import AppConfig, TSGConfig
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
 from secaware.extractors.factory import extraction_policy
 from secaware.intervention.executors import DeterministicInterventionExecutor
@@ -28,15 +30,32 @@ from secaware.pipeline.stages.prompt_variants import (
     PROMPT_VARIANT_OUTPUTS,
     run_prompt_variant_freeze_stage,
 )
+import secaware.pipeline.stage_contracts as stage_contracts
+from secaware.pipeline.stage_contracts import prompt_variant_stage_contract_sha256
+from secaware.intervention.attestation import PromptRoleAttestationRecord
+from secaware.intervention.executors import PromptCandidate
+from secaware.intervention.graph_patch import IntendedGraphPatchRecord
+from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.experiments import (
+    AllowedDeltaRecord,
     ArmRole,
+    ArmSpecRecord,
+    ConfirmationProtocolInstanceRecord,
+    ConfirmationProtocolRecord,
     FeatureFamily,
     FeatureOperation,
+    FeatureTransition,
+    FunctionalOutcomeContractRecord,
     GraphDeltaRecord,
     LengthMatchRecord,
     PreRandomizationExclusionRecord,
     PromptVariantRecord,
+    TargetInstanceRecord,
+    TargetSpecRecord,
 )
+from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
+from secaware.schema.records import PromptRecord
+from secaware.schema.tsg import PromptTSGRecord
 
 
 def _validation_inputs(*, corrupt_role: ArmRole | None = None):
@@ -103,6 +122,142 @@ def test_freeze_protocol_keeps_diagnostic_noncompliance() -> None:
     assert len(frozen.variants) == 4
 
 
+def test_blind_extraction_order_aliases_and_artifacts_ignore_input_role_order() -> None:
+    values, policy = _validation_inputs()
+
+    class CapturingBlindExtractor:
+        def __init__(self) -> None:
+            self.calls: list[PromptRecord] = []
+
+        def extract(self, prompt, extraction_policy):
+            self.calls.append(prompt)
+            return DeterministicCatalogExtractor().extract(prompt, extraction_policy)
+
+    forward_extractor = CapturingBlindExtractor()
+    reverse_extractor = CapturingBlindExtractor()
+    executor_policy = DeterministicInterventionExecutor().policy_sha256
+
+    forward = freeze_protocol_variants(
+        values,
+        extractor=forward_extractor,
+        extraction_policy=policy,
+        expected_executor_policy_sha256=executor_policy,
+    )
+    reverse = freeze_protocol_variants(
+        tuple(reversed(values)),
+        extractor=reverse_extractor,
+        extraction_policy=policy,
+        expected_executor_policy_sha256=executor_policy,
+    )
+
+    forward_visible = tuple(
+        (item.prompt_id, item.task_id, item.prompt) for item in forward_extractor.calls
+    )
+    reverse_visible = tuple(
+        (item.prompt_id, item.task_id, item.prompt) for item in reverse_extractor.calls
+    )
+    assert forward_visible == reverse_visible
+    assert forward == reverse
+    forbidden = {value.arm.role.value for value in values} | {
+        values[0].target.target_spec_id,
+        values[0].target_instance.target_instance_id,
+        values[0].protocol.arm_protocol_id,
+        values[0].protocol_instance.protocol_instance_id,
+    }
+    for prompt in forward_extractor.calls:
+        assert prompt.prompt_id.startswith("variant_prompt_")
+        assert len(prompt.prompt_id) == len("variant_prompt_") + 64
+        assert prompt.task_id.startswith("blind_task_")
+        assert all(token not in prompt.prompt_id for token in forbidden)
+        assert all(token not in prompt.task_id for token in forbidden)
+
+
+def test_equal_blind_keys_use_stable_unique_opaque_occurrence_aliases() -> None:
+    values, policy = _validation_inputs()
+    source_text = values[0].source_prompt.prompt
+    tied = tuple(
+        item.model_copy(
+            update={"candidate": item.candidate.model_copy(update={"text": source_text})}
+        )
+        for item in values
+    )
+
+    class CapturingExtractor:
+        def __init__(self) -> None:
+            self.aliases: list[str] = []
+
+        def extract(self, prompt, extraction_policy):
+            self.aliases.append(prompt.prompt_id)
+            return DeterministicCatalogExtractor().extract(prompt, extraction_policy)
+
+    left_extractor = CapturingExtractor()
+    right_extractor = CapturingExtractor()
+    executor_policy = DeterministicInterventionExecutor().policy_sha256
+
+    left = freeze_protocol_variants(
+        tied,
+        extractor=left_extractor,
+        extraction_policy=policy,
+        expected_executor_policy_sha256=executor_policy,
+    )
+    right = freeze_protocol_variants(
+        tuple(reversed(tied)),
+        extractor=right_extractor,
+        extraction_policy=policy,
+        expected_executor_policy_sha256=executor_policy,
+    )
+
+    assert left_extractor.aliases == right_extractor.aliases
+    assert len(set(left_extractor.aliases)) == len(tied)
+    assert left == right
+
+
+_PROMPT_VARIANT_SCHEMA_BINDINGS = (
+    ("prompt_schema", PromptRecord),
+    ("attestation_schema", PromptRoleAttestationRecord),
+    ("functional_contract_schema", FunctionalOutcomeContractRecord),
+    ("frozen_hypothesis_schema", FrozenHypothesisRecord),
+    ("proposal_schema", PromptExtractionProposalRecord),
+    ("prompt_tsg_schema", PromptTSGRecord),
+    ("candidate_schema", PromptCandidate),
+    ("feature_transition_schema", FeatureTransition),
+    ("allowed_delta_schema", AllowedDeltaRecord),
+    ("arm_schema", ArmSpecRecord),
+    ("target_schema", TargetSpecRecord),
+    ("target_instance_schema", TargetInstanceRecord),
+    ("protocol_schema", ConfirmationProtocolRecord),
+    ("protocol_instance_schema", ConfirmationProtocolInstanceRecord),
+    ("patch_schema", IntendedGraphPatchRecord),
+    ("delta_schema", GraphDeltaRecord),
+    ("variant_schema", PromptVariantRecord),
+    ("length_match_schema", LengthMatchRecord),
+    ("exclusion_schema", PreRandomizationExclusionRecord),
+)
+
+
+def test_stage_contract_directly_binds_every_parsed_and_semantic_schema() -> None:
+    payload = stage_contracts.prompt_variant_stage_contract_payload()
+
+    assert {key for key, _model in _PROMPT_VARIANT_SCHEMA_BINDINGS} <= set(payload)
+
+
+@pytest.mark.parametrize(("schema_key", "model"), _PROMPT_VARIANT_SCHEMA_BINDINGS)
+def test_each_prompt_variant_schema_drift_changes_stage_contract(
+    schema_key: str,
+    model: type,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = prompt_variant_stage_contract_sha256("build-confirmation-variants")
+    original = model.model_json_schema
+
+    def drifted(_cls, *args, **kwargs):
+        return {**original(*args, **kwargs), "x-secaware-drift": schema_key}
+
+    monkeypatch.setattr(model, "model_json_schema", classmethod(drifted))
+
+    assert prompt_variant_stage_contract_sha256("build-confirmation-variants") != before
+
+
 def test_one_hard_invalid_arm_excludes_the_whole_protocol_without_replacement() -> None:
     values, policy = _validation_inputs(corrupt_role=ArmRole.GENERIC_SECURITY_REMINDER)
 
@@ -166,15 +321,62 @@ def _stage_store(
     *,
     llm_executor: bool = False,
     graph_native: bool = False,
+    task_count: int = 1,
 ) -> tuple[AppConfig, RunStore]:
     baseline, variant, attestations = prompt_pair(
         FeatureFamily.SAFETY_CONTROL,
         FeatureOperation.ADD,
     )
+    prompts: list[PromptRecord] = [baseline, variant]
+    attestation_records: list[PromptRoleAttestationRecord] = list(attestations)
+    if task_count == 2:
+        second_baseline = PromptRecord.model_validate(
+            {
+                **baseline.model_dump(mode="python"),
+                "prompt_id": "task-b-baseline",
+                "task_id": "task-b",
+            }
+        )
+        second_variant = PromptRecord.model_validate(
+            {
+                **variant.model_dump(mode="python"),
+                "prompt_id": "task-b-variant",
+                "task_id": "task-b",
+                "counterpart_prompt_id": second_baseline.prompt_id,
+            }
+        )
+        second_attestations: list[PromptRoleAttestationRecord] = []
+        for attestation, prompt in zip(
+            attestations,
+            (second_baseline, second_variant),
+            strict=True,
+        ):
+            payload = attestation.model_dump(
+                mode="python",
+                exclude={"attestation_id", "schema_version"},
+            )
+            payload.update(
+                {
+                    "prompt_id": prompt.prompt_id,
+                    "task_id": prompt.task_id,
+                    "prompt_sha256": prompt.prompt_sha256,
+                    "counterpart_prompt_id": prompt.counterpart_prompt_id,
+                    "counterpart_prompt_sha256": (
+                        second_baseline.prompt_sha256
+                        if prompt.counterpart_prompt_id is not None
+                        else None
+                    ),
+                }
+            )
+            second_attestations.append(PromptRoleAttestationRecord.from_content(**payload))
+        prompts.extend((second_baseline, second_variant))
+        attestation_records.extend(second_attestations)
+    elif task_count != 1:
+        raise ValueError("unsupported task count")
     prompts_path = tmp_path / "prompts.jsonl"
     attestations_path = tmp_path / "attestations.jsonl"
-    write_jsonl(prompts_path, (baseline, variant))
-    write_jsonl(attestations_path, attestations)
+    write_jsonl(prompts_path, prompts)
+    write_jsonl(attestations_path, attestation_records)
     intervention: dict[str, object] = {
         "mode": "graph_native" if graph_native else "text_native",
         "executor": "llm" if llm_executor else "deterministic",
@@ -253,6 +455,109 @@ def test_stage_executes_then_independently_extracts_and_atomically_publishes(
         )
     )
     assert store.path(".stages", "build-confirmation-variants.json").exists()
+
+
+def test_real_stage_blind_sorts_extractor_calls_without_fixed_arm_positions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path, task_count=2)
+
+    class CapturingStageExtractor:
+        def __init__(self) -> None:
+            self.calls: list[PromptRecord] = []
+
+        def extract(self, prompt, policy):
+            self.calls.append(prompt)
+            return DeterministicCatalogExtractor().extract(prompt, policy)
+
+    extractor = CapturingStageExtractor()
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "extractor_for_config",
+        lambda *_args, **_kwargs: extractor,
+    )
+
+    run_prompt_variant_freeze_stage(config, store, force=False)
+
+    calls_by_blind_task: dict[str, list[PromptRecord]] = {}
+    for call in extractor.calls:
+        calls_by_blind_task.setdefault(call.task_id, []).append(call)
+    assert len(calls_by_blind_task) == 2
+    for calls in calls_by_blind_task.values():
+        text_digests = [hashlib.sha256(item.prompt.encode("utf-8")).hexdigest() for item in calls]
+        assert text_digests == sorted(text_digests)
+    assert len({item.prompt_id for item in extractor.calls}) == len(extractor.calls)
+    assert all(item.task_id.startswith("blind_task_") for item in extractor.calls)
+
+
+def test_forward_reverse_contrast_views_emit_only_the_attested_owner_operation(
+    tmp_path: Path,
+) -> None:
+    config, store = _stage_store(tmp_path)
+
+    run_prompt_variant_freeze_stage(config, store, force=False)
+
+    targets = read_jsonl(
+        store.path("interventions", "target_specs.jsonl"),
+        TargetSpecRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert len(targets) == 1
+    assert targets[0].operation is FeatureOperation.ADD
+
+
+def test_real_stage_two_tasks_share_semantics_but_have_exact_instance_coverage(
+    tmp_path: Path,
+) -> None:
+    config, store = _stage_store(tmp_path, task_count=2)
+
+    result = run_prompt_variant_freeze_stage(config, store, force=False)
+
+    targets = read_jsonl(
+        store.path("interventions", "target_specs.jsonl"),
+        TargetSpecRecord,
+        required=True,
+        allow_empty=False,
+    )
+    protocols = read_jsonl(
+        store.path("interventions", "confirmation_protocols.jsonl"),
+        ConfirmationProtocolRecord,
+        required=True,
+        allow_empty=False,
+    )
+    target_instances = read_jsonl(
+        store.path("interventions", "target_instances.jsonl"),
+        TargetInstanceRecord,
+        required=True,
+        allow_empty=False,
+    )
+    protocol_instances = read_jsonl(
+        store.path("interventions", "confirmation_protocol_instances.jsonl"),
+        ConfirmationProtocolInstanceRecord,
+        required=True,
+        allow_empty=False,
+    )
+    variants = read_jsonl(
+        store.path("interventions", "prompt_variants.jsonl"),
+        PromptVariantRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert result.protocol_instance_count == 2
+    assert result.frozen_protocol_instance_count == 2
+    assert len(targets) == len(protocols) == 1
+    assert len(target_instances) == len(protocol_instances) == 2
+    assert {item.task_id for item in target_instances} == {"task-a", "task-b"}
+    assert {item.target_spec_id for item in target_instances} == {targets[0].target_spec_id}
+    assert {item.arm_protocol_id for item in protocol_instances} == {protocols[0].arm_protocol_id}
+    assert len(variants) == 2 * len(protocols[0].arm_roles)
+    assert {(item.protocol_instance_id, item.arm_role) for item in variants} == {
+        (instance.protocol_instance_id, role)
+        for instance in protocol_instances
+        for role in protocols[0].arm_roles
+    }
 
 
 class _UnsafeFirstTransport:
@@ -470,6 +775,137 @@ def test_stage_policy_drift_invalidates_skip_and_attempts_rebuild(
         run_prompt_variant_freeze_stage(config, store, force=False)
 
 
+def test_catalog_contract_drift_invalidates_real_stage_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    monkeypatch.setattr(stage_contracts, "PROMPT_FEATURE_CATALOG_SHA256", "1" * 64)
+    monkeypatch.setattr(
+        store,
+        "require_committed_output",
+        lambda *_args, **_kwargs: {},
+    )
+
+    def prove_rebuild(*_args, **_kwargs):
+        raise RuntimeError("catalog drift rebuilt")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", prove_rebuild)
+
+    with pytest.raises(RuntimeError, match="catalog drift rebuilt"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
+def test_executor_policy_drift_invalidates_real_stage_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "_expected_executor_policy_sha256",
+        lambda _config: "2" * 64,
+    )
+
+    def prove_rebuild(*_args, **_kwargs):
+        raise RuntimeError("executor drift rebuilt")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", prove_rebuild)
+
+    with pytest.raises(RuntimeError, match="executor drift rebuilt"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
+def test_extractor_policy_drift_invalidates_real_stage_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    original = prompt_variants_stage.extraction_policy
+    calls = 0
+
+    def drift_only_stage_policy(tsg_config):
+        nonlocal calls
+        calls += 1
+        policy = original(tsg_config)
+        if calls == 1:
+            return policy
+        return ExtractionPolicy(
+            backend=policy.backend,
+            policy_sha256="3" * 64,
+            catalog_sha256=policy.catalog_sha256,
+            max_response_chars=policy.max_response_chars,
+        )
+
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "extraction_policy",
+        drift_only_stage_policy,
+    )
+
+    def prove_rebuild(*_args, **_kwargs):
+        raise RuntimeError("extractor drift rebuilt")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", prove_rebuild)
+
+    with pytest.raises(RuntimeError, match="extractor drift rebuilt"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
+def test_config_drift_invalidates_real_stage_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    changed = config.model_copy(
+        update={
+            "intervention": config.intervention.model_copy(
+                update={"max_protocols": config.intervention.max_protocols + 1}
+            )
+        }
+    )
+    changed_store = RunStore(changed)
+    monkeypatch.setattr(
+        changed_store,
+        "require_committed_output",
+        lambda *_args, **_kwargs: {},
+    )
+
+    def prove_rebuild(*_args, **_kwargs):
+        raise RuntimeError("config drift rebuilt")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", prove_rebuild)
+
+    with pytest.raises(RuntimeError, match="config drift rebuilt"):
+        run_prompt_variant_freeze_stage(changed, changed_store, force=False)
+
+
+def test_direct_schema_drift_invalidates_real_stage_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    run_prompt_variant_freeze_stage(config, store, force=False)
+    original = PromptRecord.model_json_schema
+
+    def drifted(_cls, *args, **kwargs):
+        return {**original(*args, **kwargs), "x-secaware-drift": "prompt-schema"}
+
+    monkeypatch.setattr(PromptRecord, "model_json_schema", classmethod(drifted))
+
+    def prove_rebuild(*_args, **_kwargs):
+        raise RuntimeError("schema drift rebuilt")
+
+    monkeypatch.setattr(prompt_variants_stage, "_executor_for_config", prove_rebuild)
+
+    with pytest.raises(RuntimeError, match="schema drift rebuilt"):
+        run_prompt_variant_freeze_stage(config, store, force=False)
+
+
 def test_producer_replacement_is_blocked_while_consumer_holds_lease(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -492,6 +928,43 @@ def test_producer_replacement_is_blocked_while_consumer_holds_lease(
         prompt_variants_stage,
         "freeze_protocol_variants",
         attempt_producer_replacement,
+    )
+
+    run_prompt_variant_freeze_stage(config, store, force=False)
+
+    assert conflicts == [ErrorCode.MANIFEST_CONFLICT]
+
+
+def test_fci_producer_replacement_is_blocked_while_consumer_holds_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path)
+    original_freeze = prompt_variants_stage.freeze_protocol_variants
+    conflicts: list[ErrorCode] = []
+
+    def attempt_fci_replacement(*args, **kwargs):
+        contender = RunStore(config)
+        fci_outputs = tuple(
+            contender.path("discovery", name) for name, _model in FCI_DISCOVERY_OUTPUTS
+        )
+        try:
+            contender.should_skip_stage(
+                "fci-discovery",
+                (),
+                fci_outputs,
+                True,
+            )
+        except SecAwareError as error:
+            conflicts.append(error.code)
+        else:  # pragma: no cover - the producer lease must remain held
+            raise AssertionError("FCI replacement unexpectedly acquired its lease")
+        return original_freeze(*args, **kwargs)
+
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "freeze_protocol_variants",
+        attempt_fci_replacement,
     )
 
     run_prompt_variant_freeze_stage(config, store, force=False)

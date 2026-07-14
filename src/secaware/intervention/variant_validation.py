@@ -7,7 +7,7 @@ then creates content-addressed records that later stages may randomize.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 from typing import ClassVar, NoReturn
@@ -55,6 +55,7 @@ from secaware.tsg.queries import feature_state, feature_state_vector
 
 
 _STAGE = "prompt_variant_validation"
+BLIND_EXTRACTION_ORDER_VERSION = "blind-extraction-order-v1"
 _SENTINEL_FEATURE_IDS = (
     "safety.prohibited_unsafe_request",
     "safety.vulnerability_disclosure",
@@ -338,17 +339,143 @@ def validate_length_match_record(
         raise _error("prompt length-match record failed readback validation") from None
 
 
-def _variant_prompt_id(candidate: PromptCandidate) -> str:
+def _blind_extraction_key(
+    source_prompt: PromptRecord,
+    candidate: PromptCandidate,
+    policy: ExtractionPolicy,
+) -> tuple[str, str, str, str]:
+    return (
+        BLIND_EXTRACTION_ORDER_VERSION,
+        source_prompt.prompt_sha256,
+        hashlib.sha256(candidate.text.encode("utf-8")).hexdigest(),
+        policy.policy_sha256,
+    )
+
+
+def _blind_candidate_commitment(candidate: PromptCandidate) -> str:
+    return canonical_sha256(candidate.model_dump(mode="json", round_trip=True, warnings=False))
+
+
+def blind_variant_prompt_id(
+    source_prompt: PromptRecord,
+    candidate: PromptCandidate,
+    policy: ExtractionPolicy,
+    occurrence_rank: int,
+) -> str:
+    """Create an opaque extractor-visible alias without arm or target coordinates."""
+
+    if type(occurrence_rank) is not int or occurrence_rank < 0:
+        raise _error("blind extraction alias failed validation")
+    version, source_sha256, text_sha256, policy_sha256 = _blind_extraction_key(
+        source_prompt,
+        candidate,
+        policy,
+    )
     return "variant_prompt_" + canonical_sha256(
         {
             "schema_version": "1.0",
-            "source_prompt_id": candidate.source_prompt_id,
-            "target_instance_id": candidate.target_instance_id,
-            "protocol_instance_id": candidate.protocol_instance_id,
-            "arm_role": candidate.arm_role.value,
-            "text_sha256": hashlib.sha256(candidate.text.encode("utf-8")).hexdigest(),
+            "blind_order_version": version,
+            "source_prompt_sha256": source_sha256,
+            "candidate_text_sha256": text_sha256,
+            "extractor_policy_sha256": policy_sha256,
+            "occurrence_rank": occurrence_rank,
         }
     )
+
+
+def blind_extractor_task_id(
+    source_prompt: PromptRecord,
+    policy: ExtractionPolicy,
+) -> str:
+    """Hide source task identifiers from the validation extractor."""
+
+    return "blind_task_" + canonical_sha256(
+        {
+            "schema_version": "1.0",
+            "blind_order_version": BLIND_EXTRACTION_ORDER_VERSION,
+            "source_task_id_sha256": hashlib.sha256(
+                source_prompt.task_id.encode("utf-8")
+            ).hexdigest(),
+            "source_prompt_sha256": source_prompt.prompt_sha256,
+            "extractor_policy_sha256": policy.policy_sha256,
+        }
+    )
+
+
+def _blind_extraction_plan(
+    values: tuple[VariantValidationInput, ...],
+    policy: ExtractionPolicy,
+    occurrence_ranks: Mapping[str, int] | None = None,
+) -> tuple[tuple[VariantValidationInput, str], ...]:
+    ordered = sorted(
+        values,
+        key=lambda item: (
+            _blind_extraction_key(item.source_prompt, item.candidate, policy),
+            _blind_candidate_commitment(item.candidate),
+        ),
+    )
+    occurrences: dict[tuple[str, str, str, str], int] = {}
+    seen_ranks: set[tuple[tuple[str, str, str, str], int]] = set()
+    plan: list[tuple[VariantValidationInput, str]] = []
+    for item in ordered:
+        key = _blind_extraction_key(item.source_prompt, item.candidate, policy)
+        commitment = _blind_candidate_commitment(item.candidate)
+        if occurrence_ranks is None:
+            rank = occurrences.get(key, 0)
+            occurrences[key] = rank + 1
+        else:
+            rank = occurrence_ranks.get(commitment, -1)
+            if type(rank) is not int or rank < 0 or (key, rank) in seen_ranks:
+                raise _error("blind extraction rank failed validation")
+        seen_ranks.add((key, rank))
+        plan.append(
+            (
+                item,
+                blind_variant_prompt_id(
+                    item.source_prompt,
+                    item.candidate,
+                    policy,
+                    rank,
+                ),
+            )
+        )
+    return tuple(plan)
+
+
+def blind_occurrence_ranks(
+    values: Sequence[VariantValidationInput],
+    policy: ExtractionPolicy,
+) -> dict[str, int]:
+    """Assign stable global ranks without exposing candidate commitments."""
+
+    if type(values) not in {tuple, list} or not values:
+        raise _error("blind extraction rank failed validation")
+    try:
+        checked = tuple(_snapshot_input(item) for item in values)
+        ordered = sorted(
+            checked,
+            key=lambda item: (
+                _blind_extraction_key(item.source_prompt, item.candidate, policy),
+                _blind_candidate_commitment(item.candidate),
+            ),
+        )
+        occurrences: dict[tuple[str, str, str, str], int] = {}
+        result: dict[str, int] = {}
+        for item in ordered:
+            key = _blind_extraction_key(item.source_prompt, item.candidate, policy)
+            commitment = _blind_candidate_commitment(item.candidate)
+            if commitment in result:
+                raise ValueError
+            rank = occurrences.get(key, 0)
+            occurrences[key] = rank + 1
+            result[commitment] = rank
+        return result
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _error("blind extraction rank failed validation") from None
 
 
 def _validate_source_and_bindings(
@@ -610,6 +737,12 @@ def validate_variant(
             extraction_policy=extraction_policy,
             expected_executor_policy_sha256=expected_executor_policy_sha256,
             length_match=length_match,
+            variant_prompt_id=blind_variant_prompt_id(
+                item.source_prompt,
+                item.candidate,
+                extraction_policy,
+                0,
+            ),
         )
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
@@ -644,6 +777,7 @@ def _validate_variant_input(
     extraction_policy: ExtractionPolicy,
     expected_executor_policy_sha256: str,
     length_match: LengthMatchRecord | None,
+    variant_prompt_id: str,
 ) -> VariantValidationResult:
     source, _source_proposal, source_graph, candidate = _validate_source_and_bindings(
         item,
@@ -673,7 +807,8 @@ def _validate_variant_input(
     variant_prompt = PromptRecord.model_validate(
         {
             **source.model_dump(mode="python"),
-            "prompt_id": _variant_prompt_id(candidate),
+            "prompt_id": variant_prompt_id,
+            "task_id": blind_extractor_task_id(source, extraction_policy),
             "prompt": candidate.text,
         }
     )
@@ -794,6 +929,7 @@ def freeze_protocol_variants(
     extractor: PromptExtractor,
     extraction_policy: ExtractionPolicy,
     expected_executor_policy_sha256: str,
+    blind_rank_by_candidate_sha256: Mapping[str, int] | None = None,
 ) -> FrozenProtocolVariants:
     """Freeze all arms or reject the complete task-level protocol block."""
 
@@ -862,7 +998,12 @@ def freeze_protocol_variants(
 
     results: list[tuple[VariantValidationInput, VariantValidationResult]] = []
     failures: list[tuple[ArmRole, PreRandomizationFailureCode]] = []
-    for item in checked:
+    blind_plan = _blind_extraction_plan(
+        checked,
+        extraction_policy,
+        blind_rank_by_candidate_sha256,
+    )
+    for item, variant_prompt_id in blind_plan:
         try:
             result = _validate_variant_input(
                 item,
@@ -870,6 +1011,7 @@ def freeze_protocol_variants(
                 extraction_policy=extraction_policy,
                 expected_executor_policy_sha256=expected_executor_policy_sha256,
                 length_match=lengths.get(item.arm.role),
+                variant_prompt_id=variant_prompt_id,
             )
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
@@ -893,6 +1035,8 @@ def freeze_protocol_variants(
                 )
             )
     if failures:
+        role_order = {role: index for index, role in enumerate(first.protocol.arm_roles)}
+        failures.sort(key=lambda item: role_order[item[0]])
         raise ProtocolFreezeError(
             first.protocol_instance.protocol_instance_id,
             tuple(item[0] for item in failures),
@@ -914,15 +1058,16 @@ def freeze_protocol_variants(
         )
     return FrozenProtocolVariants(
         intended_patches=tuple(
-            item.intended_patch for item in checked if item.intended_patch is not None
+            sorted(
+                (item.intended_patch for item in checked if item.intended_patch is not None),
+                key=lambda item: item.patch_id,
+            )
         ),
-        proposals=proposals,  # type: ignore[arg-type]
-        graphs=graphs,  # type: ignore[arg-type]
-        deltas=deltas,  # type: ignore[arg-type]
-        variants=variants,  # type: ignore[arg-type]
-        length_matches=tuple(
-            lengths[role] for role in sorted(lengths, key=lambda item: item.value)
-        ),
+        proposals=tuple(sorted(proposals, key=lambda item: item.proposal_id)),  # type: ignore[arg-type]
+        graphs=tuple(sorted(graphs, key=lambda item: item.graph_id)),  # type: ignore[arg-type]
+        deltas=tuple(sorted(deltas, key=lambda item: item.delta_id)),  # type: ignore[arg-type]
+        variants=tuple(sorted(variants, key=lambda item: item.variant_id)),  # type: ignore[arg-type]
+        length_matches=tuple(sorted(lengths.values(), key=lambda item: item.length_match_id)),
     )
 
 
@@ -932,6 +1077,10 @@ __all__ = [
     "VariantValidationInput",
     "VariantValidationResult",
     "actual_feature_transitions",
+    "BLIND_EXTRACTION_ORDER_VERSION",
+    "blind_extractor_task_id",
+    "blind_occurrence_ranks",
+    "blind_variant_prompt_id",
     "canonical_changed_span_utf8_bytes",
     "freeze_protocol_variants",
     "make_length_match_record",

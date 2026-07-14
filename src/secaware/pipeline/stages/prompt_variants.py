@@ -41,8 +41,11 @@ from secaware.intervention.graph_patch import (
     allowed_delta_sha256,
 )
 from secaware.intervention.variant_validation import (
+    BLIND_EXTRACTION_ORDER_VERSION,
     ProtocolFreezeError,
     VariantValidationInput,
+    blind_extractor_task_id,
+    blind_occurrence_ranks,
     freeze_protocol_variants,
     validate_graph_delta_record,
     validate_length_match_record,
@@ -346,6 +349,7 @@ def prompt_variant_stage_policy_sha256(config: AppConfig) -> str:
                 "intervention_mode": config.intervention.mode.value,
                 "intervention_executor": config.intervention.executor.value,
                 "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
+                "blind_extraction_order_version": BLIND_EXTRACTION_ORDER_VERSION,
             }
         )
     except (MemoryError, KeyboardInterrupt, SystemExit):
@@ -757,6 +761,10 @@ def _validate_bundle_relations(
                     {
                         **source.model_dump(mode="python"),
                         "prompt_id": variant.variant_prompt_id,
+                        "task_id": blind_extractor_task_id(
+                            source,
+                            snapshot.extractor_policy,
+                        ),
                         "prompt": variant.prompt_text,
                     }
                 )
@@ -776,7 +784,7 @@ def _validate_bundle_relations(
                     or variant.length_match_id != expected_length_id
                     or proposal.proposal_id != variant.proposal_id
                     or proposal.prompt_id != variant.variant_prompt_id
-                    or proposal.task_id != source.task_id
+                    or proposal.task_id != variant_prompt.task_id
                     or proposal.prompt_sha256 != variant.prompt_sha256
                     or proposal.backend is not snapshot.extractor_policy.backend
                     or proposal.catalog_sha256 != snapshot.extractor_policy.catalog_sha256
@@ -785,7 +793,7 @@ def _validate_bundle_relations(
                     or graph.graph_id != variant.graph_id
                     or graph.proposal_id != proposal.proposal_id
                     or graph.prompt_id != variant.variant_prompt_id
-                    or graph.task_id != source.task_id
+                    or graph.task_id != variant_prompt.task_id
                     or graph.task_family != source.task_family
                     or graph.cwe != source.cwe
                     or graph.extractor_backend is not snapshot.extractor_policy.backend
@@ -1025,6 +1033,9 @@ def run_prompt_variant_freeze_stage(
         variants: list[PromptVariantRecord] = []
         lengths: list[LengthMatchRecord] = []
         exclusions: list[PreRandomizationExclusionRecord] = []
+        pending_validation: list[
+            tuple[_ProtocolInstanceBuild, tuple[VariantValidationInput, ...]]
+        ] = []
         for item in definitions[4]:
             source = item.source_prompt
             counterpart = (
@@ -1082,12 +1093,27 @@ def run_prompt_variant_freeze_stage(
                     _exclusion(item, (execution_failure[0],), (execution_failure[1],))
                 )
                 continue
+            pending_validation.append((item, tuple(validation_inputs)))
+        rank_by_candidate_sha256 = (
+            blind_occurrence_ranks(
+                tuple(
+                    value
+                    for _item, validation_inputs in pending_validation
+                    for value in validation_inputs
+                ),
+                policy,
+            )
+            if pending_validation
+            else {}
+        )
+        for item, validation_inputs in pending_validation:
             try:
                 frozen = freeze_protocol_variants(
-                    tuple(validation_inputs),
+                    validation_inputs,
                     extractor=extractor,
                     extraction_policy=policy,
                     expected_executor_policy_sha256=expected_executor_policy,
+                    blind_rank_by_candidate_sha256=rank_by_candidate_sha256,
                 )
             except (MemoryError, KeyboardInterrupt, SystemExit):
                 raise

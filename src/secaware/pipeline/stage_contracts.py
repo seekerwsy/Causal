@@ -22,10 +22,14 @@ from secaware.schema.causal import (
     PathPatternRecord,
     PathSupportRecord,
 )
-from secaware.schema.records import CanonicalGeneratedCodeRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import (
+    AllowedDeltaRecord,
+    ArmSpecRecord,
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
+    FeatureTransition,
+    FunctionalOutcomeContractRecord,
     GraphDeltaRecord,
     LengthMatchRecord,
     PreRandomizationExclusionRecord,
@@ -110,10 +114,12 @@ def prompt_variant_stage_contract_payload() -> dict[str, object]:
         PromptCandidate,
     )
     from secaware.intervention.graph_patch import IntendedGraphPatchRecord
+    from secaware.intervention.variant_validation import BLIND_EXTRACTION_ORDER_VERSION
 
     return {
         "stage": _PROMPT_VARIANT_STAGE,
-        "contract_version": "prompt-variant-freeze-v1",
+        "contract_version": "prompt-variant-freeze-v2",
+        "blind_extraction_order_version": BLIND_EXTRACTION_ORDER_VERSION,
         "prompt_feature_catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
         "prompt_tsg_stage_contract_sha256": PROMPT_TSG_STAGE_CONTRACT_SHA256,
         "deterministic_executor_policy_sha256": DETERMINISTIC_INTERVENTION_POLICY_SHA256,
@@ -122,7 +128,13 @@ def prompt_variant_stage_contract_payload() -> dict[str, object]:
         "intervention_config_schema": _schema_sha256(InterventionConfig),
         "extractor_config_schema": _schema_sha256(TSGConfig),
         "candidate_schema": _schema_sha256(PromptCandidate),
+        "prompt_schema": _schema_sha256(PromptRecord),
         "attestation_schema": _schema_sha256(PromptRoleAttestationRecord),
+        "functional_contract_schema": _schema_sha256(FunctionalOutcomeContractRecord),
+        "frozen_hypothesis_schema": _schema_sha256(FrozenHypothesisRecord),
+        "feature_transition_schema": _schema_sha256(FeatureTransition),
+        "allowed_delta_schema": _schema_sha256(AllowedDeltaRecord),
+        "arm_schema": _schema_sha256(ArmSpecRecord),
         "target_schema": _schema_sha256(TargetSpecRecord),
         "target_instance_schema": _schema_sha256(TargetInstanceRecord),
         "protocol_schema": _schema_sha256(ConfirmationProtocolRecord),
