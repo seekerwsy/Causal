@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import stat
+import sys
 from typing import Iterator
 
 
@@ -15,6 +17,26 @@ class BoundedTraversalError(ValueError):
     def __init__(self, *, limit_exceeded: bool) -> None:
         self.limit_exceeded = limit_exceeded
         super().__init__("bounded directory traversal failed validation")
+
+
+_FATAL_EXCEPTIONS = (MemoryError, KeyboardInterrupt, SystemExit)
+
+
+def _close_preserving_active_fatal(
+    close: Callable[[int], None],
+    resource: int,
+    active_exception: BaseException | None,
+) -> None:
+    """Close a resource without masking an already-propagating fatal exception."""
+
+    try:
+        close(resource)
+    except _FATAL_EXCEPTIONS:
+        raise
+    except Exception:
+        if isinstance(active_exception, _FATAL_EXCEPTIONS):
+            return
+        raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,8 +137,9 @@ def _walk_posix_directory(
                         name_in_parent=name,
                     )
                 finally:
+                    active_exception = sys.exc_info()[1]
                     if child_fd >= 0:
-                        os.close(child_fd)
+                        _close_preserving_active_fatal(os.close, child_fd, active_exception)
             elif stat.S_ISREG(entry_metadata.st_mode):
                 file_fd = -1
                 try:
@@ -140,8 +163,9 @@ def _walk_posix_directory(
                     ):
                         raise BoundedTraversalError(limit_exceeded=False)
                 finally:
+                    active_exception = sys.exc_info()[1]
                     if file_fd >= 0:
-                        os.close(file_fd)
+                        _close_preserving_active_fatal(os.close, file_fd, active_exception)
             else:
                 raise BoundedTraversalError(limit_exceeded=False)
     if _posix_identity(os.fstat(directory_fd)) != expected_identity:
@@ -172,8 +196,9 @@ def _walk_posix(root: Path, state: _TraversalState) -> Iterator[BoundedTreeEntry
         if _posix_identity(current_root) != root_identity:
             raise BoundedTraversalError(limit_exceeded=False)
     finally:
+        active_exception = sys.exc_info()[1]
         if root_fd >= 0:
-            os.close(root_fd)
+            _close_preserving_active_fatal(os.close, root_fd, active_exception)
 
 
 if os.name == "nt":
@@ -299,8 +324,9 @@ def _windows_verify_path(path: Path, expected: _WindowsIdentity) -> None:
         if _windows_identity(probe) != expected:
             raise BoundedTraversalError(limit_exceeded=False)
     finally:
+        active_exception = sys.exc_info()[1]
         if probe >= 0:
-            _windows_close(probe)
+            _close_preserving_active_fatal(_windows_close, probe, active_exception)
 
 
 def _walk_windows_directory(
@@ -348,8 +374,13 @@ def _walk_windows_directory(
                         raise BoundedTraversalError(limit_exceeded=False)
                     _windows_verify_path(candidate_path, child_identity)
             finally:
+                active_exception = sys.exc_info()[1]
                 if child_handle >= 0:
-                    _windows_close(child_handle)
+                    _close_preserving_active_fatal(
+                        _windows_close,
+                        child_handle,
+                        active_exception,
+                    )
     if _windows_identity(handle) != expected:
         raise BoundedTraversalError(limit_exceeded=False)
     _windows_verify_path(path, expected)
@@ -369,8 +400,13 @@ def _walk_windows(root: Path, state: _TraversalState) -> Iterator[BoundedTreeEnt
             state=state,
         )
     finally:
+        active_exception = sys.exc_info()[1]
         if root_handle >= 0:
-            _windows_close(root_handle)
+            _close_preserving_active_fatal(
+                _windows_close,
+                root_handle,
+                active_exception,
+            )
 
 
 def iter_bounded_tree(

@@ -6,6 +6,7 @@ import struct
 
 import pytest
 
+import secaware.pipeline.bounded_traversal as bounded_traversal
 from secaware.pipeline.bounded_traversal import BoundedTraversalError, iter_bounded_tree
 
 
@@ -293,3 +294,147 @@ def test_handle_bound_traversal_preserves_process_control_identity(
     monkeypatch.setattr(os, "scandir", interrupt)
     with pytest.raises(signal_type):
         list(_walk(root))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor close semantics")
+@pytest.mark.parametrize("signal_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_posix_active_fatal_identity_survives_ordinary_close_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    sentinel = signal_type("private-posix-active-fatal")
+    real_close = os.close
+
+    def close_then_fail(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError("private-posix-close-failure")
+
+    monkeypatch.setattr(os, "close", close_then_fail)
+    with pytest.raises(signal_type) as exc_info:
+        traversal.throw(sentinel)
+    assert exc_info.value is sentinel
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle close semantics")
+@pytest.mark.parametrize("signal_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_windows_active_fatal_identity_survives_ordinary_close_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    sentinel = signal_type("private-windows-active-fatal")
+    real_close = bounded_traversal._windows_close
+
+    def close_then_fail(handle: int) -> None:
+        real_close(handle)
+        raise OSError("private-windows-close-failure")
+
+    monkeypatch.setattr(bounded_traversal, "_windows_close", close_then_fail)
+    with pytest.raises(signal_type) as exc_info:
+        traversal.throw(sentinel)
+    assert exc_info.value is sentinel
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor close semantics")
+def test_posix_no_active_fatal_close_failure_remains_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    real_close = os.close
+
+    def close_then_fail(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError("private-posix-close-failure")
+
+    monkeypatch.setattr(os, "close", close_then_fail)
+    with pytest.raises(BoundedTraversalError) as exc_info:
+        traversal.close()
+    assert exc_info.value.limit_exceeded is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle close semantics")
+def test_windows_no_active_fatal_close_failure_remains_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    real_close = bounded_traversal._windows_close
+
+    def close_then_fail(handle: int) -> None:
+        real_close(handle)
+        raise OSError("private-windows-close-failure")
+
+    monkeypatch.setattr(bounded_traversal, "_windows_close", close_then_fail)
+    with pytest.raises(BoundedTraversalError) as exc_info:
+        traversal.close()
+    assert exc_info.value.limit_exceeded is False
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor close semantics")
+@pytest.mark.parametrize("signal_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_posix_fatal_close_failure_keeps_its_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    sentinel = signal_type("private-posix-close-fatal")
+    real_close = os.close
+
+    def close_then_interrupt(descriptor: int) -> None:
+        real_close(descriptor)
+        raise sentinel
+
+    monkeypatch.setattr(os, "close", close_then_interrupt)
+    with pytest.raises(signal_type) as exc_info:
+        traversal.close()
+    assert exc_info.value is sentinel
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle close semantics")
+@pytest.mark.parametrize("signal_type", (MemoryError, KeyboardInterrupt, SystemExit))
+def test_windows_fatal_close_failure_keeps_its_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("safe", encoding="utf-8")
+    traversal = _walk(root)
+    assert next(traversal).relative_path == "file.txt"
+    sentinel = signal_type("private-windows-close-fatal")
+    real_close = bounded_traversal._windows_close
+
+    def close_then_interrupt(handle: int) -> None:
+        real_close(handle)
+        raise sentinel
+
+    monkeypatch.setattr(bounded_traversal, "_windows_close", close_then_interrupt)
+    with pytest.raises(signal_type) as exc_info:
+        traversal.close()
+    assert exc_info.value is sentinel
