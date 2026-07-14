@@ -41,6 +41,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "secaware.extractors" = ["prompts/*.txt"]
+"secaware.intervention" = ["prompts/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

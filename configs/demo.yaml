@@ -28,10 +28,13 @@ discovery:
   max_failed_bootstrap_fraction: 0.1
 
 intervention:
-  enabled_directions:
-    - risk_down
-  max_hypotheses: 5
-  allow_side_effects_for_directional: true
+  mode: text_native
+  executor: deterministic
+  llm: null
+  operations:
+    - add
+    - remove
+  max_protocols: 64
 
 generation:
   provider: mock

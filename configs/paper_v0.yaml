@@ -39,10 +39,22 @@ discovery:
   max_failed_bootstrap_fraction: 0.1
 
 intervention:
-  enabled_directions:
-    - risk_down
-  max_hypotheses: 5
-  allow_side_effects_for_directional: true
+  mode: text_native
+  executor: llm
+  llm:
+    model_id: gpt-4.1-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    timeout_seconds: 60.0
+    max_attempts: 3
+    max_response_bytes: 262144
+    temperature: 0.0
+    top_p: 1.0
+    seed: 0
+  operations:
+    - add
+    - remove
+  max_protocols: 64
 
 generation:
   provider: mock
