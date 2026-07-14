@@ -11,7 +11,7 @@ from pathlib import Path
 import stat
 
 from secaware.causal.freeze import revalidate_frozen_hypothesis
-from secaware.config import AppConfig
+from secaware.config import AppConfig, RandomizationConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.experiments.randomization import (
     RandomizationBlock,
@@ -30,6 +30,7 @@ from secaware.pipeline.manifest import StageManifest
 from secaware.pipeline.stages.fci_discovery import FCI_DISCOVERY_OUTPUTS
 from secaware.pipeline.stages.prompt_variants import PROMPT_VARIANT_OUTPUTS
 from secaware.schema.causal import FrozenHypothesisRecord
+from secaware.schema.common import model_shape_is_intact
 from secaware.schema.experiments import (
     AssignmentRecord,
     ConfirmationProtocolInstanceRecord,
@@ -260,9 +261,13 @@ def _guard_no_generation_or_future_artifacts(store: RunStore) -> None:
     try:
         for candidate in entries(".stages"):
             path = Path(candidate.relative_path)
-            if not candidate.is_file or path.parent != Path(".") or path.suffix != ".json":
+            if (
+                not candidate.is_file
+                or path.parent != Path(".")
+                or path.suffix.casefold() != ".json"
+            ):
                 continue
-            stage_name = path.stem
+            stage_name = path.stem.casefold()
             if stage_name in _FUTURE_STAGE_NAMES or any(
                 stage_name.startswith(prefix) for prefix in _FUTURE_STAGE_PREFIXES
             ):
@@ -324,15 +329,22 @@ def _validate_output_bundle(
     assignments: tuple[AssignmentRecord, ...],
     blocks: tuple[RandomizationBlock, ...],
     confirmation_seeds: tuple[int, ...],
-    config: AppConfig,
+    *,
+    global_seed: int,
+    randomization_config: RandomizationConfig,
 ) -> RandomizationStageResult:
     try:
+        if (
+            manifest.global_seed != global_seed
+            or manifest.rng_version != randomization_config.rng_version
+        ):
+            raise RandomizationError(RandomizationFailureCode.INVALID_INPUT)
         validate_randomization_bundle(
             manifest,
             assignments,
             blocks,
             confirmation_seeds,
-            config=config.randomization,
+            config=randomization_config,
         )
         return RandomizationStageResult(
             block_count=len(blocks),
@@ -358,19 +370,40 @@ def run_confirmation_randomization_stage(
 ) -> RandomizationStageResult:
     """Freeze assignments atomically before any confirmation generation."""
 
-    if type(config) is not AppConfig or type(store) is not RunStore or store.config != config:
+    if (
+        type(config) is not AppConfig
+        or type(store) is not RunStore
+        or store.config != config
+        or not model_shape_is_intact(config)
+    ):
         raise _stage_error("randomization stage configuration failed validation")
+    try:
+        effective_config = AppConfig.model_validate(config.model_dump(mode="json"))
+        effective_store = RunStore(effective_config)
+        if effective_store.root != store.root:
+            raise ValueError
+        effective_global_seed = effective_config.run.random_seed
+        effective_confirmation_seeds = tuple(sorted(effective_config.generation.confirmation_seeds))
+        effective_randomization = RandomizationConfig.model_validate(
+            effective_config.randomization.model_dump(mode="json")
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _stage_error("randomization stage configuration failed validation") from None
     task4_paths = tuple(
-        store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
+        effective_store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
     )
-    task4_manifest_path = store.path(".stages", "build-confirmation-variants.json")
-    fci_paths = tuple(store.path("discovery", name) for name, _model in FCI_DISCOVERY_OUTPUTS)
+    task4_manifest_path = effective_store.path(".stages", "build-confirmation-variants.json")
+    fci_paths = tuple(
+        effective_store.path("discovery", name) for name, _model in FCI_DISCOVERY_OUTPUTS
+    )
     hypothesis_path = next(path for path in fci_paths if path.name == "hypotheses_frozen.jsonl")
-    fci_manifest_path = store.path(".stages", "fci-discovery.json")
+    fci_manifest_path = effective_store.path(".stages", "fci-discovery.json")
     inputs = (*task4_paths, task4_manifest_path, hypothesis_path, fci_manifest_path)
     output_specs = tuple(
         JsonlOutputSpec(
-            store.path("interventions", name),
+            effective_store.path("interventions", name),
             model,
             require_nonempty=True,
             max_records=(1 if index == 0 else _MAX_ASSIGNMENTS),
@@ -385,7 +418,7 @@ def run_confirmation_randomization_stage(
         nonlocal snapshot
         if snapshot is not None:
             raise _stage_error("randomization input snapshot failed validation")
-        _guard_no_generation_or_future_artifacts(store)
+        _guard_no_generation_or_future_artifacts(effective_store)
         payloads: list[bytes] = []
         file_snapshots: list[_FileSnapshot] = []
         combined = 0
@@ -439,9 +472,9 @@ def run_confirmation_randomization_stage(
                 variants=task4_groups[8],  # type: ignore[arg-type]
                 exclusions=task4_groups[10],  # type: ignore[arg-type]
                 hypotheses=hypotheses,
-                max_blocks=config.randomization.max_blocks,
+                max_blocks=effective_randomization.max_blocks,
             )
-            assignment_capacity = len(blocks) * len(config.generation.confirmation_seeds)
+            assignment_capacity = len(blocks) * len(effective_confirmation_seeds)
             if assignment_capacity < 1 or assignment_capacity > _MAX_ASSIGNMENTS:
                 raise RandomizationError(RandomizationFailureCode.RESOURCE_LIMIT)
         except (MemoryError, KeyboardInterrupt, SystemExit):
@@ -461,7 +494,7 @@ def run_confirmation_randomization_stage(
     def verify_input_snapshot() -> None:
         if snapshot is None:
             raise _stage_error("randomization input snapshot failed validation")
-        _guard_no_generation_or_future_artifacts(store)
+        _guard_no_generation_or_future_artifacts(effective_store)
         for expected in snapshot.files:
             _payload, current = _read_file_snapshot(
                 expected.path,
@@ -474,13 +507,13 @@ def run_confirmation_randomization_stage(
         nonlocal built_manifest, built_assignments
         if snapshot is None or built_manifest is not None or built_assignments is not None:
             raise _stage_error("randomization input snapshot failed validation")
-        _guard_no_generation_or_future_artifacts(store)
+        _guard_no_generation_or_future_artifacts(effective_store)
         try:
             built_manifest, built_assignments = randomize_protocols(
                 snapshot.blocks,
-                global_seed=config.run.random_seed,
-                confirmation_seeds=config.generation.confirmation_seeds,
-                config=config.randomization,
+                global_seed=effective_global_seed,
+                confirmation_seeds=effective_confirmation_seeds,
+                config=effective_randomization,
             )
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
@@ -493,8 +526,9 @@ def run_confirmation_randomization_stage(
             built_manifest,
             built_assignments,
             snapshot.blocks,
-            tuple(sorted(config.generation.confirmation_seeds)),
-            config,
+            effective_confirmation_seeds,
+            global_seed=effective_global_seed,
+            randomization_config=effective_randomization,
         )
         return ((built_manifest,), built_assignments)
 
@@ -511,8 +545,9 @@ def run_confirmation_randomization_stage(
             manifest,
             assignments,  # type: ignore[arg-type]
             snapshot.blocks,
-            tuple(sorted(config.generation.confirmation_seeds)),
-            config,
+            effective_confirmation_seeds,
+            global_seed=effective_global_seed,
+            randomization_config=effective_randomization,
         )
 
     producer_outputs = {
@@ -522,7 +557,7 @@ def run_confirmation_randomization_stage(
     with ExitStack() as stack:
         for producer_stage in sorted(producer_outputs):
             stack.enter_context(
-                store.hold_committed_output(
+                effective_store.hold_committed_output(
                     producer_stage,
                     producer_outputs[producer_stage],
                     expected_catalog_sha256=(
@@ -533,7 +568,7 @@ def run_confirmation_randomization_stage(
                 )
             )
         execute_jsonl_stage_transaction(
-            store,
+            effective_store,
             stage=_STAGE,
             inputs=inputs,
             outputs=output_specs,
@@ -569,8 +604,9 @@ def run_confirmation_randomization_stage(
             manifests[0],
             assignments,
             snapshot.blocks,
-            tuple(sorted(config.generation.confirmation_seeds)),
-            config,
+            effective_confirmation_seeds,
+            global_seed=effective_global_seed,
+            randomization_config=effective_randomization,
         )
 
 

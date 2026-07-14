@@ -427,6 +427,8 @@ class GenerationConfig(StrictModel):
 
 
 class RandomizationConfig(StrictModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, revalidate_instances="always")
+
     rng_version: Literal["sha256-rejection-fisher-yates-v1"] = "sha256-rejection-fisher-yates-v1"
     max_blocks: int = Field(default=10_000, ge=1, le=100_000, strict=True)
     min_independent_tasks_per_semantic_protocol: int = Field(

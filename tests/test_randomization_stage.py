@@ -5,13 +5,14 @@ import threading
 import pytest
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.config import AppConfig, load_config
+from secaware.config import AppConfig, RandomizationConfig, load_config
 from secaware.experiments.randomization import RandomizationError, build_randomization_blocks
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.io.transaction import ArtifactTransaction, TransactionStateError
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline.manifest import build_stage_fingerprint
+from secaware.pipeline.artifact import canonical_sha256
 import secaware.pipeline.stage_contracts as stage_contracts
 import secaware.pipeline.stages.randomization as randomization_stage
 from secaware.pipeline.stages.randomization import RANDOMIZATION_OUTPUTS
@@ -610,3 +611,115 @@ def test_stage_enforces_preassignment_and_input_resource_limits(
         name: store.path("interventions", name).read_bytes()
         for name, _model in RANDOMIZATION_OUTPUTS
     }
+
+
+@pytest.mark.parametrize(
+    "coordinate",
+    ("global_seed", "confirmation_seeds", "randomization_config"),
+)
+def test_stage_uses_one_deep_validated_config_snapshot_despite_transient_mutation(
+    frozen_task4_store,
+    monkeypatch: pytest.MonkeyPatch,
+    coordinate: str,
+) -> None:
+    config, store = frozen_task4_store
+    original_seed = config.run.random_seed
+    original_seeds = tuple(config.generation.confirmation_seeds)
+    original_randomization = config.randomization
+    changed_randomization = RandomizationConfig(
+        max_blocks=original_randomization.max_blocks - 1,
+        min_independent_tasks_per_semantic_protocol=(
+            original_randomization.min_independent_tasks_per_semantic_protocol
+        ),
+    )
+    mutated = False
+    restored = False
+
+    def mutate_original() -> None:
+        nonlocal mutated
+        if mutated:
+            return
+        mutated = True
+        if coordinate == "global_seed":
+            object.__setattr__(config.run, "random_seed", original_seed + 10_000)
+        elif coordinate == "confirmation_seeds":
+            config.generation.confirmation_seeds[:] = list(range(201, 213))
+        else:
+            object.__setattr__(config, "randomization", changed_randomization)
+
+    def restore_original() -> None:
+        nonlocal restored
+        if restored or not mutated:
+            return
+        restored = True
+        object.__setattr__(config.run, "random_seed", original_seed)
+        config.generation.confirmation_seeds[:] = list(original_seeds)
+        object.__setattr__(config, "randomization", original_randomization)
+
+    real_model_validate = AppConfig.model_validate
+
+    def validate_then_mutate(cls, value, *args, **kwargs):
+        del cls
+        result = real_model_validate(value, *args, **kwargs)
+        mutate_original()
+        return result
+
+    monkeypatch.setattr(AppConfig, "model_validate", classmethod(validate_then_mutate))
+    real_randomize = randomization_stage.randomize_protocols
+    observed: dict[str, object] = {}
+
+    def restore_during_build(*args, **kwargs):
+        observed["global_seed"] = kwargs["global_seed"]
+        observed["confirmation_seeds"] = tuple(kwargs["confirmation_seeds"])
+        observed["randomization"] = kwargs["config"]
+        kwargs["confirmation_seeds"] = tuple(kwargs["confirmation_seeds"])
+        restore_original()
+        return real_randomize(*args, **kwargs)
+
+    monkeypatch.setattr(randomization_stage, "randomize_protocols", restore_during_build)
+    try:
+        result = run_confirmation_randomization_stage(config, store, force=True)
+    finally:
+        restore_original()
+    assert mutated and restored
+    assert observed == {
+        "global_seed": original_seed,
+        "confirmation_seeds": tuple(sorted(original_seeds)),
+        "randomization": original_randomization,
+    }
+    manifests = read_jsonl(
+        store.path("interventions", "randomization_manifest.jsonl"),
+        RandomizationManifestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assignments = read_jsonl(
+        store.path("interventions", "assignments.jsonl"),
+        AssignmentRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert result.manifest_id == manifests[0].manifest_id
+    assert manifests[0].global_seed == original_seed
+    assert {item.seed_id for item in assignments} == set(original_seeds)
+    stage_manifest = read_stage_manifest(store.path(".stages", "randomize-confirmation.json"))
+    assert stage_manifest.config_sha256 == canonical_sha256(config.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize(
+    "future_name",
+    ("GENERATE-CONFIRMATION.JSON", "Generate-Confirmation.JsOn"),
+)
+def test_future_stage_manifest_detection_is_case_insensitive(
+    frozen_task4_store,
+    future_name: str,
+) -> None:
+    config, store = frozen_task4_store
+    future = store.path(".stages", future_name)
+    future.write_text("{}\n", encoding="utf-8")
+    try:
+        with pytest.raises(SecAwareError) as exc_info:
+            run_confirmation_randomization_stage(config, store, force=True)
+        assert exc_info.value.message == "future confirmation artifact already exists"
+    finally:
+        future.unlink(missing_ok=True)

@@ -271,6 +271,12 @@ def test_rng_version_is_closed() -> None:
         RandomizationConfig(rng_version="future-rng")  # type: ignore[arg-type]
 
 
+def test_randomization_config_is_immutable_after_validation() -> None:
+    config = RandomizationConfig(min_independent_tasks_per_semantic_protocol=2)
+    with pytest.raises(ValidationError):
+        config.max_blocks = 2  # type: ignore[misc]
+
+
 @pytest.mark.parametrize(
     "mutation",
     ("duplicate", "omission", "extra", "variant", "task", "model", "hypothesis", "target"),
