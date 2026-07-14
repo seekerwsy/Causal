@@ -14,7 +14,10 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
 from secaware.extractors.factory import extraction_policy
-from secaware.intervention.executors import DeterministicInterventionExecutor
+from secaware.intervention.executors import (
+    DeterministicInterventionExecutor,
+    GraphNativeExecutor,
+)
 from secaware.intervention.variant_validation import (
     ProtocolFreezeError,
     VariantValidationInput,
@@ -49,7 +52,9 @@ from secaware.schema.experiments import (
     FunctionalOutcomeContractRecord,
     GraphDeltaRecord,
     LengthMatchRecord,
+    InterventionMode,
     PreRandomizationExclusionRecord,
+    PreRandomizationFailureCode,
     PromptVariantRecord,
     TargetInstanceRecord,
     TargetSpecRecord,
@@ -213,42 +218,170 @@ def test_equal_blind_keys_are_extracted_once_without_occurrence_aliases() -> Non
     assert left == right
 
 
-def test_blind_extraction_deduplicates_task_aliases_without_leaking_identity() -> None:
+class _CountingExtractor:
+    def __init__(self) -> None:
+        self.calls: list[PromptRecord] = []
+
+    def extract(self, prompt, extraction_policy):
+        self.calls.append(prompt)
+        return DeterministicCatalogExtractor().extract(prompt, extraction_policy)
+
+
+def _assert_zero_call_source_preflight_failure(
+    values: tuple[VariantValidationInput, ...],
+    policy: ExtractionPolicy,
+    expected_role: ArmRole,
+) -> None:
+    extractor = _CountingExtractor()
+    with pytest.raises(ProtocolFreezeError) as exc_info:
+        freeze_protocol_variants(
+            values,
+            extractor=extractor,
+            extraction_policy=policy,
+            expected_executor_policy_sha256=DeterministicInterventionExecutor().policy_sha256,
+        )
+
+    assert extractor.calls == []
+    assert exc_info.value.failed_arm_roles == (expected_role,)
+    assert exc_info.value.failure_codes == (PreRandomizationFailureCode.SOURCE_PROVENANCE_MISMATCH,)
+
+
+def test_candidate_target_binding_fails_before_any_blind_extraction() -> None:
     values, policy = _validation_inputs()
-    original = values[0]
-    alias_source = original.source_prompt.model_copy(update={"task_id": "secret-alias-task"})
-    aliased = original.model_copy(update={"source_prompt": alias_source})
-
-    class CapturingStatefulExtractor:
-        def __init__(self) -> None:
-            self.calls: list[PromptRecord] = []
-
-        def extract(self, prompt, extraction_policy):
-            self.calls.append(prompt)
-            return DeterministicCatalogExtractor().extract(prompt, extraction_policy)
-
-    forward = CapturingStatefulExtractor()
-    reverse = CapturingStatefulExtractor()
-    forward_cache = prepare_blind_extractions(
-        (original, aliased),
-        extractor=forward,
-        extraction_policy=policy,
-    )
-    reverse_cache = prepare_blind_extractions(
-        (aliased, original),
-        extractor=reverse,
-        extraction_policy=policy,
+    victim = values[0]
+    forged = victim.model_copy(
+        update={
+            "candidate": victim.candidate.model_copy(
+                update={"target_spec_id": "target_" + "f" * 64}
+            )
+        }
     )
 
-    assert forward_cache == reverse_cache
-    assert len(forward.calls) == len(reverse.calls) == 1
-    assert forward.calls == reverse.calls
-    visible = forward.calls[0]
-    assert original.source_prompt.task_id not in visible.prompt_id
-    assert original.source_prompt.task_id not in visible.task_id
-    assert alias_source.task_id not in visible.prompt_id
-    assert alias_source.task_id not in visible.task_id
-    assert visible.task_id.startswith("blind_task_")
+    _assert_zero_call_source_preflight_failure((forged, *values[1:]), policy, victim.arm.role)
+
+
+def test_blind_cache_api_rejects_unpreflighted_input_without_extractor_calls() -> None:
+    values, policy = _validation_inputs()
+    victim = values[0]
+    forged = victim.model_copy(
+        update={
+            "candidate": victim.candidate.model_copy(
+                update={"target_spec_id": "target_" + "f" * 64}
+            )
+        }
+    )
+    extractor = _CountingExtractor()
+
+    with pytest.raises(ProtocolFreezeError):
+        prepare_blind_extractions(
+            (forged, *values[1:]),
+            extractor=extractor,
+            extraction_policy=policy,
+            expected_executor_policy_sha256=DeterministicInterventionExecutor().policy_sha256,
+        )
+
+    assert extractor.calls == []
+
+
+def test_attestation_binding_fails_before_any_blind_extraction() -> None:
+    values, policy = _validation_inputs()
+    victim = values[0]
+    payload = victim.source_attestation.model_dump(
+        mode="python",
+        exclude={"schema_version", "attestation_id"},
+    )
+    payload["task_id"] = "foreign-task"
+    forged_attestation = PromptRoleAttestationRecord.from_content(**payload)
+    forged = victim.model_copy(update={"source_attestation": forged_attestation})
+
+    _assert_zero_call_source_preflight_failure((forged, *values[1:]), policy, victim.arm.role)
+
+
+def test_graph_patch_binding_fails_before_any_blind_extraction() -> None:
+    policy = extraction_policy(TSGConfig(prompt_extractor="deterministic_catalog_v1"))
+    values: list[VariantValidationInput] = []
+    roles = (
+        ArmRole.TARGET_PATCH,
+        ArmRole.NOOP_REWRITE,
+        ArmRole.LENGTH_MATCHED_PLACEBO,
+        ArmRole.GENERIC_SECURITY_REMINDER,
+    )
+    for role in roles:
+        execution = request(
+            FeatureFamily.SAFETY_CONTROL,
+            FeatureOperation.ADD,
+            role,
+            mode=InterventionMode.GRAPH_NATIVE,
+        )
+        patch, candidate = GraphNativeExecutor(DeterministicInterventionExecutor()).execute(
+            execution
+        )
+        values.append(
+            VariantValidationInput(
+                candidate=candidate,
+                source_prompt=execution.source_prompt,
+                target=execution.target,
+                target_instance=execution.target_instance,
+                protocol=execution.protocol,
+                protocol_instance=execution.protocol_instance,
+                arm=execution.arm,
+                source_proposal=execution.source_proposal,
+                source_graph=execution.source_graph,
+                source_attestation=next(
+                    item
+                    for item in execution.attestations
+                    if item.prompt_id == execution.source_prompt.prompt_id
+                ),
+                intended_patch=patch,
+            )
+        )
+    victim = values[0]
+    original_patch = victim.intended_patch
+    assert original_patch is not None
+    forged_patch = IntendedGraphPatchRecord.from_content(
+        target_spec_id="target_" + "e" * 64,
+        target_instance_id=original_patch.target_instance_id,
+        arm_protocol_id=original_patch.arm_protocol_id,
+        protocol_instance_id=original_patch.protocol_instance_id,
+        arm_role=original_patch.arm_role,
+        before_graph_sha256=original_patch.before_graph_sha256,
+        allowed_delta_sha256=original_patch.allowed_delta_sha256,
+        intended_transitions=original_patch.intended_transitions,
+    )
+    forged = victim.model_copy(
+        update={
+            "candidate": victim.candidate.model_copy(
+                update={"intended_patch_id": forged_patch.patch_id}
+            ),
+            "intended_patch": forged_patch,
+        }
+    )
+
+    _assert_zero_call_source_preflight_failure(
+        (forged, *values[1:]),
+        policy,
+        victim.arm.role,
+    )
+
+
+def test_executor_policy_binding_fails_before_any_blind_extraction() -> None:
+    values, policy = _validation_inputs()
+    extractor = _CountingExtractor()
+
+    with pytest.raises(ProtocolFreezeError) as exc_info:
+        freeze_protocol_variants(
+            values,
+            extractor=extractor,
+            extraction_policy=policy,
+            expected_executor_policy_sha256="f" * 64,
+        )
+
+    assert extractor.calls == []
+    assert exc_info.value.failed_arm_roles == values[0].protocol.arm_roles
+    assert exc_info.value.failure_codes == tuple(
+        PreRandomizationFailureCode.EXECUTOR_POLICY_MISMATCH
+        for _role in values[0].protocol.arm_roles
+    )
 
 
 def test_stateful_extractor_sees_only_global_blind_key_order() -> None:
@@ -268,11 +401,13 @@ def test_stateful_extractor_sees_only_global_blind_key_order() -> None:
         values,
         extractor=forward,
         extraction_policy=policy,
+        expected_executor_policy_sha256=DeterministicInterventionExecutor().policy_sha256,
     )
     prepare_blind_extractions(
         tuple(reversed(values)),
         extractor=reverse,
         extraction_policy=policy,
+        expected_executor_policy_sha256=DeterministicInterventionExecutor().policy_sha256,
     )
 
     assert forward.visible == reverse.visible
@@ -560,6 +695,66 @@ def test_real_stage_blind_sorts_extractor_calls_without_fixed_arm_positions(
     assert len(extractor.calls) == 4
     assert len({item.prompt_id for item in extractor.calls}) == len(extractor.calls)
     assert all(item.task_id.startswith("blind_task_") for item in extractor.calls)
+
+
+def test_stage_preflights_every_protocol_before_global_blind_scheduling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _stage_store(tmp_path, task_count=2)
+    base_executor = DeterministicInterventionExecutor()
+    invalid_marker = " invalid-preflight-only"
+
+    class OneTaskForgingExecutor:
+        def execute(self, execution_request):
+            candidate = base_executor.execute(execution_request)
+            if (
+                execution_request.source_prompt.task_id == "task-a"
+                and execution_request.arm.role is ArmRole.TARGET_PATCH
+            ):
+                return candidate.model_copy(
+                    update={
+                        "target_spec_id": "target_" + "f" * 64,
+                        "text": candidate.text + invalid_marker,
+                    }
+                )
+            return candidate
+
+    extractor = _CountingExtractor()
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "_executor_for_config",
+        lambda *_args, **_kwargs: OneTaskForgingExecutor(),
+    )
+    monkeypatch.setattr(
+        prompt_variants_stage,
+        "extractor_for_config",
+        lambda *_args, **_kwargs: extractor,
+    )
+
+    result = run_prompt_variant_freeze_stage(config, store, force=False)
+
+    assert result.frozen_protocol_instance_count == 1
+    assert result.exclusion_count == 1
+    assert all(invalid_marker not in call.prompt for call in extractor.calls)
+    variants = read_jsonl(
+        store.path("interventions", "prompt_variants.jsonl"),
+        PromptVariantRecord,
+        required=True,
+        allow_empty=False,
+    )
+    exclusions = read_jsonl(
+        store.path("interventions", "pre_randomization_exclusions.jsonl"),
+        PreRandomizationExclusionRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert {item.task_id for item in variants} == {"task-b"}
+    assert len(variants) == 4
+    assert len(exclusions) == 1
+    assert exclusions[0].task_id == "task-a"
+    assert exclusions[0].failed_arm_roles == (ArmRole.TARGET_PATCH,)
+    assert exclusions[0].failure_codes == (PreRandomizationFailureCode.SOURCE_PROVENANCE_MISMATCH,)
 
 
 def test_forward_reverse_contrast_views_emit_only_the_attested_owner_operation(

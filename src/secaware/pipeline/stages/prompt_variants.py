@@ -47,6 +47,7 @@ from secaware.intervention.variant_validation import (
     blind_variant_prompt_record_from_text,
     freeze_protocol_variants,
     prepare_blind_extractions,
+    preflight_protocol_variant_inputs,
     validate_graph_delta_record,
     validate_length_match_record,
 )
@@ -1089,19 +1090,36 @@ def run_prompt_variant_freeze_stage(
                 )
                 continue
             pending_validation.append((item, tuple(validation_inputs)))
+        preflighted_pending: list[
+            tuple[_ProtocolInstanceBuild, tuple[VariantValidationInput, ...]]
+        ] = []
+        for item, validation_inputs in pending_validation:
+            try:
+                checked_inputs = preflight_protocol_variant_inputs(
+                    validation_inputs,
+                    extraction_policy=policy,
+                    expected_executor_policy_sha256=expected_executor_policy,
+                )
+            except (MemoryError, KeyboardInterrupt, SystemExit):
+                raise
+            except ProtocolFreezeError as failure:
+                exclusions.append(_exclusion(item, failure.failed_arm_roles, failure.failure_codes))
+                continue
+            preflighted_pending.append((item, checked_inputs))
         all_validation_inputs = tuple(
-            value for _item, validation_inputs in pending_validation for value in validation_inputs
+            value for _item, validation_inputs in preflighted_pending for value in validation_inputs
         )
         blind_extractions = (
             prepare_blind_extractions(
                 all_validation_inputs,
                 extractor=extractor,
                 extraction_policy=policy,
+                expected_executor_policy_sha256=expected_executor_policy,
             )
             if all_validation_inputs
             else None
         )
-        for item, validation_inputs in pending_validation:
+        for item, validation_inputs in preflighted_pending:
             try:
                 frozen = freeze_protocol_variants(
                     validation_inputs,

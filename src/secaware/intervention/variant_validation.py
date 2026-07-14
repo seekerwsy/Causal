@@ -500,6 +500,7 @@ def prepare_blind_extractions(
     *,
     extractor: PromptExtractor,
     extraction_policy: ExtractionPolicy,
+    expected_executor_policy_sha256: str,
 ) -> BlindExtractionCache:
     """Extract each global content key once, in content-key order, before arm validation."""
 
@@ -511,17 +512,54 @@ def prepare_blind_extractions(
             or extraction_policy.catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
         ):
             raise ValueError
-        checked = tuple(_snapshot_input(item) for item in values)
-        grouped: dict[BlindExtractionKey, list[VariantValidationInput]] = {}
-        for item in checked:
-            grouped.setdefault(
-                _blind_extraction_key(item.source_prompt, item.candidate, extraction_policy),
-                [],
-            ).append(item)
+        snapshots = tuple(_snapshot_input(item) for item in values)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise _error("blind extraction plan failed validation") from None
+
+    by_protocol: dict[str, list[VariantValidationInput]] = {}
+    for item in snapshots:
+        by_protocol.setdefault(item.protocol_instance.protocol_instance_id, []).append(item)
+    checked_protocols: list[tuple[VariantValidationInput, ...]] = []
+    failures: list[ProtocolFreezeError] = []
+    for protocol_instance_id in sorted(by_protocol):
+        try:
+            checked_protocols.append(
+                preflight_protocol_variant_inputs(
+                    tuple(by_protocol[protocol_instance_id]),
+                    extraction_policy=extraction_policy,
+                    expected_executor_policy_sha256=expected_executor_policy_sha256,
+                )
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except ProtocolFreezeError as failure:
+            failures.append(failure)
+    if failures:
+        raise failures[0]
+    checked = tuple(item for protocol in checked_protocols for item in protocol)
+    return _prepare_blind_extractions_from_preflighted(
+        checked,
+        extractor=extractor,
+        extraction_policy=extraction_policy,
+    )
+
+
+def _prepare_blind_extractions_from_preflighted(
+    checked: tuple[VariantValidationInput, ...],
+    *,
+    extractor: PromptExtractor,
+    extraction_policy: ExtractionPolicy,
+) -> BlindExtractionCache:
+    """Schedule already-authenticated candidates by their blind content key."""
+
+    grouped: dict[BlindExtractionKey, list[VariantValidationInput]] = {}
+    for item in checked:
+        grouped.setdefault(
+            _blind_extraction_key(item.source_prompt, item.candidate, extraction_policy),
+            [],
+        ).append(item)
 
     entries: list[tuple[BlindExtractionKey, _BlindExtractionOutcome]] = []
     for key in sorted(grouped):
@@ -955,7 +993,7 @@ def _validate_variant_input(
     if blind_extraction is None:
         if extractor is None:
             _hard(PreRandomizationFailureCode.EXTRACTION_FAILED)
-        blind_extraction = prepare_blind_extractions(
+        blind_extraction = _prepare_blind_extractions_from_preflighted(
             (item,),
             extractor=extractor,
             extraction_policy=extraction_policy,
@@ -1059,6 +1097,67 @@ def _coverage_failure(values: Sequence[VariantValidationInput]) -> ProtocolFreez
     )
 
 
+def preflight_protocol_variant_inputs(
+    values: Sequence[VariantValidationInput],
+    *,
+    extraction_policy: ExtractionPolicy,
+    expected_executor_policy_sha256: str,
+) -> tuple[VariantValidationInput, ...]:
+    """Authenticate one complete protocol without invoking or scheduling an extractor."""
+
+    if type(values) not in {tuple, list} or not values:
+        raise _coverage_failure(())
+    try:
+        checked = tuple(_snapshot_input(item) for item in values)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _coverage_failure(tuple(values)) from None
+
+    failures: list[tuple[ArmRole, PreRandomizationFailureCode]] = []
+    for item in checked:
+        try:
+            _validate_source_and_bindings(
+                item,
+                extraction_policy,
+                expected_executor_policy_sha256,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except _HardInvalid as failure:
+            failures.append((item.arm.role, failure.code))
+    if failures:
+        role_order = {role: index for index, role in enumerate(checked[0].protocol.arm_roles)}
+        failures.sort(key=lambda item: role_order.get(item[0], len(role_order)))
+        raise ProtocolFreezeError(
+            checked[0].protocol_instance.protocol_instance_id,
+            tuple(item[0] for item in failures),
+            tuple(item[1] for item in failures),
+        )
+
+    first = checked[0]
+    roles = tuple(item.arm.role for item in checked)
+    expected_roles = first.protocol.arm_roles
+    if (
+        len(checked) != len(expected_roles)
+        or len(roles) != len(set(roles))
+        or set(roles) != set(expected_roles)
+        or any(
+            item.protocol != first.protocol
+            or item.protocol_instance != first.protocol_instance
+            or item.target != first.target
+            or item.target_instance != first.target_instance
+            or item.source_prompt != first.source_prompt
+            or item.source_proposal != first.source_proposal
+            or item.source_graph != first.source_graph
+            or item.source_attestation != first.source_attestation
+            for item in checked
+        )
+    ):
+        raise _coverage_failure(checked)
+    return checked
+
+
 def freeze_protocol_variants(
     values: Sequence[VariantValidationInput],
     *,
@@ -1069,34 +1168,12 @@ def freeze_protocol_variants(
 ) -> FrozenProtocolVariants:
     """Freeze all arms or reject the complete task-level protocol block."""
 
-    if type(values) not in {tuple, list} or not values:
-        raise _coverage_failure(())
-    try:
-        checked = tuple(_snapshot_input(item) for item in values)
-        first = checked[0]
-        roles = tuple(item.arm.role for item in checked)
-        expected_roles = first.protocol.arm_roles
-        if (
-            len(checked) != len(expected_roles)
-            or len(roles) != len(set(roles))
-            or set(roles) != set(expected_roles)
-            or any(
-                item.protocol != first.protocol
-                or item.protocol_instance != first.protocol_instance
-                or item.target != first.target
-                or item.target_instance != first.target_instance
-                or item.source_prompt != first.source_prompt
-                or item.source_proposal != first.source_proposal
-                or item.source_graph != first.source_graph
-                or item.source_attestation != first.source_attestation
-                for item in checked
-            )
-        ):
-            raise ValueError
-    except (MemoryError, KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        raise _coverage_failure(tuple(values)) from None
+    checked = preflight_protocol_variant_inputs(
+        values,
+        extraction_policy=extraction_policy,
+        expected_executor_policy_sha256=expected_executor_policy_sha256,
+    )
+    first = checked[0]
 
     by_role = {item.arm.role: item for item in checked}
     lengths: dict[ArmRole, LengthMatchRecord] = {}
@@ -1133,7 +1210,7 @@ def freeze_protocol_variants(
         )
 
     if blind_extractions is None:
-        blind_extractions = prepare_blind_extractions(
+        blind_extractions = _prepare_blind_extractions_from_preflighted(
             checked,
             extractor=extractor,
             extraction_policy=extraction_policy,
@@ -1235,6 +1312,7 @@ __all__ = [
     "freeze_protocol_variants",
     "make_length_match_record",
     "prepare_blind_extractions",
+    "preflight_protocol_variant_inputs",
     "security_neutral_prompt_invariant",
     "validate_length_match_record",
     "validate_graph_delta_record",
