@@ -22,6 +22,12 @@ _TARGET_INSTANCE_ID_PATTERN = r"^target_instance_[0-9a-f]{64}$"
 _PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
 _PROTOCOL_INSTANCE_ID_PATTERN = r"^protocol_instance_[0-9a-f]{64}$"
 _CONTRACT_ID_PATTERN = r"^functional_contract_[0-9a-f]{64}$"
+_DELTA_ID_PATTERN = r"^delta_[0-9a-f]{64}$"
+_VARIANT_ID_PATTERN = r"^variant_[0-9a-f]{64}$"
+_VARIANT_PROMPT_ID_PATTERN = r"^variant_prompt_[0-9a-f]{64}$"
+_LENGTH_MATCH_ID_PATTERN = r"^length_match_[0-9a-f]{64}$"
+_EXCLUSION_ID_PATTERN = r"^pre_randomization_exclusion_[0-9a-f]{64}$"
+_PROPOSAL_ID_PATTERN = r"^proposal_[0-9a-f]{64}$"
 _MULTIPLICITY_ID_RE = re.compile(r"^multiplicity_[0-9a-f]{64}$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _OUTCOME_ID_RE = re.compile(r"^y_[a-z0-9][a-z0-9_]{0,126}$")
@@ -202,6 +208,20 @@ class ArmRole(str, Enum):
     PRESENTATION_MATCHED_CONTROL = "presentation_matched_control"
 
 
+class PreRandomizationFailureCode(str, Enum):
+    SOURCE_PROVENANCE_MISMATCH = "source_provenance_mismatch"
+    EXECUTOR_POLICY_MISMATCH = "executor_policy_mismatch"
+    EXECUTION_FAILED = "execution_failed"
+    EXTRACTOR_POLICY_MISMATCH = "extractor_policy_mismatch"
+    EXTRACTION_FAILED = "extraction_failed"
+    GRAPH_ROUNDTRIP_FAILED = "graph_roundtrip_failed"
+    ALLOWED_DELTA_VIOLATION = "allowed_delta_violation"
+    FIXED_PROJECTION_UNRESOLVED = "fixed_projection_unresolved"
+    SECURITY_NEUTRALITY_VIOLATION = "security_neutrality_violation"
+    LENGTH_MISMATCH = "length_mismatch"
+    PROTOCOL_COVERAGE_INVALID = "protocol_coverage_invalid"
+
+
 class TargetSpecRecord(_ExperimentVersionedContract):
     schema_version: Literal["1.0"]
     target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
@@ -347,7 +367,7 @@ class FeatureTransition(_ExperimentContract):
 
     @model_validator(mode="after")
     def validate_transition(self) -> Self:
-        allowed_states = {FeatureState.ABSENT, FeatureState.PRESENT}
+        allowed_states = set(FeatureState)
         if (
             not _valid_identifier(self.feature_id)
             or not self.from_states
@@ -391,6 +411,7 @@ class AllowedDeltaRecord(_ExperimentContract):
     @model_validator(mode="after")
     def validate_delta(self) -> Self:
         transition_ids = tuple(item.feature_id for item in self.allowed_transitions)
+        intervention_states = {FeatureState.ABSENT, FeatureState.PRESENT}
         if (
             transition_ids != tuple(sorted(transition_ids))
             or len(transition_ids) != len(set(transition_ids))
@@ -400,6 +421,11 @@ class AllowedDeltaRecord(_ExperimentContract):
             or self.fixed_feature_ids != tuple(sorted(self.fixed_feature_ids))
             or len(self.fixed_feature_ids) != len(set(self.fixed_feature_ids))
             or set(transition_ids) & set(self.fixed_feature_ids)
+            or any(
+                set(item.from_states) - intervention_states
+                or set(item.to_states) - intervention_states
+                for item in self.allowed_transitions
+            )
         ):
             raise ValueError(self._safe_validation_message)
         try:
@@ -696,6 +722,236 @@ class FunctionalOutcomeContractRecord(_ExperimentVersionedContract):
         return self
 
 
+_MATCHED_ROLE_REFERENCE = {
+    ArmRole.LENGTH_MATCHED_PLACEBO: ArmRole.TARGET_PATCH,
+    ArmRole.LENGTH_MATCHED_SHAM_EDIT: ArmRole.TARGET_REMOVE,
+    ArmRole.TASK_LENGTH_PLACEBO: ArmRole.TASK_TARGET,
+    ArmRole.PRESENTATION_MATCHED_CONTROL: ArmRole.PRESENTATION_TARGET,
+}
+
+
+def _validate_sorted_unique_feature_transitions(
+    transitions: tuple[FeatureTransition, ...],
+) -> None:
+    feature_ids = tuple(item.feature_id for item in transitions)
+    if feature_ids != tuple(sorted(feature_ids)) or len(feature_ids) != len(set(feature_ids)):
+        raise ValueError("experiment contract failed validation")
+
+
+class LengthMatchRecord(_ExperimentVersionedContract):
+    schema_version: Literal["1.0"]
+    length_match_id: str = Field(pattern=_LENGTH_MATCH_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
+    reference_arm_role: ArmRole
+    matched_arm_role: ArmRole
+    metric: Literal["canonical_changed_span_utf8_bytes_v1"]
+    reference_delta_bytes: int = Field(ge=0, strict=True)
+    matched_delta_bytes: int = Field(ge=0, strict=True)
+    tolerance_bytes: int = Field(ge=4, strict=True)
+    within_tolerance: Literal[True]
+
+    @field_validator("reference_arm_role", "matched_arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        return _exact_enum(value, ArmRole)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload = {"schema_version": "1.0", **content}
+        try:
+            return cls(
+                **payload,
+                length_match_id=f"length_match_{_digest(payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        expected_reference = _MATCHED_ROLE_REFERENCE.get(self.matched_arm_role)
+        expected_tolerance = max(4, (self.reference_delta_bytes + 19) // 20)
+        if (
+            expected_reference is not self.reference_arm_role
+            or self.tolerance_bytes != expected_tolerance
+            or abs(self.reference_delta_bytes - self.matched_delta_bytes) > self.tolerance_bytes
+            or self.length_match_id != f"length_match_{_digest(_content(self, 'length_match_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class GraphDeltaRecord(_ExperimentVersionedContract):
+    schema_version: Literal["1.0"]
+    delta_id: str = Field(pattern=_DELTA_ID_PATTERN)
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    target_instance_id: str = Field(pattern=_TARGET_INSTANCE_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
+    arm_role: ArmRole
+    before_graph_sha256: str = Field(pattern=_SHA256_PATTERN)
+    after_graph_sha256: str = Field(pattern=_SHA256_PATTERN)
+    actual_transitions: tuple[FeatureTransition, ...]
+    target_changed: bool | None
+    semantic_compliance: bool | None
+    permissible_non_target_drift: tuple[str, ...]
+    length_match_id: str | None = Field(default=None, pattern=_LENGTH_MATCH_ID_PATTERN)
+
+    @field_validator("arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        return _exact_enum(value, ArmRole)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload = {"schema_version": "1.0", **content}
+        try:
+            return cls(**payload, delta_id=f"delta_{_digest(payload)}")
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        _validate_sorted_unique_feature_transitions(self.actual_transitions)
+        matched = self.arm_role in _MATCHED_ROLE_REFERENCE
+        if (
+            self.permissible_non_target_drift != tuple(sorted(self.permissible_non_target_drift))
+            or len(self.permissible_non_target_drift) != len(set(self.permissible_non_target_drift))
+            or any(
+                item not in {transition.feature_id for transition in self.actual_transitions}
+                for item in self.permissible_non_target_drift
+            )
+            or matched != (self.length_match_id is not None)
+            or self.delta_id != f"delta_{_digest(_content(self, 'delta_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class PromptVariantRecord(_ExperimentVersionedContract):
+    schema_version: Literal["1.0"]
+    variant_id: str = Field(pattern=_VARIANT_ID_PATTERN)
+    task_id: str
+    source_prompt_id: str
+    variant_prompt_id: str = Field(pattern=_VARIANT_PROMPT_ID_PATTERN)
+    hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    target_instance_id: str = Field(pattern=_TARGET_INSTANCE_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
+    arm_role: ArmRole
+    prompt_sha256: str = Field(pattern=_SHA256_PATTERN)
+    prompt_text: str = Field(min_length=1, max_length=262_144, repr=False)
+    proposal_id: str = Field(pattern=_PROPOSAL_ID_PATTERN)
+    graph_id: str
+    delta_id: str = Field(pattern=_DELTA_ID_PATTERN)
+    executor_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
+    extractor_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
+    length_match_id: str | None = Field(default=None, pattern=_LENGTH_MATCH_ID_PATTERN)
+
+    @field_validator("arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        return _exact_enum(value, ArmRole)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload = {"schema_version": "1.0", **content}
+        try:
+            return cls(**payload, variant_id=f"variant_{_digest(payload)}")
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        matched = self.arm_role in _MATCHED_ROLE_REFERENCE
+        try:
+            prompt_sha256 = hashlib.sha256(self.prompt_text.encode("utf-8")).hexdigest()
+        except Exception:
+            raise ValueError(self._safe_validation_message) from None
+        if (
+            not _valid_identifier(self.task_id)
+            or not _valid_identifier(self.source_prompt_id)
+            or not _valid_identifier(self.graph_id)
+            or prompt_sha256 != self.prompt_sha256
+            or matched != (self.length_match_id is not None)
+            or self.variant_id != f"variant_{_digest(_content(self, 'variant_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class PreRandomizationExclusionRecord(_ExperimentVersionedContract):
+    schema_version: Literal["1.0"]
+    exclusion_id: str = Field(pattern=_EXCLUSION_ID_PATTERN)
+    hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    target_instance_id: str = Field(pattern=_TARGET_INSTANCE_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
+    task_id: str
+    failed_arm_roles: tuple[ArmRole, ...]
+    failure_codes: tuple[PreRandomizationFailureCode, ...]
+    detail_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("failed_arm_roles", mode="before")
+    @classmethod
+    def parse_arm_roles(cls, value: object) -> object:
+        snapshot = _snapshot_json_arrays(value)
+        if type(snapshot) is not tuple:
+            return snapshot
+        return tuple(_exact_enum(item, ArmRole) for item in snapshot)
+
+    @field_validator("failure_codes", mode="before")
+    @classmethod
+    def parse_failure_codes(cls, value: object) -> object:
+        snapshot = _snapshot_json_arrays(value)
+        if type(snapshot) is not tuple:
+            return snapshot
+        return tuple(_exact_enum(item, PreRandomizationFailureCode) for item in snapshot)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload = {"schema_version": "1.0", **content}
+        try:
+            return cls(
+                **payload,
+                exclusion_id=f"pre_randomization_exclusion_{_digest(payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        if (
+            not _valid_identifier(self.task_id)
+            or not self.failed_arm_roles
+            or not self.failure_codes
+            or len(self.failed_arm_roles) != len(self.failure_codes)
+            or len(self.failed_arm_roles) != len(set(self.failed_arm_roles))
+            or self.exclusion_id
+            != f"pre_randomization_exclusion_{_digest(_content(self, 'exclusion_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 __all__ = [
     "AllowedDeltaRecord",
     "ArmRole",
@@ -706,11 +962,16 @@ __all__ = [
     "ConfirmationProtocolRecord",
     "FeatureTransition",
     "FunctionalOutcomeContractRecord",
+    "GraphDeltaRecord",
     "InterventionExecutorKind",
     "InterventionMode",
+    "LengthMatchRecord",
+    "PreRandomizationExclusionRecord",
+    "PreRandomizationFailureCode",
     "is_confirmation_target_feature",
     "PreRegisteredContrastSpec",
     "PromptRole",
+    "PromptVariantRecord",
     "TargetInstanceRecord",
     "TargetSpecRecord",
 ]

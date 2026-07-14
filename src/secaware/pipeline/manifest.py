@@ -51,10 +51,16 @@ class StageManifest(VersionedModel):
 
     @model_validator(mode="after")
     def _validate_output_hash_coverage(self) -> "StageManifest":
-        policy_stage = self.stage.startswith("run-oracle-") or self.stage == "extract-prompt-tsg"
+        policy_stage = self.stage.startswith("run-oracle-") or self.stage in {
+            "extract-prompt-tsg",
+            "build-confirmation-variants",
+        }
         if policy_stage != (self.policy_sha256 is not None):
             raise ValueError("stage manifest policy binding is invalid")
-        catalog_stage = self.stage == "extract-prompt-tsg"
+        catalog_stage = self.stage in {
+            "extract-prompt-tsg",
+            "build-confirmation-variants",
+        }
         if catalog_stage != (self.catalog_sha256 is not None):
             raise ValueError("stage manifest catalog binding is invalid")
         if len(set(self.outputs)) != len(self.outputs):

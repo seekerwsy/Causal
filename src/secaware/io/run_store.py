@@ -21,7 +21,10 @@ from secaware.pipeline.manifest import (
     read_stage_manifest,
     write_stage_manifest,
 )
-from secaware.pipeline.stage_contracts import discovery_stage_contract_sha256
+from secaware.pipeline.stage_contracts import (
+    discovery_stage_contract_sha256,
+    prompt_variant_stage_contract_sha256,
+)
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
 
@@ -44,6 +47,19 @@ _FCI_DISCOVERY_OUTPUTS = (
     "discovery/path_support.jsonl",
     "discovery/hypotheses_frozen.jsonl",
     "discovery/discovery_failures.jsonl",
+)
+_PROMPT_VARIANT_OUTPUTS = (
+    "interventions/target_specs.jsonl",
+    "interventions/target_instances.jsonl",
+    "interventions/confirmation_protocols.jsonl",
+    "interventions/confirmation_protocol_instances.jsonl",
+    "interventions/intended_patches.jsonl",
+    "interventions/variant_extraction_proposals.jsonl",
+    "interventions/variant_prompt_tsg.jsonl",
+    "interventions/graph_deltas.jsonl",
+    "interventions/prompt_variants.jsonl",
+    "interventions/length_matches.jsonl",
+    "interventions/pre_randomization_exclusions.jsonl",
 )
 
 
@@ -422,6 +438,7 @@ class RunStore:
         return stage in {
             "assemble-causal-tables",
             "fci-discovery",
+            "build-confirmation-variants",
             "generate-observed",
             "generate-counterfactual",
             "extract-prompt-tsg",
@@ -442,7 +459,10 @@ class RunStore:
         valid_digest = (
             type(policy_sha256) is str and re.fullmatch(r"[0-9a-f]{64}", policy_sha256) is not None
         )
-        if stage.startswith("run-oracle-") or stage == "extract-prompt-tsg":
+        if stage.startswith("run-oracle-") or stage in {
+            "extract-prompt-tsg",
+            "build-confirmation-variants",
+        }:
             if not valid_digest:
                 raise self._manifest_conflict(stage, "stage policy binding is invalid")
             return policy_sha256
@@ -461,13 +481,18 @@ class RunStore:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
         if stage == "fci-discovery" and tuple(relative_outputs) != _FCI_DISCOVERY_OUTPUTS:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if (
+            stage == "build-confirmation-variants"
+            and tuple(relative_outputs) != _PROMPT_VARIANT_OUTPUTS
+        ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
         valid_digest = (
             type(catalog_sha256) is str
             and re.fullmatch(r"[0-9a-f]{64}", catalog_sha256) is not None
         )
-        if stage == "extract-prompt-tsg":
+        if stage in {"extract-prompt-tsg", "build-confirmation-variants"}:
             if not valid_digest:
                 raise self._manifest_conflict(stage, "stage catalog binding is invalid")
             return catalog_sha256
@@ -591,7 +616,10 @@ class RunStore:
             stage_contract_sha256=(
                 PROMPT_TSG_STAGE_CONTRACT_SHA256
                 if stage == "extract-prompt-tsg"
-                else discovery_stage_contract_sha256(stage)
+                else (
+                    prompt_variant_stage_contract_sha256(stage)
+                    or discovery_stage_contract_sha256(stage)
+                )
             ),
             code_version=__version__,
         )
@@ -915,6 +943,7 @@ class RunStore:
                 "discover",
                 "assemble-causal-tables",
                 "fci-discovery",
+                "build-confirmation-variants",
                 "extract-prompt-tsg",
                 "intervene",
                 "confirm",
