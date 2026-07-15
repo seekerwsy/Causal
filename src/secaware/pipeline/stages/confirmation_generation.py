@@ -150,37 +150,113 @@ class _LockedMockProvider:
         )
 
 
+_ADAPTER_FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
+
+
+def _clear_adapter_error(error: BaseException | None) -> None:
+    if error is None:
+        return
+    try:
+        error.__traceback__ = None
+        error.__cause__ = None
+        error.__context__ = None
+    except Exception:
+        pass
+
+
+def _close_adapter_iterator(iterator: object) -> BaseException | None:
+    close: object = None
+    try:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
+    except BaseException as error:
+        return error
+    finally:
+        iterator = None
+        close = None
+    return None
+
+
 class _SingleRequestProviderAdapter:
     def __init__(self, provider: object, system_template: str) -> None:
         self._provider = provider
         self._system_template = system_template
 
     def generate_many(self, requests: Sequence[GenerationRequestRecord]):
-        generate = getattr(self._provider, "generate", None)
-        if not callable(generate):
-            raise TypeError
-        results = []
-        for request in requests:
-            candidate = generate(request, self._system_template)
+        provider: object = None
+        system_template = ""
+        iterator: object = None
+        request: GenerationRequestRecord | None = None
+        second: object = None
+        generate: object = None
+        candidate: OpenAICompatibleGenerationResult | None = None
+        envelope: ProviderResultEnvelope | None = None
+        result: tuple[tuple[str, ProviderResultEnvelope], ...] | None = None
+        active: BaseException | None = None
+        cleanup: BaseException | None = None
+        sentinel = object()
+        try:
+            provider = self._provider
+            system_template = self._system_template
+            iterator = iter(requests)
+            request = next(iterator)  # type: ignore[arg-type]
+            second = next(iterator, sentinel)  # type: ignore[arg-type]
+            if second is not sentinel or type(request) is not GenerationRequestRecord:
+                raise TypeError
+            generate = getattr(provider, "generate", None)
+            if not callable(generate):
+                raise TypeError
+            candidate = generate(request, system_template)
             if type(candidate) is not OpenAICompatibleGenerationResult:
                 raise TypeError
-            results.append(
-                (
-                    request.request_id,
-                    ProviderResultEnvelope.from_content(
-                        request_id=request.request_id,
-                        model_id=request.model_id,
-                        finish_reason=candidate.finish_reason,
-                        code=candidate.code,
-                        usage=candidate.usage,
-                        attempts=candidate.attempts,
-                        provenance=candidate.provenance,
-                        provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
-                        runtime_fingerprint_sha256=candidate.runtime_fingerprint_sha256,
-                    ),
-                )
+            envelope = ProviderResultEnvelope.from_content(
+                request_id=request.request_id,
+                model_id=request.model_id,
+                finish_reason=candidate.finish_reason,
+                code=candidate.code,
+                usage=candidate.usage,
+                attempts=candidate.attempts,
+                provenance=candidate.provenance,
+                provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+                runtime_fingerprint_sha256=candidate.runtime_fingerprint_sha256,
             )
-        return tuple(results)
+            result = ((request.request_id, envelope),)
+        except BaseException as error:
+            active = error
+        finally:
+            if iterator is not None:
+                cleanup = _close_adapter_iterator(iterator)
+            if active is not None or cleanup is not None:
+                result = None
+            self = None  # type: ignore[assignment]
+            requests = ()
+            provider = None
+            system_template = ""
+            iterator = None
+            request = None
+            second = None
+            generate = None
+            candidate = None
+            envelope = None
+            sentinel = None
+        if active is not None:
+            if isinstance(active, _ADAPTER_FATAL):
+                _clear_adapter_error(cleanup)
+                cleanup = None
+                raise active
+            if isinstance(cleanup, _ADAPTER_FATAL):
+                _clear_adapter_error(active)
+                active = None
+                raise cleanup
+            _clear_adapter_error(cleanup)
+            cleanup = None
+            raise active
+        if cleanup is not None:
+            raise cleanup
+        if result is None:  # pragma: no cover
+            raise TypeError
+        return result
 
 
 def _provider_from_frozen_config(config: AppConfig) -> object:
@@ -574,6 +650,11 @@ def run_confirmation_generation_stage(
         raise _stage_error(
             "confirmation generation stage configuration failed validation"
         ) from None
+    provider_factory = _provider_from_frozen_config
+
+    def verify_provider_factory() -> None:
+        if globals().get("_provider_from_frozen_config") is not provider_factory:
+            raise _stage_error("confirmation provider factory changed during execution")
 
     task4_paths = tuple(
         effective_store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
@@ -695,12 +776,14 @@ def run_confirmation_generation_stage(
         effective_provider: object = None
         result_requests: tuple[GenerationRequestRecord, ...] = ()
         try:
-            effective_provider = _provider_from_frozen_config(effective_config)
+            verify_provider_factory()
+            effective_provider = provider_factory(effective_config)
             executions, codes = execute_confirmation_requests(
                 requests,
                 effective_provider,
                 effective_config.generation,
             )
+            verify_provider_factory()
             result_requests = requests
         finally:
             effective_provider = None
@@ -742,6 +825,7 @@ def run_confirmation_generation_stage(
             verify_input_snapshot=verify_input_snapshot,
             validate_staged_outputs=validate_staged_outputs,
         )
+        verify_provider_factory()
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
         groups = tuple(

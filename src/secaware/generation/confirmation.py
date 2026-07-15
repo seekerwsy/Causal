@@ -32,7 +32,9 @@ CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256 = hashlib.sha256(
 ).hexdigest()
 _JSONL_STAGE_LIMIT_BYTES = 256 * 1024 * 1024
 _JSONL_SAFETY_MARGIN_BYTES = 16 * 1024 * 1024
-_RESULT_OVERHEAD_BYTES = 64 * 1024
+_CODE_RECORD_OVERHEAD_BYTES = 12 * 1024
+_EXECUTION_RECORD_OVERHEAD_BYTES = 4 * 1024
+_MAX_JSON_STRING_EXPANSION = 6
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _PROVIDER_ERROR_CODES = frozenset(
     {
@@ -120,14 +122,34 @@ def _parameter_bytes(values: Mapping[str, object]) -> int:
     )
 
 
+def _serialized_request_bytes(request: GenerationRequestRecord) -> int:
+    payload: dict[str, object] = {}
+    try:
+        payload = request.model_dump(mode="json", warnings=False)
+        return len(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+    finally:
+        request = None  # type: ignore[assignment]
+        payload.clear()
+
+
 def _preflight_resources(
     requests: tuple[GenerationRequestRecord, ...], config: GenerationConfig
 ) -> None:
     total_prompt_bytes = 0
+    total_request_bytes = 0
     try:
         for request in requests:
             prompt_bytes = len(request.prompt.encode("utf-8"))
             total_prompt_bytes += prompt_bytes
+            total_request_bytes += _serialized_request_bytes(request)
             if prompt_bytes > config.confirmation_max_prompt_bytes_per_request:
                 raise ValueError
             parameters = request.parameters.model_dump(mode="json", warnings=False)["values"]
@@ -138,7 +160,7 @@ def _preflight_resources(
                 for key in ("max_tokens", "max_completion_tokens", "max_output_tokens")
                 if key in parameters
             ]
-            if len(token_values) > 1 or any(
+            if len(token_values) != 1 or any(
                 type(value) is not int
                 or not 1 <= value <= config.confirmation_max_tokens_per_request
                 for value in token_values
@@ -181,10 +203,26 @@ def _preflight_resources(
             len(requests) * config.confirmation_max_code_bytes_per_result,
             config.confirmation_max_total_code_bytes,
         )
-        projected = total_prompt_bytes + projected_code + len(requests) * _RESULT_OVERHEAD_BYTES
+        request_ledger_bytes = total_request_bytes + len(requests)
+        code_ledger_bytes = (
+            total_request_bytes
+            + _MAX_JSON_STRING_EXPANSION * projected_code
+            + len(requests) * (_CODE_RECORD_OVERHEAD_BYTES + 1)
+        )
+        execution_ledger_bytes = len(requests) * (_EXECUTION_RECORD_OVERHEAD_BYTES + 1)
+        projected = request_ledger_bytes + code_ledger_bytes + execution_ledger_bytes
+        hard_limit = _JSONL_STAGE_LIMIT_BYTES - _JSONL_SAFETY_MARGIN_BYTES
         if (
-            projected > config.confirmation_max_projected_jsonl_bytes
-            or projected > _JSONL_STAGE_LIMIT_BYTES - _JSONL_SAFETY_MARGIN_BYTES
+            any(
+                value >= hard_limit
+                for value in (
+                    request_ledger_bytes,
+                    code_ledger_bytes,
+                    execution_ledger_bytes,
+                    projected,
+                )
+            )
+            or projected >= config.confirmation_max_projected_jsonl_bytes
         ):
             raise ValueError
     except _FATAL:
@@ -196,9 +234,15 @@ def _preflight_resources(
         config = None  # type: ignore[assignment]
         request = None  # type: ignore[assignment]
         total_prompt_bytes = 0
+        total_request_bytes = 0
         parameters = {}
         token_values = []
         stop_values = ()
+        request_ledger_bytes = 0
+        code_ledger_bytes = 0
+        execution_ledger_bytes = 0
+        projected = 0
+        hard_limit = 0
 
 
 def _clear_exception(error: BaseException) -> None:

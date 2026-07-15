@@ -235,6 +235,35 @@ def test_confirmation_executor_rejects_duck_result_envelope() -> None:
         execute_confirmation_requests((request,), Provider())
 
 
+def test_provider_result_envelope_bounds_escaped_provenance_metadata() -> None:
+    request = _requests()[0]
+    with pytest.raises(Exception):
+        ProviderResultEnvelope.from_content(
+            request_id=request.request_id,
+            model_id=request.model_id,
+            finish_reason="stop",
+            code="code\n",
+            usage=ProviderUsageRecord(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            attempts=(
+                GenerationAttemptRecord(
+                    schema_version="1.0",
+                    request_id=request.request_id,
+                    attempt=1,
+                    outcome="success",
+                    error_code=None,
+                    retryable=False,
+                    backoff_seconds=0.0,
+                ),
+            ),
+            provenance=GenerationProvenance(
+                producer="\x01" * 4_096,
+                producer_version="v1",
+            ),
+            provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+            runtime_fingerprint_sha256="b" * 64,
+        )
+
+
 @pytest.mark.parametrize("field", ("attempts", "provenance", "usage"))
 def test_confirmation_executor_rejects_result_missing_required_terminal_metadata(
     field: str,
@@ -331,6 +360,7 @@ def test_oversize_first_result_prevents_later_provider_call() -> None:
     "case",
     (
         "request_count",
+        "missing_token_cap",
         "max_tokens",
         "stop_count",
         "stop_item",
@@ -339,6 +369,7 @@ def test_oversize_first_result_prevents_later_provider_call() -> None:
         "prompt_per_request",
         "prompt_total",
         "projected_output",
+        "json_escape_projection",
     ),
 )
 def test_resource_preflight_rejects_before_any_provider_call(case: str) -> None:
@@ -346,6 +377,12 @@ def test_resource_preflight_rejects_before_any_provider_call(case: str) -> None:
     config = _resource_config()
     if case == "request_count":
         config = _resource_config(confirmation_max_requests=1)
+    elif case == "missing_token_cap":
+        requests = [
+            _reseal_request(
+                requests[0], parameters=GenerationParameters(values={"temperature": 0.0})
+            )
+        ]
     elif case == "max_tokens":
         requests = [
             _reseal_request(requests[0], parameters=GenerationParameters(values={"max_tokens": 2}))
@@ -392,9 +429,16 @@ def test_resource_preflight_rejects_before_any_provider_call(case: str) -> None:
             confirmation_max_prompt_bytes_per_request=1_024,
             confirmation_max_total_prompt_bytes=1_024,
         )
-    else:
+    elif case == "projected_output":
         requests = [requests[0]]
         config = _resource_config(confirmation_max_projected_jsonl_bytes=1_024)
+    else:
+        requests = [requests[0]]
+        config = _resource_config(
+            confirmation_max_code_bytes_per_result=3 * 1024 * 1024,
+            confirmation_max_total_code_bytes=3 * 1024 * 1024,
+            confirmation_max_projected_jsonl_bytes=16 * 1024 * 1024,
+        )
 
     calls = 0
 
@@ -467,6 +511,71 @@ def test_provider_attempt_budget_is_enforced_before_later_request() -> None:
     with pytest.raises(SecAwareError):
         execute_confirmation_requests(requests, Provider(), config)
     assert calls == 1
+
+
+def test_default_wait_budget_accepts_240_assignments_and_smaller_budget_is_zero_call() -> None:
+    pairs = tuple(_assignment_and_variant(task_id=f"wait-task-{index}") for index in range(240))
+    provider_config = OpenAICompatibleConfig(base_url="https://example.test/v1")
+    config = GenerationConfig(
+        provider="openai_compatible",
+        models=["model-a"],
+        seeds=[1],
+        confirmation_seeds=[101],
+        openai_compatible=provider_config,
+    )
+    requests = tuple(
+        plan_confirmation_requests(
+            tuple(pair[0] for pair in pairs),
+            tuple(pair[1] for pair in pairs),
+            config,
+        )
+    )
+    calls = 0
+
+    class Provider:
+        def generate_many(self, batch):
+            nonlocal calls
+            calls += 1
+            request = batch[0]
+            return ((request.request_id, _envelope(request, "code\n")),)
+
+    executions, codes = execute_confirmation_requests(requests, Provider(), config)
+    assert len(executions) == len(codes) == 240
+    assert calls == 240
+
+    constrained_payload = config.model_dump(mode="python")
+    constrained_payload["confirmation_max_worst_case_wait_seconds"] = 43_900.0
+    constrained = GenerationConfig.model_validate(constrained_payload)
+    calls = 0
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests(requests, Provider(), constrained)
+    assert calls == 0
+
+
+def test_128_mib_control_character_projection_is_rejected_before_provider_call() -> None:
+    pairs = tuple(_assignment_and_variant(task_id=f"escape-task-{index}") for index in range(43))
+    config = _resource_config(
+        confirmation_max_code_bytes_per_result=3 * 1024 * 1024,
+        confirmation_max_total_code_bytes=128 * 1024 * 1024,
+    )
+    requests = tuple(
+        plan_confirmation_requests(
+            tuple(pair[0] for pair in pairs),
+            tuple(pair[1] for pair in pairs),
+            config,
+        )
+    )
+    calls = 0
+
+    class Provider:
+        def generate_many(self, _batch):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("provider called after failed output projection")
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests(requests, Provider(), config)
+    assert calls == 0
 
 
 def _persisted_bundle(config, store):
@@ -684,6 +793,72 @@ def test_confirmation_executor_failure_releases_raw_code_and_provider_from_frame
     assert provider_secret not in retained
 
 
+def test_single_request_adapter_ordinary_failure_releases_provider_request_and_result() -> None:
+    provider_secret = "adapter-provider-secret"
+    result_secret = "adapter-result-secret"
+    request = _requests()[0]
+
+    class Provider:
+        def __repr__(self) -> str:
+            return provider_secret
+
+        def generate(self, _request, _system_template):
+            return _Result(result_secret, "stop")
+
+    adapter = confirmation_stage._SingleRequestProviderAdapter(Provider(), "")
+    with pytest.raises(TypeError) as exc_info:
+        adapter.generate_many((request,))
+    retained = _secaware_traceback_locals(exc_info.value)
+    assert provider_secret not in retained
+    assert result_secret not in retained
+    assert request.prompt not in retained
+
+
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
+def test_single_request_adapter_preserves_fatal_identity_and_releases_frames(
+    signal_type: type[BaseException],
+) -> None:
+    provider_secret = f"adapter-{signal_type.__name__}-provider-secret"
+    request = _requests()[0]
+    signal = signal_type("adapter-control-flow")
+
+    class Provider:
+        def __repr__(self) -> str:
+            return provider_secret
+
+        def generate(self, _request, _system_template):
+            raise signal
+
+    adapter = confirmation_stage._SingleRequestProviderAdapter(Provider(), "")
+    with pytest.raises(signal_type) as exc_info:
+        adapter.generate_many((request,))
+    assert exc_info.value is signal
+    retained = _secaware_traceback_locals(signal)
+    assert provider_secret not in retained
+    assert request.prompt not in retained
+
+
+def test_single_request_adapter_active_fatal_precedes_cleanup_fatal() -> None:
+    active = MemoryError("adapter-active-fatal")
+    cleanup = SystemExit("adapter-cleanup-fatal-secret")
+
+    class Requests:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise active
+
+        def close(self):
+            raise cleanup
+
+    adapter = confirmation_stage._SingleRequestProviderAdapter(object(), "")
+    with pytest.raises(MemoryError) as exc_info:
+        adapter.generate_many(Requests())  # type: ignore[arg-type]
+    assert exc_info.value is active
+    assert "adapter-cleanup-fatal-secret" not in _secaware_traceback_locals(active)
+
+
 def test_request_revalidation_failure_releases_prompt_from_frames() -> None:
     secret = "request-revalidation-prompt-secret"
     forged = _requests()[0].model_copy(update={"prompt": secret})
@@ -786,6 +961,11 @@ def test_confirmation_generation_stage_declares_exact_atomic_outputs() -> None:
         "provider_response_contract_version",
         "provider_provenance_schema",
     } <= set(stage_contracts.confirmation_generation_stage_contract_payload())
+    factory_contract = stage_contracts.confirmation_generation_stage_contract_payload()[
+        "provider_factory_callable"
+    ]
+    assert isinstance(factory_contract, dict)
+    assert {"module", "qualname", "source_sha256"} == set(factory_contract)
 
 
 def test_generated_code_and_execution_ids_bind_actual_code_content() -> None:
@@ -1363,7 +1543,7 @@ def test_confirmation_stage_all_infrastructure_failures_preserve_force_commit(
     assert tuple(path.read_bytes() for path in (*paths, manifest)) == before
 
 
-@pytest.mark.parametrize("drift", ["config", "schema", "provider_policy"])
+@pytest.mark.parametrize("drift", ["config", "schema", "provider_policy", "factory_alias"])
 def test_valid_committed_skip_is_invalidated_by_every_bound_contract_drift(
     randomized_store,
     monkeypatch: pytest.MonkeyPatch,
@@ -1395,15 +1575,26 @@ def test_valid_committed_skip_is_invalidated_by_every_bound_contract_drift(
             return original(model)
 
         monkeypatch.setattr(stage_contracts, "_schema_sha256", drift_schema)
-    else:
+    elif drift == "provider_policy":
         monkeypatch.setattr(
             confirmation_stage,
             "CONFIRMATION_PROVIDER_POLICY_VERSION",
             "provider-policy-drift-test",
         )
-    monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: CountingProvider()
-    )
+    else:
+
+        def drifted_factory(_config):
+            return CountingProvider()
+
+        monkeypatch.setattr(
+            confirmation_stage,
+            "_provider_from_frozen_config",
+            drifted_factory,
+        )
+    if drift != "factory_alias":
+        monkeypatch.setattr(
+            confirmation_stage, "_provider_from_frozen_config", lambda _config: CountingProvider()
+        )
     if drift == "config":
         with pytest.raises(SecAwareError) as exc_info:
             run_confirmation_generation_stage(effective_config, effective_store, force=False)
@@ -1412,6 +1603,44 @@ def test_valid_committed_skip_is_invalidated_by_every_bound_contract_drift(
         return
     result = run_confirmation_generation_stage(effective_config, effective_store, force=False)
     assert calls == result.assignment_count
+
+
+def test_provider_factory_alias_change_after_capture_aborts_and_preserves_commit(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = randomized_store
+    run_confirmation_generation_stage(config, store, force=False)
+    paths = tuple(
+        store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
+    )
+    manifest = store.path(".stages", "generate-confirmation.json")
+    before = tuple(path.read_bytes() for path in (*paths, manifest))
+
+    def replacement_factory(_config):
+        return _Provider()
+
+    class MutatingProvider(_Provider):
+        def generate_many(self, requests):
+            result = super().generate_many(requests)
+            monkeypatch.setattr(
+                confirmation_stage,
+                "_provider_from_frozen_config",
+                replacement_factory,
+            )
+            return result
+
+    def captured_factory(_config):
+        return MutatingProvider()
+
+    monkeypatch.setattr(
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        captured_factory,
+    )
+    with pytest.raises(SecAwareError):
+        run_confirmation_generation_stage(config, store, force=True)
+    assert tuple(path.read_bytes() for path in (*paths, manifest)) == before
 
 
 def test_assignment_manifest_replacement_during_provider_call_aborts_commit(

@@ -117,6 +117,7 @@ def test_confirmation_request_binds_assignment_variant_and_arm() -> None:
     assert request.model_id == assignment.experimental_unit.model_id
     assert request.prompt == variant.prompt_text
     assert request.prompt_sha256 == variant.prompt_sha256
+    assert request.parameters.values == {"max_tokens": 65_536}
     identity = request.model_dump(mode="python", exclude={"request_id", "prompt"})
     identity["parameters"] = request.parameters
     assert request.request_id == build_generation_request_id(**identity)
@@ -232,3 +233,62 @@ def test_confirmation_planner_binds_endpoint_system_template_and_parameters_exac
     assert request.system_template_version == provider.system_template_version
     assert request.system_template_sha256 == _sha(provider.system_template)
     assert request.parameters == provider.parameters
+
+
+@pytest.mark.parametrize("provider_kind", ("mock", "file", "openai_compatible"))
+def test_confirmation_planner_injects_one_locked_token_cap_for_every_provider(
+    provider_kind: str,
+) -> None:
+    assignment, variant = _assignment_and_variant()
+    values: dict[str, object] = {
+        "provider": provider_kind,
+        "models": ["model-a"],
+        "seeds": [1],
+        "confirmation_seeds": [101],
+    }
+    if provider_kind == "file":
+        values["file_provider_dir"] = "offline-results"
+    elif provider_kind == "openai_compatible":
+        values["openai_compatible"] = OpenAICompatibleConfig(
+            base_url="https://example.test/v1",
+            parameters=GenerationParameters(values={"temperature": 0.0}),
+        )
+    config = GenerationConfig.model_validate(values)
+
+    request = plan_confirmation_requests((assignment,), (variant,), config)[0]
+
+    assert request.parameters.values["max_tokens"] == 65_536
+    assert (
+        sum(
+            key in request.parameters.values
+            for key in ("max_tokens", "max_completion_tokens", "max_output_tokens")
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    (
+        {"max_tokens": 0},
+        {"max_tokens": 1, "max_completion_tokens": 1},
+        {"max_tokens": 65_537},
+    ),
+)
+def test_confirmation_planner_rejects_empty_multiple_or_unbounded_token_caps(
+    parameters: dict[str, int],
+) -> None:
+    assignment, variant = _assignment_and_variant()
+    with pytest.raises(Exception):
+        provider = OpenAICompatibleConfig(
+            base_url="https://example.test/v1",
+            parameters=GenerationParameters(values=parameters),
+        )
+        config = GenerationConfig(
+            provider="openai_compatible",
+            models=["model-a"],
+            seeds=[1],
+            confirmation_seeds=[101],
+            openai_compatible=provider,
+        )
+        plan_confirmation_requests((assignment,), (variant,), config)

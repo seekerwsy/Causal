@@ -228,18 +228,21 @@ def _callable_sha256(value: object) -> str:
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
+def _callable_contract(value: object) -> dict[str, str]:
+    return {
+        "module": str(getattr(value, "__module__", type(value).__module__)),
+        "qualname": str(getattr(value, "__qualname__", type(value).__qualname__)),
+        "source_sha256": _callable_sha256(value),
+    }
+
+
 def confirmation_generation_stage_contract_payload(
     generation_config: GenerationConfig | None = None,
 ) -> dict[str, object]:
     """Bind assignment generation to every direct schema/config/provider contract."""
 
     from secaware.pipeline.manifest import StageManifest
-    from secaware.pipeline.stages.confirmation_generation import (
-        CONFIRMATION_PROVIDER_FACTORY_VERSION,
-        CONFIRMATION_PROVIDER_POLICY_VERSION,
-        CONFIRMATION_PROVIDER_RESPONSE_VERSION,
-        _provider_from_frozen_config,
-    )
+    from secaware.pipeline.stages import confirmation_generation as confirmation_stage
     from secaware.generation.confirmation import (
         CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
         execute_confirmation_requests,
@@ -262,13 +265,15 @@ def confirmation_generation_stage_contract_payload(
     return {
         "stage": _CONFIRMATION_GENERATION_STAGE,
         "contract_version": "assignment-bound-confirmation-generation-v1",
-        "provider_policy_version": CONFIRMATION_PROVIDER_POLICY_VERSION,
-        "provider_factory_version": CONFIRMATION_PROVIDER_FACTORY_VERSION,
-        "provider_response_contract_version": CONFIRMATION_PROVIDER_RESPONSE_VERSION,
+        "provider_policy_version": confirmation_stage.CONFIRMATION_PROVIDER_POLICY_VERSION,
+        "provider_factory_version": confirmation_stage.CONFIRMATION_PROVIDER_FACTORY_VERSION,
+        "provider_response_contract_version": confirmation_stage.CONFIRMATION_PROVIDER_RESPONSE_VERSION,
         "provider_result_policy_sha256": CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
         "provider_runtime": runtime_payload,
-        "provider_factory_source_sha256": _callable_sha256(_provider_from_frozen_config),
-        "provider_executor_source_sha256": _callable_sha256(execute_confirmation_requests),
+        "provider_factory_callable": _callable_contract(
+            confirmation_stage._provider_from_frozen_config
+        ),
+        "provider_executor_callable": _callable_contract(execute_confirmation_requests),
         "app_config_schema": _schema_sha256(AppConfig),
         "generation_config_schema": _schema_sha256(GenerationConfig),
         "request_schema": _schema_sha256(GenerationRequestRecord),

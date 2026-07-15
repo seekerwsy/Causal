@@ -417,6 +417,24 @@ def plan_confirmation_requests(
             system_template_version = "none"
         else:
             raise ValueError
+        parameter_values = dict(parameters.values)
+        token_parameter_keys = tuple(
+            key
+            for key in ("max_tokens", "max_completion_tokens", "max_output_tokens")
+            if key in parameter_values
+        )
+        if not token_parameter_keys:
+            parameter_values["max_tokens"] = trusted_config.confirmation_max_tokens_per_request
+        elif len(token_parameter_keys) != 1:
+            raise ValueError
+        else:
+            token_limit = parameter_values[token_parameter_keys[0]]
+            if (
+                type(token_limit) is not int
+                or not 1 <= token_limit <= trusted_config.confirmation_max_tokens_per_request
+            ):
+                raise ValueError
+        parameters = GenerationParameters(values=parameter_values)
         endpoint_sha256 = _endpoint_sha256(endpoint_type, endpoint_identity)
         system_template_sha256 = sha256_text(system_template)
 
@@ -486,6 +504,9 @@ def plan_confirmation_requests(
         unit = None
         provider = None
         parameters = None
+        parameter_values = {}
+        token_parameter_keys = ()
+        token_limit = None
     if result is None:  # pragma: no cover
         raise _planner_error(
             ErrorCode.CONTRACT,

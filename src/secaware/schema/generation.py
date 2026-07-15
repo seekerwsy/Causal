@@ -379,6 +379,15 @@ class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
     @model_validator(mode="after")
     def validate_integrity(self) -> "ProviderResultEnvelope":
         attempt_numbers = tuple(item.attempt for item in self.attempts)
+        provenance_bytes = len(
+            json.dumps(
+                self.provenance.model_dump(mode="json", warnings=False),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
         code_valid = (
             self.finish_reason == "stop" and type(self.code) is str and bool(self.code.strip())
         ) or (self.finish_reason == "content_filter" and self.code is None)
@@ -388,6 +397,7 @@ class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
             or attempt_numbers != tuple(range(1, len(self.attempts) + 1))
             or self.attempts[-1].outcome != "success"
             or any(item.outcome != "retry" for item in self.attempts[:-1])
+            or provenance_bytes > 4_096
             or self.result_sha256
             != _provider_digest(self.model_dump(mode="json", exclude={"result_sha256"}))
         ):

@@ -424,13 +424,13 @@ class GenerationConfig(StrictModel):
         default=1_048_576, ge=1, le=3 * 1024 * 1024
     )
     confirmation_max_total_code_bytes: StrictInt = Field(
-        default=128 * 1024 * 1024, ge=1, le=240 * 1024 * 1024
+        default=32 * 1024 * 1024, ge=1, le=240 * 1024 * 1024
     )
     confirmation_max_projected_jsonl_bytes: StrictInt = Field(
         default=240 * 1024 * 1024, ge=1_024, le=240 * 1024 * 1024
     )
     confirmation_max_timeout_seconds_per_attempt: float = Field(default=300.0, gt=0, le=3600)
-    confirmation_max_worst_case_wait_seconds: float = Field(default=3600.0, gt=0, le=86400)
+    confirmation_max_worst_case_wait_seconds: float = Field(default=86_400.0, gt=0, le=86_400)
 
     @field_validator("confirmation_seeds")
     @classmethod
