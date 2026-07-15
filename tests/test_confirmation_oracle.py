@@ -47,7 +47,7 @@ from secaware.schema.experiments import (
     PreRandomizationFailureCode,
     RandomizationManifestRecord,
 )
-from secaware.schema.generation import provider_provenance_sha256
+from secaware.schema.generation import GenerationRequestRecord, provider_provenance_sha256
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.schema.experiments import ArmRole
 from secaware.schema.generation import GenerationProvenance
@@ -482,6 +482,7 @@ class _StageRunner:
         self.analysis = FakeRunner()
         self.version_calls = 0
         self.analysis_calls = 0
+        self.analysis_invocations: list[tuple[tuple[str, ...], Path]] = []
 
     def __call__(
         self,
@@ -515,6 +516,7 @@ class _StageRunner:
                 argv_sha256=("b" if analyzer == "bandit" else "a") * 64,
             )
         self.analysis_calls += 1
+        self.analysis_invocations.append((argv, cwd))
         if self.on_analysis is not None:
             self.on_analysis(self.analysis_calls)
         if self.control is not None:
@@ -1253,6 +1255,81 @@ def test_confirmation_oracle_runtime_contract_binds_analysis_dto_globals(
     monkeypatch.setattr(oracle_aggregator, global_name, replacement)
     changed = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
     assert changed != baseline
+
+
+_TRUSTED_DTO_ALIASES = (
+    "_TRUSTED_ORACLE_CODE_ANALYSIS_TYPE",
+    "_TRUSTED_ANALYZER_REPORT_TYPE",
+    "_TRUSTED_LOCATED_FINDING_TYPE",
+    "_TRUSTED_ANALYZER_FINDING_TYPE",
+    "_TRUSTED_ANALYZER_PROVENANCE_TYPE",
+)
+
+
+@pytest.mark.parametrize("alias_name", _TRUSTED_DTO_ALIASES)
+def test_confirmation_oracle_runtime_contract_binds_trusted_dto_aliases(
+    monkeypatch: pytest.MonkeyPatch, alias_name: str
+) -> None:
+    baseline = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    replacement = type(f"Evil{alias_name}", (), {})
+    monkeypatch.setattr(oracle_aggregator, alias_name, replacement)
+    changed = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    assert changed != baseline
+
+
+@pytest.mark.parametrize("alias_name", _TRUSTED_DTO_ALIASES)
+def test_confirmation_oracle_rejects_in_call_trusted_dto_alias_drift_blindly(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+    alias_name: str,
+) -> None:
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    fabricated = AnalyzerFindingRecord(
+        schema_version="1.0",
+        analyzer="semgrep",
+        rule_id="forged.alias.rule",
+        cwe="CWE-999",
+        severity="high",
+        confidence="high",
+        line=1,
+        column=1,
+        end_line=1,
+        end_column=2,
+        message="fabricated alias finding",
+    )
+
+    def drift_on_first_analysis(call: int) -> None:
+        if call != 1:
+            return
+        if alias_name == "_TRUSTED_ORACLE_CODE_ANALYSIS_TYPE":
+
+            class EvilAnalysis:
+                def __init__(self, **kwargs):
+                    kwargs["security_label"] = SecurityLabel.INSECURE
+                    kwargs["severity"] = "high"
+                    kwargs["findings"] = (fabricated,)
+                    for name, value in kwargs.items():
+                        setattr(self, name, value)
+
+            replacement = EvilAnalysis
+        else:
+            replacement = type(f"Evil{alias_name}", (), {})
+        monkeypatch.setattr(oracle_aggregator, alias_name, replacement)
+
+    runner = _StageRunner(on_analysis=drift_on_first_analysis)
+    with pytest.raises(SecAwareError):
+        _stage_run(config, store, runner, force=True)
+    assert _oracle_bytes(store) == committed
+    rendered = repr(runner.analysis_invocations)
+    assignment = read_jsonl(store.path("interventions", "assignments.jsonl"), AssignmentRecord)[0]
+    request = read_jsonl(
+        store.path("generation", "confirmation_requests.jsonl"), GenerationRequestRecord
+    )[0]
+    assert assignment.assignment_id not in rendered
+    assert assignment.variant_id not in rendered
+    assert assignment.arm_role.value not in rendered
+    assert request.prompt not in rendered
 
 
 def test_confirmation_oracle_rejects_in_call_forged_analysis_dto_and_preserves_commit(
