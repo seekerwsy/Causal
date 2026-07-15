@@ -481,7 +481,13 @@ def _guard_no_oracle_or_analysis(store: RunStore, *, traversal=iter_bounded_tree
                 name.startswith(prefix) for prefix in _FUTURE_STAGE_PREFIXES
             ):
                 raise ValueError
-        for directory in ("oracle", "analysis", "reports"):
+        for entry in entries("oracle"):
+            relative = Path(entry.relative_path)
+            if entry.is_file and not (
+                relative.parent == Path(".") and relative.name.casefold() == "observed_oracle.jsonl"
+            ):
+                raise ValueError
+        for directory in ("analysis", "reports"):
             if any(entry.is_file for entry in entries(directory)):
                 raise ValueError
     except (MemoryError, KeyboardInterrupt, SystemExit):

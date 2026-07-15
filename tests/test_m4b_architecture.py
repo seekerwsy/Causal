@@ -111,8 +111,13 @@ def test_minimum_fci_runtime_has_no_java_or_rfci_dependency() -> None:
 def test_cli_exposes_fci_discovery_without_heuristic_or_old_two_arm_commands() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    help_text = result.stdout.casefold()
-    assert "discover" in help_text
+    registered = {item.name for item in app.registered_commands}
+    assert {
+        "discover",
+        "build-confirmation-variants",
+        "randomize-confirmation",
+        "generate-confirmation",
+    } <= registered
     for retired in (
         "tsg-qcd",
         "intervene",
@@ -120,7 +125,7 @@ def test_cli_exposes_fci_discovery_without_heuristic_or_old_two_arm_commands() -
         "generate-counterfactual",
         "report",
     ):
-        assert retired not in help_text
+        assert retired not in registered
 
 
 def test_frozen_hypotheses_are_guarded_before_any_future_stage() -> None:

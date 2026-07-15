@@ -43,6 +43,9 @@ where = ["src"]
 "secaware.extractors" = ["prompts/*.txt"]
 "secaware.intervention" = ["prompts/*.txt"]
 
+[tool.setuptools.data-files]
+"share/doc/secaware/migrations" = ["docs/migrations/randomized-confirmation.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

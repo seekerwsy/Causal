@@ -49,15 +49,18 @@ from secaware.pipeline.jsonl_stage import (
     execute_jsonl_stage_transaction,
 )
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
-from secaware.pipeline.stages.prompt_extraction import (
-    run_prompt_extraction_stage as extract_prompt_tsg_stage,
-)
 from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
+from secaware.pipeline.stages.confirmation_generation import run_confirmation_generation_stage
+from secaware.pipeline.stages.confirmation_oracle import run_confirmation_oracle_stage
 from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryTerminalStatus,
     fci_discovery_stage,
 )
-from secaware.pipeline.stages.confirmation_oracle import run_confirmation_oracle_stage
+from secaware.pipeline.stages.prompt_extraction import (
+    run_prompt_extraction_stage as extract_prompt_tsg_stage,
+)
+from secaware.pipeline.stages.prompt_variants import run_prompt_variant_freeze_stage
+from secaware.pipeline.stages.randomization import run_confirmation_randomization_stage
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.generation import (
@@ -2031,6 +2034,40 @@ def discover_command(
     discover_stage(cfg, store, force=force)
 
 
+@app.command("build-confirmation-variants")
+@cli_action
+def build_confirmation_variants_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    _prepare(cfg, store)
+    run_prompt_variant_freeze_stage(cfg, store, force=force)
+
+
+@app.command("randomize-confirmation")
+@cli_action
+def randomize_confirmation_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    run_confirmation_randomization_stage(cfg, store, force=force)
+
+
+@app.command("generate-confirmation")
+@cli_action
+def generate_confirmation_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    run_confirmation_generation_stage(cfg, store, force=force)
+
+
 @app.command("run-all")
 @cli_action
 def run_all_command(
@@ -2044,7 +2081,11 @@ def run_all_command(
     generate_observed_stage(cfg, store, force=force)
     run_oracle_stage(cfg, store, condition="observed", force=force)
     discover_stage(cfg, store, force=force)
-    console.print(f"SecAware discovery complete: {store.root}")
+    run_prompt_variant_freeze_stage(cfg, store, force=force)
+    run_confirmation_randomization_stage(cfg, store, force=force)
+    run_confirmation_generation_stage(cfg, store, force=force)
+    run_confirmation_oracle_stage(cfg, store, force=force)
+    console.print(f"SecAware randomized confirmation complete: {store.root}")
 
 
 if __name__ == "__main__":

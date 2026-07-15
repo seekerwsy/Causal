@@ -110,6 +110,20 @@ def randomized_store(tmp_path_factory: pytest.TempPathFactory):
     return config, store
 
 
+def test_confirmation_generation_future_guard_allows_observed_oracle(
+    tmp_path: Path,
+) -> None:
+    _config, store = _stage_store(tmp_path, task_count=2)
+    observed = store.path("oracle", "observed_oracle.jsonl")
+    observed.write_text("{}\n", encoding="utf-8")
+
+    confirmation_stage._guard_no_oracle_or_analysis(store)
+
+    store.path("oracle", "confirmation_oracle.jsonl").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(SecAwareError):
+        confirmation_stage._guard_no_oracle_or_analysis(store)
+
+
 def _requests():
     pairs = (_assignment_and_variant(task_id="task-a"), _assignment_and_variant(task_id="task-b"))
     return plan_confirmation_requests(
@@ -1770,6 +1784,7 @@ def test_confirmation_generation_rejects_future_oracle_artifact_and_preserves_co
     randomized_store,
 ) -> None:
     config, store = randomized_store
+    run_confirmation_generation_stage(config, store, force=False)
     outputs = tuple(
         store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
     )

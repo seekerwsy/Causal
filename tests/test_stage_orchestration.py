@@ -23,9 +23,60 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+M5_STAGE_OUTPUTS = {
+    "build-confirmation-variants": (
+        "interventions/target_specs.jsonl",
+        "interventions/target_instances.jsonl",
+        "interventions/confirmation_protocols.jsonl",
+        "interventions/confirmation_protocol_instances.jsonl",
+        "interventions/intended_patches.jsonl",
+        "interventions/variant_extraction_proposals.jsonl",
+        "interventions/variant_prompt_tsg.jsonl",
+        "interventions/graph_deltas.jsonl",
+        "interventions/prompt_variants.jsonl",
+        "interventions/length_matches.jsonl",
+        "interventions/pre_randomization_exclusions.jsonl",
+    ),
+    "randomize-confirmation": (
+        "interventions/randomization_manifest.jsonl",
+        "interventions/assignments.jsonl",
+    ),
+    "generate-confirmation": (
+        "generation/confirmation_requests.jsonl",
+        "generation/confirmation_execution.jsonl",
+        "generation/confirmation_code.jsonl",
+    ),
+    "run-oracle-confirmation": ("oracle/confirmation_oracle.jsonl",),
+}
+
 
 def test_cli_does_not_define_jsonl_stage_transaction_runner() -> None:
     assert not hasattr(pipeline_cli, "_execute_jsonl_stage_transaction")
+
+
+def test_run_store_registers_every_m5_output_contract_and_directory(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    for stage, relative_outputs in M5_STAGE_OUTPUTS.items():
+        assert store._requires_output_seal(stage)
+        store._validate_stage_output_contract(stage, relative_outputs)
+        for relative_output in relative_outputs:
+            assert store.path(Path(relative_output).parent).is_dir()
+
+
+@pytest.mark.parametrize("stage", tuple(M5_STAGE_OUTPUTS))
+def test_run_store_rejects_reordered_or_incomplete_m5_outputs(
+    tmp_path: Path,
+    stage: str,
+) -> None:
+    store = _store(tmp_path)
+    outputs = M5_STAGE_OUTPUTS[stage]
+    invalid = tuple(reversed(outputs)) if len(outputs) > 1 else ()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store._validate_stage_output_contract(stage, invalid)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
 def test_recovery_callback_authorizes_transaction_mode_for_a_new_stage(

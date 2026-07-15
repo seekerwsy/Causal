@@ -44,6 +44,9 @@ def _copy_clean_build_source(source: Path, destination: Path) -> None:
     destination.mkdir(parents=True)
     for filename in ("pyproject.toml", "README.md"):
         shutil.copy2(source / filename, destination / filename)
+    migration = Path("docs/migrations/randomized-confirmation.md")
+    (destination / migration.parent).mkdir(parents=True)
+    shutil.copy2(source / migration, destination / migration)
     shutil.copytree(
         source / "src",
         destination / "src",
@@ -279,12 +282,19 @@ def test_python_m_secaware_oracle_cli_shows_oracle_help() -> None:
     assert "standalone security oracle" in result.stdout
 
 
-def test_built_wheel_contains_both_versioned_prompt_templates(tmp_path: Path) -> None:
+def test_built_wheel_contains_templates_and_randomized_confirmation_migration(
+    tmp_path: Path,
+) -> None:
     assert not any(tmp_path.iterdir())
     original_generated = _project_generated_fingerprint()
     clean_source = tmp_path / "clean-source"
     _copy_clean_build_source(PROJECT_ROOT, clean_source)
-    assert {path.name for path in clean_source.iterdir()} == {"README.md", "pyproject.toml", "src"}
+    assert {path.name for path in clean_source.iterdir()} == {
+        "README.md",
+        "docs",
+        "pyproject.toml",
+        "src",
+    }
     assert not any(
         path.name in {".git", ".venv", "build", "dist", "__pycache__"}
         or path.name.endswith(".egg-info")
@@ -325,6 +335,13 @@ def test_built_wheel_contains_both_versioned_prompt_templates(tmp_path: Path) ->
                 "secaware/extractors/prompts/llm_direct_graph_v1.txt",
             )
         }
+        migration_members = tuple(
+            name
+            for name in archive.namelist()
+            if name.endswith("share/doc/secaware/migrations/randomized-confirmation.md")
+        )
+        assert len(migration_members) == 1
+        packaged_migration = archive.read(migration_members[0])
 
     expected = {
         "secaware/extractors/prompts/llm_facts_v1.txt": (
@@ -342,6 +359,11 @@ def test_built_wheel_contains_both_versioned_prompt_templates(tmp_path: Path) ->
         assert payload == source_payload
         assert hashlib.sha256(payload).hexdigest() == expected_sha256
 
+    assert (
+        packaged_migration
+        == (PROJECT_ROOT / "docs" / "migrations" / "randomized-confirmation.md").read_bytes()
+    )
+
     _assert_wheel_resources_load_in_isolation(wheels[0], tmp_path / "isolated")
 
 
@@ -350,6 +372,7 @@ def test_package_and_config_examples_contain_no_embedded_secrets() -> None:
         PROJECT_ROOT / "README.md",
         PROJECT_ROOT / "pyproject.toml",
         PROJECT_ROOT / "docs" / "migrations" / "prompt-tsg-v2.md",
+        PROJECT_ROOT / "docs" / "migrations" / "randomized-confirmation.md",
         *(PROJECT_ROOT / "configs").glob("*.yaml"),
         *(PROJECT_ROOT / "src" / "secaware" / "extractors" / "prompts").glob("*.txt"),
     )

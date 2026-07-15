@@ -73,10 +73,34 @@ there is no Code TSG. Generated code is used only to bind Prompt generation to t
 Oracle result through provenance metadata; code text, structure, findings, and mechanisms are not
 causal variables.
 
-At the M4B boundary, the public discovery workflow entry points are `discover` and `run-all`; the
-old heuristic and two-arm intervention/confirmation commands are not CLI-reachable. `run-all` stops
-after the frozen discovery transaction and prints `SecAware discovery complete`. M5 will extend that
-boundary with randomized confirmation.
+The public discovery entry point is `discover`. The old heuristic and two-arm
+intervention/confirmation commands are not CLI-reachable. `run-all` continues from frozen discovery
+through the M5 randomized-confirmation commit described below.
+
+## Randomized prompt confirmation in M5
+
+M5 freezes pre-outcome prompt roles, exact positive/neutral counterparts, semantic target and
+protocol definitions, task-bound instances, and independently extracted prompt variants before any
+assignment. Its public commands are:
+
+```bash
+secaware build-confirmation-variants --config configs/demo.yaml --run-dir runs/demo
+secaware randomize-confirmation --config configs/demo.yaml --run-dir runs/demo
+secaware generate-confirmation --config configs/demo.yaml --run-dir runs/demo
+secaware run-oracle --config configs/demo.yaml --run-dir runs/demo --condition confirmation
+```
+
+`run-all` executes observed generation and Oracle evaluation, local-table assembly, frozen FCI
+hypothesis discovery, variant construction, complete-block randomization, confirmation generation,
+and the independent confirmation Oracle in that order. It stops at the committed confirmation
+Oracle. M6 owns analysis, JCI, effects, and reporting, so M5 never creates those future artifacts.
+
+The migration is intentionally breaking: `intervene` and `generate-counterfactual` are no longer
+registered commands, and paired two-arm artifacts are not accepted as randomized-confirmation
+inputs. See [Randomized confirmation migration](docs/migrations/randomized-confirmation.md) for the
+security-neutral prompt invariant, per-arm deltas, text/graph execution modes, LLM executor
+assumption, blind extractor boundary, seed slots, assignment commit point, terminal-no-code
+handling, and exact artifact replacements.
 
 Install the core development environment and run the unit suite with:
 

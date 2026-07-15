@@ -30,6 +30,8 @@ from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline.artifact import canonical_sha256, sha256_path
+from secaware.pipeline.stages import confirmation_generation as confirmation_generation_module
+from secaware.pipeline.stages import confirmation_oracle as confirmation_oracle_module
 from secaware.pipeline.stages import fci_discovery as fci_stage_module
 from secaware.pipeline.manifest import (
     StageManifest,
@@ -1481,7 +1483,7 @@ def test_legacy_api_stub_has_no_provider_fallback_and_cleans_failed_execution(
     assert second.value.code is ErrorCode.CONFIG
 
 
-def test_run_all_dispatches_observed_provider_then_stops_at_discovery(
+def test_run_all_dispatches_provider_for_observed_and_randomized_confirmation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1548,10 +1550,29 @@ def test_run_all_dispatches_observed_provider_then_stops_at_discovery(
         providers.append(provider)
         return provider
 
+    def confirmation_factory(provider_config: object) -> MockBackedProvider:
+        del provider_config
+        return MockBackedProvider()
+
     monkeypatch.setattr(cli_module, "create_openai_compatible_provider", factory)
+    monkeypatch.setattr(
+        confirmation_generation_module,
+        "create_openai_compatible_provider",
+        confirmation_factory,
+    )
     monkeypatch.setattr(cli_module, "run_analyzer_process", _clean_oracle_runner)
     monkeypatch.setattr(cli_module, "validate_analyzer_runtime", lambda: None)
     monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "run_analyzer_process",
+        _clean_oracle_runner,
+    )
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "validate_analyzer_runtime",
+        lambda: None,
+    )
 
     class FakeFCIRunner:
         def run(
@@ -1563,7 +1584,11 @@ def test_run_all_dispatches_observed_provider_then_stops_at_discovery(
             run_kind: PAGRunKind,
         ) -> PAGRecord:
             del matrix
-            target = "x.safety.generic_security_reminder"
+            target = {
+                "scope.cwe_22": "x.safety.path_normalization",
+                "scope.cwe_78": "x.safety.safe_subprocess",
+                "scope.cwe_89": "x.safety.sql_parameterization",
+            }[table.scope_id]
             return PAGRecord.from_content(
                 run_kind=run_kind,
                 table_id=table.table_id,
@@ -1588,12 +1613,22 @@ def test_run_all_dispatches_observed_provider_then_stops_at_discovery(
     result = CliRunner().invoke(app, ["run-all", "--config", str(config_path), "--force"])
 
     assert result.exit_code == 0, result.output + result.stderr
+    assert "SecAware randomized confirmation complete" in result.output
     assert len(providers) == 1
     run_dir = tmp_path / "run"
     assert (run_dir / ".stages" / "plan-provider-generation-observed.json").exists()
     assert (run_dir / ".stages" / "generate-provider-observed.json").exists()
     assert (run_dir / ".stages" / "fci-discovery.json").exists()
+    assert (run_dir / ".stages" / "build-confirmation-variants.json").exists()
+    assert (run_dir / ".stages" / "randomize-confirmation.json").exists()
+    assert (run_dir / ".stages" / "generate-confirmation.json").exists()
+    assert (run_dir / ".stages" / "run-oracle-confirmation.json").exists()
+    assert (run_dir / "generation" / "confirmation_requests.jsonl").exists()
+    assert (run_dir / "generation" / "confirmation_code.jsonl").exists()
+    assert (run_dir / "oracle" / "confirmation_oracle.jsonl").exists()
     assert not (run_dir / ".stages" / "plan-provider-generation-counterfactual.json").exists()
+    assert not (run_dir / "generation" / "counterfactual_code.jsonl").exists()
+    assert not (run_dir / "oracle" / "counterfactual_oracle.jsonl").exists()
     assert not (run_dir / "reports" / "summary.md").exists()
 
 

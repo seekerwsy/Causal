@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -21,6 +22,7 @@ from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline import artifact as artifact_module
+from secaware.pipeline.stages import confirmation_oracle as confirmation_oracle_stage_module
 from secaware.pipeline.stages import fci_discovery as fci_stage_module
 from secaware.config import FCIDiscoveryConfig
 from secaware.schema.causal import (
@@ -34,14 +36,137 @@ from secaware.schema.causal import (
     PAGRunKind,
 )
 from secaware.schema.interventions import InterventionRecord
+from secaware.schema.experiments import AssignmentExecutionRecord, AssignmentRecord
 from secaware.schema.oracle import OracleRecord
 from secaware.schema.features import PromptExtractorBackend
+from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.schema.results import PairResult
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_run_all_executes_the_complete_m5_pipeline_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    config = object()
+    store = SimpleNamespace(root=Path("run-all-order"))
+    monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
+    monkeypatch.setattr(cli_module, "_prepare", lambda *_args: calls.append("prepare"))
+    monkeypatch.setattr(
+        cli_module,
+        "extract_prompt_tsg_stage",
+        lambda *_args, **_kwargs: calls.append("extract-prompt-tsg"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "generate_observed_stage",
+        lambda *_args, **_kwargs: calls.append("generate-observed"),
+    )
+
+    def oracle_stage(*_args: object, condition: str, **_kwargs: object) -> None:
+        calls.append(f"run-oracle-{condition}")
+
+    monkeypatch.setattr(cli_module, "run_oracle_stage", oracle_stage)
+    monkeypatch.setattr(
+        cli_module,
+        "discover_stage",
+        lambda *_args, **_kwargs: calls.extend(("assemble-causal-tables", "fci-discovery")),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "run_prompt_variant_freeze_stage",
+        lambda *_args, **_kwargs: calls.append("build-confirmation-variants"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "run_confirmation_randomization_stage",
+        lambda *_args, **_kwargs: calls.append("randomize-confirmation"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "run_confirmation_generation_stage",
+        lambda *_args, **_kwargs: calls.append("generate-confirmation"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "run_confirmation_oracle_stage",
+        lambda *_args, **_kwargs: calls.append("run-oracle-confirmation"),
+    )
+
+    result = CliRunner().invoke(app, ["run-all", "--config", "unused.yaml", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        "prepare",
+        "extract-prompt-tsg",
+        "generate-observed",
+        "run-oracle-observed",
+        "assemble-causal-tables",
+        "fci-discovery",
+        "build-confirmation-variants",
+        "randomize-confirmation",
+        "generate-confirmation",
+        "run-oracle-confirmation",
+    ]
+
+
+def test_run_all_stops_without_future_m5_calls_after_randomization_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    config = object()
+    store = SimpleNamespace(root=Path("run-all-failure"))
+    monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
+    for name in (
+        "_prepare",
+        "extract_prompt_tsg_stage",
+        "generate_observed_stage",
+        "run_oracle_stage",
+        "discover_stage",
+        "run_prompt_variant_freeze_stage",
+    ):
+        monkeypatch.setattr(
+            cli_module,
+            name,
+            lambda *_args, _name=name, **_kwargs: calls.append(_name),
+            raising=False,
+        )
+
+    def fail_randomization(*_args: object, **_kwargs: object) -> None:
+        calls.append("run_confirmation_randomization_stage")
+        raise RuntimeError("randomization failed")
+
+    monkeypatch.setattr(
+        cli_module,
+        "run_confirmation_randomization_stage",
+        fail_randomization,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "run_confirmation_generation_stage",
+        lambda *_args, **_kwargs: calls.append("unexpected-generation"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "run_confirmation_oracle_stage",
+        lambda *_args, **_kwargs: calls.append("unexpected-oracle"),
+    )
+
+    result = CliRunner().invoke(app, ["run-all", "--config", "unused.yaml", "--force"])
+
+    assert result.exit_code != 0
+    assert calls[-1] == "run_confirmation_randomization_stage"
+    assert "unexpected-generation" not in calls
+    assert "unexpected-oracle" not in calls
 
 
 def _assert_pair_security_matches_oracle(
@@ -350,7 +475,11 @@ class _RunAllFCIRunner:
         assert matrix.shape == (table.independent_task_count, len(table.variables))
         self.calls.append((table.table_id, run_kind))
         variables = tuple(item.variable_id for item in table.variables)
-        target = "x.safety.generic_security_reminder"
+        target = {
+            "scope.cwe_22": "x.safety.path_normalization",
+            "scope.cwe_78": "x.safety.safe_subprocess",
+            "scope.cwe_89": "x.safety.sql_parameterization",
+        }[table.scope_id]
         assert target in variables
         return PAGRecord.from_content(
             run_kind=run_kind,
@@ -381,6 +510,12 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     monkeypatch.setattr(cli_module, "run_analyzer_process", runner)
     monkeypatch.setattr(cli_module, "validate_analyzer_runtime", lambda: None)
     monkeypatch.setattr(aggregator_module, "validate_analyzer_runtime", lambda: None)
+    monkeypatch.setattr(confirmation_oracle_stage_module, "run_analyzer_process", runner)
+    monkeypatch.setattr(
+        confirmation_oracle_stage_module,
+        "validate_analyzer_runtime",
+        lambda: None,
+    )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     fci_runner = _RunAllFCIRunner()
     monkeypatch.setattr(fci_stage_module, "SpawnedFCIRunner", lambda: fci_runner)
@@ -400,7 +535,7 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     )
 
     assert result.exit_code == 0, result.output
-    assert "SecAware discovery complete" in result.output
+    assert "SecAware randomized confirmation complete" in result.output
     observed = read_jsonl(
         run_dir / "oracle" / "observed_oracle.jsonl",
         OracleRecord,
@@ -448,11 +583,61 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     assert len(draws) == len(tables) * (1 + 20)
     assert len(fci_runner.calls) == len(tables) * (1 + 20)
     assert read_stage_manifest(run_dir / ".stages" / "run-oracle-observed.json").policy_sha256
+    assignments = read_jsonl(
+        run_dir / "interventions" / "assignments.jsonl",
+        AssignmentRecord,
+        required=True,
+        allow_empty=False,
+    )
+    requests = read_jsonl(
+        run_dir / "generation" / "confirmation_requests.jsonl",
+        GenerationRequestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    executions = read_jsonl(
+        run_dir / "generation" / "confirmation_execution.jsonl",
+        AssignmentExecutionRecord,
+        required=True,
+        allow_empty=False,
+    )
+    confirmation_code = read_jsonl(
+        run_dir / "generation" / "confirmation_code.jsonl",
+        CanonicalGeneratedCodeRecord,
+        required=True,
+        allow_empty=False,
+    )
+    confirmation_oracle = read_jsonl(
+        run_dir / "oracle" / "confirmation_oracle.jsonl",
+        OracleRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assignment_ids = {item.assignment_id for item in assignments}
+    assert assignment_ids
+    assert {item.assignment_id for item in requests} == assignment_ids
+    assert {item.assignment_id for item in executions} == assignment_ids
+    assert {item.assignment_id for item in confirmation_code} == assignment_ids
+    assert {item.assignment_id for item in confirmation_oracle} == assignment_ids
+    assert all(item.condition == "confirm_arm" for item in confirmation_oracle)
+    for stage in (
+        "build-confirmation-variants",
+        "randomize-confirmation",
+        "generate-confirmation",
+        "run-oracle-confirmation",
+    ):
+        assert read_stage_manifest(run_dir / ".stages" / f"{stage}.json").stage == stage
     for absent in (
         run_dir / "oracle" / "counterfactual_oracle.jsonl",
         run_dir / "generation" / "counterfactual_code.jsonl",
         run_dir / "interventions" / "interventions.jsonl",
         run_dir / "analysis" / "pair_results.jsonl",
+        run_dir / "analysis" / "hypothesis_effects.jsonl",
+        run_dir / "analysis" / "jci_pag.jsonl",
+        run_dir / ".stages" / "import-functional-outcomes.json",
+        run_dir / ".stages" / "analyze-jci.json",
+        run_dir / ".stages" / "effects.json",
+        run_dir / ".stages" / "report.json",
         run_dir / "reports" / "summary.md",
     ):
         assert not absent.exists()
