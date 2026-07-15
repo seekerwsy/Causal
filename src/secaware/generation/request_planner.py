@@ -336,7 +336,6 @@ def _record(
         model_id=model_id,
         seed_id=seed_id,
         hypothesis_id=hypothesis_id,
-        intervention_id=intervention_id,
         assignment_id=assignment_id,
         target_spec_id=target_spec_id,
         target_instance_id=target_instance_id,
@@ -366,7 +365,6 @@ def _ensure_unique_request_coordinates(records: list[GenerationRequestRecord]) -
             record.model_id,
             record.seed_id,
             record.hypothesis_id,
-            record.intervention_id,
         )
         for record in records
     ]
@@ -441,6 +439,13 @@ def plan_counterfactual_requests(
     system_template: str = "",
     system_template_version: str = "none",
 ) -> list[GenerationRequestRecord]:
+    raise _planner_error(
+        ErrorCode.CONTRACT,
+        "legacy counterfactual generation requires regeneration as confirmation arms",
+    )
+
+    # Retained temporarily as non-executable legacy implementation context until Task 8
+    # removes the compatibility surface completely.
     prompt_values_by_id = _validated_prompt_mapping(prompts_by_id)
     intervention_values = _validated_interventions(interventions)
     model_values, seed_values = _validated_grid(models, seeds)
@@ -483,7 +488,6 @@ def plan_counterfactual_requests(
         key=lambda record: (
             record.prompt_id,
             record.hypothesis_id or "",
-            record.intervention_id or "",
             record.model_id,
             record.seed_id,
             record.prompt_sha256,

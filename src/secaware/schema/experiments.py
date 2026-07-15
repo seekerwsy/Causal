@@ -362,6 +362,7 @@ class AssignmentExecutionRecord(_ExperimentVersionedContract):
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     status: AssignmentExecutionStatus
     code_id: str | None = Field(default=None, pattern=_CODE_ID_PATTERN)
+    code_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
     terminal_reason: Literal["content_filter"] | None = None
 
     @field_validator("status", mode="before")
@@ -388,7 +389,8 @@ class AssignmentExecutionRecord(_ExperimentVersionedContract):
     def validate_semantics_and_digest(self) -> Self:
         generated = self.status is AssignmentExecutionStatus.GENERATED
         if (
-            generated != (self.code_id is not None)
+            generated != (self.code_id is not None and self.code_sha256 is not None)
+            or (self.code_id is None) != (self.code_sha256 is None)
             or generated == (self.terminal_reason is not None)
             or self.execution_id
             != f"assignment_execution_{_digest(_content(self, 'execution_id'))}"

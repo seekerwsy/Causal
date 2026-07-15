@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 import json
+from functools import wraps
 from pathlib import Path
 import threading
 import time
@@ -54,6 +55,17 @@ from secaware.schema.causal import (
 )
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+
+
+def _expects_counterfactual_provider_rejection(test):
+    @wraps(test)
+    def wrapped(tmp_path: Path, *args, **kwargs):
+        with pytest.raises(SecAwareError) as exc_info:
+            test(tmp_path, *args, **kwargs)
+        assert exc_info.value.code is ErrorCode.CONTRACT
+        assert not tuple(tmp_path.rglob("counterfactual_requests.jsonl"))
+
+    return wrapped
 
 
 def _clean_oracle_runner(
@@ -328,6 +340,7 @@ def test_provider_generate_publishes_canonical_code_and_flat_attempts_in_ledger_
     ]
 
 
+@_expects_counterfactual_provider_rejection
 def test_provider_plan_and_generate_support_counterfactual_condition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1204,6 +1217,7 @@ def test_tampered_provider_attempt_journal_revokes_downstream_authorization(
     assert not store.path(".stages", "run-oracle-observed.json").exists()
 
 
+@_expects_counterfactual_provider_rejection
 def test_counterfactual_compatibility_entrypoint_dispatches_to_provider_pipeline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1634,6 +1648,7 @@ def test_old_code_manifest_and_v10_ledger_are_rerun_instead_of_skipped(
         payload = request.model_dump(mode="json")
         payload["schema_version"] = "1.0"
         payload.pop("endpoint_sha256")
+        payload["intervention_id"] = None
         identity = {
             key: payload[key]
             for key in (

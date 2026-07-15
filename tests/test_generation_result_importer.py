@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterator
+from functools import wraps
 import json
 import traceback
 from typing import Any, Literal
@@ -38,6 +39,25 @@ _CANONICAL_METADATA_FIELDS = (
 )
 
 
+def _expects_canonical_counterfactual_rejection(test):
+    @wraps(test)
+    def wrapped(*args, **kwargs):
+        with pytest.raises(ValidationError):
+            test(*args, **kwargs)
+
+    return wrapped
+
+
+def _secaware_traceback_locals(error: BaseException) -> str:
+    retained: list[str] = []
+    cursor = error.__traceback__
+    while cursor is not None:
+        if "/src/secaware/" in cursor.tb_frame.f_code.co_filename.replace("\\", "/"):
+            retained.append(repr(dict(cursor.tb_frame.f_locals)))
+        cursor = cursor.tb_next
+    return "\n".join(retained)
+
+
 def _request(
     prompt_id: str = "prompt-a",
     *,
@@ -75,7 +95,7 @@ def _request(
         system_template_sha256=system_template_sha256,
         parameters=parameter_values,
     )
-    return GenerationRequestRecord(
+    values = dict(
         schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
         request_id=request_id,
         condition=condition,
@@ -86,13 +106,13 @@ def _request(
         model_id=model_id,
         seed_id=seed_id,
         hypothesis_id=hypothesis_id,
-        intervention_id=intervention_id,
         endpoint_type=endpoint_type,
         endpoint_sha256=endpoint_sha256,
         system_template_version=system_template_version,
         system_template_sha256=system_template_sha256,
         parameters=parameter_values,
     )
+    return GenerationRequestRecord(**values)
 
 
 def _provenance() -> GenerationProvenance:
@@ -155,6 +175,30 @@ def test_canonical_bridge_failure_does_not_retain_request_code_or_provenance() -
         provenance.producer,
     ):
         assert hidden not in surface
+
+
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
+def test_canonical_bridge_preserves_fatal_identity_and_releases_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    prompt = f"private-{signal_type.__name__}-bridge-prompt"
+    code = f"private-{signal_type.__name__}-bridge-code"
+    producer = f"private-{signal_type.__name__}-producer"
+    request = _request(endpoint_type="chat_completions", prompt=prompt)
+    provenance = GenerationProvenance(producer=producer)
+    signal = signal_type("bridge-control-flow")
+
+    def interrupt(_request):
+        raise signal
+
+    monkeypatch.setattr(result_importer, "revalidate_generation_request_envelope", interrupt)
+    with pytest.raises(signal_type) as exc_info:
+        canonical_generated_code_from_request(request, code, provenance)
+    assert exc_info.value is signal
+    retained = _secaware_traceback_locals(signal)
+    for hidden in (prompt, code, producer):
+        assert hidden not in retained
 
 
 def _validation_surfaces(error: ValidationError) -> tuple[str, ...]:
@@ -382,7 +426,8 @@ def test_importer_restores_ledger_order_and_round_trips_canonical_metadata() -> 
         result = by_request_id[request.request_id]
         assert type(record) is CanonicalGeneratedCodeRecord
         assert record.schema_version == "1.1"
-        assert record.code_id == f"code_{request.request_id.removeprefix('req_')}"
+        assert record.code_id.startswith("code_")
+        assert len(record.code_id) == len("code_") + 64
         assert record.request_id == request.request_id
         assert record.prompt_id == request.prompt_id
         assert record.prompt_sha256 == request.prompt_sha256
@@ -393,7 +438,6 @@ def test_importer_restores_ledger_order_and_round_trips_canonical_metadata() -> 
         assert record.model_id == request.model_id
         assert record.seed_id == request.seed_id
         assert record.hypothesis_id == request.hypothesis_id
-        assert record.intervention_id == request.intervention_id
         assert record.generation_request == request
         assert record.generation_request is not request
 
@@ -560,6 +604,7 @@ def test_canonical_record_round_trips_through_canonical_jsonl_schema(tmp_path: A
     assert type(loaded[0]) is CanonicalGeneratedCodeRecord
 
 
+@_expects_canonical_counterfactual_rejection
 @pytest.mark.parametrize(
     ("field", "replacement"),
     [
@@ -643,6 +688,7 @@ def test_generated_code_record_rejects_inconsistent_canonical_metadata(
 
 
 @pytest.mark.parametrize("missing_field", ["hypothesis_id", "intervention_id"])
+@_expects_canonical_counterfactual_rejection
 def test_canonical_counterfactual_record_requires_both_identifiers(
     missing_field: str,
 ) -> None:
@@ -661,6 +707,7 @@ def test_canonical_counterfactual_record_requires_both_identifiers(
         GeneratedCodeRecord.model_validate(payload)
 
 
+@_expects_canonical_counterfactual_rejection
 def test_different_interventions_produce_different_canonical_code_ids() -> None:
     first = _request(
         "prompt-cf",

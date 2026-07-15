@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterator, Mapping
+from functools import wraps
 import hashlib
 import json
 import traceback
@@ -23,6 +24,17 @@ from secaware.schema.generation import (
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import PromptRecord
+
+
+def _expects_legacy_planner_rejection(test):
+    @wraps(test)
+    def wrapped(*args, **kwargs):
+        with pytest.raises(SecAwareError) as exc_info:
+            test(*args, **kwargs)
+        assert exc_info.value.code is ErrorCode.CONTRACT
+        assert "regeneration" in exc_info.value.message
+
+    return wrapped
 
 
 def _prompt(prompt_id: str, text: str | None = None) -> PromptRecord:
@@ -138,7 +150,6 @@ def _record_values(**overrides: object) -> dict[str, object]:
         "model_id": "model-a",
         "seed_id": 1,
         "hypothesis_id": None,
-        "intervention_id": None,
         "assignment_id": None,
         "target_spec_id": None,
         "target_instance_id": None,
@@ -1151,6 +1162,7 @@ def test_system_template_is_hashed_and_bound_to_request_identity() -> None:
     assert "system alpha" not in first.model_dump_json()
 
 
+@_expects_legacy_planner_rejection
 def test_counterfactual_uses_patched_text_hash_and_identifiers() -> None:
     prompt = _prompt("prompt-a")
     intervention = _intervention(
@@ -1175,6 +1187,7 @@ def test_counterfactual_uses_patched_text_hash_and_identifiers() -> None:
     assert record.intervention_id == intervention.intervention_id
 
 
+@_expects_legacy_planner_rejection
 def test_observed_and_counterfactual_request_ids_do_not_collide() -> None:
     prompt = _prompt("prompt-a")
     intervention = _intervention(prompt, counterfactual_prompt=prompt.prompt)
@@ -1191,6 +1204,7 @@ def test_observed_and_counterfactual_request_ids_do_not_collide() -> None:
     assert observed.request_id != counterfactual.request_id
 
 
+@_expects_legacy_planner_rejection
 def test_counterfactual_planning_is_independent_of_all_input_order() -> None:
     prompt_a = _prompt("prompt-a")
     prompt_b = _prompt("prompt-b")
@@ -1386,8 +1400,8 @@ def test_observed_planner_materializes_each_iterable_with_a_bound(
     ("axis", "expected_code"),
     [
         ("interventions", ErrorCode.CONTRACT),
-        ("models", ErrorCode.CONFIG),
-        ("seeds", ErrorCode.CONFIG),
+        ("models", ErrorCode.CONTRACT),
+        ("seeds", ErrorCode.CONTRACT),
     ],
 )
 def test_counterfactual_planner_materializes_each_iterable_with_a_bound(
@@ -1436,11 +1450,17 @@ def test_counterfactual_planner_materializes_each_iterable_with_a_bound(
         )
 
     assert exc_info.value.code is expected_code
-    assert guarded.reads == limit + 1
+    assert guarded.reads == 0
     assert "overread-secret" not in "".join(traceback.format_exception(exc_info.value))
 
 
-@pytest.mark.parametrize("condition", ["observed", "counterfactual"])
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "observed",
+        "counterfactual",
+    ],
+)
 def test_planner_rejects_request_products_before_record_construction(
     condition: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -1484,7 +1504,9 @@ def test_planner_rejects_request_products_before_record_construction(
                 endpoint_type="mock",
             )
 
-    assert exc_info.value.code is ErrorCode.CONFIG
+    assert exc_info.value.code is (
+        ErrorCode.CONFIG if condition == "observed" else ErrorCode.CONTRACT
+    )
     assert "request-product-was-built-secret" not in "".join(
         traceback.format_exception(exc_info.value)
     )
@@ -1550,6 +1572,7 @@ def test_observed_planner_snapshots_each_prompt_as_it_is_consumed() -> None:
     assert mutation not in "".join(record.model_dump_json() for record in records)
 
 
+@_expects_legacy_planner_rejection
 def test_counterfactual_planner_snapshots_each_intervention_as_it_is_consumed() -> None:
     prompt = _prompt("prompt-a")
     first = _intervention(
@@ -1584,6 +1607,7 @@ def test_counterfactual_planner_snapshots_each_intervention_as_it_is_consumed() 
     assert mutation not in "".join(record.model_dump_json() for record in records)
 
 
+@_expects_legacy_planner_rejection
 def test_counterfactual_planner_snapshots_prompt_mapping_once_without_get() -> None:
     prompt = _prompt("prompt-a")
     secret = "prompt-mapping-get-secret"
@@ -1669,9 +1693,9 @@ def test_counterfactual_planner_safely_bounds_prompt_mapping_items(
         )
 
     assert exc_info.value.code is ErrorCode.CONTRACT
-    assert prompts.items_calls == 1
+    assert prompts.items_calls == 0
     if failure_mode == "items_overflow":
-        assert guarded.reads == limit + 1
+        assert guarded.reads == 0
     rendered = (
         str(exc_info.value),
         "".join(traceback.format_exception(exc_info.value)),

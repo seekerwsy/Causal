@@ -137,6 +137,15 @@ def test_oracle_record_requires_analyzer_provenance_and_request_binding() -> Non
     assert isinstance(record.analyzers, tuple)
 
 
+def test_oracle_record_accepts_content_addressed_code_id_independent_of_request_id() -> None:
+    payload = _canonical_oracle_payload()
+    payload["code_id"] = f"code_{'f' * 64}"
+
+    record = OracleRecord.model_validate(payload)
+
+    assert record.code_id == f"code_{'f' * 64}"
+
+
 def test_secure_oracle_record_has_no_findings_and_no_aggregate_severity() -> None:
     record = OracleRecord.model_validate(_canonical_oracle_payload(security_label="secure"))
 
@@ -322,7 +331,7 @@ def test_analyzer_provenance_rejects_invalid_fields(
     [
         ("schema_version", "2.0"),
         ("request_id", f"request_{_REQUEST_DIGEST}"),
-        ("code_id", f"code_{'f' * 64}"),
+        ("code_id", f"code_{'f' * 63}"),
         ("code_sha256", "F" * 64),
         ("prompt_id", "   "),
         ("model_id", ""),

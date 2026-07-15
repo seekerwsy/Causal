@@ -222,9 +222,6 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
 
     @model_validator(mode="after")
     def validate_integrity(self) -> "OracleRecord":
-        if self.code_id != f"code_{self.request_id.removeprefix('req_')}":
-            raise ValueError(_INVALID_ORACLE_MESSAGE)
-
         identifiers = (self.hypothesis_id, self.intervention_id)
         if self.condition == "observed" and any(value is not None for value in identifiers):
             raise ValueError(_INVALID_ORACLE_MESSAGE)

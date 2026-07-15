@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 import json
+from functools import wraps
 import os
 from pathlib import Path
 import traceback
@@ -30,6 +31,17 @@ from secaware.schema.generation import (
 from secaware.schema.hypotheses import FactorType
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+
+
+def _expects_counterfactual_cli_rejection(test):
+    @wraps(test)
+    def wrapped(tmp_path: Path, *args, **kwargs):
+        with pytest.raises(SecAwareError) as exc_info:
+            test(tmp_path, *args, **kwargs)
+        assert exc_info.value.code is ErrorCode.CONTRACT
+        assert not tuple(tmp_path.rglob("counterfactual_requests.jsonl"))
+
+    return wrapped
 
 
 def _clean_oracle_runner(
@@ -255,6 +267,7 @@ def test_generation_skip_wrapper_preserves_an_active_stage_on_reentry(
     assert store.path(".stages", f"{stage}.json").exists()
 
 
+@_expects_counterfactual_cli_rejection
 def test_plan_counterfactual_uses_fixed_inputs_and_preserves_coordinates(
     tmp_path: Path,
 ) -> None:
@@ -577,6 +590,7 @@ def test_import_shuffled_results_writes_ledger_order_canonical_output(
     assert ledger.is_file()
 
 
+@_expects_counterfactual_cli_rejection
 def test_import_counterfactual_results_preserves_request_coordinates(
     tmp_path: Path,
 ) -> None:

@@ -39,6 +39,8 @@ from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 _STAGE = "generate-confirmation"
 CONFIRMATION_PROVIDER_POLICY_VERSION = "assignment-bound-generation-provider-v1"
+CONFIRMATION_PROVIDER_FACTORY_VERSION = "frozen-app-config-provider-factory-v1"
+CONFIRMATION_PROVIDER_RESPONSE_VERSION = "model-bound-code-result-v1"
 _MAX_INPUT_FILE_BYTES = 256_000_000
 _MAX_COMBINED_INPUT_BYTES = 1_000_000_000
 _MAX_JSONL_LINE_BYTES = 4_000_000
@@ -136,6 +138,26 @@ class _SingleRequestProviderAdapter:
         )
 
 
+def _provider_from_frozen_config(config: AppConfig) -> object:
+    """Construct the only production provider path from the validated frozen config."""
+
+    generation = config.generation
+    if generation.provider == "mock":
+        return _LockedMockProvider()
+    if generation.provider == "openai_compatible":
+        provider_config = generation.openai_compatible
+        if provider_config is None:
+            raise _stage_error("confirmation provider is unavailable", code=ErrorCode.CONFIG)
+        return _SingleRequestProviderAdapter(
+            create_openai_compatible_provider(provider_config),
+            provider_config.system_template,
+        )
+    raise _stage_error(
+        "confirmation provider is unavailable",
+        code=ErrorCode.EXTERNAL_INPUT_REQUIRED,
+    )
+
+
 def _stage_error(message: str, *, code: ErrorCode = ErrorCode.CONTRACT) -> SecAwareError:
     return SecAwareError(code=code, stage=_STAGE, message=message, retryable=False)
 
@@ -201,24 +223,44 @@ def _read_snapshot(path: Path, *, allow_empty: bool) -> tuple[bytes, _FileSnapsh
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
+    failed = True
+    try:
+        for key, value in pairs:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        failed = False
+        return result
+    finally:
+        pairs.clear()
+        key = ""
+        value = None
+        if failed:
+            result.clear()
 
 
 def _json(payload: bytes) -> object:
-    return json.loads(
-        payload.decode("utf-8", errors="strict"),
-        object_pairs_hook=_reject_duplicate_keys,
-        parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
-    )
+    result: object = None
+    decoded = ""
+    try:
+        decoded = payload.decode("utf-8", errors="strict")
+        result = json.loads(
+            decoded,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+        )
+        return result
+    finally:
+        payload = b""
+        decoded = ""
+        result = None
 
 
 def _parse_jsonl(payload: bytes, model: type, *, allow_empty: bool) -> tuple:
+    records = []
+    raw = ""
+    result: tuple = ()
     try:
-        records = []
         for raw in payload.decode("utf-8", errors="strict").splitlines():
             if not raw.strip():
                 continue
@@ -229,20 +271,32 @@ def _parse_jsonl(payload: bytes, model: type, *, allow_empty: bool) -> tuple:
                 raise ValueError
         if not records and not allow_empty:
             raise ValueError
-        return tuple(records)
+        result = tuple(records)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise _stage_error("confirmation generation input artifact failed validation") from None
+    finally:
+        payload = b""
+        model = type(None)
+        raw = ""
+        records.clear()
+    return result
 
 
 def _parse_manifest(payload: bytes) -> StageManifest:
+    result: StageManifest | None = None
     try:
-        return StageManifest.model_validate(_json(payload))
+        result = StageManifest.model_validate(_json(payload))
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise _stage_error("confirmation generation producer manifest failed validation") from None
+    finally:
+        payload = b""
+    if result is None:  # pragma: no cover - all failures raise above
+        raise _stage_error("confirmation generation producer manifest failed validation")
+    return result
 
 
 def _guard_no_oracle_or_analysis(store: RunStore) -> None:
@@ -374,13 +428,24 @@ def _validate_output_bundle(
             or set(request_by_assignment) != set(execution_by_assignment)
         ):
             raise ValueError
+        generated_assignments = {
+            assignment_id
+            for assignment_id, execution in execution_by_assignment.items()
+            if execution.status is AssignmentExecutionStatus.GENERATED
+        }
+        if set(code_by_assignment) != generated_assignments:
+            raise ValueError
         for assignment_id, execution in execution_by_assignment.items():
             request = request_by_assignment[assignment_id]
             code = code_by_assignment.get(assignment_id)
             if execution.request_id != request.request_id:
                 raise ValueError
             if execution.status is AssignmentExecutionStatus.GENERATED:
-                if code is None or execution.code_id != code.code_id:
+                if (
+                    code is None
+                    or execution.code_id != code.code_id
+                    or execution.code_sha256 != code.code_sha256
+                ):
                     raise ValueError
                 if code.generation_request != request or code.assignment_id != assignment_id:
                     raise ValueError
@@ -402,7 +467,6 @@ def run_confirmation_generation_stage(
     store: RunStore,
     *,
     force: bool,
-    provider: object | None = None,
 ) -> ConfirmationGenerationStageResult:
     """Execute and publish every committed randomized assignment exactly once."""
 
@@ -457,6 +521,8 @@ def run_confirmation_generation_stage(
         _guard_no_oracle_or_analysis(effective_store)
         payloads: list[bytes] = []
         files: list[_FileSnapshot] = []
+        stack.callback(payloads.clear)
+        stack.callback(files.clear)
         combined = 0
         for index, path in enumerate(inputs):
             allow_empty = index < len(task4_paths) and index >= 4
@@ -466,6 +532,7 @@ def run_confirmation_generation_stage(
                 raise _stage_error("confirmation generation input snapshot exceeded bounds")
             payloads.append(payload)
             files.append(file)
+            payload = b""
         task4_manifest_index = len(task4_paths)
         randomization_index = task4_manifest_index + 1
         task4_manifest = _parse_manifest(payloads[task4_manifest_index])
@@ -524,26 +591,16 @@ def run_confirmation_generation_stage(
                 effective_config.generation,
             )
         )
-        effective_provider = provider
-        if effective_provider is None:
-            generation = effective_config.generation
-            if generation.provider == "mock":
-                effective_provider = _LockedMockProvider()
-            elif generation.provider == "openai_compatible":
-                provider_config = generation.openai_compatible
-                if provider_config is None:
-                    raise _stage_error("confirmation provider is unavailable", code=ErrorCode.CONFIG)
-                effective_provider = _SingleRequestProviderAdapter(
-                    create_openai_compatible_provider(provider_config),
-                    provider_config.system_template,
-                )
-            else:
-                raise _stage_error(
-                    "confirmation provider is unavailable",
-                    code=ErrorCode.EXTERNAL_INPUT_REQUIRED,
-                )
-        executions, codes = execute_confirmation_requests(requests, effective_provider)
-        groups = (requests, executions, codes)
+        effective_provider: object = None
+        result_requests: tuple[GenerationRequestRecord, ...] = ()
+        try:
+            effective_provider = _provider_from_frozen_config(effective_config)
+            executions, codes = execute_confirmation_requests(requests, effective_provider)
+            result_requests = requests
+        finally:
+            effective_provider = None
+            requests = ()
+        groups = (result_requests, executions, codes)
         _validate_output_bundle(snapshot, effective_config, groups)
         return groups
 

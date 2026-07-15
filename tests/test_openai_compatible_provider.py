@@ -158,6 +158,7 @@ def _response(
     code: object = _CODE,
     finish_reason: object = "stop",
     usage: object = None,
+    model: object = "org/model-api",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         choices=[
@@ -167,7 +168,21 @@ def _response(
             )
         ],
         usage=usage,
+        model=model,
     )
+
+
+@pytest.mark.parametrize("actual_model", [None, "", "   ", 7, "org/wrong-model"])
+def test_response_code_requires_exact_expected_model_and_releases_response(
+    actual_model: object,
+) -> None:
+    response = _response(model=actual_model)
+    with pytest.raises(Exception) as exc_info:
+        provider_module._response_code(response, expected_model="org/model-api")
+    retained = _secaware_traceback_locals(exc_info.value)
+    assert "org/model-api" not in retained
+    assert "org/wrong-model" not in retained
+    assert _CODE not in retained
 
 
 class FakeCompletions:
@@ -756,7 +771,8 @@ def test_optional_usage_may_be_absent_from_a_valid_response() -> None:
                 message=SimpleNamespace(content=_CODE),
                 finish_reason="stop",
             )
-        ]
+        ],
+        model="org/model-api",
     )
     client = FakeClient([response])
     provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
@@ -1460,6 +1476,8 @@ def test_provider_control_flow_signals_clear_every_secaware_traceback_frame(
             return client_sentinel
 
     class InterruptingResponse:
+        model = "org/model-api"
+
         @property
         def choices(self) -> object:
             raise signal

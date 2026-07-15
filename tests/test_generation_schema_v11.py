@@ -74,6 +74,7 @@ def _legacy_payload(
     payload = request.model_dump(mode="json")
     payload["schema_version"] = "1.0"
     payload.pop("endpoint_sha256")
+    payload["intervention_id"] = None
     for field in (
         "assignment_id",
         "target_spec_id",
@@ -214,6 +215,7 @@ def test_v10_chat_migration_binds_endpoint_and_executes_with_provider() -> None:
                 )
             ],
             usage=None,
+            model="model-a",
         )
 
     migrated = migrate_generation_request_v1_0_to_v1_1(

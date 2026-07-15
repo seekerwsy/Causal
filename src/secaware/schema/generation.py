@@ -71,7 +71,8 @@ _INVALID_PROVENANCE_MESSAGE = "generation provenance validation failed"
 _INVALID_ATTEMPT_MESSAGE = "generation attempt validation failed"
 _INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
 GENERATION_REQUEST_SCHEMA_VERSION = "1.2"
-GenerationCondition = Literal["observed", "counterfactual", "confirm_arm"]
+GenerationCondition = Literal["observed", "confirm_arm"]
+LegacyGenerationCondition = Literal["observed", "counterfactual"]
 EndpointType = Literal["mock", "offline", "chat_completions"]
 
 
@@ -306,14 +307,14 @@ class GenerationParameters(SafeValidationMixin, StrictModel):
 def build_generation_request_id(
     *,
     schema_version: str,
-    condition: GenerationCondition,
+    condition: GenerationCondition | LegacyGenerationCondition,
     prompt_id: str,
     prompt_sha256: str,
     language: str,
     model_id: str,
     seed_id: int,
     hypothesis_id: str | None,
-    intervention_id: str | None,
+    intervention_id: str | None = None,
     endpoint_type: EndpointType,
     endpoint_sha256: str,
     system_template_version: str,
@@ -389,7 +390,6 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
     model_id: str = Field(min_length=1)
     seed_id: StrictInt
     hypothesis_id: str | None = None
-    intervention_id: str | None = None
     assignment_id: str | None = None
     target_spec_id: str | None = None
     target_instance_id: str | None = None
@@ -418,7 +418,6 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
 
     @field_validator(
         "hypothesis_id",
-        "intervention_id",
         "assignment_id",
         "target_spec_id",
         "target_instance_id",
@@ -454,20 +453,11 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
             self.arm_role,
         )
         if self.condition == "observed" and (
-            self.intervention_id is not None
-            or any(value is not None for value in experiment_coordinates)
+            any(value is not None for value in experiment_coordinates)
         ):
             raise ValueError("observed requests must not have counterfactual identifiers")
-        if self.condition == "counterfactual" and (
-            self.hypothesis_id is None
-            or self.intervention_id is None
-            or any(value is not None for value in experiment_coordinates[1:])
-        ):
-            raise ValueError("counterfactual requests require both identifiers")
         if self.condition == "confirm_arm":
-            if self.intervention_id is not None or any(
-                value is None for value in experiment_coordinates
-            ):
+            if any(value is None for value in experiment_coordinates):
                 raise ValueError("confirmation requests require complete assignment coordinates")
             try:
                 if type(self.arm_role) is not ArmRole or any(
@@ -491,7 +481,6 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
             model_id=self.model_id,
             seed_id=self.seed_id,
             hypothesis_id=self.hypothesis_id,
-            intervention_id=self.intervention_id,
             assignment_id=self.assignment_id,
             target_spec_id=self.target_spec_id,
             target_instance_id=self.target_instance_id,

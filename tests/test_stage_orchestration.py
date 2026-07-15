@@ -18,7 +18,7 @@ from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore, StageCommitLease
 from secaware.pipeline.artifact import canonical_sha256, sha256_file, sha256_path
 from secaware.pipeline.manifest import read_stage_manifest
-from secaware.schema.records import GeneratedCodeRecord, PromptRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1203,7 +1203,7 @@ def test_file_provider_directory_change_invalidates_generation_stage(tmp_path: P
 
     records = read_jsonl(
         store.path("generation", "observed_code.jsonl"),
-        GeneratedCodeRecord,
+        CanonicalGeneratedCodeRecord,
         required=True,
     )
     assert records[0].code == "result = 'second'\n"

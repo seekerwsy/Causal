@@ -1,5 +1,7 @@
 from collections.abc import Callable, Iterable
+import hashlib
 from itertools import islice
+import json
 from typing import TypeVar
 
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
@@ -144,14 +146,14 @@ def canonical_generated_code_from_request(
 
     trusted_request: GenerationRequestRecord | None = None
     trusted_provenance: GenerationProvenance | None = None
+    result: CanonicalGeneratedCodeRecord | None = None
     try:
         trusted_request = revalidate_generation_request_envelope(request)
         trusted_provenance = GenerationProvenance.model_validate(provenance)
         if type(code) is not str or not code.strip():
             raise ValueError("generated code is unavailable")
-        return CanonicalGeneratedCodeRecord(
+        payload = dict(
             schema_version="1.1",
-            code_id=f"code_{trusted_request.request_id.removeprefix('req_')}",
             request_id=trusted_request.request_id,
             prompt_id=trusted_request.prompt_id,
             prompt_sha256=trusted_request.prompt_sha256,
@@ -161,7 +163,6 @@ def canonical_generated_code_from_request(
             code=code,
             code_sha256=sha256_text(code),
             hypothesis_id=trusted_request.hypothesis_id,
-            intervention_id=trusted_request.intervention_id,
             assignment_id=trusted_request.assignment_id,
             target_spec_id=trusted_request.target_spec_id,
             target_instance_id=trusted_request.target_instance_id,
@@ -172,17 +173,36 @@ def canonical_generated_code_from_request(
             generation_provenance=trusted_provenance,
             generation_request=trusted_request,
         )
+        shell = CanonicalGeneratedCodeRecord.model_construct(
+            code_id="code_" + "0" * 64, **payload
+        )
+        identity = shell.model_dump(mode="json", exclude={"code_id", "code"})
+        encoded = json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        result = CanonicalGeneratedCodeRecord(
+            code_id=f"code_{hashlib.sha256(encoded).hexdigest()}", **payload
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
-        pass
-    request = None  # type: ignore[assignment]
-    code = ""
-    provenance = None  # type: ignore[assignment]
-    trusted_request = None
-    trusted_provenance = None
-    raise _import_error(
-        ErrorCode.CONTRACT,
-        "canonical generation record construction failed",
-    )
+        result = None
+    finally:
+        request = None  # type: ignore[assignment]
+        code = ""
+        provenance = None  # type: ignore[assignment]
+        trusted_request = None
+        trusted_provenance = None
+        payload = {}
+        identity = {}
+        encoded = b""
+        shell = None
+    if result is None:
+        raise _import_error(
+            ErrorCode.CONTRACT,
+            "canonical generation record construction failed",
+        )
+    return result
 
 
 def import_offline_results(

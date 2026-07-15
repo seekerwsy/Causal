@@ -1,6 +1,7 @@
 import hashlib
+import json
 import re
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
@@ -90,7 +91,7 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
     condition: Literal["observed", "counterfactual", "confirm_arm"]
     model_id: str
     seed_id: int
-    code: str
+    code: str = Field(repr=False)
     hypothesis_id: str | None = None
     intervention_id: str | None = None
     assignment_id: str | None = None
@@ -155,8 +156,12 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
         request = revalidate_generation_request_envelope(generation_request)
         if not self.code.strip() or code_sha256 != sha256_text(self.code):
             raise ValueError("canonical generated code hash does not match its payload")
-        if self.code_id != f"code_{request_id.removeprefix('req_')}":
-            raise ValueError("canonical code id must match its request id")
+        identity = self.model_dump(mode="json", exclude={"code_id", "code"})
+        encoded = json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        if self.code_id != f"code_{hashlib.sha256(encoded).hexdigest()}":
+            raise ValueError("canonical code id must match its content identity")
 
         bound_coordinates = (
             (self.request_id, request.request_id),
@@ -165,7 +170,7 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
             (self.model_id, request.model_id),
             (self.seed_id, request.seed_id),
             (self.hypothesis_id, request.hypothesis_id),
-            (self.intervention_id, request.intervention_id),
+            (self.intervention_id, getattr(request, "intervention_id", None)),
             (self.assignment_id, request.assignment_id),
             (self.target_spec_id, request.target_spec_id),
             (self.target_instance_id, request.target_instance_id),
@@ -218,6 +223,8 @@ class CanonicalGeneratedCodeRecord(GeneratedCodeRecord):
     )
 
     code_id: str = Field(pattern=_CANONICAL_CODE_ID_PATTERN)
+    condition: Literal["observed", "confirm_arm"]
+    intervention_id: ClassVar[None] = None
     seed_id: StrictInt
     schema_version: Literal["1.1"] = Field()
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)

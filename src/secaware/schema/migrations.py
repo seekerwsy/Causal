@@ -1,6 +1,8 @@
 import hashlib
 import json
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import SCHEMA_VERSION
@@ -12,6 +14,38 @@ from secaware.schema.generation import (
     sha256_text,
 )
 from secaware.schema.records import CanonicalGeneratedCodeRecord
+
+
+class LegacyGenerationRegenerationRequired(SecAwareError):
+    """A valid legacy counterfactual cannot cross into the canonical v1.2 ledger."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.CONTRACT,
+            stage="migration",
+            message="legacy counterfactual generation requires regeneration",
+        )
+
+
+class _LegacyGenerationRequestV11(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True, hide_input_in_errors=True)
+
+    schema_version: Literal["1.1"]
+    request_id: str
+    condition: Literal["observed", "counterfactual"]
+    prompt_id: str
+    prompt: str = Field(repr=False)
+    prompt_sha256: str
+    language: str
+    model_id: str
+    seed_id: StrictInt
+    hypothesis_id: str | None
+    intervention_id: str | None
+    endpoint_type: Literal["offline", "mock", "chat_completions"]
+    endpoint_sha256: str
+    system_template_version: str
+    system_template_sha256: str
+    parameters: GenerationParameters
 
 
 _GENERATION_REQUEST_V1_FIELDS = frozenset(
@@ -76,12 +110,12 @@ def require_v1_payload(payload: Mapping[str, Any]) -> None:
         )
 
 
-def migrate_generation_request_v1_0_to_v1_1(
+def migrate_generation_request_v1_0_to_v1_2(
     payload: Mapping[str, Any],
     *,
     endpoint_identity: str | None = None,
 ) -> GenerationRequestRecord:
-    """Explicitly migrate a canonical v1.0 request into endpoint-bound v1.1."""
+    """Migrate a valid legacy observed v1.0 request directly into canonical v1.2."""
 
     snapshot: dict[str, Any] = {}
     legacy_identity: dict[str, Any] = {}
@@ -131,6 +165,8 @@ def migrate_generation_request_v1_0_to_v1_1(
             }
             if snapshot["request_id"] != _build_generation_request_v1_id(legacy_identity):
                 raise ValueError
+            if condition == "counterfactual":
+                raise LegacyGenerationRegenerationRequired()
 
             endpoint_type = snapshot["endpoint_type"]
             if type(endpoint_type) is not str:
@@ -161,6 +197,7 @@ def migrate_generation_request_v1_0_to_v1_1(
                 "variant_id": None,
                 "arm_role": None,
             }
+            migrated.pop("intervention_id", None)
             migrated["request_id"] = build_generation_request_id(
                 schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
                 condition=migrated["condition"],
@@ -170,7 +207,6 @@ def migrate_generation_request_v1_0_to_v1_1(
                 model_id=migrated["model_id"],
                 seed_id=migrated["seed_id"],
                 hypothesis_id=migrated["hypothesis_id"],
-                intervention_id=migrated["intervention_id"],
                 endpoint_type=migrated["endpoint_type"],
                 endpoint_sha256=endpoint_sha256,
                 system_template_version=migrated["system_template_version"],
@@ -178,6 +214,10 @@ def migrate_generation_request_v1_0_to_v1_1(
                 parameters=parameters,
             )
             result = GenerationRequestRecord.model_validate(migrated)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except LegacyGenerationRegenerationRequired:
+            raise
         except Exception:
             migration_failed = True
     finally:
@@ -202,99 +242,88 @@ def migrate_generation_request_v1_0_to_v1_1(
     return result
 
 
+# Compatibility name retained only for callers discovering the legacy migration entrypoint.
+migrate_generation_request_v1_0_to_v1_1 = migrate_generation_request_v1_0_to_v1_2
+
+
 def migrate_generation_request_v1_1_to_v1_2(
     payload: Mapping[str, Any],
 ) -> GenerationRequestRecord:
     """Migrate only legacy observed requests; old counterfactuals must be regenerated."""
-
+    snapshot: dict[str, Any] = {}
+    current: dict[str, Any] = {}
+    legacy: _LegacyGenerationRequestV11 | None = None
+    result: GenerationRequestRecord | None = None
+    failure: SecAwareError | None = None
     try:
         snapshot = dict(payload)
-        expected = {
-            "schema_version",
-            "request_id",
-            "condition",
-            "prompt_id",
-            "prompt",
-            "prompt_sha256",
-            "language",
-            "model_id",
-            "seed_id",
-            "hypothesis_id",
-            "intervention_id",
-            "endpoint_type",
-            "endpoint_sha256",
-            "system_template_version",
-            "system_template_sha256",
-            "parameters",
-        }
-        if set(snapshot) != expected or snapshot.get("schema_version") != "1.1":
-            raise ValueError
-        if snapshot.get("condition") != "observed":
-            raise SecAwareError(
-                code=ErrorCode.CONTRACT,
-                stage="migration",
-                message="legacy counterfactual generation requires regeneration",
-            )
-        if snapshot.get("hypothesis_id") is not None or snapshot.get("intervention_id") is not None:
-            raise ValueError
-        parameters = GenerationParameters.model_validate(snapshot["parameters"])
+        legacy = _LegacyGenerationRequestV11.model_validate(snapshot)
         expected_id = build_generation_request_id(
             schema_version="1.1",
-            condition="observed",
-            prompt_id=snapshot["prompt_id"],
-            prompt_sha256=snapshot["prompt_sha256"],
-            language=snapshot["language"],
-            model_id=snapshot["model_id"],
-            seed_id=snapshot["seed_id"],
-            hypothesis_id=None,
-            intervention_id=None,
-            endpoint_type=snapshot["endpoint_type"],
-            endpoint_sha256=snapshot["endpoint_sha256"],
-            system_template_version=snapshot["system_template_version"],
-            system_template_sha256=snapshot["system_template_sha256"],
-            parameters=parameters,
+            condition=legacy.condition,
+            prompt_id=legacy.prompt_id,
+            prompt_sha256=legacy.prompt_sha256,
+            language=legacy.language,
+            model_id=legacy.model_id,
+            seed_id=legacy.seed_id,
+            hypothesis_id=legacy.hypothesis_id,
+            intervention_id=legacy.intervention_id,
+            endpoint_type=legacy.endpoint_type,
+            endpoint_sha256=legacy.endpoint_sha256,
+            system_template_version=legacy.system_template_version,
+            system_template_sha256=legacy.system_template_sha256,
+            parameters=legacy.parameters,
         )
-        if snapshot["request_id"] != expected_id or snapshot["prompt_sha256"] != sha256_text(
-            snapshot["prompt"]
-        ):
+        if legacy.request_id != expected_id or legacy.prompt_sha256 != sha256_text(legacy.prompt):
             raise ValueError
-        current = {
-            **snapshot,
-            "schema_version": GENERATION_REQUEST_SCHEMA_VERSION,
-            "parameters": parameters,
-            "assignment_id": None,
-            "target_spec_id": None,
-            "target_instance_id": None,
-            "arm_protocol_id": None,
-            "protocol_instance_id": None,
-            "variant_id": None,
-            "arm_role": None,
-        }
-        current["request_id"] = build_generation_request_id(
-            schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
-            condition="observed",
-            prompt_id=current["prompt_id"],
-            prompt_sha256=current["prompt_sha256"],
-            language=current["language"],
-            model_id=current["model_id"],
-            seed_id=current["seed_id"],
-            hypothesis_id=None,
-            intervention_id=None,
-            endpoint_type=current["endpoint_type"],
-            endpoint_sha256=current["endpoint_sha256"],
-            system_template_version=current["system_template_version"],
-            system_template_sha256=current["system_template_sha256"],
-            parameters=parameters,
-        )
-        return GenerationRequestRecord.model_validate(current)
-    except (MemoryError, KeyboardInterrupt, SystemExit, SecAwareError):
+        if legacy.condition == "counterfactual":
+            if not legacy.hypothesis_id or not legacy.intervention_id:
+                raise ValueError
+            failure = LegacyGenerationRegenerationRequired()
+        elif legacy.hypothesis_id is not None or legacy.intervention_id is not None:
+            raise ValueError
+        else:
+            current = legacy.model_dump(mode="python")
+            current.pop("intervention_id", None)
+            current["parameters"] = legacy.parameters
+            current.update(
+                schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
+                assignment_id=None,
+                target_spec_id=None,
+                target_instance_id=None,
+                arm_protocol_id=None,
+                protocol_instance_id=None,
+                variant_id=None,
+                arm_role=None,
+            )
+            current["request_id"] = build_generation_request_id(
+                **{key: value for key, value in current.items() if key not in {"request_id", "prompt"}}
+            )
+            result = GenerationRequestRecord.model_validate(current)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
+    except SecAwareError as error:
+        failure = error
     except Exception:
+        failure = SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage="migration",
+            message="generation request v1.1 migration failed validation",
+        )
+    finally:
+        payload = {}
+        snapshot.clear()
+        current.clear()
+        legacy = None
+    if failure is not None:
+        raise failure from None
+    if result is None:
         raise SecAwareError(
             code=ErrorCode.CONTRACT,
             stage="migration",
             message="generation request v1.1 migration failed validation",
         ) from None
+    return result
 
 
 def migrate_generated_code_v1_0_to_v1_1(

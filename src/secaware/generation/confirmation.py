@@ -54,6 +54,13 @@ def _trusted_requests(
 def _provider_outputs(
     requests: tuple[GenerationRequestRecord, ...], provider: object
 ) -> tuple[tuple[str, object], ...]:
+    raw: object = None
+    values: tuple[object, ...] = ()
+    checked: list[tuple[str, object]] = []
+    result: tuple[tuple[str, object], ...] | None = None
+    generate_many: object = None
+    generate: object = None
+    value: object = None
     try:
         generate_many = getattr(provider, "generate_many", None)
         if callable(generate_many):
@@ -66,18 +73,29 @@ def _provider_outputs(
             values = tuple((item.request_id, generate(item)) for item in requests)
         if len(values) > MAX_CONFIRMATION_REQUESTS:
             raise ValueError
-        checked: list[tuple[str, object]] = []
         for value in values:
             if type(value) not in {tuple, list} or len(value) != 2 or type(value[0]) is not str:
                 raise ValueError
             checked.append((value[0], value[1]))
-        return tuple(checked)
+        result = tuple(checked)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except SecAwareError:
         raise
     except Exception:
         raise _error("confirmation provider infrastructure failure", code=ErrorCode.API_INVALID_RESPONSE) from None
+    finally:
+        requests = ()
+        provider = None
+        raw = None
+        values = ()
+        checked.clear()
+        generate_many = None
+        generate = None
+        value = None
+    if result is None:  # pragma: no cover - every non-fatal failure raises above
+        raise _error("confirmation provider infrastructure failure", code=ErrorCode.API_INVALID_RESPONSE)
+    return result
 
 
 def execute_confirmation_requests(
@@ -88,13 +106,35 @@ def execute_confirmation_requests(
 
     trusted = _trusted_requests(requests)
     by_request = {item.request_id: item for item in trusted}
-    outputs = _provider_outputs(trusted, provider)
+    try:
+        outputs = _provider_outputs(trusted, provider)
+    except BaseException:
+        requests = ()
+        provider = None
+        trusted = ()
+        by_request.clear()
+        raise
     output_ids = tuple(item[0] for item in outputs)
     if len(output_ids) != len(set(output_ids)) or set(output_ids) != set(by_request):
-        raise _error("confirmation provider coverage failed validation")
+        requests = ()
+        provider = None
+        trusted = ()
+        by_request.clear()
+        outputs = ()
+        output_ids = ()
+        raise _error(
+            "confirmation provider coverage failed validation",
+            code=ErrorCode.API_INVALID_RESPONSE,
+        )
     executions: list[AssignmentExecutionRecord] = []
     codes: list[CanonicalGeneratedCodeRecord] = []
     total_code_bytes = 0
+    request: GenerationRequestRecord | None = None
+    raw_result: object = None
+    code: object = None
+    provenance: object = None
+    canonical: CanonicalGeneratedCodeRecord | None = None
+    loop_failed = True
     try:
         for request_id, raw_result in outputs:
             request = by_request[request_id]
@@ -109,6 +149,7 @@ def execute_confirmation_requests(
                         request_id=request.request_id,
                         status=AssignmentExecutionStatus.TERMINAL_NO_CODE,
                         code_id=None,
+                        code_sha256=None,
                         terminal_reason="content_filter",
                     )
                 )
@@ -132,15 +173,31 @@ def execute_confirmation_requests(
                     request_id=request.request_id,
                     status=AssignmentExecutionStatus.GENERATED,
                     code_id=canonical.code_id,
+                    code_sha256=canonical.code_sha256,
                     terminal_reason=None,
                 )
             )
+        loop_failed = False
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except SecAwareError:
         raise
     except Exception:
         raise _error("confirmation provider result failed validation") from None
+    finally:
+        requests = ()
+        provider = None
+        by_request.clear()
+        outputs = ()
+        output_ids = ()
+        request = None
+        raw_result = None
+        code = None
+        provenance = None
+        canonical = None
+        if loop_failed:
+            executions.clear()
+            codes.clear()
     ordered_executions = tuple(sorted(executions, key=lambda item: item.assignment_id))
     ordered_codes = tuple(sorted(codes, key=lambda item: item.assignment_id or ""))
     if (

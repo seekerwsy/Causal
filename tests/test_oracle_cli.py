@@ -18,7 +18,6 @@ from secaware.cli import app as pipeline_app
 from secaware.cli import (
     confirm_stage,
     extract_prompt_tsg_stage,
-    generate_counterfactual_stage,
     generate_observed_stage,
     import_generation_stage,
     intervene_stage,
@@ -32,6 +31,7 @@ from secaware.discovery.candidate_enum import FACTOR_SPECS
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.factory import extraction_policy
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
+from secaware.generation.result_importer import canonical_generated_code_from_request
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io import run_store as run_store_module
 from secaware.io.run_store import RunStore
@@ -42,6 +42,7 @@ from secaware.oracle.cli import run_standalone_oracle
 from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.artifact import sha256_path
+from secaware.pipeline.jsonl_stage import JsonlOutputSpec, execute_jsonl_stage_transaction
 from secaware.pipeline.manifest import (
     read_stage_manifest,
     write_stage_manifest,
@@ -53,6 +54,7 @@ from secaware.schema.generation import (
     sha256_text,
 )
 from secaware.schema.hypotheses import FactorType, HypothesisRecord
+from secaware.schema.interventions import InterventionRecord
 from secaware.schema.oracle import OracleRecord, SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.tsg import PromptTSGRecord
@@ -223,16 +225,69 @@ def _prepared_confirmation_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore
     config, store = _prepared_observed_pipeline(tmp_path)
     discover_stage(config, store, force=False)
     intervene_stage(config, store, force=False)
-    generate_counterfactual_stage(config, store, force=False)
-    run_oracle_stage(
-        config,
-        store,
-        condition="counterfactual",
-        force=False,
-        runner=_OracleRunner(),
-        runtime_validator=lambda: None,
-    )
+    _commit_counterfactual_oracle_fixture(store)
     return config, store
+
+
+def _commit_counterfactual_oracle_fixture(store: RunStore) -> None:
+    """Commit strict legacy-shaped Oracle fixtures for confirm infrastructure tests."""
+
+    intervention_path = store.path("interventions", "interventions.jsonl")
+    observed_path = store.path("oracle", "observed_oracle.jsonl")
+    output = store.path("oracle", "counterfactual_oracle.jsonl")
+    interventions = read_jsonl(
+        intervention_path,
+        InterventionRecord,
+        required=True,
+        allow_empty=False,
+    )
+    observed = read_jsonl(
+        observed_path,
+        OracleRecord,
+        required=True,
+        allow_empty=False,
+    )
+    records: list[OracleRecord] = []
+    for intervention in interventions:
+        for source in observed:
+            if source.prompt_id != intervention.prompt_id:
+                continue
+            identity = {
+                "intervention_id": intervention.intervention_id,
+                "observed_request_id": source.request_id,
+                "model_id": source.model_id,
+                "seed_id": source.seed_id,
+            }
+            encoded = json.dumps(
+                identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            digest = hashlib.sha256(encoded).hexdigest()
+            fixture_code_sha256 = hashlib.sha256(b"def answer():\n    return 42\n").hexdigest()
+            payload = source.model_dump(mode="python", round_trip=True, warnings=False)
+            payload.update(
+                request_id=f"req_{digest}",
+                code_id=f"code_{hashlib.sha256(encoded + fixture_code_sha256.encode()).hexdigest()}",
+                code_sha256=fixture_code_sha256,
+                condition="counterfactual",
+                hypothesis_id=intervention.hypothesis_id,
+                intervention_id=intervention.intervention_id,
+            )
+            records.append(OracleRecord.model_validate(payload))
+
+    execute_jsonl_stage_transaction(
+        store,
+        stage="run-oracle-counterfactual",
+        inputs=(intervention_path, observed_path),
+        outputs=(JsonlOutputSpec(output, OracleRecord, require_nonempty=True),),
+        force=False,
+        build=lambda: (records,),
+        policy_sha256=read_stage_manifest(
+            store.path(".stages", "run-oracle-observed.json")
+        ).policy_sha256,
+    )
 
 
 class _OracleRunner:
@@ -2584,8 +2639,11 @@ def test_standalone_uses_one_strict_input_snapshot_for_analysis_and_seal(
         allow_empty=False,
     )
     changed_code = "def changed_snapshot():\n    return 7\n"
-    changed_record = original_records[0].model_copy(  # type: ignore[index,union-attr]
-        update={"code": changed_code, "code_sha256": sha256_text(changed_code)}
+    original_record = original_records[0]
+    changed_record = canonical_generated_code_from_request(  # type: ignore[union-attr]
+        original_record.generation_request,
+        changed_code,
+        original_record.generation_provenance,
     )
     changed_path = tmp_path / "changed.jsonl"
     write_jsonl(changed_path, [changed_record])

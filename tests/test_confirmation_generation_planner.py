@@ -12,7 +12,7 @@ from secaware.schema.experiments import (
     ExperimentalUnit,
     PromptVariantRecord,
 )
-from secaware.schema.generation import GenerationParameters
+from secaware.schema.generation import GenerationParameters, build_generation_request_id
 
 
 def _sha(value: str) -> str:
@@ -101,6 +101,9 @@ def test_confirmation_request_binds_assignment_variant_and_arm() -> None:
     assert request.model_id == assignment.experimental_unit.model_id
     assert request.prompt == variant.prompt_text
     assert request.prompt_sha256 == variant.prompt_sha256
+    identity = request.model_dump(mode="python", exclude={"request_id", "prompt"})
+    identity["parameters"] = request.parameters
+    assert request.request_id == build_generation_request_id(**identity)
 
 
 def test_confirmation_planner_is_input_order_invariant() -> None:

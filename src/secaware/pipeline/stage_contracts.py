@@ -215,16 +215,22 @@ def confirmation_generation_stage_contract_payload() -> dict[str, object]:
 
     from secaware.pipeline.manifest import StageManifest
     from secaware.pipeline.stages.confirmation_generation import (
+        CONFIRMATION_PROVIDER_FACTORY_VERSION,
         CONFIRMATION_PROVIDER_POLICY_VERSION,
+        CONFIRMATION_PROVIDER_RESPONSE_VERSION,
     )
+    from secaware.schema.generation import GenerationProvenance
 
     return {
         "stage": _CONFIRMATION_GENERATION_STAGE,
         "contract_version": "assignment-bound-confirmation-generation-v1",
         "provider_policy_version": CONFIRMATION_PROVIDER_POLICY_VERSION,
+        "provider_factory_version": CONFIRMATION_PROVIDER_FACTORY_VERSION,
+        "provider_response_contract_version": CONFIRMATION_PROVIDER_RESPONSE_VERSION,
         "app_config_schema": _schema_sha256(AppConfig),
         "generation_config_schema": _schema_sha256(GenerationConfig),
         "request_schema": _schema_sha256(GenerationRequestRecord),
+        "provider_provenance_schema": _schema_sha256(GenerationProvenance),
         "code_schema": _schema_sha256(CanonicalGeneratedCodeRecord),
         "execution_schema": _schema_sha256(AssignmentExecutionRecord),
         "assignment_schema": _schema_sha256(AssignmentRecord),

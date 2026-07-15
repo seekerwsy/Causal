@@ -179,13 +179,23 @@ def _validate_usage(usage: object) -> None:
         value = None
 
 
-def _response_code(response: object) -> tuple[str | None, str]:
+def _response_code(response: object, *, expected_model: str) -> tuple[str | None, str]:
     choices: object = None
     choice: object = None
     finish_reason: object = None
     message: object = None
     content: object = None
+    actual_model: object = None
     try:
+        actual_model = _member(response, "model")
+        if (
+            type(expected_model) is not str
+            or not expected_model.strip()
+            or type(actual_model) is not str
+            or not actual_model.strip()
+            or actual_model != expected_model
+        ):
+            raise ValueError("invalid response model")
         choices = _member(response, "choices")
         if (
             isinstance(choices, (str, bytes))
@@ -207,6 +217,8 @@ def _response_code(response: object) -> tuple[str | None, str]:
         return (content if finish_reason == "stop" else None, finish_reason)
     finally:
         response = None
+        expected_model = ""
+        actual_model = None
         choices = None
         choice = None
         finish_reason = None
@@ -443,7 +455,9 @@ class OpenAICompatibleProvider:
                 finish_reason = ""
                 response_invalid = False
                 try:
-                    code, finish_reason = _response_code(response)
+                    code, finish_reason = _response_code(
+                        response, expected_model=trusted.model_id
+                    )
                 except Exception:
                     response_invalid = True
                 if response_invalid or (code is None and finish_reason != "content_filter"):
