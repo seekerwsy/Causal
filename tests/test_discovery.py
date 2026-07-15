@@ -56,7 +56,7 @@ def _oracle(prompt_id: str, *, insecure: bool, cwe: str = "CWE-22") -> OracleRec
     }
     return OracleRecord.model_validate(
         {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "request_id": f"req_{digest}",
             "code_id": f"code_{digest}",
             "code_sha256": "c" * 64,
@@ -65,7 +65,13 @@ def _oracle(prompt_id: str, *, insecure: bool, cwe: str = "CWE-22") -> OracleRec
             "model_id": "model-a",
             "seed_id": 1,
             "hypothesis_id": None,
-            "intervention_id": None,
+            "assignment_id": None,
+            "target_spec_id": None,
+            "target_instance_id": None,
+            "arm_protocol_id": None,
+            "protocol_instance_id": None,
+            "variant_id": None,
+            "arm_role": None,
             "parse_ok": True,
             "functional_ok": True,
             "security_label": "insecure" if insecure else "secure",
@@ -85,14 +91,20 @@ def _oracle(prompt_id: str, *, insecure: bool, cwe: str = "CWE-22") -> OracleRec
     )
 
 
-def _counterfactual_oracle(prompt_id: str) -> OracleRecord:
+def _confirmation_oracle(prompt_id: str) -> OracleRecord:
     observed = _oracle(prompt_id, insecure=True)
     return OracleRecord.model_validate(
         {
             **observed.model_dump(mode="python"),
-            "condition": "counterfactual",
-            "hypothesis_id": "h-counterfactual",
-            "intervention_id": "i-counterfactual",
+            "condition": "confirm_arm",
+            "hypothesis_id": "hypothesis_" + "1" * 64,
+            "assignment_id": "assignment_" + "2" * 64,
+            "target_spec_id": "target_" + "3" * 64,
+            "target_instance_id": "target_instance_" + "4" * 64,
+            "arm_protocol_id": "arm_protocol_" + "5" * 64,
+            "protocol_instance_id": "protocol_instance_" + "6" * 64,
+            "variant_id": "variant_" + "7" * 64,
+            "arm_role": "target_patch",
         }
     )
 
@@ -280,14 +292,14 @@ def test_discovery_revalidates_every_oracle_record_before_grouping() -> None:
         discover_hypotheses([prompt], [extract_prompt_tsg(prompt)], [forged])
 
 
-def test_discovery_rejects_structurally_valid_counterfactual_oracle() -> None:
+def test_discovery_rejects_structurally_valid_confirmation_oracle() -> None:
     prompt = _path_prompt("p-counterfactual", guarded=False)
 
     with pytest.raises(SecAwareError) as exc_info:
         discover_hypotheses(
             [prompt],
             [extract_prompt_tsg(prompt)],
-            [_counterfactual_oracle(prompt.prompt_id)],
+            [_confirmation_oracle(prompt.prompt_id)],
         )
 
     assert exc_info.value.code is ErrorCode.ANALYSIS_INVALID

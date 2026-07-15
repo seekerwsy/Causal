@@ -141,7 +141,18 @@ def _validate_exact_observed_chain(
                 or code is None
                 or record.condition != "observed"
                 or record.hypothesis_id is not None
-                or record.intervention_id is not None
+                or any(
+                    value is not None
+                    for value in (
+                        record.assignment_id,
+                        record.target_spec_id,
+                        record.target_instance_id,
+                        record.arm_protocol_id,
+                        record.protocol_instance_id,
+                        record.variant_id,
+                        record.arm_role,
+                    )
+                )
                 or coordinate in oracle_by_coordinate
                 or record.request_id in oracle_request_ids
                 or record.code_id in oracle_code_ids
@@ -155,7 +166,7 @@ def _validate_exact_observed_chain(
             oracle_code_ids.add(record.code_id)
         if set(code_by_coordinate) != expected or set(oracle_by_coordinate) != expected:
             raise ValueError
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise _producer_error("observed generation/Oracle coverage failed validation") from None

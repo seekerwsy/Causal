@@ -99,7 +99,7 @@ def _oracle(code: CanonicalGeneratedCodeRecord) -> OracleRecord:
         for name in ("semgrep", "bandit")
     )
     return OracleRecord(
-        schema_version="1.1",
+        schema_version="1.2",
         request_id=code.request_id,
         code_id=code.code_id,
         code_sha256=code.code_sha256,
@@ -108,7 +108,13 @@ def _oracle(code: CanonicalGeneratedCodeRecord) -> OracleRecord:
         model_id=code.model_id,
         seed_id=code.seed_id,
         hypothesis_id=None,
-        intervention_id=None,
+        assignment_id=None,
+        target_spec_id=None,
+        target_instance_id=None,
+        arm_protocol_id=None,
+        protocol_instance_id=None,
+        variant_id=None,
+        arm_role=None,
         parse_ok=True,
         functional_ok=True,
         security_label=SecurityLabel.SECURE,

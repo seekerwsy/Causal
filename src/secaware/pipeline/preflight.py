@@ -195,7 +195,7 @@ def _probe_exact_version(
                 failed_code = ErrorCode.ANALYZER_INVALID_OUTPUT
             elif lines[0] != expected_line:
                 failed_code = ErrorCode.POLICY_MISMATCH
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except SecAwareError as error:
         failed_code = error.code
@@ -230,7 +230,7 @@ def run_oracle_preflight(
 
     policy: LoadedOraclePolicy | None = None
     failure_code: ErrorCode | None = None
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     temporary_root = ""
     try:
         runtime_validator()
@@ -253,7 +253,7 @@ def run_oracle_preflight(
                 max_stderr_bytes=config.max_stderr_bytes,
                 runner=runner,
             )
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
         failure_code = error.code

@@ -129,7 +129,7 @@ class _WindowsMaterialLeases:
 
 
 def _add_safe_cleanup_note(
-    control: KeyboardInterrupt | SystemExit,
+    control: MemoryError | KeyboardInterrupt | SystemExit,
     note: str,
 ) -> None:
     try:
@@ -153,8 +153,8 @@ def _add_safe_cleanup_note(
 def _bounded_cleanup(
     action: Callable[[], None],
     is_complete: Callable[[], bool],
-    control: KeyboardInterrupt | SystemExit | None,
-) -> tuple[KeyboardInterrupt | SystemExit | None, bool]:
+    control: MemoryError | KeyboardInterrupt | SystemExit | None,
+) -> tuple[MemoryError | KeyboardInterrupt | SystemExit | None, bool]:
     """Best-effort cleanup with a fixed retry bound and control precedence.
 
     A persistent ordinary OS failure is reported by the boolean result and is
@@ -163,14 +163,14 @@ def _bounded_cleanup(
     is propagated after all best-effort attempts have run.
     """
 
-    cleanup_control: KeyboardInterrupt | SystemExit | None = None
+    cleanup_control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     complete = False
     extra_control_noted = False
     try:
         for _attempt in range(_MAX_CLEANUP_ATTEMPTS):
             try:
                 complete = bool(is_complete())
-            except (KeyboardInterrupt, SystemExit) as caught:
+            except (MemoryError, KeyboardInterrupt, SystemExit) as caught:
                 if control is None and cleanup_control is None:
                     cleanup_control = caught
                 elif not extra_control_noted:
@@ -186,7 +186,7 @@ def _bounded_cleanup(
                 break
             try:
                 action()
-            except (KeyboardInterrupt, SystemExit) as caught:
+            except (MemoryError, KeyboardInterrupt, SystemExit) as caught:
                 if control is None and cleanup_control is None:
                     cleanup_control = caught
                 elif not extra_control_noted:
@@ -199,7 +199,7 @@ def _bounded_cleanup(
                 pass
         try:
             complete = bool(is_complete())
-        except (KeyboardInterrupt, SystemExit) as caught:
+        except (MemoryError, KeyboardInterrupt, SystemExit) as caught:
             if control is None and cleanup_control is None:
                 cleanup_control = caught
             elif not extra_control_noted:
@@ -263,7 +263,7 @@ def _snapshot_codes(codes: Iterable[CanonicalGeneratedCodeRecord]) -> tuple[_Val
     functionality: dict[str, bool] = {}
     opaque_file = ""
     failed = False
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     try:
         if isinstance(codes, (str, bytes, Mapping)):
             raise TypeError(_CONTRACT_MESSAGE)
@@ -299,7 +299,7 @@ def _snapshot_codes(codes: Iterable[CanonicalGeneratedCodeRecord]) -> tuple[_Val
         if not snapshots:
             raise ValueError(_CONTRACT_MESSAGE)
         snapshots.sort(key=lambda value: value.record.request_id)
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except Exception:
         failed = True
@@ -334,7 +334,7 @@ def _snapshot_policy(policy: LoadedOraclePolicy) -> LoadedOraclePolicy:
             raise TypeError(_POLICY_MESSAGE)
         payload = policy.model_dump(mode="python", round_trip=True, warnings=False)
         trusted = LoadedOraclePolicy.model_validate(payload)
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         failed = True
@@ -382,7 +382,7 @@ def _validate_settings(
             max_stdout_bytes,
             max_stderr_bytes,
         )
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         raise _safe_error(ErrorCode.CONFIG, _CONFIG_MESSAGE) from None
@@ -486,7 +486,7 @@ def _materialize_batch(
     code: _ValidatedCode | None = None
     source_payload = b""
     failed = False
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     try:
         root = Path(tempfile.mkdtemp(prefix="secaware-oracle-"))
         if os.name != "nt":
@@ -532,7 +532,7 @@ def _materialize_batch(
             expected_files=frozenset(item.opaque_file for item in codes),
             materials=tuple(sorted(materials, key=lambda item: item.name)),
         )
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except Exception:
         failed = True
@@ -624,7 +624,7 @@ def _verify_material_file(
             and fingerprints_valid
         )
         return valid
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         return False
@@ -659,7 +659,7 @@ def _verify_materialized_batch(batch: _MaterializedBatch) -> bool:
             if not _verify_material_file(batch.root, material):
                 return False
         return True
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         return False
@@ -701,7 +701,7 @@ def _refresh_materialized_batch(batch: _MaterializedBatch) -> _MaterializedBatch
             expected_files=batch.expected_files,
             materials=tuple(refreshed),
         )
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         return None
@@ -718,7 +718,7 @@ def _refresh_materialized_batch(batch: _MaterializedBatch) -> _MaterializedBatch
 def _open_windows_material_leases(batch: _MaterializedBatch) -> _WindowsMaterialLeases:
     leases = _WindowsMaterialLeases([], None)
     path: Path | None = None
-    cleanup_control: KeyboardInterrupt | SystemExit | None = None
+    cleanup_control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     cleanup_failed = False
     try:
         if os.name != "nt":
@@ -757,7 +757,9 @@ def _open_windows_material_leases(batch: _MaterializedBatch) -> _WindowsMaterial
             leases.handles.append(handle)
         return leases
     except BaseException as error:
-        primary_control = error if isinstance(error, (KeyboardInterrupt, SystemExit)) else None
+        primary_control = (
+            error if isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit)) else None
+        )
         cleanup_control, cleanup_failed = _bounded_cleanup(
             leases.close,
             lambda: not leases.handles,
@@ -791,7 +793,7 @@ def _invoke_materialized_analyzer(
     leases = _WindowsMaterialLeases([], None)
     result: AnalyzerProcessResult | None = None
     failure: SecAwareError | None = None
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     drift = False
     cleanup_failed = False
     try:
@@ -815,7 +817,7 @@ def _invoke_materialized_analyzer(
                 max_stdout_bytes=max_stdout_bytes,
                 max_stderr_bytes=max_stderr_bytes,
             )
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
         failure = _copy_secaware_error(error)
@@ -825,7 +827,7 @@ def _invoke_materialized_analyzer(
         try:
             if not _verify_materialized_batch(batch):
                 drift = True
-        except (KeyboardInterrupt, SystemExit) as error:
+        except (MemoryError, KeyboardInterrupt, SystemExit) as error:
             if control is None:
                 control = error
         except Exception:
@@ -883,7 +885,7 @@ def _run_private_analyzer_batch(
     batch: _MaterializedBatch | None = None
     result: AnalyzerProcessResult | None = None
     failure: SecAwareError | None = None
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     cleanup_failed = False
     cleanup_root: Path | None = None
     try:
@@ -901,7 +903,7 @@ def _run_private_analyzer_batch(
             max_stderr_bytes=max_stderr_bytes,
             runner=runner,
         )
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
         failure = _copy_secaware_error(error)
@@ -1013,7 +1015,7 @@ def _source_lines(code: str) -> tuple[_SourceLine, ...] | None:
                 index += 1
         if start < len(encoded):
             append_line(len(encoded))
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         failed = True
@@ -1068,7 +1070,7 @@ def _finding_matches_source(
                 and finding.end_offset == expected_end
             )
         return finding.start_offset is None and finding.end_offset is None
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         return False
@@ -1112,7 +1114,7 @@ def _validate_report_coordinates(
                 if failed:
                     break
                 report = None
-    except (KeyboardInterrupt, SystemExit):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
         failed = True
@@ -1173,7 +1175,7 @@ def _aggregate(
             record = code.record
             records.append(
                 OracleRecord(
-                    schema_version="1.1",
+                    schema_version="1.2",
                     request_id=record.request_id,
                     code_id=record.code_id,
                     code_sha256=record.code_sha256,
@@ -1182,7 +1184,13 @@ def _aggregate(
                     model_id=record.model_id,
                     seed_id=record.seed_id,
                     hypothesis_id=record.hypothesis_id,
-                    intervention_id=record.intervention_id,
+                    assignment_id=record.assignment_id,
+                    target_spec_id=record.target_spec_id,
+                    target_instance_id=record.target_instance_id,
+                    arm_protocol_id=record.arm_protocol_id,
+                    protocol_instance_id=record.protocol_instance_id,
+                    variant_id=record.variant_id,
+                    arm_role=record.arm_role,
                     parse_ok=code.parse_ok,
                     functional_ok=code.functional_ok,
                     security_label=(
@@ -1244,7 +1252,7 @@ def run_oracle_batch(
     bandit_report: AnalyzerReport | None = None
     records: list[OracleRecord] | None = None
     failure: SecAwareError | None = None
-    control: KeyboardInterrupt | SystemExit | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     try:
         validated = _snapshot_codes(codes)
         trusted_policy = _snapshot_policy(policy)
@@ -1303,7 +1311,7 @@ def run_oracle_batch(
         )
         bandit_process = None
         records = _aggregate(validated, semgrep_report, bandit_report)
-    except (KeyboardInterrupt, SystemExit) as error:
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
         failure = _copy_secaware_error(error)

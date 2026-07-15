@@ -22,6 +22,7 @@ from secaware.pipeline.manifest import (
     write_stage_manifest,
 )
 from secaware.pipeline.stage_contracts import (
+    confirmation_oracle_stage_contract_sha256,
     confirmation_generation_stage_contract_sha256,
     discovery_stage_contract_sha256,
     prompt_variant_stage_contract_sha256,
@@ -40,6 +41,7 @@ _CAUSAL_TABLE_OUTPUTS = (
     "discovery/causal_observations.jsonl",
     "discovery/causal_exclusions.jsonl",
 )
+_CONFIRMATION_ORACLE_OUTPUTS = ("oracle/confirmation_oracle.jsonl",)
 _FCI_DISCOVERY_OUTPUTS = (
     "discovery/background_knowledge.jsonl",
     "discovery/reference_pags.jsonl",
@@ -506,6 +508,11 @@ class RunStore:
             and tuple(relative_outputs) != _CONFIRMATION_GENERATION_OUTPUTS
         ):
             raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if (
+            stage == "run-oracle-confirmation"
+            and tuple(relative_outputs) != _CONFIRMATION_ORACLE_OUTPUTS
+        ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
         valid_digest = (
@@ -640,6 +647,7 @@ class RunStore:
                     prompt_variant_stage_contract_sha256(stage)
                     or randomization_stage_contract_sha256(stage)
                     or confirmation_generation_stage_contract_sha256(stage, self.config.generation)
+                    or confirmation_oracle_stage_contract_sha256(stage)
                     or discovery_stage_contract_sha256(stage)
                 )
             ),

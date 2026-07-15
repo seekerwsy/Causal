@@ -10,6 +10,7 @@ from secaware.config import (
     FCIDiscoveryConfig,
     GenerationConfig,
     InterventionConfig,
+    OracleConfig,
     RandomizationConfig,
     TSGConfig,
 )
@@ -30,6 +31,7 @@ from secaware.schema.causal import (
     PathSupportRecord,
 )
 from secaware.schema.generation import GenerationRequestRecord
+from secaware.schema.oracle import OracleRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
@@ -60,6 +62,7 @@ _FCI_STAGE = "fci-discovery"
 _PROMPT_VARIANT_STAGE = "build-confirmation-variants"
 _RANDOMIZATION_STAGE = "randomize-confirmation"
 _CONFIRMATION_GENERATION_STAGE = "generate-confirmation"
+_CONFIRMATION_ORACLE_STAGE = "run-oracle-confirmation"
 
 
 def _schema_sha256(model: type) -> str:
@@ -266,6 +269,39 @@ def confirmation_generation_stage_contract_sha256(
     return canonical_sha256(confirmation_generation_stage_contract_payload(generation_config))
 
 
+def confirmation_oracle_stage_contract_payload() -> dict[str, object]:
+    """Bind the randomized Oracle to every direct schema and runtime contract."""
+
+    from secaware.pipeline.manifest import StageManifest
+    from secaware.pipeline.stages import confirmation_oracle as oracle_stage
+
+    return {
+        "stage": _CONFIRMATION_ORACLE_STAGE,
+        "contract_version": "assignment-bound-confirmation-oracle-v1",
+        "runtime_callable_bundle": oracle_stage.confirmation_oracle_runtime_callable_contract(),
+        "output_policy": oracle_stage.confirmation_oracle_output_policy_contract(),
+        "app_config_schema": _schema_sha256(AppConfig),
+        "oracle_config_schema": _schema_sha256(OracleConfig),
+        "target_schema": _schema_sha256(TargetSpecRecord),
+        "target_instance_schema": _schema_sha256(TargetInstanceRecord),
+        "protocol_schema": _schema_sha256(ConfirmationProtocolRecord),
+        "protocol_instance_schema": _schema_sha256(ConfirmationProtocolInstanceRecord),
+        "variant_schema": _schema_sha256(PromptVariantRecord),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "request_schema": _schema_sha256(GenerationRequestRecord),
+        "execution_schema": _schema_sha256(AssignmentExecutionRecord),
+        "code_schema": _schema_sha256(CanonicalGeneratedCodeRecord),
+        "oracle_schema": _schema_sha256(OracleRecord),
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+    }
+
+
+def confirmation_oracle_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _CONFIRMATION_ORACLE_STAGE:
+        return None
+    return canonical_sha256(confirmation_oracle_stage_contract_payload())
+
+
 __all__ = [
     "discovery_stage_contract_payload",
     "discovery_stage_contract_sha256",
@@ -275,4 +311,6 @@ __all__ = [
     "randomization_stage_contract_sha256",
     "confirmation_generation_stage_contract_payload",
     "confirmation_generation_stage_contract_sha256",
+    "confirmation_oracle_stage_contract_payload",
+    "confirmation_oracle_stage_contract_sha256",
 ]

@@ -57,6 +57,7 @@ from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryTerminalStatus,
     fci_discovery_stage,
 )
+from secaware.pipeline.stages.confirmation_oracle import run_confirmation_oracle_stage
 from secaware.reports.tables import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.generation import (
@@ -1752,6 +1753,18 @@ def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: 
 
 def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     stage = "confirm"
+    del config, store, force
+    raise _oracle_stage_error(
+        ErrorCode.CONTRACT,
+        stage,
+        "legacy two-arm confirmation artifacts require regeneration with the randomized confirmation protocol",
+    )
+
+
+def _retired_confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
+    """Retained implementation body until the legacy surface is removed in Task 8."""
+
+    stage = "confirm"
     inputs = [
         store.path("interventions", "interventions.jsonl"),
         store.path("oracle", "observed_oracle.jsonl"),
@@ -1998,6 +2011,10 @@ def run_oracle_command(
     condition: str = typer.Option("observed", "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
+    if condition == "confirmation":
+        cfg, store = _load(config, run_dir)
+        run_confirmation_oracle_stage(cfg, store, force=force)
+        return
     validated_condition = _cli_generation_condition(condition)
     cfg, store = _load(config, run_dir)
     run_oracle_stage(cfg, store, condition=validated_condition, force=force)

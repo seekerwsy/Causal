@@ -10,11 +10,19 @@ from secaware.schema.common import (
     is_valid_model_id,
     model_shape_is_intact,
 )
+from secaware.schema.experiments import ArmRole
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
 _CANONICAL_CODE_ID_PATTERN = r"^code_[0-9a-f]{64}$"
+_HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
+_ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
+_TARGET_ID_PATTERN = r"^target_[0-9a-f]{64}$"
+_TARGET_INSTANCE_ID_PATTERN = r"^target_instance_[0-9a-f]{64}$"
+_PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
+_PROTOCOL_INSTANCE_ID_PATTERN = r"^protocol_instance_[0-9a-f]{64}$"
+_VARIANT_ID_PATTERN = r"^variant_[0-9a-f]{64}$"
 _INVALID_FINDING_MESSAGE = "analyzer finding validation failed"
 _INVALID_PROVENANCE_MESSAGE = "analyzer provenance validation failed"
 _INVALID_ORACLE_MESSAGE = "oracle record validation failed"
@@ -135,16 +143,26 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
         strict=True,
     )
 
-    schema_version: Literal["1.1"]
+    schema_version: Literal["1.2"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     code_id: str = Field(pattern=_CANONICAL_CODE_ID_PATTERN)
     code_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     prompt_id: str = Field(min_length=1, max_length=1024)
-    condition: Literal["observed", "counterfactual"]
+    condition: Literal["observed", "confirm_arm"]
     model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     seed_id: StrictInt
-    hypothesis_id: str | None = Field(default=None, max_length=1024)
-    intervention_id: str | None = Field(default=None, max_length=1024)
+    hypothesis_id: str | None = Field(default=None, pattern=_HYPOTHESIS_ID_PATTERN)
+    assignment_id: str | None = Field(default=None, pattern=_ASSIGNMENT_ID_PATTERN)
+    target_spec_id: str | None = Field(default=None, pattern=_TARGET_ID_PATTERN)
+    target_instance_id: str | None = Field(
+        default=None, pattern=_TARGET_INSTANCE_ID_PATTERN
+    )
+    arm_protocol_id: str | None = Field(default=None, pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str | None = Field(
+        default=None, pattern=_PROTOCOL_INSTANCE_ID_PATTERN
+    )
+    variant_id: str | None = Field(default=None, pattern=_VARIANT_ID_PATTERN)
+    arm_role: ArmRole | None = None
     parse_ok: StrictBool
     functional_ok: StrictBool
     security_label: SecurityLabel
@@ -167,11 +185,28 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
         return value
 
-    @field_validator("hypothesis_id", "intervention_id")
+    @field_validator(
+        "hypothesis_id",
+        "assignment_id",
+        "target_spec_id",
+        "target_instance_id",
+        "arm_protocol_id",
+        "protocol_instance_id",
+        "variant_id",
+    )
     @classmethod
     def reject_blank_optional_identifiers(cls, value: str | None) -> str | None:
         if value is not None and (not value.strip() or value != value.strip()):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
+        return value
+
+    @field_validator("arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        if value is None or type(value) is ArmRole:
+            return value
+        if type(value) is str:
+            return next((item for item in ArmRole if item.value == value), value)
         return value
 
     @field_validator("security_label", mode="before")
@@ -207,14 +242,30 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
 
     @classmethod
     def migrate_persisted_payload(cls, value: object) -> object:
-        """Migrate one valid observed v1.0 payload at the JSONL read boundary only."""
-        if type(value) is not dict or value.get("schema_version") != "1.0":
+        """Migrate valid observed v1.0/v1.1 payloads at the JSONL boundary only."""
+        if type(value) is not dict or value.get("schema_version") not in {"1.0", "1.1"}:
             return value
         snapshot = dict(value)
-        if snapshot.get("condition") != "observed" or "evaluability" in snapshot:
+        legacy_version = snapshot.get("schema_version")
+        confirmation_fields = (
+            "hypothesis_id",
+            "assignment_id",
+            "target_spec_id",
+            "target_instance_id",
+            "arm_protocol_id",
+            "protocol_instance_id",
+            "variant_id",
+            "arm_role",
+        )
+        if (
+            snapshot.get("condition") != "observed"
+            or snapshot.get("intervention_id") is not None
+            or any(snapshot.get(field) is not None for field in confirmation_fields)
+            or (legacy_version == "1.0" and "evaluability" in snapshot)
+            or (legacy_version == "1.1" and "evaluability" not in snapshot)
+        ):
             return value
-        snapshot["schema_version"] = "1.1"
-        if snapshot.get("parse_ok") is False:
+        if legacy_version == "1.0" and snapshot.get("parse_ok") is False:
             if (
                 snapshot.get("functional_ok") is not False
                 or snapshot.get("security_label") != SecurityLabel.SECURE.value
@@ -225,16 +276,29 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
                 return value
             snapshot["security_label"] = SecurityLabel.UNKNOWN
             snapshot["evaluability"] = OracleEvaluability.UNKNOWN_PARSE_FAILURE
-        else:
+        elif legacy_version == "1.0":
             snapshot["evaluability"] = OracleEvaluability.EVALUABLE
+        snapshot["schema_version"] = "1.2"
+        snapshot.pop("intervention_id", None)
+        for field in confirmation_fields:
+            snapshot.setdefault(field, None)
         return cls.model_validate(snapshot)
 
     @model_validator(mode="after")
     def validate_integrity(self) -> "OracleRecord":
-        identifiers = (self.hypothesis_id, self.intervention_id)
+        identifiers = (
+            self.hypothesis_id,
+            self.assignment_id,
+            self.target_spec_id,
+            self.target_instance_id,
+            self.arm_protocol_id,
+            self.protocol_instance_id,
+            self.variant_id,
+            self.arm_role,
+        )
         if self.condition == "observed" and any(value is not None for value in identifiers):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
-        if self.condition == "counterfactual" and any(value is None for value in identifiers):
+        if self.condition == "confirm_arm" and any(value is None for value in identifiers):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
 
         if self.functional_ok and not self.parse_ok:

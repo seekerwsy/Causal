@@ -85,7 +85,7 @@ def _oracle(
 ) -> OracleRecord:
     digest = hashlib.sha256(f"{prompt_id}:{model_id}:{seed_id}".encode()).hexdigest()
     return OracleRecord(
-        schema_version="1.1",
+        schema_version="1.2",
         request_id=f"req_{digest}",
         code_id=f"code_{digest}",
         code_sha256="c" * 64,
@@ -94,7 +94,13 @@ def _oracle(
         model_id=model_id,
         seed_id=seed_id,
         hypothesis_id=None,
-        intervention_id=None,
+        assignment_id=None,
+        target_spec_id=None,
+        target_instance_id=None,
+        arm_protocol_id=None,
+        protocol_instance_id=None,
+        variant_id=None,
+        arm_role=None,
         parse_ok=label is not SecurityLabel.UNKNOWN,
         functional_ok=label is SecurityLabel.SECURE,
         security_label=label,

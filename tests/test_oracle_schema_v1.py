@@ -59,9 +59,9 @@ def _canonical_oracle_payload(
     condition: str = "observed",
     security_label: str = "insecure",
 ) -> dict[str, object]:
-    counterfactual = condition == "counterfactual"
+    confirmation = condition == "confirm_arm"
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "request_id": f"req_{_REQUEST_DIGEST}",
         "code_id": f"code_{_REQUEST_DIGEST}",
         "code_sha256": _CODE_DIGEST,
@@ -69,8 +69,14 @@ def _canonical_oracle_payload(
         "condition": condition,
         "model_id": "model-a",
         "seed_id": 7,
-        "hypothesis_id": "hypothesis-path-guard" if counterfactual else None,
-        "intervention_id": "intervention-path-guard" if counterfactual else None,
+        "hypothesis_id": "hypothesis_" + "1" * 64 if confirmation else None,
+        "assignment_id": "assignment_" + "2" * 64 if confirmation else None,
+        "target_spec_id": "target_" + "3" * 64 if confirmation else None,
+        "target_instance_id": "target_instance_" + "4" * 64 if confirmation else None,
+        "arm_protocol_id": "arm_protocol_" + "5" * 64 if confirmation else None,
+        "protocol_instance_id": "protocol_instance_" + "6" * 64 if confirmation else None,
+        "variant_id": "variant_" + "7" * 64 if confirmation else None,
+        "arm_role": "target_patch" if confirmation else None,
         "parse_ok": True,
         "functional_ok": True,
         "security_label": security_label,
@@ -127,7 +133,7 @@ def _assert_safe_validation_error(error: ValidationError, *hidden: str) -> None:
 def test_oracle_record_requires_analyzer_provenance_and_request_binding() -> None:
     record = OracleRecord.model_validate(_canonical_oracle_payload())
 
-    assert record.schema_version == "1.1"
+    assert record.schema_version == "1.2"
     assert record.evaluability is OracleEvaluability.EVALUABLE
     assert record.request_id == f"req_{_REQUEST_DIGEST}"
     assert record.code_id == f"code_{_REQUEST_DIGEST}"
@@ -212,7 +218,7 @@ def test_observed_oracle_v10_migrates_only_during_strict_jsonl_readback(tmp_path
         OracleRecord.model_validate(legacy)
     migrated = read_jsonl(path, OracleRecord, required=True, allow_empty=False)
     assert len(migrated) == 1
-    assert migrated[0].schema_version == "1.1"
+    assert migrated[0].schema_version == "1.2"
     assert migrated[0].evaluability is OracleEvaluability.EVALUABLE
 
 
@@ -232,11 +238,51 @@ def test_observed_v10_completed_parse_failure_migrates_to_typed_unknown(tmp_path
     assert migrated[0].evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
 
 
+def test_valid_observed_v11_migrates_to_v12_only_at_jsonl_boundary(tmp_path) -> None:
+    from secaware.io.jsonl import read_jsonl, write_jsonl
+
+    legacy = _canonical_oracle_payload(security_label="secure")
+    legacy["schema_version"] = "1.1"
+    legacy["intervention_id"] = None
+    for field in (
+        "assignment_id",
+        "target_spec_id",
+        "target_instance_id",
+        "arm_protocol_id",
+        "protocol_instance_id",
+        "variant_id",
+        "arm_role",
+    ):
+        legacy.pop(field)
+    path = tmp_path / "legacy-v11-observed.jsonl"
+    write_jsonl(path, (legacy,))
+
+    with pytest.raises(ValidationError):
+        OracleRecord.model_validate(legacy)
+    migrated = read_jsonl(path, OracleRecord, required=True, allow_empty=False)
+    assert len(migrated) == 1
+    assert migrated[0].schema_version == "1.2"
+    assert migrated[0].condition == "observed"
+
+
+@pytest.mark.parametrize("condition", ("counterfactual", "confirm_arm"))
+def test_legacy_nonobserved_oracle_requires_regeneration(tmp_path, condition: str) -> None:
+    from secaware.errors import SecAwareError
+    from secaware.io.jsonl import read_jsonl, write_jsonl
+
+    legacy = _canonical_oracle_payload(security_label="secure")
+    legacy.update(schema_version="1.1", condition=condition, intervention_id="legacy")
+    path = tmp_path / f"legacy-{condition}.jsonl"
+    write_jsonl(path, (legacy,))
+    with pytest.raises(SecAwareError):
+        read_jsonl(path, OracleRecord, required=True, allow_empty=False)
+
+
 def test_invalid_or_counterfactual_oracle_v10_is_not_accepted_as_migration(tmp_path) -> None:
     from secaware.errors import SecAwareError
     from secaware.io.jsonl import read_jsonl, write_jsonl
 
-    legacy = _canonical_oracle_payload(condition="counterfactual", security_label="secure")
+    legacy = _canonical_oracle_payload(condition="confirm_arm", security_label="secure")
     legacy["schema_version"] = "1.0"
     legacy.pop("evaluability")
     path = tmp_path / "legacy-counterfactual.jsonl"
@@ -382,24 +428,24 @@ def test_oracle_record_requires_exactly_one_of_each_analyzer(
 
 
 @pytest.mark.parametrize(
-    ("condition", "hypothesis_id", "intervention_id"),
+    ("condition", "hypothesis_id", "assignment_id"),
     [
         ("observed", "unexpected", None),
-        ("observed", None, "unexpected"),
-        ("counterfactual", None, "intervention"),
-        ("counterfactual", "hypothesis", None),
-        ("counterfactual", "   ", "intervention"),
-        ("counterfactual", "hypothesis", "   "),
+        ("observed", None, "assignment_" + "2" * 64),
+        ("confirm_arm", None, "assignment_" + "2" * 64),
+        ("confirm_arm", "hypothesis_" + "1" * 64, None),
+        ("confirm_arm", "   ", "assignment_" + "2" * 64),
+        ("confirm_arm", "hypothesis_" + "1" * 64, "   "),
     ],
 )
 def test_oracle_record_enforces_condition_identifiers(
     condition: str,
     hypothesis_id: str | None,
-    intervention_id: str | None,
+    assignment_id: str | None,
 ) -> None:
     payload = _canonical_oracle_payload(condition=condition)
     payload["hypothesis_id"] = hypothesis_id
-    payload["intervention_id"] = intervention_id
+    payload["assignment_id"] = assignment_id
 
     with pytest.raises(ValidationError):
         OracleRecord.model_validate(payload)

@@ -11,6 +11,7 @@ import threading
 import traceback
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from secaware import cli as pipeline_cli
@@ -227,6 +228,25 @@ def _prepared_confirmation_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore
     intervene_stage(config, store, force=False)
     _commit_counterfactual_oracle_fixture(store)
     return config, store
+
+
+def _assert_legacy_confirm_rejected_without_output(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    store = RunStore(config)
+    store.prepare()
+    outputs = (
+        store.path("analysis", "pair_results.jsonl"),
+        store.path("analysis", "hypothesis_effects.jsonl"),
+    )
+    before = tuple(output.read_bytes() if output.exists() else None for output in outputs)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        confirm_stage(config, store, force=True)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert "regeneration" in exc_info.value.message
+    assert tuple(output.read_bytes() if output.exists() else None for output in outputs) == before
+    assert not store.path(".stages", "confirm.json").exists()
 
 
 def _commit_counterfactual_oracle_fixture(store: RunStore) -> None:
@@ -1150,17 +1170,31 @@ def test_discover_requires_a_strict_committed_observed_oracle(
     assert not store.path(".stages", "discover.json").exists()
 
 
-def test_confirm_requires_both_committed_oracles(tmp_path: Path) -> None:
-    config, store = _prepared_confirmation_pipeline(tmp_path)
-    store.path(".stages", "run-oracle-counterfactual.json").unlink()
+def test_confirm_requires_legacy_oracles_to_be_regenerated(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    store = RunStore(config)
+    store.prepare()
+    outputs = [
+        store.path("analysis", "pair_results.jsonl"),
+        store.path("analysis", "hypothesis_effects.jsonl"),
+    ]
 
     with pytest.raises(SecAwareError) as exc_info:
         confirm_stage(config, store, force=False)
 
-    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
-    assert not store.path("analysis", "pair_results.jsonl").exists()
-    assert not store.path("analysis", "hypothesis_effects.jsonl").exists()
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert "regeneration" in exc_info.value.message
+    assert all(not output.exists() for output in outputs)
     assert not store.path(".stages", "confirm.json").exists()
+
+
+def test_legacy_counterfactual_oracle_condition_requires_regeneration() -> None:
+    payload = {
+        "schema_version": "1.1",
+        "condition": "counterfactual",
+    }
+    with pytest.raises(ValidationError):
+        OracleRecord.model_validate(payload)
 
 
 def test_discovery_rejects_committed_legacy_prompt_graph_artifact(tmp_path: Path) -> None:
@@ -1409,43 +1443,11 @@ def test_intervention_rejects_prompt_graph_from_stale_prompt_input_and_rolls_bac
     store.abort_stage("extract-prompt-tsg")
 
 
-def test_confirm_holds_both_oracle_leases_in_fixed_order_through_computation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config, store = _prepared_confirmation_pipeline(tmp_path)
-    real_hold = store.hold_committed_output
-    active: list[str] = []
-    entered: list[str] = []
-    checked = False
-    real_build_pairs = pipeline_cli.build_pairs
-
-    @contextmanager
-    def tracked_hold(stage: str, outputs: Sequence[Path]) -> object:
-        with real_hold(stage, outputs) as hashes:
-            active.append(stage)
-            entered.append(stage)
-            try:
-                yield hashes
-            finally:
-                active.remove(stage)
-
-    def checked_build_pairs(*args: object, **kwargs: object) -> object:
-        nonlocal checked
-        checked = active == [
-            "run-oracle-observed",
-            "run-oracle-counterfactual",
-        ]
-        return real_build_pairs(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(store, "hold_committed_output", tracked_hold)
-    monkeypatch.setattr(pipeline_cli, "build_pairs", checked_build_pairs)
-
-    confirm_stage(config, store, force=False)
-
-    assert entered == ["run-oracle-observed", "run-oracle-counterfactual"]
-    assert checked is True
-    assert active == []
+def test_confirmation_oracle_replaces_legacy_paired_oracle_contract() -> None:
+    assert set(OracleRecord.model_fields["condition"].annotation.__args__) == {
+        "observed",
+        "confirm_arm",
+    }
 
 
 @pytest.mark.parametrize(
@@ -1546,6 +1548,9 @@ def test_downstream_force_failure_preserves_previous_commit(
     monkeypatch: pytest.MonkeyPatch,
     stage_name: str,
 ) -> None:
+    if stage_name == "confirm":
+        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        return
     if stage_name == "discover":
         config, store = _prepared_observed_pipeline(tmp_path)
         discover_stage(config, store, force=False)
@@ -1708,6 +1713,9 @@ def test_multioutput_mark_failure_holds_stage_lease_through_rollback(
     monkeypatch: pytest.MonkeyPatch,
     stage_name: str,
 ) -> None:
+    if stage_name == "confirm":
+        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        return
     if stage_name == "discover":
         config, owner = _prepared_observed_pipeline(tmp_path)
         discover_stage(config, owner, force=False)
@@ -1801,6 +1809,9 @@ def test_mark_postcommit_control_rolls_back_and_releases_stage_lease(
     surface: str,
     control: KeyboardInterrupt | SystemExit,
 ) -> None:
+    if surface == "confirm":
+        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        return
     if surface == "oracle":
         config, owner = _prepared_observed_pipeline(tmp_path)
         stage = "run-oracle-observed"
@@ -1870,6 +1881,9 @@ def test_postcommit_finalize_control_keeps_commit_and_ensures_release(
     fault_point: str,
     control: KeyboardInterrupt | SystemExit,
 ) -> None:
+    if surface == "confirm":
+        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        return
     if surface == "oracle":
         config, owner = _prepared_observed_pipeline(tmp_path)
         stage = "run-oracle-observed"
@@ -2476,6 +2490,9 @@ def test_pipeline_skip_cleans_stale_backup_without_reexecution(
     surface: str,
     cleanup_state: str,
 ) -> None:
+    if surface == "confirm":
+        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        return
     if surface == "pipeline_oracle":
         config, store = _prepared_canonical_store(tmp_path)
         run_oracle_stage(
