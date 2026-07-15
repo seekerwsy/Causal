@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from secaware.config import OpenAICompatibleConfig, OracleConfig
+from secaware.schema.common import MAX_MODEL_ID_CHARS
 from secaware.schema.generation import (
     GenerationAttemptRecord,
     GenerationProvenance,
@@ -335,6 +336,7 @@ def test_analyzer_provenance_rejects_invalid_fields(
         ("code_sha256", "F" * 64),
         ("prompt_id", "   "),
         ("model_id", ""),
+        ("model_id", "m" * (MAX_MODEL_ID_CHARS + 1)),
         ("seed_id", True),
         ("parse_ok", 1),
         ("functional_ok", "true"),

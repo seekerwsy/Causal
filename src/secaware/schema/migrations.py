@@ -5,7 +5,7 @@ from typing import Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.common import SCHEMA_VERSION
+from secaware.schema.common import MAX_MODEL_ID_CHARS, SCHEMA_VERSION, is_valid_model_id
 from secaware.schema.generation import (
     GENERATION_REQUEST_SCHEMA_VERSION,
     GenerationParameters,
@@ -37,7 +37,7 @@ class _LegacyGenerationRequestV11(BaseModel):
     prompt: str = Field(repr=False)
     prompt_sha256: str
     language: str
-    model_id: str
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     seed_id: StrictInt
     hypothesis_id: str | None
     intervention_id: str | None
@@ -165,6 +165,8 @@ def migrate_generation_request_v1_0_to_v1_2(
             if set(snapshot) != _GENERATION_REQUEST_V1_FIELDS:
                 raise ValueError
             if snapshot["schema_version"] != "1.0":
+                raise ValueError
+            if not is_valid_model_id(snapshot["model_id"]):
                 raise ValueError
 
             parameters = GenerationParameters.model_validate(snapshot["parameters"])

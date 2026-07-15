@@ -11,7 +11,12 @@ from typing import Any, ClassVar, Literal, NoReturn, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.common import (
+    MAX_MODEL_ID_CHARS,
+    SafeValidationMixin,
+    StrictModel,
+    is_valid_model_id,
+)
 from secaware.schema.features import FeatureFamily, FeatureOperation, FeatureState
 
 
@@ -225,12 +230,16 @@ class ExperimentalUnit(_ExperimentContract):
     task_id: str
     hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
     target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
-    model_id: str
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     seed_slot: int = Field(ge=0, le=99_999, strict=True)
 
     @model_validator(mode="after")
     def validate_identifiers(self) -> Self:
-        if not _valid_identifier(self.task_id) or not _valid_identifier(self.model_id):
+        if (
+            not _valid_identifier(self.task_id)
+            or not _valid_identifier(self.model_id)
+            or not is_valid_model_id(self.model_id)
+        ):
             raise ValueError(self._safe_validation_message)
         return self
 
@@ -265,6 +274,8 @@ class AssignmentRecord(_ExperimentVersionedContract):
         arm_protocol_id: str,
         model_id: str,
     ) -> str:
+        if not is_valid_model_id(model_id):
+            raise ValueError("experiment contract failed validation")
         return "block_" + _digest(
             {
                 "block_key_version": "confirmation-block-key-v1",

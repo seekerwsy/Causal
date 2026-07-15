@@ -55,6 +55,7 @@ from secaware.schema.generation import (
     revalidate_generation_request_envelope,
 )
 from secaware.schema.generation import GenerationProvenance
+from secaware.schema.common import MAX_MODEL_ID_CHARS
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from test_prompt_variant_freeze_stage import _stage_store
 from test_confirmation_generation_planner import _assignment_and_variant, _generation_config
@@ -620,12 +621,13 @@ def test_canonical_request_json_line_boundary_plus_minus_one_is_exact_and_zero_c
 
 def test_worst_case_code_json_line_boundary_accepts_last_safe_cap_and_rejects_next() -> None:
     request = _requests()[0]
-    _request_bytes, request_chars = confirmation_generation._serialized_request_shape(request)
-    overhead = 12 * 1024
-    accepted_cap = (4_000_000 - request_chars - overhead - 2) // 6
+    base_chars = confirmation_generation._canonical_code_line_base_chars(
+        request, _resource_config()
+    )
+    accepted_cap = (4_000_000 - base_chars - 2) // 6
     rejected_cap = accepted_cap + 1
-    assert request_chars + 6 * accepted_cap + overhead + 1 < 4_000_000
-    assert request_chars + 6 * rejected_cap + overhead + 1 >= 4_000_000
+    assert base_chars + 6 * accepted_cap + 1 < 4_000_000
+    assert base_chars + 6 * rejected_cap + 1 >= 4_000_000
     calls = 0
 
     class Provider:
@@ -648,6 +650,36 @@ def test_worst_case_code_json_line_boundary_accepts_last_safe_cap_and_rejects_ne
     calls = 0
     with pytest.raises(SecAwareError):
         execute_confirmation_requests((request,), Provider(), rejected_config)
+    assert calls == 0
+
+
+def test_model_id_boundary_rejects_before_provider_and_accepts_maximum() -> None:
+    source = _requests()[0]
+    accepted_model = "m" * MAX_MODEL_ID_CHARS
+    payload = source.model_dump(mode="python", exclude={"request_id"})
+    payload["model_id"] = accepted_model
+    payload["parameters"] = GenerationParameters.model_validate(payload["parameters"])
+    payload["request_id"] = build_generation_request_id(
+        **{key: value for key, value in payload.items() if key != "prompt"}
+    )
+    accepted = GenerationRequestRecord.model_validate(payload)
+    calls = 0
+
+    class Provider:
+        def generate_many(self, batch):
+            nonlocal calls
+            calls += 1
+            item = batch[0]
+            return ((item.request_id, _envelope(item, "code\n")),)
+
+    execute_confirmation_requests((accepted,), Provider(), _resource_config())
+    assert calls == 1
+
+    rejected_model = "m" * (MAX_MODEL_ID_CHARS + 1)
+    forged = accepted.model_copy(update={"model_id": rejected_model})
+    calls = 0
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((forged,), Provider(), _resource_config())
     assert calls == 0
 
 
@@ -1079,7 +1111,7 @@ def test_confirmation_generation_stage_declares_exact_atomic_outputs() -> None:
     assert stage_contracts.confirmation_generation_stage_contract_payload()["output_policy"] == {
         "jsonl_max_line_chars": 4_000_000,
         "jsonl_max_total_chars": 240 * 1024 * 1024,
-        "code_record_overhead_chars": 12 * 1024,
+        "canonical_code_projection_version": "empty-skeleton-v1",
         "execution_record_overhead_chars": 4 * 1024,
         "json_string_max_expansion": 6,
         "provider_provenance_max_bytes": 4_096,
@@ -1102,6 +1134,74 @@ def test_runtime_callable_descriptor_binds_closure_without_rendering_objects() -
     opaque = confirmation_stage._runtime_callable_descriptor(bind(UnsafeRepresentation()))
     assert first["closure_sha256"] != second["closure_sha256"]
     assert len(opaque["closure_sha256"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("callable_class", "member_name"),
+    (
+        (confirmation_stage._LockedMockProvider, "generate_many"),
+        (confirmation_stage._SingleRequestProviderAdapter, "generate_many"),
+        (confirmation_stage._LockedMockProvider, "__init__"),
+        (confirmation_stage.JsonlOutputSpec, "__init__"),
+    ),
+)
+def test_runtime_callable_descriptor_binds_class_behavior_members_and_restores_stably(
+    monkeypatch: pytest.MonkeyPatch,
+    callable_class: type,
+    member_name: str,
+) -> None:
+    baseline = confirmation_stage._runtime_callable_descriptor(callable_class)
+    original = getattr(callable_class, member_name)
+
+    @functools.wraps(original)
+    def drifted(*args, **kwargs):
+        return original(*args, **kwargs)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(callable_class, member_name, drifted)
+        assert confirmation_stage._runtime_callable_descriptor(callable_class) != baseline
+    assert confirmation_stage._runtime_callable_descriptor(callable_class) == baseline
+
+
+def test_runtime_callable_descriptor_binds_every_supported_class_descriptor_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CallableBehavior:
+        def __init__(self) -> None:
+            self.value = 1
+
+        def __call__(self) -> int:
+            return self.value
+
+        def ordinary(self) -> int:
+            return self.value
+
+        @staticmethod
+        def static() -> int:
+            return 1
+
+        @classmethod
+        def class_level(cls) -> str:
+            return cls.__name__
+
+        @property
+        def property_value(self) -> int:
+            return self.value
+
+    baseline = confirmation_stage._runtime_callable_descriptor(CallableBehavior)
+    replacements = {
+        "__init__": lambda self: setattr(self, "value", 2),
+        "__call__": lambda self: self.value + 1,
+        "ordinary": lambda self: self.value + 1,
+        "static": staticmethod(lambda: 2),
+        "class_level": classmethod(lambda cls: cls.__qualname__),
+        "property_value": property(lambda self: self.value + 1),
+    }
+    for name, replacement in replacements.items():
+        with monkeypatch.context() as patcher:
+            patcher.setattr(CallableBehavior, name, replacement)
+            assert confirmation_stage._runtime_callable_descriptor(CallableBehavior) != baseline
+        assert confirmation_stage._runtime_callable_descriptor(CallableBehavior) == baseline
 
 
 @pytest.mark.parametrize(
@@ -1858,6 +1958,81 @@ def test_provider_factory_alias_change_after_capture_aborts_and_preserves_commit
         confirmation_stage,
         "_provider_from_frozen_config",
         captured_factory,
+    )
+    with pytest.raises(SecAwareError):
+        run_confirmation_generation_stage(config, store, force=True)
+    assert tuple(path.read_bytes() for path in (*paths, manifest)) == before
+
+
+def test_class_drift_during_provider_construction_aborts_before_executor_and_preserves_commit(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = randomized_store
+    run_confirmation_generation_stage(config, store, force=False)
+    paths = tuple(
+        store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
+    )
+    manifest = store.path(".stages", "generate-confirmation.json")
+    before = tuple(path.read_bytes() for path in (*paths, manifest))
+    provider_type = confirmation_stage._LockedMockProvider
+    original_init = provider_type.__init__
+    original_generate = provider_type.generate_many
+    generate_calls = 0
+
+    @functools.wraps(original_generate)
+    def drifted_generate(self, requests):
+        nonlocal generate_calls
+        generate_calls += 1
+        return original_generate(self, requests)
+
+    @functools.wraps(original_init)
+    def mutating_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        monkeypatch.setattr(provider_type, "generate_many", drifted_generate)
+
+    monkeypatch.setattr(provider_type, "__init__", mutating_init)
+    monkeypatch.setattr(
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **kwargs: provider_type(kwargs["envelope_factory"]),
+    )
+    with pytest.raises(SecAwareError):
+        run_confirmation_generation_stage(config, store, force=True)
+    assert generate_calls == 0
+    assert tuple(path.read_bytes() for path in (*paths, manifest)) == before
+
+
+def test_class_drift_during_executor_aborts_publish_and_preserves_commit(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = randomized_store
+    run_confirmation_generation_stage(config, store, force=False)
+    paths = tuple(
+        store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
+    )
+    manifest = store.path(".stages", "generate-confirmation.json")
+    before = tuple(path.read_bytes() for path in (*paths, manifest))
+    provider_type = confirmation_stage._LockedMockProvider
+    original_init = provider_type.__init__
+    original_generate = provider_type.generate_many
+
+    @functools.wraps(original_init)
+    def drifted_init(self, *args, **kwargs):
+        return original_init(self, *args, **kwargs)
+
+    @functools.wraps(original_generate)
+    def mutating_generate(self, requests):
+        result = original_generate(self, requests)
+        monkeypatch.setattr(provider_type, "__init__", drifted_init)
+        return result
+
+    monkeypatch.setattr(provider_type, "generate_many", mutating_generate)
+    monkeypatch.setattr(
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **kwargs: provider_type(kwargs["envelope_factory"]),
     )
     with pytest.raises(SecAwareError):
         run_confirmation_generation_stage(config, store, force=True)

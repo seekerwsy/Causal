@@ -4,11 +4,20 @@ import pytest
 from pydantic import ValidationError
 
 import secaware.errors as errors
-from secaware.config import AppConfig, FCIDiscoveryConfig, load_config
+from secaware.config import AppConfig, FCIDiscoveryConfig, GenerationConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.common import MAX_MODEL_ID_CHARS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_generation_models_enforce_shared_model_id_boundary() -> None:
+    accepted = "m" * MAX_MODEL_ID_CHARS
+    assert GenerationConfig(models=[accepted]).models == [accepted]
+    for rejected in (" ", "m" * (MAX_MODEL_ID_CHARS + 1)):
+        with pytest.raises(ValidationError):
+            GenerationConfig(models=[rejected])
 
 
 @pytest.mark.parametrize(

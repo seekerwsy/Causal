@@ -12,6 +12,7 @@ import re
 
 from secaware.config import RandomizationConfig
 from secaware.randomness import DeterministicRNG, RNG_VERSION
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.experiments import (
     ArmRole,
@@ -407,7 +408,7 @@ def _validate_block(block: RandomizationBlock) -> None:
         or re.fullmatch(r"protocol_instance_[0-9a-f]{64}", block.protocol_instance_id) is None
         or any(re.fullmatch(r"variant_[0-9a-f]{64}", item) is None for item in variant_ids)
         or not block.task_id
-        or not block.model_id
+        or not is_valid_model_id(block.model_id)
     ):
         _fail(RandomizationFailureCode.PROTOCOL_COVERAGE_INVALID)
 

@@ -4,8 +4,10 @@ from typing import Literal
 from pydantic import ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from secaware.schema.common import (
+    MAX_MODEL_ID_CHARS,
     SafeValidationMixin,
     VersionedModel,
+    is_valid_model_id,
     model_shape_is_intact,
 )
 
@@ -139,7 +141,7 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
     code_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     prompt_id: str = Field(min_length=1, max_length=1024)
     condition: Literal["observed", "counterfactual"]
-    model_id: str = Field(min_length=1, max_length=1024)
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     seed_id: StrictInt
     hypothesis_id: str | None = Field(default=None, max_length=1024)
     intervention_id: str | None = Field(default=None, max_length=1024)
@@ -151,10 +153,17 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
     findings: tuple[AnalyzerFindingRecord, ...] = Field(default_factory=tuple)
     analyzers: tuple[AnalyzerProvenanceRecord, ...]
 
-    @field_validator("prompt_id", "model_id")
+    @field_validator("prompt_id")
     @classmethod
-    def reject_blank_pairing_coordinates(cls, value: str) -> str:
+    def reject_blank_prompt_id(cls, value: str) -> str:
         if not value.strip() or value != value.strip():
+            raise ValueError(_INVALID_ORACLE_MESSAGE)
+        return value
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        if not is_valid_model_id(value):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
         return value
 

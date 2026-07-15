@@ -19,9 +19,11 @@ from pydantic import (
 
 from secaware.errors import JSONValue
 from secaware.schema.common import (
+    MAX_MODEL_ID_CHARS,
     SafeValidationMixin,
     StrictModel,
     VersionedModel,
+    is_valid_model_id,
     model_shape_is_intact,
 )
 from secaware.schema.experiments import ArmRole
@@ -329,7 +331,7 @@ class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
     schema_version: Literal["1.0"]
     result_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN, repr=False)
-    model_id: str = Field(min_length=1)
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     finish_reason: Literal["stop", "content_filter"]
     code: str | None = Field(default=None, repr=False)
     usage: ProviderUsageRecord
@@ -337,6 +339,13 @@ class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
     provenance: GenerationProvenance
     provider_policy_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     runtime_fingerprint_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        if not is_valid_model_id(value):
+            raise ValueError(cls._safe_validation_message)
+        return value
 
     @classmethod
     def from_content(cls, **content: object) -> "ProviderResultEnvelope":
@@ -459,10 +468,11 @@ def build_generation_request_id(
     variant_id: str | None = None,
     arm_role: object | None = None,
 ) -> str:
-    if schema_version != GENERATION_REQUEST_SCHEMA_VERSION or condition not in {
-        "observed",
-        "confirm_arm",
-    }:
+    if (
+        schema_version != GENERATION_REQUEST_SCHEMA_VERSION
+        or condition not in {"observed", "confirm_arm"}
+        or not is_valid_model_id(model_id)
+    ):
         raise ValueError("generation request identity is not canonical")
     identity: dict[str, object] = {
         "schema_version": schema_version,
@@ -518,7 +528,7 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
     prompt: str = Field(min_length=1, repr=False)
     prompt_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     language: str = Field(min_length=1)
-    model_id: str = Field(min_length=1)
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     seed_id: StrictInt
     hypothesis_id: str | None = None
     assignment_id: str | None = None
@@ -545,6 +555,13 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
     def reject_blank_required_text(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("generation request text fields must not be blank")
+        return value
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        if not is_valid_model_id(value):
+            raise ValueError(_INVALID_REQUEST_INTEGRITY_MESSAGE)
         return value
 
     @field_validator(

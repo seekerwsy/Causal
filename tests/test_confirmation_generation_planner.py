@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+from pydantic import ValidationError
 
 from secaware.config import GenerationConfig, OpenAICompatibleConfig
 from secaware.errors import SecAwareError
@@ -15,6 +16,7 @@ from secaware.schema.experiments import (
     PromptVariantRecord,
 )
 from secaware.schema.generation import GenerationParameters, build_generation_request_id
+from secaware.schema.common import MAX_MODEL_ID_CHARS
 
 
 def _sha(value: str) -> str:
@@ -98,6 +100,43 @@ def _secaware_traceback_locals(error: BaseException) -> str:
             retained.append(repr(dict(cursor.tb_frame.f_locals)))
         cursor = cursor.tb_next
     return "\n".join(retained)
+
+
+def test_experimental_unit_and_block_key_share_model_id_boundary() -> None:
+    accepted_model = "m" * MAX_MODEL_ID_CHARS
+    unit = ExperimentalUnit(
+        task_id="task-a",
+        hypothesis_id="hypothesis_" + "1" * 64,
+        target_spec_id="target_" + "2" * 64,
+        model_id=accepted_model,
+        seed_slot=0,
+    )
+    assert unit.model_id == accepted_model
+    assert AssignmentRecord.block_id_from_key(
+        unit.task_id,
+        unit.hypothesis_id,
+        unit.target_spec_id,
+        "arm_protocol_" + "3" * 64,
+        accepted_model,
+    ).startswith("block_")
+
+    rejected_model = accepted_model + "m"
+    with pytest.raises(ValidationError):
+        ExperimentalUnit(
+            task_id=unit.task_id,
+            hypothesis_id=unit.hypothesis_id,
+            target_spec_id=unit.target_spec_id,
+            model_id=rejected_model,
+            seed_slot=0,
+        )
+    with pytest.raises(ValueError):
+        AssignmentRecord.block_id_from_key(
+            unit.task_id,
+            unit.hypothesis_id,
+            unit.target_spec_id,
+            "arm_protocol_" + "3" * 64,
+            rejected_model,
+        )
 
 
 def test_confirmation_request_binds_assignment_variant_and_arm() -> None:

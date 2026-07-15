@@ -1,10 +1,21 @@
 from typing import Any, ClassVar, Literal, TypeVar
+import unicodedata
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic_core import PydanticCustomError
 
 
 SCHEMA_VERSION = "1.0"
+MAX_MODEL_ID_CHARS = 256
+
+
+def is_valid_model_id(value: object) -> bool:
+    return (
+        type(value) is str
+        and 1 <= len(value) <= MAX_MODEL_ID_CHARS
+        and value == value.strip()
+        and not any(unicodedata.category(character).startswith("C") for character in value)
+    )
 
 
 _SafeValidationModel = TypeVar(

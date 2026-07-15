@@ -8,7 +8,12 @@ import yaml
 from pydantic import ConfigDict, Field, StrictInt, ValidationError, field_validator, model_validator
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.common import (
+    MAX_MODEL_ID_CHARS,
+    SafeValidationMixin,
+    StrictModel,
+    is_valid_model_id,
+)
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.experiments import (
     InterventionExecutorKind,
@@ -62,7 +67,7 @@ class PromptExtractorLLMConfig(SafeValidationMixin, StrictModel):
     )
 
     provider: Literal["openai_compatible"] = "openai_compatible"
-    model_id: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS)
     base_url: str = Field(min_length=1, max_length=2048, repr=False)
     api_key_env: str = Field(
         min_length=1,
@@ -81,9 +86,7 @@ class PromptExtractorLLMConfig(SafeValidationMixin, StrictModel):
     @classmethod
     def validate_model_id(cls, value: str) -> str:
         try:
-            if not value.strip() or value != value.strip():
-                raise ValueError
-            if any(unicodedata.category(character).startswith("C") for character in value):
+            if not is_valid_model_id(value):
                 raise ValueError
             value.encode("utf-8")
         except Exception:
@@ -168,7 +171,7 @@ class InterventionLLMConfig(SafeValidationMixin, StrictModel):
         strict=True,
     )
 
-    model_id: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS)
     base_url: str = Field(min_length=1, max_length=2048, repr=False)
     api_key_env: str = Field(
         min_length=1,
@@ -187,9 +190,7 @@ class InterventionLLMConfig(SafeValidationMixin, StrictModel):
     @classmethod
     def validate_model_id(cls, value: str) -> str:
         try:
-            if not value.strip() or value != value.strip():
-                raise ValueError
-            if any(unicodedata.category(character).startswith("C") for character in value):
+            if not is_valid_model_id(value):
                 raise ValueError
             value.encode("utf-8")
         except Exception:
@@ -431,6 +432,13 @@ class GenerationConfig(StrictModel):
     )
     confirmation_max_timeout_seconds_per_attempt: float = Field(default=300.0, gt=0, le=3600)
     confirmation_max_worst_case_wait_seconds: float = Field(default=86_400.0, gt=0, le=86_400)
+
+    @field_validator("models")
+    @classmethod
+    def validate_models(cls, value: list[str]) -> list[str]:
+        if any(not is_valid_model_id(model_id) for model_id in value):
+            raise ValueError("generation model configuration failed validation")
+        return value
 
     @field_validator("confirmation_seeds")
     @classmethod

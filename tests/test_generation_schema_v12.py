@@ -8,13 +8,19 @@ from collections.abc import Iterator, Mapping
 import pytest
 from pydantic import ValidationError
 
+from secaware.errors import SecAwareError
 from secaware.generation.request_planner import plan_observed_requests
+from secaware.generation.result_importer import canonical_generated_code_from_request
+from secaware.schema.common import MAX_MODEL_ID_CHARS
 from secaware.schema.generation import (
     GENERATION_REQUEST_SCHEMA_VERSION,
+    GenerationAttemptRecord,
     GenerationCondition,
     GenerationParameters,
     GenerationRequestRecord,
     GenerationProvenance,
+    ProviderResultEnvelope,
+    ProviderUsageRecord,
     build_generation_request_id,
 )
 from secaware.schema.migrations import (
@@ -23,7 +29,7 @@ from secaware.schema.migrations import (
     migrate_generation_request_v1_1_to_v1_2,
     migrate_generation_request_v1_0_to_v1_2,
 )
-from secaware.schema.records import CanonicalGeneratedCodeRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, GeneratedCodeRecord
 
 
 def _sha(value: str) -> str:
@@ -163,6 +169,110 @@ def test_generation_request_schema_v12_preserves_observed_contract() -> None:
             "arm_role",
         )
     )
+
+
+def _observed_request_with_model(model_id: str) -> GenerationRequestRecord:
+    payload = _observed_payload()
+    payload["model_id"] = model_id
+    payload["request_id"] = build_generation_request_id(
+        **{key: value for key, value in payload.items() if key not in {"request_id", "prompt"}}
+    )
+    return GenerationRequestRecord.model_validate(payload)
+
+
+def test_model_id_boundary_is_shared_by_request_provider_and_code_contracts() -> None:
+    accepted_model = "m" * MAX_MODEL_ID_CHARS
+    request = _observed_request_with_model(accepted_model)
+    assert request.model_id == accepted_model
+    envelope = ProviderResultEnvelope.from_content(
+        request_id=request.request_id,
+        model_id=accepted_model,
+        finish_reason="stop",
+        code="pass\n",
+        usage=ProviderUsageRecord(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        attempts=(
+            GenerationAttemptRecord(
+                schema_version="1.0",
+                request_id=request.request_id,
+                attempt=1,
+                outcome="success",
+                error_code=None,
+                retryable=False,
+                backoff_seconds=0.0,
+            ),
+        ),
+        provenance=GenerationProvenance(producer="boundary-test"),
+        provider_policy_sha256="a" * 64,
+        runtime_fingerprint_sha256="b" * 64,
+    )
+    assert envelope.model_id == accepted_model
+    canonical = canonical_generated_code_from_request(
+        request,
+        "pass\n",
+        envelope.provenance,
+    )
+    assert canonical.model_id == accepted_model
+
+    rejected_model = "m" * (MAX_MODEL_ID_CHARS + 1)
+    with pytest.raises(ValueError):
+        _observed_request_with_model(rejected_model)
+    rejected_request_payload = _observed_payload()
+    rejected_request_payload["model_id"] = rejected_model
+    with pytest.raises(ValidationError):
+        GenerationRequestRecord.model_validate(rejected_request_payload)
+    with pytest.raises(ValidationError):
+        ProviderResultEnvelope.from_content(
+            request_id=request.request_id,
+            model_id=rejected_model,
+            finish_reason="stop",
+            code="pass\n",
+            usage=envelope.usage,
+            attempts=envelope.attempts,
+            provenance=envelope.provenance,
+            provider_policy_sha256="a" * 64,
+            runtime_fingerprint_sha256="b" * 64,
+        )
+    with pytest.raises(ValidationError):
+        GeneratedCodeRecord(
+            code_id="legacy-code",
+            prompt_id="prompt-a",
+            condition="observed",
+            model_id=rejected_model,
+            seed_id=7,
+            code="pass\n",
+        )
+
+
+@pytest.mark.parametrize("version", ("1.0", "1.1"))
+def test_legacy_request_migration_fails_closed_for_overlong_model_id(version: str) -> None:
+    current = _observed_payload()
+    legacy = {
+        key: value
+        for key, value in current.items()
+        if key
+        not in {
+            "assignment_id",
+            "target_spec_id",
+            "target_instance_id",
+            "arm_protocol_id",
+            "protocol_instance_id",
+            "variant_id",
+            "arm_role",
+        }
+    }
+    legacy["schema_version"] = version
+    legacy["model_id"] = "m" * (MAX_MODEL_ID_CHARS + 1)
+    legacy["intervention_id"] = None
+    if version == "1.0":
+        legacy.pop("endpoint_sha256")
+    legacy["request_id"] = _legacy_request_id(legacy)
+    migration = (
+        migrate_generation_request_v1_0_to_v1_2
+        if version == "1.0"
+        else migrate_generation_request_v1_1_to_v1_2
+    )
+    with pytest.raises(SecAwareError):
+        migration(legacy)
 
 
 @pytest.mark.parametrize(

@@ -11,10 +11,10 @@ import os
 import re
 import time
 from typing import Any, Protocol
-import unicodedata
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.openai_compatible_provider import _classify_failure
+from secaware.schema.common import is_valid_model_id
 
 
 _STAGE = "llm.structured_transport"
@@ -85,11 +85,8 @@ class StructuredLLMPolicy:
         if any(type(value) is not str or _SHA256.fullmatch(value) is None for value in hashes):
             raise ValueError("structured LLM policy validation failed")
         if (
-            type(self.model_id) is not str
-            or not self.model_id.strip()
-            or self.model_id != self.model_id.strip()
+            not is_valid_model_id(self.model_id)
             or len(self.model_id.encode("utf-8")) > _MAX_MODEL_ID_BYTES
-            or any(unicodedata.category(character).startswith("C") for character in self.model_id)
         ):
             raise ValueError("structured LLM policy validation failed")
         numeric = (self.temperature, self.top_p, self.timeout_seconds)

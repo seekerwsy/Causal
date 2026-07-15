@@ -5,7 +5,12 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
-from secaware.schema.common import SafeValidationMixin, model_shape_is_intact
+from secaware.schema.common import (
+    MAX_MODEL_ID_CHARS,
+    SafeValidationMixin,
+    is_valid_model_id,
+    model_shape_is_intact,
+)
 from secaware.schema.generation import (
     GenerationProvenance,
     GenerationRequestRecord,
@@ -89,7 +94,7 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
     code_id: str
     prompt_id: str
     condition: Literal["observed", "counterfactual", "confirm_arm"]
-    model_id: str
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
     seed_id: int
     code: str = Field(repr=False)
     hypothesis_id: str | None = None
@@ -120,6 +125,13 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
             return value
         if type(value) is str:
             return next((item for item in ArmRole if item.value == value), value)
+        return value
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        if not is_valid_model_id(value):
+            raise ValueError(_INVALID_GENERATED_CODE_MESSAGE)
         return value
 
     @field_validator("generation_request", mode="before")

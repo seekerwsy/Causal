@@ -15,6 +15,7 @@ from secaware.schema.experiments import (
     AssignmentExecutionStatus,
 )
 from secaware.schema.generation import (
+    GenerationProvenance,
     GenerationRequestRecord,
     ProviderResultEnvelope,
     provider_provenance_sha256,
@@ -34,9 +35,9 @@ CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256 = hashlib.sha256(
 ).hexdigest()
 _JSONL_STAGE_LIMIT_BYTES = 256 * 1024 * 1024
 _JSONL_SAFETY_MARGIN_BYTES = 16 * 1024 * 1024
-_CODE_RECORD_OVERHEAD_BYTES = 12 * 1024
 _EXECUTION_RECORD_OVERHEAD_BYTES = 4 * 1024
 _MAX_JSON_STRING_EXPANSION = 6
+_MAX_PROVIDER_PROVENANCE_BYTES = 4_096
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _PROVIDER_ERROR_CODES = frozenset(
     {
@@ -125,20 +126,70 @@ def _parameter_bytes(values: Mapping[str, object]) -> int:
 
 
 def _serialized_request_shape(request: GenerationRequestRecord) -> tuple[int, int]:
-    payload: dict[str, object] = {}
+    serialized = ""
     try:
-        payload = request.model_dump(mode="json", warnings=False)
-        serialized = json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        serialized = request.model_dump_json(warnings=False)
         return len(serialized.encode("utf-8")), len(serialized)
     finally:
         request = None  # type: ignore[assignment]
-        payload.clear()
+        serialized = ""
+
+
+def _maximum_legal_provider_provenance() -> GenerationProvenance:
+    baseline = GenerationProvenance(producer="x")
+    payload = baseline.model_dump(mode="json", warnings=False)
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    fixed_bytes = len(serialized.encode("utf-8")) - 1
+    controls, plain = divmod(_MAX_PROVIDER_PROVENANCE_BYTES - fixed_bytes, 6)
+    provenance = GenerationProvenance(producer="\x01" * controls + "a" * plain)
+    encoded = json.dumps(
+        provenance.model_dump(mode="json", warnings=False),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    if len(encoded) != _MAX_PROVIDER_PROVENANCE_BYTES:  # pragma: no cover - invariant
+        raise ValueError("maximum provider provenance projection is invalid")
+    return provenance
+
+
+def _canonical_code_line_base_chars(
+    request: GenerationRequestRecord,
+    config: GenerationConfig,
+) -> int:
+    provenance: GenerationProvenance | None = None
+    record: CanonicalGeneratedCodeRecord | None = None
+    skeleton: CanonicalGeneratedCodeRecord | None = None
+    serialized = ""
+    try:
+        provenance = _maximum_legal_provider_provenance()
+        record = canonical_generated_code_from_request(
+            request,
+            "x",
+            provenance,
+            provider_result_sha256="f" * 64,
+            provider_usage_sha256="f" * 64,
+            provider_runtime_sha256="f" * 64,
+            provider_policy_sha256="f" * 64,
+            provider_attempt_count=config.confirmation_max_attempts_per_request,
+        )
+        skeleton = record.model_copy(update={"code": ""})
+        serialized = skeleton.model_dump_json(warnings=False)
+        return len(serialized)
+    finally:
+        request = None  # type: ignore[assignment]
+        config = None  # type: ignore[assignment]
+        provenance = None
+        record = None
+        skeleton = None
+        serialized = ""
 
 
 def _preflight_resources(
@@ -147,6 +198,7 @@ def _preflight_resources(
     total_prompt_bytes = 0
     total_request_bytes = 0
     request_line_chars: list[int] = []
+    code_line_base_chars: list[int] = []
     try:
         for request in requests:
             prompt_bytes = len(request.prompt.encode("utf-8"))
@@ -154,6 +206,7 @@ def _preflight_resources(
             request_bytes, request_chars = _serialized_request_shape(request)
             total_request_bytes += request_bytes
             request_line_chars.append(request_chars)
+            code_line_base_chars.append(_canonical_code_line_base_chars(request, config))
             if request_chars + 1 >= CONFIRMATION_JSONL_MAX_LINE_CHARS:
                 raise ValueError
             if prompt_bytes > config.confirmation_max_prompt_bytes_per_request:
@@ -210,16 +263,12 @@ def _preflight_resources(
             config.confirmation_max_total_code_bytes,
         )
         request_ledger_bytes = total_request_bytes + len(requests)
-        code_ledger_bytes = (
-            total_request_bytes
-            + _MAX_JSON_STRING_EXPANSION * projected_code
-            + len(requests) * (_CODE_RECORD_OVERHEAD_BYTES + 1)
+        code_ledger_bytes = sum(code_line_base_chars) + (
+            _MAX_JSON_STRING_EXPANSION * projected_code + len(requests)
         )
         execution_ledger_bytes = len(requests) * (_EXECUTION_RECORD_OVERHEAD_BYTES + 1)
-        worst_code_line_chars = max(request_line_chars) + (
-            _MAX_JSON_STRING_EXPANSION * config.confirmation_max_code_bytes_per_result
-            + _CODE_RECORD_OVERHEAD_BYTES
-            + 1
+        worst_code_line_chars = max(code_line_base_chars) + (
+            _MAX_JSON_STRING_EXPANSION * config.confirmation_max_code_bytes_per_result + 1
         )
         if (
             worst_code_line_chars >= CONFIRMATION_JSONL_MAX_LINE_CHARS
@@ -252,6 +301,7 @@ def _preflight_resources(
         total_prompt_bytes = 0
         total_request_bytes = 0
         request_line_chars.clear()
+        code_line_base_chars.clear()
         request_bytes = 0
         request_chars = 0
         worst_code_line_chars = 0

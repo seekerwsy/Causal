@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.schema.common import MAX_MODEL_ID_CHARS
 from secaware.llm.structured_transport import (
     OpenAICompatibleStructuredTransport,
     StructuredLLMPolicy,
@@ -170,6 +171,7 @@ def test_canonical_request_mapping_iteration_failure_is_normalized_without_conte
         ("model_id", "model\x00id"),
         ("model_id", "model\nid"),
         ("model_id", "model\u202eid"),
+        ("model_id", "m" * (MAX_MODEL_ID_CHARS + 1)),
         ("temperature", float("nan")),
         ("top_p", 0.0),
         ("seed", True),
@@ -188,6 +190,11 @@ def test_structured_policy_rejects_invalid_runtime_values(field: str, value: obj
 @pytest.mark.parametrize("seed", [-(2**63), -1, 0, 2**63 - 1])
 def test_structured_policy_accepts_signed_64_bit_seed_boundaries(seed: int) -> None:
     assert _policy(seed=seed).seed == seed
+
+
+def test_structured_policy_accepts_shared_model_id_maximum() -> None:
+    model_id = "m" * MAX_MODEL_ID_CHARS
+    assert _policy(model_id=model_id).model_id == model_id
 
 
 def test_retry_resends_identical_locked_payload_and_uses_deterministic_backoff() -> None:

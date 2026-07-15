@@ -743,7 +743,20 @@ def _code_sha256(value: object) -> str:
     return canonical_sha256(_stable_code_payload(code))
 
 
-def _runtime_callable_descriptor(value: object) -> dict[str, str]:
+def _stable_class_closure_value(value: object) -> object:
+    if callable(value):
+        return {
+            "callable_module": str(getattr(value, "__module__", type(value).__module__)),
+            "callable_qualname": str(getattr(value, "__qualname__", type(value).__qualname__)),
+        }
+    return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+
+def _callable_behavior_payload(
+    value: object,
+    *,
+    class_member: bool = False,
+) -> dict[str, object]:
     partial_payload: object = None
     target = value
     if isinstance(value, functools.partial):
@@ -764,24 +777,116 @@ def _runtime_callable_descriptor(value: object) -> dict[str, str]:
         except ValueError:
             closure_payload.append({"empty": True})
         else:
-            closure_payload.append(_safe_fingerprint_value(contents))
+            closure_payload.append(
+                _stable_class_closure_value(contents)
+                if class_member
+                else _safe_fingerprint_value(contents)
+            )
             contents = None
-    callable_class = type(value)
-    class_payload = {
-        "module": callable_class.__module__,
-        "qualname": callable_class.__qualname__,
-        "source_sha256": _source_sha256(callable_class),
-        "call_code_sha256": _code_sha256(getattr(callable_class, "__call__", None)),
-    }
-    descriptor = {
+    return {
         "kind": "partial" if isinstance(value, functools.partial) else type(value).__name__,
-        "module": str(getattr(value, "__module__", callable_class.__module__)),
-        "qualname": str(getattr(value, "__qualname__", callable_class.__qualname__)),
+        "module": str(getattr(value, "__module__", type(value).__module__)),
+        "qualname": str(getattr(value, "__qualname__", type(value).__qualname__)),
         "source_sha256": _source_sha256(target),
         "code_sha256": _code_sha256(target),
-        "defaults_sha256": canonical_sha256(defaults_payload),
-        "closure_sha256": canonical_sha256(closure_payload),
-        "partial_sha256": canonical_sha256(partial_payload),
+        "defaults": defaults_payload,
+        "closure": closure_payload,
+        "partial": partial_payload,
+    }
+
+
+def _class_member_payload(
+    name: str,
+    value: object,
+    *,
+    active: tuple[type, ...],
+) -> dict[str, object] | None:
+    if isinstance(value, staticmethod):
+        return {
+            "name": name,
+            "kind": "staticmethod",
+            "callable": _callable_behavior_payload(value.__func__, class_member=True),
+        }
+    if isinstance(value, classmethod):
+        return {
+            "name": name,
+            "kind": "classmethod",
+            "callable": _callable_behavior_payload(value.__func__, class_member=True),
+        }
+    if isinstance(value, property):
+        return {
+            "name": name,
+            "kind": "property",
+            "accessors": {
+                accessor_name: (
+                    _callable_behavior_payload(accessor, class_member=True)
+                    if accessor is not None
+                    else None
+                )
+                for accessor_name, accessor in (
+                    ("get", value.fget),
+                    ("set", value.fset),
+                    ("delete", value.fdel),
+                )
+            },
+        }
+    if inspect.isclass(value):
+        return {
+            "name": name,
+            "kind": "class",
+            "class": _stable_class_payload(value, active=active),
+        }
+    if inspect.isroutine(value) or callable(value):
+        return {
+            "name": name,
+            "kind": "callable",
+            "callable": _callable_behavior_payload(value, class_member=True),
+        }
+    return None
+
+
+def _stable_class_payload(
+    value: type,
+    *,
+    active: tuple[type, ...] = (),
+) -> dict[str, object]:
+    identity = {"module": value.__module__, "qualname": value.__qualname__}
+    if value in active:
+        return {**identity, "recursive": True}
+    members: list[dict[str, object]] = []
+    next_active = (*active, value)
+    for name, member in sorted(vars(value).items()):
+        payload = _class_member_payload(name, member, active=next_active)
+        if payload is not None:
+            members.append(payload)
+    return {
+        **identity,
+        "source_sha256": _source_sha256(value),
+        "members": members,
+    }
+
+
+def _runtime_callable_descriptor(value: object) -> dict[str, str]:
+    payload = _callable_behavior_payload(value)
+    callable_class = value if inspect.isclass(value) else type(value)
+    if inspect.isclass(value) or (callable(value) and not inspect.isroutine(value)):
+        class_payload = _stable_class_payload(callable_class)
+    else:
+        class_payload = {
+            "module": callable_class.__module__,
+            "qualname": callable_class.__qualname__,
+            "source_sha256": _source_sha256(callable_class),
+            "call_code_sha256": _code_sha256(getattr(callable_class, "__call__", None)),
+        }
+    descriptor = {
+        "kind": str(payload["kind"]),
+        "module": str(payload["module"]),
+        "qualname": str(payload["qualname"]),
+        "source_sha256": str(payload["source_sha256"]),
+        "code_sha256": str(payload["code_sha256"]),
+        "defaults_sha256": canonical_sha256(payload["defaults"]),
+        "closure_sha256": canonical_sha256(payload["closure"]),
+        "partial_sha256": canonical_sha256(payload["partial"]),
         "callable_class_sha256": canonical_sha256(class_payload),
     }
     descriptor["fingerprint_sha256"] = canonical_sha256(descriptor)
@@ -822,11 +927,11 @@ def confirmation_runtime_callable_contract() -> dict[str, dict[str, str]]:
     }
 
 
-def confirmation_output_policy_contract() -> dict[str, int]:
+def confirmation_output_policy_contract() -> dict[str, int | str]:
     return {
         "jsonl_max_line_chars": CONFIRMATION_JSONL_MAX_LINE_CHARS,
         "jsonl_max_total_chars": CONFIRMATION_JSONL_MAX_TOTAL_CHARS,
-        "code_record_overhead_chars": 12 * 1024,
+        "canonical_code_projection_version": "empty-skeleton-v1",
         "execution_record_overhead_chars": 4 * 1024,
         "json_string_max_expansion": 6,
         "provider_provenance_max_bytes": 4_096,
@@ -1014,6 +1119,7 @@ def run_confirmation_generation_stage(
         effective_provider: object = None
         result_requests: tuple[GenerationRequestRecord, ...] = ()
         try:
+            verify_runtime_bundle()
             effective_provider = runtime_callables["provider.from_frozen_config"](
                 effective_config,
                 openai_factory=runtime_callables["provider.create_openai_compatible_provider"],
@@ -1022,6 +1128,7 @@ def run_confirmation_generation_stage(
                 envelope_factory=runtime_callables["provider.envelope_factory"],
                 result_type=runtime_callables["provider.result_type"],
             )
+            verify_runtime_bundle()
             executions, codes = runtime_callables["execution.execute_confirmation_requests"](
                 requests,
                 effective_provider,
