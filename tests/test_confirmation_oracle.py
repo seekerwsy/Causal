@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import shutil
 import threading
 import traceback
+import inspect
 
 import pytest
 from pydantic import ValidationError
@@ -13,10 +15,12 @@ from secaware.generation.result_importer import canonical_generated_code_from_re
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.io.transaction import ArtifactTransaction, TransactionStateError
-from secaware.oracle.aggregator import run_oracle_batch
+from secaware.oracle import aggregator as oracle_aggregator
+from secaware.oracle.aggregator import OracleCodeInput, run_oracle_batch, run_oracle_code_batch
 from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.runner import AnalyzerProcessResult
-from secaware.pipeline.manifest import read_stage_manifest
+from secaware.pipeline.artifact import sha256_path
+from secaware.pipeline.manifest import read_stage_manifest, write_stage_manifest
 import secaware.pipeline.stage_contracts as stage_contracts
 from secaware.cli import app as pipeline_app
 from typer.testing import CliRunner
@@ -35,6 +39,7 @@ from secaware.schema.experiments import (
     AssignmentExecutionRecord,
     AssignmentExecutionStatus,
     AssignmentRecord,
+    RandomizationManifestRecord,
 )
 from secaware.schema.generation import provider_provenance_sha256
 from secaware.schema.records import CanonicalGeneratedCodeRecord
@@ -54,13 +59,26 @@ _POLICY_LOCK = (
     / "python"
     / "policy.lock.json"
 )
+_ACTIVE_STAGE_RUNNER = None
+
+
+def _valid_runtime():
+    return object()
+
+
+_ACTIVE_RUNTIME_VALIDATOR = _valid_runtime
+
+
+def _controlled_analyzer_runtime_factory(_config):
+    return confirmation_oracle_module._AnalyzerRuntime(
+        runner=_ACTIVE_STAGE_RUNNER,
+        validator=_ACTIVE_RUNTIME_VALIDATOR,
+    )
 
 
 def _confirmation_code(*, task_id: str = "task-confirmation"):
     assignment, variant = _assignment_and_variant(task_id=task_id)
-    request = plan_confirmation_requests(
-        (assignment,), (variant,), _generation_config()
-    )[0]
+    request = plan_confirmation_requests((assignment,), (variant,), _generation_config())[0]
     code = canonical_generated_code_from_request(
         request,
         "def answer():\n    return 42\n",
@@ -117,9 +135,7 @@ def _execution_for(assignment: AssignmentRecord, code: CanonicalGeneratedCodeRec
         request_id=code.request_id,
         status=AssignmentExecutionStatus.GENERATED,
         provider_result_sha256=code.provider_result_sha256,
-        provider_provenance_sha256=provider_provenance_sha256(
-            code.generation_provenance
-        ),
+        provider_provenance_sha256=provider_provenance_sha256(code.generation_provenance),
         provider_runtime_sha256=code.provider_runtime_sha256,
         provider_policy_sha256=code.provider_policy_sha256,
         usage_sha256=code.provider_usage_sha256,
@@ -131,14 +147,10 @@ def _execution_for(assignment: AssignmentRecord, code: CanonicalGeneratedCodeRec
 
 
 def test_confirmation_oracle_preserves_all_assignment_coordinates(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object()
-    )
+    monkeypatch.setattr("secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object())
     assignment, _variant, code = _confirmation_code()
 
-    record = run_oracle_batch(
-        [code], load_policy_bundle(_POLICY_LOCK), runner=FakeRunner()
-    )[0]
+    record = run_oracle_batch([code], load_policy_bundle(_POLICY_LOCK), runner=FakeRunner())[0]
 
     assert record.schema_version == "1.2"
     assert record.condition == "confirm_arm"
@@ -204,9 +216,7 @@ def test_oracle_schema_discriminates_observed_and_confirmation_records() -> None
         ("seed_id", 999),
     ],
 )
-def test_confirmation_oracle_cannot_drift_from_canonical_code(
-    field: str, value: object
-) -> None:
+def test_confirmation_oracle_cannot_drift_from_canonical_code(field: str, value: object) -> None:
     payload = _confirmation_oracle_payload()
     payload[field] = value
     # A standalone record can only establish local shape. The stage relation
@@ -220,9 +230,7 @@ def test_confirmation_oracle_cannot_drift_from_canonical_code(
             validate_confirmation_oracle_coverage,
         )
 
-        validate_confirmation_oracle_coverage(
-            (assignment,), (execution,), (code,), (record,)
-        )
+        validate_confirmation_oracle_coverage((assignment,), (execution,), (code,), (record,))
 
 
 def test_confirmation_oracle_stage_surface_exists() -> None:
@@ -231,6 +239,35 @@ def test_confirmation_oracle_stage_surface_exists() -> None:
     )
 
     assert callable(validate_confirmation_oracle_coverage)
+
+
+def test_task7_uses_stable_task5_and_task6_public_bundle_validators() -> None:
+    import secaware.pipeline.stages.randomization as randomization_stage
+    import secaware.pipeline.stages.confirmation_generation as generation_stage
+
+    assert callable(randomization_stage.validate_randomization_artifact_bundle)
+    assert callable(generation_stage.validate_confirmation_generation_bundle)
+
+
+def test_confirmation_oracle_public_surface_has_no_arbitrary_runner_injection() -> None:
+    parameters = inspect.signature(run_confirmation_oracle_stage).parameters
+    assert "runner" not in parameters
+    assert "runtime_validator" not in parameters
+
+
+def test_oracle_code_input_is_blind_to_experimental_coordinates() -> None:
+    from secaware.oracle.aggregator import OracleCodeInput
+
+    assert set(inspect.signature(OracleCodeInput).parameters) == {
+        "request_id",
+        "code_id",
+        "code_sha256",
+        "prompt_id",
+        "model_id",
+        "seed_id",
+        "language",
+        "code",
+    }
 
 
 def test_confirmation_oracle_fingerprint_binds_every_direct_contract() -> None:
@@ -252,9 +289,7 @@ def test_confirmation_oracle_fingerprint_binds_every_direct_contract() -> None:
         "runtime_callable_bundle",
         "output_policy",
     } <= set(contract)
-    baseline = stage_contracts.confirmation_oracle_stage_contract_sha256(
-        "run-oracle-confirmation"
-    )
+    baseline = stage_contracts.confirmation_oracle_stage_contract_sha256("run-oracle-confirmation")
     original = stage_contracts._schema_sha256
 
     def drift(model: type) -> str:
@@ -265,9 +300,7 @@ def test_confirmation_oracle_fingerprint_binds_every_direct_contract() -> None:
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(stage_contracts, "_schema_sha256", drift)
         assert (
-            stage_contracts.confirmation_oracle_stage_contract_sha256(
-                "run-oracle-confirmation"
-            )
+            stage_contracts.confirmation_oracle_stage_contract_sha256("run-oracle-confirmation")
             != baseline
         )
 
@@ -276,9 +309,9 @@ def test_run_oracle_confirmation_cli_maps_to_confirm_arm_stage(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = AppConfig.model_validate(
-        __import__("secaware.config", fromlist=["load_config"]).load_config(
-            "configs/demo.yaml"
-        ).model_dump(mode="json")
+        __import__("secaware.config", fromlist=["load_config"])
+        .load_config("configs/demo.yaml")
+        .model_dump(mode="json")
     )
     store = RunStore(config)
     called: list[tuple[AppConfig, RunStore, bool]] = []
@@ -321,14 +354,11 @@ def test_confirmation_oracle_preserves_fatal_identity_before_artifact_access(
     def fatal() -> object:
         raise control
 
+    global _ACTIVE_STAGE_RUNNER, _ACTIVE_RUNTIME_VALIDATOR
+    _ACTIVE_STAGE_RUNNER = _StageRunner()
+    _ACTIVE_RUNTIME_VALIDATOR = fatal
     with pytest.raises(type(control)) as captured:
-        run_confirmation_oracle_stage(
-            config,
-            store,
-            force=False,
-            runner=_StageRunner(),
-            runtime_validator=fatal,
-        )
+        run_confirmation_oracle_stage(config, store, force=False)
 
     assert captured.value is control
 
@@ -336,9 +366,7 @@ def test_confirmation_oracle_preserves_fatal_identity_before_artifact_access(
 def test_confirmation_oracle_aggregator_preserves_memoryerror_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object()
-    )
+    monkeypatch.setattr("secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object())
     _assignment, _variant, code = _confirmation_code()
     control = MemoryError("analyzer-memory")
 
@@ -346,10 +374,90 @@ def test_confirmation_oracle_aggregator_preserves_memoryerror_identity(
         raise control
 
     with pytest.raises(MemoryError) as captured:
-        run_oracle_batch(
-            (code,), load_policy_bundle(_POLICY_LOCK), runner=fatal_runner
-        )
+        run_oracle_batch((code,), load_policy_bundle(_POLICY_LOCK), runner=fatal_runner)
     assert captured.value is control
+
+
+def _secaware_frame_locals(error: BaseException) -> str:
+    retained: list[str] = []
+    current = error.__traceback__
+    while current is not None:
+        if current.tb_frame.f_globals.get("__name__", "").startswith("secaware"):
+            retained.append(repr(dict(current.tb_frame.f_locals)))
+        current = current.tb_next
+    return "\n".join(retained)
+
+
+def _blind_code_input() -> tuple[AssignmentRecord, CanonicalGeneratedCodeRecord, OracleCodeInput]:
+    assignment, _variant, code = _confirmation_code(task_id="task-blind-oracle")
+    return assignment, code, OracleCodeInput.from_canonical(code)
+
+
+def _run_blind_batch(code_input: OracleCodeInput, runner):
+    return run_oracle_code_batch(
+        (code_input,),
+        load_policy_bundle(_POLICY_LOCK),
+        semgrep_executable="semgrep",
+        bandit_executable="bandit",
+        timeout_seconds=120.0,
+        max_stdout_bytes=64 * 1024 * 1024,
+        max_stderr_bytes=4 * 1024 * 1024,
+        runner=runner,
+        runtime_validator=_valid_runtime,
+    )
+
+
+def test_oracle_runner_observes_only_code_language_and_policy_coordinates() -> None:
+    assignment, code, code_input = _blind_code_input()
+    observed: list[tuple[tuple[str, ...], Path]] = []
+    fake = FakeRunner()
+
+    def spy(argv, **kwargs):
+        observed.append((tuple(argv), kwargs["cwd"]))
+        return fake(argv, **kwargs)
+
+    analyses = _run_blind_batch(code_input, spy)
+    rendered = repr(observed)
+    assert len(analyses) == 1
+    assert assignment.assignment_id not in rendered
+    assert assignment.variant_id not in rendered
+    assert assignment.arm_role.value not in rendered
+    assert code.generation_request.prompt not in rendered
+
+
+def test_blind_oracle_ordinary_failure_releases_sensitive_frame_locals() -> None:
+    assignment, code, code_input = _blind_code_input()
+
+    def fail(*_args, **_kwargs):
+        raise OSError("private failure")
+
+    with pytest.raises(SecAwareError) as captured:
+        _run_blind_batch(code_input, fail)
+    retained = _secaware_frame_locals(captured.value)
+    assert code.code not in retained
+    assert code.generation_request.prompt not in retained
+    assert assignment.assignment_id not in retained
+
+
+@pytest.mark.parametrize(
+    "control",
+    (MemoryError("memory"), KeyboardInterrupt("keyboard"), SystemExit("exit")),
+)
+def test_blind_oracle_fatal_failure_releases_sensitive_frame_locals(
+    control: BaseException,
+) -> None:
+    assignment, code, code_input = _blind_code_input()
+
+    def fail(*_args, **_kwargs):
+        raise control
+
+    with pytest.raises(type(control)) as captured:
+        _run_blind_batch(code_input, fail)
+    assert captured.value is control
+    retained = _secaware_frame_locals(captured.value)
+    assert code.code not in retained
+    assert code.generation_request.prompt not in retained
+    assert assignment.assignment_id not in retained
 
 
 class _StageRunner:
@@ -416,11 +524,19 @@ class _StageRunner:
         )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _install_controlled_analyzer_runtime_factory():
+    original = confirmation_oracle_module._ANALYZER_RUNTIME_FACTORY
+    confirmation_oracle_module._ANALYZER_RUNTIME_FACTORY = _controlled_analyzer_runtime_factory
+    try:
+        yield
+    finally:
+        confirmation_oracle_module._ANALYZER_RUNTIME_FACTORY = original
+
+
 @pytest.fixture(scope="module")
 def _generated_confirmation_store(tmp_path_factory: pytest.TempPathFactory):
-    config, store = _stage_store(
-        tmp_path_factory.mktemp("confirmation-oracle-base"), task_count=20
-    )
+    config, store = _stage_store(tmp_path_factory.mktemp("confirmation-oracle-base"), task_count=20)
     run_prompt_variant_freeze_stage(config, store, force=False)
     run_confirmation_randomization_stage(config, store, force=False)
     run_confirmation_generation_stage(config, store, force=False)
@@ -445,14 +561,56 @@ def _fresh_generated_store(root: Path) -> tuple[AppConfig, RunStore]:
     return config, store
 
 
-def _stage_run(config: AppConfig, store: RunStore, runner: _StageRunner, *, force=False):
-    return run_confirmation_oracle_stage(
-        config,
-        store,
-        force=force,
-        runner=runner,
-        runtime_validator=lambda: object(),
+def _rewrite_producer_outputs(
+    store: RunStore,
+    stage: str,
+    replacements: dict[str, tuple[object, ...]],
+) -> None:
+    manifest_path = store.path(".stages", f"{stage}.json")
+    manifest = read_stage_manifest(manifest_path)
+    output_sha256 = dict(manifest.output_sha256)
+    for relative, records in replacements.items():
+        path = store.root / relative
+        payload = "".join(
+            json.dumps(
+                record.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+            for record in records
+        )
+        path.write_text(payload, encoding="utf-8", newline="\n")
+        output_sha256[relative] = sha256_path(path)
+    write_stage_manifest(
+        manifest_path,
+        type(manifest).model_validate(
+            {**manifest.model_dump(mode="json"), "output_sha256": output_sha256}
+        ),
     )
+
+
+def _rewrite_raw_producer_output(store: RunStore, stage: str, relative: str, payload: str) -> None:
+    manifest_path = store.path(".stages", f"{stage}.json")
+    manifest = read_stage_manifest(manifest_path)
+    path = store.root / relative
+    path.write_text(payload, encoding="utf-8", newline="\n")
+    output_sha256 = dict(manifest.output_sha256)
+    output_sha256[relative] = sha256_path(path)
+    write_stage_manifest(
+        manifest_path,
+        type(manifest).model_validate(
+            {**manifest.model_dump(mode="json"), "output_sha256": output_sha256}
+        ),
+    )
+
+
+def _stage_run(config: AppConfig, store: RunStore, runner: _StageRunner, *, force=False):
+    global _ACTIVE_STAGE_RUNNER, _ACTIVE_RUNTIME_VALIDATOR
+    _ACTIVE_STAGE_RUNNER = runner
+    _ACTIVE_RUNTIME_VALIDATOR = _valid_runtime
+    return run_confirmation_oracle_stage(config, store, force=force)
 
 
 def test_confirmation_oracle_stage_publishes_exact_generated_subset(
@@ -477,7 +635,9 @@ def test_confirmation_oracle_stage_publishes_exact_generated_subset(
     )
     codes = read_jsonl(
         store.path("generation", "confirmation_code.jsonl"),
-        __import__("secaware.schema.records", fromlist=["CanonicalGeneratedCodeRecord"]).CanonicalGeneratedCodeRecord,
+        __import__(
+            "secaware.schema.records", fromlist=["CanonicalGeneratedCodeRecord"]
+        ).CanonicalGeneratedCodeRecord,
         required=True,
         allow_empty=True,
     )
@@ -501,23 +661,17 @@ def test_confirmation_oracle_stage_publishes_exact_generated_subset(
 def test_confirmation_oracle_coverage_rejects_missing_extra_or_duplicate(
     monkeypatch: pytest.MonkeyPatch, mutation: str
 ) -> None:
-    monkeypatch.setattr(
-        "secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object()
-    )
+    monkeypatch.setattr("secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object())
     assignment, _variant, code = _confirmation_code()
     execution = _execution_for(assignment, code)
-    oracle = run_oracle_batch(
-        (code,), load_policy_bundle(_POLICY_LOCK), runner=FakeRunner()
-    )[0]
+    oracle = run_oracle_batch((code,), load_policy_bundle(_POLICY_LOCK), runner=FakeRunner())[0]
     oracles = () if mutation == "missing" else (oracle, oracle)
     if mutation == "extra":
         other_payload = oracle.model_dump(mode="python")
         other_payload["request_id"] = "req_" + "f" * 64
         oracles = (oracle, OracleRecord.model_validate(other_payload))
     with pytest.raises(SecAwareError):
-        validate_confirmation_oracle_coverage(
-            (assignment,), (execution,), (code,), oracles
-        )
+        validate_confirmation_oracle_coverage((assignment,), (execution,), (code,), oracles)
 
 
 def test_terminal_no_code_assignment_has_no_oracle() -> None:
@@ -555,9 +709,7 @@ def test_confirmation_generated_subset_drift_is_rejected_pre_analyzer(
                 request_id=code.request_id,
                 status=AssignmentExecutionStatus.GENERATED,
                 provider_result_sha256=code.provider_result_sha256,
-                provider_provenance_sha256=provider_provenance_sha256(
-                    code.generation_provenance
-                ),
+                provider_provenance_sha256=provider_provenance_sha256(code.generation_provenance),
                 provider_runtime_sha256=code.provider_runtime_sha256,
                 provider_policy_sha256=code.provider_policy_sha256,
                 usage_sha256=code.provider_usage_sha256,
@@ -568,9 +720,165 @@ def test_confirmation_generated_subset_drift_is_rejected_pre_analyzer(
             ),
         )
     with pytest.raises(SecAwareError):
-        confirmation_oracle_module._validate_generated_code_coverage(
-            (assignment,), executions, (code,)
+        validate_confirmation_oracle_coverage((assignment,), executions, (code,), ())
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "assignment_ids",
+        "assignments_sha256",
+        "randomization_plan_sha256",
+        "rng_version",
+        "global_seed",
+        "randomization_config",
+    ),
+)
+def test_confirmation_oracle_rejects_randomization_manifest_drift_pre_analyzer(
+    _generated_confirmation_store, tmp_path: Path, drift: str
+) -> None:
+    config, store = _copied_store(_generated_confirmation_store, tmp_path)
+    manifests = read_jsonl(
+        store.path("interventions", "randomization_manifest.jsonl"),
+        RandomizationManifestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    manifest = manifests[0]
+    if drift == "randomization_config":
+        payload = config.model_dump(mode="json")
+        payload["randomization"]["min_independent_tasks_per_semantic_protocol"] += 1
+        config = AppConfig.model_validate(payload)
+        store = RunStore(config)
+    elif drift == "rng_version":
+        payload = manifest.model_dump(mode="json")
+        payload["rng_version"] = "future-rng"
+        _rewrite_raw_producer_output(
+            store,
+            "randomize-confirmation",
+            "interventions/randomization_manifest.jsonl",
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
         )
+    else:
+        content = manifest.model_dump(mode="python", exclude={"schema_version", "manifest_id"})
+        if drift == "assignment_ids":
+            content["assignment_ids"] = tuple(reversed(content["assignment_ids"]))
+        elif drift == "assignments_sha256":
+            content["assignments_sha256"] = "f" * 64
+        elif drift == "randomization_plan_sha256":
+            content["randomization_plan_sha256"] = "f" * 64
+        else:
+            content["global_seed"] += 1
+        replacement = RandomizationManifestRecord.from_content(**content)
+        _rewrite_producer_outputs(
+            store,
+            "randomize-confirmation",
+            {"interventions/randomization_manifest.jsonl": (replacement,)},
+        )
+    runner = _StageRunner()
+    with pytest.raises(SecAwareError):
+        _stage_run(config, store, runner, force=True)
+    assert runner.analysis_calls == 0
+
+
+def test_confirmation_oracle_rejects_full_task4_provenance_mutation_pre_analyzer(
+    _generated_confirmation_store, tmp_path: Path
+) -> None:
+    config, store = _copied_store(_generated_confirmation_store, tmp_path)
+    targets = read_jsonl(
+        store.path("interventions", "target_specs.jsonl"),
+        __import__("secaware.schema.experiments", fromlist=["TargetSpecRecord"]).TargetSpecRecord,
+        required=True,
+        allow_empty=False,
+    )
+    _rewrite_producer_outputs(
+        store,
+        "build-confirmation-variants",
+        {"interventions/target_specs.jsonl": (*targets, targets[0])},
+    )
+    runner = _StageRunner()
+    with pytest.raises(SecAwareError):
+        _stage_run(config, store, runner, force=True)
+    assert runner.analysis_calls == 0
+
+
+@pytest.mark.parametrize("drift", ("standalone_request", "nested_request", "terminal_request"))
+def test_confirmation_oracle_rejects_request_closure_drift_pre_analyzer(
+    _generated_confirmation_store, tmp_path: Path, drift: str
+) -> None:
+    config, store = _copied_store(_generated_confirmation_store, tmp_path)
+    requests = list(
+        read_jsonl(
+            store.path("generation", "confirmation_requests.jsonl"),
+            __import__(
+                "secaware.schema.generation", fromlist=["GenerationRequestRecord"]
+            ).GenerationRequestRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    executions = list(
+        read_jsonl(
+            store.path("generation", "confirmation_execution.jsonl"),
+            AssignmentExecutionRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    codes = list(
+        read_jsonl(
+            store.path("generation", "confirmation_code.jsonl"),
+            CanonicalGeneratedCodeRecord,
+            required=True,
+            allow_empty=True,
+        )
+    )
+    replacements: dict[str, tuple[object, ...]] = {}
+    if drift == "standalone_request":
+        replacements["generation/confirmation_requests.jsonl"] = tuple(requests[1:])
+    elif drift == "nested_request":
+        original = codes[0]
+        other = next(
+            request for request in requests if request.assignment_id != original.assignment_id
+        )
+        codes[0] = canonical_generated_code_from_request(
+            other,
+            original.code,
+            original.generation_provenance,
+            provider_result_sha256=original.provider_result_sha256,
+            provider_usage_sha256=original.provider_usage_sha256,
+            provider_runtime_sha256=original.provider_runtime_sha256,
+            provider_policy_sha256=original.provider_policy_sha256,
+            provider_attempt_count=original.provider_attempt_count,
+        )
+        replacements["generation/confirmation_code.jsonl"] = tuple(codes)
+    else:
+        original = executions[0]
+        other_request = next(
+            request for request in requests if request.assignment_id != original.assignment_id
+        )
+        executions[0] = AssignmentExecutionRecord.from_content(
+            assignment_id=original.assignment_id,
+            request_id=other_request.request_id,
+            status=AssignmentExecutionStatus.TERMINAL_NO_CODE,
+            provider_result_sha256=original.provider_result_sha256,
+            provider_provenance_sha256=original.provider_provenance_sha256,
+            provider_runtime_sha256=original.provider_runtime_sha256,
+            provider_policy_sha256=original.provider_policy_sha256,
+            usage_sha256=original.usage_sha256,
+            attempt_count=original.attempt_count,
+            code_id=None,
+            code_sha256=None,
+            terminal_reason="content_filter",
+        )
+        codes = [item for item in codes if item.assignment_id != original.assignment_id]
+        replacements["generation/confirmation_execution.jsonl"] = tuple(executions)
+        replacements["generation/confirmation_code.jsonl"] = tuple(codes)
+    _rewrite_producer_outputs(store, "generate-confirmation", replacements)
+    runner = _StageRunner()
+    with pytest.raises(SecAwareError):
+        _stage_run(config, store, runner, force=True)
+    assert runner.analysis_calls == 0
 
 
 def test_confirmation_oracle_stage_fails_closed_on_missing_tool_or_analyzer(
@@ -735,6 +1043,88 @@ def test_confirmation_oracle_tool_drift_fails_before_analysis_and_preserves_comm
     assert _oracle_bytes(store) == committed
 
 
+def test_confirmation_oracle_adapter_drift_aborts_and_preserves_commit(
+    _generated_confirmation_store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+
+    def drift_on_first_analysis(call: int) -> None:
+        if call == 1:
+            monkeypatch.setattr(
+                oracle_aggregator,
+                "parse_semgrep_report",
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("drift")),
+            )
+
+    runner = _StageRunner(on_analysis=drift_on_first_analysis)
+    with pytest.raises(SecAwareError) as captured:
+        _stage_run(config, store, runner, force=True)
+    assert captured.value.code in {ErrorCode.CONTRACT, ErrorCode.ANALYZER_FAILED}
+    assert runner.analysis_calls == 1
+    assert _oracle_bytes(store) == committed
+
+
+def test_confirmation_oracle_runner_method_drift_aborts_and_preserves_commit(
+    _generated_confirmation_store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    original = _StageRunner.__call__
+
+    def drift_on_first_analysis(call: int) -> None:
+        if call == 1:
+
+            def changed(self, *args, **kwargs):
+                return original(self, *args, **kwargs)
+
+            monkeypatch.setattr(_StageRunner, "__call__", changed)
+
+    runner = _StageRunner(on_analysis=drift_on_first_analysis)
+    with pytest.raises(SecAwareError) as captured:
+        _stage_run(config, store, runner, force=True)
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert _oracle_bytes(store) == committed
+
+
+def test_confirmation_oracle_pre_capture_adapter_drift_invalidates_skip(
+    _generated_confirmation_store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, store = _generated_confirmation_store
+    _committed_oracle_bytes(config, store)
+    original = oracle_aggregator.parse_semgrep_report
+
+    def wrapped(*args, **kwargs):
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(oracle_aggregator, "parse_semgrep_report", wrapped)
+    runner = _StageRunner()
+    _stage_run(config, store, runner, force=False)
+    assert runner.analysis_calls == 2
+
+
+@pytest.mark.parametrize(
+    "stage_name",
+    (
+        "IMPORT-FUNCTIONAL-OUTCOMES",
+        "analyze-jci",
+        "reporting-secondary",
+        "effects",
+    ),
+)
+def test_confirmation_oracle_rejects_manifest_only_future_stage_casefold_exact_or_prefix(
+    _generated_confirmation_store, stage_name: str
+) -> None:
+    _config, store = _generated_confirmation_store
+    future = store.path(".stages", f"{stage_name}.json")
+    future.write_text("{}\n", encoding="utf-8")
+    try:
+        with pytest.raises(SecAwareError):
+            confirmation_oracle_module._guard_no_future_artifacts(store)
+    finally:
+        future.unlink(missing_ok=True)
+
+
 def test_confirmation_oracle_contract_drift_invalidates_skip(
     _generated_confirmation_store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -754,18 +1144,14 @@ def test_confirmation_oracle_contract_drift_invalidates_skip(
 
 
 def test_confirmation_oracle_aggregation_is_order_invariant(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object()
-    )
+    monkeypatch.setattr("secaware.oracle.aggregator.validate_analyzer_runtime", lambda: object())
     first = _confirmation_code(task_id="task-confirmation-a")[2]
     second = _confirmation_code(task_id="task-confirmation-b")[2]
     policy = load_policy_bundle(_POLICY_LOCK)
     forward = run_oracle_batch((first, second), policy, runner=FakeRunner())
     reverse = run_oracle_batch((second, first), policy, runner=FakeRunner())
     assert forward == reverse
-    assert [item.request_id for item in forward] == sorted(
-        (first.request_id, second.request_id)
-    )
+    assert [item.request_id for item in forward] == sorted((first.request_id, second.request_id))
 
 
 def test_confirmation_oracle_holds_all_producer_leases(

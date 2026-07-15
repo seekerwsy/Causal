@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 import hashlib
-import inspect
 import os
 from pathlib import Path
 import stat
@@ -17,10 +16,15 @@ from pydantic import BaseModel
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.run_store import RunStore
-from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
+from secaware.oracle import aggregator as oracle_aggregator
+from secaware.oracle.aggregator import (
+    AnalyzerRunner,
+    OracleCodeAnalysis,
+    OracleCodeInput,
+)
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.oracle.strict_json import load_strict_json_bytes
-from secaware.pipeline.bounded_traversal import iter_bounded_tree
+from secaware.pipeline.bounded_traversal import BoundedTraversalError, iter_bounded_tree
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.pipeline.jsonl_stage import (
     JsonlOutputSpec,
@@ -28,9 +32,19 @@ from secaware.pipeline.jsonl_stage import (
 )
 from secaware.pipeline.manifest import StageManifest
 from secaware.pipeline.preflight import run_oracle_preflight
+from secaware.pipeline.stages import confirmation_generation as generation_stage
+from secaware.pipeline.stages import randomization as randomization_stage
 from secaware.pipeline.stages.confirmation_generation import CONFIRMATION_GENERATION_OUTPUTS
+from secaware.pipeline.stages.confirmation_generation import (
+    _runtime_callable_descriptor,
+    validate_confirmation_generation_bundle,
+)
+from secaware.pipeline.stages.fci_discovery import FCI_DISCOVERY_OUTPUTS
 from secaware.pipeline.stages.prompt_variants import PROMPT_VARIANT_OUTPUTS
-from secaware.pipeline.stages.randomization import RANDOMIZATION_OUTPUTS
+from secaware.pipeline.stages.randomization import (
+    RANDOMIZATION_OUTPUTS,
+    validate_randomization_artifact_bundle,
+)
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.experiments import (
     AssignmentExecutionRecord,
@@ -39,9 +53,12 @@ from secaware.schema.experiments import (
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
     PromptVariantRecord,
+    PreRandomizationExclusionRecord,
+    RandomizationManifestRecord,
     TargetInstanceRecord,
     TargetSpecRecord,
 )
+from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.generation import (
     GenerationRequestRecord,
     provider_provenance_sha256,
@@ -59,16 +76,27 @@ _MAX_COMBINED_INPUT_BYTES = 768 * 1024 * 1024
 _MAX_LINE_BYTES = 8 * 1024 * 1024
 _MAX_TOTAL_CODE_BYTES = 1_000_000_000
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
-_FUTURE_DIRS = frozenset({"analysis", "effects", "reports", "report", "jci", "rfci"})
-_FUTURE_STAGE_PREFIXES = (
-    "analyze-",
-    "estimate-",
-    "effects-",
-    "jci-",
-    "report-",
-    "reporting-",
-    "rfci-",
+_MAX_TRAVERSAL_ENTRIES = 100_000
+_MAX_TRAVERSAL_DEPTH = 32
+_MAX_RELATIVE_PATH_CHARS = 4096
+_MAX_NAME_CHARS = 255
+_FUTURE_DIRS = frozenset({"analysis", "effects", "reports", "report", "jci", "rfci", "mechanisms"})
+_FUTURE_STAGE_NAMES = frozenset(
+    {
+        "import-functional-outcomes",
+        "confirm",
+        "analyze-jci",
+        "analyze-rfci",
+        "effects",
+        "estimate-effects",
+        "mechanisms",
+        "report",
+        "reporting",
+        "jci",
+        "rfci",
+    }
 )
+_FUTURE_STAGE_PREFIXES = tuple(name + "-" for name in sorted(_FUTURE_STAGE_NAMES))
 _PUBLIC_MESSAGES = {
     ErrorCode.CONFIG: "confirmation Oracle configuration is invalid",
     ErrorCode.CONTRACT: "confirmation Oracle artifact validation failed",
@@ -95,6 +123,9 @@ class _InputSnapshot:
     protocols: tuple[ConfirmationProtocolRecord, ...]
     protocol_instances: tuple[ConfirmationProtocolInstanceRecord, ...]
     variants: tuple[PromptVariantRecord, ...]
+    exclusions: tuple[PreRandomizationExclusionRecord, ...]
+    hypotheses: tuple[FrozenHypothesisRecord, ...]
+    randomization_manifest: RandomizationManifestRecord
     assignments: tuple[AssignmentRecord, ...]
     requests: tuple[GenerationRequestRecord, ...]
     executions: tuple[AssignmentExecutionRecord, ...]
@@ -107,6 +138,22 @@ class ConfirmationOracleStageResult:
     generated_count: int
     terminal_no_code_count: int
     oracle_count: int
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _AnalyzerRuntime:
+    runner: AnalyzerRunner
+    validator: Callable[[], object]
+
+
+def _analyzer_runtime_from_frozen_config(_config: object) -> _AnalyzerRuntime:
+    return _AnalyzerRuntime(
+        runner=run_analyzer_process,
+        validator=validate_analyzer_runtime,
+    )
+
+
+_ANALYZER_RUNTIME_FACTORY = _analyzer_runtime_from_frozen_config
 
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
@@ -192,16 +239,15 @@ def validate_confirmation_oracle_coverage(
         trusted_executions = _trusted_records(
             executions, AssignmentExecutionRecord, allow_empty=False
         )
-        trusted_codes = _trusted_records(
-            codes, CanonicalGeneratedCodeRecord, allow_empty=True
-        )
+        trusted_codes = _trusted_records(codes, CanonicalGeneratedCodeRecord, allow_empty=True)
         trusted_oracles = _trusted_records(oracles, OracleRecord, allow_empty=True)
-        if tuple(item.assignment_id for item in trusted_executions) != tuple(
-            sorted(item.assignment_id for item in trusted_executions)
-        ) or tuple(item.assignment_id or "" for item in trusted_codes) != tuple(
-            sorted(item.assignment_id or "" for item in trusted_codes)
-        ) or tuple(item.request_id for item in trusted_oracles) != tuple(
-            sorted(item.request_id for item in trusted_oracles)
+        if (
+            tuple(item.assignment_id for item in trusted_executions)
+            != tuple(sorted(item.assignment_id for item in trusted_executions))
+            or tuple(item.assignment_id or "" for item in trusted_codes)
+            != tuple(sorted(item.assignment_id or "" for item in trusted_codes))
+            or tuple(item.request_id for item in trusted_oracles)
+            != tuple(sorted(item.request_id for item in trusted_oracles))
         ):
             raise ValueError
 
@@ -324,111 +370,112 @@ def validate_confirmation_oracle_coverage(
     return result
 
 
-def _validate_generated_code_coverage(
-    assignments: Iterable[AssignmentRecord],
-    executions: Iterable[AssignmentExecutionRecord],
-    codes: Iterable[CanonicalGeneratedCodeRecord],
-) -> None:
-    """Reject generated-subset drift before either analyzer is invoked."""
-
-    trusted_assignments: tuple[AssignmentRecord, ...] = ()
-    trusted_executions: tuple[AssignmentExecutionRecord, ...] = ()
-    trusted_codes: tuple[CanonicalGeneratedCodeRecord, ...] = ()
+def _bind_oracle_analyses(
+    codes: Sequence[CanonicalGeneratedCodeRecord],
+    analyses: Sequence[OracleCodeAnalysis],
+) -> tuple[OracleRecord, ...]:
     try:
-        trusted_assignments = _trusted_records(
-            assignments, AssignmentRecord, allow_empty=False
-        )
-        trusted_executions = _trusted_records(
-            executions, AssignmentExecutionRecord, allow_empty=False
-        )
-        trusted_codes = _trusted_records(
-            codes, CanonicalGeneratedCodeRecord, allow_empty=True
-        )
-        if tuple(item.assignment_id for item in trusted_executions) != tuple(
-            sorted(item.assignment_id for item in trusted_executions)
-        ) or tuple(item.assignment_id or "" for item in trusted_codes) != tuple(
-            sorted(item.assignment_id or "" for item in trusted_codes)
-        ):
-            raise ValueError
-        assignment_by_id = {item.assignment_id: item for item in trusted_assignments}
-        execution_by_id = {item.assignment_id: item for item in trusted_executions}
-        code_by_id = {item.assignment_id: item for item in trusted_codes}
+        code_by_request = {item.request_id: item for item in codes}
+        analysis_by_request = {item.request_id: item for item in analyses}
         if (
-            len(assignment_by_id) != len(trusted_assignments)
-            or len(execution_by_id) != len(trusted_executions)
-            or len(code_by_id) != len(trusted_codes)
-            or set(assignment_by_id) != set(execution_by_id)
+            len(code_by_request) != len(codes)
+            or len(analysis_by_request) != len(analyses)
+            or set(code_by_request) != set(analysis_by_request)
         ):
             raise ValueError
-        generated = {
-            assignment_id
-            for assignment_id, execution in execution_by_id.items()
-            if execution.status is AssignmentExecutionStatus.GENERATED
-        }
-        if set(code_by_id) != generated:
-            raise ValueError
-        for assignment_id in sorted(assignment_by_id):
-            assignment = assignment_by_id[assignment_id]
-            execution = execution_by_id[assignment_id]
-            code = code_by_id.get(assignment_id)
-            if code is None:
-                if execution.status is not AssignmentExecutionStatus.TERMINAL_NO_CODE:
-                    raise ValueError
-                continue
-            unit = assignment.experimental_unit
-            request = code.generation_request
-            expected_coordinates = (
-                (code.condition, "confirm_arm"),
-                (code.assignment_id, assignment.assignment_id),
-                (code.hypothesis_id, unit.hypothesis_id),
-                (code.target_spec_id, assignment.target_spec_id),
-                (code.target_instance_id, assignment.target_instance_id),
-                (code.arm_protocol_id, assignment.arm_protocol_id),
-                (code.protocol_instance_id, assignment.protocol_instance_id),
-                (code.variant_id, assignment.variant_id),
-                (code.arm_role, assignment.arm_role),
-                (code.model_id, unit.model_id),
-                (code.seed_id, assignment.seed_id),
-                (execution.request_id, code.request_id),
-                (execution.code_id, code.code_id),
-                (execution.code_sha256, code.code_sha256),
-                (execution.provider_result_sha256, code.provider_result_sha256),
-                (execution.usage_sha256, code.provider_usage_sha256),
-                (execution.provider_runtime_sha256, code.provider_runtime_sha256),
-                (execution.provider_policy_sha256, code.provider_policy_sha256),
-                (execution.attempt_count, code.provider_attempt_count),
-                (
-                    execution.provider_provenance_sha256,
-                    provider_provenance_sha256(code.generation_provenance),
-                ),
-                (request.assignment_id, assignment.assignment_id),
-                (request.request_id, code.request_id),
-            )
-            if any(actual != expected for actual, expected in expected_coordinates):
+        records: list[OracleRecord] = []
+        for request_id in sorted(code_by_request):
+            code = code_by_request[request_id]
+            analysis = analysis_by_request[request_id]
+            if (
+                analysis.code_id != code.code_id
+                or analysis.code_sha256 != code.code_sha256
+                or analysis.prompt_id != code.prompt_id
+                or analysis.model_id != code.model_id
+                or analysis.seed_id != code.seed_id
+            ):
                 raise ValueError
-    except _FATAL:
-        raise
-    except SecAwareError:
+            records.append(
+                OracleRecord(
+                    schema_version="1.2",
+                    request_id=code.request_id,
+                    code_id=code.code_id,
+                    code_sha256=code.code_sha256,
+                    prompt_id=code.prompt_id,
+                    condition="confirm_arm",
+                    model_id=code.model_id,
+                    seed_id=code.seed_id,
+                    hypothesis_id=code.hypothesis_id,
+                    assignment_id=code.assignment_id,
+                    target_spec_id=code.target_spec_id,
+                    target_instance_id=code.target_instance_id,
+                    arm_protocol_id=code.arm_protocol_id,
+                    protocol_instance_id=code.protocol_instance_id,
+                    variant_id=code.variant_id,
+                    arm_role=code.arm_role,
+                    parse_ok=analysis.parse_ok,
+                    functional_ok=analysis.functional_ok,
+                    security_label=analysis.security_label,
+                    evaluability=analysis.evaluability,
+                    severity=analysis.severity,
+                    findings=analysis.findings,
+                    analyzers=analysis.analyzers,
+                )
+            )
+        return tuple(records)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        raise _error("confirmation Oracle generated coverage failed validation") from None
+        raise _error("confirmation Oracle analysis binding failed validation") from None
     finally:
-        assignments = ()
-        executions = ()
         codes = ()
-        trusted_assignments = ()
-        trusted_executions = ()
-        trusted_codes = ()
-        assignment_by_id = {}
-        execution_by_id = {}
-        code_by_id = {}
-        generated = set()
-        assignment = None
-        execution = None
+        analyses = ()
+        code_by_request = {}
+        analysis_by_request = {}
+        records = []
+        request_id = ""
         code = None
-        unit = None
-        request = None
-        expected_coordinates = ()
+        analysis = None
+
+
+def _validate_upstream_bundles(
+    snapshot: _InputSnapshot,
+    config: AppConfig,
+    *,
+    randomization_validator=validate_randomization_artifact_bundle,
+    generation_validator=validate_confirmation_generation_bundle,
+    block_builder=randomization_stage.build_randomization_blocks,
+    planner=generation_stage.plan_confirmation_requests,
+    provenance_hasher=provider_provenance_sha256,
+) -> None:
+    """Replay the complete Task-4/5/6 provenance before trusting generated code."""
+
+    randomization_validator(
+        snapshot.randomization_manifest,
+        snapshot.assignments,
+        target_specs=snapshot.targets,
+        target_instances=snapshot.target_instances,
+        protocols=snapshot.protocols,
+        protocol_instances=snapshot.protocol_instances,
+        variants=snapshot.variants,
+        exclusions=snapshot.exclusions,
+        hypotheses=snapshot.hypotheses,
+        confirmation_seeds=tuple(config.generation.confirmation_seeds),
+        global_seed=config.run.random_seed,
+        randomization_config=config.randomization,
+        block_builder=block_builder,
+    )
+    generation_validator(
+        snapshot.randomization_manifest,
+        snapshot.assignments,
+        snapshot.variants,
+        config,
+        snapshot.requests,
+        snapshot.executions,
+        snapshot.codes,
+        planner=planner,
+        provenance_hasher=provenance_hasher,
+    )
 
 
 def _identity(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
@@ -531,140 +578,36 @@ def _parse_manifest(payload: bytes, expected_stage: str) -> StageManifest:
         expected_stage = ""
 
 
-def _guard_no_future_artifacts(store: RunStore) -> None:
+def _guard_no_future_artifacts(store: RunStore, *, traversal=iter_bounded_tree) -> None:
     try:
-        for entry in iter_bounded_tree(
+        for entry in traversal(
             store.root,
-            max_entries=100_000,
-            max_depth=16,
-            max_relative_path_chars=8_192,
-            max_name_chars=1_024,
+            max_entries=_MAX_TRAVERSAL_ENTRIES,
+            max_depth=_MAX_TRAVERSAL_DEPTH,
+            max_relative_path_chars=_MAX_RELATIVE_PATH_CHARS,
+            max_name_chars=_MAX_NAME_CHARS,
         ):
+            if not entry.is_file:
+                continue
             parts = entry.relative_path.replace("\\", "/").split("/")
-            if entry.is_file and parts[0] in _FUTURE_DIRS:
+            if parts[0].casefold() in _FUTURE_DIRS:
                 raise ValueError
-            if len(parts) == 2 and parts[0] == ".stages" and parts[1].endswith(".json"):
-                stage_name = parts[1][:-5]
-                if stage_name.startswith(_FUTURE_STAGE_PREFIXES):
+            if (
+                len(parts) == 2
+                and parts[0].casefold() == ".stages"
+                and Path(parts[1]).suffix.casefold() == ".json"
+            ):
+                stage_name = Path(parts[1]).stem.casefold()
+                if stage_name in _FUTURE_STAGE_NAMES or any(
+                    stage_name.startswith(prefix) for prefix in _FUTURE_STAGE_PREFIXES
+                ):
                     raise ValueError
     except _FATAL:
         raise
+    except BoundedTraversalError:
+        raise _error("future analysis artifact traversal failed validation") from None
     except Exception:
         raise _error("future analysis artifact exists before confirmation Oracle") from None
-
-
-def _validate_task4_provenance(snapshot: _InputSnapshot) -> None:
-    try:
-        target_by_id = {item.target_spec_id: item for item in snapshot.targets}
-        instance_by_id = {item.target_instance_id: item for item in snapshot.target_instances}
-        protocol_by_id = {item.arm_protocol_id: item for item in snapshot.protocols}
-        protocol_instance_by_id = {
-            item.protocol_instance_id: item for item in snapshot.protocol_instances
-        }
-        variant_by_id = {item.variant_id: item for item in snapshot.variants}
-        if any(
-            len(mapping) != size
-            for mapping, size in (
-                (target_by_id, len(snapshot.targets)),
-                (instance_by_id, len(snapshot.target_instances)),
-                (protocol_by_id, len(snapshot.protocols)),
-                (protocol_instance_by_id, len(snapshot.protocol_instances)),
-                (variant_by_id, len(snapshot.variants)),
-            )
-        ):
-            raise ValueError
-        for assignment in snapshot.assignments:
-            unit = assignment.experimental_unit
-            target = target_by_id.get(assignment.target_spec_id)
-            instance = instance_by_id.get(assignment.target_instance_id)
-            protocol = protocol_by_id.get(assignment.arm_protocol_id)
-            protocol_instance = protocol_instance_by_id.get(assignment.protocol_instance_id)
-            variant = variant_by_id.get(assignment.variant_id)
-            if any(item is None for item in (target, instance, protocol, protocol_instance, variant)):
-                raise ValueError
-            assert target is not None and instance is not None and protocol is not None
-            assert protocol_instance is not None and variant is not None
-            if (
-                target.hypothesis_id != unit.hypothesis_id
-                or instance.target_spec_id != target.target_spec_id
-                or instance.task_id != unit.task_id
-                or protocol.hypothesis_id != unit.hypothesis_id
-                or protocol.target_spec_id != target.target_spec_id
-                or protocol_instance.arm_protocol_id != protocol.arm_protocol_id
-                or protocol_instance.target_instance_id != instance.target_instance_id
-                or protocol_instance.task_id != unit.task_id
-                or variant.task_id != unit.task_id
-                or variant.target_spec_id != target.target_spec_id
-                or variant.target_instance_id != instance.target_instance_id
-                or variant.arm_protocol_id != protocol.arm_protocol_id
-                or variant.protocol_instance_id != protocol_instance.protocol_instance_id
-                or variant.arm_role is not assignment.arm_role
-            ):
-                raise ValueError
-    except _FATAL:
-        raise
-    except Exception:
-        raise _error("confirmation Oracle task provenance failed validation") from None
-    finally:
-        snapshot = None  # type: ignore[assignment]
-        target_by_id = {}
-        instance_by_id = {}
-        protocol_by_id = {}
-        protocol_instance_by_id = {}
-        variant_by_id = {}
-        assignment = None
-        unit = None
-        target = None
-        instance = None
-        protocol = None
-        protocol_instance = None
-        variant = None
-
-
-def _validate_request_and_variant_coverage(snapshot: _InputSnapshot) -> None:
-    try:
-        assignment_by_id = {item.assignment_id: item for item in snapshot.assignments}
-        request_by_id = {item.assignment_id: item for item in snapshot.requests}
-        variant_by_id = {item.variant_id: item for item in snapshot.variants}
-        if (
-            len(assignment_by_id) != len(snapshot.assignments)
-            or len(request_by_id) != len(snapshot.requests)
-            or set(assignment_by_id) != set(request_by_id)
-        ):
-            raise ValueError
-        for assignment_id, assignment in assignment_by_id.items():
-            request = request_by_id[assignment_id]
-            variant = variant_by_id.get(assignment.variant_id)
-            if variant is None or (
-                request.condition != "confirm_arm"
-                or request.assignment_id != assignment.assignment_id
-                or request.hypothesis_id != assignment.experimental_unit.hypothesis_id
-                or request.target_spec_id != assignment.target_spec_id
-                or request.target_instance_id != assignment.target_instance_id
-                or request.arm_protocol_id != assignment.arm_protocol_id
-                or request.protocol_instance_id != assignment.protocol_instance_id
-                or request.variant_id != assignment.variant_id
-                or request.arm_role is not assignment.arm_role
-                or request.model_id != assignment.experimental_unit.model_id
-                or request.seed_id != assignment.seed_id
-                or request.prompt_id != variant.variant_prompt_id
-                or request.prompt_sha256 != variant.prompt_sha256
-                or request.prompt != variant.prompt_text
-                or request.language != variant.language
-            ):
-                raise ValueError
-    except _FATAL:
-        raise
-    except Exception:
-        raise _error("confirmation Oracle request provenance failed validation") from None
-    finally:
-        snapshot = None  # type: ignore[assignment]
-        assignment_by_id = {}
-        request_by_id = {}
-        variant_by_id = {}
-        assignment = None
-        request = None
-        variant = None
 
 
 def _run_confirmation_oracle_stage(
@@ -672,21 +615,52 @@ def _run_confirmation_oracle_stage(
     store: RunStore,
     *,
     force: bool,
-    runner: AnalyzerRunner,
-    runtime_validator: Callable[[], object],
+    analyzer_runtime: _AnalyzerRuntime,
+    runtime_callables: Mapping[str, object],
+    runtime_contract: Mapping[str, Mapping[str, str]],
 ) -> ConfirmationOracleStageResult:
+    analyzer_runtime_refs = {
+        "runner": analyzer_runtime.runner,
+        "validator": analyzer_runtime.validator,
+    }
+    analyzer_runtime_contract = {
+        name: _runtime_callable_descriptor(value)
+        for name, value in sorted(analyzer_runtime_refs.items())
+    }
+
+    def verify_runtime_bundle() -> None:
+        current = _confirmation_oracle_runtime_callables()
+        if (
+            tuple(sorted(current)) != tuple(sorted(runtime_callables))
+            or any(current[name] is not value for name, value in runtime_callables.items())
+            or {
+                name: _runtime_callable_descriptor(value) for name, value in sorted(current.items())
+            }
+            != runtime_contract
+            or analyzer_runtime.runner is not analyzer_runtime_refs["runner"]
+            or analyzer_runtime.validator is not analyzer_runtime_refs["validator"]
+            or {
+                name: _runtime_callable_descriptor(value)
+                for name, value in sorted(analyzer_runtime_refs.items())
+            }
+            != analyzer_runtime_contract
+        ):
+            raise _error("confirmation Oracle runtime callable bundle changed")
+
+    verify_runtime_bundle()
     if (
         type(config) is not AppConfig
         or type(store) is not RunStore
         or store.config != config
-        or not model_shape_is_intact(config)
+        or not runtime_callables["input.model_shape_is_intact"](config)
         or type(force) is not bool
-        or not callable(runner)
-        or not callable(runtime_validator)
+        or type(analyzer_runtime) is not _AnalyzerRuntime
+        or not callable(analyzer_runtime.runner)
+        or not callable(analyzer_runtime.validator)
     ):
         raise _error("confirmation Oracle configuration failed validation", code=ErrorCode.CONFIG)
     effective_config = AppConfig.model_validate(config.model_dump(mode="json"))
-    effective_store = RunStore(effective_config)
+    effective_store = runtime_callables["input.run_store_factory"](effective_config)
     if effective_store.root != store.root:
         raise _error("confirmation Oracle configuration failed validation", code=ErrorCode.CONFIG)
 
@@ -696,19 +670,36 @@ def _run_confirmation_oracle_stage(
     task5_paths = tuple(
         effective_store.path("interventions", name) for name, _model in RANDOMIZATION_OUTPUTS
     )
+    fci_paths = tuple(
+        effective_store.path("discovery", name) for name, _model in FCI_DISCOVERY_OUTPUTS
+    )
+    hypothesis_path = next(path for path in fci_paths if path.name == "hypotheses_frozen.jsonl")
     task6_paths = tuple(
-        effective_store.path("generation", name)
-        for name, _model in CONFIRMATION_GENERATION_OUTPUTS
+        effective_store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
     )
     manifest_paths = (
         effective_store.path(".stages", "build-confirmation-variants.json"),
+        effective_store.path(".stages", "fci-discovery.json"),
         effective_store.path(".stages", "randomize-confirmation.json"),
         effective_store.path(".stages", "generate-confirmation.json"),
     )
-    initial_policy = run_oracle_preflight(
+    verify_runtime_bundle()
+    initial_policy = runtime_callables["preflight.run_oracle_preflight"](
         effective_config.oracle,
-        runner=runner,
-        runtime_validator=runtime_validator,
+        runner=analyzer_runtime.runner,
+        runtime_validator=analyzer_runtime.validator,
+    )
+    verify_runtime_bundle()
+    effective_policy_sha256 = canonical_sha256(
+        {
+            "policy_sha256": initial_policy.combined_sha256,
+            "semgrep_executable": effective_config.oracle.semgrep_executable,
+            "bandit_executable": effective_config.oracle.bandit_executable,
+            "semgrep_version": initial_policy.semgrep_version,
+            "bandit_version": initial_policy.bandit_version,
+            "analyzer_runtime": analyzer_runtime_contract,
+            "runtime_factory": runtime_contract["runtime.analyzer_factory"],
+        }
     )
     policy_paths = (
         Path(effective_config.oracle.policy_lock_path),
@@ -719,14 +710,16 @@ def _run_confirmation_oracle_stage(
     inputs = (
         *task4_paths,
         manifest_paths[0],
-        *task5_paths,
+        hypothesis_path,
         manifest_paths[1],
-        *task6_paths,
+        *task5_paths,
         manifest_paths[2],
+        *task6_paths,
+        manifest_paths[3],
         *policy_paths,
     )
     output = effective_store.path("oracle", _OUTPUT_NAME)
-    output_spec = JsonlOutputSpec(
+    output_spec = runtime_callables["transaction.jsonl_output_spec"](
         output,
         OracleRecord,
         require_nonempty=False,
@@ -738,9 +731,12 @@ def _run_confirmation_oracle_stage(
 
     def capture_input_snapshot() -> tuple[str, ...]:
         nonlocal snapshot
+        verify_runtime_bundle()
         if snapshot is not None:
             raise _error("confirmation Oracle input snapshot failed validation")
-        _guard_no_future_artifacts(effective_store)
+        runtime_callables["input.guard_no_future_artifacts"](
+            effective_store, traversal=runtime_callables["input.bounded_tree"]
+        )
         payloads: list[bytes] = []
         files: list[_FileSnapshot] = []
         combined = 0
@@ -749,41 +745,54 @@ def _run_confirmation_oracle_stage(
                 allow_empty = (
                     index < len(task4_paths) and index >= 4
                 ) or path.name == "confirmation_code.jsonl"
-                payload, file = _read_snapshot(path, allow_empty=allow_empty)
+                payload, file = runtime_callables["input.read_snapshot"](
+                    path, allow_empty=allow_empty
+                )
                 combined += len(payload)
                 if combined > _MAX_COMBINED_INPUT_BYTES:
                     raise _error("confirmation Oracle input resource limit exceeded")
                 payloads.append(payload)
                 files.append(file)
             task4_manifest_index = len(task4_paths)
-            task5_start = task4_manifest_index + 1
+            hypothesis_index = task4_manifest_index + 1
+            fci_manifest_index = hypothesis_index + 1
+            task5_start = fci_manifest_index + 1
             task5_manifest_index = task5_start + len(task5_paths)
             task6_start = task5_manifest_index + 1
             task6_manifest_index = task6_start + len(task6_paths)
-            _parse_manifest(payloads[task4_manifest_index], "build-confirmation-variants")
-            _parse_manifest(payloads[task5_manifest_index], "randomize-confirmation")
-            _parse_manifest(payloads[task6_manifest_index], "generate-confirmation")
-            targets = _parse_jsonl(payloads[0], TargetSpecRecord, allow_empty=False)
-            target_instances = _parse_jsonl(
-                payloads[1], TargetInstanceRecord, allow_empty=False
+            runtime_callables["input.parse_manifest"](
+                payloads[task4_manifest_index], "build-confirmation-variants"
             )
-            protocols = _parse_jsonl(
-                payloads[2], ConfirmationProtocolRecord, allow_empty=False
+            runtime_callables["input.parse_manifest"](payloads[fci_manifest_index], "fci-discovery")
+            runtime_callables["input.parse_manifest"](
+                payloads[task5_manifest_index], "randomize-confirmation"
             )
-            protocol_instances = _parse_jsonl(
+            runtime_callables["input.parse_manifest"](
+                payloads[task6_manifest_index], "generate-confirmation"
+            )
+            parser = runtime_callables["input.parse_jsonl"]
+            targets = parser(payloads[0], TargetSpecRecord, allow_empty=False)
+            target_instances = parser(payloads[1], TargetInstanceRecord, allow_empty=False)
+            protocols = parser(payloads[2], ConfirmationProtocolRecord, allow_empty=False)
+            protocol_instances = parser(
                 payloads[3], ConfirmationProtocolInstanceRecord, allow_empty=False
             )
-            variants = _parse_jsonl(payloads[8], PromptVariantRecord, allow_empty=False)
-            assignments = _parse_jsonl(
-                payloads[task5_start + 1], AssignmentRecord, allow_empty=False
+            variants = parser(payloads[8], PromptVariantRecord, allow_empty=False)
+            exclusions = parser(payloads[10], PreRandomizationExclusionRecord, allow_empty=True)
+            hypotheses = parser(
+                payloads[hypothesis_index], FrozenHypothesisRecord, allow_empty=False
             )
-            requests = _parse_jsonl(
-                payloads[task6_start], GenerationRequestRecord, allow_empty=False
+            randomization_records = parser(
+                payloads[task5_start], RandomizationManifestRecord, allow_empty=False
             )
-            executions = _parse_jsonl(
+            if len(randomization_records) != 1:
+                raise _error("confirmation Oracle randomization manifest failed validation")
+            assignments = parser(payloads[task5_start + 1], AssignmentRecord, allow_empty=False)
+            requests = parser(payloads[task6_start], GenerationRequestRecord, allow_empty=False)
+            executions = parser(
                 payloads[task6_start + 1], AssignmentExecutionRecord, allow_empty=False
             )
-            codes = _parse_jsonl(
+            codes = parser(
                 payloads[task6_start + 2], CanonicalGeneratedCodeRecord, allow_empty=True
             )
             if sum(len(item.code.encode("utf-8")) for item in codes) > _MAX_TOTAL_CODE_BYTES:
@@ -795,14 +804,26 @@ def _run_confirmation_oracle_stage(
                 protocols=protocols,
                 protocol_instances=protocol_instances,
                 variants=variants,
+                exclusions=exclusions,
+                hypotheses=hypotheses,
+                randomization_manifest=randomization_records[0],
                 assignments=assignments,
                 requests=requests,
                 executions=executions,
                 codes=codes,
             )
-            _validate_task4_provenance(snapshot)
-            _validate_request_and_variant_coverage(snapshot)
-            _validate_generated_code_coverage(assignments, executions, codes)
+            runtime_callables["validation.upstream_bundles"](
+                snapshot,
+                effective_config,
+                randomization_validator=runtime_callables[
+                    "validation.randomization_artifact_bundle"
+                ],
+                generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
+                block_builder=runtime_callables["validation.randomization_block_builder"],
+                planner=runtime_callables["validation.plan_confirmation_requests"],
+                provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+            )
+            verify_runtime_bundle()
             return tuple(item.sha256 for item in snapshot.files)
         finally:
             payloads.clear()
@@ -814,72 +835,121 @@ def _run_confirmation_oracle_stage(
             protocols = ()
             protocol_instances = ()
             variants = ()
+            exclusions = ()
+            hypotheses = ()
+            randomization_records = ()
             assignments = ()
             requests = ()
             executions = ()
             codes = ()
 
     def verify_input_snapshot() -> None:
+        verify_runtime_bundle()
         if snapshot is None:
             raise _error("confirmation Oracle input snapshot failed validation")
-        _guard_no_future_artifacts(effective_store)
+        runtime_callables["input.guard_no_future_artifacts"](
+            effective_store, traversal=runtime_callables["input.bounded_tree"]
+        )
         for expected in snapshot.files:
-            payload, current = _read_snapshot(
+            payload, current = runtime_callables["input.read_snapshot"](
                 expected.path, allow_empty=expected.identity[4] == 0
             )
             del payload
             if current != expected:
                 raise _error("confirmation Oracle inputs changed during execution")
-        final_policy = run_oracle_preflight(
+        runtime_callables["validation.upstream_bundles"](
+            snapshot,
+            effective_config,
+            randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
+            generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
+            block_builder=runtime_callables["validation.randomization_block_builder"],
+            planner=runtime_callables["validation.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
+        final_policy = runtime_callables["preflight.run_oracle_preflight"](
             effective_config.oracle,
-            runner=runner,
-            runtime_validator=runtime_validator,
+            runner=analyzer_runtime.runner,
+            runtime_validator=analyzer_runtime.validator,
         )
         if final_policy.combined_sha256 != initial_policy.combined_sha256:
-            raise _error("confirmation Oracle policy changed during execution", code=ErrorCode.POLICY_MISMATCH)
+            raise _error(
+                "confirmation Oracle policy changed during execution",
+                code=ErrorCode.POLICY_MISMATCH,
+            )
+        verify_runtime_bundle()
 
     def build() -> tuple[tuple[OracleRecord, ...]]:
+        verify_runtime_bundle()
         if snapshot is None:
             raise _error("confirmation Oracle input snapshot failed validation")
-        execution_policy = run_oracle_preflight(
+        runtime_callables["validation.upstream_bundles"](
+            snapshot,
+            effective_config,
+            randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
+            generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
+            block_builder=runtime_callables["validation.randomization_block_builder"],
+            planner=runtime_callables["validation.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
+        execution_policy = runtime_callables["preflight.run_oracle_preflight"](
             effective_config.oracle,
-            runner=runner,
-            runtime_validator=runtime_validator,
+            runner=analyzer_runtime.runner,
+            runtime_validator=analyzer_runtime.validator,
         )
         if execution_policy.combined_sha256 != initial_policy.combined_sha256:
-            raise _error("confirmation Oracle policy changed before execution", code=ErrorCode.POLICY_MISMATCH)
+            raise _error(
+                "confirmation Oracle policy changed before execution",
+                code=ErrorCode.POLICY_MISMATCH,
+            )
         if not snapshot.codes:
             records: tuple[OracleRecord, ...] = ()
         else:
-            records = tuple(
-                run_oracle_batch(
-                    snapshot.codes,
-                    execution_policy,
-                    semgrep_executable=effective_config.oracle.semgrep_executable,
-                    bandit_executable=effective_config.oracle.bandit_executable,
-                    timeout_seconds=effective_config.oracle.timeout_seconds,
-                    max_stdout_bytes=effective_config.oracle.max_stdout_bytes,
-                    max_stderr_bytes=effective_config.oracle.max_stderr_bytes,
-                    runner=runner,
-                )
+            verify_runtime_bundle()
+            code_input_type = runtime_callables["aggregate.oracle_code_input"]
+            code_inputs = tuple(code_input_type.from_canonical(code) for code in snapshot.codes)
+            analyses = runtime_callables["aggregate.run_oracle_code_batch"](
+                code_inputs,
+                execution_policy,
+                semgrep_executable=effective_config.oracle.semgrep_executable,
+                bandit_executable=effective_config.oracle.bandit_executable,
+                timeout_seconds=effective_config.oracle.timeout_seconds,
+                max_stdout_bytes=effective_config.oracle.max_stdout_bytes,
+                max_stderr_bytes=effective_config.oracle.max_stderr_bytes,
+                runner=analyzer_runtime.runner,
+                runtime_validator=analyzer_runtime.validator,
             )
-        validate_confirmation_oracle_coverage(
+            verify_runtime_bundle()
+            records = runtime_callables["aggregate.bind_oracle_analyses"](snapshot.codes, analyses)
+        runtime_callables["relation.validate_confirmation_oracle_coverage"](
             snapshot.assignments, snapshot.executions, snapshot.codes, records
         )
+        verify_runtime_bundle()
         return (records,)
 
     def validate_staged_outputs(groups: tuple[tuple[object, ...], ...]) -> None:
+        verify_runtime_bundle()
         if snapshot is None or len(groups) != 1:
             raise _error("confirmation Oracle output bundle failed validation")
-        validate_confirmation_oracle_coverage(
+        runtime_callables["validation.upstream_bundles"](
+            snapshot,
+            effective_config,
+            randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
+            generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
+            block_builder=runtime_callables["validation.randomization_block_builder"],
+            planner=runtime_callables["validation.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
+        runtime_callables["relation.validate_confirmation_oracle_coverage"](
             snapshot.assignments,
             snapshot.executions,
             snapshot.codes,
             groups[0],
         )
+        verify_runtime_bundle()
 
     producer_outputs = {
         "build-confirmation-variants": task4_paths,
+        "fci-discovery": fci_paths,
         "randomize-confirmation": task5_paths,
         "generate-confirmation": task6_paths,
     }
@@ -896,23 +966,35 @@ def _run_confirmation_oracle_stage(
                     ),
                 )
             )
-        execute_jsonl_stage_transaction(
+        verify_runtime_bundle()
+        runtime_callables["transaction.execute_jsonl_stage_transaction"](
             effective_store,
             stage=_STAGE,
             inputs=inputs,
             outputs=(output_spec,),
             force=force,
             build=build,
-            policy_sha256=initial_policy.combined_sha256,
+            policy_sha256=effective_policy_sha256,
             capture_input_snapshot=capture_input_snapshot,
             verify_input_snapshot=verify_input_snapshot,
             validate_staged_outputs=validate_staged_outputs,
         )
+        verify_runtime_bundle()
         if snapshot is None:
             raise _error("confirmation Oracle input snapshot failed validation")
-        payload, _file = _read_snapshot(output, allow_empty=True)
-        records = _parse_jsonl(payload, OracleRecord, allow_empty=True)
-        return validate_confirmation_oracle_coverage(
+        runtime_callables["validation.upstream_bundles"](
+            snapshot,
+            effective_config,
+            randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
+            generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
+            block_builder=runtime_callables["validation.randomization_block_builder"],
+            planner=runtime_callables["validation.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
+        payload, _file = runtime_callables["input.read_snapshot"](output, allow_empty=True)
+        records = runtime_callables["input.parse_jsonl"](payload, OracleRecord, allow_empty=True)
+        verify_runtime_bundle()
+        return runtime_callables["relation.validate_confirmation_oracle_coverage"](
             snapshot.assignments, snapshot.executions, snapshot.codes, records
         )
 
@@ -922,26 +1004,30 @@ def run_confirmation_oracle_stage(
     store: RunStore,
     *,
     force: bool,
-    runner: AnalyzerRunner | None = None,
-    runtime_validator: Callable[[], object] | None = None,
 ) -> ConfirmationOracleStageResult:
     """Run the public fail-closed confirmation Oracle stage."""
 
-    effective_runner = run_analyzer_process if runner is None else runner
-    effective_validator = (
-        validate_analyzer_runtime if runtime_validator is None else runtime_validator
-    )
+    runtime_callables: dict[str, object] = {}
+    runtime_contract: dict[str, Mapping[str, str]] = {}
+    analyzer_runtime: _AnalyzerRuntime | None = None
     failure_code: ErrorCode | None = None
     control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     result: ConfirmationOracleStageResult | None = None
     caught: BaseException | None = None
     try:
+        runtime_callables = _confirmation_oracle_runtime_callables()
+        runtime_contract = {
+            name: _runtime_callable_descriptor(value)
+            for name, value in sorted(runtime_callables.items())
+        }
+        analyzer_runtime = runtime_callables["runtime.analyzer_factory"](config.oracle)
         result = _run_confirmation_oracle_stage(
             config,
             store,
             force=force,
-            runner=effective_runner,
-            runtime_validator=effective_validator,
+            analyzer_runtime=analyzer_runtime,
+            runtime_callables=runtime_callables,
+            runtime_contract=runtime_contract,
         )
     except _FATAL as error:
         control = error
@@ -954,10 +1040,9 @@ def run_confirmation_oracle_stage(
     finally:
         config = None  # type: ignore[assignment]
         store = None  # type: ignore[assignment]
-        effective_runner = None  # type: ignore[assignment]
-        effective_validator = None  # type: ignore[assignment]
-        runner = None
-        runtime_validator = None
+        analyzer_runtime = None  # type: ignore[assignment]
+        runtime_callables = {}
+        runtime_contract = {}
         _clear_exception(caught)
         caught = None
     if control is not None:
@@ -972,39 +1057,47 @@ def run_confirmation_oracle_stage(
     return result
 
 
-def _callable_descriptor(value: object) -> dict[str, str]:
-    target = getattr(value, "__func__", value)
-    code = getattr(target, "__code__", None)
-    try:
-        source = inspect.getsource(target)
-    except (OSError, TypeError):
-        source = ""
-    payload = {
-        "module": str(getattr(target, "__module__", type(target).__module__)),
-        "qualname": str(getattr(target, "__qualname__", type(target).__qualname__)),
-        "source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
-        "bytecode_sha256": (
-            hashlib.sha256(code.co_code).hexdigest() if code is not None else "none"
-        ),
+def _confirmation_oracle_runtime_callables() -> dict[str, object]:
+    return {
+        "adapter.bandit_argv": oracle_aggregator.bandit_argv,
+        "adapter.parse_bandit_report": oracle_aggregator.parse_bandit_report,
+        "adapter.parse_semgrep_report": oracle_aggregator.parse_semgrep_report,
+        "adapter.semgrep_argv": oracle_aggregator.semgrep_argv,
+        "aggregate.aggregate_code_analyses": oracle_aggregator._aggregate_code_analyses,
+        "aggregate.bind_oracle_analyses": _bind_oracle_analyses,
+        "aggregate.oracle_code_input": OracleCodeInput,
+        "aggregate.private_analyzer_batch": oracle_aggregator._run_private_analyzer_batch,
+        "aggregate.run_oracle_code_batch": oracle_aggregator.run_oracle_code_batch,
+        "aggregate.snapshot_code_inputs": oracle_aggregator._snapshot_oracle_code_inputs,
+        "aggregate.validate_report_coordinates": oracle_aggregator._validate_report_coordinates,
+        "input.bounded_tree": iter_bounded_tree,
+        "input.guard_no_future_artifacts": _guard_no_future_artifacts,
+        "input.model_shape_is_intact": model_shape_is_intact,
+        "input.parse_jsonl": _parse_jsonl,
+        "input.parse_manifest": _parse_manifest,
+        "input.read_snapshot": _read_snapshot,
+        "input.run_store_factory": RunStore,
+        "input.strict_json": load_strict_json_bytes,
+        "preflight.run_oracle_preflight": run_oracle_preflight,
+        "relation.validate_confirmation_oracle_coverage": validate_confirmation_oracle_coverage,
+        "runtime.analyzer_factory": _ANALYZER_RUNTIME_FACTORY,
+        "runtime.production_runner": run_analyzer_process,
+        "runtime.validator": validate_analyzer_runtime,
+        "transaction.execute_jsonl_stage_transaction": execute_jsonl_stage_transaction,
+        "transaction.jsonl_output_spec": JsonlOutputSpec,
+        "validation.confirmation_generation_bundle": generation_stage.validate_confirmation_generation_bundle,
+        "validation.plan_confirmation_requests": generation_stage.plan_confirmation_requests,
+        "validation.provider_provenance_sha256": generation_stage.provider_provenance_sha256,
+        "validation.randomization_artifact_bundle": randomization_stage.validate_randomization_artifact_bundle,
+        "validation.randomization_block_builder": randomization_stage.build_randomization_blocks,
+        "validation.upstream_bundles": _validate_upstream_bundles,
     }
-    payload["fingerprint_sha256"] = canonical_sha256(payload)
-    return payload
 
 
 def confirmation_oracle_runtime_callable_contract() -> dict[str, dict[str, str]]:
-    callables = {
-        "aggregate.run_oracle_batch": run_oracle_batch,
-        "input.guard_no_future_artifacts": _guard_no_future_artifacts,
-        "input.parse_jsonl": _parse_jsonl,
-        "input.read_snapshot": _read_snapshot,
-        "input.run_store": RunStore,
-        "preflight.run_oracle_preflight": run_oracle_preflight,
-        "relation.validate_confirmation_oracle_coverage": validate_confirmation_oracle_coverage,
-        "relation.validate_generated_code_coverage": _validate_generated_code_coverage,
-        "transaction.execute_jsonl_stage_transaction": execute_jsonl_stage_transaction,
-    }
     return {
-        name: _callable_descriptor(value) for name, value in sorted(callables.items())
+        name: _runtime_callable_descriptor(value)
+        for name, value in sorted(_confirmation_oracle_runtime_callables().items())
     }
 
 

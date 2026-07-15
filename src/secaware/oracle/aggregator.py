@@ -6,6 +6,7 @@ import hashlib
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import tempfile
@@ -22,8 +23,14 @@ from secaware.oracle.runner import (
     validate_analyzer_runtime,
 )
 from secaware.oracle.semgrep_adapter import semgrep_argv, parse_semgrep_report
-from secaware.schema.common import model_shape_is_intact
-from secaware.schema.oracle import OracleEvaluability, OracleRecord, SecurityLabel
+from secaware.schema.common import is_valid_model_id, model_shape_is_intact
+from secaware.schema.oracle import (
+    AnalyzerFindingRecord,
+    AnalyzerProvenanceRecord,
+    OracleEvaluability,
+    OracleRecord,
+    SecurityLabel,
+)
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 
@@ -62,8 +69,77 @@ class AnalyzerRunner(Protocol):
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class OracleCodeInput:
+    """Analyzer-facing code input with no randomized-arm coordinates."""
+
+    request_id: str
+    code_id: str
+    code_sha256: str
+    prompt_id: str
+    model_id: str
+    seed_id: int
+    language: str
+    code: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.request_id) is not str
+            or re.fullmatch(r"req_[0-9a-f]{64}", self.request_id) is None
+            or type(self.code_id) is not str
+            or re.fullmatch(r"code_[0-9a-f]{64}", self.code_id) is None
+            or type(self.code_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", self.code_sha256) is None
+            or type(self.code) is not str
+            or not self.code
+            or hashlib.sha256(self.code.encode("utf-8")).hexdigest() != self.code_sha256
+            or type(self.prompt_id) is not str
+            or not self.prompt_id
+            or len(self.prompt_id) > 1024
+            or type(self.model_id) is not str
+            or not is_valid_model_id(self.model_id)
+            or type(self.seed_id) is not int
+            or not -(2**63) <= self.seed_id <= 2**63 - 1
+            or self.language != "python"
+        ):
+            raise ValueError(_CONTRACT_MESSAGE)
+
+    @classmethod
+    def from_canonical(cls, record: CanonicalGeneratedCodeRecord) -> "OracleCodeInput":
+        trusted = CanonicalGeneratedCodeRecord.model_validate(
+            record.model_dump(mode="python", round_trip=True, warnings=False)
+        )
+        return cls(
+            request_id=trusted.request_id,
+            code_id=trusted.code_id,
+            code_sha256=trusted.code_sha256,
+            prompt_id=trusted.prompt_id,
+            model_id=trusted.model_id,
+            seed_id=trusted.seed_id,
+            language=trusted.generation_request.language,
+            code=trusted.code,
+        )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class OracleCodeAnalysis:
+    request_id: str
+    code_id: str
+    code_sha256: str
+    prompt_id: str
+    model_id: str
+    seed_id: int
+    parse_ok: bool
+    functional_ok: bool
+    security_label: SecurityLabel
+    evaluability: OracleEvaluability
+    severity: str
+    findings: tuple[AnalyzerFindingRecord, ...]
+    analyzers: tuple[AnalyzerProvenanceRecord, ...]
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class _ValidatedCode:
-    record: CanonicalGeneratedCodeRecord
+    record: CanonicalGeneratedCodeRecord | OracleCodeInput
     parse_ok: bool
     functional_ok: bool
     opaque_file: str
@@ -323,6 +399,59 @@ def _snapshot_codes(codes: Iterable[CanonicalGeneratedCodeRecord]) -> tuple[_Val
         snapshots.clear()
         raise _safe_error(ErrorCode.CONTRACT, _CONTRACT_MESSAGE) from None
     return tuple(snapshots)
+
+
+def _snapshot_oracle_code_inputs(
+    codes: Iterable[OracleCodeInput],
+) -> tuple[_ValidatedCode, ...]:
+    snapshots: list[_ValidatedCode] = []
+    request_ids: set[str] = set()
+    try:
+        if isinstance(codes, (str, bytes, Mapping)):
+            raise TypeError
+        for index, item in enumerate(codes):
+            if index >= _MAX_BATCH_RECORDS or type(item) is not OracleCodeInput:
+                raise ValueError
+            trusted = OracleCodeInput(
+                request_id=item.request_id,
+                code_id=item.code_id,
+                code_sha256=item.code_sha256,
+                prompt_id=item.prompt_id,
+                model_id=item.model_id,
+                seed_id=item.seed_id,
+                language=item.language,
+                code=item.code,
+            )
+            if trusted.request_id in request_ids:
+                raise ValueError
+            functionality = evaluate_functionality(trusted.code)
+            if not functionality["not_empty"]:
+                raise ValueError
+            request_ids.add(trusted.request_id)
+            snapshots.append(
+                _ValidatedCode(
+                    record=trusted,
+                    parse_ok=functionality["syntax_ok"],
+                    functional_ok=functionality["functional_ok"],
+                    opaque_file=_opaque_source_name(trusted.request_id),
+                )
+            )
+        if not snapshots:
+            raise ValueError
+        snapshots.sort(key=lambda value: value.record.request_id)
+        return tuple(snapshots)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        snapshots.clear()
+        raise
+    except Exception:
+        snapshots.clear()
+        raise _safe_error(ErrorCode.CONTRACT, _CONTRACT_MESSAGE) from None
+    finally:
+        codes = ()
+        request_ids.clear()
+        item = None
+        trusted = None
+        functionality = {}
 
 
 def _snapshot_policy(policy: LoadedOraclePolicy) -> LoadedOraclePolicy:
@@ -1230,6 +1359,88 @@ def _aggregate(
         record = None
 
 
+def _aggregate_code_analyses(
+    codes: tuple[_ValidatedCode, ...],
+    semgrep_report: AnalyzerReport,
+    bandit_report: AnalyzerReport,
+) -> list[OracleCodeAnalysis]:
+    located: list[LocatedAnalyzerFinding] = []
+    by_file: dict[str, list[LocatedAnalyzerFinding]] = {item.opaque_file: [] for item in codes}
+    analyses: list[OracleCodeAnalysis] = []
+    severity_rank = {"low": 1, "medium": 2, "high": 3}
+    try:
+        if (
+            semgrep_report.analyzer != "semgrep"
+            or bandit_report.analyzer != "bandit"
+            or semgrep_report.covered_files != tuple(sorted(by_file))
+            or bandit_report.covered_files != tuple(sorted(by_file))
+        ):
+            raise ValueError(_ENGINE_MESSAGE)
+        _validate_report_coordinates(codes, (semgrep_report, bandit_report))
+        located.extend(semgrep_report.findings)
+        located.extend(bandit_report.findings)
+        located.sort(key=LocatedAnalyzerFinding.sort_key)
+        for finding in located:
+            if finding.opaque_file not in by_file:
+                raise ValueError(_ENGINE_MESSAGE)
+            by_file[finding.opaque_file].append(finding)
+        analyzers = (semgrep_report.provenance, bandit_report.provenance)
+        for validated in codes:
+            record = validated.record
+            if type(record) is not OracleCodeInput:
+                raise ValueError(_ENGINE_MESSAGE)
+            findings = tuple(by_file[validated.opaque_file])
+            canonical_findings = tuple(item.record for item in findings)
+            if not validated.parse_ok and canonical_findings:
+                raise ValueError(_ENGINE_MESSAGE)
+            severity = (
+                max(canonical_findings, key=lambda item: severity_rank[item.severity]).severity
+                if canonical_findings
+                else "none"
+            )
+            analyses.append(
+                OracleCodeAnalysis(
+                    request_id=record.request_id,
+                    code_id=record.code_id,
+                    code_sha256=record.code_sha256,
+                    prompt_id=record.prompt_id,
+                    model_id=record.model_id,
+                    seed_id=record.seed_id,
+                    parse_ok=validated.parse_ok,
+                    functional_ok=validated.functional_ok,
+                    security_label=(
+                        SecurityLabel.UNKNOWN
+                        if not validated.parse_ok
+                        else SecurityLabel.INSECURE
+                        if canonical_findings
+                        else SecurityLabel.SECURE
+                    ),
+                    evaluability=(
+                        OracleEvaluability.UNKNOWN_PARSE_FAILURE
+                        if not validated.parse_ok
+                        else OracleEvaluability.EVALUABLE
+                    ),
+                    severity=severity,
+                    findings=canonical_findings,
+                    analyzers=analyzers,
+                )
+            )
+        return analyses
+    finally:
+        codes = ()
+        semgrep_report = None  # type: ignore[assignment]
+        bandit_report = None  # type: ignore[assignment]
+        located.clear()
+        by_file.clear()
+        severity_rank = {}
+        validated = None
+        record = None
+        findings = ()
+        canonical_findings = ()
+        analyzers = ()
+        severity = ""
+
+
 def run_oracle_batch(
     codes: Iterable[CanonicalGeneratedCodeRecord],
     policy: LoadedOraclePolicy,
@@ -1345,4 +1556,125 @@ def run_oracle_batch(
     return records
 
 
-__all__ = ["AnalyzerRunner", "run_oracle_batch"]
+def run_oracle_code_batch(
+    codes: Iterable[OracleCodeInput],
+    policy: LoadedOraclePolicy,
+    *,
+    semgrep_executable: str,
+    bandit_executable: str,
+    timeout_seconds: float,
+    max_stdout_bytes: int,
+    max_stderr_bytes: int,
+    runner: AnalyzerRunner,
+    runtime_validator: Callable[[], object],
+) -> list[OracleCodeAnalysis]:
+    """Analyze a randomized-coordinate-blind canonical code batch."""
+
+    validated: tuple[_ValidatedCode, ...] = ()
+    trusted_policy: LoadedOraclePolicy | None = None
+    analyses: list[OracleCodeAnalysis] | None = None
+    failure: SecAwareError | None = None
+    control: MemoryError | KeyboardInterrupt | SystemExit | None = None
+    try:
+        validated = _snapshot_oracle_code_inputs(codes)
+        trusted_policy = _snapshot_policy(policy)
+        (
+            semgrep_executable,
+            bandit_executable,
+            timeout_seconds,
+            max_stdout_bytes,
+            max_stderr_bytes,
+        ) = _validate_settings(
+            semgrep_executable,
+            bandit_executable,
+            timeout_seconds,
+            max_stdout_bytes,
+            max_stderr_bytes,
+        )
+        runtime_validator()
+        expected_files = frozenset(item.opaque_file for item in validated)
+        semgrep_process = _run_private_analyzer_batch(
+            "semgrep",
+            validated,
+            trusted_policy,
+            semgrep_executable,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+            runner=runner,
+        )
+        semgrep_report = parse_semgrep_report(
+            semgrep_process.stdout,
+            returncode=semgrep_process.returncode,
+            expected_files=expected_files,
+            version=trusted_policy.semgrep_version,
+            policy_sha256=trusted_policy.combined_sha256,
+            max_output_bytes=max_stdout_bytes,
+        )
+        semgrep_process = None
+        bandit_process = _run_private_analyzer_batch(
+            "bandit",
+            validated,
+            trusted_policy,
+            bandit_executable,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+            runner=runner,
+        )
+        bandit_report = parse_bandit_report(
+            bandit_process.stdout,
+            returncode=bandit_process.returncode,
+            expected_files=expected_files,
+            version=trusted_policy.bandit_version,
+            policy_sha256=trusted_policy.combined_sha256,
+            constraints=trusted_policy.bandit_constraints,
+            max_output_bytes=max_stdout_bytes,
+        )
+        bandit_process = None
+        analyses = _aggregate_code_analyses(validated, semgrep_report, bandit_report)
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
+        control = error
+    except SecAwareError as error:
+        failure = _copy_secaware_error(error)
+    except Exception:
+        failure = _safe_error(ErrorCode.ANALYZER_FAILED, _ENGINE_MESSAGE)
+    finally:
+        codes = ()
+        policy = None  # type: ignore[assignment]
+        semgrep_executable = ""
+        bandit_executable = ""
+        timeout_seconds = 0.0
+        max_stdout_bytes = 0
+        max_stderr_bytes = 0
+        runner = None  # type: ignore[assignment]
+        runtime_validator = None  # type: ignore[assignment]
+        validated = ()
+        trusted_policy = None
+        expected_files = frozenset()
+        semgrep_process = None
+        bandit_process = None
+        semgrep_report = None
+        bandit_report = None
+    if control is not None:
+        analyses = None
+        failure = None
+        control.__traceback__ = None
+        raised_control = control
+        control = None
+        raise raised_control
+    if failure is not None or analyses is None:
+        analyses = None
+        raised_failure = failure or _safe_error(ErrorCode.ANALYZER_FAILED, _ENGINE_MESSAGE)
+        failure = None
+        raise raised_failure from None
+    return analyses
+
+
+__all__ = [
+    "AnalyzerRunner",
+    "OracleCodeAnalysis",
+    "OracleCodeInput",
+    "run_oracle_batch",
+    "run_oracle_code_batch",
+]

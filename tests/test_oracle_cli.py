@@ -230,7 +230,7 @@ def _prepared_confirmation_pipeline(tmp_path: Path) -> tuple[AppConfig, RunStore
     return config, store
 
 
-def _assert_legacy_confirm_rejected_without_output(tmp_path: Path) -> None:
+def _assert_legacy_confirm_rejected_preserving_output(tmp_path: Path) -> None:
     config = _config(tmp_path)
     store = RunStore(config)
     store.prepare()
@@ -238,15 +238,27 @@ def _assert_legacy_confirm_rejected_without_output(tmp_path: Path) -> None:
         store.path("analysis", "pair_results.jsonl"),
         store.path("analysis", "hypothesis_effects.jsonl"),
     )
-    before = tuple(output.read_bytes() if output.exists() else None for output in outputs)
+    manifest = store.path(".stages", "confirm.json")
+    sentinels = (b'{"legacy":"pairs"}\n', b'{"legacy":"effects"}\n')
+    for output, sentinel in zip(outputs, sentinels, strict=True):
+        output.write_bytes(sentinel)
+    manifest_sentinel = b'{"legacy":"confirm-manifest"}\n'
+    manifest.write_bytes(manifest_sentinel)
+    before = tuple(output.read_bytes() for output in outputs)
 
     with pytest.raises(SecAwareError) as exc_info:
         confirm_stage(config, store, force=True)
 
     assert exc_info.value.code is ErrorCode.CONTRACT
     assert "regeneration" in exc_info.value.message
-    assert tuple(output.read_bytes() if output.exists() else None for output in outputs) == before
-    assert not store.path(".stages", "confirm.json").exists()
+    assert tuple(output.read_bytes() for output in outputs) == before
+    assert manifest.read_bytes() == manifest_sentinel
+
+
+def test_legacy_confirm_typed_rejection_preserves_existing_outputs_and_manifest(
+    tmp_path: Path,
+) -> None:
+    _assert_legacy_confirm_rejected_preserving_output(tmp_path)
 
 
 def _commit_counterfactual_oracle_fixture(store: RunStore) -> None:
@@ -1549,7 +1561,7 @@ def test_downstream_force_failure_preserves_previous_commit(
     stage_name: str,
 ) -> None:
     if stage_name == "confirm":
-        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        _assert_legacy_confirm_rejected_preserving_output(tmp_path)
         return
     if stage_name == "discover":
         config, store = _prepared_observed_pipeline(tmp_path)
@@ -1714,7 +1726,7 @@ def test_multioutput_mark_failure_holds_stage_lease_through_rollback(
     stage_name: str,
 ) -> None:
     if stage_name == "confirm":
-        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        _assert_legacy_confirm_rejected_preserving_output(tmp_path)
         return
     if stage_name == "discover":
         config, owner = _prepared_observed_pipeline(tmp_path)
@@ -1810,7 +1822,7 @@ def test_mark_postcommit_control_rolls_back_and_releases_stage_lease(
     control: KeyboardInterrupt | SystemExit,
 ) -> None:
     if surface == "confirm":
-        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        _assert_legacy_confirm_rejected_preserving_output(tmp_path)
         return
     if surface == "oracle":
         config, owner = _prepared_observed_pipeline(tmp_path)
@@ -1882,7 +1894,7 @@ def test_postcommit_finalize_control_keeps_commit_and_ensures_release(
     control: KeyboardInterrupt | SystemExit,
 ) -> None:
     if surface == "confirm":
-        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        _assert_legacy_confirm_rejected_preserving_output(tmp_path)
         return
     if surface == "oracle":
         config, owner = _prepared_observed_pipeline(tmp_path)
@@ -2491,7 +2503,7 @@ def test_pipeline_skip_cleans_stale_backup_without_reexecution(
     cleanup_state: str,
 ) -> None:
     if surface == "confirm":
-        _assert_legacy_confirm_rejected_without_output(tmp_path)
+        _assert_legacy_confirm_rejected_preserving_output(tmp_path)
         return
     if surface == "pipeline_oracle":
         config, store = _prepared_canonical_store(tmp_path)

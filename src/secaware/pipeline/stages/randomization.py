@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 import hashlib
@@ -362,6 +363,61 @@ def _validate_output_bundle(
         raise _stage_error("randomization output bundle failed validation") from None
 
 
+def validate_randomization_artifact_bundle(
+    manifest: RandomizationManifestRecord,
+    assignments: Sequence[AssignmentRecord],
+    *,
+    target_specs: Sequence[TargetSpecRecord],
+    target_instances: Sequence[TargetInstanceRecord],
+    protocols: Sequence[ConfirmationProtocolRecord],
+    protocol_instances: Sequence[ConfirmationProtocolInstanceRecord],
+    variants: Sequence[PromptVariantRecord],
+    exclusions: Sequence[PreRandomizationExclusionRecord],
+    hypotheses: Sequence[FrozenHypothesisRecord],
+    confirmation_seeds: Sequence[int],
+    global_seed: int,
+    randomization_config: RandomizationConfig,
+    block_builder=build_randomization_blocks,
+) -> RandomizationStageResult:
+    """Rebuild and authenticate the complete Task-4/randomization closure."""
+
+    try:
+        blocks = block_builder(
+            target_specs=target_specs,
+            target_instances=target_instances,
+            protocols=protocols,
+            protocol_instances=protocol_instances,
+            variants=variants,
+            exclusions=exclusions,
+            hypotheses=hypotheses,
+            max_blocks=randomization_config.max_blocks,
+        )
+        return _validate_output_bundle(
+            RandomizationManifestRecord.model_validate(manifest.model_dump(mode="json")),
+            tuple(
+                AssignmentRecord.model_validate(item.model_dump(mode="json"))
+                for item in assignments
+            ),
+            blocks,
+            tuple(confirmation_seeds),
+            global_seed=global_seed,
+            randomization_config=randomization_config,
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except RandomizationError as error:
+        raise _stage_error(
+            "randomization artifact bundle failed validation",
+            failure_code=error.failure_code.value,
+        ) from None
+    except Exception:
+        raise _stage_error("randomization artifact bundle failed validation") from None
+    finally:
+        block_builder = None
+
+
 def run_confirmation_randomization_stage(
     config: AppConfig,
     store: RunStore,
@@ -614,4 +670,5 @@ __all__ = [
     "RANDOMIZATION_OUTPUTS",
     "RandomizationStageResult",
     "run_confirmation_randomization_stage",
+    "validate_randomization_artifact_bundle",
 ]

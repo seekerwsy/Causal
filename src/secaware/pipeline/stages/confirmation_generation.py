@@ -663,6 +663,66 @@ def _validate_output_bundle(
     return result
 
 
+def validate_confirmation_generation_bundle(
+    randomization_manifest: RandomizationManifestRecord,
+    assignments: Sequence[AssignmentRecord],
+    variants: Sequence[PromptVariantRecord],
+    config: AppConfig,
+    requests: Sequence[GenerationRequestRecord],
+    executions: Sequence[AssignmentExecutionRecord],
+    codes: Sequence[CanonicalGeneratedCodeRecord],
+    *,
+    planner=plan_confirmation_requests,
+    provenance_hasher=provider_provenance_sha256,
+) -> ConfirmationGenerationStageResult:
+    """Authenticate the complete standalone-request/execution/code closure."""
+
+    try:
+        manifest = RandomizationManifestRecord.model_validate(
+            randomization_manifest.model_dump(mode="json")
+        )
+        checked_assignments = tuple(
+            AssignmentRecord.model_validate(item.model_dump(mode="json")) for item in assignments
+        )
+        checked_variants = tuple(
+            PromptVariantRecord.model_validate(item.model_dump(mode="json")) for item in variants
+        )
+        _validate_randomization_closure(manifest, checked_assignments)
+        snapshot = _InputSnapshot(
+            files=(),
+            assignments=checked_assignments,
+            variants=checked_variants,
+            randomization_manifest=manifest,
+        )
+        return _validate_output_bundle(
+            snapshot,
+            config,
+            (requests, executions, codes),
+            planner=planner,
+            provenance_hasher=provenance_hasher,
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _stage_error("confirmation generation bundle failed validation") from None
+    finally:
+        randomization_manifest = None  # type: ignore[assignment]
+        assignments = ()
+        variants = ()
+        config = None  # type: ignore[assignment]
+        requests = ()
+        executions = ()
+        codes = ()
+        manifest = None
+        checked_assignments = ()
+        checked_variants = ()
+        snapshot = None
+        planner = None
+        provenance_hasher = None
+
+
 def _safe_fingerprint_value(value: object, *, depth: int = 0) -> object:
     if depth > 4:
         return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
@@ -913,6 +973,7 @@ def _confirmation_runtime_callables() -> dict[str, object]:
         "provider.result_type": OpenAICompatibleGenerationResult,
         "execution.execute_confirmation_requests": execute_confirmation_requests,
         "validation.output_bundle": _validate_output_bundle,
+        "validation.public_output_bundle": validate_confirmation_generation_bundle,
         "validation.provider_provenance_sha256": provider_provenance_sha256,
         "transaction.execute_jsonl_stage_transaction": execute_jsonl_stage_transaction,
         "transaction.jsonl_output_spec": JsonlOutputSpec,
@@ -1140,10 +1201,12 @@ def run_confirmation_generation_stage(
             effective_provider = None
             requests = ()
         groups = (result_requests, executions, codes)
-        runtime_callables["validation.output_bundle"](
-            snapshot,
+        runtime_callables["validation.public_output_bundle"](
+            snapshot.randomization_manifest,
+            snapshot.assignments,
+            snapshot.variants,
             effective_config,
-            groups,
+            *groups,
             planner=runtime_callables["planning.plan_confirmation_requests"],
             provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
         )
@@ -1153,10 +1216,12 @@ def run_confirmation_generation_stage(
         verify_runtime_bundle()
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
-        runtime_callables["validation.output_bundle"](
-            snapshot,
+        runtime_callables["validation.public_output_bundle"](
+            snapshot.randomization_manifest,
+            snapshot.assignments,
+            snapshot.variants,
             effective_config,
-            groups,
+            *groups,
             planner=runtime_callables["planning.plan_confirmation_requests"],
             provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
         )
@@ -1209,10 +1274,12 @@ def run_confirmation_generation_stage(
             for spec in output_specs
         )
         verify_runtime_bundle()
-        return runtime_callables["validation.output_bundle"](
-            snapshot,
+        return runtime_callables["validation.public_output_bundle"](
+            snapshot.randomization_manifest,
+            snapshot.assignments,
+            snapshot.variants,
             effective_config,
-            groups,
+            *groups,
             planner=runtime_callables["planning.plan_confirmation_requests"],
             provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
         )
@@ -1223,4 +1290,5 @@ __all__ = [
     "CONFIRMATION_PROVIDER_POLICY_VERSION",
     "ConfirmationGenerationStageResult",
     "run_confirmation_generation_stage",
+    "validate_confirmation_generation_bundle",
 ]
