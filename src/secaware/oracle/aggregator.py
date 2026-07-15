@@ -55,6 +55,11 @@ _CLEANUP_CONTROL_NOTE = "Oracle cleanup observed an additional control exception
 _CLEANUP_INCOMPLETE_NOTE = "Oracle cleanup remained incomplete after bounded retries"
 _CLEANUP_STATUS_ATTRIBUTE = "_secaware_cleanup_status"
 
+_TRUSTED_ANALYZER_REPORT_TYPE = AnalyzerReport
+_TRUSTED_LOCATED_FINDING_TYPE = LocatedAnalyzerFinding
+_TRUSTED_ANALYZER_FINDING_TYPE = AnalyzerFindingRecord
+_TRUSTED_ANALYZER_PROVENANCE_TYPE = AnalyzerProvenanceRecord
+
 
 class AnalyzerRunner(Protocol):
     def __call__(
@@ -135,6 +140,9 @@ class OracleCodeAnalysis:
     severity: str
     findings: tuple[AnalyzerFindingRecord, ...]
     analyzers: tuple[AnalyzerProvenanceRecord, ...]
+
+
+_TRUSTED_ORACLE_CODE_ANALYSIS_TYPE = OracleCodeAnalysis
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -1263,6 +1271,193 @@ def _validate_report_coordinates(
         ) from None
 
 
+def _snapshot_analyzer_report(
+    report: AnalyzerReport,
+    *,
+    analyzer: Literal["semgrep", "bandit"],
+    expected_files: frozenset[str],
+) -> AnalyzerReport:
+    """Rebuild an adapter report using the authenticated DTO definitions."""
+
+    try:
+        if (
+            type(report) is not _TRUSTED_ANALYZER_REPORT_TYPE
+            or type(report.covered_files) is not tuple
+            or report.covered_files != tuple(sorted(expected_files))
+            or report.analyzer != analyzer
+            or type(report.provenance) is not _TRUSTED_ANALYZER_PROVENANCE_TYPE
+            or not model_shape_is_intact(report.provenance)
+            or report.provenance.analyzer != analyzer
+            or type(report.findings) is not tuple
+        ):
+            raise ValueError
+        provenance = _TRUSTED_ANALYZER_PROVENANCE_TYPE.model_validate(
+            report.provenance.model_dump(mode="python", round_trip=True, warnings=False)
+        )
+        findings: list[LocatedAnalyzerFinding] = []
+        for located in report.findings:
+            if (
+                type(located) is not _TRUSTED_LOCATED_FINDING_TYPE
+                or type(located.opaque_file) is not str
+                or located.opaque_file not in expected_files
+                or type(located.record) is not _TRUSTED_ANALYZER_FINDING_TYPE
+                or not model_shape_is_intact(located.record)
+                or located.record.analyzer != analyzer
+                or (
+                    located.start_offset is not None
+                    and (type(located.start_offset) is not int or located.start_offset < 0)
+                )
+                or (
+                    located.end_offset is not None
+                    and (type(located.end_offset) is not int or located.end_offset < 0)
+                )
+                or ((located.start_offset is None) != (located.end_offset is None))
+                or (
+                    located.start_offset is not None
+                    and located.end_offset is not None
+                    and located.end_offset < located.start_offset
+                )
+            ):
+                raise ValueError
+            record = _TRUSTED_ANALYZER_FINDING_TYPE.model_validate(
+                located.record.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            findings.append(
+                _TRUSTED_LOCATED_FINDING_TYPE(
+                    opaque_file=located.opaque_file,
+                    record=record,
+                    start_offset=located.start_offset,
+                    end_offset=located.end_offset,
+                )
+            )
+        trusted_findings = tuple(findings)
+        if trusted_findings != tuple(
+            sorted(trusted_findings, key=_TRUSTED_LOCATED_FINDING_TYPE.sort_key)
+        ) or len({item.identity_key() for item in trusted_findings}) != len(trusted_findings):
+            raise ValueError
+        return _TRUSTED_ANALYZER_REPORT_TYPE(
+            analyzer=analyzer,
+            provenance=provenance,
+            covered_files=tuple(sorted(expected_files)),
+            findings=trusted_findings,
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _safe_error(ErrorCode.ANALYZER_INVALID_OUTPUT, _ENGINE_MESSAGE) from None
+
+
+def validate_oracle_code_analyses(
+    analyses: Iterable[OracleCodeAnalysis],
+) -> tuple[OracleCodeAnalysis, ...]:
+    """Authenticate and rebuild analyzer-only results before coordinate binding."""
+
+    trusted: list[OracleCodeAnalysis] = []
+    try:
+        if isinstance(analyses, (str, bytes, Mapping)):
+            raise ValueError
+        for analysis in analyses:
+            if (
+                type(analysis) is not _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE
+                or type(analysis.request_id) is not str
+                or re.fullmatch(r"req_[0-9a-f]{64}", analysis.request_id) is None
+                or type(analysis.code_id) is not str
+                or re.fullmatch(r"code_[0-9a-f]{64}", analysis.code_id) is None
+                or type(analysis.code_sha256) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", analysis.code_sha256) is None
+                or type(analysis.prompt_id) is not str
+                or not analysis.prompt_id
+                or len(analysis.prompt_id) > 1024
+                or type(analysis.model_id) is not str
+                or not is_valid_model_id(analysis.model_id)
+                or type(analysis.seed_id) is not int
+                or not -(2**63) <= analysis.seed_id <= 2**63 - 1
+                or type(analysis.parse_ok) is not bool
+                or type(analysis.functional_ok) is not bool
+                or type(analysis.security_label) is not SecurityLabel
+                or type(analysis.evaluability) is not OracleEvaluability
+                or type(analysis.severity) is not str
+                or type(analysis.findings) is not tuple
+                or type(analysis.analyzers) is not tuple
+                or len(analysis.analyzers) != 2
+            ):
+                raise ValueError
+            provenances = tuple(
+                _TRUSTED_ANALYZER_PROVENANCE_TYPE.model_validate(
+                    value.model_dump(mode="python", round_trip=True, warnings=False)
+                )
+                for value in analysis.analyzers
+                if type(value) is _TRUSTED_ANALYZER_PROVENANCE_TYPE and model_shape_is_intact(value)
+            )
+            findings = tuple(
+                _TRUSTED_ANALYZER_FINDING_TYPE.model_validate(
+                    value.model_dump(mode="python", round_trip=True, warnings=False)
+                )
+                for value in analysis.findings
+                if type(value) is _TRUSTED_ANALYZER_FINDING_TYPE and model_shape_is_intact(value)
+            )
+            if (
+                len(provenances) != len(analysis.analyzers)
+                or tuple(item.analyzer for item in provenances) != ("semgrep", "bandit")
+                or len(findings) != len(analysis.findings)
+                or any(item.analyzer not in {"semgrep", "bandit"} for item in findings)
+            ):
+                raise ValueError
+            severity_rank = {"low": 1, "medium": 2, "high": 3}
+            expected_severity = (
+                max(findings, key=lambda item: severity_rank[item.severity]).severity
+                if findings
+                else "none"
+            )
+            expected_security = (
+                SecurityLabel.UNKNOWN
+                if not analysis.parse_ok
+                else SecurityLabel.INSECURE
+                if findings
+                else SecurityLabel.SECURE
+            )
+            expected_evaluability = (
+                OracleEvaluability.UNKNOWN_PARSE_FAILURE
+                if not analysis.parse_ok
+                else OracleEvaluability.EVALUABLE
+            )
+            if (
+                (not analysis.parse_ok and findings)
+                or analysis.severity != expected_severity
+                or analysis.security_label is not expected_security
+                or analysis.evaluability is not expected_evaluability
+            ):
+                raise ValueError
+            trusted.append(
+                _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
+                    request_id=analysis.request_id,
+                    code_id=analysis.code_id,
+                    code_sha256=analysis.code_sha256,
+                    prompt_id=analysis.prompt_id,
+                    model_id=analysis.model_id,
+                    seed_id=analysis.seed_id,
+                    parse_ok=analysis.parse_ok,
+                    functional_ok=analysis.functional_ok,
+                    security_label=expected_security,
+                    evaluability=expected_evaluability,
+                    severity=expected_severity,
+                    findings=findings,
+                    analyzers=provenances,
+                )
+            )
+            if len(trusted) > _MAX_BATCH_RECORDS:
+                raise ValueError
+        if len({item.request_id for item in trusted}) != len(trusted):
+            raise ValueError
+        return tuple(trusted)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _safe_error(ErrorCode.ANALYZER_INVALID_OUTPUT, _ENGINE_MESSAGE) from None
+    finally:
+        analyses = ()
+
+
 def _aggregate(
     codes: tuple[_ValidatedCode, ...],
     semgrep_report: AnalyzerReport,
@@ -1285,7 +1480,7 @@ def _aggregate(
         _validate_report_coordinates(codes, (semgrep_report, bandit_report))
         located.extend(semgrep_report.findings)
         located.extend(bandit_report.findings)
-        located.sort(key=LocatedAnalyzerFinding.sort_key)
+        located.sort(key=_TRUSTED_LOCATED_FINDING_TYPE.sort_key)
         for finding in located:
             if finding.opaque_file not in by_file:
                 raise ValueError(_ENGINE_MESSAGE)
@@ -1379,7 +1574,7 @@ def _aggregate_code_analyses(
         _validate_report_coordinates(codes, (semgrep_report, bandit_report))
         located.extend(semgrep_report.findings)
         located.extend(bandit_report.findings)
-        located.sort(key=LocatedAnalyzerFinding.sort_key)
+        located.sort(key=_TRUSTED_LOCATED_FINDING_TYPE.sort_key)
         for finding in located:
             if finding.opaque_file not in by_file:
                 raise ValueError(_ENGINE_MESSAGE)
@@ -1399,7 +1594,7 @@ def _aggregate_code_analyses(
                 else "none"
             )
             analyses.append(
-                OracleCodeAnalysis(
+                _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
                     request_id=record.request_id,
                     code_id=record.code_id,
                     code_sha256=record.code_sha256,
@@ -1632,7 +1827,18 @@ def run_oracle_code_batch(
             max_output_bytes=max_stdout_bytes,
         )
         bandit_process = None
+        semgrep_report = _snapshot_analyzer_report(
+            semgrep_report,
+            analyzer="semgrep",
+            expected_files=expected_files,
+        )
+        bandit_report = _snapshot_analyzer_report(
+            bandit_report,
+            analyzer="bandit",
+            expected_files=expected_files,
+        )
         analyses = _aggregate_code_analyses(validated, semgrep_report, bandit_report)
+        analyses = list(validate_oracle_code_analyses(analyses))
     except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
@@ -1677,4 +1883,5 @@ __all__ = [
     "OracleCodeInput",
     "run_oracle_batch",
     "run_oracle_code_batch",
+    "validate_oracle_code_analyses",
 ]

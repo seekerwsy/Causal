@@ -154,13 +154,9 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
     hypothesis_id: str | None = Field(default=None, pattern=_HYPOTHESIS_ID_PATTERN)
     assignment_id: str | None = Field(default=None, pattern=_ASSIGNMENT_ID_PATTERN)
     target_spec_id: str | None = Field(default=None, pattern=_TARGET_ID_PATTERN)
-    target_instance_id: str | None = Field(
-        default=None, pattern=_TARGET_INSTANCE_ID_PATTERN
-    )
+    target_instance_id: str | None = Field(default=None, pattern=_TARGET_INSTANCE_ID_PATTERN)
     arm_protocol_id: str | None = Field(default=None, pattern=_PROTOCOL_ID_PATTERN)
-    protocol_instance_id: str | None = Field(
-        default=None, pattern=_PROTOCOL_INSTANCE_ID_PATTERN
-    )
+    protocol_instance_id: str | None = Field(default=None, pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
     variant_id: str | None = Field(default=None, pattern=_VARIANT_ID_PATTERN)
     arm_role: ArmRole | None = None
     parse_ok: StrictBool

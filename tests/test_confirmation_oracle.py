@@ -19,7 +19,8 @@ from secaware.oracle import aggregator as oracle_aggregator
 from secaware.oracle.aggregator import OracleCodeInput, run_oracle_batch, run_oracle_code_batch
 from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.runner import AnalyzerProcessResult
-from secaware.pipeline.artifact import sha256_path
+from secaware.intervention.graph_patch import IntendedGraphPatchRecord, allowed_delta_sha256
+from secaware.pipeline.artifact import canonical_sha256, sha256_path
 from secaware.pipeline.manifest import read_stage_manifest, write_stage_manifest
 import secaware.pipeline.stage_contracts as stage_contracts
 from secaware.cli import app as pipeline_app
@@ -31,7 +32,10 @@ from secaware.pipeline.stages.confirmation_oracle import (
     validate_confirmation_oracle_coverage,
 )
 import secaware.pipeline.stages.confirmation_oracle as confirmation_oracle_module
-from secaware.pipeline.stages.prompt_variants import run_prompt_variant_freeze_stage
+from secaware.pipeline.stages.prompt_variants import (
+    PROMPT_VARIANT_OUTPUTS,
+    run_prompt_variant_freeze_stage,
+)
 from secaware.pipeline.stages.randomization import run_confirmation_randomization_stage
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
@@ -39,13 +43,15 @@ from secaware.schema.experiments import (
     AssignmentExecutionRecord,
     AssignmentExecutionStatus,
     AssignmentRecord,
+    PreRandomizationExclusionRecord,
+    PreRandomizationFailureCode,
     RandomizationManifestRecord,
 )
 from secaware.schema.generation import provider_provenance_sha256
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.schema.experiments import ArmRole
 from secaware.schema.generation import GenerationProvenance
-from secaware.schema.oracle import OracleRecord
+from secaware.schema.oracle import AnalyzerFindingRecord, OracleRecord, SecurityLabel
 
 from test_confirmation_generation_planner import _assignment_and_variant, _generation_config
 from test_oracle_engine import FakeRunner
@@ -606,6 +612,86 @@ def _rewrite_raw_producer_output(store: RunStore, stage: str, relative: str, pay
     )
 
 
+def _task4_bundle(store: RunStore) -> dict[str, tuple[object, ...]]:
+    return {
+        name: tuple(
+            read_jsonl(
+                store.path("interventions", name),
+                model,
+                required=True,
+                allow_empty=True,
+            )
+        )
+        for name, model in PROMPT_VARIANT_OUTPUTS
+    }
+
+
+def _mutated_task4_group(
+    output_name: str, bundle: dict[str, tuple[object, ...]]
+) -> tuple[object, ...]:
+    records = bundle[output_name]
+    if output_name in {
+        "target_specs.jsonl",
+        "confirmation_protocols.jsonl",
+        "prompt_variants.jsonl",
+    }:
+        return (*records, records[0])
+    if output_name in {
+        "target_instances.jsonl",
+        "confirmation_protocol_instances.jsonl",
+        "variant_extraction_proposals.jsonl",
+        "variant_prompt_tsg.jsonl",
+        "length_matches.jsonl",
+    }:
+        return records[1:]
+    if output_name == "graph_deltas.jsonl":
+        original = records[0]
+        content = original.model_dump(mode="python", exclude={"schema_version", "delta_id"})
+        content["target_changed"] = not bool(original.target_changed)
+        replacement = type(original).from_content(**content)
+        return (replacement, *records[1:])
+    if output_name == "intended_patches.jsonl":
+        delta = bundle["graph_deltas.jsonl"][0]
+        protocol = bundle["confirmation_protocols.jsonl"][0]
+        arm = next(item for item in protocol.arms if item.role is delta.arm_role)
+        return (
+            IntendedGraphPatchRecord.from_content(
+                target_spec_id=delta.target_spec_id,
+                target_instance_id=delta.target_instance_id,
+                arm_protocol_id=delta.arm_protocol_id,
+                protocol_instance_id=delta.protocol_instance_id,
+                arm_role=delta.arm_role,
+                before_graph_sha256=delta.before_graph_sha256,
+                allowed_delta_sha256=allowed_delta_sha256(arm.allowed_delta),
+                intended_transitions=arm.allowed_delta.allowed_transitions,
+            ),
+        )
+    if output_name == "pre_randomization_exclusions.jsonl":
+        variant = bundle["prompt_variants.jsonl"][0]
+        detail_sha256 = canonical_sha256(
+            {
+                "schema_version": "1.0",
+                "protocol_instance_id": variant.protocol_instance_id,
+                "failed_arm_roles": [variant.arm_role.value],
+                "failure_codes": [PreRandomizationFailureCode.EXECUTION_FAILED.value],
+            }
+        )
+        return (
+            PreRandomizationExclusionRecord.from_content(
+                hypothesis_id=variant.hypothesis_id,
+                target_spec_id=variant.target_spec_id,
+                target_instance_id=variant.target_instance_id,
+                arm_protocol_id=variant.arm_protocol_id,
+                protocol_instance_id=variant.protocol_instance_id,
+                task_id=variant.task_id,
+                failed_arm_roles=(variant.arm_role,),
+                failure_codes=(PreRandomizationFailureCode.EXECUTION_FAILED,),
+                detail_sha256=detail_sha256,
+            ),
+        )
+    raise AssertionError(output_name)
+
+
 def _stage_run(config: AppConfig, store: RunStore, runner: _StageRunner, *, force=False):
     global _ACTIVE_STAGE_RUNNER, _ACTIVE_RUNTIME_VALIDATOR
     _ACTIVE_STAGE_RUNNER = runner
@@ -800,6 +886,90 @@ def test_confirmation_oracle_rejects_full_task4_provenance_mutation_pre_analyzer
     with pytest.raises(SecAwareError):
         _stage_run(config, store, runner, force=True)
     assert runner.analysis_calls == 0
+
+
+@pytest.mark.parametrize("output_name", tuple(name for name, _model in PROMPT_VARIANT_OUTPUTS))
+def test_confirmation_oracle_consumes_every_task4_output_relation_pre_analyzer(
+    _generated_confirmation_store, tmp_path: Path, output_name: str
+) -> None:
+    del tmp_path
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    bundle = _task4_bundle(store)
+    artifact = store.path("interventions", output_name)
+    producer_manifest = store.path(".stages", "build-confirmation-variants.json")
+    previous = (artifact.read_bytes(), producer_manifest.read_bytes())
+    try:
+        _rewrite_producer_outputs(
+            store,
+            "build-confirmation-variants",
+            {f"interventions/{output_name}": _mutated_task4_group(output_name, bundle)},
+        )
+        runner = _StageRunner()
+        with pytest.raises(SecAwareError):
+            _stage_run(config, store, runner, force=True)
+        assert runner.analysis_calls == 0
+        assert _oracle_bytes(store) == committed
+    finally:
+        artifact.write_bytes(previous[0])
+        producer_manifest.write_bytes(previous[1])
+
+
+def test_confirmation_oracle_rejects_resigned_duplicate_graph_delta_pre_analyzer(
+    _generated_confirmation_store, tmp_path: Path
+) -> None:
+    del tmp_path
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    bundle = _task4_bundle(store)
+    deltas = bundle["graph_deltas.jsonl"]
+    artifact = store.path("interventions", "graph_deltas.jsonl")
+    producer_manifest = store.path(".stages", "build-confirmation-variants.json")
+    previous = (artifact.read_bytes(), producer_manifest.read_bytes())
+    try:
+        _rewrite_producer_outputs(
+            store,
+            "build-confirmation-variants",
+            {"interventions/graph_deltas.jsonl": (*deltas, deltas[0])},
+        )
+        runner = _StageRunner()
+        with pytest.raises(SecAwareError):
+            _stage_run(config, store, runner, force=True)
+        assert runner.analysis_calls == 0
+        assert _oracle_bytes(store) == committed
+    finally:
+        artifact.write_bytes(previous[0])
+        producer_manifest.write_bytes(previous[1])
+
+
+@pytest.mark.parametrize(
+    "producer_stage",
+    ("build-confirmation-variants", "randomize-confirmation", "generate-confirmation"),
+)
+def test_confirmation_oracle_rejects_producer_manifest_input_hash_drift_pre_analyzer(
+    _generated_confirmation_store, tmp_path: Path, producer_stage: str
+) -> None:
+    del tmp_path
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    manifest_path = store.path(".stages", f"{producer_stage}.json")
+    previous = manifest_path.read_bytes()
+    manifest = read_stage_manifest(manifest_path)
+    inputs = dict(manifest.inputs)
+    first = next(iter(inputs))
+    inputs[first] = "f" * 64 if inputs[first] != "f" * 64 else "e" * 64
+    try:
+        write_stage_manifest(
+            manifest_path,
+            type(manifest).model_validate({**manifest.model_dump(mode="json"), "inputs": inputs}),
+        )
+        runner = _StageRunner()
+        with pytest.raises(SecAwareError):
+            _stage_run(config, store, runner, force=True)
+        assert runner.analysis_calls == 0
+        assert _oracle_bytes(store) == committed
+    finally:
+        manifest_path.write_bytes(previous)
 
 
 @pytest.mark.parametrize("drift", ("standalone_request", "nested_request", "terminal_request"))
@@ -1062,6 +1232,64 @@ def test_confirmation_oracle_adapter_drift_aborts_and_preserves_commit(
         _stage_run(config, store, runner, force=True)
     assert captured.value.code in {ErrorCode.CONTRACT, ErrorCode.ANALYZER_FAILED}
     assert runner.analysis_calls == 1
+    assert _oracle_bytes(store) == committed
+
+
+@pytest.mark.parametrize(
+    "global_name",
+    (
+        "OracleCodeAnalysis",
+        "AnalyzerReport",
+        "LocatedAnalyzerFinding",
+        "AnalyzerFindingRecord",
+        "AnalyzerProvenanceRecord",
+    ),
+)
+def test_confirmation_oracle_runtime_contract_binds_analysis_dto_globals(
+    monkeypatch: pytest.MonkeyPatch, global_name: str
+) -> None:
+    baseline = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    replacement = type(f"Forged{global_name}", (), {})
+    monkeypatch.setattr(oracle_aggregator, global_name, replacement)
+    changed = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    assert changed != baseline
+
+
+def test_confirmation_oracle_rejects_in_call_forged_analysis_dto_and_preserves_commit(
+    _generated_confirmation_store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    trusted_analysis_type = oracle_aggregator.OracleCodeAnalysis
+    fabricated = AnalyzerFindingRecord(
+        schema_version="1.0",
+        analyzer="semgrep",
+        rule_id="forged.rule",
+        cwe="CWE-999",
+        severity="high",
+        confidence="high",
+        line=1,
+        column=1,
+        end_line=1,
+        end_column=2,
+        message="fabricated finding",
+    )
+
+    def drift_on_first_analysis(call: int) -> None:
+        if call != 1:
+            return
+
+        def forged_analysis(**kwargs):
+            kwargs["security_label"] = SecurityLabel.INSECURE
+            kwargs["severity"] = "high"
+            kwargs["findings"] = (fabricated,)
+            return trusted_analysis_type(**kwargs)
+
+        monkeypatch.setattr(oracle_aggregator, "OracleCodeAnalysis", forged_analysis)
+
+    runner = _StageRunner(on_analysis=drift_on_first_analysis)
+    with pytest.raises(SecAwareError):
+        _stage_run(config, store, runner, force=True)
     assert _oracle_bytes(store) == committed
 
 

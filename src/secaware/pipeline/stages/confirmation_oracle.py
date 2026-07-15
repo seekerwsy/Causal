@@ -40,7 +40,10 @@ from secaware.pipeline.stages.confirmation_generation import (
     validate_confirmation_generation_bundle,
 )
 from secaware.pipeline.stages.fci_discovery import FCI_DISCOVERY_OUTPUTS
-from secaware.pipeline.stages.prompt_variants import PROMPT_VARIANT_OUTPUTS
+from secaware.pipeline.stages.prompt_variants import (
+    PROMPT_VARIANT_OUTPUTS,
+    validate_prompt_variant_artifact_bundle,
+)
 from secaware.pipeline.stages.randomization import (
     RANDOMIZATION_OUTPUTS,
     validate_randomization_artifact_bundle,
@@ -52,19 +55,23 @@ from secaware.schema.experiments import (
     AssignmentRecord,
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
+    FunctionalOutcomeContractRecord,
     PromptVariantRecord,
     PreRandomizationExclusionRecord,
     RandomizationManifestRecord,
     TargetInstanceRecord,
     TargetSpecRecord,
 )
+from secaware.intervention.attestation import PromptRoleAttestationRecord
 from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.generation import (
     GenerationRequestRecord,
     provider_provenance_sha256,
 )
 from secaware.schema.oracle import OracleRecord
-from secaware.schema.records import CanonicalGeneratedCodeRecord
+from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+from secaware.schema.tsg import PromptTSGRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 
@@ -118,6 +125,12 @@ class _FileSnapshot:
 @dataclass(frozen=True, slots=True, repr=False)
 class _InputSnapshot:
     files: tuple[_FileSnapshot, ...]
+    prompts: tuple[PromptRecord, ...]
+    attestations: tuple[PromptRoleAttestationRecord, ...]
+    contracts: tuple[FunctionalOutcomeContractRecord, ...]
+    source_proposals: tuple[PromptExtractionProposalRecord, ...]
+    source_graphs: tuple[PromptTSGRecord, ...]
+    task4_groups: tuple[tuple[BaseModel, ...], ...]
     targets: tuple[TargetSpecRecord, ...]
     target_instances: tuple[TargetInstanceRecord, ...]
     protocols: tuple[ConfirmationProtocolRecord, ...]
@@ -442,6 +455,7 @@ def _validate_upstream_bundles(
     snapshot: _InputSnapshot,
     config: AppConfig,
     *,
+    prompt_variant_validator=validate_prompt_variant_artifact_bundle,
     randomization_validator=validate_randomization_artifact_bundle,
     generation_validator=validate_confirmation_generation_bundle,
     block_builder=randomization_stage.build_randomization_blocks,
@@ -450,6 +464,16 @@ def _validate_upstream_bundles(
 ) -> None:
     """Replay the complete Task-4/5/6 provenance before trusting generated code."""
 
+    prompt_variant_validator(
+        config,
+        prompts=snapshot.prompts,
+        attestations=snapshot.attestations,
+        contracts=snapshot.contracts,
+        source_proposals=snapshot.source_proposals,
+        source_graphs=snapshot.source_graphs,
+        hypotheses=snapshot.hypotheses,
+        groups=snapshot.task4_groups,
+    )
     randomization_validator(
         snapshot.randomization_manifest,
         snapshot.assignments,
@@ -664,6 +688,17 @@ def _run_confirmation_oracle_stage(
     if effective_store.root != store.root:
         raise _error("confirmation Oracle configuration failed validation", code=ErrorCode.CONFIG)
 
+    prompt_path = effective_store.path("inputs", "prompts.jsonl")
+    attestation_path = Path(effective_config.data.prompt_attestations_path)
+    contract_path = (
+        Path(effective_config.data.functional_outcome_contracts_path)
+        if effective_config.data.functional_outcome_contracts_path is not None
+        else None
+    )
+    extraction_paths = (
+        effective_store.path("tsg", "prompt_extraction_proposals.jsonl"),
+        effective_store.path("tsg", "prompt_tsg.jsonl"),
+    )
     task4_paths = tuple(
         effective_store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
     )
@@ -678,6 +713,7 @@ def _run_confirmation_oracle_stage(
         effective_store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
     )
     manifest_paths = (
+        effective_store.path(".stages", "extract-prompt-tsg.json"),
         effective_store.path(".stages", "build-confirmation-variants.json"),
         effective_store.path(".stages", "fci-discovery.json"),
         effective_store.path(".stages", "randomize-confirmation.json"),
@@ -708,14 +744,19 @@ def _run_confirmation_oracle_stage(
         initial_policy.bandit_metadata_path,
     )
     inputs = (
-        *task4_paths,
+        prompt_path,
+        attestation_path,
+        *((contract_path,) if contract_path is not None else ()),
+        *extraction_paths,
         manifest_paths[0],
-        hypothesis_path,
+        *task4_paths,
         manifest_paths[1],
-        *task5_paths,
+        hypothesis_path,
         manifest_paths[2],
-        *task6_paths,
+        *task5_paths,
         manifest_paths[3],
+        *task6_paths,
+        manifest_paths[4],
         *policy_paths,
     )
     output = effective_store.path("oracle", _OUTPUT_NAME)
@@ -741,10 +782,19 @@ def _run_confirmation_oracle_stage(
         files: list[_FileSnapshot] = []
         combined = 0
         try:
-            for index, path in enumerate(inputs):
-                allow_empty = (
-                    index < len(task4_paths) and index >= 4
-                ) or path.name == "confirmation_code.jsonl"
+            empty_task4_paths = {
+                path
+                for path, (name, _model) in zip(task4_paths, PROMPT_VARIANT_OUTPUTS, strict=True)
+                if name
+                not in {
+                    "target_specs.jsonl",
+                    "target_instances.jsonl",
+                    "confirmation_protocols.jsonl",
+                    "confirmation_protocol_instances.jsonl",
+                }
+            }
+            for path in inputs:
+                allow_empty = path in empty_task4_paths or path.name == "confirmation_code.jsonl"
                 payload, file = runtime_callables["input.read_snapshot"](
                     path, allow_empty=allow_empty
                 )
@@ -753,52 +803,104 @@ def _run_confirmation_oracle_stage(
                     raise _error("confirmation Oracle input resource limit exceeded")
                 payloads.append(payload)
                 files.append(file)
-            task4_manifest_index = len(task4_paths)
-            hypothesis_index = task4_manifest_index + 1
-            fci_manifest_index = hypothesis_index + 1
-            task5_start = fci_manifest_index + 1
-            task5_manifest_index = task5_start + len(task5_paths)
-            task6_start = task5_manifest_index + 1
-            task6_manifest_index = task6_start + len(task6_paths)
+            payload_by_path = dict(zip(inputs, payloads, strict=True))
             runtime_callables["input.parse_manifest"](
-                payloads[task4_manifest_index], "build-confirmation-variants"
-            )
-            runtime_callables["input.parse_manifest"](payloads[fci_manifest_index], "fci-discovery")
-            runtime_callables["input.parse_manifest"](
-                payloads[task5_manifest_index], "randomize-confirmation"
+                payload_by_path[manifest_paths[0]], "extract-prompt-tsg"
             )
             runtime_callables["input.parse_manifest"](
-                payloads[task6_manifest_index], "generate-confirmation"
+                payload_by_path[manifest_paths[1]], "build-confirmation-variants"
+            )
+            runtime_callables["input.parse_manifest"](
+                payload_by_path[manifest_paths[2]], "fci-discovery"
+            )
+            runtime_callables["input.parse_manifest"](
+                payload_by_path[manifest_paths[3]], "randomize-confirmation"
+            )
+            runtime_callables["input.parse_manifest"](
+                payload_by_path[manifest_paths[4]], "generate-confirmation"
             )
             parser = runtime_callables["input.parse_jsonl"]
-            targets = parser(payloads[0], TargetSpecRecord, allow_empty=False)
-            target_instances = parser(payloads[1], TargetInstanceRecord, allow_empty=False)
-            protocols = parser(payloads[2], ConfirmationProtocolRecord, allow_empty=False)
-            protocol_instances = parser(
-                payloads[3], ConfirmationProtocolInstanceRecord, allow_empty=False
+            prompts = parser(payload_by_path[prompt_path], PromptRecord, allow_empty=False)
+            attestations = parser(
+                payload_by_path[attestation_path],
+                PromptRoleAttestationRecord,
+                allow_empty=False,
             )
-            variants = parser(payloads[8], PromptVariantRecord, allow_empty=False)
-            exclusions = parser(payloads[10], PreRandomizationExclusionRecord, allow_empty=True)
+            contracts = (
+                parser(
+                    payload_by_path[contract_path],
+                    FunctionalOutcomeContractRecord,
+                    allow_empty=False,
+                )
+                if contract_path is not None
+                else ()
+            )
+            source_proposals = parser(
+                payload_by_path[extraction_paths[0]],
+                PromptExtractionProposalRecord,
+                allow_empty=False,
+            )
+            source_graphs = parser(
+                payload_by_path[extraction_paths[1]], PromptTSGRecord, allow_empty=False
+            )
+            task4_groups = tuple(
+                parser(
+                    payload_by_path[path],
+                    model,
+                    allow_empty=name
+                    not in {
+                        "target_specs.jsonl",
+                        "target_instances.jsonl",
+                        "confirmation_protocols.jsonl",
+                        "confirmation_protocol_instances.jsonl",
+                    },
+                )
+                for path, (name, model) in zip(task4_paths, PROMPT_VARIANT_OUTPUTS, strict=True)
+            )
+            task4_by_name = {
+                name: group
+                for (name, _model), group in zip(PROMPT_VARIANT_OUTPUTS, task4_groups, strict=True)
+            }
+            targets = task4_by_name["target_specs.jsonl"]
+            target_instances = task4_by_name["target_instances.jsonl"]
+            protocols = task4_by_name["confirmation_protocols.jsonl"]
+            protocol_instances = task4_by_name["confirmation_protocol_instances.jsonl"]
+            variants = task4_by_name["prompt_variants.jsonl"]
+            exclusions = task4_by_name["pre_randomization_exclusions.jsonl"]
             hypotheses = parser(
-                payloads[hypothesis_index], FrozenHypothesisRecord, allow_empty=False
+                payload_by_path[hypothesis_path], FrozenHypothesisRecord, allow_empty=False
             )
-            randomization_records = parser(
-                payloads[task5_start], RandomizationManifestRecord, allow_empty=False
-            )
+            task5_by_name = {
+                name: parser(payload_by_path[path], model, allow_empty=False)
+                for path, (name, model) in zip(task5_paths, RANDOMIZATION_OUTPUTS, strict=True)
+            }
+            randomization_records = task5_by_name["randomization_manifest.jsonl"]
             if len(randomization_records) != 1:
                 raise _error("confirmation Oracle randomization manifest failed validation")
-            assignments = parser(payloads[task5_start + 1], AssignmentRecord, allow_empty=False)
-            requests = parser(payloads[task6_start], GenerationRequestRecord, allow_empty=False)
-            executions = parser(
-                payloads[task6_start + 1], AssignmentExecutionRecord, allow_empty=False
-            )
-            codes = parser(
-                payloads[task6_start + 2], CanonicalGeneratedCodeRecord, allow_empty=True
-            )
+            assignments = task5_by_name["assignments.jsonl"]
+            task6_by_name = {
+                name: parser(
+                    payload_by_path[path],
+                    model,
+                    allow_empty=name == "confirmation_code.jsonl",
+                )
+                for path, (name, model) in zip(
+                    task6_paths, CONFIRMATION_GENERATION_OUTPUTS, strict=True
+                )
+            }
+            requests = task6_by_name["confirmation_requests.jsonl"]
+            executions = task6_by_name["confirmation_execution.jsonl"]
+            codes = task6_by_name["confirmation_code.jsonl"]
             if sum(len(item.code.encode("utf-8")) for item in codes) > _MAX_TOTAL_CODE_BYTES:
                 raise _error("confirmation Oracle code resource limit exceeded")
             snapshot = _InputSnapshot(
                 files=tuple(files),
+                prompts=prompts,
+                attestations=attestations,
+                contracts=contracts,
+                source_proposals=source_proposals,
+                source_graphs=source_graphs,
+                task4_groups=task4_groups,
                 targets=targets,
                 target_instances=target_instances,
                 protocols=protocols,
@@ -815,6 +917,9 @@ def _run_confirmation_oracle_stage(
             runtime_callables["validation.upstream_bundles"](
                 snapshot,
                 effective_config,
+                prompt_variant_validator=runtime_callables[
+                    "validation.prompt_variant_artifact_bundle"
+                ],
                 randomization_validator=runtime_callables[
                     "validation.randomization_artifact_bundle"
                 ],
@@ -828,8 +933,16 @@ def _run_confirmation_oracle_stage(
         finally:
             payloads.clear()
             files.clear()
+            payload_by_path = {}
             payload = b""
             file = None
+            prompts = ()
+            attestations = ()
+            contracts = ()
+            source_proposals = ()
+            source_graphs = ()
+            task4_groups = ()
+            task4_by_name = {}
             targets = ()
             target_instances = ()
             protocols = ()
@@ -838,10 +951,12 @@ def _run_confirmation_oracle_stage(
             exclusions = ()
             hypotheses = ()
             randomization_records = ()
+            task5_by_name = {}
             assignments = ()
             requests = ()
             executions = ()
             codes = ()
+            task6_by_name = {}
 
     def verify_input_snapshot() -> None:
         verify_runtime_bundle()
@@ -860,6 +975,7 @@ def _run_confirmation_oracle_stage(
         runtime_callables["validation.upstream_bundles"](
             snapshot,
             effective_config,
+            prompt_variant_validator=runtime_callables["validation.prompt_variant_artifact_bundle"],
             randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
             generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
             block_builder=runtime_callables["validation.randomization_block_builder"],
@@ -885,6 +1001,7 @@ def _run_confirmation_oracle_stage(
         runtime_callables["validation.upstream_bundles"](
             snapshot,
             effective_config,
+            prompt_variant_validator=runtime_callables["validation.prompt_variant_artifact_bundle"],
             randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
             generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
             block_builder=runtime_callables["validation.randomization_block_builder"],
@@ -919,6 +1036,7 @@ def _run_confirmation_oracle_stage(
                 runtime_validator=analyzer_runtime.validator,
             )
             verify_runtime_bundle()
+            analyses = runtime_callables["aggregate.validate_code_analyses"](analyses)
             records = runtime_callables["aggregate.bind_oracle_analyses"](snapshot.codes, analyses)
         runtime_callables["relation.validate_confirmation_oracle_coverage"](
             snapshot.assignments, snapshot.executions, snapshot.codes, records
@@ -933,6 +1051,7 @@ def _run_confirmation_oracle_stage(
         runtime_callables["validation.upstream_bundles"](
             snapshot,
             effective_config,
+            prompt_variant_validator=runtime_callables["validation.prompt_variant_artifact_bundle"],
             randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
             generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
             block_builder=runtime_callables["validation.randomization_block_builder"],
@@ -948,6 +1067,7 @@ def _run_confirmation_oracle_stage(
         verify_runtime_bundle()
 
     producer_outputs = {
+        "extract-prompt-tsg": extraction_paths,
         "build-confirmation-variants": task4_paths,
         "fci-discovery": fci_paths,
         "randomize-confirmation": task5_paths,
@@ -961,7 +1081,7 @@ def _run_confirmation_oracle_stage(
                     producer_outputs[producer_stage],
                     expected_catalog_sha256=(
                         PROMPT_FEATURE_CATALOG_SHA256
-                        if producer_stage == "build-confirmation-variants"
+                        if producer_stage in {"extract-prompt-tsg", "build-confirmation-variants"}
                         else None
                     ),
                 )
@@ -985,6 +1105,7 @@ def _run_confirmation_oracle_stage(
         runtime_callables["validation.upstream_bundles"](
             snapshot,
             effective_config,
+            prompt_variant_validator=runtime_callables["validation.prompt_variant_artifact_bundle"],
             randomization_validator=runtime_callables["validation.randomization_artifact_bundle"],
             generation_validator=runtime_callables["validation.confirmation_generation_bundle"],
             block_builder=runtime_callables["validation.randomization_block_builder"],
@@ -1065,10 +1186,16 @@ def _confirmation_oracle_runtime_callables() -> dict[str, object]:
         "adapter.semgrep_argv": oracle_aggregator.semgrep_argv,
         "aggregate.aggregate_code_analyses": oracle_aggregator._aggregate_code_analyses,
         "aggregate.bind_oracle_analyses": _bind_oracle_analyses,
+        "aggregate.dto.analyzer_finding": oracle_aggregator.AnalyzerFindingRecord,
+        "aggregate.dto.analyzer_provenance": oracle_aggregator.AnalyzerProvenanceRecord,
+        "aggregate.dto.analyzer_report": oracle_aggregator.AnalyzerReport,
+        "aggregate.dto.located_finding": oracle_aggregator.LocatedAnalyzerFinding,
+        "aggregate.dto.oracle_code_analysis": oracle_aggregator.OracleCodeAnalysis,
         "aggregate.oracle_code_input": OracleCodeInput,
         "aggregate.private_analyzer_batch": oracle_aggregator._run_private_analyzer_batch,
         "aggregate.run_oracle_code_batch": oracle_aggregator.run_oracle_code_batch,
         "aggregate.snapshot_code_inputs": oracle_aggregator._snapshot_oracle_code_inputs,
+        "aggregate.validate_code_analyses": oracle_aggregator.validate_oracle_code_analyses,
         "aggregate.validate_report_coordinates": oracle_aggregator._validate_report_coordinates,
         "input.bounded_tree": iter_bounded_tree,
         "input.guard_no_future_artifacts": _guard_no_future_artifacts,
@@ -1087,6 +1214,7 @@ def _confirmation_oracle_runtime_callables() -> dict[str, object]:
         "transaction.jsonl_output_spec": JsonlOutputSpec,
         "validation.confirmation_generation_bundle": generation_stage.validate_confirmation_generation_bundle,
         "validation.plan_confirmation_requests": generation_stage.plan_confirmation_requests,
+        "validation.prompt_variant_artifact_bundle": validate_prompt_variant_artifact_bundle,
         "validation.provider_provenance_sha256": generation_stage.provider_provenance_sha256,
         "validation.randomization_artifact_bundle": randomization_stage.validate_randomization_artifact_bundle,
         "validation.randomization_block_builder": randomization_stage.build_randomization_blocks,

@@ -921,6 +921,108 @@ def _validate_bundle_relations(
         raise _stage_error("prompt variant bundle failed readback validation") from None
 
 
+def validate_prompt_variant_artifact_bundle(
+    config: AppConfig,
+    *,
+    prompts: Sequence[PromptRecord],
+    attestations: Sequence[PromptRoleAttestationRecord],
+    contracts: Sequence[FunctionalOutcomeContractRecord],
+    source_proposals: Sequence[PromptExtractionProposalRecord],
+    source_graphs: Sequence[PromptTSGRecord],
+    hypotheses: Sequence[FrozenHypothesisRecord],
+    groups: Sequence[Sequence],
+) -> PromptVariantStageResult:
+    """Replay the complete Task-4 artifact relation from authenticated inputs."""
+
+    try:
+        if type(config) is not AppConfig:
+            raise ValueError
+        policy = extraction_policy(config.tsg)
+        checked_prompts = tuple(
+            PromptRecord.model_validate(
+                item.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            for item in prompts
+            if type(item) is PromptRecord
+        )
+        checked_attestations = tuple(
+            PromptRoleAttestationRecord.model_validate(
+                item.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            for item in attestations
+            if type(item) is PromptRoleAttestationRecord
+        )
+        checked_contracts = tuple(
+            FunctionalOutcomeContractRecord.model_validate(
+                item.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            for item in contracts
+            if type(item) is FunctionalOutcomeContractRecord
+        )
+        checked_proposals = tuple(
+            PromptExtractionProposalRecord.model_validate(
+                item.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            for item in source_proposals
+            if type(item) is PromptExtractionProposalRecord
+        )
+        checked_graphs = tuple(
+            PromptTSGRecord.model_validate(
+                item.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            for item in source_graphs
+            if type(item) is PromptTSGRecord
+        )
+        checked_hypotheses = tuple(revalidate_frozen_hypothesis(item) for item in hypotheses)
+        if (
+            len(checked_prompts) != len(prompts)
+            or len(checked_attestations) != len(attestations)
+            or len(checked_contracts) != len(contracts)
+            or len(checked_proposals) != len(source_proposals)
+            or len(checked_graphs) != len(source_graphs)
+            or len(checked_hypotheses) != len(hypotheses)
+        ):
+            raise ValueError
+        target_index = build_target_materialization_index(
+            checked_prompts,
+            checked_attestations,
+        )
+        validate_exact_extraction_coverage(
+            target_index.prompts,
+            checked_proposals,
+            checked_graphs,
+            policy,
+        )
+        if len({item.contract_id for item in checked_contracts}) != len(checked_contracts) or len(
+            {item.task_feature_id for item in checked_contracts}
+        ) != len(checked_contracts):
+            raise ValueError
+        snapshot = _StageInputSnapshot(
+            files=(),
+            prompts=target_index.prompts,
+            attestations=target_index.attestations,
+            contracts=checked_contracts,
+            source_proposals=checked_proposals,
+            source_graphs=checked_graphs,
+            hypotheses=checked_hypotheses,
+            extractor_policy=policy,
+            target_materialization_index=target_index,
+        )
+        definitions = _materialize_definitions(snapshot, config)
+        return _validate_bundle_relations(
+            snapshot=snapshot,
+            config=config,
+            expected_definitions=definitions,
+            groups=groups,
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _stage_error("prompt variant bundle failed readback validation") from None
+
+
 def run_prompt_variant_freeze_stage(
     config: AppConfig,
     store: RunStore,
@@ -1285,4 +1387,5 @@ __all__ = [
     "PromptVariantStageResult",
     "prompt_variant_stage_policy_sha256",
     "run_prompt_variant_freeze_stage",
+    "validate_prompt_variant_artifact_bundle",
 ]
