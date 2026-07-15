@@ -574,12 +574,27 @@ def run_confirmation_generation_stage(
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
         _guard_no_oracle_or_analysis(effective_store)
-        for expected in snapshot.files:
-            _payload, current = _read_snapshot(
-                expected.path, allow_empty=expected.identity[4] == 0
-            )
-            if current != expected:
-                raise _stage_error("confirmation generation inputs changed during execution")
+        expected: _FileSnapshot | None = None
+        current: _FileSnapshot | None = None
+        _payload = b""
+        try:
+            for expected in snapshot.files:
+                try:
+                    _payload, current = _read_snapshot(
+                        expected.path, allow_empty=expected.identity[4] == 0
+                    )
+                    if current != expected:
+                        raise _stage_error(
+                            "confirmation generation inputs changed during execution"
+                        )
+                finally:
+                    _payload = b""
+                    current = None
+                    expected = None
+        finally:
+            _payload = b""
+            current = None
+            expected = None
 
     def build():
         if snapshot is None:

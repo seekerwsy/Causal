@@ -135,6 +135,18 @@ def test_confirmation_planner_rejects_non_exact_assignment_variant_join(kind: st
         plan_confirmation_requests(assignments, variants, _generation_config())
 
 
+def test_confirmation_planner_rejects_legally_resealed_variant_prompt_hash_mismatch() -> None:
+    assignment, variant = _assignment_and_variant()
+    content = variant.model_dump(mode="python", exclude={"variant_id"})
+    content["prompt_text"] = variant.prompt_text + "\nPreserve behavior."
+    content["prompt_sha256"] = _sha(content["prompt_text"])
+    resealed = PromptVariantRecord.from_content(**content)
+
+    assert resealed.variant_id != assignment.variant_id
+    with pytest.raises(Exception):
+        plan_confirmation_requests((assignment,), (resealed,), _generation_config())
+
+
 def test_confirmation_planner_uses_assignment_model_not_observed_generation_axis() -> None:
     assignment, variant = _assignment_and_variant()
     config = GenerationConfig(

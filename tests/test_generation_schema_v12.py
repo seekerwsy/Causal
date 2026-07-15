@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import get_args
 from collections.abc import Iterator, Mapping
 
@@ -17,6 +18,7 @@ from secaware.schema.generation import (
     build_generation_request_id,
 )
 from secaware.schema.migrations import (
+    LegacyGenerationRegenerationRequired,
     migrate_generated_code_v1_0_to_v1_1,
     migrate_generation_request_v1_1_to_v1_2,
     migrate_generation_request_v1_0_to_v1_2,
@@ -26,6 +28,74 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _legacy_request_id(payload: Mapping[str, object]) -> str:
+    fields = [
+        "schema_version",
+        "condition",
+        "prompt_id",
+        "prompt_sha256",
+        "language",
+        "model_id",
+        "seed_id",
+        "hypothesis_id",
+        "intervention_id",
+        "endpoint_type",
+    ]
+    if payload["schema_version"] == "1.1":
+        fields.append("endpoint_sha256")
+    fields.extend(("system_template_version", "system_template_sha256", "parameters"))
+    identity = {field: payload[field] for field in fields}
+    if isinstance(identity["parameters"], GenerationParameters):
+        identity["parameters"] = identity["parameters"].model_dump(mode="json")
+    encoded = json.dumps(
+        identity,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"req_{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _legacy_counterfactual_code_payload(version: str) -> dict[str, object]:
+    request = _observed_payload()
+    for field in (
+        "assignment_id",
+        "target_spec_id",
+        "target_instance_id",
+        "arm_protocol_id",
+        "protocol_instance_id",
+        "variant_id",
+        "arm_role",
+    ):
+        request.pop(field)
+    request.update(
+        schema_version=version,
+        condition="counterfactual",
+        hypothesis_id="hypothesis_" + "1" * 64,
+        intervention_id="intervention-a",
+    )
+    if version == "1.0":
+        request.pop("endpoint_sha256")
+    request["request_id"] = _legacy_request_id(request)
+    code = "def parse():\n    return True\n"
+    return {
+        "code_id": f"code_{str(request['request_id']).removeprefix('req_')}",
+        "prompt_id": request["prompt_id"],
+        "schema_version": "1.0",
+        "condition": "counterfactual",
+        "model_id": request["model_id"],
+        "seed_id": request["seed_id"],
+        "code": code,
+        "hypothesis_id": request["hypothesis_id"],
+        "intervention_id": request["intervention_id"],
+        "request_id": request["request_id"],
+        "prompt_sha256": request["prompt_sha256"],
+        "code_sha256": _sha(code),
+        "generation_request": request,
+        "generation_provenance": GenerationProvenance(producer="legacy-worker"),
+    }
 
 
 def _secaware_traceback_locals(error: BaseException) -> str:
@@ -125,13 +195,23 @@ def test_request_id_and_prompt_hash_are_self_addressed() -> None:
         GenerationRequestRecord.model_validate(payload)
 
 
+def test_canonical_request_id_builder_rejects_legacy_coordinates() -> None:
+    identity = {
+        key: value
+        for key, value in _observed_payload().items()
+        if key not in {"request_id", "prompt"}
+    }
+    with pytest.raises(ValueError):
+        build_generation_request_id(**{**identity, "condition": "counterfactual"})
+    with pytest.raises(TypeError):
+        build_generation_request_id(**identity, intervention_id="legacy")
+
+
 def test_canonical_v12_rejects_counterfactual_even_when_resealed() -> None:
     payload = _observed_payload()
     payload["condition"] = "counterfactual"
     payload["hypothesis_id"] = "hypothesis_" + "1" * 64
-    payload["request_id"] = build_generation_request_id(
-        **{key: value for key, value in payload.items() if key not in {"request_id", "prompt"}}
-    )
+    payload["request_id"] = "req_" + "f" * 64
     with pytest.raises(ValidationError):
         GenerationRequestRecord.model_validate(payload)
     payload = _observed_payload()
@@ -158,9 +238,7 @@ def test_valid_legacy_observed_v11_migrates_but_counterfactual_requires_regenera
     }
     legacy["schema_version"] = "1.1"
     legacy["intervention_id"] = None
-    legacy["request_id"] = build_generation_request_id(
-        **{key: value for key, value in legacy.items() if key not in {"prompt", "request_id"}}
-    )
+    legacy["request_id"] = _legacy_request_id(legacy)
     migrated = migrate_generation_request_v1_1_to_v1_2(legacy)
     assert migrated.condition == "observed"
     assert migrated.schema_version == "1.2"
@@ -168,10 +246,8 @@ def test_valid_legacy_observed_v11_migrates_but_counterfactual_requires_regenera
     legacy["condition"] = "counterfactual"
     legacy["hypothesis_id"] = "hypothesis_" + "1" * 64
     legacy["intervention_id"] = "intervention-a"
-    legacy["request_id"] = build_generation_request_id(
-        **{key: value for key, value in legacy.items() if key not in {"prompt", "request_id"}}
-    )
-    with pytest.raises(Exception, match="regenerat"):
+    legacy["request_id"] = _legacy_request_id(legacy)
+    with pytest.raises(LegacyGenerationRegenerationRequired, match="regenerat"):
         migrate_generation_request_v1_1_to_v1_2(legacy)
 
 
@@ -219,13 +295,7 @@ def test_legacy_observed_code_migrates_with_current_request_coordinates() -> Non
     }
     legacy_request["schema_version"] = "1.1"
     legacy_request["intervention_id"] = None
-    legacy_request["request_id"] = build_generation_request_id(
-        **{
-            key: value
-            for key, value in legacy_request.items()
-            if key not in {"prompt", "request_id"}
-        }
-    )
+    legacy_request["request_id"] = _legacy_request_id(legacy_request)
     code = "def parse():\n    return True\n"
     request_id = legacy_request["request_id"]
     payload = {
@@ -253,8 +323,25 @@ def test_legacy_observed_code_migrates_with_current_request_coordinates() -> Non
         migrate_generated_code_v1_0_to_v1_1(tampered)
 
 
+@pytest.mark.parametrize("nested_version", ("1.0", "1.1"))
+def test_valid_legacy_counterfactual_code_requires_typed_regeneration(
+    nested_version: str,
+) -> None:
+    payload = _legacy_counterfactual_code_payload(nested_version)
+
+    with pytest.raises(LegacyGenerationRegenerationRequired) as exc_info:
+        migrate_generated_code_v1_0_to_v1_1(payload)
+
+    assert exc_info.value.code.name == "CONTRACT"
+
+
 @pytest.mark.parametrize(
-    "migration", [migrate_generation_request_v1_0_to_v1_2, migrate_generation_request_v1_1_to_v1_2]
+    "migration",
+    [
+        migrate_generation_request_v1_0_to_v1_2,
+        migrate_generation_request_v1_1_to_v1_2,
+        migrate_generated_code_v1_0_to_v1_1,
+    ],
 )
 def test_generation_migrations_release_invalid_payload_frames(migration) -> None:
     secret = "legacy-migration-payload-secret"
@@ -264,7 +351,12 @@ def test_generation_migrations_release_invalid_payload_frames(migration) -> None
 
 
 @pytest.mark.parametrize(
-    "migration", [migrate_generation_request_v1_0_to_v1_2, migrate_generation_request_v1_1_to_v1_2]
+    "migration",
+    [
+        migrate_generation_request_v1_0_to_v1_2,
+        migrate_generation_request_v1_1_to_v1_2,
+        migrate_generated_code_v1_0_to_v1_1,
+    ],
 )
 @pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
 def test_generation_migrations_preserve_fatal_identity_and_release_source(

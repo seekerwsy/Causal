@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import inspect
 import os
+import threading
 
 import pytest
 
@@ -12,8 +14,14 @@ from secaware.config import load_config
 from secaware.generation.confirmation import execute_confirmation_requests
 from secaware.io.jsonl import read_jsonl
 from secaware.io.transaction import ArtifactTransaction, TransactionStateError
-from secaware.pipeline.stages.prompt_variants import run_prompt_variant_freeze_stage
-from secaware.pipeline.stages.randomization import run_confirmation_randomization_stage
+from secaware.pipeline.stages.prompt_variants import (
+    PROMPT_VARIANT_OUTPUTS,
+    run_prompt_variant_freeze_stage,
+)
+from secaware.pipeline.stages.randomization import (
+    RANDOMIZATION_OUTPUTS,
+    run_confirmation_randomization_stage,
+)
 import secaware.pipeline.stage_contracts as stage_contracts
 from secaware.pipeline.stages.confirmation_generation import (
     CONFIRMATION_GENERATION_OUTPUTS,
@@ -24,7 +32,7 @@ from secaware.pipeline.manifest import build_stage_fingerprint
 from secaware import __version__
 from secaware.schema.experiments import AssignmentExecutionRecord, AssignmentExecutionStatus
 from secaware.schema.experiments import ArmRole, AssignmentRecord, PromptVariantRecord, RandomizationManifestRecord
-from secaware.schema.generation import GenerationRequestRecord
+from secaware.schema.generation import GenerationRequestRecord, build_generation_request_id
 from secaware.schema.generation import GenerationProvenance
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from test_prompt_variant_freeze_stage import _stage_store
@@ -467,6 +475,38 @@ def test_confirmation_generation_stage_publishes_exact_assignment_coverage(
     assert result.terminal_no_code_count == 0
 
 
+@pytest.mark.parametrize("mutation", ("request_id", "prompt_sha256"))
+def test_confirmation_stage_rejects_independent_request_identity_mutation(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    config, store = randomized_store
+    real_plan = confirmation_stage.plan_confirmation_requests
+
+    def forged_plan(*args, **kwargs):
+        records = real_plan(*args, **kwargs)
+        request = records[0]
+        if mutation == "request_id":
+            forged = request.model_copy(update={"request_id": "req_" + "f" * 64})
+        else:
+            forged_hash = "e" * 64
+            identity = request.model_dump(mode="python", exclude={"request_id", "prompt"})
+            identity["prompt_sha256"] = forged_hash
+            identity["parameters"] = request.parameters
+            forged = request.model_copy(
+                update={
+                    "prompt_sha256": forged_hash,
+                    "request_id": build_generation_request_id(**identity),
+                }
+            )
+        return [forged, *records[1:]]
+
+    monkeypatch.setattr(confirmation_stage, "plan_confirmation_requests", forged_plan)
+    with pytest.raises(SecAwareError):
+        run_confirmation_generation_stage(config, store, force=True)
+
+
 def test_confirmation_generation_stage_force_partial_install_restores_old_commit(
     randomized_store,
     monkeypatch: pytest.MonkeyPatch,
@@ -565,6 +605,69 @@ def test_confirmation_stage_capture_preserves_fatal_identity_and_releases_payloa
     monkeypatch.setattr(confirmation_stage, "_parse_jsonl", interrupt)
     with pytest.raises(signal_type) as exc_info:
         run_confirmation_generation_stage(config, store, force=True)
+    assert exc_info.value is signal
+    assert secret not in _secaware_traceback_locals(signal)
+
+
+def test_confirmation_stage_verify_releases_replaced_input_payload_from_frames(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = randomized_store
+    secret = read_jsonl(
+        store.path("interventions", "prompt_variants.jsonl"),
+        PromptVariantRecord,
+        required=True,
+        allow_empty=False,
+    )[0].prompt_text
+    input_count = len(PROMPT_VARIANT_OUTPUTS) + len(RANDOMIZATION_OUTPUTS) + 2
+    calls = 0
+    real_read = confirmation_stage._read_snapshot
+
+    def replace_variant_identity(path, *, allow_empty):
+        nonlocal calls
+        calls += 1
+        payload, current = real_read(path, allow_empty=allow_empty)
+        if calls == input_count + 9:
+            current = replace(current, identity=(*current.identity[:-1], current.identity[-1] + 1))
+        return payload, current
+
+    monkeypatch.setattr(confirmation_stage, "_read_snapshot", replace_variant_identity)
+    with pytest.raises(SecAwareError) as exc_info:
+        run_confirmation_generation_stage(config, store, force=True)
+
+    assert secret not in _secaware_traceback_locals(exc_info.value)
+
+
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
+def test_confirmation_stage_verify_later_fatal_preserves_identity_and_releases_prior_payload(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    config, store = randomized_store
+    secret = read_jsonl(
+        store.path("interventions", "prompt_variants.jsonl"),
+        PromptVariantRecord,
+        required=True,
+        allow_empty=False,
+    )[0].prompt_text
+    input_count = len(PROMPT_VARIANT_OUTPUTS) + len(RANDOMIZATION_OUTPUTS) + 2
+    calls = 0
+    signal = signal_type("verify-input-control-flow")
+    real_read = confirmation_stage._read_snapshot
+
+    def interrupt_after_variant(path, *, allow_empty):
+        nonlocal calls
+        calls += 1
+        if calls == input_count + 10:
+            raise signal
+        return real_read(path, allow_empty=allow_empty)
+
+    monkeypatch.setattr(confirmation_stage, "_read_snapshot", interrupt_after_variant)
+    with pytest.raises(signal_type) as exc_info:
+        run_confirmation_generation_stage(config, store, force=True)
+
     assert exc_info.value is signal
     assert secret not in _secaware_traceback_locals(signal)
 
@@ -802,3 +905,109 @@ def test_task4_and_randomization_producer_replacement_leases_abort_force_commit(
     with pytest.raises(SecAwareError):
         run_confirmation_generation_stage(config, store, force=True)
     assert tuple(path.read_bytes() for path in outputs) == before
+
+
+def test_confirmation_generation_holds_both_real_producer_leases_through_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, setup_store = _stage_store(tmp_path, task_count=20)
+    run_prompt_variant_freeze_stage(config, setup_store, force=False)
+    run_confirmation_randomization_stage(config, setup_store, force=False)
+    consumer_store = type(setup_store)(config)
+    task4_writer = type(setup_store)(config)
+    randomization_writer = type(setup_store)(config)
+    entered_provider = threading.Event()
+    release_provider = threading.Event()
+    active: list[str] = []
+    entered: list[str] = []
+    committed_with_both_leases = False
+    failures: list[BaseException] = []
+    results = []
+    store_type = type(setup_store)
+    real_hold = store_type.hold_committed_output
+    real_record_stage = store_type.record_stage
+
+    @contextmanager
+    def tracked_hold(self, stage, outputs, **kwargs):
+        with real_hold(self, stage, outputs, **kwargs) as hashes:
+            active.append(stage)
+            entered.append(stage)
+            try:
+                yield hashes
+            finally:
+                active.remove(stage)
+
+    def checked_record_stage(self, stage, *args, **kwargs):
+        nonlocal committed_with_both_leases
+        if stage == "generate-confirmation":
+            committed_with_both_leases = active == [
+                "build-confirmation-variants",
+                "randomize-confirmation",
+            ]
+        return real_record_stage(self, stage, *args, **kwargs)
+
+    class BarrierProvider(_Provider):
+        def generate_many(self, requests):
+            assert active == ["build-confirmation-variants", "randomize-confirmation"]
+            entered_provider.set()
+            assert release_provider.wait(timeout=30)
+            return super().generate_many(requests)
+
+    monkeypatch.setattr(store_type, "hold_committed_output", tracked_hold)
+    monkeypatch.setattr(store_type, "record_stage", checked_record_stage)
+    monkeypatch.setattr(
+        confirmation_stage, "_provider_from_frozen_config", lambda _config: BarrierProvider()
+    )
+
+    def consume() -> None:
+        try:
+            results.append(run_confirmation_generation_stage(config, consumer_store, force=False))
+        except BaseException as error:
+            failures.append(error)
+
+    thread = threading.Thread(target=consume)
+    thread.start()
+    assert entered_provider.wait(timeout=30), failures
+    task4_paths = tuple(
+        setup_store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
+    )
+    randomization_paths = tuple(
+        setup_store.path("interventions", name) for name, _model in RANDOMIZATION_OUTPUTS
+    )
+    assert len(task4_paths) == 11
+    assert len(randomization_paths) == 2
+    task4_manifest = setup_store.path(".stages", "build-confirmation-variants.json")
+    randomization_manifest = setup_store.path(".stages", "randomize-confirmation.json")
+    task4_snapshot = tuple(path.read_bytes() for path in (*task4_paths, task4_manifest))
+    randomization_snapshot = tuple(
+        path.read_bytes() for path in (*randomization_paths, randomization_manifest)
+    )
+
+    try:
+        with pytest.raises(SecAwareError) as task4_error:
+            run_prompt_variant_freeze_stage(config, task4_writer, force=True)
+        with pytest.raises(SecAwareError) as randomization_error:
+            run_confirmation_randomization_stage(config, randomization_writer, force=True)
+        assert task4_error.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert randomization_error.value.code is ErrorCode.MANIFEST_CONFLICT
+        assert task4_snapshot == tuple(
+            path.read_bytes() for path in (*task4_paths, task4_manifest)
+        )
+        assert randomization_snapshot == tuple(
+            path.read_bytes() for path in (*randomization_paths, randomization_manifest)
+        )
+    finally:
+        release_provider.set()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive()
+    assert failures == []
+    assert len(results) == 1
+    assert entered == ["build-confirmation-variants", "randomize-confirmation"]
+    assert committed_with_both_leases is True
+    assert active == []
+    assert all(
+        setup_store.path("generation", name).exists()
+        for name, _model in CONFIRMATION_GENERATION_OUTPUTS
+    )

@@ -79,21 +79,24 @@ def _request(
     prompt_sha256 = sha256_text(prompt_text)
     system_template_sha256 = sha256_text(system_template)
     endpoint_sha256 = sha256_text(endpoint_identity or endpoint_type)
-    request_id = build_generation_request_id(
-        schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
-        condition=condition,
-        prompt_id=prompt_id,
-        prompt_sha256=prompt_sha256,
-        language=language,
-        model_id=model_id,
-        seed_id=seed_id,
-        hypothesis_id=hypothesis_id,
-        intervention_id=intervention_id,
-        endpoint_type=endpoint_type,
-        endpoint_sha256=endpoint_sha256,
-        system_template_version=system_template_version,
-        system_template_sha256=system_template_sha256,
-        parameters=parameter_values,
+    request_id = (
+        build_generation_request_id(
+            schema_version=GENERATION_REQUEST_SCHEMA_VERSION,
+            condition="observed",
+            prompt_id=prompt_id,
+            prompt_sha256=prompt_sha256,
+            language=language,
+            model_id=model_id,
+            seed_id=seed_id,
+            hypothesis_id=hypothesis_id,
+            endpoint_type=endpoint_type,
+            endpoint_sha256=endpoint_sha256,
+            system_template_version=system_template_version,
+            system_template_sha256=system_template_sha256,
+            parameters=parameter_values,
+        )
+        if condition == "observed"
+        else "req_" + "f" * 64
     )
     values = dict(
         schema_version=GENERATION_REQUEST_SCHEMA_VERSION,

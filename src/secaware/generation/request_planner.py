@@ -37,14 +37,6 @@ class _PromptSnapshot:
     language: str
 
 
-@dataclass(frozen=True)
-class _InterventionSnapshot:
-    prompt_id: str
-    hypothesis_id: str
-    intervention_id: str
-    counterfactual_prompt: str
-
-
 def _planner_error(code: ErrorCode, message: str) -> SecAwareError:
     return SecAwareError(code=code, stage="generation-planner", message=message)
 
@@ -106,25 +98,6 @@ def _prompt_snapshot(value: object) -> _PromptSnapshot:
     )
 
 
-def _intervention_snapshot(value: object) -> _InterventionSnapshot:
-    intervention = _revalidated_model(value, InterventionRecord)
-    identifiers = (
-        intervention.prompt_id,
-        intervention.hypothesis_id,
-        intervention.intervention_id,
-    )
-    if any(not identifier.strip() for identifier in identifiers):
-        raise ValueError("invalid intervention")
-    if not intervention.counterfactual_prompt.strip():
-        raise ValueError("invalid intervention")
-    return _InterventionSnapshot(
-        prompt_id=intervention.prompt_id,
-        hypothesis_id=intervention.hypothesis_id,
-        intervention_id=intervention.intervention_id,
-        counterfactual_prompt=intervention.counterfactual_prompt,
-    )
-
-
 def _validated_grid(models: Iterable[str], seeds: Iterable[int]) -> tuple[list[str], list[int]]:
     model_values = _bounded_snapshots(
         models,
@@ -164,75 +137,6 @@ def _validated_observed_prompts(
     if len(set(prompt_ids)) != len(prompt_ids):
         raise _planner_error(ErrorCode.CONTRACT, "observed prompt ids must be unique")
     return prompt_values
-
-
-def _validated_interventions(
-    interventions: Iterable[InterventionRecord],
-) -> list[_InterventionSnapshot]:
-    intervention_values = _bounded_snapshots(
-        interventions,
-        code=ErrorCode.CONTRACT,
-        message="counterfactual intervention collection failed validation",
-        snapshot=_intervention_snapshot,
-    )
-    if not intervention_values:
-        raise _planner_error(
-            ErrorCode.CONTRACT,
-            "counterfactual intervention collection must not be empty",
-        )
-    coordinates = [
-        (item.prompt_id, item.hypothesis_id, item.intervention_id) for item in intervention_values
-    ]
-    if len(set(coordinates)) != len(coordinates):
-        raise _planner_error(
-            ErrorCode.CONTRACT,
-            "counterfactual intervention coordinates must be unique",
-        )
-    intervention_ids = [item.intervention_id for item in intervention_values]
-    if len(set(intervention_ids)) != len(intervention_ids):
-        raise _planner_error(ErrorCode.CONTRACT, "intervention ids must be unique")
-    return intervention_values
-
-
-def _prompt_mapping_entry_snapshot(
-    entry: tuple[object, object],
-) -> tuple[str, _PromptSnapshot]:
-    key, value = entry
-    if not isinstance(key, str):
-        raise ValueError("invalid prompt mapping key")
-    prompt = _prompt_snapshot(value)
-    if key != prompt.prompt_id:
-        raise ValueError("prompt mapping key mismatch")
-    return key, prompt
-
-
-def _validated_prompt_mapping(
-    prompts_by_id: Mapping[str, PromptRecord],
-) -> dict[str, _PromptSnapshot]:
-    try:
-        entries = prompts_by_id.items()
-    except Exception:
-        pass
-    else:
-        snapshots = _bounded_snapshots(
-            entries,
-            code=ErrorCode.CONTRACT,
-            message="counterfactual prompt mapping failed validation",
-            snapshot=_prompt_mapping_entry_snapshot,
-        )
-        result: dict[str, _PromptSnapshot] = {}
-        for key, prompt in snapshots:
-            if key in result:
-                raise _planner_error(
-                    ErrorCode.CONTRACT,
-                    "counterfactual prompt mapping failed validation",
-                )
-            result[key] = prompt
-        return result
-    raise _planner_error(
-        ErrorCode.CONTRACT,
-        "counterfactual prompt mapping failed validation",
-    )
 
 
 def _ensure_request_capacity(*axis_sizes: int) -> None:
@@ -281,14 +185,13 @@ def _endpoint_sha256(
 
 def _record(
     *,
-    condition: Literal["observed", "counterfactual", "confirm_arm"],
+    condition: Literal["observed", "confirm_arm"],
     prompt_id: str,
     prompt: str,
     language: str,
     model_id: str,
     seed_id: int,
     hypothesis_id: str | None,
-    intervention_id: str | None,
     endpoint_type: EndpointType,
     endpoint_sha256: str,
     system_template_version: str,
@@ -314,7 +217,6 @@ def _record(
             model_id=model_id,
             seed_id=seed_id,
             hypothesis_id=hypothesis_id,
-            intervention_id=intervention_id,
             endpoint_type=endpoint_type,
             endpoint_sha256=endpoint_sha256,
             system_template_version=system_template_version,
@@ -402,7 +304,6 @@ def plan_observed_requests(
             model_id=model_id,
             seed_id=seed_id,
             hypothesis_id=None,
-            intervention_id=None,
             endpoint_type=endpoint_type,
             endpoint_sha256=endpoint_sha256,
             system_template_version=system_template_version,
@@ -443,60 +344,6 @@ def plan_counterfactual_requests(
         ErrorCode.CONTRACT,
         "legacy counterfactual generation requires regeneration as confirmation arms",
     )
-
-    # Retained temporarily as non-executable legacy implementation context until Task 8
-    # removes the compatibility surface completely.
-    prompt_values_by_id = _validated_prompt_mapping(prompts_by_id)
-    intervention_values = _validated_interventions(interventions)
-    model_values, seed_values = _validated_grid(models, seeds)
-    _ensure_request_capacity(
-        len(intervention_values),
-        len(model_values),
-        len(seed_values),
-    )
-    parameter_values = _parameters(parameters)
-    endpoint_sha256 = _endpoint_sha256(endpoint_type, endpoint_identity)
-    system_template_sha256 = sha256_text(system_template)
-    records: list[GenerationRequestRecord] = []
-    for intervention in intervention_values:
-        prompt = prompt_values_by_id.get(intervention.prompt_id)
-        if prompt is None:
-            raise _planner_error(
-                ErrorCode.CONTRACT,
-                "counterfactual intervention references an unavailable prompt",
-            )
-        for model_id in model_values:
-            for seed_id in seed_values:
-                records.append(
-                    _record(
-                        condition="counterfactual",
-                        prompt_id=intervention.prompt_id,
-                        prompt=intervention.counterfactual_prompt,
-                        language=prompt.language,
-                        model_id=model_id,
-                        seed_id=seed_id,
-                        hypothesis_id=intervention.hypothesis_id,
-                        intervention_id=intervention.intervention_id,
-                        endpoint_type=endpoint_type,
-                        endpoint_sha256=endpoint_sha256,
-                        system_template_version=system_template_version,
-                        system_template_sha256=system_template_sha256,
-                        parameters=parameter_values,
-                    )
-                )
-    records.sort(
-        key=lambda record: (
-            record.prompt_id,
-            record.hypothesis_id or "",
-            record.model_id,
-            record.seed_id,
-            record.prompt_sha256,
-            record.request_id,
-        )
-    )
-    _ensure_unique_request_coordinates(records)
-    _ensure_unique_request_ids(records)
-    return records
 
 
 def plan_confirmation_requests(
@@ -587,7 +434,6 @@ def plan_confirmation_requests(
                     model_id=unit.model_id,
                     seed_id=assignment.seed_id,
                     hypothesis_id=unit.hypothesis_id,
-                    intervention_id=None,
                     endpoint_type=endpoint_type,
                     endpoint_sha256=endpoint_sha256,
                     system_template_version=system_template_version,

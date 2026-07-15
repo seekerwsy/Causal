@@ -82,6 +82,22 @@ _GENERATION_REQUEST_V1_IDENTITY_FIELDS = (
     "system_template_sha256",
     "parameters",
 )
+_GENERATION_REQUEST_V11_IDENTITY_FIELDS = (
+    "schema_version",
+    "condition",
+    "prompt_id",
+    "prompt_sha256",
+    "language",
+    "model_id",
+    "seed_id",
+    "hypothesis_id",
+    "intervention_id",
+    "endpoint_type",
+    "endpoint_sha256",
+    "system_template_version",
+    "system_template_sha256",
+    "parameters",
+)
 
 
 def _build_generation_request_v1_id(identity: Mapping[str, Any]) -> str:
@@ -93,6 +109,18 @@ def _build_generation_request_v1_id(identity: Mapping[str, Any]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return f"req_{hashlib.sha256(payload).hexdigest()}"
+
+
+def _build_generation_request_v1_1_id(identity: Mapping[str, Any]) -> str:
+    legacy_identity = {
+        key: (
+            identity[key].model_dump(mode="json")
+            if key == "parameters" and isinstance(identity[key], GenerationParameters)
+            else identity[key]
+        )
+        for key in _GENERATION_REQUEST_V11_IDENTITY_FIELDS
+    }
+    return _build_generation_request_v1_id(legacy_identity)
 
 
 def require_v1_payload(payload: Mapping[str, Any]) -> None:
@@ -258,22 +286,7 @@ def migrate_generation_request_v1_1_to_v1_2(
     try:
         snapshot = dict(payload)
         legacy = _LegacyGenerationRequestV11.model_validate(snapshot)
-        expected_id = build_generation_request_id(
-            schema_version="1.1",
-            condition=legacy.condition,
-            prompt_id=legacy.prompt_id,
-            prompt_sha256=legacy.prompt_sha256,
-            language=legacy.language,
-            model_id=legacy.model_id,
-            seed_id=legacy.seed_id,
-            hypothesis_id=legacy.hypothesis_id,
-            intervention_id=legacy.intervention_id,
-            endpoint_type=legacy.endpoint_type,
-            endpoint_sha256=legacy.endpoint_sha256,
-            system_template_version=legacy.system_template_version,
-            system_template_sha256=legacy.system_template_sha256,
-            parameters=legacy.parameters,
-        )
+        expected_id = _build_generation_request_v1_1_id(legacy.model_dump(mode="python"))
         if legacy.request_id != expected_id or legacy.prompt_sha256 != sha256_text(legacy.prompt):
             raise ValueError
         if legacy.condition == "counterfactual":
@@ -331,6 +344,13 @@ def migrate_generated_code_v1_0_to_v1_1(
 ) -> CanonicalGeneratedCodeRecord:
     """Migrate a complete legacy observed code bridge; counterfactuals regenerate."""
 
+    snapshot: dict[str, Any] = {}
+    legacy_request: dict[str, Any] = {}
+    request: GenerationRequestRecord | None = None
+    provenance = None
+    code = ""
+    result: CanonicalGeneratedCodeRecord | None = None
+    failed = False
     try:
         snapshot = dict(payload)
         expected_fields = {
@@ -349,56 +369,65 @@ def migrate_generated_code_v1_0_to_v1_1(
             "generation_provenance",
             "generation_request",
         }
-        if (
-            set(snapshot) != expected_fields
-            or snapshot.get("schema_version") != "1.0"
-            or snapshot.get("condition") != "observed"
-        ):
-            if snapshot.get("condition") == "counterfactual":
-                raise SecAwareError(
-                    code=ErrorCode.CONTRACT,
-                    stage="migration",
-                    message="legacy counterfactual generation requires regeneration",
-                )
+        if set(snapshot) != expected_fields or snapshot.get("schema_version") != "1.0":
             raise ValueError
         nested = snapshot.get("generation_request")
         if isinstance(nested, Mapping):
             legacy_request = dict(nested)
-            request = migrate_generation_request_v1_1_to_v1_2(legacy_request)
         else:
             raise ValueError
         legacy_request_id = legacy_request["request_id"]
-        legacy_prompt_id = legacy_request["prompt_id"]
-        legacy_prompt_sha256 = legacy_request["prompt_sha256"]
-        legacy_model_id = legacy_request["model_id"]
-        legacy_seed_id = legacy_request["seed_id"]
         if (
-            request.condition != "observed"
+            snapshot["condition"] != legacy_request.get("condition")
             or snapshot["request_id"] != legacy_request_id
             or snapshot["code_id"] != f"code_{str(legacy_request_id).removeprefix('req_')}"
-            or snapshot["prompt_id"] != legacy_prompt_id
-            or snapshot["prompt_sha256"] != legacy_prompt_sha256
-            or snapshot["model_id"] != legacy_model_id
-            or snapshot["seed_id"] != legacy_seed_id
-            or snapshot["hypothesis_id"] is not None
-            or snapshot["intervention_id"] is not None
+            or snapshot["prompt_id"] != legacy_request.get("prompt_id")
+            or snapshot["prompt_sha256"] != legacy_request.get("prompt_sha256")
+            or snapshot["model_id"] != legacy_request.get("model_id")
+            or snapshot["seed_id"] != legacy_request.get("seed_id")
+            or snapshot["hypothesis_id"] != legacy_request.get("hypothesis_id")
+            or snapshot["intervention_id"] != legacy_request.get("intervention_id")
             or snapshot["code_sha256"] != sha256_text(snapshot["code"])
         ):
             raise ValueError
+        if legacy_request.get("schema_version") == "1.0":
+            request = migrate_generation_request_v1_0_to_v1_2(legacy_request)
+        elif legacy_request.get("schema_version") == "1.1":
+            request = migrate_generation_request_v1_1_to_v1_2(legacy_request)
+        else:
+            raise ValueError
+        if snapshot["condition"] != "observed" or request.condition != "observed":
+            raise LegacyGenerationRegenerationRequired()
+        if snapshot["hypothesis_id"] is not None or snapshot["intervention_id"] is not None:
+            raise ValueError
         provenance = snapshot.get("generation_provenance")
+        code = snapshot["code"]
         from secaware.generation.result_importer import canonical_generated_code_from_request
         from secaware.schema.generation import GenerationProvenance
 
-        return canonical_generated_code_from_request(
+        result = canonical_generated_code_from_request(
             request,
-            snapshot["code"],
+            code,
             GenerationProvenance.model_validate(provenance),
         )
-    except (MemoryError, KeyboardInterrupt, SystemExit, SecAwareError):
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except LegacyGenerationRegenerationRequired:
         raise
     except Exception:
+        failed = True
+    finally:
+        payload = {}
+        snapshot.clear()
+        legacy_request.clear()
+        request = None
+        provenance = None
+        code = ""
+        nested = None
+    if failed or result is None:
         raise SecAwareError(
             code=ErrorCode.CONTRACT,
             stage="migration",
             message="generated code v1.0 migration failed validation",
         ) from None
+    return result

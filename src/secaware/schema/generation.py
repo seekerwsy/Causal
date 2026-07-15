@@ -72,7 +72,6 @@ _INVALID_ATTEMPT_MESSAGE = "generation attempt validation failed"
 _INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
 GENERATION_REQUEST_SCHEMA_VERSION = "1.2"
 GenerationCondition = Literal["observed", "confirm_arm"]
-LegacyGenerationCondition = Literal["observed", "counterfactual"]
 EndpointType = Literal["mock", "offline", "chat_completions"]
 
 
@@ -306,15 +305,14 @@ class GenerationParameters(SafeValidationMixin, StrictModel):
 
 def build_generation_request_id(
     *,
-    schema_version: str,
-    condition: GenerationCondition | LegacyGenerationCondition,
+    schema_version: Literal["1.2"],
+    condition: GenerationCondition,
     prompt_id: str,
     prompt_sha256: str,
     language: str,
     model_id: str,
     seed_id: int,
     hypothesis_id: str | None,
-    intervention_id: str | None = None,
     endpoint_type: EndpointType,
     endpoint_sha256: str,
     system_template_version: str,
@@ -328,6 +326,11 @@ def build_generation_request_id(
     variant_id: str | None = None,
     arm_role: object | None = None,
 ) -> str:
+    if schema_version != GENERATION_REQUEST_SCHEMA_VERSION or condition not in {
+        "observed",
+        "confirm_arm",
+    }:
+        raise ValueError("generation request identity is not canonical")
     identity: dict[str, object] = {
         "schema_version": schema_version,
         "condition": condition,
@@ -343,22 +346,17 @@ def build_generation_request_id(
         "system_template_sha256": system_template_sha256,
         "parameters": parameters.model_dump(mode="json"),
     }
-    if schema_version == "1.1" or condition == "counterfactual":
-        identity["intervention_id"] = intervention_id
-    if schema_version == "1.2":
-        identity.update(
-            {
-                "assignment_id": assignment_id,
-                "target_spec_id": target_spec_id,
-                "target_instance_id": target_instance_id,
-                "arm_protocol_id": arm_protocol_id,
-                "protocol_instance_id": protocol_instance_id,
-                "variant_id": variant_id,
-                "arm_role": (
-                    getattr(arm_role, "value", arm_role) if arm_role is not None else None
-                ),
-            }
-        )
+    identity.update(
+        {
+            "assignment_id": assignment_id,
+            "target_spec_id": target_spec_id,
+            "target_instance_id": target_instance_id,
+            "arm_protocol_id": arm_protocol_id,
+            "protocol_instance_id": protocol_instance_id,
+            "variant_id": variant_id,
+            "arm_role": getattr(arm_role, "value", arm_role) if arm_role is not None else None,
+        }
+    )
     payload = json.dumps(
         identity,
         ensure_ascii=False,
