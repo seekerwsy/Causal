@@ -23,6 +23,7 @@ from secaware.oracle.aggregator import (
     OracleCodeInput,
 )
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
+from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.strict_json import load_strict_json_bytes
 from secaware.pipeline.bounded_traversal import BoundedTraversalError, iter_bounded_tree
 from secaware.pipeline.artifact import canonical_sha256
@@ -642,6 +643,7 @@ def _run_confirmation_oracle_stage(
     analyzer_runtime: _AnalyzerRuntime,
     runtime_callables: Mapping[str, object],
     runtime_contract: Mapping[str, Mapping[str, str]],
+    validate_only: bool = False,
 ) -> ConfirmationOracleStageResult:
     analyzer_runtime_refs = {
         "runner": analyzer_runtime.runner,
@@ -678,6 +680,7 @@ def _run_confirmation_oracle_stage(
         or store.config != config
         or not runtime_callables["input.model_shape_is_intact"](config)
         or type(force) is not bool
+        or type(validate_only) is not bool
         or type(analyzer_runtime) is not _AnalyzerRuntime
         or not callable(analyzer_runtime.runner)
         or not callable(analyzer_runtime.validator)
@@ -720,10 +723,14 @@ def _run_confirmation_oracle_stage(
         effective_store.path(".stages", "generate-confirmation.json"),
     )
     verify_runtime_bundle()
-    initial_policy = runtime_callables["preflight.run_oracle_preflight"](
-        effective_config.oracle,
-        runner=analyzer_runtime.runner,
-        runtime_validator=analyzer_runtime.validator,
+    initial_policy = (
+        runtime_callables["preflight.load_policy_bundle"](effective_config.oracle.policy_lock_path)
+        if validate_only
+        else runtime_callables["preflight.run_oracle_preflight"](
+            effective_config.oracle,
+            runner=analyzer_runtime.runner,
+            runtime_validator=analyzer_runtime.validator,
+        )
     )
     verify_runtime_bundle()
     effective_policy_sha256 = canonical_sha256(
@@ -982,22 +989,28 @@ def _run_confirmation_oracle_stage(
             planner=runtime_callables["validation.plan_confirmation_requests"],
             provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
         )
-        final_policy = runtime_callables["preflight.run_oracle_preflight"](
-            effective_config.oracle,
-            runner=analyzer_runtime.runner,
-            runtime_validator=analyzer_runtime.validator,
-        )
-        if final_policy.combined_sha256 != initial_policy.combined_sha256:
-            raise _error(
-                "confirmation Oracle policy changed during execution",
-                code=ErrorCode.POLICY_MISMATCH,
+        if not validate_only:
+            final_policy = runtime_callables["preflight.run_oracle_preflight"](
+                effective_config.oracle,
+                runner=analyzer_runtime.runner,
+                runtime_validator=analyzer_runtime.validator,
             )
+            if final_policy.combined_sha256 != initial_policy.combined_sha256:
+                raise _error(
+                    "confirmation Oracle policy changed during execution",
+                    code=ErrorCode.POLICY_MISMATCH,
+                )
         verify_runtime_bundle()
 
     def build() -> tuple[tuple[OracleRecord, ...]]:
         verify_runtime_bundle()
         if snapshot is None:
             raise _error("confirmation Oracle input snapshot failed validation")
+        if validate_only:
+            raise _error(
+                "committed confirmation Oracle failed trust verification",
+                code=ErrorCode.MANIFEST_CONFLICT,
+            )
         runtime_callables["validation.upstream_bundles"](
             snapshot,
             effective_config,
@@ -1178,6 +1191,53 @@ def run_confirmation_oracle_stage(
     return result
 
 
+def validate_committed_confirmation_run(
+    config: AppConfig,
+    store: RunStore,
+) -> ConfirmationOracleStageResult:
+    """Validate one terminal M5 commit without executing providers or analyzers."""
+
+    runtime_callables: dict[str, object] = {}
+    runtime_contract: dict[str, Mapping[str, str]] = {}
+    analyzer_runtime: _AnalyzerRuntime | None = None
+    try:
+        runtime_callables = _confirmation_oracle_runtime_callables()
+        runtime_contract = {
+            name: _runtime_callable_descriptor(value)
+            for name, value in sorted(runtime_callables.items())
+        }
+        runtime_callables["input.guard_no_future_artifacts"](
+            store,
+            traversal=runtime_callables["input.bounded_tree"],
+        )
+        store.require_committed_output(
+            _STAGE,
+            (store.path("oracle", _OUTPUT_NAME),),
+        )
+        analyzer_runtime = runtime_callables["runtime.analyzer_factory"](config.oracle)
+        return _run_confirmation_oracle_stage(
+            config,
+            store,
+            force=False,
+            analyzer_runtime=analyzer_runtime,
+            runtime_callables=runtime_callables,
+            runtime_contract=runtime_contract,
+            validate_only=True,
+        )
+    except _FATAL:
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _public_error(ErrorCode.MANIFEST_CONFLICT) from None
+    finally:
+        config = None  # type: ignore[assignment]
+        store = None  # type: ignore[assignment]
+        analyzer_runtime = None
+        runtime_callables = {}
+        runtime_contract = {}
+
+
 def _confirmation_oracle_runtime_callables() -> dict[str, object]:
     return {
         "adapter.bandit_argv": oracle_aggregator.bandit_argv,
@@ -1210,6 +1270,7 @@ def _confirmation_oracle_runtime_callables() -> dict[str, object]:
         "input.read_snapshot": _read_snapshot,
         "input.run_store_factory": RunStore,
         "input.strict_json": load_strict_json_bytes,
+        "preflight.load_policy_bundle": load_policy_bundle,
         "preflight.run_oracle_preflight": run_oracle_preflight,
         "relation.validate_confirmation_oracle_coverage": validate_confirmation_oracle_coverage,
         "runtime.analyzer_factory": _ANALYZER_RUNTIME_FACTORY,
@@ -1251,5 +1312,6 @@ __all__ = [
     "confirmation_oracle_output_policy_contract",
     "confirmation_oracle_runtime_callable_contract",
     "run_confirmation_oracle_stage",
+    "validate_committed_confirmation_run",
     "validate_confirmation_oracle_coverage",
 ]

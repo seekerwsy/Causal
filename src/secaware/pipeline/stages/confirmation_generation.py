@@ -482,10 +482,7 @@ def _guard_no_oracle_or_analysis(store: RunStore, *, traversal=iter_bounded_tree
             ):
                 raise ValueError
         for entry in entries("oracle"):
-            relative = Path(entry.relative_path)
-            if entry.is_file and not (
-                relative.parent == Path(".") and relative.name.casefold() == "observed_oracle.jsonl"
-            ):
+            if entry.is_file and entry.relative_path != "observed_oracle.jsonl":
                 raise ValueError
         for directory in ("analysis", "reports"):
             if any(entry.is_file for entry in entries(directory)):

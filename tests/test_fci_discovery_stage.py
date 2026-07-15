@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
+from secaware import cli as cli_module
 import secaware.pipeline.stages.causal_tables as causal_stage
 from secaware.cli import app
 from secaware.config import FCIDiscoveryConfig
@@ -177,12 +178,28 @@ def test_heuristic_and_two_arm_commands_are_not_cli_reachable() -> None:
     "command",
     ("plan-generation", "generate", "import-generation", "run-oracle"),
 )
-def test_generic_cli_rejects_counterfactual_condition(command: str) -> None:
+def test_generic_cli_rejects_counterfactual_condition(
+    command: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     arguments = [command, "--condition", "counterfactual", "--config", "missing.yaml"]
     if command == "import-generation":
         arguments.extend(("--results", "missing.jsonl"))
+    if command == "run-oracle":
+        monkeypatch.setattr(
+            cli_module,
+            "_load",
+            lambda *_args, **_kwargs: pytest.fail("invalid condition reached the callback"),
+        )
     result = CliRunner().invoke(app, arguments)
 
+    if command == "run-oracle":
+        normalized = " ".join(result.output.split()).casefold()
+        assert result.exit_code == 2
+        assert "invalid value" in normalized
+        assert "observed" in normalized
+        assert "confirmation" in normalized
+        return
     assert result.exit_code == int(ErrorCode.CONFIG)
     assert "only the observed condition is reachable" in result.output
 

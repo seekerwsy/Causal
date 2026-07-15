@@ -311,6 +311,22 @@ def test_confirmation_oracle_fingerprint_binds_every_direct_contract() -> None:
         )
 
 
+def test_confirmation_oracle_runtime_contract_binds_validation_only_policy_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    assert "preflight.load_policy_bundle" in baseline
+
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "load_policy_bundle",
+        lambda _path: None,
+    )
+
+    changed = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    assert changed["preflight.load_policy_bundle"] != baseline["preflight.load_policy_bundle"]
+
+
 def test_run_oracle_confirmation_cli_maps_to_confirm_arm_stage(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1074,6 +1090,66 @@ def _oracle_bytes(store: RunStore) -> tuple[bytes, bytes]:
         store.path("oracle", "confirmation_oracle.jsonl").read_bytes(),
         store.path(".stages", "run-oracle-confirmation.json").read_bytes(),
     )
+
+
+def test_terminal_validation_rejects_pre_call_policy_loader_drift_without_invocation(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    original = confirmation_oracle_module.load_policy_bundle
+    calls = 0
+
+    def drifted_loader(path):
+        nonlocal calls
+        calls += 1
+        return original(path)
+
+    monkeypatch.setattr(confirmation_oracle_module, "load_policy_bundle", drifted_loader)
+    with pytest.raises(SecAwareError) as captured:
+        confirmation_oracle_module.validate_committed_confirmation_run(config, store)
+
+    assert captured.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert calls == 0
+    assert _oracle_bytes(store) == committed
+
+
+def test_terminal_validation_rejects_in_call_policy_loader_drift_and_preserves_commit(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _generated_confirmation_store
+    original = confirmation_oracle_module.load_policy_bundle
+    calls = 0
+
+    def drifted_loader(_path):
+        pytest.fail("drifted policy loader must never be invoked")
+
+    def mutate_after_load(path):
+        nonlocal calls
+        calls += 1
+        policy = original(path)
+        monkeypatch.setattr(
+            confirmation_oracle_module,
+            "load_policy_bundle",
+            drifted_loader,
+        )
+        return policy
+
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "load_policy_bundle",
+        mutate_after_load,
+    )
+    committed = _committed_oracle_bytes(config, store)
+
+    with pytest.raises(SecAwareError) as captured:
+        confirmation_oracle_module.validate_committed_confirmation_run(config, store)
+
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert calls == 1
+    assert _oracle_bytes(store) == committed
 
 
 def test_confirmation_oracle_skip_and_tamper_repair(

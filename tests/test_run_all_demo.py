@@ -22,6 +22,7 @@ from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline import artifact as artifact_module
+from secaware.pipeline.stages import confirmation_generation as confirmation_generation_stage_module
 from secaware.pipeline.stages import confirmation_oracle as confirmation_oracle_stage_module
 from secaware.pipeline.stages import fci_discovery as fci_stage_module
 from secaware.config import FCIDiscoveryConfig
@@ -48,12 +49,24 @@ from secaware.schema.results import PairResult
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _run_tree_bytes(run_dir: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(run_dir).as_posix(): path.read_bytes()
+        for path in sorted(run_dir.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _empty_run_all_store(root: Path) -> SimpleNamespace:
+    return SimpleNamespace(root=root, path=lambda *parts: root.joinpath(*parts))
+
+
 def test_run_all_executes_the_complete_m5_pipeline_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
     config = object()
-    store = SimpleNamespace(root=Path("run-all-order"))
+    store = _empty_run_all_store(Path("run-all-order"))
     monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
     monkeypatch.setattr(cli_module, "_prepare", lambda *_args: calls.append("prepare"))
     monkeypatch.setattr(
@@ -122,7 +135,7 @@ def test_run_all_stops_without_future_m5_calls_after_randomization_failure(
 ) -> None:
     calls: list[str] = []
     config = object()
-    store = SimpleNamespace(root=Path("run-all-failure"))
+    store = _empty_run_all_store(Path("run-all-failure"))
     monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
     for name in (
         "_prepare",
@@ -405,6 +418,9 @@ def _declared_cli_commands(path: Path) -> set[str]:
 
 
 class _RunAllOracleRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
     def __call__(
         self,
         argv: Sequence[str],
@@ -416,6 +432,7 @@ class _RunAllOracleRunner:
     ) -> AnalyzerProcessResult:
         del timeout_seconds, max_stdout_bytes, max_stderr_bytes
         call = tuple(argv)
+        self.calls.append(call)
         analyzer = "semgrep" if "semgrep" in call[0] else "bandit"
         if call[1:] == ("--version",):
             stdout = (
@@ -519,6 +536,28 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     fci_runner = _RunAllFCIRunner()
     monkeypatch.setattr(fci_stage_module, "SpawnedFCIRunner", lambda: fci_runner)
+    real_confirmation_provider_factory = (
+        confirmation_generation_stage_module._provider_from_frozen_config
+    )
+
+    class CountingConfirmationProvider:
+        calls = 0
+
+        def __init__(self, delegate: object) -> None:
+            self.delegate = delegate
+
+        def generate_many(self, requests):
+            type(self).calls += 1
+            return self.delegate.generate_many(requests)
+
+    def counting_confirmation_provider_factory(config, **kwargs):
+        return CountingConfirmationProvider(real_confirmation_provider_factory(config, **kwargs))
+
+    monkeypatch.setattr(
+        confirmation_generation_stage_module,
+        "_provider_from_frozen_config",
+        counting_confirmation_provider_factory,
+    )
 
     def reject_llm_transport(**_kwargs: object) -> None:
         pytest.fail("offline deterministic demo must not construct an LLM transport")
@@ -641,6 +680,76 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         run_dir / "reports" / "summary.md",
     ):
         assert not absent.exists()
+
+    committed = _run_tree_bytes(run_dir)
+
+    analyzer_calls = tuple(runner.calls)
+    provider_calls = CountingConfirmationProvider.calls
+
+    second = CliRunner().invoke(
+        app,
+        ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
+    )
+
+    assert second.exit_code == 0, second.output
+    assert "SecAware randomized confirmation complete" in second.output
+    assert tuple(runner.calls) == analyzer_calls
+    assert CountingConfirmationProvider.calls == provider_calls
+    assert _run_tree_bytes(run_dir) == committed
+
+    terminal_output = run_dir / "oracle" / "confirmation_oracle.jsonl"
+    terminal_manifest = run_dir / ".stages" / "run-oracle-confirmation.json"
+    assignments_path = run_dir / "interventions" / "assignments.jsonl"
+    for tampered_path in (terminal_output, assignments_path):
+        original = tampered_path.read_bytes()
+        tampered_path.write_bytes(original + b"\n")
+        tampered = _run_tree_bytes(run_dir)
+        rejected = CliRunner().invoke(
+            app,
+            [
+                "run-all",
+                "--config",
+                "configs/demo.yaml",
+                "--run-dir",
+                str(run_dir),
+                "--force",
+            ],
+        )
+        assert rejected.exit_code != 0
+        assert _run_tree_bytes(run_dir) == tampered
+        tampered_path.write_bytes(original)
+
+    for missing_path in (terminal_output, terminal_manifest):
+        original = missing_path.read_bytes()
+        missing_path.unlink()
+        partial = _run_tree_bytes(run_dir)
+        rejected = CliRunner().invoke(
+            app,
+            ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
+        )
+        assert rejected.exit_code != 0
+        assert _run_tree_bytes(run_dir) == partial
+        missing_path.write_bytes(original)
+
+    for future_relative in (
+        "analysis/effects.jsonl",
+        "analysis/jci_pag.jsonl",
+        "reports/summary.md",
+        ".stages/report.json",
+    ):
+        future = run_dir / future_relative
+        future.parent.mkdir(parents=True, exist_ok=True)
+        future.write_text("{}\n", encoding="utf-8")
+        future_snapshot = _run_tree_bytes(run_dir)
+        rejected = CliRunner().invoke(
+            app,
+            ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
+        )
+        assert rejected.exit_code != 0
+        assert _run_tree_bytes(run_dir) == future_snapshot
+        future.unlink()
+
+    assert _run_tree_bytes(run_dir) == committed
 
 
 def test_final_architecture_has_no_flat_projection_or_removed_stage_authority() -> None:

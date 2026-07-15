@@ -1,5 +1,6 @@
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
+from enum import Enum
 import os
 from pathlib import Path
 import tempfile
@@ -51,7 +52,10 @@ from secaware.pipeline.jsonl_stage import (
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
 from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
 from secaware.pipeline.stages.confirmation_generation import run_confirmation_generation_stage
-from secaware.pipeline.stages.confirmation_oracle import run_confirmation_oracle_stage
+from secaware.pipeline.stages.confirmation_oracle import (
+    run_confirmation_oracle_stage,
+    validate_committed_confirmation_run,
+)
 from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryTerminalStatus,
     fci_discovery_stage,
@@ -83,6 +87,13 @@ from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
 GenerationCondition = Literal["observed", "counterfactual"]
 GenerationMode = Literal["offline", "provider"]
+
+
+class OracleCLICondition(str, Enum):
+    OBSERVED = "observed"
+    CONFIRMATION = "confirmation"
+
+
 _Record = TypeVar("_Record")
 _ActionResult = TypeVar("_ActionResult")
 MAX_GENERATION_JSONL_LINE_CHARS = 8 * 1024 * 1024
@@ -2011,16 +2022,15 @@ def import_generation_command(
 def run_oracle_command(
     config: Path = typer.Option(..., "--config"),
     run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    condition: str = typer.Option("observed", "--condition"),
+    condition: OracleCLICondition = typer.Option(OracleCLICondition.OBSERVED, "--condition"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    if condition == "confirmation":
+    if condition is OracleCLICondition.CONFIRMATION:
         cfg, store = _load(config, run_dir)
         run_confirmation_oracle_stage(cfg, store, force=force)
         return
-    validated_condition = _cli_generation_condition(condition)
     cfg, store = _load(config, run_dir)
-    run_oracle_stage(cfg, store, condition=validated_condition, force=force)
+    run_oracle_stage(cfg, store, condition="observed", force=force)
 
 
 @app.command("discover")
@@ -2076,6 +2086,15 @@ def run_all_command(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     cfg, store = _load(config, run_dir)
+    terminal_paths = (
+        store.path("oracle", "confirmation_oracle.jsonl"),
+        store.path(".stages", "run-oracle-confirmation.json"),
+    )
+    if any(path.exists() or path.is_symlink() for path in terminal_paths):
+        validate_committed_confirmation_run(cfg, store)
+        if not force:
+            console.print(f"SecAware randomized confirmation complete: {store.root}")
+            return
     _prepare(cfg, store)
     extract_prompt_tsg_stage(cfg, store, force=force)
     generate_observed_stage(cfg, store, force=force)

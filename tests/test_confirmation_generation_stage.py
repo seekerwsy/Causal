@@ -35,6 +35,7 @@ from secaware.pipeline.stages.confirmation_generation import (
     CONFIRMATION_GENERATION_OUTPUTS,
     run_confirmation_generation_stage,
 )
+from secaware.pipeline.bounded_traversal import BoundedTreeEntry
 import secaware.pipeline.stages.confirmation_generation as confirmation_stage
 from secaware.pipeline.manifest import build_stage_fingerprint
 from secaware import __version__
@@ -122,6 +123,60 @@ def test_confirmation_generation_future_guard_allows_observed_oracle(
     store.path("oracle", "confirmation_oracle.jsonl").write_text("{}\n", encoding="utf-8")
     with pytest.raises(SecAwareError):
         confirmation_stage._guard_no_oracle_or_analysis(store)
+
+
+@pytest.mark.parametrize(
+    "relative_paths",
+    (
+        ("Observed_Oracle.jsonl",),
+        ("nested/observed_oracle.jsonl",),
+        ("other.jsonl",),
+        ("observed_oracle.jsonl", "other.jsonl"),
+    ),
+)
+def test_confirmation_generation_oracle_guard_requires_one_exact_canonical_path(
+    tmp_path: Path,
+    relative_paths: tuple[str, ...],
+) -> None:
+    _config, store = _stage_store(tmp_path, task_count=2)
+
+    def traversal(root: Path, **_limits: int):
+        if root.name != "oracle":
+            return iter(())
+        return iter(
+            BoundedTreeEntry(
+                relative_path=relative,
+                name=Path(relative).name,
+                is_file=True,
+                is_dir=False,
+            )
+            for relative in relative_paths
+        )
+
+    with pytest.raises(SecAwareError):
+        confirmation_stage._guard_no_oracle_or_analysis(store, traversal=traversal)
+
+
+def test_confirmation_generation_oracle_guard_accepts_only_exact_canonical_path(
+    tmp_path: Path,
+) -> None:
+    _config, store = _stage_store(tmp_path, task_count=2)
+
+    def traversal(root: Path, **_limits: int):
+        if root.name == "oracle":
+            return iter(
+                (
+                    BoundedTreeEntry(
+                        relative_path="observed_oracle.jsonl",
+                        name="observed_oracle.jsonl",
+                        is_file=True,
+                        is_dir=False,
+                    ),
+                )
+            )
+        return iter(())
+
+    confirmation_stage._guard_no_oracle_or_analysis(store, traversal=traversal)
 
 
 def _requests():

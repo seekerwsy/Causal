@@ -152,6 +152,32 @@ def test_run_oracle_confirmation_condition_dispatches_only_to_confirmation_stage
     assert calls == [(sentinel_config, sentinel_store, True)]
 
 
+def test_run_oracle_help_exposes_only_observed_and_confirmation_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    help_result = CliRunner().invoke(app, ["run-oracle", "--help"])
+
+    assert help_result.exit_code == 0, help_result.output
+    normalized = " ".join(help_result.output.split()).casefold()
+    assert "observed" in normalized
+    assert "confirmation" in normalized
+    assert "counterfactual" not in normalized
+
+    load_calls: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        cli_module,
+        "_load",
+        lambda config, run_dir: load_calls.append((config, run_dir)),
+    )
+    for invalid in ("counterfactual", "unknown"):
+        result = CliRunner().invoke(
+            app,
+            ["run-oracle", "--config", "unused.yaml", "--condition", invalid],
+        )
+        assert result.exit_code == 2, result.output
+    assert load_calls == []
+
+
 def test_m5_public_stage_package_exports_the_complete_pipeline() -> None:
     from secaware.pipeline import stages
 
