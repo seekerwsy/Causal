@@ -141,6 +141,12 @@ def canonical_generated_code_from_request(
     request: GenerationRequestRecord,
     code: str,
     provenance: GenerationProvenance,
+    *,
+    provider_result_sha256: str | None = None,
+    provider_usage_sha256: str | None = None,
+    provider_runtime_sha256: str | None = None,
+    provider_policy_sha256: str | None = None,
+    provider_attempt_count: int | None = None,
 ) -> CanonicalGeneratedCodeRecord:
     """Build the canonical metadata bridge for any validated generation producer."""
 
@@ -172,10 +178,13 @@ def canonical_generated_code_from_request(
             arm_role=trusted_request.arm_role,
             generation_provenance=trusted_provenance,
             generation_request=trusted_request,
+            provider_result_sha256=provider_result_sha256,
+            provider_usage_sha256=provider_usage_sha256,
+            provider_runtime_sha256=provider_runtime_sha256,
+            provider_policy_sha256=provider_policy_sha256,
+            provider_attempt_count=provider_attempt_count,
         )
-        shell = CanonicalGeneratedCodeRecord.model_construct(
-            code_id="code_" + "0" * 64, **payload
-        )
+        shell = CanonicalGeneratedCodeRecord.model_construct(code_id="code_" + "0" * 64, **payload)
         identity = shell.model_dump(mode="json", exclude={"code_id", "code"})
         encoded = json.dumps(
             identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -191,6 +200,11 @@ def canonical_generated_code_from_request(
         request = None  # type: ignore[assignment]
         code = ""
         provenance = None  # type: ignore[assignment]
+        provider_result_sha256 = None
+        provider_usage_sha256 = None
+        provider_runtime_sha256 = None
+        provider_policy_sha256 = None
+        provider_attempt_count = None
         trusted_request = None
         trusted_provenance = None
         payload = {}

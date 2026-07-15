@@ -36,6 +36,7 @@ _API_KEY = "provider-api-key-secret"
 _PROMPT = "Return a path helper and preserve this sensitive prompt exactly."
 _SYSTEM = "Return code only."
 _CODE = "```python\ndef helper(path):\n    return path\n```"
+_DEFAULT_USAGE = object()
 
 
 def _validation_surfaces(error: ValidationError) -> tuple[str, ...]:
@@ -157,9 +158,11 @@ def _response(
     *,
     code: object = _CODE,
     finish_reason: object = "stop",
-    usage: object = None,
+    usage: object = _DEFAULT_USAGE,
     model: object = "org/model-api",
 ) -> SimpleNamespace:
+    if usage is _DEFAULT_USAGE:
+        usage = SimpleNamespace(prompt_tokens=11, completion_tokens=13, total_tokens=24)
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -764,7 +767,7 @@ def test_empty_system_template_is_not_sent() -> None:
     assert client.completions.calls[0]["messages"] == [{"role": "user", "content": _PROMPT}]
 
 
-def test_optional_usage_may_be_absent_from_a_valid_response() -> None:
+def test_usage_must_be_present_in_a_valid_response() -> None:
     response = SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -777,9 +780,11 @@ def test_optional_usage_may_be_absent_from_a_valid_response() -> None:
     client = FakeClient([response])
     provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
 
-    result = provider.generate(_request(), system_template=_SYSTEM)
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(_request(), system_template=_SYSTEM)
 
-    assert result.code == _CODE
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+    _assert_safe_provider_error(exc_info.value)
 
 
 def test_provider_constructor_clears_inputs_after_invalid_config() -> None:

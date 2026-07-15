@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.metadata
+import hashlib
+import inspect
 
 from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
 from secaware.config import (
@@ -210,7 +212,25 @@ def randomization_stage_contract_sha256(stage: str) -> str | None:
     return canonical_sha256(randomization_stage_contract_payload())
 
 
-def confirmation_generation_stage_contract_payload() -> dict[str, object]:
+def _callable_sha256(value: object) -> str:
+    try:
+        source = inspect.getsource(value)
+    except Exception:
+        code = getattr(value, "__code__", None)
+        source = repr(
+            (
+                getattr(value, "__module__", None),
+                getattr(value, "__qualname__", None),
+                getattr(code, "co_code", b"").hex(),
+                getattr(code, "co_consts", ()),
+            )
+        )
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def confirmation_generation_stage_contract_payload(
+    generation_config: GenerationConfig | None = None,
+) -> dict[str, object]:
     """Bind assignment generation to every direct schema/config/provider contract."""
 
     from secaware.pipeline.manifest import StageManifest
@@ -218,8 +238,26 @@ def confirmation_generation_stage_contract_payload() -> dict[str, object]:
         CONFIRMATION_PROVIDER_FACTORY_VERSION,
         CONFIRMATION_PROVIDER_POLICY_VERSION,
         CONFIRMATION_PROVIDER_RESPONSE_VERSION,
+        _provider_from_frozen_config,
     )
-    from secaware.schema.generation import GenerationProvenance
+    from secaware.generation.confirmation import (
+        CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+        execute_confirmation_requests,
+    )
+    from secaware.generation.openai_compatible_provider import (
+        openai_provider_runtime_payload,
+    )
+    from secaware.schema.generation import GenerationProvenance, ProviderResultEnvelope
+
+    runtime_payload: object = {"provider": "unbound"}
+    if generation_config is not None:
+        if generation_config.provider == "openai_compatible":
+            runtime_payload = openai_provider_runtime_payload()
+        else:
+            runtime_payload = {
+                "provider": generation_config.provider,
+                "implementation": "locked-confirmation-provider-v1",
+            }
 
     return {
         "stage": _CONFIRMATION_GENERATION_STAGE,
@@ -227,10 +265,15 @@ def confirmation_generation_stage_contract_payload() -> dict[str, object]:
         "provider_policy_version": CONFIRMATION_PROVIDER_POLICY_VERSION,
         "provider_factory_version": CONFIRMATION_PROVIDER_FACTORY_VERSION,
         "provider_response_contract_version": CONFIRMATION_PROVIDER_RESPONSE_VERSION,
+        "provider_result_policy_sha256": CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+        "provider_runtime": runtime_payload,
+        "provider_factory_source_sha256": _callable_sha256(_provider_from_frozen_config),
+        "provider_executor_source_sha256": _callable_sha256(execute_confirmation_requests),
         "app_config_schema": _schema_sha256(AppConfig),
         "generation_config_schema": _schema_sha256(GenerationConfig),
         "request_schema": _schema_sha256(GenerationRequestRecord),
         "provider_provenance_schema": _schema_sha256(GenerationProvenance),
+        "provider_result_schema": _schema_sha256(ProviderResultEnvelope),
         "code_schema": _schema_sha256(CanonicalGeneratedCodeRecord),
         "execution_schema": _schema_sha256(AssignmentExecutionRecord),
         "assignment_schema": _schema_sha256(AssignmentRecord),
@@ -240,10 +283,13 @@ def confirmation_generation_stage_contract_payload() -> dict[str, object]:
     }
 
 
-def confirmation_generation_stage_contract_sha256(stage: str) -> str | None:
+def confirmation_generation_stage_contract_sha256(
+    stage: str,
+    generation_config: GenerationConfig | None = None,
+) -> str | None:
     if stage != _CONFIRMATION_GENERATION_STAGE:
         return None
-    return canonical_sha256(confirmation_generation_stage_contract_payload())
+    return canonical_sha256(confirmation_generation_stage_contract_payload(generation_config))
 
 
 __all__ = [

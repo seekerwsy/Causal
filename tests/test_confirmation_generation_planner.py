@@ -5,7 +5,9 @@ import hashlib
 import pytest
 
 from secaware.config import GenerationConfig, OpenAICompatibleConfig
+from secaware.errors import SecAwareError
 from secaware.generation.request_planner import plan_confirmation_requests
+import secaware.generation.request_planner as request_planner
 from secaware.schema.experiments import (
     ArmRole,
     AssignmentRecord,
@@ -24,6 +26,7 @@ def _assignment_and_variant(
     task_id: str = "task-a",
     role: ArmRole = ArmRole.TARGET_PATCH,
     seed_id: int = 101,
+    language: str = "python",
 ) -> tuple[AssignmentRecord, PromptVariantRecord]:
     hypothesis_id = "hypothesis_" + "1" * 64
     target_spec_id = "target_" + "2" * 64
@@ -34,6 +37,7 @@ def _assignment_and_variant(
     variant = PromptVariantRecord.from_content(
         task_id=task_id,
         source_prompt_id=f"prompt-{task_id}",
+        language=language,
         variant_prompt_id="variant_prompt_" + _sha(task_id + role.value),
         hypothesis_id=hypothesis_id,
         target_spec_id=target_spec_id,
@@ -81,7 +85,19 @@ def _assignment_and_variant(
 
 
 def _generation_config() -> GenerationConfig:
-    return GenerationConfig(provider="mock", models=["model-a"], seeds=[1], confirmation_seeds=[101])
+    return GenerationConfig(
+        provider="mock", models=["model-a"], seeds=[1], confirmation_seeds=[101]
+    )
+
+
+def _secaware_traceback_locals(error: BaseException) -> str:
+    retained: list[str] = []
+    cursor = error.__traceback__
+    while cursor is not None:
+        if "/src/secaware/" in cursor.tb_frame.f_code.co_filename.replace("\\", "/"):
+            retained.append(repr(dict(cursor.tb_frame.f_locals)))
+        cursor = cursor.tb_next
+    return "\n".join(retained)
 
 
 def test_confirmation_request_binds_assignment_variant_and_arm() -> None:
@@ -154,6 +170,45 @@ def test_confirmation_planner_uses_assignment_model_not_observed_generation_axis
     )
     request = plan_confirmation_requests((assignment,), (variant,), config)[0]
     assert request.model_id == assignment.experimental_unit.model_id
+
+
+def test_confirmation_planner_preserves_java_variant_language() -> None:
+    assignment, variant = _assignment_and_variant(language="java")
+
+    request = plan_confirmation_requests((assignment,), (variant,), _generation_config())[0]
+
+    assert request.language == "java"
+
+
+def test_confirmation_planner_late_join_failure_releases_variant_prompt() -> None:
+    assignment, variant = _assignment_and_variant()
+    secret = "planner-late-join-prompt-secret"
+    content = variant.model_dump(mode="python", exclude={"variant_id"})
+    content["prompt_text"] = secret
+    content["prompt_sha256"] = _sha(secret)
+    mismatched = PromptVariantRecord.from_content(**content)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        plan_confirmation_requests((assignment,), (mismatched,), _generation_config())
+    assert secret not in _secaware_traceback_locals(exc_info.value)
+
+
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
+def test_confirmation_planner_preserves_late_fatal_identity_and_releases_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    assignment, variant = _assignment_and_variant()
+    signal = signal_type("planner-control-flow")
+
+    def fail_record(**_kwargs):
+        raise signal
+
+    monkeypatch.setattr(request_planner, "_record", fail_record)
+    with pytest.raises(signal_type) as exc_info:
+        plan_confirmation_requests((assignment,), (variant,), _generation_config())
+    assert exc_info.value is signal
+    assert variant.prompt_text not in _secaware_traceback_locals(signal)
 
 
 def test_confirmation_planner_binds_endpoint_system_template_and_parameters_exactly() -> None:

@@ -13,8 +13,12 @@ from typing import Sequence
 
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.generation.confirmation import execute_confirmation_requests
+from secaware.generation.confirmation import (
+    CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+    execute_confirmation_requests,
+)
 from secaware.generation.openai_compatible_provider import create_openai_compatible_provider
+from secaware.generation.openai_compatible_provider import OpenAICompatibleGenerationResult
 from secaware.generation.request_planner import plan_confirmation_requests
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
@@ -32,7 +36,14 @@ from secaware.schema.experiments import (
     PromptVariantRecord,
     RandomizationManifestRecord,
 )
-from secaware.schema.generation import GenerationProvenance, GenerationRequestRecord
+from secaware.schema.generation import (
+    GenerationAttemptRecord,
+    GenerationProvenance,
+    GenerationRequestRecord,
+    ProviderResultEnvelope,
+    ProviderUsageRecord,
+    provider_provenance_sha256,
+)
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
@@ -97,27 +108,42 @@ class ConfirmationGenerationStageResult:
     terminal_no_code_count: int
 
 
-@dataclass(frozen=True, slots=True)
-class _MockResult:
-    code: str
-    provenance: GenerationProvenance
-    finish_reason: str = "stop"
-
-
 class _LockedMockProvider:
     def generate_many(self, requests: Sequence[GenerationRequestRecord]):
         return tuple(
             (
                 request.request_id,
-                _MockResult(
+                ProviderResultEnvelope.from_content(
+                    request_id=request.request_id,
+                    model_id=request.model_id,
+                    finish_reason="stop",
                     code=(
-                        "# secaware locked mock generation\n"
-                        f"# assignment={request.assignment_id}\n"
+                        f"# secaware locked mock generation\n# assignment={request.assignment_id}\n"
+                    ),
+                    usage=ProviderUsageRecord(
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        total_tokens=0,
+                    ),
+                    attempts=(
+                        GenerationAttemptRecord(
+                            schema_version="1.0",
+                            request_id=request.request_id,
+                            attempt=1,
+                            outcome="success",
+                            error_code=None,
+                            retryable=False,
+                            backoff_seconds=0.0,
+                        ),
                     ),
                     provenance=GenerationProvenance(
                         producer="secaware-locked-mock",
                         producer_version="v1",
                     ),
+                    provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+                    runtime_fingerprint_sha256=hashlib.sha256(
+                        b"secaware-locked-mock-v1"
+                    ).hexdigest(),
                 ),
             )
             for request in reversed(tuple(requests))
@@ -133,9 +159,28 @@ class _SingleRequestProviderAdapter:
         generate = getattr(self._provider, "generate", None)
         if not callable(generate):
             raise TypeError
-        return tuple(
-            (request.request_id, generate(request, self._system_template)) for request in requests
-        )
+        results = []
+        for request in requests:
+            candidate = generate(request, self._system_template)
+            if type(candidate) is not OpenAICompatibleGenerationResult:
+                raise TypeError
+            results.append(
+                (
+                    request.request_id,
+                    ProviderResultEnvelope.from_content(
+                        request_id=request.request_id,
+                        model_id=request.model_id,
+                        finish_reason=candidate.finish_reason,
+                        code=candidate.code,
+                        usage=candidate.usage,
+                        attempts=candidate.attempts,
+                        provenance=candidate.provenance,
+                        provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+                        runtime_fingerprint_sha256=candidate.runtime_fingerprint_sha256,
+                    ),
+                )
+            )
+        return tuple(results)
 
 
 def _provider_from_frozen_config(config: AppConfig) -> object:
@@ -366,7 +411,9 @@ def _validate_producer_manifests(
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        raise _stage_error("confirmation generation producer provenance failed validation") from None
+        raise _stage_error(
+            "confirmation generation producer provenance failed validation"
+        ) from None
 
 
 def _validate_randomization_closure(
@@ -398,6 +445,11 @@ def _validate_output_bundle(
     config: AppConfig,
     groups: Sequence[Sequence],
 ) -> ConfirmationGenerationStageResult:
+    requests: tuple[GenerationRequestRecord, ...] = ()
+    executions: tuple[AssignmentExecutionRecord, ...] = ()
+    codes: tuple[CanonicalGeneratedCodeRecord, ...] = ()
+    expected_requests: tuple[GenerationRequestRecord, ...] = ()
+    result: ConfirmationGenerationStageResult | None = None
     try:
         if len(groups) != 3:
             raise ValueError
@@ -417,6 +469,12 @@ def _validate_output_bundle(
             plan_confirmation_requests(snapshot.assignments, snapshot.variants, config.generation)
         )
         if requests != expected_requests:
+            raise ValueError
+        if tuple(item.assignment_id for item in executions) != tuple(
+            sorted(item.assignment_id for item in executions)
+        ) or tuple(item.assignment_id for item in codes) != tuple(
+            sorted(item.assignment_id or "" for item in codes)
+        ):
             raise ValueError
         request_by_assignment = {item.assignment_id: item for item in requests}
         execution_by_assignment = {item.assignment_id: item for item in executions}
@@ -449,9 +507,19 @@ def _validate_output_bundle(
                     raise ValueError
                 if code.generation_request != request or code.assignment_id != assignment_id:
                     raise ValueError
+                if (
+                    execution.provider_result_sha256 != code.provider_result_sha256
+                    or execution.usage_sha256 != code.provider_usage_sha256
+                    or execution.provider_runtime_sha256 != code.provider_runtime_sha256
+                    or execution.provider_policy_sha256 != code.provider_policy_sha256
+                    or execution.attempt_count != code.provider_attempt_count
+                    or execution.provider_provenance_sha256
+                    != provider_provenance_sha256(code.generation_provenance)
+                ):
+                    raise ValueError
             elif code is not None:
                 raise ValueError
-        return ConfirmationGenerationStageResult(
+        result = ConfirmationGenerationStageResult(
             assignment_count=len(requests),
             generated_count=len(codes),
             terminal_no_code_count=len(requests) - len(codes),
@@ -460,6 +528,24 @@ def _validate_output_bundle(
         raise
     except Exception:
         raise _stage_error("confirmation generation output bundle failed validation") from None
+    finally:
+        snapshot = None  # type: ignore[assignment]
+        config = None  # type: ignore[assignment]
+        groups = ()
+        requests = ()
+        executions = ()
+        codes = ()
+        expected_requests = ()
+        request_by_assignment = {}
+        execution_by_assignment = {}
+        code_by_assignment = {}
+        generated_assignments = set()
+        request = None
+        code = None
+        execution = None
+    if result is None:  # pragma: no cover
+        raise _stage_error("confirmation generation output bundle failed validation")
+    return result
 
 
 def run_confirmation_generation_stage(
@@ -485,7 +571,9 @@ def run_confirmation_generation_stage(
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        raise _stage_error("confirmation generation stage configuration failed validation") from None
+        raise _stage_error(
+            "confirmation generation stage configuration failed validation"
+        ) from None
 
     task4_paths = tuple(
         effective_store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
@@ -494,9 +582,7 @@ def run_confirmation_generation_stage(
     randomization_paths = tuple(
         effective_store.path("interventions", name) for name, _model in RANDOMIZATION_OUTPUTS
     )
-    randomization_manifest_path = effective_store.path(
-        ".stages", "randomize-confirmation.json"
-    )
+    randomization_manifest_path = effective_store.path(".stages", "randomize-confirmation.json")
     inputs = (
         *task4_paths,
         task4_manifest_path,
@@ -610,7 +696,11 @@ def run_confirmation_generation_stage(
         result_requests: tuple[GenerationRequestRecord, ...] = ()
         try:
             effective_provider = _provider_from_frozen_config(effective_config)
-            executions, codes = execute_confirmation_requests(requests, effective_provider)
+            executions, codes = execute_confirmation_requests(
+                requests,
+                effective_provider,
+                effective_config.generation,
+            )
             result_requests = requests
         finally:
             effective_provider = None

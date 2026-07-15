@@ -353,6 +353,18 @@ def plan_confirmation_requests(
 ) -> list[GenerationRequestRecord]:
     """Join every frozen assignment to exactly one frozen prompt variant."""
 
+    trusted_config: GenerationConfig | None = None
+    assignment_values: tuple[AssignmentRecord, ...] = ()
+    variant_values: tuple[PromptVariantRecord, ...] = ()
+    variant_by_id: dict[str, PromptVariantRecord] = {}
+    referenced_variant_ids: set[str] = set()
+    records: list[GenerationRequestRecord] = []
+    result: list[GenerationRequestRecord] | None = None
+    assignment: AssignmentRecord | None = None
+    variant: PromptVariantRecord | None = None
+    unit = None
+    provider = None
+    parameters = None
     try:
         trusted_config = GenerationConfig.model_validate(config)
         assignment_values = _bounded_snapshots(
@@ -371,9 +383,8 @@ def plan_confirmation_requests(
             raise ValueError
         assignment_ids = tuple(item.assignment_id for item in assignment_values)
         variant_ids = tuple(item.variant_id for item in variant_values)
-        if (
-            len(assignment_ids) != len(set(assignment_ids))
-            or len(variant_ids) != len(set(variant_ids))
+        if len(assignment_ids) != len(set(assignment_ids)) or len(variant_ids) != len(
+            set(variant_ids)
         ):
             raise ValueError
         variant_by_id = {item.variant_id: item for item in variant_values}
@@ -409,7 +420,6 @@ def plan_confirmation_requests(
         endpoint_sha256 = _endpoint_sha256(endpoint_type, endpoint_identity)
         system_template_sha256 = sha256_text(system_template)
 
-        records: list[GenerationRequestRecord] = []
         for assignment in assignment_values:
             variant = variant_by_id.get(assignment.variant_id)
             unit = assignment.experimental_unit
@@ -430,7 +440,7 @@ def plan_confirmation_requests(
                     condition="confirm_arm",
                     prompt_id=variant.variant_prompt_id,
                     prompt=variant.prompt_text,
-                    language="python",
+                    language=variant.language,
                     model_id=unit.model_id,
                     seed_id=assignment.seed_id,
                     hypothesis_id=unit.hypothesis_id,
@@ -451,7 +461,7 @@ def plan_confirmation_requests(
         records.sort(key=lambda item: (item.assignment_id or "", item.request_id))
         if len({item.request_id for item in records}) != len(records):
             raise ValueError
-        return records
+        result = list(records)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except SecAwareError:
@@ -461,3 +471,24 @@ def plan_confirmation_requests(
             ErrorCode.CONTRACT,
             "confirmation generation planning failed validation",
         ) from None
+    finally:
+        assignments = ()
+        variants = ()
+        config = None  # type: ignore[assignment]
+        trusted_config = None
+        assignment_values = ()
+        variant_values = ()
+        variant_by_id = {}
+        referenced_variant_ids = set()
+        records.clear()
+        assignment = None
+        variant = None
+        unit = None
+        provider = None
+        parameters = None
+    if result is None:  # pragma: no cover
+        raise _planner_error(
+            ErrorCode.CONTRACT,
+            "confirmation generation planning failed validation",
+        )
+    return result

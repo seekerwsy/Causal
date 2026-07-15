@@ -107,6 +107,11 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
     code_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
     generation_provenance: GenerationProvenance | None = None
     generation_request: GenerationRequestRecord | None = None
+    provider_result_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
+    provider_usage_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
+    provider_runtime_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
+    provider_policy_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
+    provider_attempt_count: StrictInt | None = Field(default=None, ge=1, le=10)
 
     @field_validator("arm_role", mode="before")
     @classmethod
@@ -203,6 +208,19 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
             value is None for value in confirmation_coordinates
         ):
             raise ValueError("canonical confirmation code requires assignment coordinates")
+        provider_coordinates = (
+            self.provider_result_sha256,
+            self.provider_usage_sha256,
+            self.provider_runtime_sha256,
+            self.provider_policy_sha256,
+            self.provider_attempt_count,
+        )
+        if self.condition == "confirm_arm" and any(value is None for value in provider_coordinates):
+            raise ValueError("canonical confirmation code requires provider coordinates")
+        if self.condition != "confirm_arm" and any(
+            value is not None for value in provider_coordinates
+        ):
+            raise ValueError("canonical non-confirmation code forbids provider coordinates")
         if self.condition != "confirm_arm" and any(
             value is not None for value in confirmation_coordinates
         ):

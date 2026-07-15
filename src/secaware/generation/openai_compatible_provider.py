@@ -1,5 +1,9 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
+import importlib.metadata
+import inspect
+import json
 import os
 import time
 from typing import Any
@@ -11,6 +15,7 @@ from secaware.schema.generation import (
     GenerationAttemptRecord,
     GenerationProvenance,
     GenerationRequestRecord,
+    ProviderUsageRecord,
     revalidate_generation_request_envelope,
     sha256_text,
 )
@@ -30,13 +35,19 @@ class OpenAICompatibleGenerationResult:
     code: str | None
     provenance: GenerationProvenance
     attempts: tuple[GenerationAttemptRecord, ...]
+    usage: ProviderUsageRecord
+    runtime_fingerprint_sha256: str
     finish_reason: str = "stop"
 
     def __post_init__(self) -> None:
-        if self.finish_reason not in {"stop", "content_filter"} or (
-            self.finish_reason == "stop"
-            and (type(self.code) is not str or not self.code.strip())
-        ) or (self.finish_reason == "content_filter" and self.code is not None):
+        if (
+            self.finish_reason not in {"stop", "content_filter"}
+            or (
+                self.finish_reason == "stop"
+                and (type(self.code) is not str or not self.code.strip())
+            )
+            or (self.finish_reason == "content_filter" and self.code is not None)
+        ):
             raise ValueError("provider result code failed validation")
         metadata_failed = False
         try:
@@ -46,12 +57,23 @@ class OpenAICompatibleGenerationResult:
             attempts = tuple(
                 GenerationAttemptRecord.model_validate(attempt) for attempt in self.attempts
             )
+            usage = ProviderUsageRecord.model_validate(self.usage)
+            if (
+                type(self.runtime_fingerprint_sha256) is not str
+                or len(self.runtime_fingerprint_sha256) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in self.runtime_fingerprint_sha256
+                )
+            ):
+                raise ValueError
         except Exception:
             metadata_failed = True
         if metadata_failed:
             raise ValueError("provider result metadata failed validation") from None
         object.__setattr__(self, "provenance", provenance)
         object.__setattr__(self, "attempts", attempts)
+        object.__setattr__(self, "usage", usage)
 
     def __repr__(self) -> str:
         return "OpenAICompatibleGenerationResult()"
@@ -163,23 +185,29 @@ def _member(value: object, name: str, *, default: object = _NO_DEFAULT) -> objec
         default = None
 
 
-def _validate_usage(usage: object) -> None:
+def _validate_usage(usage: object) -> ProviderUsageRecord:
     name = ""
     value: object = None
     try:
         if usage is _MISSING or usage is None:
-            return
+            raise ValueError("missing token usage")
+        values: dict[str, int] = {}
         for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
             value = _member(usage, name)
             if type(value) is not int or value < 0:
                 raise ValueError("invalid token usage")
+            values[name] = value
+        return ProviderUsageRecord.model_validate(values)
     finally:
         usage = None
         name = ""
         value = None
+        values = {}
 
 
-def _response_code(response: object, *, expected_model: str) -> tuple[str | None, str]:
+def _response_code(
+    response: object, *, expected_model: str
+) -> tuple[str | None, str, ProviderUsageRecord]:
     choices: object = None
     choice: object = None
     finish_reason: object = None
@@ -213,8 +241,8 @@ def _response_code(response: object, *, expected_model: str) -> tuple[str | None
             raise ValueError("invalid message content")
         if finish_reason == "content_filter" and content not in {None, ""}:
             raise ValueError("invalid filtered content")
-        _validate_usage(_member(response, "usage", default=_MISSING))
-        return (content if finish_reason == "stop" else None, finish_reason)
+        usage = _validate_usage(_member(response, "usage", default=_MISSING))
+        return (content if finish_reason == "stop" else None, finish_reason, usage)
     finally:
         response = None
         expected_model = ""
@@ -224,6 +252,7 @@ def _response_code(response: object, *, expected_model: str) -> tuple[str | None
         finish_reason = None
         message = None
         content = None
+        usage = None
 
 
 def _wire_parameters(parameters: Mapping[str, JSONValue]) -> dict[str, Any]:
@@ -251,6 +280,7 @@ class OpenAICompatibleProvider:
         "_max_attempts",
         "_max_backoff_seconds",
         "_sleeper",
+        "_runtime_fingerprint_sha256",
     )
 
     def __init__(
@@ -259,6 +289,7 @@ class OpenAICompatibleProvider:
         *,
         client: object,
         sleeper: Callable[[float], None] = time.sleep,
+        runtime_fingerprint_sha256: str | None = None,
     ) -> None:
         trusted: OpenAICompatibleConfig | None = None
         initialization_error: SecAwareError | None = None
@@ -293,6 +324,11 @@ class OpenAICompatibleProvider:
         self._initial_backoff_seconds = trusted.initial_backoff_seconds
         self._max_backoff_seconds = trusted.max_backoff_seconds
         self._sleeper = sleeper
+        self._runtime_fingerprint_sha256 = (
+            openai_provider_runtime_fingerprint()
+            if runtime_fingerprint_sha256 is None
+            else runtime_fingerprint_sha256
+        )
 
     def __repr__(self) -> str:
         return "OpenAICompatibleProvider()"
@@ -374,6 +410,7 @@ class OpenAICompatibleProvider:
         classification: _FailureClassification | None = None
         code: str | None = None
         finish_reason = ""
+        usage: ProviderUsageRecord | None = None
         try:
             trusted = self._request(request, system_template)
             if trusted is None:
@@ -455,7 +492,7 @@ class OpenAICompatibleProvider:
                 finish_reason = ""
                 response_invalid = False
                 try:
-                    code, finish_reason = _response_code(
+                    code, finish_reason, usage = _response_code(
                         response, expected_model=trusted.model_id
                     )
                 except Exception:
@@ -494,6 +531,8 @@ class OpenAICompatibleProvider:
                         producer_version=_PRODUCER_VERSION,
                     ),
                     attempts=tuple(attempts),
+                    usage=usage,
+                    runtime_fingerprint_sha256=self._runtime_fingerprint_sha256,
                     finish_reason=finish_reason,
                 )
 
@@ -510,6 +549,7 @@ class OpenAICompatibleProvider:
             classification = None
             code = None
             finish_reason = ""
+            usage = None
             request = None  # type: ignore[assignment]
             system_template = ""
             self = None  # type: ignore[assignment]
@@ -532,6 +572,37 @@ class OpenAICompatibleProvider:
             system_template = ""
 
 
+def openai_provider_runtime_payload() -> dict[str, str]:
+    try:
+        sdk_version = importlib.metadata.version("openai")
+        provider_source = inspect.getsource(OpenAICompatibleProvider)
+        factory_source = inspect.getsource(create_openai_compatible_provider)
+        response_source = inspect.getsource(_response_code)
+        usage_source = inspect.getsource(_validate_usage)
+    except Exception:
+        raise _provider_error(
+            ErrorCode.CONFIG,
+            "OpenAI-compatible provider runtime is unavailable",
+        ) from None
+    return {
+        "openai_sdk_version": sdk_version,
+        "provider_source_sha256": hashlib.sha256(provider_source.encode("utf-8")).hexdigest(),
+        "factory_source_sha256": hashlib.sha256(factory_source.encode("utf-8")).hexdigest(),
+        "response_source_sha256": hashlib.sha256(response_source.encode("utf-8")).hexdigest(),
+        "usage_source_sha256": hashlib.sha256(usage_source.encode("utf-8")).hexdigest(),
+        "response_policy": "strict-provider-result-envelope-v1",
+    }
+
+
+def openai_provider_runtime_fingerprint() -> str:
+    payload = json.dumps(
+        openai_provider_runtime_payload(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def create_openai_compatible_provider(
     config: OpenAICompatibleConfig,
     *,
@@ -550,6 +621,7 @@ def create_openai_compatible_provider(
     client_creation_failed = False
     provider: OpenAICompatibleProvider | None = None
     provider_error: SecAwareError | None = None
+    runtime_fingerprint_sha256: str | None = None
     try:
         try:
             trusted = _trusted_config(config)
@@ -610,10 +682,12 @@ def create_openai_compatible_provider(
             ) from None
 
         try:
+            runtime_fingerprint_sha256 = openai_provider_runtime_fingerprint()
             provider = OpenAICompatibleProvider(
                 trusted,
                 client=client,
                 sleeper=sleeper,
+                runtime_fingerprint_sha256=runtime_fingerprint_sha256,
             )
         except SecAwareError as error:
             provider_error = error
@@ -645,10 +719,13 @@ def create_openai_compatible_provider(
         config_error = None
         factory_error = None
         provider_error = None
+        runtime_fingerprint_sha256 = None
 
 
 __all__ = [
     "OpenAICompatibleGenerationResult",
     "OpenAICompatibleProvider",
     "create_openai_compatible_provider",
+    "openai_provider_runtime_fingerprint",
+    "openai_provider_runtime_payload",
 ]

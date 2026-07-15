@@ -42,6 +42,7 @@ from secaware.schema.generation import (
     GenerationProvenance,
     GenerationRequestRecord,
     OfflineGenerationResultRecord,
+    ProviderUsageRecord,
     sha256_text,
 )
 from secaware.schema.hypotheses import FactorType
@@ -252,6 +253,8 @@ class FakeProvider:
                     backoff_seconds=0.0,
                 ),
             ),
+            usage=ProviderUsageRecord(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            runtime_fingerprint_sha256="c" * 64,
         )
 
 
@@ -1369,6 +1372,8 @@ def test_provider_generate_rejects_attempts_bound_to_another_request(
                 code=result.code,
                 provenance=result.provenance,
                 attempts=(result.attempts[0].model_copy(update={"request_id": f"req_{'0' * 64}"}),),
+                usage=result.usage,
+                runtime_fingerprint_sha256=result.runtime_fingerprint_sha256,
             )
 
     monkeypatch.setattr(
@@ -1533,6 +1538,8 @@ def test_run_all_dispatches_observed_provider_then_stops_at_discovery(
                         backoff_seconds=0.0,
                     ),
                 ),
+                usage=ProviderUsageRecord(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                runtime_fingerprint_sha256="c" * 64,
             )
 
     def factory(provider_config: object) -> MockBackedProvider:

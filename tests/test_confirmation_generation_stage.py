@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+import hashlib
 import inspect
 import os
 import threading
@@ -10,8 +11,11 @@ import threading
 import pytest
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.config import load_config
-from secaware.generation.confirmation import execute_confirmation_requests
+from secaware.config import GenerationConfig, OpenAICompatibleConfig, load_config
+from secaware.generation.confirmation import (
+    CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+    execute_confirmation_requests,
+)
 from secaware.io.jsonl import read_jsonl
 from secaware.io.transaction import ArtifactTransaction, TransactionStateError
 from secaware.pipeline.stages.prompt_variants import (
@@ -23,6 +27,8 @@ from secaware.pipeline.stages.randomization import (
     run_confirmation_randomization_stage,
 )
 import secaware.pipeline.stage_contracts as stage_contracts
+import secaware.generation.openai_compatible_provider as openai_provider
+import secaware.schema.generation as generation_schema
 from secaware.pipeline.stages.confirmation_generation import (
     CONFIRMATION_GENERATION_OUTPUTS,
     run_confirmation_generation_stage,
@@ -31,8 +37,21 @@ import secaware.pipeline.stages.confirmation_generation as confirmation_stage
 from secaware.pipeline.manifest import build_stage_fingerprint
 from secaware import __version__
 from secaware.schema.experiments import AssignmentExecutionRecord, AssignmentExecutionStatus
-from secaware.schema.experiments import ArmRole, AssignmentRecord, PromptVariantRecord, RandomizationManifestRecord
-from secaware.schema.generation import GenerationRequestRecord, build_generation_request_id
+from secaware.schema.experiments import (
+    ArmRole,
+    AssignmentRecord,
+    PromptVariantRecord,
+    RandomizationManifestRecord,
+)
+from secaware.schema.generation import (
+    GenerationAttemptRecord,
+    GenerationParameters,
+    GenerationRequestRecord,
+    ProviderResultEnvelope,
+    ProviderUsageRecord,
+    build_generation_request_id,
+    revalidate_generation_request_envelope,
+)
 from secaware.schema.generation import GenerationProvenance
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from test_prompt_variant_freeze_stage import _stage_store
@@ -63,9 +82,9 @@ class _Provider:
         return tuple(
             (
                 item.request_id,
-                _Result(None, "content_filter")
+                _envelope(item, None, "content_filter")
                 if item.assignment_id == self.content_filter_assignment
-                else _Result(f"# code for {item.assignment_id}\n", "stop"),
+                else _envelope(item, f"# code for {item.assignment_id}\n", "stop"),
             )
             for item in items
         )
@@ -91,6 +110,363 @@ def _requests():
     return plan_confirmation_requests(
         tuple(item[0] for item in pairs), tuple(item[1] for item in pairs), _generation_config()
     )
+
+
+def _envelope(request, code: str | None, finish_reason: str = "stop"):
+    return ProviderResultEnvelope.from_content(
+        request_id=request.request_id,
+        model_id=request.model_id,
+        finish_reason=finish_reason,
+        code=code,
+        usage=ProviderUsageRecord(prompt_tokens=4, completion_tokens=3, total_tokens=7),
+        attempts=(
+            GenerationAttemptRecord(
+                schema_version="1.0",
+                request_id=request.request_id,
+                attempt=1,
+                outcome="success",
+                error_code=None,
+                retryable=False,
+                backoff_seconds=0.0,
+            ),
+        ),
+        provenance=GenerationProvenance(producer="strict-test", producer_version="v1"),
+        provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+        runtime_fingerprint_sha256="b" * 64,
+    )
+
+
+def _reseal_request(
+    request: GenerationRequestRecord,
+    *,
+    prompt: str | None = None,
+    parameters: GenerationParameters | None = None,
+) -> GenerationRequestRecord:
+    payload = request.model_dump(mode="python", exclude={"request_id"})
+    if prompt is not None:
+        payload["prompt"] = prompt
+        payload["prompt_sha256"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    if parameters is not None:
+        payload["parameters"] = parameters
+    elif type(payload["parameters"]) is not GenerationParameters:
+        payload["parameters"] = GenerationParameters.model_validate(payload["parameters"])
+    identity = {key: value for key, value in payload.items() if key != "prompt"}
+    identity["parameters"] = payload["parameters"]
+    payload["request_id"] = build_generation_request_id(**identity)
+    return GenerationRequestRecord.model_validate(payload)
+
+
+def _resource_config(**updates: object) -> GenerationConfig:
+    payload = _generation_config().model_dump(mode="python")
+    payload.update(updates)
+    return GenerationConfig.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {
+            "confirmation_max_attempts_per_request": 1,
+            "openai_compatible": OpenAICompatibleConfig(
+                base_url="https://example.test/v1", max_attempts=2
+            ),
+        },
+        {
+            "confirmation_max_timeout_seconds_per_attempt": 1.0,
+            "openai_compatible": OpenAICompatibleConfig(
+                base_url="https://example.test/v1", timeout_seconds=2.0
+            ),
+        },
+        {
+            "confirmation_max_worst_case_wait_seconds": 1.0,
+            "openai_compatible": OpenAICompatibleConfig(
+                base_url="https://example.test/v1", timeout_seconds=2.0
+            ),
+        },
+    ),
+)
+def test_generation_config_closes_attempt_timeout_and_wait_budgets(
+    updates: dict[str, object],
+) -> None:
+    payload = _generation_config().model_dump(mode="python")
+    payload.update(updates)
+    with pytest.raises(Exception):
+        GenerationConfig.model_validate(payload)
+
+
+def test_confirmation_executor_closes_infinite_single_request_iterator_after_two_reads() -> None:
+    request = _requests()[0]
+
+    class Infinite:
+        def __init__(self):
+            self.reads = 0
+            self.closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.reads += 1
+            return (request.request_id, _envelope(request, "code\n"))
+
+        def close(self):
+            self.closed = True
+
+    stream = Infinite()
+
+    class Provider:
+        def generate_many(self, _requests):
+            return stream
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((request,), Provider())
+    assert stream.reads == 2
+    assert stream.closed is True
+
+
+def test_confirmation_executor_rejects_duck_result_envelope() -> None:
+    request = _requests()[0]
+
+    class Provider:
+        def generate_many(self, _requests):
+            return ((request.request_id, _Result("code\n", "stop")),)
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((request,), Provider())
+
+
+@pytest.mark.parametrize("field", ("attempts", "provenance", "usage"))
+def test_confirmation_executor_rejects_result_missing_required_terminal_metadata(
+    field: str,
+) -> None:
+    request = _requests()[0]
+    envelope = _envelope(request, "code\n")
+    replacement = () if field == "attempts" else None
+    malformed = envelope.model_copy(update={field: replacement})
+
+    class Provider:
+        def generate_many(self, _requests):
+            return ((request.request_id, malformed),)
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((request,), Provider())
+
+
+def test_provider_provenance_and_attempts_are_bound_into_execution_identity() -> None:
+    request = _requests()[0]
+
+    def envelope(*, producer: str, retries: bool) -> ProviderResultEnvelope:
+        attempts = []
+        if retries:
+            attempts.append(
+                GenerationAttemptRecord(
+                    schema_version="1.0",
+                    request_id=request.request_id,
+                    attempt=1,
+                    outcome="retry",
+                    error_code=int(ErrorCode.API_TIMEOUT),
+                    retryable=True,
+                    backoff_seconds=0.0,
+                )
+            )
+        attempts.append(
+            GenerationAttemptRecord(
+                schema_version="1.0",
+                request_id=request.request_id,
+                attempt=len(attempts) + 1,
+                outcome="success",
+                error_code=None,
+                retryable=False,
+                backoff_seconds=0.0,
+            )
+        )
+        return ProviderResultEnvelope.from_content(
+            request_id=request.request_id,
+            model_id=request.model_id,
+            finish_reason="stop",
+            code="same code\n",
+            usage=ProviderUsageRecord(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            attempts=tuple(attempts),
+            provenance=GenerationProvenance(producer=producer, producer_version="v1"),
+            provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+            runtime_fingerprint_sha256="b" * 64,
+        )
+
+    class Provider:
+        def __init__(self, value: ProviderResultEnvelope) -> None:
+            self.value = value
+
+        def generate_many(self, _requests):
+            return ((request.request_id, self.value),)
+
+    baseline = execute_confirmation_requests(
+        (request,), Provider(envelope(producer="provider-a", retries=False))
+    )[0][0]
+    provenance_drift = execute_confirmation_requests(
+        (request,), Provider(envelope(producer="provider-b", retries=False))
+    )[0][0]
+    attempt_drift = execute_confirmation_requests(
+        (request,), Provider(envelope(producer="provider-a", retries=True))
+    )[0][0]
+    assert baseline.execution_id != provenance_drift.execution_id
+    assert baseline.execution_id != attempt_drift.execution_id
+
+
+def test_oversize_first_result_prevents_later_provider_call() -> None:
+    requests = _requests()
+    calls: list[tuple[str, ...]] = []
+
+    class Provider:
+        def generate_many(self, batch):
+            calls.append(tuple(item.request_id for item in batch))
+            request = batch[0]
+            return ((request.request_id, _envelope(request, "x" * 1_048_577)),)
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests(requests, Provider())
+    assert calls == [(requests[0].request_id,)]
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "request_count",
+        "max_tokens",
+        "stop_count",
+        "stop_item",
+        "stop_total",
+        "parameters",
+        "prompt_per_request",
+        "prompt_total",
+        "projected_output",
+    ),
+)
+def test_resource_preflight_rejects_before_any_provider_call(case: str) -> None:
+    requests = list(_requests())
+    config = _resource_config()
+    if case == "request_count":
+        config = _resource_config(confirmation_max_requests=1)
+    elif case == "max_tokens":
+        requests = [
+            _reseal_request(requests[0], parameters=GenerationParameters(values={"max_tokens": 2}))
+        ]
+        config = _resource_config(confirmation_max_tokens_per_request=1)
+    elif case == "stop_count":
+        requests = [
+            _reseal_request(
+                requests[0], parameters=GenerationParameters(values={"stop": ["a", "b"]})
+            )
+        ]
+        config = _resource_config(confirmation_max_stop_items=1)
+    elif case == "stop_item":
+        requests = [
+            _reseal_request(requests[0], parameters=GenerationParameters(values={"stop": "ab"}))
+        ]
+        config = _resource_config(confirmation_max_stop_item_chars=1)
+    elif case == "stop_total":
+        requests = [
+            _reseal_request(
+                requests[0], parameters=GenerationParameters(values={"stop": ["aa", "b"]})
+            )
+        ]
+        config = _resource_config(
+            confirmation_max_stop_item_chars=2,
+            confirmation_max_stop_total_chars=2,
+        )
+    elif case == "parameters":
+        requests = [
+            _reseal_request(
+                requests[0], parameters=GenerationParameters(values={"temperature": 0.0})
+            )
+        ]
+        config = _resource_config(confirmation_max_parameters_bytes=1)
+    elif case == "prompt_per_request":
+        config = _resource_config(confirmation_max_prompt_bytes_per_request=1)
+        requests = [requests[0]]
+    elif case == "prompt_total":
+        requests = [
+            _reseal_request(request, prompt=character * 600)
+            for request, character in zip(requests, ("a", "b"), strict=True)
+        ]
+        config = _resource_config(
+            confirmation_max_prompt_bytes_per_request=1_024,
+            confirmation_max_total_prompt_bytes=1_024,
+        )
+    else:
+        requests = [requests[0]]
+        config = _resource_config(confirmation_max_projected_jsonl_bytes=1_024)
+
+    calls = 0
+
+    class Provider:
+        def generate_many(self, batch):
+            nonlocal calls
+            calls += 1
+            request = batch[0]
+            return ((request.request_id, _envelope(request, "code\n")),)
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests(tuple(requests), Provider(), config)
+    assert calls == 0
+
+
+def test_provider_attempt_budget_is_enforced_before_later_request() -> None:
+    requests = _requests()
+    calls = 0
+
+    class Provider:
+        def generate_many(self, batch):
+            nonlocal calls
+            calls += 1
+            request = batch[0]
+            attempts = (
+                GenerationAttemptRecord(
+                    schema_version="1.0",
+                    request_id=request.request_id,
+                    attempt=1,
+                    outcome="retry",
+                    error_code=int(ErrorCode.API_TIMEOUT),
+                    retryable=True,
+                    backoff_seconds=0.0,
+                ),
+                GenerationAttemptRecord(
+                    schema_version="1.0",
+                    request_id=request.request_id,
+                    attempt=2,
+                    outcome="success",
+                    error_code=None,
+                    retryable=False,
+                    backoff_seconds=0.0,
+                ),
+            )
+            return (
+                (
+                    request.request_id,
+                    ProviderResultEnvelope.from_content(
+                        request_id=request.request_id,
+                        model_id=request.model_id,
+                        finish_reason="stop",
+                        code="code\n",
+                        usage=ProviderUsageRecord(
+                            prompt_tokens=1, completion_tokens=1, total_tokens=2
+                        ),
+                        attempts=attempts,
+                        provenance=GenerationProvenance(
+                            producer="strict-test", producer_version="v1"
+                        ),
+                        provider_policy_sha256=CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
+                        runtime_fingerprint_sha256="b" * 64,
+                    ),
+                ),
+            )
+
+    config = _resource_config(
+        confirmation_max_attempts_per_request=1,
+        confirmation_max_total_provider_attempts=2,
+    )
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests(requests, Provider(), config)
+    assert calls == 1
 
 
 def _persisted_bundle(config, store):
@@ -163,16 +539,21 @@ def test_valid_terminal_generation_failure_keeps_assignment_coverage() -> None:
         requests,
         _Provider(content_filter_assignment=requests[0].assignment_id),
     )
-    assert {item.assignment_id for item in records} == {
-        item.assignment_id for item in requests
-    }
+    assert {item.assignment_id for item in records} == {item.assignment_id for item in requests}
     assert sum(item.status is AssignmentExecutionStatus.TERMINAL_NO_CODE for item in records) == 1
     assert len(codes) == len(records) - 1
     assert {item.assignment_id for item in codes} == {
-        item.assignment_id
-        for item in records
-        if item.status is AssignmentExecutionStatus.GENERATED
+        item.assignment_id for item in records if item.status is AssignmentExecutionStatus.GENERATED
     }
+    terminal = next(
+        item for item in records if item.status is AssignmentExecutionStatus.TERMINAL_NO_CODE
+    )
+    assert terminal.provider_result_sha256
+    assert terminal.provider_provenance_sha256
+    assert terminal.provider_runtime_sha256
+    assert terminal.provider_policy_sha256 == CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256
+    assert terminal.usage_sha256
+    assert terminal.attempt_count == 1
 
 
 def test_provider_execution_order_does_not_change_canonical_outputs() -> None:
@@ -215,6 +596,75 @@ def test_provider_infrastructure_errors_abort_without_terminal_record() -> None:
     assert "secret prompt" not in str(caught.value)
 
 
+def test_provider_secaware_error_is_rewrapped_with_fixed_safe_details() -> None:
+    secret = "provider-error-sensitive-payload"
+
+    class Provider:
+        def generate_many(self, _values):
+            raise SecAwareError(
+                code=ErrorCode.API_AUTH,
+                stage=secret,
+                message=secret,
+                details={"nested": {"value": secret}},
+                retryable=True,
+            )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        execute_confirmation_requests((_requests()[0],), Provider())
+    error = exc_info.value
+    assert error.code is ErrorCode.API_AUTH
+    assert error.stage == "generate-confirmation"
+    assert error.message == "confirmation provider request failed"
+    assert error.details == {"retryable": True}
+    assert secret not in str(error)
+    assert secret not in _secaware_traceback_locals(error)
+
+
+def test_active_fatal_error_has_priority_over_iterator_cleanup_fatal() -> None:
+    active = MemoryError("active-fatal")
+    cleanup = SystemExit("cleanup-fatal")
+
+    class Stream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise active
+
+        def close(self):
+            raise cleanup
+
+    class Provider:
+        def generate_many(self, _values):
+            return Stream()
+
+    with pytest.raises(MemoryError) as exc_info:
+        execute_confirmation_requests((_requests()[0],), Provider())
+    assert exc_info.value is active
+
+
+def test_iterator_cleanup_fatal_has_priority_over_active_nonfatal_error() -> None:
+    cleanup = SystemExit("cleanup-fatal")
+
+    class Stream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise RuntimeError("ordinary provider failure")
+
+        def close(self):
+            raise cleanup
+
+    class Provider:
+        def generate_many(self, _values):
+            return Stream()
+
+    with pytest.raises(SystemExit) as exc_info:
+        execute_confirmation_requests((_requests()[0],), Provider())
+    assert exc_info.value is cleanup
+
+
 def test_confirmation_executor_failure_releases_raw_code_and_provider_from_frames() -> None:
     secret = "confirmation-raw-code-frame-secret"
     provider_secret = "confirmation-provider-frame-secret"
@@ -232,6 +682,33 @@ def test_confirmation_executor_failure_releases_raw_code_and_provider_from_frame
     retained = _secaware_traceback_locals(exc_info.value)
     assert secret not in retained
     assert provider_secret not in retained
+
+
+def test_request_revalidation_failure_releases_prompt_from_frames() -> None:
+    secret = "request-revalidation-prompt-secret"
+    forged = _requests()[0].model_copy(update={"prompt": secret})
+    with pytest.raises(Exception) as exc_info:
+        revalidate_generation_request_envelope(forged)
+    assert secret not in _secaware_traceback_locals(exc_info.value)
+
+
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
+def test_request_revalidation_preserves_fatal_identity_and_releases_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    secret = f"request-revalidation-{signal_type.__name__}-secret"
+    forged = _requests()[0].model_copy(update={"prompt": secret})
+    signal = signal_type("request-revalidation-control-flow")
+
+    def fail_shape(_value):
+        raise signal
+
+    monkeypatch.setattr(generation_schema, "model_shape_is_intact", fail_shape)
+    with pytest.raises(signal_type) as exc_info:
+        revalidate_generation_request_envelope(forged)
+    assert exc_info.value is signal
+    assert secret not in _secaware_traceback_locals(signal)
 
 
 @pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
@@ -258,7 +735,7 @@ def test_confirmation_jsonl_parser_releases_invalid_payload_from_frames() -> Non
     secret = "confirmation-jsonl-parser-secret"
     with pytest.raises(SecAwareError) as exc_info:
         confirmation_stage._parse_jsonl(
-            ("{\"secret\":\"" + secret + "\",}").encode(),
+            ('{"secret":"' + secret + '",}').encode(),
             GenerationRequestRecord,
             allow_empty=False,
         )
@@ -279,7 +756,7 @@ def test_confirmation_jsonl_parser_preserves_fatal_identity_and_releases_payload
 
     with pytest.raises(signal_type) as exc_info:
         confirmation_stage._parse_jsonl(
-            ("{\"value\":\"" + secret + "\"}").encode(),
+            ('{"value":"' + secret + '"}').encode(),
             FatalModel,
             allow_empty=False,
         )
@@ -316,11 +793,11 @@ def test_generated_code_and_execution_ids_bind_actual_code_content() -> None:
 
     class ProviderA:
         def generate_many(self, _requests):
-            return ((request.request_id, _Result("first code\n", "stop")),)
+            return ((request.request_id, _envelope(request, "first code\n")),)
 
     class ProviderB:
         def generate_many(self, _requests):
-            return ((request.request_id, _Result("second code\n", "stop")),)
+            return ((request.request_id, _envelope(request, "second code\n")),)
 
     first_executions, first_codes = execute_confirmation_requests((request,), ProviderA())
     second_executions, second_codes = execute_confirmation_requests((request,), ProviderB())
@@ -355,11 +832,76 @@ def test_persisted_bundle_rejects_duplicate_omit_extra_and_bidirectional_subset(
             code_id=None,
             code_sha256=None,
             terminal_reason="content_filter",
+            provider_result_sha256=first.provider_result_sha256,
+            provider_provenance_sha256=first.provider_provenance_sha256,
+            provider_runtime_sha256=first.provider_runtime_sha256,
+            provider_policy_sha256=first.provider_policy_sha256,
+            usage_sha256=first.usage_sha256,
+            attempt_count=first.attempt_count,
         )
     with pytest.raises(SecAwareError):
         confirmation_stage._validate_output_bundle(
             snapshot, config, (requests, tuple(mutated_executions), tuple(mutated_codes))
         )
+
+
+@pytest.mark.parametrize("group", ("executions", "codes"))
+def test_persisted_bundle_requires_exact_canonical_sequence_order(
+    randomized_store,
+    group: str,
+) -> None:
+    config, store = randomized_store
+    snapshot, groups = _persisted_bundle(config, store)
+    requests, executions, codes = groups
+    mutated = (
+        requests,
+        tuple(reversed(executions)) if group == "executions" else executions,
+        tuple(reversed(codes)) if group == "codes" else codes,
+    )
+    with pytest.raises(SecAwareError):
+        confirmation_stage._validate_output_bundle(snapshot, config, mutated)
+
+
+def test_output_bundle_failure_releases_snapshot_prompt_and_code_from_frames(
+    randomized_store,
+) -> None:
+    config, store = randomized_store
+    snapshot, groups = _persisted_bundle(config, store)
+    prompt_secret = snapshot.variants[0].prompt_text
+    code_secret = groups[2][0].code
+    with pytest.raises(SecAwareError) as exc_info:
+        confirmation_stage._validate_output_bundle(
+            snapshot,
+            config,
+            (groups[0], tuple(reversed(groups[1])), groups[2]),
+        )
+    retained = _secaware_traceback_locals(exc_info.value)
+    assert prompt_secret not in retained
+    assert code_secret not in retained
+
+
+@pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
+def test_output_bundle_preserves_fatal_identity_and_releases_snapshot(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+    signal_type: type[BaseException],
+) -> None:
+    config, store = randomized_store
+    snapshot, groups = _persisted_bundle(config, store)
+    prompt_secret = snapshot.variants[0].prompt_text
+    code_secret = groups[2][0].code
+    signal = signal_type("output-bundle-control-flow")
+
+    def fail_plan(*_args, **_kwargs):
+        raise signal
+
+    monkeypatch.setattr(confirmation_stage, "plan_confirmation_requests", fail_plan)
+    with pytest.raises(signal_type) as exc_info:
+        confirmation_stage._validate_output_bundle(snapshot, config, groups)
+    assert exc_info.value is signal
+    retained = _secaware_traceback_locals(signal)
+    assert prompt_secret not in retained
+    assert code_secret not in retained
 
 
 @pytest.mark.parametrize("drift", ["assignment_id", "arm", "seed", "protocol", "variant"])
@@ -433,9 +975,7 @@ def test_confirmation_generation_fingerprint_binds_config_schema_and_provider_po
         "future-provider-policy",
     )
     assert (
-        stage_contracts.confirmation_generation_stage_contract_sha256(
-            "generate-confirmation"
-        )
+        stage_contracts.confirmation_generation_stage_contract_sha256("generate-confirmation")
         != original_contract
     )
     monkeypatch.setattr(
@@ -452,10 +992,49 @@ def test_confirmation_generation_fingerprint_binds_config_schema_and_provider_po
 
     monkeypatch.setattr(stage_contracts, "_schema_sha256", drift_request_schema)
     assert (
-        stage_contracts.confirmation_generation_stage_contract_sha256(
-            "generate-confirmation"
-        )
+        stage_contracts.confirmation_generation_stage_contract_sha256("generate-confirmation")
         != original_contract
+    )
+
+
+def test_openai_runtime_contract_binds_actual_sdk_and_source_digests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generation = GenerationConfig(
+        provider="openai_compatible",
+        models=["model-a"],
+        seeds=[1],
+        confirmation_seeds=[101],
+        openai_compatible=OpenAICompatibleConfig(base_url="https://example.test/v1"),
+    )
+    monkeypatch.setattr(
+        openai_provider.importlib.metadata,
+        "version",
+        lambda package: "1.2.3" if package == "openai" else "unknown",
+    )
+    payload = stage_contracts.confirmation_generation_stage_contract_payload(generation)
+    runtime = payload["provider_runtime"]
+    assert isinstance(runtime, dict)
+    assert runtime["openai_sdk_version"] == "1.2.3"
+    assert {
+        "provider_source_sha256",
+        "factory_source_sha256",
+        "response_source_sha256",
+        "usage_source_sha256",
+    } <= set(runtime)
+    baseline = stage_contracts.confirmation_generation_stage_contract_sha256(
+        "generate-confirmation", generation
+    )
+    monkeypatch.setattr(
+        openai_provider.importlib.metadata,
+        "version",
+        lambda package: "9.9.9" if package == "openai" else "unknown",
+    )
+    assert (
+        stage_contracts.confirmation_generation_stage_contract_sha256(
+            "generate-confirmation", generation
+        )
+        != baseline
     )
 
 
@@ -677,14 +1256,7 @@ def test_confirmation_generation_stage_skips_valid_commit_and_repairs_tamper(
 ) -> None:
     config, store = randomized_store
 
-    class ExplodingProvider:
-        def generate_many(self, _requests):
-            raise AssertionError("valid committed stage must skip provider")
-
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: ExplodingProvider()
-    )
     skipped = run_confirmation_generation_stage(config, store, force=False)
     assert skipped.assignment_count > 0
     code_path = store.path("generation", "confirmation_code.jsonl")
@@ -838,8 +1410,8 @@ def test_valid_committed_skip_is_invalidated_by_every_bound_contract_drift(
         assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
         assert calls == 0
         return
-    run_confirmation_generation_stage(effective_config, effective_store, force=False)
-    assert calls == 1
+    result = run_confirmation_generation_stage(effective_config, effective_store, force=False)
+    assert calls == result.assignment_count
 
 
 def test_assignment_manifest_replacement_during_provider_call_aborts_commit(
@@ -991,9 +1563,7 @@ def test_confirmation_generation_holds_both_real_producer_leases_through_commit(
             run_confirmation_randomization_stage(config, randomization_writer, force=True)
         assert task4_error.value.code is ErrorCode.MANIFEST_CONFLICT
         assert randomization_error.value.code is ErrorCode.MANIFEST_CONFLICT
-        assert task4_snapshot == tuple(
-            path.read_bytes() for path in (*task4_paths, task4_manifest)
-        )
+        assert task4_snapshot == tuple(path.read_bytes() for path in (*task4_paths, task4_manifest))
         assert randomization_snapshot == tuple(
             path.read_bytes() for path in (*randomization_paths, randomization_manifest)
         )

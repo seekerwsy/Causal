@@ -639,7 +639,7 @@ class RunStore:
                 else (
                     prompt_variant_stage_contract_sha256(stage)
                     or randomization_stage_contract_sha256(stage)
-                    or confirmation_generation_stage_contract_sha256(stage)
+                    or confirmation_generation_stage_contract_sha256(stage, self.config.generation)
                     or discovery_stage_contract_sha256(stage)
                 )
             ),

@@ -406,6 +406,31 @@ class GenerationConfig(StrictModel):
     confirmation_seeds: list[StrictInt] = Field(default_factory=lambda: list(range(101, 113)))
     file_provider_dir: str | None = None
     openai_compatible: OpenAICompatibleConfig | None = None
+    confirmation_max_requests: StrictInt = Field(default=10_000, ge=1, le=100_000)
+    confirmation_max_attempts_per_request: StrictInt = Field(default=3, ge=1, le=10)
+    confirmation_max_total_provider_attempts: StrictInt = Field(default=30_000, ge=1, le=1_000_000)
+    confirmation_max_tokens_per_request: StrictInt = Field(default=65_536, ge=1, le=262_144)
+    confirmation_max_stop_items: StrictInt = Field(default=64, ge=1, le=1_024)
+    confirmation_max_stop_item_chars: StrictInt = Field(default=4_096, ge=1, le=65_536)
+    confirmation_max_stop_total_chars: StrictInt = Field(default=16_384, ge=1, le=262_144)
+    confirmation_max_parameters_bytes: StrictInt = Field(default=65_536, ge=1, le=1_048_576)
+    confirmation_max_total_prompt_bytes: StrictInt = Field(
+        default=64 * 1024 * 1024, ge=1_024, le=240 * 1024 * 1024
+    )
+    confirmation_max_prompt_bytes_per_request: StrictInt = Field(
+        default=4 * 1024 * 1024, ge=1, le=240 * 1024 * 1024
+    )
+    confirmation_max_code_bytes_per_result: StrictInt = Field(
+        default=1_048_576, ge=1, le=3 * 1024 * 1024
+    )
+    confirmation_max_total_code_bytes: StrictInt = Field(
+        default=128 * 1024 * 1024, ge=1, le=240 * 1024 * 1024
+    )
+    confirmation_max_projected_jsonl_bytes: StrictInt = Field(
+        default=240 * 1024 * 1024, ge=1_024, le=240 * 1024 * 1024
+    )
+    confirmation_max_timeout_seconds_per_attempt: float = Field(default=300.0, gt=0, le=3600)
+    confirmation_max_worst_case_wait_seconds: float = Field(default=3600.0, gt=0, le=86400)
 
     @field_validator("confirmation_seeds")
     @classmethod
@@ -423,6 +448,29 @@ class GenerationConfig(StrictModel):
     def validate_disjoint_seed_namespaces(self) -> "GenerationConfig":
         if set(self.seeds) & set(self.confirmation_seeds):
             raise ValueError("generation seed namespaces must be disjoint")
+        if (
+            self.confirmation_max_stop_total_chars < self.confirmation_max_stop_item_chars
+            or self.confirmation_max_total_prompt_bytes
+            < self.confirmation_max_prompt_bytes_per_request
+            or self.confirmation_max_total_code_bytes < self.confirmation_max_code_bytes_per_result
+        ):
+            raise ValueError("confirmation generation resource configuration failed validation")
+        provider = self.openai_compatible
+        if provider is not None:
+            worst_backoff = sum(
+                min(
+                    provider.initial_backoff_seconds * (2**index),
+                    provider.max_backoff_seconds,
+                )
+                for index in range(max(0, provider.max_attempts - 1))
+            )
+            worst_wait = provider.max_attempts * provider.timeout_seconds + worst_backoff
+            if (
+                provider.max_attempts > self.confirmation_max_attempts_per_request
+                or provider.timeout_seconds > self.confirmation_max_timeout_seconds_per_attempt
+                or worst_wait > self.confirmation_max_worst_case_wait_seconds
+            ):
+                raise ValueError("confirmation generation resource configuration failed validation")
         return self
 
 

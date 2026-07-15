@@ -272,6 +272,129 @@ class GenerationAttemptRecord(SafeValidationMixin, VersionedModel):
     backoff_seconds: FiniteFloat = Field(ge=0.0)
 
 
+class ProviderUsageRecord(SafeValidationMixin, StrictModel):
+    _safe_validation_message = "provider usage validation failed"
+
+    prompt_tokens: StrictInt = Field(ge=0)
+    completion_tokens: StrictInt = Field(ge=0)
+    total_tokens: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_total(self) -> "ProviderUsageRecord":
+        if self.total_tokens != self.prompt_tokens + self.completion_tokens:
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+def _provider_digest(value: object) -> str:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json", warnings=False)  # type: ignore[union-attr]
+    elif isinstance(value, Mapping):
+        value = {key: _provider_json_value(item) for key, item in value.items()}
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        value = [_provider_json_value(item) for item in value]
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _provider_json_value(value: object) -> object:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json", warnings=False)  # type: ignore[union-attr]
+    if isinstance(value, Mapping):
+        return {key: _provider_json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_provider_json_value(item) for item in value]
+    return value
+
+
+def provider_usage_sha256(usage: ProviderUsageRecord) -> str:
+    return _provider_digest(usage.model_dump(mode="json"))
+
+
+def provider_provenance_sha256(provenance: GenerationProvenance) -> str:
+    return _provider_digest(provenance.model_dump(mode="json"))
+
+
+class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
+    """Exact, self-addressed response metadata accepted by confirmation generation."""
+
+    _safe_validation_message = "provider result envelope validation failed"
+
+    schema_version: Literal["1.0"]
+    result_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
+    request_id: str = Field(pattern=_REQUEST_ID_PATTERN, repr=False)
+    model_id: str = Field(min_length=1)
+    finish_reason: Literal["stop", "content_filter"]
+    code: str | None = Field(default=None, repr=False)
+    usage: ProviderUsageRecord
+    attempts: tuple[GenerationAttemptRecord, ...] = Field(min_length=1, max_length=10)
+    provenance: GenerationProvenance
+    provider_policy_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
+    runtime_fingerprint_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
+
+    @classmethod
+    def from_content(cls, **content: object) -> "ProviderResultEnvelope":
+        payload = {"schema_version": "1.0", **content}
+        payload["result_sha256"] = _provider_digest(payload)
+        try:
+            return cls.model_validate(payload)
+        finally:
+            content.clear()
+            payload.clear()
+
+    @field_validator("usage", mode="before")
+    @classmethod
+    def snapshot_usage(cls, value: object) -> object:
+        if type(value) is ProviderUsageRecord:
+            value = value.model_dump(mode="python", round_trip=True, warnings=False)
+        return ProviderUsageRecord.model_validate(value)
+
+    @field_validator("attempts", mode="before")
+    @classmethod
+    def snapshot_attempts(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        return tuple(
+            GenerationAttemptRecord.model_validate(
+                item.model_dump(mode="python", round_trip=True, warnings=False)
+                if type(item) is GenerationAttemptRecord
+                else item
+            )
+            for item in value
+        )
+
+    @field_validator("provenance", mode="before")
+    @classmethod
+    def snapshot_provenance(cls, value: object) -> object:
+        if type(value) is GenerationProvenance:
+            value = value.model_dump(mode="python", round_trip=True, warnings=False)
+        return GenerationProvenance.model_validate(value)
+
+    @model_validator(mode="after")
+    def validate_integrity(self) -> "ProviderResultEnvelope":
+        attempt_numbers = tuple(item.attempt for item in self.attempts)
+        code_valid = (
+            self.finish_reason == "stop" and type(self.code) is str and bool(self.code.strip())
+        ) or (self.finish_reason == "content_filter" and self.code is None)
+        if (
+            not code_valid
+            or any(item.request_id != self.request_id for item in self.attempts)
+            or attempt_numbers != tuple(range(1, len(self.attempts) + 1))
+            or self.attempts[-1].outcome != "success"
+            or any(item.outcome != "retry" for item in self.attempts[:-1])
+            or self.result_sha256
+            != _provider_digest(self.model_dump(mode="json", exclude={"result_sha256"}))
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class GenerationParameters(SafeValidationMixin, StrictModel):
     _safe_validation_message = _INVALID_PARAMETERS_MESSAGE
 
@@ -532,6 +655,9 @@ def revalidate_generation_request_envelope(
 ) -> GenerationRequestRecord:
     """Snapshot and revalidate only the canonical request portion of a record."""
 
+    snapshot: dict[str, object] = {}
+    envelope: dict[str, object] = {}
+    result: GenerationRequestRecord | None = None
     try:
         if type(value) not in {GenerationRequestRecord, OfflineGenerationResultRecord}:
             raise TypeError("unexpected generation request envelope")
@@ -545,10 +671,18 @@ def revalidate_generation_request_envelope(
         envelope = {
             field_name: snapshot[field_name] for field_name in GenerationRequestRecord.model_fields
         }
-        return GenerationRequestRecord.model_validate(envelope)
+        result = GenerationRequestRecord.model_validate(envelope)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         pass
-    raise GenerationRequestRecord._safe_error()
+    finally:
+        value = None
+        snapshot.clear()
+        envelope.clear()
+    if result is None:
+        raise GenerationRequestRecord._safe_error()
+    return result
 
 
 def revalidate_offline_generation_result(

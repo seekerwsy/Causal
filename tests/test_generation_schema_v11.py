@@ -214,7 +214,11 @@ def test_v10_chat_migration_binds_endpoint_and_executes_with_provider() -> None:
                     finish_reason="stop",
                 )
             ],
-            usage=None,
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+            ),
             model="model-a",
         )
 

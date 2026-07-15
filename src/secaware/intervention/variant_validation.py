@@ -1046,6 +1046,7 @@ def _validate_variant_input(
     variant = PromptVariantRecord.from_content(
         task_id=source.task_id,
         source_prompt_id=source.prompt_id,
+        language=source.language,
         variant_prompt_id=variant_prompt.prompt_id,
         hypothesis_id=item.target.hypothesis_id,
         target_spec_id=item.target.target_spec_id,

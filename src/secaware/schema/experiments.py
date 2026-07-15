@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any, ClassVar, Literal, NoReturn, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from secaware.schema.common import SafeValidationMixin, StrictModel
 from secaware.schema.features import FeatureFamily, FeatureOperation, FeatureState
@@ -361,6 +361,12 @@ class AssignmentExecutionRecord(_ExperimentVersionedContract):
     assignment_id: str = Field(pattern=_ASSIGNMENT_ID_PATTERN)
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     status: AssignmentExecutionStatus
+    provider_result_sha256: str = Field(pattern=_SHA256_PATTERN)
+    provider_provenance_sha256: str = Field(pattern=_SHA256_PATTERN)
+    provider_runtime_sha256: str = Field(pattern=_SHA256_PATTERN)
+    provider_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
+    usage_sha256: str = Field(pattern=_SHA256_PATTERN)
+    attempt_count: StrictInt = Field(ge=1, le=10)
     code_id: str | None = Field(default=None, pattern=_CODE_ID_PATTERN)
     code_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
     terminal_reason: Literal["content_filter"] | None = None
@@ -1032,6 +1038,7 @@ class PromptVariantRecord(_ExperimentVersionedContract):
     variant_id: str = Field(pattern=_VARIANT_ID_PATTERN)
     task_id: str
     source_prompt_id: str
+    language: str = Field(min_length=1, max_length=128)
     variant_prompt_id: str = Field(pattern=_VARIANT_PROMPT_ID_PATTERN)
     hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
     target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
@@ -1078,6 +1085,7 @@ class PromptVariantRecord(_ExperimentVersionedContract):
             not _valid_identifier(self.task_id)
             or not _valid_identifier(self.source_prompt_id)
             or not _valid_identifier(self.graph_id)
+            or self.language != self.language.strip()
             or prompt_sha256 != self.prompt_sha256
             or matched != (self.length_match_id is not None)
             or self.variant_id != f"variant_{_digest(_content(self, 'variant_id'))}"
