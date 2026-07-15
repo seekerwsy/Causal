@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+import functools
 import hashlib
 import inspect
 import os
@@ -28,6 +29,7 @@ from secaware.pipeline.stages.randomization import (
 )
 import secaware.pipeline.stage_contracts as stage_contracts
 import secaware.generation.openai_compatible_provider as openai_provider
+import secaware.generation.confirmation as confirmation_generation
 import secaware.schema.generation as generation_schema
 from secaware.pipeline.stages.confirmation_generation import (
     CONFIRMATION_GENERATION_OUTPUTS,
@@ -93,7 +95,9 @@ class _Provider:
 @pytest.fixture(autouse=True)
 def _locked_test_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: _Provider()
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **_kwargs: _Provider(),
     )
 
 
@@ -578,6 +582,100 @@ def test_128_mib_control_character_projection_is_rejected_before_provider_call()
     assert calls == 0
 
 
+def _request_with_exact_serialized_line_chars(
+    request: GenerationRequestRecord,
+    target_chars: int,
+) -> GenerationRequestRecord:
+    baseline = _reseal_request(request, prompt="a")
+    _bytes, baseline_chars = confirmation_generation._serialized_request_shape(baseline)
+    fixed_chars = baseline_chars - 1
+    delta = target_chars - fixed_chars
+    if delta < 1:
+        raise ValueError("target line is too small")
+    controls, plain = divmod(delta, 6)
+    prompt = "\x01" * controls + "a" * plain
+    result = _reseal_request(request, prompt=prompt)
+    assert confirmation_generation._serialized_request_shape(result)[1] == target_chars
+    return result
+
+
+def test_canonical_request_json_line_boundary_plus_minus_one_is_exact_and_zero_call() -> None:
+    request = _requests()[0]
+    accepted = _request_with_exact_serialized_line_chars(request, 4_000_000 - 2)
+    rejected = _request_with_exact_serialized_line_chars(request, 4_000_000 - 1)
+    assert confirmation_generation._serialized_request_shape(accepted)[1] + 1 == 3_999_999
+    assert confirmation_generation._serialized_request_shape(rejected)[1] + 1 == 4_000_000
+    calls = 0
+
+    class Provider:
+        def generate_many(self, _batch):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("provider called after request line bound")
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((rejected,), Provider(), _resource_config())
+    assert calls == 0
+
+
+def test_worst_case_code_json_line_boundary_accepts_last_safe_cap_and_rejects_next() -> None:
+    request = _requests()[0]
+    _request_bytes, request_chars = confirmation_generation._serialized_request_shape(request)
+    overhead = 12 * 1024
+    accepted_cap = (4_000_000 - request_chars - overhead - 2) // 6
+    rejected_cap = accepted_cap + 1
+    assert request_chars + 6 * accepted_cap + overhead + 1 < 4_000_000
+    assert request_chars + 6 * rejected_cap + overhead + 1 >= 4_000_000
+    calls = 0
+
+    class Provider:
+        def generate_many(self, batch):
+            nonlocal calls
+            calls += 1
+            item = batch[0]
+            return ((item.request_id, _envelope(item, "code\n")),)
+
+    accepted_config = _resource_config(
+        confirmation_max_code_bytes_per_result=accepted_cap,
+        confirmation_max_total_code_bytes=accepted_cap,
+    )
+    execute_confirmation_requests((request,), Provider(), accepted_config)
+    assert calls == 1
+    rejected_config = _resource_config(
+        confirmation_max_code_bytes_per_result=rejected_cap,
+        confirmation_max_total_code_bytes=rejected_cap,
+    )
+    calls = 0
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((request,), Provider(), rejected_config)
+    assert calls == 0
+
+
+def test_700001_control_code_is_never_configurable_and_provider_violation_stops_batch() -> None:
+    requests = _requests()
+    impossible = _resource_config(
+        confirmation_max_code_bytes_per_result=700_001,
+        confirmation_max_total_code_bytes=700_001,
+    )
+    calls = 0
+
+    class Provider:
+        def generate_many(self, batch):
+            nonlocal calls
+            calls += 1
+            item = batch[0]
+            return ((item.request_id, _envelope(item, "\x01" * 700_001)),)
+
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests((requests[0],), Provider(), impossible)
+    assert calls == 0
+
+    calls = 0
+    with pytest.raises(SecAwareError):
+        execute_confirmation_requests(requests, Provider(), _resource_config())
+    assert calls == 1
+
+
 def _persisted_bundle(config, store):
     run_confirmation_generation_stage(config, store, force=False)
     requests = tuple(
@@ -961,11 +1059,125 @@ def test_confirmation_generation_stage_declares_exact_atomic_outputs() -> None:
         "provider_response_contract_version",
         "provider_provenance_schema",
     } <= set(stage_contracts.confirmation_generation_stage_contract_payload())
-    factory_contract = stage_contracts.confirmation_generation_stage_contract_payload()[
-        "provider_factory_callable"
+    callable_bundle = stage_contracts.confirmation_generation_stage_contract_payload()[
+        "runtime_callable_bundle"
     ]
-    assert isinstance(factory_contract, dict)
-    assert {"module", "qualname", "source_sha256"} == set(factory_contract)
+    assert isinstance(callable_bundle, dict)
+    assert "provider.from_frozen_config" in callable_bundle
+    assert {
+        "module",
+        "qualname",
+        "source_sha256",
+        "code_sha256",
+        "defaults_sha256",
+        "closure_sha256",
+        "partial_sha256",
+        "callable_class_sha256",
+        "fingerprint_sha256",
+        "kind",
+    } == set(callable_bundle["provider.from_frozen_config"])
+    assert stage_contracts.confirmation_generation_stage_contract_payload()["output_policy"] == {
+        "jsonl_max_line_chars": 4_000_000,
+        "jsonl_max_total_chars": 240 * 1024 * 1024,
+        "code_record_overhead_chars": 12 * 1024,
+        "execution_record_overhead_chars": 4 * 1024,
+        "json_string_max_expansion": 6,
+        "provider_provenance_max_bytes": 4_096,
+    }
+
+
+def test_runtime_callable_descriptor_binds_closure_without_rendering_objects() -> None:
+    class UnsafeRepresentation:
+        def __repr__(self) -> str:
+            raise AssertionError("closure object was rendered")
+
+    def bind(value):
+        def target():
+            return value
+
+        return target
+
+    first = confirmation_stage._runtime_callable_descriptor(bind("first"))
+    second = confirmation_stage._runtime_callable_descriptor(bind("second"))
+    opaque = confirmation_stage._runtime_callable_descriptor(bind(UnsafeRepresentation()))
+    assert first["closure_sha256"] != second["closure_sha256"]
+    assert len(opaque["closure_sha256"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("alias", "bundle_key"),
+    (
+        ("_guard_no_oracle_or_analysis", "input.guard_no_oracle_or_analysis"),
+        ("_parse_jsonl", "input.parse_jsonl"),
+        ("_parse_manifest", "input.parse_manifest"),
+        ("_read_snapshot", "input.read_snapshot"),
+        ("iter_bounded_tree", "input.bounded_tree"),
+        ("model_shape_is_intact", "input.model_shape_is_intact"),
+        ("RunStore", "input.run_store_factory"),
+        ("_validate_producer_manifests", "input.validate_producer_manifests"),
+        ("_validate_randomization_closure", "input.validate_randomization_closure"),
+        ("plan_confirmation_requests", "planning.plan_confirmation_requests"),
+        ("_SingleRequestProviderAdapter", "provider.adapter_factory"),
+        (
+            "create_openai_compatible_provider",
+            "provider.create_openai_compatible_provider",
+        ),
+        ("_PROVIDER_RESULT_ENVELOPE_FACTORY", "provider.envelope_factory"),
+        ("_provider_from_frozen_config", "provider.from_frozen_config"),
+        ("_LockedMockProvider", "provider.mock_factory"),
+        ("OpenAICompatibleGenerationResult", "provider.result_type"),
+        (
+            "execute_confirmation_requests",
+            "execution.execute_confirmation_requests",
+        ),
+        ("_validate_output_bundle", "validation.output_bundle"),
+        (
+            "provider_provenance_sha256",
+            "validation.provider_provenance_sha256",
+        ),
+        (
+            "execute_jsonl_stage_transaction",
+            "transaction.execute_jsonl_stage_transaction",
+        ),
+        ("JsonlOutputSpec", "transaction.jsonl_output_spec"),
+        ("read_jsonl", "transaction.read_jsonl"),
+    ),
+)
+def test_runtime_callable_bundle_binds_every_critical_stage_alias(
+    randomized_store,
+    monkeypatch: pytest.MonkeyPatch,
+    alias: str,
+    bundle_key: str,
+) -> None:
+    config, store = randomized_store
+    run_confirmation_generation_stage(config, store, force=False)
+    baseline = stage_contracts.confirmation_generation_stage_contract_payload()[
+        "runtime_callable_bundle"
+    ]
+    original = getattr(confirmation_stage, alias)
+
+    @functools.wraps(original)
+    def drifted(*args, **kwargs):
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(confirmation_stage, alias, drifted)
+    changed = stage_contracts.confirmation_generation_stage_contract_payload()[
+        "runtime_callable_bundle"
+    ]
+    assert changed[bundle_key] != baseline[bundle_key]
+    inputs = (
+        *(store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS),
+        store.path(".stages", "build-confirmation-variants.json"),
+        *(store.path("interventions", name) for name, _model in RANDOMIZATION_OUTPUTS),
+        store.path(".stages", "randomize-confirmation.json"),
+    )
+    outputs = tuple(
+        store.path("generation", name) for name, _model in CONFIRMATION_GENERATION_OUTPUTS
+    )
+    try:
+        assert not store.should_skip_stage("generate-confirmation", inputs, outputs, False)
+    finally:
+        store.abort_stage("generate-confirmation")
 
 
 def test_generated_code_and_execution_ids_bind_actual_code_content() -> None:
@@ -1063,7 +1275,6 @@ def test_output_bundle_failure_releases_snapshot_prompt_and_code_from_frames(
 @pytest.mark.parametrize("signal_type", [MemoryError, KeyboardInterrupt, SystemExit])
 def test_output_bundle_preserves_fatal_identity_and_releases_snapshot(
     randomized_store,
-    monkeypatch: pytest.MonkeyPatch,
     signal_type: type[BaseException],
 ) -> None:
     config, store = randomized_store
@@ -1075,9 +1286,13 @@ def test_output_bundle_preserves_fatal_identity_and_releases_snapshot(
     def fail_plan(*_args, **_kwargs):
         raise signal
 
-    monkeypatch.setattr(confirmation_stage, "plan_confirmation_requests", fail_plan)
     with pytest.raises(signal_type) as exc_info:
-        confirmation_stage._validate_output_bundle(snapshot, config, groups)
+        confirmation_stage._validate_output_bundle(
+            snapshot,
+            config,
+            groups,
+            planner=fail_plan,
+        )
     assert exc_info.value is signal
     retained = _secaware_traceback_locals(signal)
     assert prompt_secret not in retained
@@ -1313,7 +1528,9 @@ def test_confirmation_stage_preserves_fatal_identity_cleans_frames_and_old_commi
             raise signal
 
     monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: Provider()
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **_kwargs: Provider(),
     )
     with pytest.raises(signal_type) as exc_info:
         run_confirmation_generation_stage(config, store, force=True)
@@ -1412,14 +1629,12 @@ def test_confirmation_stage_verify_later_fatal_preserves_identity_and_releases_p
         allow_empty=False,
     )[0].prompt_text
     input_count = len(PROMPT_VARIANT_OUTPUTS) + len(RANDOMIZATION_OUTPUTS) + 2
-    calls = 0
+    calls = iter(range(1, input_count + 11))
     signal = signal_type("verify-input-control-flow")
     real_read = confirmation_stage._read_snapshot
 
     def interrupt_after_variant(path, *, allow_empty):
-        nonlocal calls
-        calls += 1
-        if calls == input_count + 10:
+        if next(calls) == input_count + 10:
             raise signal
         return real_read(path, allow_empty=allow_empty)
 
@@ -1442,7 +1657,9 @@ def test_confirmation_generation_stage_skips_valid_commit_and_repairs_tamper(
     code_path = store.path("generation", "confirmation_code.jsonl")
     code_path.write_bytes(code_path.read_bytes() + b"{}\n")
     monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: _Provider()
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **_kwargs: _Provider(),
     )
     repaired = run_confirmation_generation_stage(config, store, force=False)
     monkeypatch.undo()
@@ -1479,7 +1696,9 @@ def test_confirmation_generation_stage_infrastructure_abort_publishes_nothing(
             raise RuntimeError("authorization secret")
 
     monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: FailingProvider()
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **_kwargs: FailingProvider(),
     )
     with pytest.raises(SecAwareError) as caught:
         run_confirmation_generation_stage(config, store, force=False)
@@ -1527,7 +1746,7 @@ def test_confirmation_stage_all_infrastructure_failures_preserve_force_commit(
                 message="safe provider failure",
             )
 
-    def factory(_config):
+    def factory(_config, **_kwargs):
         if case in {"none", "endpoint"}:
             raise SecAwareError(
                 code=expected_code,
@@ -1583,7 +1802,7 @@ def test_valid_committed_skip_is_invalidated_by_every_bound_contract_drift(
         )
     else:
 
-        def drifted_factory(_config):
+        def drifted_factory(_config, **_kwargs):
             return CountingProvider()
 
         monkeypatch.setattr(
@@ -1593,7 +1812,9 @@ def test_valid_committed_skip_is_invalidated_by_every_bound_contract_drift(
         )
     if drift != "factory_alias":
         monkeypatch.setattr(
-            confirmation_stage, "_provider_from_frozen_config", lambda _config: CountingProvider()
+            confirmation_stage,
+            "_provider_from_frozen_config",
+            lambda _config, **_kwargs: CountingProvider(),
         )
     if drift == "config":
         with pytest.raises(SecAwareError) as exc_info:
@@ -1617,7 +1838,7 @@ def test_provider_factory_alias_change_after_capture_aborts_and_preserves_commit
     manifest = store.path(".stages", "generate-confirmation.json")
     before = tuple(path.read_bytes() for path in (*paths, manifest))
 
-    def replacement_factory(_config):
+    def replacement_factory(_config, **_kwargs):
         return _Provider()
 
     class MutatingProvider(_Provider):
@@ -1630,7 +1851,7 @@ def test_provider_factory_alias_change_after_capture_aborts_and_preserves_commit
             )
             return result
 
-    def captured_factory(_config):
+    def captured_factory(_config, **_kwargs):
         return MutatingProvider()
 
     monkeypatch.setattr(
@@ -1661,7 +1882,7 @@ def test_assignment_manifest_replacement_during_provider_call_aborts_commit(
     monkeypatch.setattr(
         confirmation_stage,
         "_provider_from_frozen_config",
-        lambda _config: ReplacingProvider(),
+        lambda _config, **_kwargs: ReplacingProvider(),
     )
     with pytest.raises(SecAwareError):
         run_confirmation_generation_stage(config, store, force=False)
@@ -1701,7 +1922,7 @@ def test_task4_and_randomization_producer_replacement_leases_abort_force_commit(
     monkeypatch.setattr(
         confirmation_stage,
         "_provider_from_frozen_config",
-        lambda _config: ReplacingProvider(),
+        lambda _config, **_kwargs: ReplacingProvider(),
     )
     with pytest.raises(SecAwareError):
         run_confirmation_generation_stage(config, store, force=True)
@@ -1758,7 +1979,9 @@ def test_confirmation_generation_holds_both_real_producer_leases_through_commit(
     monkeypatch.setattr(store_type, "hold_committed_output", tracked_hold)
     monkeypatch.setattr(store_type, "record_stage", checked_record_stage)
     monkeypatch.setattr(
-        confirmation_stage, "_provider_from_frozen_config", lambda _config: BarrierProvider()
+        confirmation_stage,
+        "_provider_from_frozen_config",
+        lambda _config, **_kwargs: BarrierProvider(),
     )
 
     def consume() -> None:

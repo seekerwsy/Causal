@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import hashlib
-import inspect
 
 from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
 from secaware.config import (
@@ -212,30 +210,6 @@ def randomization_stage_contract_sha256(stage: str) -> str | None:
     return canonical_sha256(randomization_stage_contract_payload())
 
 
-def _callable_sha256(value: object) -> str:
-    try:
-        source = inspect.getsource(value)
-    except Exception:
-        code = getattr(value, "__code__", None)
-        source = repr(
-            (
-                getattr(value, "__module__", None),
-                getattr(value, "__qualname__", None),
-                getattr(code, "co_code", b"").hex(),
-                getattr(code, "co_consts", ()),
-            )
-        )
-    return hashlib.sha256(source.encode("utf-8")).hexdigest()
-
-
-def _callable_contract(value: object) -> dict[str, str]:
-    return {
-        "module": str(getattr(value, "__module__", type(value).__module__)),
-        "qualname": str(getattr(value, "__qualname__", type(value).__qualname__)),
-        "source_sha256": _callable_sha256(value),
-    }
-
-
 def confirmation_generation_stage_contract_payload(
     generation_config: GenerationConfig | None = None,
 ) -> dict[str, object]:
@@ -243,10 +217,7 @@ def confirmation_generation_stage_contract_payload(
 
     from secaware.pipeline.manifest import StageManifest
     from secaware.pipeline.stages import confirmation_generation as confirmation_stage
-    from secaware.generation.confirmation import (
-        CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
-        execute_confirmation_requests,
-    )
+    from secaware.generation.confirmation import CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256
     from secaware.generation.openai_compatible_provider import (
         openai_provider_runtime_payload,
     )
@@ -270,10 +241,8 @@ def confirmation_generation_stage_contract_payload(
         "provider_response_contract_version": confirmation_stage.CONFIRMATION_PROVIDER_RESPONSE_VERSION,
         "provider_result_policy_sha256": CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
         "provider_runtime": runtime_payload,
-        "provider_factory_callable": _callable_contract(
-            confirmation_stage._provider_from_frozen_config
-        ),
-        "provider_executor_callable": _callable_contract(execute_confirmation_requests),
+        "runtime_callable_bundle": confirmation_stage.confirmation_runtime_callable_contract(),
+        "output_policy": confirmation_stage.confirmation_output_policy_contract(),
         "app_config_schema": _schema_sha256(AppConfig),
         "generation_config_schema": _schema_sha256(GenerationConfig),
         "request_schema": _schema_sha256(GenerationRequestRecord),

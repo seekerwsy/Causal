@@ -310,7 +310,11 @@ def migrate_generation_request_v1_1_to_v1_2(
                 arm_role=None,
             )
             current["request_id"] = build_generation_request_id(
-                **{key: value for key, value in current.items() if key not in {"request_id", "prompt"}}
+                **{
+                    key: value
+                    for key, value in current.items()
+                    if key not in {"request_id", "prompt"}
+                }
             )
             result = GenerationRequestRecord.model_validate(current)
     except (MemoryError, KeyboardInterrupt, SystemExit):

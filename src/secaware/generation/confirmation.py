@@ -27,6 +27,8 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord
 MAX_CONFIRMATION_REQUESTS = 100_000
 MAX_CONFIRMATION_CODE_BYTES = 1_048_576
 MAX_CONFIRMATION_TOTAL_CODE_BYTES = 1_000_000_000
+CONFIRMATION_JSONL_MAX_LINE_CHARS = 4_000_000
+CONFIRMATION_JSONL_MAX_TOTAL_CHARS = 240 * 1024 * 1024
 CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256 = hashlib.sha256(
     b"secaware-confirmation-provider-result-envelope-v1"
 ).hexdigest()
@@ -122,19 +124,18 @@ def _parameter_bytes(values: Mapping[str, object]) -> int:
     )
 
 
-def _serialized_request_bytes(request: GenerationRequestRecord) -> int:
+def _serialized_request_shape(request: GenerationRequestRecord) -> tuple[int, int]:
     payload: dict[str, object] = {}
     try:
         payload = request.model_dump(mode="json", warnings=False)
-        return len(
-            json.dumps(
-                payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            ).encode("utf-8")
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
         )
+        return len(serialized.encode("utf-8")), len(serialized)
     finally:
         request = None  # type: ignore[assignment]
         payload.clear()
@@ -145,11 +146,16 @@ def _preflight_resources(
 ) -> None:
     total_prompt_bytes = 0
     total_request_bytes = 0
+    request_line_chars: list[int] = []
     try:
         for request in requests:
             prompt_bytes = len(request.prompt.encode("utf-8"))
             total_prompt_bytes += prompt_bytes
-            total_request_bytes += _serialized_request_bytes(request)
+            request_bytes, request_chars = _serialized_request_shape(request)
+            total_request_bytes += request_bytes
+            request_line_chars.append(request_chars)
+            if request_chars + 1 >= CONFIRMATION_JSONL_MAX_LINE_CHARS:
+                raise ValueError
             if prompt_bytes > config.confirmation_max_prompt_bytes_per_request:
                 raise ValueError
             parameters = request.parameters.model_dump(mode="json", warnings=False)["values"]
@@ -210,6 +216,16 @@ def _preflight_resources(
             + len(requests) * (_CODE_RECORD_OVERHEAD_BYTES + 1)
         )
         execution_ledger_bytes = len(requests) * (_EXECUTION_RECORD_OVERHEAD_BYTES + 1)
+        worst_code_line_chars = max(request_line_chars) + (
+            _MAX_JSON_STRING_EXPANSION * config.confirmation_max_code_bytes_per_result
+            + _CODE_RECORD_OVERHEAD_BYTES
+            + 1
+        )
+        if (
+            worst_code_line_chars >= CONFIRMATION_JSONL_MAX_LINE_CHARS
+            or _EXECUTION_RECORD_OVERHEAD_BYTES + 1 >= CONFIRMATION_JSONL_MAX_LINE_CHARS
+        ):
+            raise ValueError
         projected = request_ledger_bytes + code_ledger_bytes + execution_ledger_bytes
         hard_limit = _JSONL_STAGE_LIMIT_BYTES - _JSONL_SAFETY_MARGIN_BYTES
         if (
@@ -235,6 +251,10 @@ def _preflight_resources(
         request = None  # type: ignore[assignment]
         total_prompt_bytes = 0
         total_request_bytes = 0
+        request_line_chars.clear()
+        request_bytes = 0
+        request_chars = 0
+        worst_code_line_chars = 0
         parameters = {}
         token_values = []
         stop_values = ()

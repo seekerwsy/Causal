@@ -421,7 +421,7 @@ class GenerationConfig(StrictModel):
         default=4 * 1024 * 1024, ge=1, le=240 * 1024 * 1024
     )
     confirmation_max_code_bytes_per_result: StrictInt = Field(
-        default=1_048_576, ge=1, le=3 * 1024 * 1024
+        default=600_000, ge=1, le=3 * 1024 * 1024
     )
     confirmation_max_total_code_bytes: StrictInt = Field(
         default=32 * 1024 * 1024, ge=1, le=240 * 1024 * 1024

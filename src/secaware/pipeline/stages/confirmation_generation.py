@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from dataclasses import dataclass
+import functools
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -14,6 +16,8 @@ from typing import Sequence
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.confirmation import (
+    CONFIRMATION_JSONL_MAX_LINE_CHARS,
+    CONFIRMATION_JSONL_MAX_TOTAL_CHARS,
     CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
     execute_confirmation_requests,
 )
@@ -52,9 +56,9 @@ _STAGE = "generate-confirmation"
 CONFIRMATION_PROVIDER_POLICY_VERSION = "assignment-bound-generation-provider-v1"
 CONFIRMATION_PROVIDER_FACTORY_VERSION = "frozen-app-config-provider-factory-v1"
 CONFIRMATION_PROVIDER_RESPONSE_VERSION = "model-bound-code-result-v1"
+_PROVIDER_RESULT_ENVELOPE_FACTORY = ProviderResultEnvelope.from_content
 _MAX_INPUT_FILE_BYTES = 256_000_000
 _MAX_COMBINED_INPUT_BYTES = 1_000_000_000
-_MAX_JSONL_LINE_BYTES = 4_000_000
 _MAX_RECORDS = 100_000
 _MAX_REQUEST_PROMPT_BYTES = 256_000_000
 _MAX_PROJECTED_CODE_BYTES = 1_000_000_000
@@ -109,11 +113,15 @@ class ConfirmationGenerationStageResult:
 
 
 class _LockedMockProvider:
+    def __init__(self, envelope_factory=_PROVIDER_RESULT_ENVELOPE_FACTORY) -> None:
+        self._envelope_factory = envelope_factory
+
     def generate_many(self, requests: Sequence[GenerationRequestRecord]):
+        envelope_factory = self._envelope_factory
         return tuple(
             (
                 request.request_id,
-                ProviderResultEnvelope.from_content(
+                envelope_factory(
                     request_id=request.request_id,
                     model_id=request.model_id,
                     finish_reason="stop",
@@ -179,9 +187,17 @@ def _close_adapter_iterator(iterator: object) -> BaseException | None:
 
 
 class _SingleRequestProviderAdapter:
-    def __init__(self, provider: object, system_template: str) -> None:
+    def __init__(
+        self,
+        provider: object,
+        system_template: str,
+        envelope_factory=_PROVIDER_RESULT_ENVELOPE_FACTORY,
+        result_type=OpenAICompatibleGenerationResult,
+    ) -> None:
         self._provider = provider
         self._system_template = system_template
+        self._envelope_factory = envelope_factory
+        self._result_type = result_type
 
     def generate_many(self, requests: Sequence[GenerationRequestRecord]):
         provider: object = None
@@ -192,6 +208,8 @@ class _SingleRequestProviderAdapter:
         generate: object = None
         candidate: OpenAICompatibleGenerationResult | None = None
         envelope: ProviderResultEnvelope | None = None
+        envelope_factory: object = None
+        result_type: object = None
         result: tuple[tuple[str, ProviderResultEnvelope], ...] | None = None
         active: BaseException | None = None
         cleanup: BaseException | None = None
@@ -199,6 +217,8 @@ class _SingleRequestProviderAdapter:
         try:
             provider = self._provider
             system_template = self._system_template
+            envelope_factory = self._envelope_factory
+            result_type = self._result_type
             iterator = iter(requests)
             request = next(iterator)  # type: ignore[arg-type]
             second = next(iterator, sentinel)  # type: ignore[arg-type]
@@ -208,9 +228,11 @@ class _SingleRequestProviderAdapter:
             if not callable(generate):
                 raise TypeError
             candidate = generate(request, system_template)
-            if type(candidate) is not OpenAICompatibleGenerationResult:
+            if type(candidate) is not result_type:
                 raise TypeError
-            envelope = ProviderResultEnvelope.from_content(
+            if not callable(envelope_factory):
+                raise TypeError
+            envelope = envelope_factory(
                 request_id=request.request_id,
                 model_id=request.model_id,
                 finish_reason=candidate.finish_reason,
@@ -239,6 +261,8 @@ class _SingleRequestProviderAdapter:
             generate = None
             candidate = None
             envelope = None
+            envelope_factory = None
+            result_type = None
             sentinel = None
         if active is not None:
             if isinstance(active, _ADAPTER_FATAL):
@@ -259,19 +283,29 @@ class _SingleRequestProviderAdapter:
         return result
 
 
-def _provider_from_frozen_config(config: AppConfig) -> object:
+def _provider_from_frozen_config(
+    config: AppConfig,
+    *,
+    openai_factory=create_openai_compatible_provider,
+    adapter_factory=_SingleRequestProviderAdapter,
+    mock_factory=_LockedMockProvider,
+    envelope_factory=_PROVIDER_RESULT_ENVELOPE_FACTORY,
+    result_type=OpenAICompatibleGenerationResult,
+) -> object:
     """Construct the only production provider path from the validated frozen config."""
 
     generation = config.generation
     if generation.provider == "mock":
-        return _LockedMockProvider()
+        return mock_factory(envelope_factory=envelope_factory)
     if generation.provider == "openai_compatible":
         provider_config = generation.openai_compatible
         if provider_config is None:
             raise _stage_error("confirmation provider is unavailable", code=ErrorCode.CONFIG)
-        return _SingleRequestProviderAdapter(
-            create_openai_compatible_provider(provider_config),
+        return adapter_factory(
+            openai_factory(provider_config),
             provider_config.system_template,
+            envelope_factory,
+            result_type,
         )
     raise _stage_error(
         "confirmation provider is unavailable",
@@ -385,7 +419,7 @@ def _parse_jsonl(payload: bytes, model: type, *, allow_empty: bool) -> tuple:
         for raw in payload.decode("utf-8", errors="strict").splitlines():
             if not raw.strip():
                 continue
-            if len(raw.encode("utf-8")) > _MAX_JSONL_LINE_BYTES:
+            if len(raw) >= CONFIRMATION_JSONL_MAX_LINE_CHARS:
                 raise ValueError
             records.append(model.model_validate(_json(raw.encode("utf-8"))))
             if len(records) > _MAX_RECORDS:
@@ -420,12 +454,12 @@ def _parse_manifest(payload: bytes) -> StageManifest:
     return result
 
 
-def _guard_no_oracle_or_analysis(store: RunStore) -> None:
+def _guard_no_oracle_or_analysis(store: RunStore, *, traversal=iter_bounded_tree) -> None:
     total = 0
 
     def entries(directory: str):
         nonlocal total
-        for entry in iter_bounded_tree(
+        for entry in traversal(
             store.path(directory),
             max_entries=_MAX_TRAVERSAL_ENTRIES,
             max_depth=_MAX_TRAVERSAL_DEPTH,
@@ -520,6 +554,9 @@ def _validate_output_bundle(
     snapshot: _InputSnapshot,
     config: AppConfig,
     groups: Sequence[Sequence],
+    *,
+    planner=plan_confirmation_requests,
+    provenance_hasher=provider_provenance_sha256,
 ) -> ConfirmationGenerationStageResult:
     requests: tuple[GenerationRequestRecord, ...] = ()
     executions: tuple[AssignmentExecutionRecord, ...] = ()
@@ -542,7 +579,7 @@ def _validate_output_bundle(
             for item in groups[2]
         )
         expected_requests = tuple(
-            plan_confirmation_requests(snapshot.assignments, snapshot.variants, config.generation)
+            planner(snapshot.assignments, snapshot.variants, config.generation)
         )
         if requests != expected_requests:
             raise ValueError
@@ -590,7 +627,7 @@ def _validate_output_bundle(
                     or execution.provider_policy_sha256 != code.provider_policy_sha256
                     or execution.attempt_count != code.provider_attempt_count
                     or execution.provider_provenance_sha256
-                    != provider_provenance_sha256(code.generation_provenance)
+                    != provenance_hasher(code.generation_provenance)
                 ):
                     raise ValueError
             elif code is not None:
@@ -619,9 +656,181 @@ def _validate_output_bundle(
         request = None
         code = None
         execution = None
+        planner = None
+        provenance_hasher = None
     if result is None:  # pragma: no cover
         raise _stage_error("confirmation generation output bundle failed validation")
     return result
+
+
+def _safe_fingerprint_value(value: object, *, depth: int = 0) -> object:
+    if depth > 4:
+        return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+    if value is None or type(value) in {str, int, float, bool}:
+        return value
+    if type(value) is bytes:
+        return {"bytes_sha256": hashlib.sha256(value).hexdigest()}
+    if type(value) in {tuple, list}:
+        return [_safe_fingerprint_value(item, depth=depth + 1) for item in value]
+    if type(value) is dict:
+        return {
+            str(key): _safe_fingerprint_value(item, depth=depth + 1)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if callable(value):
+        return {
+            "callable_module": str(getattr(value, "__module__", type(value).__module__)),
+            "callable_qualname": str(getattr(value, "__qualname__", type(value).__qualname__)),
+        }
+    return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+
+def _source_sha256(value: object) -> str:
+    try:
+        source = inspect.getsource(value)
+    except Exception:
+        return "none"
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _code_constant_payload(value: object, *, depth: int = 0) -> object:
+    if depth > 8:
+        return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+    if inspect.iscode(value):
+        return _stable_code_payload(value, depth=depth + 1)
+    if value is None or type(value) in {str, int, float, bool}:
+        return value
+    if type(value) in {bytes, bytearray}:
+        payload = bytes(value)
+        return {"bytes_sha256": hashlib.sha256(payload).hexdigest(), "length": len(payload)}
+    if type(value) is tuple:
+        return [_code_constant_payload(item, depth=depth + 1) for item in value]
+    if type(value) is frozenset:
+        items = [_code_constant_payload(item, depth=depth + 1) for item in value]
+        return sorted(items, key=canonical_sha256)
+    return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+
+def _stable_code_payload(code, *, depth: int = 0) -> dict[str, object]:
+    return {
+        "argcount": code.co_argcount,
+        "posonlyargcount": code.co_posonlyargcount,
+        "kwonlyargcount": code.co_kwonlyargcount,
+        "nlocals": code.co_nlocals,
+        "stacksize": code.co_stacksize,
+        "flags": code.co_flags,
+        "bytecode_sha256": hashlib.sha256(code.co_code).hexdigest(),
+        "constants": [_code_constant_payload(item, depth=depth + 1) for item in code.co_consts],
+        "names": list(code.co_names),
+        "varnames": list(code.co_varnames),
+        "freevars": list(code.co_freevars),
+        "cellvars": list(code.co_cellvars),
+        "name": code.co_name,
+        "qualname": code.co_qualname,
+        "firstlineno": code.co_firstlineno,
+        "linetable_sha256": hashlib.sha256(code.co_linetable).hexdigest(),
+        "exceptiontable_sha256": hashlib.sha256(code.co_exceptiontable).hexdigest(),
+    }
+
+
+def _code_sha256(value: object) -> str:
+    code = getattr(value, "__code__", None)
+    if code is None:
+        call = getattr(value, "__call__", None)
+        code = getattr(call, "__code__", None)
+    if code is None:
+        return "none"
+    return canonical_sha256(_stable_code_payload(code))
+
+
+def _runtime_callable_descriptor(value: object) -> dict[str, str]:
+    partial_payload: object = None
+    target = value
+    if isinstance(value, functools.partial):
+        target = value.func
+        partial_payload = {
+            "args": _safe_fingerprint_value(value.args),
+            "keywords": _safe_fingerprint_value(value.keywords or {}),
+            "func": _safe_fingerprint_value(value.func),
+        }
+    defaults_payload = {
+        "defaults": _safe_fingerprint_value(getattr(target, "__defaults__", None)),
+        "kwdefaults": _safe_fingerprint_value(getattr(target, "__kwdefaults__", None)),
+    }
+    closure_payload: list[object] = []
+    for cell in getattr(target, "__closure__", None) or ():
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            closure_payload.append({"empty": True})
+        else:
+            closure_payload.append(_safe_fingerprint_value(contents))
+            contents = None
+    callable_class = type(value)
+    class_payload = {
+        "module": callable_class.__module__,
+        "qualname": callable_class.__qualname__,
+        "source_sha256": _source_sha256(callable_class),
+        "call_code_sha256": _code_sha256(getattr(callable_class, "__call__", None)),
+    }
+    descriptor = {
+        "kind": "partial" if isinstance(value, functools.partial) else type(value).__name__,
+        "module": str(getattr(value, "__module__", callable_class.__module__)),
+        "qualname": str(getattr(value, "__qualname__", callable_class.__qualname__)),
+        "source_sha256": _source_sha256(target),
+        "code_sha256": _code_sha256(target),
+        "defaults_sha256": canonical_sha256(defaults_payload),
+        "closure_sha256": canonical_sha256(closure_payload),
+        "partial_sha256": canonical_sha256(partial_payload),
+        "callable_class_sha256": canonical_sha256(class_payload),
+    }
+    descriptor["fingerprint_sha256"] = canonical_sha256(descriptor)
+    return descriptor
+
+
+def _confirmation_runtime_callables() -> dict[str, object]:
+    return {
+        "input.guard_no_oracle_or_analysis": _guard_no_oracle_or_analysis,
+        "input.parse_jsonl": _parse_jsonl,
+        "input.parse_manifest": _parse_manifest,
+        "input.read_snapshot": _read_snapshot,
+        "input.bounded_tree": iter_bounded_tree,
+        "input.model_shape_is_intact": model_shape_is_intact,
+        "input.run_store_factory": RunStore,
+        "input.validate_producer_manifests": _validate_producer_manifests,
+        "input.validate_randomization_closure": _validate_randomization_closure,
+        "planning.plan_confirmation_requests": plan_confirmation_requests,
+        "provider.adapter_factory": _SingleRequestProviderAdapter,
+        "provider.create_openai_compatible_provider": create_openai_compatible_provider,
+        "provider.envelope_factory": _PROVIDER_RESULT_ENVELOPE_FACTORY,
+        "provider.from_frozen_config": _provider_from_frozen_config,
+        "provider.mock_factory": _LockedMockProvider,
+        "provider.result_type": OpenAICompatibleGenerationResult,
+        "execution.execute_confirmation_requests": execute_confirmation_requests,
+        "validation.output_bundle": _validate_output_bundle,
+        "validation.provider_provenance_sha256": provider_provenance_sha256,
+        "transaction.execute_jsonl_stage_transaction": execute_jsonl_stage_transaction,
+        "transaction.jsonl_output_spec": JsonlOutputSpec,
+        "transaction.read_jsonl": read_jsonl,
+    }
+
+
+def confirmation_runtime_callable_contract() -> dict[str, dict[str, str]]:
+    return {
+        name: _runtime_callable_descriptor(value)
+        for name, value in sorted(_confirmation_runtime_callables().items())
+    }
+
+
+def confirmation_output_policy_contract() -> dict[str, int]:
+    return {
+        "jsonl_max_line_chars": CONFIRMATION_JSONL_MAX_LINE_CHARS,
+        "jsonl_max_total_chars": CONFIRMATION_JSONL_MAX_TOTAL_CHARS,
+        "code_record_overhead_chars": 12 * 1024,
+        "execution_record_overhead_chars": 4 * 1024,
+        "json_string_max_expansion": 6,
+        "provider_provenance_max_bytes": 4_096,
+    }
 
 
 def run_confirmation_generation_stage(
@@ -632,16 +841,34 @@ def run_confirmation_generation_stage(
 ) -> ConfirmationGenerationStageResult:
     """Execute and publish every committed randomized assignment exactly once."""
 
+    runtime_callables = _confirmation_runtime_callables()
+    runtime_contract = {
+        name: _runtime_callable_descriptor(value)
+        for name, value in sorted(runtime_callables.items())
+    }
+
+    def verify_runtime_bundle() -> None:
+        current = _confirmation_runtime_callables()
+        if (
+            tuple(sorted(current)) != tuple(sorted(runtime_callables))
+            or any(current[name] is not value for name, value in runtime_callables.items())
+            or {
+                name: _runtime_callable_descriptor(value) for name, value in sorted(current.items())
+            }
+            != runtime_contract
+        ):
+            raise _stage_error("confirmation runtime callable bundle changed during execution")
+
     if (
         type(config) is not AppConfig
         or type(store) is not RunStore
         or store.config != config
-        or not model_shape_is_intact(config)
+        or not runtime_callables["input.model_shape_is_intact"](config)
     ):
         raise _stage_error("confirmation generation stage configuration failed validation")
     try:
         effective_config = AppConfig.model_validate(config.model_dump(mode="json"))
-        effective_store = RunStore(effective_config)
+        effective_store = runtime_callables["input.run_store_factory"](effective_config)
         if effective_store.root != store.root:
             raise ValueError
     except (MemoryError, KeyboardInterrupt, SystemExit):
@@ -650,12 +877,6 @@ def run_confirmation_generation_stage(
         raise _stage_error(
             "confirmation generation stage configuration failed validation"
         ) from None
-    provider_factory = _provider_from_frozen_config
-
-    def verify_provider_factory() -> None:
-        if globals().get("_provider_from_frozen_config") is not provider_factory:
-            raise _stage_error("confirmation provider factory changed during execution")
-
     task4_paths = tuple(
         effective_store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
     )
@@ -670,12 +891,15 @@ def run_confirmation_generation_stage(
         *randomization_paths,
         randomization_manifest_path,
     )
+    output_spec_factory = runtime_callables["transaction.jsonl_output_spec"]
     output_specs = tuple(
-        JsonlOutputSpec(
+        output_spec_factory(
             effective_store.path("generation", name),
             model,
             require_nonempty=index < 2,
             max_records=_MAX_RECORDS,
+            max_line_chars=CONFIRMATION_JSONL_MAX_LINE_CHARS,
+            max_total_chars=CONFIRMATION_JSONL_MAX_TOTAL_CHARS,
         )
         for index, (name, model) in enumerate(CONFIRMATION_GENERATION_OUTPUTS)
     )
@@ -683,9 +907,12 @@ def run_confirmation_generation_stage(
 
     def capture_input_snapshot() -> tuple[str, ...]:
         nonlocal snapshot
+        verify_runtime_bundle()
         if snapshot is not None:
             raise _stage_error("confirmation generation input snapshot failed validation")
-        _guard_no_oracle_or_analysis(effective_store)
+        runtime_callables["input.guard_no_oracle_or_analysis"](
+            effective_store, traversal=runtime_callables["input.bounded_tree"]
+        )
         payloads: list[bytes] = []
         files: list[_FileSnapshot] = []
         stack.callback(payloads.clear)
@@ -693,7 +920,7 @@ def run_confirmation_generation_stage(
         combined = 0
         for index, path in enumerate(inputs):
             allow_empty = index < len(task4_paths) and index >= 4
-            payload, file = _read_snapshot(path, allow_empty=allow_empty)
+            payload, file = runtime_callables["input.read_snapshot"](path, allow_empty=allow_empty)
             combined += len(payload)
             if combined > _MAX_COMBINED_INPUT_BYTES:
                 raise _stage_error("confirmation generation input snapshot exceeded bounds")
@@ -702,25 +929,31 @@ def run_confirmation_generation_stage(
             payload = b""
         task4_manifest_index = len(task4_paths)
         randomization_index = task4_manifest_index + 1
-        task4_manifest = _parse_manifest(payloads[task4_manifest_index])
-        randomization_manifest = _parse_manifest(payloads[-1])
-        variants = _parse_jsonl(payloads[8], PromptVariantRecord, allow_empty=False)
-        randomization_records = _parse_jsonl(
+        task4_manifest = runtime_callables["input.parse_manifest"](payloads[task4_manifest_index])
+        randomization_manifest = runtime_callables["input.parse_manifest"](payloads[-1])
+        variants = runtime_callables["input.parse_jsonl"](
+            payloads[8], PromptVariantRecord, allow_empty=False
+        )
+        randomization_records = runtime_callables["input.parse_jsonl"](
             payloads[randomization_index], RandomizationManifestRecord, allow_empty=False
         )
-        assignments = _parse_jsonl(
+        assignments = runtime_callables["input.parse_jsonl"](
             payloads[randomization_index + 1], AssignmentRecord, allow_empty=False
         )
         if len(randomization_records) != 1:
             raise _stage_error("confirmation assignment manifest closure failed validation")
-        _validate_producer_manifests(
+        runtime_callables["input.validate_producer_manifests"](
             task4_manifest,
             randomization_manifest,
             tuple(files[: len(task4_paths)]),
             tuple(files[randomization_index : randomization_index + 2]),
         )
-        _validate_randomization_closure(randomization_records[0], assignments)
-        planned = plan_confirmation_requests(assignments, variants, effective_config.generation)
+        runtime_callables["input.validate_randomization_closure"](
+            randomization_records[0], assignments
+        )
+        planned = runtime_callables["planning.plan_confirmation_requests"](
+            assignments, variants, effective_config.generation
+        )
         prompt_bytes = sum(len(item.prompt.encode("utf-8")) for item in planned)
         if (
             len(planned) > _MAX_RECORDS
@@ -734,20 +967,24 @@ def run_confirmation_generation_stage(
             variants=variants,
             randomization_manifest=randomization_records[0],
         )
+        verify_runtime_bundle()
         payloads.clear()
         return tuple(item.sha256 for item in snapshot.files)
 
     def verify_input_snapshot() -> None:
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
-        _guard_no_oracle_or_analysis(effective_store)
+        verify_runtime_bundle()
+        runtime_callables["input.guard_no_oracle_or_analysis"](
+            effective_store, traversal=runtime_callables["input.bounded_tree"]
+        )
         expected: _FileSnapshot | None = None
         current: _FileSnapshot | None = None
         _payload = b""
         try:
             for expected in snapshot.files:
                 try:
-                    _payload, current = _read_snapshot(
+                    _payload, current = runtime_callables["input.read_snapshot"](
                         expected.path, allow_empty=expected.identity[4] == 0
                     )
                     if current != expected:
@@ -764,10 +1001,11 @@ def run_confirmation_generation_stage(
             expected = None
 
     def build():
+        verify_runtime_bundle()
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
         requests = tuple(
-            plan_confirmation_requests(
+            runtime_callables["planning.plan_confirmation_requests"](
                 snapshot.assignments,
                 snapshot.variants,
                 effective_config.generation,
@@ -776,26 +1014,45 @@ def run_confirmation_generation_stage(
         effective_provider: object = None
         result_requests: tuple[GenerationRequestRecord, ...] = ()
         try:
-            verify_provider_factory()
-            effective_provider = provider_factory(effective_config)
-            executions, codes = execute_confirmation_requests(
+            effective_provider = runtime_callables["provider.from_frozen_config"](
+                effective_config,
+                openai_factory=runtime_callables["provider.create_openai_compatible_provider"],
+                adapter_factory=runtime_callables["provider.adapter_factory"],
+                mock_factory=runtime_callables["provider.mock_factory"],
+                envelope_factory=runtime_callables["provider.envelope_factory"],
+                result_type=runtime_callables["provider.result_type"],
+            )
+            executions, codes = runtime_callables["execution.execute_confirmation_requests"](
                 requests,
                 effective_provider,
                 effective_config.generation,
             )
-            verify_provider_factory()
+            verify_runtime_bundle()
             result_requests = requests
         finally:
             effective_provider = None
             requests = ()
         groups = (result_requests, executions, codes)
-        _validate_output_bundle(snapshot, effective_config, groups)
+        runtime_callables["validation.output_bundle"](
+            snapshot,
+            effective_config,
+            groups,
+            planner=runtime_callables["planning.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
         return groups
 
     def validate_staged_outputs(groups: tuple[tuple[object, ...], ...]) -> None:
+        verify_runtime_bundle()
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
-        _validate_output_bundle(snapshot, effective_config, groups)
+        runtime_callables["validation.output_bundle"](
+            snapshot,
+            effective_config,
+            groups,
+            planner=runtime_callables["planning.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
 
     producer_outputs = {
         "build-confirmation-variants": task4_paths,
@@ -814,7 +1071,8 @@ def run_confirmation_generation_stage(
                     ),
                 )
             )
-        execute_jsonl_stage_transaction(
+        verify_runtime_bundle()
+        runtime_callables["transaction.execute_jsonl_stage_transaction"](
             effective_store,
             stage=_STAGE,
             inputs=inputs,
@@ -825,12 +1083,12 @@ def run_confirmation_generation_stage(
             verify_input_snapshot=verify_input_snapshot,
             validate_staged_outputs=validate_staged_outputs,
         )
-        verify_provider_factory()
+        verify_runtime_bundle()
         if snapshot is None:
             raise _stage_error("confirmation generation input snapshot failed validation")
         groups = tuple(
             tuple(
-                read_jsonl(
+                runtime_callables["transaction.read_jsonl"](
                     spec.path,
                     spec.model,
                     required=True,
@@ -843,7 +1101,14 @@ def run_confirmation_generation_stage(
             )
             for spec in output_specs
         )
-        return _validate_output_bundle(snapshot, effective_config, groups)
+        verify_runtime_bundle()
+        return runtime_callables["validation.output_bundle"](
+            snapshot,
+            effective_config,
+            groups,
+            planner=runtime_callables["planning.plan_confirmation_requests"],
+            provenance_hasher=runtime_callables["validation.provider_provenance_sha256"],
+        )
 
 
 __all__ = [
