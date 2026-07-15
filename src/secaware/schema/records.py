@@ -11,7 +11,7 @@ from secaware.schema.generation import (
     revalidate_generation_request_envelope,
     sha256_text,
 )
-from secaware.schema.experiments import PromptRole
+from secaware.schema.experiments import ArmRole, PromptRole
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -87,18 +87,34 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
 
     code_id: str
     prompt_id: str
-    condition: Literal["observed", "counterfactual"]
+    condition: Literal["observed", "counterfactual", "confirm_arm"]
     model_id: str
     seed_id: int
     code: str
     hypothesis_id: str | None = None
     intervention_id: str | None = None
-    schema_version: Literal["1.0"] | None = None
+    assignment_id: str | None = None
+    target_spec_id: str | None = None
+    target_instance_id: str | None = None
+    arm_protocol_id: str | None = None
+    protocol_instance_id: str | None = None
+    variant_id: str | None = None
+    arm_role: ArmRole | None = None
+    schema_version: Literal["1.1"] | None = None
     request_id: str | None = Field(default=None, pattern=_REQUEST_ID_PATTERN)
     prompt_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
     code_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
     generation_provenance: GenerationProvenance | None = None
     generation_request: GenerationRequestRecord | None = None
+
+    @field_validator("arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        if value is None or type(value) is ArmRole:
+            return value
+        if type(value) is str:
+            return next((item for item in ArmRole if item.value == value), value)
+        return value
 
     @field_validator("generation_request", mode="before")
     @classmethod
@@ -150,6 +166,13 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
             (self.seed_id, request.seed_id),
             (self.hypothesis_id, request.hypothesis_id),
             (self.intervention_id, request.intervention_id),
+            (self.assignment_id, request.assignment_id),
+            (self.target_spec_id, request.target_spec_id),
+            (self.target_instance_id, request.target_instance_id),
+            (self.arm_protocol_id, request.arm_protocol_id),
+            (self.protocol_instance_id, request.protocol_instance_id),
+            (self.variant_id, request.variant_id),
+            (self.arm_role, request.arm_role),
             (self.prompt_sha256, request.prompt_sha256),
         )
         if any(actual != expected for actual, expected in bound_coordinates):
@@ -162,6 +185,23 @@ class GeneratedCodeRecord(SafeValidationMixin, BaseModel):
             value is None or not value.strip() for value in identifiers
         ):
             raise ValueError("canonical counterfactual code requires intervention identifiers")
+        confirmation_coordinates = (
+            self.assignment_id,
+            self.target_spec_id,
+            self.target_instance_id,
+            self.arm_protocol_id,
+            self.protocol_instance_id,
+            self.variant_id,
+            self.arm_role,
+        )
+        if self.condition == "confirm_arm" and any(
+            value is None for value in confirmation_coordinates
+        ):
+            raise ValueError("canonical confirmation code requires assignment coordinates")
+        if self.condition != "confirm_arm" and any(
+            value is not None for value in confirmation_coordinates
+        ):
+            raise ValueError("canonical non-confirmation code must not have assignment coordinates")
         return self
 
 
@@ -179,7 +219,7 @@ class CanonicalGeneratedCodeRecord(GeneratedCodeRecord):
 
     code_id: str = Field(pattern=_CANONICAL_CODE_ID_PATTERN)
     seed_id: StrictInt
-    schema_version: Literal["1.0"] = Field()
+    schema_version: Literal["1.1"] = Field()
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     prompt_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     code_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)

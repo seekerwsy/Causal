@@ -31,6 +31,9 @@ _PROPOSAL_ID_PATTERN = r"^proposal_[0-9a-f]{64}$"
 _ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
 _BLOCK_ID_PATTERN = r"^block_[0-9a-f]{64}$"
 _RANDOMIZATION_ID_PATTERN = r"^randomization_[0-9a-f]{64}$"
+_EXECUTION_ID_PATTERN = r"^assignment_execution_[0-9a-f]{64}$"
+_REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
+_CODE_ID_PATTERN = r"^code_[0-9a-f]{64}$"
 _MULTIPLICITY_ID_RE = re.compile(r"^multiplicity_[0-9a-f]{64}$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _OUTCOME_ID_RE = re.compile(r"^y_[a-z0-9][a-z0-9_]{0,126}$")
@@ -211,6 +214,11 @@ class ArmRole(str, Enum):
     PRESENTATION_MATCHED_CONTROL = "presentation_matched_control"
 
 
+class AssignmentExecutionStatus(str, Enum):
+    GENERATED = "generated"
+    TERMINAL_NO_CODE = "terminal_no_code"
+
+
 class ExperimentalUnit(_ExperimentContract):
     """A seed-slot unit fixed before an arm role is assigned."""
 
@@ -340,6 +348,50 @@ class RandomizationManifestRecord(_ExperimentVersionedContract):
             or len(self.block_ids) != len(set(self.block_ids))
             or len(self.assignment_ids) != len(set(self.assignment_ids))
             or self.manifest_id != f"randomization_{_digest(_content(self, 'manifest_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class AssignmentExecutionRecord(_ExperimentVersionedContract):
+    """One terminal, content-addressed execution outcome per assignment."""
+
+    schema_version: Literal["1.0"]
+    execution_id: str = Field(pattern=_EXECUTION_ID_PATTERN)
+    assignment_id: str = Field(pattern=_ASSIGNMENT_ID_PATTERN)
+    request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
+    status: AssignmentExecutionStatus
+    code_id: str | None = Field(default=None, pattern=_CODE_ID_PATTERN)
+    terminal_reason: Literal["content_filter"] | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def parse_status(cls, value: object) -> object:
+        return _exact_enum(value, AssignmentExecutionStatus)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload = {"schema_version": "1.0", **content}
+        try:
+            return cls(
+                **payload,
+                execution_id=f"assignment_execution_{_digest(payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            payload.clear()
+            _raise_contract_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        generated = self.status is AssignmentExecutionStatus.GENERATED
+        if (
+            generated != (self.code_id is not None)
+            or generated == (self.terminal_reason is not None)
+            or self.execution_id
+            != f"assignment_execution_{_digest(_content(self, 'execution_id'))}"
         ):
             raise ValueError(self._safe_validation_message)
         return self

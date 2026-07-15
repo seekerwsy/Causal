@@ -381,7 +381,7 @@ def test_importer_restores_ledger_order_and_round_trips_canonical_metadata() -> 
     for request, record in zip(expected, imported, strict=True):
         result = by_request_id[request.request_id]
         assert type(record) is CanonicalGeneratedCodeRecord
-        assert record.schema_version == "1.0"
+        assert record.schema_version == "1.1"
         assert record.code_id == f"code_{request.request_id.removeprefix('req_')}"
         assert record.request_id == request.request_id
         assert record.prompt_id == request.prompt_id

@@ -3,6 +3,7 @@ import hashlib
 from itertools import islice
 import json
 import math
+import re
 from typing import Literal, cast
 
 from pydantic import (
@@ -23,10 +24,20 @@ from secaware.schema.common import (
     VersionedModel,
     model_shape_is_intact,
 )
+from secaware.schema.experiments import ArmRole
 
 
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
+_CONFIRM_COORDINATE_PATTERNS = (
+    ("hypothesis_id", re.compile(r"^hypothesis_[0-9a-f]{64}$")),
+    ("assignment_id", re.compile(r"^assignment_[0-9a-f]{64}$")),
+    ("target_spec_id", re.compile(r"^target_[0-9a-f]{64}$")),
+    ("target_instance_id", re.compile(r"^target_instance_[0-9a-f]{64}$")),
+    ("arm_protocol_id", re.compile(r"^arm_protocol_[0-9a-f]{64}$")),
+    ("protocol_instance_id", re.compile(r"^protocol_instance_[0-9a-f]{64}$")),
+    ("variant_id", re.compile(r"^variant_[0-9a-f]{64}$")),
+)
 _FINITE_NUMBER_PARAMETER_KEYS = frozenset(
     {
         "temperature",
@@ -59,7 +70,9 @@ _INVALID_REQUEST_INTEGRITY_MESSAGE = "generation request integrity validation fa
 _INVALID_PROVENANCE_MESSAGE = "generation provenance validation failed"
 _INVALID_ATTEMPT_MESSAGE = "generation attempt validation failed"
 _INVALID_OFFLINE_RESULT_MESSAGE = "offline generation result validation failed"
-GENERATION_REQUEST_SCHEMA_VERSION = "1.1"
+GENERATION_REQUEST_SCHEMA_VERSION = "1.2"
+GenerationCondition = Literal["observed", "counterfactual", "confirm_arm"]
+EndpointType = Literal["mock", "offline", "chat_completions"]
 
 
 class _FrozenJSONSequence(Sequence[object]):
@@ -267,6 +280,7 @@ class GenerationParameters(SafeValidationMixin, StrictModel):
         hide_input_in_errors=True,
         protected_namespaces=(),
         revalidate_instances="always",
+        strict=True,
     )
 
     values: Mapping[str, JSONValue] = Field(default_factory=dict)
@@ -292,7 +306,7 @@ class GenerationParameters(SafeValidationMixin, StrictModel):
 def build_generation_request_id(
     *,
     schema_version: str,
-    condition: Literal["observed", "counterfactual"],
+    condition: GenerationCondition,
     prompt_id: str,
     prompt_sha256: str,
     language: str,
@@ -300,13 +314,20 @@ def build_generation_request_id(
     seed_id: int,
     hypothesis_id: str | None,
     intervention_id: str | None,
-    endpoint_type: Literal["mock", "offline", "chat_completions"],
+    endpoint_type: EndpointType,
     endpoint_sha256: str,
     system_template_version: str,
     system_template_sha256: str,
     parameters: GenerationParameters,
+    assignment_id: str | None = None,
+    target_spec_id: str | None = None,
+    target_instance_id: str | None = None,
+    arm_protocol_id: str | None = None,
+    protocol_instance_id: str | None = None,
+    variant_id: str | None = None,
+    arm_role: object | None = None,
 ) -> str:
-    identity = {
+    identity: dict[str, object] = {
         "schema_version": schema_version,
         "condition": condition,
         "prompt_id": prompt_id,
@@ -315,13 +336,28 @@ def build_generation_request_id(
         "model_id": model_id,
         "seed_id": seed_id,
         "hypothesis_id": hypothesis_id,
-        "intervention_id": intervention_id,
         "endpoint_type": endpoint_type,
         "endpoint_sha256": endpoint_sha256,
         "system_template_version": system_template_version,
         "system_template_sha256": system_template_sha256,
         "parameters": parameters.model_dump(mode="json"),
     }
+    if schema_version == "1.1" or condition == "counterfactual":
+        identity["intervention_id"] = intervention_id
+    if schema_version == "1.2":
+        identity.update(
+            {
+                "assignment_id": assignment_id,
+                "target_spec_id": target_spec_id,
+                "target_instance_id": target_instance_id,
+                "arm_protocol_id": arm_protocol_id,
+                "protocol_instance_id": protocol_instance_id,
+                "variant_id": variant_id,
+                "arm_role": (
+                    getattr(arm_role, "value", arm_role) if arm_role is not None else None
+                ),
+            }
+        )
     payload = json.dumps(
         identity,
         ensure_ascii=False,
@@ -340,20 +376,28 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
         hide_input_in_errors=True,
         protected_namespaces=(),
         revalidate_instances="always",
+        strict=True,
     )
 
-    schema_version: Literal["1.1"]
+    schema_version: Literal["1.2"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
-    condition: Literal["observed", "counterfactual"]
+    condition: GenerationCondition
     prompt_id: str = Field(min_length=1)
-    prompt: str = Field(min_length=1)
+    prompt: str = Field(min_length=1, repr=False)
     prompt_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     language: str = Field(min_length=1)
     model_id: str = Field(min_length=1)
     seed_id: StrictInt
     hypothesis_id: str | None = None
     intervention_id: str | None = None
-    endpoint_type: Literal["mock", "offline", "chat_completions"]
+    assignment_id: str | None = None
+    target_spec_id: str | None = None
+    target_instance_id: str | None = None
+    arm_protocol_id: str | None = None
+    protocol_instance_id: str | None = None
+    variant_id: str | None = None
+    arm_role: ArmRole | None = None
+    endpoint_type: EndpointType
     endpoint_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     system_template_version: str = Field(min_length=1)
     system_template_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
@@ -372,20 +416,67 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
             raise ValueError("generation request text fields must not be blank")
         return value
 
-    @field_validator("hypothesis_id", "intervention_id")
+    @field_validator(
+        "hypothesis_id",
+        "intervention_id",
+        "assignment_id",
+        "target_spec_id",
+        "target_instance_id",
+        "arm_protocol_id",
+        "protocol_instance_id",
+        "variant_id",
+    )
     @classmethod
     def reject_blank_optional_identifiers(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("generation request identifiers must not be blank")
         return value
 
+    @field_validator("arm_role", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        if value is None or type(value) is ArmRole:
+            return value
+        if type(value) is str:
+            return next((item for item in ArmRole if item.value == value), value)
+        return value
+
     @model_validator(mode="after")
     def validate_request_integrity(self) -> "GenerationRequestRecord":
-        identifiers = (self.hypothesis_id, self.intervention_id)
-        if self.condition == "observed" and any(value is not None for value in identifiers):
+        experiment_coordinates = (
+            self.hypothesis_id,
+            self.assignment_id,
+            self.target_spec_id,
+            self.target_instance_id,
+            self.arm_protocol_id,
+            self.protocol_instance_id,
+            self.variant_id,
+            self.arm_role,
+        )
+        if self.condition == "observed" and (
+            self.intervention_id is not None
+            or any(value is not None for value in experiment_coordinates)
+        ):
             raise ValueError("observed requests must not have counterfactual identifiers")
-        if self.condition == "counterfactual" and any(value is None for value in identifiers):
+        if self.condition == "counterfactual" and (
+            self.hypothesis_id is None
+            or self.intervention_id is None
+            or any(value is not None for value in experiment_coordinates[1:])
+        ):
             raise ValueError("counterfactual requests require both identifiers")
+        if self.condition == "confirm_arm":
+            if self.intervention_id is not None or any(
+                value is None for value in experiment_coordinates
+            ):
+                raise ValueError("confirmation requests require complete assignment coordinates")
+            try:
+                if type(self.arm_role) is not ArmRole or any(
+                    pattern.fullmatch(getattr(self, field_name) or "") is None
+                    for field_name, pattern in _CONFIRM_COORDINATE_PATTERNS
+                ):
+                    raise ValueError
+            except Exception:
+                raise ValueError(_INVALID_REQUEST_INTEGRITY_MESSAGE) from None
         parameter_seed = self.parameters.values.get("seed")
         if parameter_seed is not None and parameter_seed != self.seed_id:
             raise ValueError(_INVALID_REQUEST_INTEGRITY_MESSAGE)
@@ -401,6 +492,13 @@ class GenerationRequestRecord(SafeValidationMixin, VersionedModel):
             seed_id=self.seed_id,
             hypothesis_id=self.hypothesis_id,
             intervention_id=self.intervention_id,
+            assignment_id=self.assignment_id,
+            target_spec_id=self.target_spec_id,
+            target_instance_id=self.target_instance_id,
+            arm_protocol_id=self.arm_protocol_id,
+            protocol_instance_id=self.protocol_instance_id,
+            variant_id=self.variant_id,
+            arm_role=self.arm_role,
             endpoint_type=self.endpoint_type,
             endpoint_sha256=self.endpoint_sha256,
             system_template_version=self.system_template_version,

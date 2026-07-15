@@ -74,6 +74,16 @@ def _legacy_payload(
     payload = request.model_dump(mode="json")
     payload["schema_version"] = "1.0"
     payload.pop("endpoint_sha256")
+    for field in (
+        "assignment_id",
+        "target_spec_id",
+        "target_instance_id",
+        "arm_protocol_id",
+        "protocol_instance_id",
+        "variant_id",
+        "arm_role",
+    ):
+        payload.pop(field)
     _seal_legacy_payload(payload)
     return payload
 
@@ -115,10 +125,11 @@ def test_generation_request_schema_is_explicit_v11_while_shared_records_remain_v
         backoff_seconds=0.0,
     )
 
-    assert GENERATION_REQUEST_SCHEMA_VERSION == "1.1"
+    assert GENERATION_REQUEST_SCHEMA_VERSION == "1.2"
     assert request.schema_version == GENERATION_REQUEST_SCHEMA_VERSION
-    assert code.schema_version == SCHEMA_VERSION == "1.0"
-    assert code.generation_request.schema_version == "1.1"
+    assert code.schema_version == "1.1"
+    assert SCHEMA_VERSION == "1.0"
+    assert code.generation_request.schema_version == "1.2"
     assert attempt.schema_version == "1.0"
 
 
@@ -135,7 +146,7 @@ def test_explicit_v10_migration_derives_endpoint_hash_and_recomputes_identity() 
 
     migrated = migrate_generation_request_v1_0_to_v1_1(payload)
 
-    assert migrated.schema_version == "1.1"
+    assert migrated.schema_version == "1.2"
     assert migrated.endpoint_sha256 != "0" * 64
     assert migrated.request_id != payload["request_id"]
     assert payload["schema_version"] == "1.0"

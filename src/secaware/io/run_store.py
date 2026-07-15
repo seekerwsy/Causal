@@ -22,6 +22,7 @@ from secaware.pipeline.manifest import (
     write_stage_manifest,
 )
 from secaware.pipeline.stage_contracts import (
+    confirmation_generation_stage_contract_sha256,
     discovery_stage_contract_sha256,
     prompt_variant_stage_contract_sha256,
     randomization_stage_contract_sha256,
@@ -65,6 +66,11 @@ _PROMPT_VARIANT_OUTPUTS = (
 _RANDOMIZATION_OUTPUTS = (
     "interventions/randomization_manifest.jsonl",
     "interventions/assignments.jsonl",
+)
+_CONFIRMATION_GENERATION_OUTPUTS = (
+    "generation/confirmation_requests.jsonl",
+    "generation/confirmation_execution.jsonl",
+    "generation/confirmation_code.jsonl",
 )
 
 
@@ -445,6 +451,7 @@ class RunStore:
             "fci-discovery",
             "build-confirmation-variants",
             "randomize-confirmation",
+            "generate-confirmation",
             "generate-observed",
             "generate-counterfactual",
             "extract-prompt-tsg",
@@ -493,6 +500,11 @@ class RunStore:
         ):
             raise self._manifest_conflict(stage, "stage output contract is invalid")
         if stage == "randomize-confirmation" and tuple(relative_outputs) != _RANDOMIZATION_OUTPUTS:
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if (
+            stage == "generate-confirmation"
+            and tuple(relative_outputs) != _CONFIRMATION_GENERATION_OUTPUTS
+        ):
             raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
@@ -627,6 +639,7 @@ class RunStore:
                 else (
                     prompt_variant_stage_contract_sha256(stage)
                     or randomization_stage_contract_sha256(stage)
+                    or confirmation_generation_stage_contract_sha256(stage)
                     or discovery_stage_contract_sha256(stage)
                 )
             ),
@@ -954,6 +967,7 @@ class RunStore:
                 "fci-discovery",
                 "build-confirmation-variants",
                 "randomize-confirmation",
+                "generate-confirmation",
                 "extract-prompt-tsg",
                 "intervene",
                 "confirm",

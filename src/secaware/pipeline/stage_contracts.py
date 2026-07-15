@@ -29,10 +29,12 @@ from secaware.schema.causal import (
     PathPatternRecord,
     PathSupportRecord,
 )
+from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
     AssignmentRecord,
+    AssignmentExecutionRecord,
     ArmSpecRecord,
     ConfirmationProtocolInstanceRecord,
     ConfirmationProtocolRecord,
@@ -57,6 +59,7 @@ _CAUSAL_TABLE_STAGE = "assemble-causal-tables"
 _FCI_STAGE = "fci-discovery"
 _PROMPT_VARIANT_STAGE = "build-confirmation-variants"
 _RANDOMIZATION_STAGE = "randomize-confirmation"
+_CONFIRMATION_GENERATION_STAGE = "generate-confirmation"
 
 
 def _schema_sha256(model: type) -> str:
@@ -207,6 +210,36 @@ def randomization_stage_contract_sha256(stage: str) -> str | None:
     return canonical_sha256(randomization_stage_contract_payload())
 
 
+def confirmation_generation_stage_contract_payload() -> dict[str, object]:
+    """Bind assignment generation to every direct schema/config/provider contract."""
+
+    from secaware.pipeline.manifest import StageManifest
+    from secaware.pipeline.stages.confirmation_generation import (
+        CONFIRMATION_PROVIDER_POLICY_VERSION,
+    )
+
+    return {
+        "stage": _CONFIRMATION_GENERATION_STAGE,
+        "contract_version": "assignment-bound-confirmation-generation-v1",
+        "provider_policy_version": CONFIRMATION_PROVIDER_POLICY_VERSION,
+        "app_config_schema": _schema_sha256(AppConfig),
+        "generation_config_schema": _schema_sha256(GenerationConfig),
+        "request_schema": _schema_sha256(GenerationRequestRecord),
+        "code_schema": _schema_sha256(CanonicalGeneratedCodeRecord),
+        "execution_schema": _schema_sha256(AssignmentExecutionRecord),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "variant_schema": _schema_sha256(PromptVariantRecord),
+        "randomization_manifest_schema": _schema_sha256(RandomizationManifestRecord),
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+    }
+
+
+def confirmation_generation_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _CONFIRMATION_GENERATION_STAGE:
+        return None
+    return canonical_sha256(confirmation_generation_stage_contract_payload())
+
+
 __all__ = [
     "discovery_stage_contract_payload",
     "discovery_stage_contract_sha256",
@@ -214,4 +247,6 @@ __all__ = [
     "prompt_variant_stage_contract_sha256",
     "randomization_stage_contract_payload",
     "randomization_stage_contract_sha256",
+    "confirmation_generation_stage_contract_payload",
+    "confirmation_generation_stage_contract_sha256",
 ]

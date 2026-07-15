@@ -1,5 +1,7 @@
 from secaware.schema.generation import (
+    EndpointType,
     GENERATION_REQUEST_SCHEMA_VERSION,
+    GenerationCondition,
     GenerationParameters,
     GenerationProvenance,
     GenerationRequestRecord,
@@ -36,6 +38,8 @@ from secaware.schema.features import (
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
     AssignmentRecord,
+    AssignmentExecutionRecord,
+    AssignmentExecutionStatus,
     ArmRole,
     ArmSpecRecord,
     CONFIRMATION_CONTROL_ONLY_FEATURE_IDS,
@@ -90,6 +94,8 @@ from secaware.schema.tsg import (
 __all__ = [
     "AllowedDeltaRecord",
     "AssignmentRecord",
+    "AssignmentExecutionRecord",
+    "AssignmentExecutionStatus",
     "ArmRole",
     "ArmSpecRecord",
     "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
@@ -113,6 +119,7 @@ __all__ = [
     "AnalyzerProvenanceRecord",
     "EffectRecord",
     "EdgeType",
+    "EndpointType",
     "EndpointMark",
     "FactorType",
     "FeatureFamily",
@@ -125,6 +132,7 @@ __all__ = [
     "FunctionalOutcomeContractRecord",
     "GraphDeltaRecord",
     "GenerationParameters",
+    "GenerationCondition",
     "GENERATION_REQUEST_SCHEMA_VERSION",
     "GenerationProvenance",
     "GenerationRequestRecord",

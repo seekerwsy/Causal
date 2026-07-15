@@ -13,6 +13,8 @@ from secaware.schema.generation import (
     build_generation_request_id,
     sha256_text,
 )
+from secaware.config import GenerationConfig
+from secaware.schema.experiments import AssignmentRecord, PromptVariantRecord
 from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import PromptRecord
 
@@ -279,7 +281,7 @@ def _endpoint_sha256(
 
 def _record(
     *,
-    condition: Literal["observed", "counterfactual"],
+    condition: Literal["observed", "counterfactual", "confirm_arm"],
     prompt_id: str,
     prompt: str,
     language: str,
@@ -292,6 +294,13 @@ def _record(
     system_template_version: str,
     system_template_sha256: str,
     parameters: GenerationParameters,
+    assignment_id: str | None = None,
+    target_spec_id: str | None = None,
+    target_instance_id: str | None = None,
+    arm_protocol_id: str | None = None,
+    protocol_instance_id: str | None = None,
+    variant_id: str | None = None,
+    arm_role: object | None = None,
 ) -> GenerationRequestRecord:
     prompt_sha256 = sha256_text(prompt)
     return GenerationRequestRecord(
@@ -311,6 +320,13 @@ def _record(
             system_template_version=system_template_version,
             system_template_sha256=system_template_sha256,
             parameters=parameters,
+            assignment_id=assignment_id,
+            target_spec_id=target_spec_id,
+            target_instance_id=target_instance_id,
+            arm_protocol_id=arm_protocol_id,
+            protocol_instance_id=protocol_instance_id,
+            variant_id=variant_id,
+            arm_role=arm_role,
         ),
         condition=condition,
         prompt_id=prompt_id,
@@ -321,6 +337,13 @@ def _record(
         seed_id=seed_id,
         hypothesis_id=hypothesis_id,
         intervention_id=intervention_id,
+        assignment_id=assignment_id,
+        target_spec_id=target_spec_id,
+        target_instance_id=target_instance_id,
+        arm_protocol_id=arm_protocol_id,
+        protocol_instance_id=protocol_instance_id,
+        variant_id=variant_id,
+        arm_role=arm_role,
         endpoint_type=endpoint_type,
         endpoint_sha256=endpoint_sha256,
         system_template_version=system_template_version,
@@ -470,3 +493,121 @@ def plan_counterfactual_requests(
     _ensure_unique_request_coordinates(records)
     _ensure_unique_request_ids(records)
     return records
+
+
+def plan_confirmation_requests(
+    assignments: Iterable[AssignmentRecord],
+    variants: Iterable[PromptVariantRecord],
+    config: GenerationConfig,
+) -> list[GenerationRequestRecord]:
+    """Join every frozen assignment to exactly one frozen prompt variant."""
+
+    try:
+        trusted_config = GenerationConfig.model_validate(config)
+        assignment_values = _bounded_snapshots(
+            assignments,
+            code=ErrorCode.CONTRACT,
+            message="confirmation assignment collection failed validation",
+            snapshot=lambda value: _revalidated_model(value, AssignmentRecord),
+        )
+        variant_values = _bounded_snapshots(
+            variants,
+            code=ErrorCode.CONTRACT,
+            message="confirmation variant collection failed validation",
+            snapshot=lambda value: _revalidated_model(value, PromptVariantRecord),
+        )
+        if not assignment_values or not variant_values:
+            raise ValueError
+        assignment_ids = tuple(item.assignment_id for item in assignment_values)
+        variant_ids = tuple(item.variant_id for item in variant_values)
+        if (
+            len(assignment_ids) != len(set(assignment_ids))
+            or len(variant_ids) != len(set(variant_ids))
+        ):
+            raise ValueError
+        variant_by_id = {item.variant_id: item for item in variant_values}
+        referenced_variant_ids = {item.variant_id for item in assignment_values}
+        if referenced_variant_ids != set(variant_by_id):
+            raise ValueError
+
+        if trusted_config.provider == "openai_compatible":
+            provider = trusted_config.openai_compatible
+            if provider is None:
+                raise ValueError
+            endpoint_type: EndpointType = "chat_completions"
+            endpoint_identity = provider.base_url
+            parameters = _parameters(provider.parameters)
+            system_template = provider.system_template
+            system_template_version = provider.system_template_version
+        elif trusted_config.provider == "file":
+            if not trusted_config.file_provider_dir:
+                raise ValueError
+            endpoint_type = "offline"
+            endpoint_identity = trusted_config.file_provider_dir
+            parameters = GenerationParameters()
+            system_template = ""
+            system_template_version = "none"
+        elif trusted_config.provider == "mock":
+            endpoint_type = "mock"
+            endpoint_identity = "mock"
+            parameters = GenerationParameters()
+            system_template = ""
+            system_template_version = "none"
+        else:
+            raise ValueError
+        endpoint_sha256 = _endpoint_sha256(endpoint_type, endpoint_identity)
+        system_template_sha256 = sha256_text(system_template)
+
+        records: list[GenerationRequestRecord] = []
+        for assignment in assignment_values:
+            variant = variant_by_id.get(assignment.variant_id)
+            unit = assignment.experimental_unit
+            if (
+                variant is None
+                or assignment.seed_id not in trusted_config.confirmation_seeds
+                or variant.task_id != unit.task_id
+                or variant.hypothesis_id != unit.hypothesis_id
+                or variant.target_spec_id != assignment.target_spec_id
+                or variant.target_instance_id != assignment.target_instance_id
+                or variant.arm_protocol_id != assignment.arm_protocol_id
+                or variant.protocol_instance_id != assignment.protocol_instance_id
+                or variant.arm_role is not assignment.arm_role
+            ):
+                raise ValueError
+            records.append(
+                _record(
+                    condition="confirm_arm",
+                    prompt_id=variant.variant_prompt_id,
+                    prompt=variant.prompt_text,
+                    language="python",
+                    model_id=unit.model_id,
+                    seed_id=assignment.seed_id,
+                    hypothesis_id=unit.hypothesis_id,
+                    intervention_id=None,
+                    endpoint_type=endpoint_type,
+                    endpoint_sha256=endpoint_sha256,
+                    system_template_version=system_template_version,
+                    system_template_sha256=system_template_sha256,
+                    parameters=parameters,
+                    assignment_id=assignment.assignment_id,
+                    target_spec_id=assignment.target_spec_id,
+                    target_instance_id=assignment.target_instance_id,
+                    arm_protocol_id=assignment.arm_protocol_id,
+                    protocol_instance_id=assignment.protocol_instance_id,
+                    variant_id=assignment.variant_id,
+                    arm_role=assignment.arm_role,
+                )
+            )
+        records.sort(key=lambda item: (item.assignment_id or "", item.request_id))
+        if len({item.request_id for item in records}) != len(records):
+            raise ValueError
+        return records
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _planner_error(
+            ErrorCode.CONTRACT,
+            "confirmation generation planning failed validation",
+        ) from None

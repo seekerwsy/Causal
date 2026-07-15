@@ -1693,6 +1693,6 @@ def test_old_code_manifest_and_v10_ledger_are_rerun_instead_of_skipped(
         required=True,
         allow_empty=False,
     )
-    assert all(request.schema_version == "1.1" for request in migrated)
+    assert all(request.schema_version == "1.2" for request in migrated)
     manifest = read_stage_manifest(store.path(".stages", f"{stage}.json"))
     assert manifest.code_version == "0.2.0"

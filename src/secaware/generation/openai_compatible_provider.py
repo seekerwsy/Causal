@@ -27,12 +27,16 @@ _EXTRA_BODY_PARAMETER_KEYS = frozenset({"max_completion_tokens", "reasoning_effo
 
 @dataclass(frozen=True, slots=True, repr=False)
 class OpenAICompatibleGenerationResult:
-    code: str
+    code: str | None
     provenance: GenerationProvenance
     attempts: tuple[GenerationAttemptRecord, ...]
+    finish_reason: str = "stop"
 
     def __post_init__(self) -> None:
-        if type(self.code) is not str or not self.code.strip():
+        if self.finish_reason not in {"stop", "content_filter"} or (
+            self.finish_reason == "stop"
+            and (type(self.code) is not str or not self.code.strip())
+        ) or (self.finish_reason == "content_filter" and self.code is not None):
             raise ValueError("provider result code failed validation")
         metadata_failed = False
         try:
@@ -175,7 +179,7 @@ def _validate_usage(usage: object) -> None:
         value = None
 
 
-def _response_code(response: object) -> str:
+def _response_code(response: object) -> tuple[str | None, str]:
     choices: object = None
     choice: object = None
     finish_reason: object = None
@@ -191,14 +195,16 @@ def _response_code(response: object) -> str:
             raise ValueError("invalid choices")
         choice = choices[0]
         finish_reason = _member(choice, "finish_reason")
-        if type(finish_reason) is not str or finish_reason != "stop":
+        if type(finish_reason) is not str or finish_reason not in {"stop", "content_filter"}:
             raise ValueError("invalid finish reason")
         message = _member(choice, "message")
         content = _member(message, "content")
-        if type(content) is not str or not content.strip():
+        if finish_reason == "stop" and (type(content) is not str or not content.strip()):
             raise ValueError("invalid message content")
+        if finish_reason == "content_filter" and content not in {None, ""}:
+            raise ValueError("invalid filtered content")
         _validate_usage(_member(response, "usage", default=_MISSING))
-        return content
+        return (content if finish_reason == "stop" else None, finish_reason)
     finally:
         response = None
         choices = None
@@ -355,6 +361,7 @@ class OpenAICompatibleProvider:
         response: object = None
         classification: _FailureClassification | None = None
         code: str | None = None
+        finish_reason = ""
         try:
             trusted = self._request(request, system_template)
             if trusted is None:
@@ -433,12 +440,13 @@ class OpenAICompatibleProvider:
                     continue
 
                 code = None
+                finish_reason = ""
                 response_invalid = False
                 try:
-                    code = _response_code(response)
+                    code, finish_reason = _response_code(response)
                 except Exception:
                     response_invalid = True
-                if response_invalid or code is None:
+                if response_invalid or (code is None and finish_reason != "content_filter"):
                     attempts.append(
                         self._attempt(
                             trusted.request_id,
@@ -472,6 +480,7 @@ class OpenAICompatibleProvider:
                         producer_version=_PRODUCER_VERSION,
                     ),
                     attempts=tuple(attempts),
+                    finish_reason=finish_reason,
                 )
 
             return _provider_error(
@@ -486,6 +495,7 @@ class OpenAICompatibleProvider:
             response = None
             classification = None
             code = None
+            finish_reason = ""
             request = None  # type: ignore[assignment]
             system_template = ""
             self = None  # type: ignore[assignment]

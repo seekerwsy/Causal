@@ -1366,6 +1366,17 @@ def test_malformed_success_responses_are_rejected_without_retry(response: object
     )
 
 
+def test_content_filter_is_the_only_valid_terminal_no_code_response() -> None:
+    client = FakeClient([_response(code=None, finish_reason="content_filter")])
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    result = provider.generate(_request(), system_template=_SYSTEM)
+
+    assert result.finish_reason == "content_filter"
+    assert result.code is None
+    assert len(client.completions.calls) == 1
+
+
 def test_hostile_client_exception_is_wrapped_without_rendering_it() -> None:
     secret = "hostile-client-exception-secret"
 
