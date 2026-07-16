@@ -136,6 +136,10 @@ def _config() -> FCIDiscoveryConfig:
     )
 
 
+def _config_with(**changes: object) -> FCIDiscoveryConfig:
+    return FCIDiscoveryConfig.model_validate({**_config().model_dump(mode="python"), **changes})
+
+
 class _CapturingRunner:
     def __init__(self, *, fail_on: PAGRunKind | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -315,3 +319,148 @@ def test_persisted_jci_result_relation_recomputes_delta_and_rejects_forgery() ->
     )
     with pytest.raises(SecAwareError, match="JCI"):
         validate_jci_analysis_result(table, rows, config, forged)
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        _config_with(max_rows=3),
+        _config_with(max_variables=2),
+        _config_with(min_independent_tasks=3),
+    ),
+)
+def test_jci_fci_preflight_rejects_config_bounds_before_matrix_or_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    config: FCIDiscoveryConfig,
+) -> None:
+    from secaware.causal.jci import analyze_jci_stratum
+
+    table, rows = _jci_table_and_rows()
+    runner = _CapturingRunner()
+    matrix_called = False
+
+    def forbidden_matrix(*_args: object, **_kwargs: object) -> np.ndarray:
+        nonlocal matrix_called
+        matrix_called = True
+        raise AssertionError("matrix allocation must follow JCI FCI preflight")
+
+    monkeypatch.setattr("secaware.causal.jci._matrix_for_exact_rows", forbidden_matrix)
+
+    with pytest.raises(SecAwareError, match="JCI"):
+        analyze_jci_stratum(table, rows, config, runner=runner)
+    assert matrix_called is False
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        _config_with(max_rows=3),
+        _config_with(max_variables=2),
+        _config_with(min_independent_tasks=3),
+    ),
+)
+def test_persisted_jci_relation_reuses_preflight_before_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    config: FCIDiscoveryConfig,
+) -> None:
+    from secaware.causal.jci import (
+        analyze_jci_stratum,
+        validate_jci_analysis_result,
+    )
+
+    table, rows = _jci_table_and_rows()
+    result = analyze_jci_stratum(table, rows, _config(), runner=_CapturingRunner())
+    matrix_called = False
+
+    def forbidden_matrix(*_args: object, **_kwargs: object) -> np.ndarray:
+        nonlocal matrix_called
+        matrix_called = True
+        raise AssertionError("persisted relation must preflight before matrix allocation")
+
+    monkeypatch.setattr("secaware.causal.jci._matrix_for_exact_rows", forbidden_matrix)
+
+    with pytest.raises(SecAwareError, match="JCI"):
+        validate_jci_analysis_result(table, rows, config, result)
+    assert matrix_called is False
+
+
+@pytest.mark.parametrize("mutation_run", (PAGRunKind.JCI_RAW, PAGRunKind.JCI_CONSTRAINED))
+def test_jci_analysis_fails_closed_on_runner_matrix_mutation(
+    mutation_run: PAGRunKind,
+) -> None:
+    from secaware.causal.jci import analyze_jci_stratum
+
+    class _MutatingRunner(_CapturingRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.run_kinds: list[PAGRunKind] = []
+
+        def run(
+            self,
+            matrix: np.ndarray,
+            table: CausalTableRecord,
+            knowledge: BackgroundKnowledgeRecord,
+            config: FCIDiscoveryConfig,
+            run_kind: PAGRunKind,
+        ) -> PAGRecord:
+            self.run_kinds.append(run_kind)
+            if run_kind is mutation_run:
+                matrix.flags.writeable = True
+                matrix[0, 0] = (int(matrix[0, 0]) + 1) % 2
+            return super().run(matrix, table, knowledge, config, run_kind)
+
+    table, rows = _jci_table_and_rows()
+    runner = _MutatingRunner()
+
+    with pytest.raises(SecAwareError, match="JCI"):
+        analyze_jci_stratum(table, rows, _config(), runner=runner)
+    assert runner.run_kinds == (
+        [PAGRunKind.JCI_RAW]
+        if mutation_run is PAGRunKind.JCI_RAW
+        else [PAGRunKind.JCI_RAW, PAGRunKind.JCI_CONSTRAINED]
+    )
+
+
+def test_runner_retained_matrix_alias_has_only_immutable_bytes_backing() -> None:
+    from secaware.causal.jci import analyze_jci_stratum
+
+    class _RetainingRunner(_CapturingRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.aliases: list[np.ndarray] = []
+
+        def run(
+            self,
+            matrix: np.ndarray,
+            table: CausalTableRecord,
+            knowledge: BackgroundKnowledgeRecord,
+            config: FCIDiscoveryConfig,
+            run_kind: PAGRunKind,
+        ) -> PAGRecord:
+            self.aliases.append(matrix)
+            return super().run(matrix, table, knowledge, config, run_kind)
+
+    table, rows = _jci_table_and_rows()
+    runner = _RetainingRunner()
+    expected = np.asarray(tuple(row.values for row in rows), dtype=np.int64).tobytes(order="C")
+
+    analyze_jci_stratum(table, rows, _config(), runner=runner)
+
+    assert len(runner.aliases) == 2
+    for alias in runner.aliases:
+        assert alias.flags.c_contiguous is True
+        assert alias.flags.owndata is False
+        assert alias.flags.writeable is False
+        assert alias.tobytes(order="C") == expected
+        with pytest.raises(ValueError):
+            alias.flags.writeable = True
+        with pytest.raises(ValueError):
+            alias[0, 0] = (int(alias[0, 0]) + 1) % 2
+        base: object = alias
+        while isinstance(base, np.ndarray):
+            assert base.flags.writeable is False
+            with pytest.raises(ValueError):
+                base.flags.writeable = True
+            base = base.base
+        assert type(base) is bytes

@@ -822,11 +822,20 @@ def _matrix_for_exact_rows(
     checked_table = checked_tables[0]
     if any(row.table_id != checked_table.table_id for row in checked_rows):
         raise ValueError
+    expected_shape = (checked_table.row_count, len(checked_table.variables))
     matrix = np.asarray(tuple(row.values for row in checked_rows), dtype=np.int64)
-    if matrix.shape != (checked_table.row_count, len(checked_table.variables)):
+    if matrix.shape != expected_shape:
         raise ValueError
-    result = np.array(matrix, dtype=np.int64, order="C", copy=True)
-    result.flags.writeable = False
+    immutable_buffer = matrix.tobytes(order="C")
+    result = np.frombuffer(immutable_buffer, dtype=np.int64).reshape(expected_shape)
+    if (
+        result.flags.owndata
+        or result.flags.writeable
+        or not result.flags.c_contiguous
+        or type(result.base) is not np.ndarray
+        or type(result.base.base) is not bytes
+    ):
+        raise ValueError
     return result
 
 
@@ -893,6 +902,43 @@ def _checked_pag_for_run(
         raise ValueError
     validate_pag_against_background(checked_pag, knowledge)
     return checked_pag
+
+
+def _validate_jci_fci_preflight(
+    table: CausalTableRecord,
+    config: FCIDiscoveryConfig,
+) -> None:
+    if (
+        table.row_count > config.max_rows
+        or len(table.variables) > config.max_variables
+        or table.independent_task_count < config.min_independent_tasks
+    ):
+        raise ValueError
+
+
+def _immutable_matrix_signature(matrix: np.ndarray) -> tuple[object, ...]:
+    if (
+        type(matrix) is not np.ndarray
+        or matrix.ndim != 2
+        or matrix.dtype != np.dtype(np.int64)
+        or not matrix.flags.c_contiguous
+        or matrix.flags.owndata
+        or matrix.flags.writeable
+    ):
+        raise ValueError
+    base: object = matrix
+    while isinstance(base, np.ndarray):
+        if base.flags.owndata or base.flags.writeable:
+            raise ValueError
+        base = base.base
+    if type(base) is not bytes:
+        raise ValueError
+    return (
+        matrix.shape,
+        matrix.strides,
+        matrix.dtype.str,
+        matrix.tobytes(order="C"),
+    )
 
 
 def _checked_jci_pag_pair(
@@ -1024,15 +1070,12 @@ def _analyze_jci_stratum(
     checked_tables, checked_rows = _checked_jci_table_bundle((table,), rows)
     checked_table = checked_tables[0]
     checked_config = FCIDiscoveryConfig.model_validate(config, strict=True)
+    _validate_jci_fci_preflight(checked_table, checked_config)
     base, provenance = _build_jci_background(checked_table)
     _validate_jci_background_bundle(checked_table, base, provenance)
 
     raw_matrix = _matrix_for_exact_rows(checked_table, checked_rows)
-    matrix_signature = (
-        raw_matrix.shape,
-        raw_matrix.dtype.str,
-        raw_matrix.tobytes(order="C"),
-    )
+    matrix_signature = _immutable_matrix_signature(raw_matrix)
     raw_pag = _checked_pag_for_run(
         runner.run(
             raw_matrix,
@@ -1046,13 +1089,11 @@ def _analyze_jci_stratum(
         checked_config,
         PAGRunKind.JCI_RAW,
     )
+    if _immutable_matrix_signature(raw_matrix) != matrix_signature:
+        raise ValueError
 
     constrained_matrix = _matrix_for_exact_rows(checked_table, checked_rows)
-    if (
-        constrained_matrix.shape,
-        constrained_matrix.dtype.str,
-        constrained_matrix.tobytes(order="C"),
-    ) != matrix_signature:
+    if _immutable_matrix_signature(constrained_matrix) != matrix_signature:
         raise ValueError
     constrained_knowledge = provenance.materialized_background_knowledge
     constrained_pag = _checked_pag_for_run(
@@ -1068,6 +1109,8 @@ def _analyze_jci_stratum(
         checked_config,
         PAGRunKind.JCI_CONSTRAINED,
     )
+    if _immutable_matrix_signature(constrained_matrix) != matrix_signature:
+        raise ValueError
     delta = _compare_jci_pags(raw_pag, constrained_pag, provenance)
     return JCIAnalysisResult(
         raw_pag=raw_pag,
@@ -1099,10 +1142,12 @@ def _validate_jci_analysis_result(
 ) -> None:
     checked_tables, checked_rows = _checked_jci_table_bundle((table,), rows)
     checked_table = checked_tables[0]
+    checked_config = FCIDiscoveryConfig.model_validate(config, strict=True)
+    _validate_jci_fci_preflight(checked_table, checked_config)
     # Rebuilding authenticates the complete row payload committed by table_id;
     # PAGRecord binds that table_id rather than a second, divergent matrix digest.
-    _matrix_for_exact_rows(checked_table, checked_rows)
-    checked_config = FCIDiscoveryConfig.model_validate(config, strict=True)
+    matrix = _matrix_for_exact_rows(checked_table, checked_rows)
+    _immutable_matrix_signature(matrix)
     if type(result) is not JCIAnalysisResult:
         raise ValueError
     base, provenance = _build_jci_background(checked_table)
