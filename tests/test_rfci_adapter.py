@@ -166,6 +166,57 @@ def _matrix() -> np.ndarray:
     return np.asarray(((0, 0, 1), (1, 0, 0), (0, 1, 1), (1, 1, 0)), dtype=np.int64)
 
 
+def _rows(table: CausalTableRecord) -> tuple[CausalObservationRecord, ...]:
+    rows = []
+    for index, values in enumerate(_matrix().tolist()):
+        rows.append(
+            CausalObservationRecord.from_content(
+                table=table,
+                task_id=f"task-{index}",
+                prompt_id=f"prompt-{index}",
+                model_id=table.model_id,
+                seed_id=index,
+                values=tuple(values),
+            )
+        )
+    return tuple(sorted(rows, key=lambda item: (item.table_id, item.row_id)))
+
+
+def _foreign_row(table: CausalTableRecord) -> CausalObservationRecord:
+    observations = []
+    for index, raw_values in enumerate(_matrix().tolist()):
+        values = tuple(raw_values)
+        if index == 3:
+            values = (values[0], values[1], 1 - values[2])
+        task_id = f"task-{index}"
+        prompt_id = f"prompt-{index}"
+        observations.append(
+            (
+                CausalObservationRecord.row_id_from_content(
+                    task_id=task_id,
+                    prompt_id=prompt_id,
+                    model_id=table.model_id,
+                    seed_id=index,
+                    values=values,
+                ),
+                task_id,
+                prompt_id,
+                index,
+                values,
+            )
+        )
+    foreign_table = CausalTableRecord.from_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        variables=table.variables,
+        row_count=4,
+        independent_task_count=4,
+        observation_payload=observations,
+    )
+    return _rows(foreign_table)[0]
+
+
 def _config(**changes: object) -> Any:
     from secaware.config import RFCIConfig
 
@@ -253,11 +304,20 @@ def test_rfci_adapter_uses_exact_table_rows_gsquare_knowledge_and_run_settings()
     from secaware.discovery.rfci_backend import run_rfci_sensitivity
 
     table = _table()
-    matrix = _matrix()
+    rows = _rows(table)
+    matrix = np.asarray(tuple(item.values for item in rows), dtype=np.int64)
     knowledge = build_background_knowledge(table)
     config = _config(alpha=0.01, depth=4, max_discriminating_path_length=8)
 
-    pag = run_rfci_sensitivity(table, matrix, knowledge, config, _FakeTetradSearch)
+    result = run_rfci_sensitivity(
+        table,
+        rows,
+        knowledge,
+        config,
+        _FakeTetradSearch,
+        capability=_capability(),
+    )
+    pag = result.pag
 
     search = _FakeTetradSearch.instances[0]
     assert tuple(search.frame.columns) == tuple(item.variable_id for item in table.variables)
@@ -278,6 +338,7 @@ def test_rfci_adapter_uses_exact_table_rows_gsquare_knowledge_and_run_settings()
         "max_disc_path_length": 8,
         "complete_rule_set_used": True,
     }
+    assert pag is not None
     assert pag.run_kind is PAGRunKind.RFCI_SENSITIVITY
     assert pag.backend == "py_tetrad_rfci_v1"
     assert pag.backend_version == PINNED_COMMIT
@@ -302,14 +363,17 @@ def test_rfci_adapter_converts_only_through_shared_pag_endpoint_codec() -> None:
 
     _FakeTetradSearch.graph_factory = graph
     table = _table()
-    pag = run_rfci_sensitivity(
+    result = run_rfci_sensitivity(
         table,
-        _matrix(),
+        _rows(table),
         build_background_knowledge(table),
         _config(),
         _FakeTetradSearch,
+        capability=_capability(),
     )
 
+    assert result.pag is not None
+    pag = result.pag
     edge = pag.edges[0]
     assert edge.left == "x.safety.sql_parameterization"
     assert edge.right == "y.secure_functional"
@@ -338,10 +402,11 @@ def test_rfci_adapter_rejects_postrun_background_violation() -> None:
     with pytest.raises(SecAwareError):
         run_rfci_sensitivity(
             table,
-            _matrix(),
+            _rows(table),
             build_background_knowledge(table),
             _config(),
             _FakeTetradSearch,
+            capability=_capability(),
         )
 
 
@@ -353,7 +418,7 @@ def test_rfci_adapter_rejects_postrun_background_violation() -> None:
         np.asarray(((0, 0, 2),) * 4, dtype=np.int64),
     ),
 )
-def test_rfci_rejects_invalid_exact_row_matrix_before_fake_boundary(matrix: np.ndarray) -> None:
+def test_rfci_rejects_detached_ndarray_before_fake_boundary(matrix: np.ndarray) -> None:
     from secaware.discovery.rfci_backend import run_rfci_sensitivity
 
     table = _table()
@@ -375,13 +440,14 @@ def test_disabled_or_unavailable_rfci_returns_no_pag_and_never_enters_boundary()
     table = _table()
     result = run_rfci_sensitivity(
         table,
-        _matrix(),
+        _rows(table),
         build_background_knowledge(table),
         RFCIConfig(),
         lambda _frame: pytest.fail("disabled RFCI must not enter adapter"),
     )
 
-    assert result is None
+    assert result.capability.status == "disabled"
+    assert result.pag is None
 
 
 def test_enabled_but_unavailable_rfci_returns_no_pag_and_keeps_capability_record(
@@ -412,12 +478,13 @@ def test_enabled_but_unavailable_rfci_returns_no_pag_and_keeps_capability_record
 
     result = rfci_backend.run_rfci_sensitivity(
         table,
-        _matrix(),
+        _rows(table),
         build_background_knowledge(table),
         _config(),
     )
 
-    assert result is None
+    assert result.capability == capability
+    assert result.pag is None
     assert capability.status == "unavailable"
     assert capability.reason_code == "jpype_missing"
 
@@ -430,6 +497,172 @@ def test_rfci_has_no_primary_run_kind_escape_hatch() -> None:
     assert "run_kind" not in signature(run_rfci_sensitivity).parameters
 
 
+def test_rfci_public_boundary_rebuilds_matrix_from_exact_authenticated_rows() -> None:
+    from secaware.discovery.rfci_backend import run_rfci_sensitivity
+
+    table = _table()
+    result = run_rfci_sensitivity(
+        table,
+        _rows(table),
+        build_background_knowledge(table),
+        _config(),
+        _FakeTetradSearch,
+        capability=_capability(),
+    )
+
+    assert result.capability == _capability()
+    assert result.pag is not None
+    assert np.array_equal(
+        _FakeTetradSearch.instances[0].frame.to_numpy(dtype=np.int64),
+        np.asarray(tuple(item.values for item in _rows(table)), dtype=np.int64),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("detached", "missing", "extra", "reordered", "forged", "foreign"),
+)
+def test_rfci_public_boundary_rejects_detached_matrix_and_forged_row_relations(
+    mutation: str,
+) -> None:
+    from secaware.discovery.rfci_backend import run_rfci_sensitivity
+
+    table = _table()
+    knowledge = build_background_knowledge(table)
+    rows = _rows(table)
+    forged = CausalObservationRecord.from_content(
+        table=table,
+        task_id=rows[0].task_id,
+        prompt_id=rows[0].prompt_id,
+        model_id=rows[0].model_id,
+        seed_id=rows[0].seed_id,
+        values=(1 - rows[0].values[0], *rows[0].values[1:]),
+    )
+    relation = {
+        "detached": _matrix(),
+        "missing": rows[:-1],
+        "extra": (*rows, rows[-1]),
+        "reordered": tuple(reversed(rows)),
+        "forged": tuple(
+            sorted((forged, *rows[1:]), key=lambda item: (item.table_id, item.row_id))
+        ),
+        "foreign": tuple(
+            sorted(
+                (_foreign_row(table), *rows[1:]),
+                key=lambda item: (item.table_id, item.row_id),
+            )
+        ),
+    }[mutation]
+
+    with pytest.raises(SecAwareError):
+        run_rfci_sensitivity(
+            table,
+            relation,  # type: ignore[arg-type]
+            knowledge,
+            _config(),
+            _FakeTetradSearch,
+            capability=_capability(),
+        )
+    assert _FakeTetradSearch.instances == []
+
+
+def test_unavailable_rfci_returns_persistable_result_bound_to_exact_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from secaware.discovery import rfci_backend
+
+    capability = _capability(
+        available=False,
+        status="unavailable",
+        java_major=None,
+        jpype_version=None,
+        py_tetrad_commit=None,
+        tetrad_jar_sha256=None,
+        reason_code="jpype_missing",
+    )
+    monkeypatch.setattr(rfci_backend, "detect_rfci_capability", lambda _config: capability)
+    table = _table()
+
+    result = rfci_backend.run_rfci_sensitivity(
+        table,
+        _rows(table),
+        build_background_knowledge(table),
+        _config(),
+    )
+
+    assert result.capability == capability
+    assert result.pag is None
+    assert type(result).model_validate_json(result.model_dump_json()) == result
+
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        result.pag = None  # type: ignore[misc]
+    with pytest.raises(ValidationError):
+        type(result).model_validate(
+            {"capability": capability, "pag": None, "unexpected": True}
+        )
+
+
+def test_rfci_public_boundary_accepts_exact_authenticated_jci_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_jci_table_builder import fixture_for
+
+    from secaware.causal.jci import build_jci_background, build_jci_tables
+    from secaware.discovery import rfci_backend
+
+    fixture = fixture_for(task_count=2)
+    tables, all_rows = build_jci_tables(
+        fixture.assignments,
+        fixture.outcomes,
+        fixture.graphs,
+        variants=fixture.variants,
+        hypotheses=fixture.hypotheses,  # type: ignore[arg-type]
+        protocols=fixture.protocols,  # type: ignore[arg-type]
+        min_independent_tasks=2,
+    )
+    table = tables[0]
+    rows = tuple(item for item in all_rows if item.table_id == table.table_id)
+    knowledge, _provenance = build_jci_background(table)
+    expected = np.asarray(tuple(item.values for item in rows), dtype=np.int64)
+
+    def adapter(
+        received_table: CausalTableRecord,
+        matrix: np.ndarray,
+        received_knowledge: BackgroundKnowledgeRecord,
+        config: object,
+        _factory: object,
+    ) -> PAGRecord:
+        assert received_table == table
+        assert received_knowledge == knowledge
+        assert np.array_equal(matrix, expected)
+        return PAGRecord.from_content(
+            run_kind=PAGRunKind.RFCI_SENSITIVITY,
+            table_id=table.table_id,
+            backend="py_tetrad_rfci_v1",
+            backend_version=PINNED_COMMIT,
+            ci_test="gsq",
+            config_sha256=canonical_sha256(config.model_dump(mode="json")),  # type: ignore[attr-defined]
+            background_knowledge_sha256=knowledge.knowledge_sha256,
+            variable_ids=tuple(item.variable_id for item in table.variables),
+            edges=(),
+        )
+
+    monkeypatch.setattr(rfci_backend, "_run_rfci_adapter", adapter)
+
+    result = rfci_backend.run_rfci_sensitivity(
+        table,
+        rows,
+        knowledge,
+        _config(),
+        _FakeTetradSearch,
+        capability=_capability(),
+    )
+
+    assert result.pag is not None
+
+
 def test_spawned_rfci_runner_revalidates_sensitivity_provenance() -> None:
     from secaware.discovery.rfci_backend import SpawnedRFCIRunner
 
@@ -438,7 +671,7 @@ def test_spawned_rfci_runner_revalidates_sensitivity_provenance() -> None:
         capability=_capability(),
         timeout_seconds=2.0,
         worker=_returns_valid,
-    ).run(table, _matrix(), build_background_knowledge(table), _config())
+    ).run(table, _rows(table), build_background_knowledge(table), _config())
 
     assert pag is not None
     assert pag.run_kind is PAGRunKind.RFCI_SENSITIVITY
@@ -455,7 +688,7 @@ def test_spawned_rfci_runner_times_out_without_leaking_children() -> None:
             capability=_capability(),
             timeout_seconds=0.1,
             worker=_never_returns,
-        ).run(table, _matrix(), build_background_knowledge(table), _config())
+        ).run(table, _rows(table), build_background_knowledge(table), _config())
     assert time.monotonic() - started < 2.0
     assert {child.pid for child in multiprocessing.active_children()} <= baseline
     assert not any(
@@ -474,7 +707,7 @@ def test_spawned_rfci_runner_rejects_child_crash_and_config_drift(worker: Any) -
             capability=_capability(),
             timeout_seconds=2.0,
             worker=worker,
-        ).run(table, _matrix(), build_background_knowledge(table), _config())
+        ).run(table, _rows(table), build_background_knowledge(table), _config())
 
 
 def test_spawned_rfci_runner_rejects_tampered_capability_and_parent_inputs() -> None:
@@ -493,7 +726,7 @@ def test_spawned_rfci_runner_rejects_tampered_capability_and_parent_inputs() -> 
             capability=_capability(),
             timeout_seconds=2.0,
             worker=_returns_valid,
-        ).run(tampered, _matrix(), build_background_knowledge(table), _config())
+        ).run(tampered, _rows(table), build_background_knowledge(table), _config())
 
 
 def test_production_runner_reprobes_installation_and_rejects_self_reported_capability(
@@ -525,7 +758,7 @@ def test_production_runner_reprobes_installation_and_rejects_self_reported_capab
     with pytest.raises(SecAwareError):
         rfci_backend.SpawnedRFCIRunner(capability=_capability()).run(
             table,
-            _matrix(),
+            _rows(table),
             build_background_knowledge(table),
             _config(),
         )

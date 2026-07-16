@@ -18,7 +18,7 @@ from secaware.schema.common import (
     StrictModel,
     VersionedModel,
 )
-from secaware.schema.causal import EndpointMark, jci_row_id_from_content
+from secaware.schema.causal import EndpointMark, PAGRecord, PAGRunKind, jci_row_id_from_content
 from secaware.schema.experiments import ArmRole, AssignmentExecutionStatus
 
 
@@ -159,6 +159,41 @@ class RFCICapabilityRecord(_OutcomeContract):
         ):
             raise ValueError(self._safe_validation_message)
         return self
+
+
+class RFCISensitivityResult(SafeValidationMixin, StrictModel):
+    """Persistable RFCI outcome bound to the exact capability evidence checked."""
+
+    _safe_validation_message: ClassVar[str] = "RFCI sensitivity result failed validation"
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    capability: RFCICapabilityRecord
+    pag: PAGRecord | None
+
+    @model_validator(mode="after")
+    def validate_capability_binding(self) -> Self:
+        if self.capability.available:
+            if (
+                self.pag is None
+                or self.pag.run_kind is not PAGRunKind.RFCI_SENSITIVITY
+                or self.pag.backend_version != self.capability.py_tetrad_commit
+            ):
+                raise ValueError(self._safe_validation_message)
+        elif self.pag is not None:
+            raise ValueError(self._safe_validation_message)
+        return self
+
+    def __repr__(self) -> str:
+        return "RFCISensitivityResult()"
+
+    def __str__(self) -> str:
+        return "RFCISensitivityResult()"
 
 
 class ContrastSpecRecord(_OutcomeContract):

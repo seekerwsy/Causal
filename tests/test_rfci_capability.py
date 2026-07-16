@@ -115,6 +115,7 @@ def test_disabled_detection_does_not_probe_java_import_or_start_jpype(
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     monkeypatch.setattr(rfci_backend.importlib.util, "find_spec", forbidden)
     monkeypatch.setattr(rfci_backend.importlib.metadata, "version", forbidden)
+    monkeypatch.setattr(rfci_backend, "_runtime_python_version", forbidden)
     monkeypatch.setattr(rfci_backend, "_inspect_py_tetrad_installation", forbidden)
     monkeypatch.setattr(rfci_backend, "_detect_java_major", forbidden)
 
@@ -126,6 +127,125 @@ def test_disabled_detection_does_not_probe_java_import_or_start_jpype(
     assert capability.reason_code == "disabled"
     assert capability.java_major is None
     assert capability.jpype_version is None
+    assert capability.python_version == "0.0"
+
+
+def test_runtime_version_probe_exception_is_safe_unavailability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from secaware.config import RFCIConfig
+    from secaware.discovery import rfci_backend
+
+    monkeypatch.setattr(
+        rfci_backend,
+        "_runtime_python_version",
+        lambda: (_ for _ in ()).throw(OSError("private runtime detail")),
+    )
+
+    capability = rfci_backend.detect_rfci_capability(RFCIConfig(enabled=True))
+
+    assert capability.status == "unavailable"
+    assert capability.reason_code == "capability_probe_failed"
+    assert capability.python_version == "0.0"
+
+
+def test_direct_url_metadata_is_read_with_a_hard_byte_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    from secaware.discovery import rfci_backend
+
+    root = Path(str(tmp_path))
+    direct_url = root / "py_tetrad-0.1.dist-info" / "direct_url.json"
+    jar = root / "pytetrad" / "resources" / "tetrad-current.jar"
+    direct_url.parent.mkdir(parents=True)
+    jar.parent.mkdir(parents=True)
+    direct_url.write_bytes(b"x" * (rfci_backend._MAX_DIRECT_URL_BYTES + 1))
+    jar.write_bytes(b"jar")
+
+    class Distribution:
+        files = (
+            Path("py_tetrad-0.1.dist-info/direct_url.json"),
+            Path("pytetrad/resources/tetrad-current.jar"),
+        )
+
+        def locate_file(self, item: object) -> Path:
+            return root / Path(str(item))
+
+        def read_text(self, _name: str) -> str:
+            raise AssertionError("unbounded Distribution.read_text must not be used")
+
+    monkeypatch.setattr(rfci_backend.importlib.metadata, "distribution", lambda _name: Distribution())
+
+    commit, _jar_sha = rfci_backend._inspect_py_tetrad_installation()
+
+    assert commit is None
+
+
+@pytest.mark.parametrize("producer", ("overflow", "timeout"))
+def test_java_probe_caps_output_and_cleans_up_overflow_or_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    producer: str,
+) -> None:
+    from secaware.discovery import rfci_backend
+
+    class Stream:
+        closed = False
+
+        def read(self, size: int) -> bytes:
+            if self.closed or producer == "timeout":
+                return b""
+            return b"x" * size
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Process:
+        pid = 2_147_483_646
+
+        def __init__(self) -> None:
+            self.stdout = Stream()
+            self.returncode: int | None = None
+            self.killed = False
+            self.waited = False
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+            self.stdout.close()
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            self.waited = True
+            return -9 if self.returncode is None else self.returncode
+
+    process = Process()
+    taskkill_calls: list[list[str]] = []
+
+    def taskkill_only(command: list[str], *_args: object, **_kwargs: object) -> object:
+        if not command or command[0] != "taskkill":
+            raise AssertionError("java probe must not use capture_output subprocess.run")
+        taskkill_calls.append(command)
+        return object()
+
+    monkeypatch.setattr(rfci_backend.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(rfci_backend.subprocess, "run", taskkill_only)
+    monkeypatch.setattr(rfci_backend, "_JAVA_PROBE_TIMEOUT_SECONDS", 0.05)
+
+    assert rfci_backend._detect_java_major() is None
+    assert process.killed is True
+    assert process.waited is True
+    assert process.stdout.closed is True
+    if rfci_backend.os.name == "nt":
+        assert taskkill_calls
+    assert not any(
+        thread.name == "secaware-java-version-reader" and thread.is_alive()
+        for thread in __import__("threading").enumerate()
+    )
 
 
 def test_no_argument_detection_is_an_active_nonfatal_probe(

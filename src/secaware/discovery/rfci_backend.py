@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from collections.abc import Sequence
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -28,6 +29,7 @@ from secaware.causal.background import (
     to_causal_learn_background,
     validate_pag_against_background,
 )
+from secaware.causal.jci import matrix_for_exact_rows as matrix_for_exact_jci_rows
 from secaware.causal.pag import pag_from_causal_learn
 from secaware.config import FCIDiscoveryConfig, RFCIConfig
 from secaware.discovery.fci_supervisor import (
@@ -43,11 +45,16 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
+    CausalObservationRecord,
     CausalTableRecord,
     PAGRecord,
     PAGRunKind,
 )
-from secaware.schema.outcomes import RFCICapabilityRecord
+from secaware.schema.outcomes import (
+    JCIObservationRecord,
+    RFCICapabilityRecord,
+    RFCISensitivityResult,
+)
 
 
 PY_TETRAD_COMMIT = "a30707264aa4363a23ac5f136a70bbdd62212f07"
@@ -58,6 +65,7 @@ RFCI_BACKEND = "py_tetrad_rfci_v1"
 
 _PY_TETRAD_URL = "https://github.com/cmu-phil/py-tetrad.git"
 _MAX_JAR_BYTES = 256 * 1024 * 1024
+_MAX_DIRECT_URL_BYTES = 64 * 1024
 _HASH_CHUNK_BYTES = 1024 * 1024
 _MAX_JAVA_VERSION_OUTPUT_CHARS = 16 * 1024
 _JAVA_PROBE_TIMEOUT_SECONDS = 5.0
@@ -112,29 +120,42 @@ def _sha256_file(path: Path) -> str | None:
 def _inspect_py_tetrad_installation() -> tuple[str | None, str | None]:
     """Read VCS provenance and hash the installed JAR without importing py-tetrad."""
     distribution = importlib.metadata.distribution("py-tetrad")
-    direct_url_text = distribution.read_text("direct_url.json")
     commit: str | None = None
-    if direct_url_text is not None and len(direct_url_text) <= 64 * 1024:
-        direct_url = json.loads(direct_url_text)
-        if type(direct_url) is dict and direct_url.get("url") == _PY_TETRAD_URL:
-            vcs_info = direct_url.get("vcs_info")
-            if type(vcs_info) is dict and vcs_info.get("vcs") == "git":
-                candidate = vcs_info.get("commit_id")
-                if type(candidate) is str and re.fullmatch(r"[0-9a-f]{40}", candidate):
-                    commit = candidate
-
     files = distribution.files
     if files is None:
-        return commit, None
-    matches = tuple(
+        return None, None
+    distribution_root = Path(distribution.locate_file("")).resolve()
+    direct_url_matches = tuple(
+        item
+        for item in files
+        if str(item).replace("\\", "/").endswith(".dist-info/direct_url.json")
+    )
+    if len(direct_url_matches) == 1:
+        direct_url_path = Path(distribution.locate_file(direct_url_matches[0])).resolve()
+        try:
+            direct_url_path.relative_to(distribution_root)
+            with direct_url_path.open("rb") as handle:
+                direct_url_bytes = handle.read(_MAX_DIRECT_URL_BYTES + 1)
+            if len(direct_url_bytes) <= _MAX_DIRECT_URL_BYTES:
+                direct_url = json.loads(direct_url_bytes.decode("utf-8"))
+                if type(direct_url) is dict and direct_url.get("url") == _PY_TETRAD_URL:
+                    vcs_info = direct_url.get("vcs_info")
+                    if type(vcs_info) is dict and vcs_info.get("vcs") == "git":
+                        candidate = vcs_info.get("commit_id")
+                        if type(candidate) is str and re.fullmatch(r"[0-9a-f]{40}", candidate):
+                            commit = candidate
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            commit = None
+    jar_matches = tuple(
         item
         for item in files
         if str(item).replace("\\", "/") == "pytetrad/resources/tetrad-current.jar"
     )
-    if len(matches) != 1:
+    if len(jar_matches) != 1:
         return commit, None
-    distribution_root = Path(distribution.locate_file("")).resolve()
-    jar_path = Path(distribution.locate_file(matches[0])).resolve()
+    jar_path = Path(distribution.locate_file(jar_matches[0])).resolve()
     try:
         jar_path.relative_to(distribution_root)
     except ValueError:
@@ -142,23 +163,114 @@ def _inspect_py_tetrad_installation() -> tuple[str | None, str | None]:
     return commit, _sha256_file(jar_path)
 
 
-def _detect_java_major() -> int | None:
-    """Probe a bounded ``java -version`` process without importing or starting JPype."""
+def _terminate_java_process(
+    process: subprocess.Popen[bytes],
+    *,
+    force_tree: bool = False,
+) -> None:
+    """Best-effort tree cleanup for a short-lived, process-group-isolated probe."""
+    if process.poll() is None or force_tree:
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=1.0,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except BaseException:
+                pass
+        else:
+            try:
+                os.killpg(process.pid, 9)
+            except BaseException:
+                pass
+        if process.poll() is None:
+            try:
+                process.kill()
+            except BaseException:
+                pass
     try:
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        completed = subprocess.run(
-            ["java", "-version"],
-            capture_output=True,
-            check=False,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_JAVA_PROBE_TIMEOUT_SECONDS,
-            creationflags=creationflags,
+        process.wait(timeout=1.0)
+    except BaseException:
+        try:
+            process.kill()
+        except BaseException:
+            pass
+        try:
+            process.wait(timeout=1.0)
+        except BaseException:
+            pass
+
+
+def _detect_java_major() -> int | None:
+    """Probe ``java -version`` while capping bytes during production."""
+    process: subprocess.Popen[bytes] | None = None
+    reader: threading.Thread | None = None
+    output = bytearray()
+    overflow = threading.Event()
+    try:
+        popen_kwargs: dict[str, object] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        }
+        if os.name != "nt":
+            popen_kwargs["start_new_session"] = True
+        process = subprocess.Popen(["java", "-version"], **popen_kwargs)  # type: ignore[arg-type]
+        if process.stdout is None:
+            raise OSError
+
+        def read_bounded() -> None:
+            try:
+                while True:
+                    chunk = process.stdout.read(4096)
+                    if not chunk:
+                        return
+                    remaining = _MAX_JAVA_VERSION_OUTPUT_CHARS + 1 - len(output)
+                    if remaining > 0:
+                        output.extend(chunk[:remaining])
+                    if len(output) > _MAX_JAVA_VERSION_OUTPUT_CHARS:
+                        overflow.set()
+                        return
+            except BaseException:
+                overflow.set()
+
+        reader = threading.Thread(
+            target=read_bounded,
+            name="secaware-java-version-reader",
+            daemon=True,
         )
-        output = completed.stdout + completed.stderr
-        if completed.returncode != 0 or len(output) > _MAX_JAVA_VERSION_OUTPUT_CHARS:
+        reader.start()
+        deadline = time.monotonic() + _JAVA_PROBE_TIMEOUT_SECONDS
+        while process.poll() is None and not overflow.is_set():
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
+        if process.poll() is None:
+            _terminate_java_process(process, force_tree=True)
+        if reader is not None:
+            reader.join(1.0)
+        if reader is not None and reader.is_alive():
+            _terminate_java_process(process, force_tree=True)
+            try:
+                process.stdout.close()
+            except BaseException:
+                pass
+            reader.join(1.0)
             return None
-        match = _JAVA_VERSION.search(output)
+        if overflow.is_set():
+            _terminate_java_process(process, force_tree=True)
+            return None
+        if process.returncode != 0:
+            return None
+        decoded = bytes(output).decode("utf-8", errors="replace")
+        match = _JAVA_VERSION.search(decoded)
         if match is None:
             return None
         major = int(match.group(1))
@@ -169,6 +281,19 @@ def _detect_java_major() -> int | None:
         raise
     except Exception:
         return None
+    finally:
+        if process is not None:
+            _terminate_java_process(process)
+            if process.stdout is not None:
+                try:
+                    process.stdout.close()
+                except BaseException:
+                    pass
+        if reader is not None:
+            try:
+                reader.join(1.0)
+            except BaseException:
+                pass
 
 
 def _capability_record(
@@ -197,9 +322,7 @@ def _capability_record(
 
 def detect_rfci_capability(config: RFCIConfig | None = None) -> RFCICapabilityRecord:
     """Return disabled/available/unavailable evidence; optional absence never raises."""
-    python_version = _runtime_python_version()
-    if _PYTHON_VERSION.fullmatch(python_version) is None:
-        python_version = "0.0"
+    python_version = "0.0"
     try:
         checked = RFCIConfig(enabled=True) if config is None else RFCIConfig.model_validate(config)
         if not checked.enabled:
@@ -208,6 +331,9 @@ def detect_rfci_capability(config: RFCIConfig | None = None) -> RFCICapabilityRe
                 status="disabled",
                 reason_code="disabled",
             )
+        python_version = _runtime_python_version()
+        if _PYTHON_VERSION.fullmatch(python_version) is None:
+            python_version = "0.0"
         if not _python_supports_rfci(python_version):
             return _capability_record(
                 python_version=python_version,
@@ -321,6 +447,82 @@ def expanded_forbidden_directions(
         raise
     except Exception:
         raise _rfci_error() from None
+
+
+def _matrix_for_exact_base_rows(
+    table: CausalTableRecord,
+    rows: Sequence[CausalObservationRecord],
+) -> np.ndarray:
+    if type(rows) is not tuple or len(rows) != table.row_count:
+        raise ValueError
+    checked_rows = tuple(
+        CausalObservationRecord.model_validate(item)
+        for item in rows
+        if type(item) is CausalObservationRecord
+    )
+    if len(checked_rows) != len(rows) or tuple(
+        (item.table_id, item.row_id) for item in checked_rows
+    ) != tuple(sorted((item.table_id, item.row_id) for item in checked_rows)):
+        raise ValueError
+    if len({item.row_id for item in checked_rows}) != len(checked_rows):
+        raise ValueError
+    for item in checked_rows:
+        if (
+            item.table_id != table.table_id
+            or item.model_id != table.model_id
+            or CausalObservationRecord.from_content(
+                table=table,
+                task_id=item.task_id,
+                prompt_id=item.prompt_id,
+                model_id=item.model_id,
+                seed_id=item.seed_id,
+                values=item.values,
+            )
+            != item
+        ):
+            raise ValueError
+    rebuilt = CausalTableRecord.from_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        variables=table.variables,
+        row_count=len(checked_rows),
+        independent_task_count=len({item.task_id for item in checked_rows}),
+        observation_payload=tuple(
+            (item.row_id, item.task_id, item.prompt_id, item.seed_id, item.values)
+            for item in checked_rows
+        ),
+    )
+    if rebuilt != table:
+        raise ValueError
+    shape = (table.row_count, len(table.variables))
+    matrix = np.asarray(tuple(item.values for item in checked_rows), dtype=np.int64)
+    if matrix.shape != shape:
+        raise ValueError
+    return np.frombuffer(matrix.tobytes(order="C"), dtype=np.int64).reshape(shape)
+
+
+def _authenticated_rfci_matrix(
+    table: CausalTableRecord,
+    rows: Sequence[CausalObservationRecord | JCIObservationRecord],
+) -> tuple[CausalTableRecord, np.ndarray]:
+    try:
+        checked_table = CausalTableRecord.model_validate(table)
+        if type(rows) is not tuple or not rows:
+            raise ValueError
+        if all(type(item) is CausalObservationRecord for item in rows):
+            matrix = _matrix_for_exact_base_rows(checked_table, rows)  # type: ignore[arg-type]
+        elif all(type(item) is JCIObservationRecord for item in rows):
+            matrix = matrix_for_exact_jci_rows(checked_table, rows)  # type: ignore[arg-type]
+        else:
+            raise ValueError
+        if matrix.flags.writeable or not matrix.flags.c_contiguous:
+            raise ValueError
+        return checked_table, matrix
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _rfci_error("RFCI exact row relation failed validation") from None
 
 
 def _validated_rfci_inputs(
@@ -529,7 +731,7 @@ class SpawnedRFCIRunner:
     def run(
         self,
         table: CausalTableRecord,
-        matrix: np.ndarray,
+        rows: Sequence[CausalObservationRecord | JCIObservationRecord],
         knowledge: BackgroundKnowledgeRecord,
         config: RFCIConfig,
     ) -> PAGRecord:
@@ -550,9 +752,12 @@ class SpawnedRFCIRunner:
                         "timeout_seconds": self._timeout_seconds,
                     }
                 )
+            authenticated_table, matrix = _authenticated_rfci_matrix(table, rows)
             checked_table, checked_matrix, checked_knowledge, checked_config = (
                 _validated_rfci_inputs(table, matrix, knowledge, effective_config)
             )
+            if authenticated_table != checked_table:
+                raise ValueError
             checked_capability = _validate_available_capability(
                 self._capability,
                 checked_config,
@@ -669,6 +874,7 @@ class SpawnedRFCIRunner:
                 except BaseException:
                     pass
             table = None  # type: ignore[assignment]
+            rows = None  # type: ignore[assignment]
             matrix = None  # type: ignore[assignment]
             knowledge = None  # type: ignore[assignment]
             config = None  # type: ignore[assignment]
@@ -676,33 +882,43 @@ class SpawnedRFCIRunner:
 
 def run_rfci_sensitivity(
     table: CausalTableRecord,
-    matrix: np.ndarray,
+    rows: Sequence[CausalObservationRecord | JCIObservationRecord],
     knowledge: BackgroundKnowledgeRecord,
     config: RFCIConfig,
     tetrad_search_factory: _SearchFactory | None = None,
-) -> PAGRecord | None:
-    """Return an RFCI sensitivity PAG, or ``None`` when the optional gate is unavailable."""
+    *,
+    capability: RFCICapabilityRecord | None = None,
+) -> RFCISensitivityResult:
+    """Return capability evidence and an optional PAG from an exact persisted row relation."""
     try:
         checked_config = RFCIConfig.model_validate(config)
-        if not checked_config.enabled:
-            return None
+        checked_table, matrix = _authenticated_rfci_matrix(table, rows)
+        if capability is not None and tetrad_search_factory is None:
+            raise ValueError
+        checked_capability = (
+            detect_rfci_capability(checked_config)
+            if capability is None
+            else RFCICapabilityRecord.model_validate(capability)
+        )
+        if not checked_capability.available:
+            return RFCISensitivityResult(capability=checked_capability, pag=None)
+        checked_capability = _validate_available_capability(checked_capability, checked_config)
         if tetrad_search_factory is not None:
-            return _run_rfci_adapter(
-                table,
+            pag = _run_rfci_adapter(
+                checked_table,
                 matrix,
                 knowledge,
                 checked_config,
                 tetrad_search_factory,
             )
-        capability = detect_rfci_capability(checked_config)
-        if not capability.available:
-            return None
-        return SpawnedRFCIRunner(capability=capability).run(
-            table,
-            matrix,
-            knowledge,
-            checked_config,
-        )
+        else:
+            pag = SpawnedRFCIRunner(capability=checked_capability).run(
+                checked_table,
+                rows,
+                knowledge,
+                checked_config,
+            )
+        return RFCISensitivityResult(capability=checked_capability, pag=pag)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except SecAwareError:
