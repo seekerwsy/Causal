@@ -37,6 +37,14 @@ def _functional_outcomes(rows, contract, statuses=None):
     )
 
 
+def _protocol_effect(effects, protocol, contrast_id):
+    return next(
+        effect
+        for effect in effects
+        if effect.arm_protocol_id == protocol.arm_protocol_id and effect.contrast_id == contrast_id
+    )
+
+
 def _contract_with(**updates: object) -> FunctionalOutcomeContractRecord:
     content: dict[str, object] = {
         "task_feature_id": "task.database_query",
@@ -217,6 +225,121 @@ def test_task_custom_functional_uses_exact_independent_records_and_unknown_bound
     assert primary.status != "unsupported_missing_functional_outcome"
 
 
+def test_contractless_task_protocol_estimates_reserved_oracle_outcomes() -> None:
+    protocol = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=False,
+    ).protocol
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+
+    effects = estimate_itt(rows, _analysis_config(), protocols=(protocol,))
+
+    assert effects
+    assert {effect.outcome_id for effect in effects} <= {
+        "y_secure_functional",
+        "y_cwe_secure",
+        "y_cwe_insecure",
+        "y_cwe_unknown",
+        "y_oracle_evaluable",
+        "y_parse_ok",
+        "y_functional_ok",
+    }
+    assert all(effect.status != "unsupported_missing_functional_outcome" for effect in effects)
+
+
+def test_contractless_and_contracted_task_support_is_isolated_per_protocol() -> None:
+    contractless = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=False,
+    ).protocol
+    contracted = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    ).protocol
+    rows = (
+        *_complete_rows(contractless, ("task-a", "task-b")),
+        *_complete_rows(contracted, ("task-a", "task-b")),
+    )
+
+    effects = estimate_itt(
+        rows,
+        _analysis_config(),
+        protocols=(contractless, contracted),
+    )
+
+    contractless_effects = tuple(
+        effect for effect in effects if effect.arm_protocol_id == contractless.arm_protocol_id
+    )
+    contracted_effects = tuple(
+        effect for effect in effects if effect.arm_protocol_id == contracted.arm_protocol_id
+    )
+    assert all(
+        effect.status != "unsupported_missing_functional_outcome" for effect in contractless_effects
+    )
+    assert all(
+        effect.status == "unsupported_missing_functional_outcome" for effect in contracted_effects
+    )
+
+
+def test_functional_coverage_contains_only_contracted_task_assignments() -> None:
+    contractless = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=False,
+    ).protocol
+    execution_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    )
+    contracted = execution_request.protocol
+    contract = execution_request.functional_contract
+    assert contract is not None
+    contractless_rows = _complete_rows(contractless, ("task-a", "task-b"))
+    contracted_rows = _complete_rows(contracted, ("task-a", "task-b"))
+
+    effects = estimate_itt(
+        (*contractless_rows, *contracted_rows),
+        _analysis_config(),
+        protocols=(contractless, contracted),
+        functional_contracts=(contract,),
+        functional_outcomes=_functional_outcomes(contracted_rows, contract),
+    )
+
+    assert all(effect.status != "unsupported_missing_functional_outcome" for effect in effects)
+
+
+def test_safety_and_contracted_task_missing_support_statuses_do_not_leak() -> None:
+    safety = _safety_protocol()
+    contracted = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    ).protocol
+    rows = (
+        *_complete_rows(safety, ("task-a", "task-b")),
+        *_complete_rows(contracted, ("task-a", "task-b")),
+    )
+
+    effects = estimate_itt(rows, _analysis_config(), protocols=(safety, contracted))
+
+    safety_effects = tuple(
+        effect for effect in effects if effect.arm_protocol_id == safety.arm_protocol_id
+    )
+    contracted_effects = tuple(
+        effect for effect in effects if effect.arm_protocol_id == contracted.arm_protocol_id
+    )
+    assert all(
+        effect.status != "unsupported_missing_functional_outcome" for effect in safety_effects
+    )
+    assert all(
+        effect.status == "unsupported_missing_functional_outcome" for effect in contracted_effects
+    )
+
+
 def test_wholly_missing_task_functional_records_publish_explicit_unsupported_effect() -> None:
     execution_request = request(
         FeatureFamily.TASK_FUNCTION,
@@ -259,10 +382,77 @@ def test_wholly_missing_task_functional_records_publish_explicit_unsupported_eff
                 "multiplicity_method": config.multiplicity_method,
                 "min_independent_tasks": config.min_independent_tasks,
             },
+            "functional_provenance": {
+                "contract_ids": [protocol.functional_outcome_contract_id],
+                "functional_outcome_ids": [],
+            },
             "assignment_universe_sha256": primary.assignment_universe_sha256,
             "target_instance_universe_sha256": primary.target_instance_universe_sha256,
         }
     )
+
+
+def test_functional_evidence_identity_changes_manifest_and_effect_not_estimate() -> None:
+    execution_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    )
+    protocol = execution_request.protocol
+    contract = execution_request.functional_contract
+    assert contract is not None
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    baseline_records = _functional_outcomes(rows, contract)
+    changed_first = FunctionalOutcomeRecord.from_content(
+        assignment_id=baseline_records[0].assignment_id,
+        contract_id=baseline_records[0].contract_id,
+        evaluator_policy_sha256=baseline_records[0].evaluator_policy_sha256,
+        status=baseline_records[0].status,
+        evidence_sha256="f" * 64,
+    )
+    changed_records = (changed_first, *baseline_records[1:])
+
+    baseline = _protocol_effect(
+        estimate_itt(
+            rows,
+            _analysis_config(),
+            protocols=(protocol,),
+            functional_contracts=(contract,),
+            functional_outcomes=baseline_records,
+        ),
+        protocol,
+        "task_add.target_minus_noop.y_task_database_functional",
+    )
+    changed = _protocol_effect(
+        estimate_itt(
+            rows,
+            _analysis_config(),
+            protocols=(protocol,),
+            functional_contracts=(contract,),
+            functional_outcomes=changed_records,
+        ),
+        protocol,
+        "task_add.target_minus_noop.y_task_database_functional",
+    )
+
+    assert (
+        changed.risk_difference,
+        changed.ci_low,
+        changed.ci_high,
+        changed.sensitivity_low,
+        changed.sensitivity_high,
+        changed.status,
+    ) == (
+        baseline.risk_difference,
+        baseline.ci_low,
+        baseline.ci_high,
+        baseline.sensitivity_low,
+        baseline.sensitivity_high,
+        baseline.status,
+    )
+    assert changed.assignment_universe_sha256 == baseline.assignment_universe_sha256
+    assert changed.bootstrap_manifest_sha256 != baseline.bootstrap_manifest_sha256
+    assert changed.effect_id != baseline.effect_id
 
 
 def test_partial_extra_or_wrong_functional_provenance_fails_closed() -> None:
@@ -311,6 +501,36 @@ def test_partial_extra_or_wrong_functional_provenance_fails_closed() -> None:
             _analysis_config(),
             protocols=(protocol,),
             functional_outcomes=complete,
+        )
+
+
+def test_one_contracted_protocol_cannot_hide_missing_records_behind_another() -> None:
+    add_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    )
+    remove_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.REMOVE,
+        with_functional_contract=True,
+    )
+    add_contract = add_request.functional_contract
+    remove_contract = remove_request.functional_contract
+    assert add_contract is not None and remove_contract is not None
+    add_rows = _complete_rows(add_request.protocol, ("task-a", "task-b"))
+    remove_rows = _complete_rows(remove_request.protocol, ("task-a", "task-b"))
+    contracts = tuple(
+        {contract.contract_id: contract for contract in (add_contract, remove_contract)}.values()
+    )
+
+    with pytest.raises(Exception, match="functional"):
+        estimate_itt(
+            (*add_rows, *remove_rows),
+            _analysis_config(),
+            protocols=(add_request.protocol, remove_request.protocol),
+            functional_contracts=contracts,
+            functional_outcomes=_functional_outcomes(add_rows, add_contract),
         )
 
 

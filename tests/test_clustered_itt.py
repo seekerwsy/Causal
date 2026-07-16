@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Iterable
 
 import pytest
 from pydantic import ValidationError
 
 from m5_executor_fixtures import request
-from secaware.analysis.cluster_bootstrap import linear_percentile, task_cluster_bootstrap
+from secaware.analysis.cluster_bootstrap import (
+    ClusterBootstrapResult,
+    linear_percentile,
+    task_cluster_bootstrap,
+)
 from secaware.analysis.itt import estimate_itt, risk_difference
 from secaware.analysis.multiple_testing import bonferroni_percentile_quantiles
 from secaware.config import AnalysisConfig
@@ -139,6 +144,37 @@ def _complete_rows(
     )
 
 
+def _rows_for_model(
+    rows: Iterable[AssignmentOutcomeRecord],
+    model_id: str,
+) -> tuple[AssignmentOutcomeRecord, ...]:
+    cloned: list[AssignmentOutcomeRecord] = []
+    for row in rows:
+        content = row.model_dump(mode="python", exclude={"outcome_id"})
+        content.update(
+            assignment_id="assignment_" + _sha(row.assignment_id, model_id),
+            variant_id="variant_" + _sha(row.variant_id, model_id),
+            model_id=model_id,
+            source_digests_sha256=_sha(row.source_digests_sha256, model_id),
+        )
+        cloned.append(AssignmentOutcomeRecord.from_content(**content))
+    return tuple(cloned)
+
+
+def _replace_instance_ids(
+    row: AssignmentOutcomeRecord,
+    *,
+    target_instance_id: str | None = None,
+    protocol_instance_id: str | None = None,
+) -> AssignmentOutcomeRecord:
+    content = row.model_dump(mode="python", exclude={"outcome_id"})
+    if target_instance_id is not None:
+        content["target_instance_id"] = target_instance_id
+    if protocol_instance_id is not None:
+        content["protocol_instance_id"] = protocol_instance_id
+    return AssignmentOutcomeRecord.from_content(**content)
+
+
 def _effect(effects: tuple[ITTEffectRecord, ...], contrast_id: str) -> ITTEffectRecord:
     return next(item for item in effects if item.contrast_id == contrast_id)
 
@@ -210,6 +246,54 @@ def test_duplicate_assignment_rows_and_multiple_instance_pairs_are_rejected() ->
         estimate_itt((changed, *rows[1:]), _analysis_config(), protocols=(protocol,))
 
 
+@pytest.mark.parametrize("invalid_block", ("split-arms", "missing-arm", "unequal-repeats"))
+def test_each_semantic_model_task_is_a_complete_equal_count_protocol_block(
+    invalid_block: str,
+) -> None:
+    protocol = _safety_protocol()
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    if invalid_block == "split-arms":
+        halfway = len(protocol.arm_roles) // 2
+        selected = {("task-a", role) for role in protocol.arm_roles[:halfway]} | {
+            ("task-b", role) for role in protocol.arm_roles[halfway:]
+        }
+        forged = tuple(row for row in rows if (row.task_id, row.arm_role) in selected)
+    elif invalid_block == "missing-arm":
+        missing = protocol.arm_roles[-1]
+        forged = tuple(row for row in rows if row.arm_role is not missing)
+    else:
+        repeated = _assignment_outcome(
+            protocol,
+            "task-a",
+            protocol.arm_roles[0],
+            assignment_nonce="unequal-repeat",
+        )
+        forged = (*rows, repeated)
+
+    with pytest.raises(Exception, match="complete block"):
+        estimate_itt(forged, _analysis_config(), protocols=(protocol,))
+
+
+def test_equal_repeats_preserve_a_complete_randomized_block() -> None:
+    protocol = _safety_protocol()
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    repeated = tuple(
+        _assignment_outcome(
+            protocol,
+            task_id,
+            arm_role,
+            assignment_nonce="equal-repeat",
+        )
+        for task_id in ("task-a", "task-b")
+        for arm_role in protocol.arm_roles
+    )
+
+    effects = estimate_itt((*rows, *repeated), _analysis_config(), protocols=(protocol,))
+
+    assert all(effect.treatment_n == 4 for effect in effects)
+    assert all(effect.control_n == 4 for effect in effects)
+
+
 @pytest.mark.parametrize("reuse", ("pair", "target", "protocol"))
 def test_task_bound_instance_ids_cannot_be_reused_by_another_task(reuse: str) -> None:
     protocol = _safety_protocol()
@@ -229,6 +313,88 @@ def test_task_bound_instance_ids_cannot_be_reused_by_another_task(reuse: str) ->
 
     with pytest.raises(Exception, match="ITT"):
         estimate_itt(tuple(forged), _analysis_config(), protocols=(protocol,))
+
+
+@pytest.mark.parametrize("reuse", ("protocol", "pair"))
+def test_protocol_instance_or_pair_cannot_be_reused_across_protocols(reuse: str) -> None:
+    contractless = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=False,
+    ).protocol
+    contracted = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    ).protocol
+    assert contractless.target_spec_id == contracted.target_spec_id
+    left = _complete_rows(contractless, ("task-a", "task-b"))
+    right = _complete_rows(contracted, ("task-a", "task-b"))
+    owners = {row.task_id: row for row in left}
+    forged = tuple(
+        _replace_instance_ids(
+            row,
+            target_instance_id=(
+                owners[row.task_id].target_instance_id if reuse == "pair" else None
+            ),
+            protocol_instance_id=owners[row.task_id].protocol_instance_id,
+        )
+        for row in right
+    )
+
+    with pytest.raises(Exception, match="instance ownership"):
+        estimate_itt(
+            (*left, *forged),
+            _analysis_config(),
+            protocols=(contractless, contracted),
+        )
+
+
+def test_target_instance_can_span_protocols_at_the_same_task_target_coordinate() -> None:
+    contractless = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=False,
+    ).protocol
+    contracted = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    ).protocol
+    left = _complete_rows(contractless, ("task-a", "task-b"))
+    owners = {row.task_id: row for row in left}
+    right = tuple(
+        _replace_instance_ids(
+            row,
+            target_instance_id=owners[row.task_id].target_instance_id,
+        )
+        for row in _complete_rows(contracted, ("task-a", "task-b"))
+    )
+
+    effects = estimate_itt(
+        (*left, *right),
+        _analysis_config(),
+        protocols=(contractless, contracted),
+    )
+
+    assert {effect.arm_protocol_id for effect in effects} == {
+        contractless.arm_protocol_id,
+        contracted.arm_protocol_id,
+    }
+
+
+def test_task_protocol_instances_are_intentionally_model_independent() -> None:
+    protocol = _safety_protocol()
+    model_a = _complete_rows(protocol, ("task-a", "task-b"))
+    model_b = _rows_for_model(model_a, "model-b")
+
+    effects = estimate_itt((*model_a, *model_b), _analysis_config(), protocols=(protocol,))
+
+    assert {effect.model_id for effect in effects} == {"model-a", "model-b"}
+    for task_id in ("task-a", "task-b"):
+        task_rows = tuple(row for row in (*model_a, *model_b) if row.task_id == task_id)
+        assert len({row.target_instance_id for row in task_rows}) == 1
+        assert len({row.protocol_instance_id for row in task_rows}) == 1
 
 
 def test_semantic_protocol_pools_many_distinct_task_instances() -> None:
@@ -260,7 +426,18 @@ def test_semantic_protocol_pools_many_distinct_task_instances() -> None:
         {
             "schema_version": "1.0",
             "semantic_group": semantic_group,
-            "assignment_ids": sorted(row.assignment_id for row in rows),
+            "assignments": [
+                {
+                    "assignment_id": row.assignment_id,
+                    "execution_status": row.execution_status.value,
+                    "secure_functional_success": row.secure_functional_success,
+                    "cwe_security_outcome": row.cwe_security_outcome.value,
+                    "oracle_evaluability": row.oracle_evaluability.value,
+                    "parse_ok": row.parse_ok,
+                    "functional_ok": row.functional_ok,
+                }
+                for row in sorted(rows, key=lambda item: item.assignment_id)
+            ],
         }
     )
     assert primary.target_instance_universe_sha256 == canonical_sha256(
@@ -379,6 +556,127 @@ def test_failed_bootstrap_replicates_are_counted_and_bounded() -> None:
         )
 
 
+def test_low_level_bootstrap_rejects_draw_entry_budget_before_rng(monkeypatch) -> None:
+    import secaware.analysis.cluster_bootstrap as bootstrap_module
+
+    protocol = _safety_protocol()
+    rows = tuple(
+        _assignment_outcome(protocol, f"task-{index:03d}", protocol.arm_roles[0])
+        for index in range(101)
+    )
+    rng_constructed = False
+
+    class ForbiddenRNG:
+        def __init__(self, _seed: bytes) -> None:
+            nonlocal rng_constructed
+            rng_constructed = True
+            raise AssertionError("resource guard must run before RNG construction")
+
+    monkeypatch.setattr(bootstrap_module, "DeterministicRNG", ForbiddenRNG)
+
+    with pytest.raises(Exception, match="bootstrap"):
+        task_cluster_bootstrap(
+            rows,
+            lambda _sample: 0.0,
+            samples=9_901,
+            seed_material=b"entry-budget-probe",
+            max_failed_fraction=0.0,
+        )
+    assert not rng_constructed
+
+
+def test_low_level_bootstrap_rejects_worst_case_json_bytes_before_rng(monkeypatch) -> None:
+    import secaware.analysis.cluster_bootstrap as bootstrap_module
+
+    protocol = _safety_protocol()
+
+    def long_task_id(index: int) -> str:
+        prefix = f"task-{index}-"
+        return prefix + "x" * (256 - len(prefix))
+
+    rows = tuple(
+        _assignment_outcome(protocol, long_task_id(index), protocol.arm_roles[0])
+        for index in range(7)
+    )
+    rng_constructed = False
+
+    class ForbiddenRNG:
+        def __init__(self, _seed: bytes) -> None:
+            nonlocal rng_constructed
+            rng_constructed = True
+            raise AssertionError("byte budget must run before RNG construction")
+
+    monkeypatch.setattr(bootstrap_module, "DeterministicRNG", ForbiddenRNG)
+
+    with pytest.raises(Exception, match="bootstrap"):
+        task_cluster_bootstrap(
+            rows,
+            lambda _sample: 0.0,
+            samples=10_000,
+            seed_material=b"byte-budget-probe",
+            max_failed_fraction=0.0,
+        )
+    assert not rng_constructed
+
+
+def test_estimator_rejects_global_task_draw_budget_before_any_bootstrap(monkeypatch) -> None:
+    import secaware.analysis.itt as itt_module
+
+    protocol = _safety_protocol()
+    base = _complete_rows(protocol, ("task-a", "task-b"))
+    samples = 10_000
+    group_work = samples * 2 * len(protocol.contrasts)
+    model_count = (5_000_000 // group_work) + 1
+    rows = tuple(
+        cloned
+        for index in range(model_count)
+        for cloned in _rows_for_model(base, f"model-{index:03d}")
+    )
+    bootstrap_called = False
+
+    def forbidden_bootstrap(*_args, **_kwargs):
+        nonlocal bootstrap_called
+        bootstrap_called = True
+        raise AssertionError("global budget must run before bootstrap")
+
+    monkeypatch.setattr(itt_module, "task_cluster_bootstrap", forbidden_bootstrap)
+
+    with pytest.raises(Exception, match="work budget"):
+        estimate_itt(
+            rows,
+            _analysis_config(bootstrap_samples=samples),
+            protocols=(protocol,),
+        )
+    assert not bootstrap_called
+
+
+@pytest.mark.parametrize("malformation", ("failed-replicate", "missing-draw"))
+def test_estimator_requires_zero_failed_replicates_and_complete_manifest(
+    monkeypatch,
+    malformation: str,
+) -> None:
+    import secaware.analysis.itt as itt_module
+
+    protocol = _safety_protocol()
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    samples = 40
+
+    def malformed_bootstrap(*_args, **_kwargs):
+        failed = int(malformation == "failed-replicate")
+        draw_count = samples - int(malformation == "missing-draw")
+        return ClusterBootstrapResult(
+            estimates=(0.0,) * (samples - failed),
+            failed_replicates=failed,
+            task_draws=(("task-a", "task-b"),) * draw_count,
+            manifest_sha256="a" * 64,
+        )
+
+    monkeypatch.setattr(itt_module, "task_cluster_bootstrap", malformed_bootstrap)
+
+    with pytest.raises(Exception, match="bootstrap manifest"):
+        estimate_itt(rows, _analysis_config(), protocols=(protocol,))
+
+
 def test_bonferroni_uses_preregistered_family_size_not_valid_effect_count() -> None:
     low, high = bonferroni_percentile_quantiles(
         confidence_level=0.95,
@@ -415,7 +713,7 @@ def test_estimator_passes_the_complete_frozen_family_size_to_bonferroni(monkeypa
     (
         {"bootstrap_samples": 0},
         {"bootstrap_samples": True},
-        {"bootstrap_samples": 100_001},
+        {"bootstrap_samples": 10_001},
         {"percentile_method": "nearest"},
         {"max_failed_bootstrap_fraction": -0.01},
         {"max_failed_bootstrap_fraction": 1.0},
@@ -473,3 +771,33 @@ def test_itt_effect_is_strict_frozen_finite_and_content_addressed() -> None:
         ITTEffectRecord.model_validate(record.model_copy(update={"risk_difference": float("nan")}))
     with pytest.raises(ValidationError):
         ITTEffectRecord.model_validate(record.model_copy(update={"status": "forged"}))
+
+
+def test_itt_effect_from_content_normalizes_zero_and_direct_negative_zero_is_rejected() -> None:
+    protocol = _safety_protocol()
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    zero = estimate_itt(rows, _analysis_config(), protocols=(protocol,))[0]
+    numeric_fields = (
+        "risk_difference",
+        "ci_low",
+        "ci_high",
+        "sensitivity_low",
+        "sensitivity_high",
+    )
+    plus_payload = zero.model_dump(mode="python", exclude={"schema_version", "effect_id"})
+    minus_payload = {**plus_payload, **{field: -0.0 for field in numeric_fields}}
+
+    normalized = ITTEffectRecord.from_content(**minus_payload)
+    canonical = ITTEffectRecord.from_content(**plus_payload)
+
+    assert normalized.effect_id == canonical.effect_id
+    assert all(math.copysign(1.0, getattr(normalized, field)) == 1.0 for field in numeric_fields)
+    direct_payload = {
+        "schema_version": "1.0",
+        "effect_id": "itt_effect_" + canonical_sha256({"schema_version": "1.0", **minus_payload}),
+        **minus_payload,
+    }
+    with pytest.raises(ValidationError):
+        ITTEffectRecord.model_validate(direct_payload)
+    with pytest.raises(ValidationError):
+        ITTEffectRecord(**direct_payload)

@@ -184,6 +184,16 @@ class ITTEffectRecord(_OutcomeContract):
         result: Self | None = None
         failed = False
         try:
+            for field in (
+                "risk_difference",
+                "ci_low",
+                "ci_high",
+                "sensitivity_low",
+                "sensitivity_high",
+            ):
+                value = content.get(field)
+                if type(value) in {float, int} and type(value) is not bool and value == 0:
+                    content[field] = 0.0
             payload = {"schema_version": "1.0", **content}
             result = cls(
                 **payload,
@@ -211,6 +221,7 @@ class ITTEffectRecord(_OutcomeContract):
         )
         if (
             not all(math.isfinite(value) for value in numeric)
+            or any(value == 0.0 and math.copysign(1.0, value) < 0.0 for value in numeric)
             or self.ci_low > self.ci_high
             or self.sensitivity_low > self.risk_difference
             or self.risk_difference > self.sensitivity_high

@@ -4,7 +4,14 @@ from secaware.analysis.itt import estimate_itt
 from secaware.schema.experiments import ArmRole
 from secaware.schema.outcomes import AssignmentOutcomeRecord
 
-from test_clustered_itt import _analysis_config, _complete_rows, _safety_protocol, _sha
+from test_clustered_itt import (
+    _analysis_config,
+    _assignment_outcome,
+    _complete_rows,
+    _effect,
+    _safety_protocol,
+    _sha,
+)
 
 
 def _with_diagnostics(
@@ -71,6 +78,32 @@ def test_none_false_and_true_diagnostics_never_filter_randomized_assignments() -
 
     assert all(effect.treatment_n == 2 for effect in effects)
     assert all(effect.control_n == 2 for effect in effects)
+
+
+def test_analysis_affecting_assignment_fields_change_universe_and_effect_identity() -> None:
+    protocol = _safety_protocol()
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    changed_row = _assignment_outcome(
+        protocol,
+        rows[0].task_id,
+        rows[0].arm_role,
+        secure=True,
+    )
+    assert changed_row.assignment_id == rows[0].assignment_id
+    changed_rows = (changed_row, *rows[1:])
+
+    baseline = _effect(
+        estimate_itt(rows, _analysis_config(), protocols=(protocol,)),
+        "safety_add.target_minus_noop.y_secure_functional",
+    )
+    changed = _effect(
+        estimate_itt(changed_rows, _analysis_config(), protocols=(protocol,)),
+        "safety_add.target_minus_noop.y_secure_functional",
+    )
+
+    assert changed.assignment_universe_sha256 != baseline.assignment_universe_sha256
+    assert changed.bootstrap_manifest_sha256 != baseline.bootstrap_manifest_sha256
+    assert changed.effect_id != baseline.effect_id
 
 
 def test_outcome_input_order_does_not_change_effect_or_bootstrap_draw_order() -> None:

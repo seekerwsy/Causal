@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
+import json
 import math
 from typing import Literal
 
@@ -14,7 +16,8 @@ from secaware.schema.outcomes import AssignmentOutcomeRecord
 
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
-_MAX_TOTAL_TASK_DRAWS = 20_000_000
+_MAX_TOTAL_TASK_DRAW_ENTRIES = 1_000_000
+_MAX_TASK_DRAW_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +79,7 @@ def task_cluster_bootstrap(
         isinstance(rows, (str, bytes, Mapping))
         or not callable(statistic)
         or type(samples) is not int
-        or not 1 <= samples <= 100_000
+        or not 1 <= samples <= 10_000
         or type(seed_material) is not bytes
         or not seed_material
         or type(max_failed_fraction) is not float
@@ -101,7 +104,25 @@ def task_cluster_bootstrap(
             assignment_ids.add(checked.assignment_id)
             by_task.setdefault(checked.task_id, []).append(checked)
         task_ids = tuple(sorted(by_task))
-        if not task_ids or len(task_ids) * samples > _MAX_TOTAL_TASK_DRAWS:
+        if not task_ids:
+            raise _error()
+        task_draw_entries = len(task_ids) * samples
+        largest_encoded_task_id = max(
+            len(
+                json.dumps(
+                    task_id,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            for task_id in task_ids
+        )
+        per_draw_bytes = 2 + len(task_ids) * (largest_encoded_task_id + 1)
+        task_draw_manifest_bytes = 2 + samples * (per_draw_bytes + 1)
+        if (
+            task_draw_entries > _MAX_TOTAL_TASK_DRAW_ENTRIES
+            or task_draw_manifest_bytes > _MAX_TASK_DRAW_MANIFEST_BYTES
+        ):
             raise _error()
         clusters = {
             task_id: tuple(sorted(by_task[task_id], key=lambda item: item.assignment_id))
@@ -111,9 +132,26 @@ def task_cluster_bootstrap(
         estimates: list[float] = []
         task_draws: list[tuple[str, ...]] = []
         failed_indexes: list[int] = []
+        task_indexes = {task_id: index for index, task_id in enumerate(task_ids)}
+        draw_stream = hashlib.sha256()
+        draw_stream.update(
+            bytes.fromhex(
+                canonical_sha256(
+                    {
+                        "schema_version": "1.0",
+                        "stream_kind": "task-cluster-draw-index-stream-v1",
+                        "samples": samples,
+                        "draw_width": len(task_ids),
+                        "task_ids": list(task_ids),
+                    }
+                )
+            )
+        )
         for replicate in range(samples):
             draw = tuple(rng.choice(task_ids) for _ in task_ids)
             task_draws.append(draw)
+            for task_id in draw:
+                draw_stream.update(task_indexes[task_id].to_bytes(4, "big"))
             sampled_rows = tuple(row for task_id in draw for row in clusters[task_id])
             try:
                 estimate = statistic(sampled_rows)
@@ -140,7 +178,7 @@ def task_cluster_bootstrap(
                 "max_failed_fraction": max_failed_fraction,
                 "task_ids": list(task_ids),
                 "assignment_ids": sorted(assignment_ids),
-                "task_draws": [list(draw) for draw in task_draws],
+                "task_draw_stream_sha256": draw_stream.hexdigest(),
                 "failed_replicate_indexes": list(failed_indexes),
                 "estimates": list(estimates),
             }

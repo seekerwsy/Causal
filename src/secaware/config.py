@@ -561,7 +561,7 @@ class AnalysisConfig(StrictModel):
         strict=True,
     )
 
-    bootstrap_samples: StrictInt = Field(default=200, ge=1, le=100_000)
+    bootstrap_samples: StrictInt = Field(default=200, ge=1, le=10_000)
     percentile_method: Literal["linear-v1"] = "linear-v1"
     max_failed_bootstrap_fraction: float = Field(
         default=0.10,

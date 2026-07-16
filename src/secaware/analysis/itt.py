@@ -32,6 +32,7 @@ from secaware.schema.outcomes import (
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
+_MAX_ESTIMATOR_TASK_DRAWS = 5_000_000
 _RESERVED_OUTCOMES = frozenset(
     {
         "y_secure_functional",
@@ -158,9 +159,10 @@ def _validate_assignment_relation(
     if {row.arm_protocol_id for row in rows} != set(protocols):
         raise _itt_error()
     instance_pairs: dict[tuple[str, str, str, str, str], set[tuple[str, str]]] = {}
-    pair_owners: dict[tuple[str, str], str] = {}
-    target_instance_owners: dict[str, str] = {}
-    protocol_instance_owners: dict[str, str] = {}
+    arm_counts: dict[tuple[str, str, str, str, str], dict[ArmRole, int]] = {}
+    pair_owners: dict[tuple[str, str], tuple[str, str, str, str]] = {}
+    target_instance_owners: dict[str, tuple[str, str, str]] = {}
+    protocol_instance_owners: dict[str, tuple[str, str, str]] = {}
     for row in rows:
         protocol = protocols.get(row.arm_protocol_id)
         if (
@@ -179,18 +181,35 @@ def _validate_assignment_relation(
         )
         pair = (row.target_instance_id, row.protocol_instance_id)
         instance_pairs.setdefault(task_key, set()).add(pair)
-        for owners, instance_id in (
-            (target_instance_owners, row.target_instance_id),
-            (protocol_instance_owners, row.protocol_instance_id),
+        counts = arm_counts.setdefault(task_key, {})
+        counts[row.arm_role] = counts.get(row.arm_role, 0) + 1
+        target_owner = (row.task_id, row.hypothesis_id, row.target_spec_id)
+        protocol_owner = (row.task_id, row.arm_protocol_id, row.target_instance_id)
+        pair_owner = (
+            row.task_id,
+            row.hypothesis_id,
+            row.target_spec_id,
+            row.arm_protocol_id,
+        )
+        if target_instance_owners.setdefault(row.target_instance_id, target_owner) != target_owner:
+            raise _itt_error("ITT instance ownership failed validation")
+        if (
+            protocol_instance_owners.setdefault(row.protocol_instance_id, protocol_owner)
+            != protocol_owner
+            or pair_owners.setdefault(pair, pair_owner) != pair_owner
         ):
-            owner = owners.setdefault(instance_id, row.task_id)
-            if owner != row.task_id:
-                raise _itt_error()
-        pair_owner = pair_owners.setdefault(pair, row.task_id)
-        if pair_owner != row.task_id:
-            raise _itt_error()
+            raise _itt_error("ITT instance ownership failed validation")
     if any(len(pairs) != 1 for pairs in instance_pairs.values()):
-        raise _itt_error()
+        raise _itt_error("ITT instance ownership failed validation")
+    for task_key, counts in arm_counts.items():
+        protocol = protocols[task_key[2]]
+        if (
+            set(counts) != set(protocol.arm_roles)
+            or len(set(counts.values())) != 1
+            or not counts
+            or min(counts.values()) < 1
+        ):
+            raise _itt_error("ITT complete block failed validation")
 
 
 def _validate_task_contract_semantics(
@@ -239,7 +258,7 @@ def _validate_functional_relation(
     contracts: Iterable[FunctionalOutcomeContractRecord],
     functional_outcomes: Iterable[FunctionalOutcomeRecord],
 ) -> tuple[
-    bool,
+    dict[str, bool],
     dict[str, FunctionalOutcomeContractRecord],
     dict[str, FunctionalOutcomeRecord],
 ]:
@@ -260,37 +279,42 @@ def _validate_functional_relation(
         for protocol_id, protocol in protocols.items()
         if protocol.feature_family is FeatureFamily.TASK_FUNCTION
     }
-    referenced_contract_ids = {
-        protocol.functional_outcome_contract_id for protocol in task_protocols.values()
+    contracted_protocols = {
+        protocol_id: protocol
+        for protocol_id, protocol in task_protocols.items()
+        if protocol.functional_outcome_contract_id is not None
     }
-    if None in referenced_contract_ids:
-        raise _itt_error("functional outcome relation failed validation")
-    expected_contract_ids = {item for item in referenced_contract_ids if item is not None}
+    expected_contract_ids = {
+        protocol.functional_outcome_contract_id
+        for protocol in contracted_protocols.values()
+        if protocol.functional_outcome_contract_id is not None
+    }
     if not task_protocols:
         if contract_records or outcome_records:
             raise _itt_error("functional outcome relation failed validation")
-        return True, {}, {}
+        return {protocol_id: True for protocol_id in protocols}, {}, {}
     if contract_records and set(contract_by_id) != expected_contract_ids:
         raise _itt_error("functional outcome relation failed validation")
-    for protocol in task_protocols.values():
+    for protocol in contracted_protocols.values():
         contract_id = protocol.functional_outcome_contract_id
-        if contract_id is None:
-            raise _itt_error("functional outcome relation failed validation")
-        contract = contract_by_id.get(contract_id)
+        contract = contract_by_id.get(contract_id or "")
         if contract is not None:
             _validate_task_contract_semantics(protocol, contract)
+    support_by_protocol = {
+        protocol_id: protocol_id not in contracted_protocols for protocol_id in protocols
+    }
     if not outcome_records:
-        return False, contract_by_id, {}
-    if not contract_records:
+        return support_by_protocol, contract_by_id, {}
+    if not contracted_protocols or not contract_records:
         raise _itt_error("functional outcome relation failed validation")
-    task_rows = tuple(row for row in rows if row.arm_protocol_id in task_protocols)
+    task_rows = tuple(row for row in rows if row.arm_protocol_id in contracted_protocols)
     expected_assignments = {row.assignment_id for row in task_rows}
     if set(outcome_by_assignment) != expected_assignments:
         raise _itt_error("functional outcome relation failed validation")
     row_by_assignment = {row.assignment_id: row for row in task_rows}
     for assignment_id, outcome in outcome_by_assignment.items():
         row = row_by_assignment[assignment_id]
-        protocol = task_protocols[row.arm_protocol_id]
+        protocol = contracted_protocols[row.arm_protocol_id]
         contract_id = protocol.functional_outcome_contract_id
         contract = contract_by_id.get(contract_id or "")
         if (
@@ -299,7 +323,8 @@ def _validate_functional_relation(
             or outcome.evaluator_policy_sha256 != contract.evaluator_policy_sha256
         ):
             raise _itt_error("functional outcome relation failed validation")
-    return True, contract_by_id, outcome_by_assignment
+    support_by_protocol.update({protocol_id: True for protocol_id in contracted_protocols})
+    return support_by_protocol, contract_by_id, outcome_by_assignment
 
 
 def _outcome_projection(
@@ -452,6 +477,60 @@ def _analysis_config_payload(config: AnalysisConfig) -> dict[str, object]:
     }
 
 
+def _assignment_universe_payload(
+    semantic_key: tuple[str, str, str, str],
+    rows: tuple[AssignmentOutcomeRecord, ...],
+) -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "semantic_group": list(semantic_key),
+        "assignments": [
+            {
+                "assignment_id": row.assignment_id,
+                "execution_status": row.execution_status.value,
+                "secure_functional_success": row.secure_functional_success,
+                "cwe_security_outcome": row.cwe_security_outcome.value,
+                "oracle_evaluability": row.oracle_evaluability.value,
+                "parse_ok": row.parse_ok,
+                "functional_ok": row.functional_ok,
+            }
+            for row in rows
+        ],
+    }
+
+
+def _functional_provenance_payload(
+    protocol: ConfirmationProtocolRecord,
+    rows: tuple[AssignmentOutcomeRecord, ...],
+    functional_by_assignment: dict[str, FunctionalOutcomeRecord],
+) -> dict[str, object]:
+    contract_ids = (
+        []
+        if protocol.functional_outcome_contract_id is None
+        else [protocol.functional_outcome_contract_id]
+    )
+    return {
+        "contract_ids": sorted(contract_ids),
+        "functional_outcome_ids": sorted(
+            outcome.functional_outcome_id
+            for row in rows
+            if (outcome := functional_by_assignment.get(row.assignment_id)) is not None
+        ),
+    }
+
+
+def _bootstrap_will_run(
+    protocol: ConfirmationProtocolRecord,
+    contrast: ContrastSpecRecord,
+    support_by_protocol: dict[str, bool],
+) -> bool:
+    return not (
+        protocol.feature_family is FeatureFamily.TASK_FUNCTION
+        and contrast.outcome_id not in _RESERVED_OUTCOMES
+        and not support_by_protocol[protocol.arm_protocol_id]
+    )
+
+
 def estimate_itt(
     outcomes: Iterable[AssignmentOutcomeRecord],
     analysis_config: AnalysisConfig,
@@ -477,7 +556,7 @@ def estimate_itt(
         allow_empty=False,
     )
     _validate_assignment_relation(rows, protocol_by_id)
-    functional_supported, contract_by_id, functional_by_assignment = _validate_functional_relation(
+    support_by_protocol, contract_by_id, functional_by_assignment = _validate_functional_relation(
         rows,
         protocol_by_id,
         functional_contracts,
@@ -504,6 +583,18 @@ def estimate_itt(
         )
         semantic_rows.setdefault(key, []).append(row)
 
+    total_task_draws = 0
+    for semantic_key, grouped in semantic_rows.items():
+        protocol = protocol_by_id[semantic_key[2]]
+        task_count = len({row.task_id for row in grouped})
+        runnable_contrasts = sum(
+            _bootstrap_will_run(protocol, contrast, support_by_protocol)
+            for contrast in contrasts_by_protocol[protocol.arm_protocol_id]
+        )
+        total_task_draws += task_count * config.bootstrap_samples * runnable_contrasts
+        if total_task_draws > _MAX_ESTIMATOR_TASK_DRAWS:
+            raise _itt_error("ITT bootstrap work budget failed validation")
+
     effects: list[ITTEffectRecord] = []
     for semantic_key in sorted(semantic_rows):
         hypothesis_id, target_spec_id, protocol_id, model_id = semantic_key
@@ -513,11 +604,7 @@ def estimate_itt(
         if len(task_ids) < config.min_independent_tasks:
             raise _itt_error("ITT requires minimum independent task count")
         assignment_universe_sha256 = canonical_sha256(
-            {
-                "schema_version": "1.0",
-                "semantic_group": list(semantic_key),
-                "assignment_ids": [row.assignment_id for row in group_rows],
-            }
+            _assignment_universe_payload(semantic_key, group_rows)
         )
         instance_universe = sorted(
             {(row.task_id, row.target_instance_id, row.protocol_instance_id) for row in group_rows}
@@ -536,11 +623,16 @@ def estimate_itt(
                 ],
             }
         )
+        functional_provenance = _functional_provenance_payload(
+            protocol,
+            group_rows,
+            functional_by_assignment,
+        )
         for contrast in contrasts_by_protocol[protocol_id]:
             observed, unknown, unsupported_custom = _outcome_projection(
                 protocol,
                 contrast,
-                functional_supported=functional_supported,
+                functional_supported=support_by_protocol[protocol_id],
                 contract_by_id=contract_by_id,
                 functional_by_assignment=functional_by_assignment,
             )
@@ -568,6 +660,7 @@ def estimate_itt(
                         "reason": "missing-functional-outcome",
                         "effect_group": list(effect_group),
                         "analysis_config": config_payload,
+                        "functional_provenance": functional_provenance,
                         "assignment_universe_sha256": assignment_universe_sha256,
                         "target_instance_universe_sha256": (target_instance_universe_sha256),
                     }
@@ -602,6 +695,16 @@ def estimate_itt(
                     seed_material=seed_material,
                     max_failed_fraction=config.max_failed_bootstrap_fraction,
                 )
+                if (
+                    bootstrap.failed_replicates != 0
+                    or len(bootstrap.estimates) != config.bootstrap_samples
+                    or len(bootstrap.task_draws) != config.bootstrap_samples
+                    or any(
+                        len(draw) != len(task_ids) or set(draw) - set(task_ids)
+                        for draw in bootstrap.task_draws
+                    )
+                ):
+                    raise _itt_error("ITT bootstrap manifest failed validation")
                 low_q, high_q = bonferroni_percentile_quantiles(
                     confidence_level=config.ci_level,
                     number_of_pre_registered_contrasts=family_sizes[
@@ -628,6 +731,7 @@ def estimate_itt(
                         "family_size": family_sizes[contrast.multiplicity_family_id],
                         "percentile_quantiles": [low_q, high_q],
                         "cluster_manifest_sha256": bootstrap.manifest_sha256,
+                        "functional_provenance": functional_provenance,
                         "assignment_universe_sha256": assignment_universe_sha256,
                         "target_instance_universe_sha256": (target_instance_universe_sha256),
                     }
@@ -653,7 +757,7 @@ def estimate_itt(
                         contrast,
                         ci_low=ci_low,
                         ci_high=ci_high,
-                        functional_supported=functional_supported,
+                        functional_supported=support_by_protocol[protocol_id],
                     ),
                     assignment_universe_sha256=assignment_universe_sha256,
                     target_instance_universe_sha256=target_instance_universe_sha256,
@@ -675,4 +779,40 @@ def estimate_itt(
     )
 
 
-__all__ = ["estimate_itt", "risk_difference"]
+def validate_itt_effects(
+    outcomes: Iterable[AssignmentOutcomeRecord],
+    analysis_config: AnalysisConfig,
+    *,
+    protocols: Iterable[ConfirmationProtocolRecord],
+    effects: Iterable[ITTEffectRecord],
+    contrasts: Iterable[ContrastSpecRecord] | None = None,
+    functional_contracts: Iterable[FunctionalOutcomeContractRecord] = (),
+    functional_outcomes: Iterable[FunctionalOutcomeRecord] = (),
+) -> tuple[ITTEffectRecord, ...]:
+    """Require exact count, order, and content against a fresh ITT recomputation."""
+
+    try:
+        expected = estimate_itt(
+            outcomes,
+            analysis_config,
+            protocols=protocols,
+            contrasts=contrasts,
+            functional_contracts=functional_contracts,
+            functional_outcomes=functional_outcomes,
+        )
+        checked, _by_id = _trusted_records(
+            effects,
+            ITTEffectRecord,
+            "effect_id",
+            allow_empty=False,
+        )
+        if checked != expected:
+            raise _itt_error("ITT effect relation failed validation")
+        return checked
+    except _FATAL:
+        raise
+    except Exception:
+        raise _itt_error("ITT effect relation failed validation") from None
+
+
+__all__ = ["estimate_itt", "risk_difference", "validate_itt_effects"]

@@ -5,7 +5,7 @@ from secaware.analysis.cluster_bootstrap import (
 )
 from secaware.analysis.contrasts import materialize_contrasts, validate_contrasts
 from secaware.analysis.effects import estimate_effects
-from secaware.analysis.itt import estimate_itt, risk_difference
+from secaware.analysis.itt import estimate_itt, risk_difference, validate_itt_effects
 from secaware.analysis.multiple_testing import bonferroni_percentile_quantiles
 from secaware.analysis.pairing import build_pairs
 
@@ -20,4 +20,5 @@ __all__ = [
     "risk_difference",
     "task_cluster_bootstrap",
     "validate_contrasts",
+    "validate_itt_effects",
 ]
