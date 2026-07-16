@@ -25,6 +25,10 @@ _ALLOWED_JCI_SCHEMA_SYMBOLS = {
     "secaware.schema.causal.jcicontextspec",
     "secaware.schema.causal.jcicontextspec.from_protocol",
     "secaware.schema.causal.jcistratum",
+    "secaware.schema.causal.pagrunkind.jci_constrained",
+    "secaware.schema.causal.pagrunkind.jci_raw",
+    "secaware.schema.outcomes.jciorientationdeltarecord",
+    "secaware.schema.outcomes.jciorientationdeltarecord.from_content",
     "secaware.schema.outcomes.jciobservationrecord",
     "secaware.schema.outcomes.jciobservationrecord.from_content",
 }
@@ -146,6 +150,17 @@ def test_causal_package_is_prompt_only() -> None:
     symbols = _symbols_under(ROOT / "src" / "secaware" / "causal")
 
     assert not _prompt_only_causal_violations(symbols)
+
+
+def test_prompt_only_jci_schema_whitelist_remains_symbol_exact() -> None:
+    nonwhitelisted = {
+        "secaware.schema.causal.PAGRunKind.JCI_RAW.value",
+        "secaware.schema.outcomes.JCIOrientationDeltaRecord.model_validate",
+    }
+
+    assert _prompt_only_causal_violations(nonwhitelisted) == {
+        item.casefold() for item in nonwhitelisted
+    }
 
 
 def test_prompt_only_import_gate_resolves_aliased_attribute_chains(tmp_path: Path) -> None:
