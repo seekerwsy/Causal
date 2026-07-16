@@ -10,13 +10,21 @@ from m5_executor_fixtures import proposal_graph, request
 from secaware.causal.jci import (
     build_jci_tables,
     jci_stratum_key,
+    validate_jci_relations,
     validate_jci_table_bundle,
 )
 from secaware.intervention.executors import (
     DETERMINISTIC_INTERVENTION_POLICY_SHA256,
 )
 from secaware.intervention.arm_catalog import _safety_contrasts
-from secaware.schema.causal import JCIContextSpec, JCIStratum, VariableRole
+from secaware.schema.causal import (
+    CausalTableRecord,
+    CausalVariableSpec,
+    JCIContextSpec,
+    JCIStratum,
+    VariableRole,
+    jci_row_id_from_content,
+)
 from secaware.schema.experiments import (
     ArmRole,
     AssignmentExecutionStatus,
@@ -413,6 +421,89 @@ def _fixture_rebound_to_protocol(
     )
 
 
+def _rebuild_table_rows(
+    table: CausalTableRecord,
+    rows: tuple[JCIObservationRecord, ...],
+    *,
+    variables: tuple[CausalVariableSpec, ...],
+    remap_context: bool = False,
+) -> tuple[CausalTableRecord, tuple[JCIObservationRecord, ...]]:
+    context_index = tuple(item.variable_id for item in variables).index("c.arm")
+    payloads = []
+    changed_values: dict[str, tuple[int, ...]] = {}
+    for row in rows:
+        values = list(row.values)
+        if remap_context:
+            values[context_index] = len(variables[context_index].states) - 1 - values[context_index]
+        encoded = tuple(values)
+        changed_values[row.assignment_id] = encoded
+        payloads.append(
+            (
+                jci_row_id_from_content(
+                    assignment_id=row.assignment_id,
+                    task_id=row.task_id,
+                    target_spec_id=row.target_spec_id,
+                    target_instance_id=row.target_instance_id,
+                    arm_protocol_id=row.arm_protocol_id,
+                    protocol_instance_id=row.protocol_instance_id,
+                    values=encoded,
+                ),
+                row.assignment_id,
+                row.task_id,
+                row.target_spec_id,
+                row.target_instance_id,
+                row.arm_protocol_id,
+                row.protocol_instance_id,
+                encoded,
+            )
+        )
+    changed_table = CausalTableRecord.from_jci_content(
+        scope_id=table.scope_id,
+        cwe=table.cwe,
+        model_id=table.model_id,
+        variables=variables,
+        independent_task_count=table.independent_task_count,
+        observation_payload=payloads,
+    )
+    changed_rows = tuple(
+        sorted(
+            (
+                JCIObservationRecord.from_content(
+                    table_id=changed_table.table_id,
+                    assignment_id=row.assignment_id,
+                    task_id=row.task_id,
+                    target_spec_id=row.target_spec_id,
+                    target_instance_id=row.target_instance_id,
+                    arm_protocol_id=row.arm_protocol_id,
+                    protocol_instance_id=row.protocol_instance_id,
+                    values=changed_values[row.assignment_id],
+                )
+                for row in rows
+            ),
+            key=lambda item: (item.table_id, item.row_id),
+        )
+    )
+    return changed_table, changed_rows
+
+
+def _validate_relations(
+    fixture: JCIFixture,
+    tables: tuple[CausalTableRecord, ...],
+    rows: tuple[JCIObservationRecord, ...],
+) -> None:
+    validate_jci_relations(
+        fixture.assignments,
+        fixture.outcomes,
+        fixture.graphs,
+        variants=fixture.variants,
+        hypotheses=fixture.hypotheses,
+        protocols=fixture.protocols,
+        min_independent_tasks=2,
+        tables=tables,
+        rows=rows,
+    )
+
+
 def test_jci_tables_pool_task_instances_but_never_semantic_strata() -> None:
     safety_add = fixture_for(task_count=20)
     safety_remove = fixture_for(FeatureFamily.SAFETY_CONTROL, FeatureOperation.REMOVE)
@@ -745,3 +836,133 @@ def test_persisted_jci_table_bundle_revalidates_exact_table_row_closure(mutation
 
     with pytest.raises(Exception, match="JCI"):
         validate_jci_table_bundle(changed_tables, changed_rows)
+
+
+@pytest.mark.parametrize("multi_table", ("add-remove", "multi-model"))
+def test_persisted_bundle_accepts_builder_order_for_multiple_tables(
+    multi_table: str,
+) -> None:
+    base = fixture_for()
+    fixture = (
+        merge_fixtures(
+            base,
+            fixture_for(FeatureFamily.SAFETY_CONTROL, FeatureOperation.REMOVE),
+        )
+        if multi_table == "add-remove"
+        else _combine_model_fixtures(base, _fixture_for_model(base, "model-b"))
+    )
+    tables, rows = build_fixture(fixture)
+
+    validate_jci_table_bundle(tables, rows)
+
+
+def test_persisted_bundle_groups_rows_once_with_linear_table_id_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = fixture_for()
+    model_fixtures = tuple(_fixture_for_model(base, f"model-{index:02d}") for index in range(12))
+    fixture = model_fixtures[0]
+    for model_fixture in model_fixtures[1:]:
+        fixture = _combine_model_fixtures(fixture, model_fixture)
+    tables, rows = build_fixture(fixture)
+    original_getattribute = JCIObservationRecord.__getattribute__
+    table_id_accesses = 0
+
+    def counted_getattribute(self: JCIObservationRecord, name: str):
+        nonlocal table_id_accesses
+        if name == "table_id":
+            table_id_accesses += 1
+        return original_getattribute(self, name)
+
+    monkeypatch.setattr(JCIObservationRecord, "__getattribute__", counted_getattribute)
+
+    validate_jci_table_bundle(tables, rows)
+
+    assert table_id_accesses <= 4 * len(rows)
+
+
+def test_exact_relation_boundary_accepts_builder_artifacts_and_all_upstream_records() -> None:
+    fixture = merge_fixtures(
+        fixture_for(),
+        fixture_for(FeatureFamily.SAFETY_CONTROL, FeatureOperation.REMOVE),
+    )
+    tables, rows = build_fixture(fixture)
+
+    _validate_relations(fixture, tables, rows)
+
+
+@pytest.mark.parametrize("forgery", ("context-producer", "arm-category-remap"))
+def test_exact_relation_boundary_rejects_self_consistent_table_row_forgery(
+    forgery: str,
+) -> None:
+    fixture = fixture_for()
+    tables, rows = build_fixture(fixture)
+    table = tables[0]
+    variables = tuple(
+        item.model_copy(
+            update=(
+                {"producer_sha256": "f" * 64}
+                if forgery == "context-producer"
+                else {"states": tuple(reversed(item.states))}
+            )
+        )
+        if item.variable_id == "c.arm"
+        else item
+        for item in table.variables
+    )
+    changed_table, changed_rows = _rebuild_table_rows(
+        table,
+        rows,
+        variables=variables,
+        remap_context=forgery == "arm-category-remap",
+    )
+
+    with pytest.raises(Exception, match="JCI"):
+        _validate_relations(fixture, (changed_table,), changed_rows)
+
+
+@pytest.mark.parametrize("forgery", ("cross-model-owner", "target-feature", "missing-outcome"))
+def test_exact_relation_boundary_rejects_upstream_provenance_drift(forgery: str) -> None:
+    original = fixture_for()
+    tables, rows = build_fixture(original)
+    if forgery == "cross-model-owner":
+        changed = _combine_model_fixtures(
+            original,
+            _fixture_for_model(original, "model-b", replace_instances=True),
+        )
+    elif forgery == "target-feature":
+        hypothesis = original.hypotheses[0]
+        foreign = request(
+            FeatureFamily.SAFETY_CONTROL,
+            FeatureOperation.ADD,
+            feature_id="safety.input_validation",
+        ).protocol
+        target = TargetSpecRecord.from_content(
+            hypothesis_id=hypothesis.hypothesis_id,
+            frozen_hypothesis_sha256=hypothesis.hypothesis_sha256,
+            feature_family=foreign.feature_family,
+            feature_id="safety.input_validation",
+            operation=foreign.operation,
+            hypothesis_outcome_variable_id=foreign.hypothesis_outcome_variable_id,
+            hypothesis_outcome_estimand_id=foreign.hypothesis_outcome_estimand_id,
+            expected_hypothesis_contrast_sign=foreign.expected_hypothesis_contrast_sign,
+        )
+        content = foreign.model_dump(
+            mode="python",
+            exclude={"arm_protocol_id", "contrast_set_sha256"},
+        )
+        content.update(
+            hypothesis_id=hypothesis.hypothesis_id,
+            frozen_hypothesis_sha256=hypothesis.hypothesis_sha256,
+            target_spec_id=target.target_spec_id,
+            contrasts=_safety_contrasts(target),
+        )
+        changed = _fixture_rebound_to_protocol(
+            original,
+            ConfirmationProtocolRecord.from_content(**content),
+        )
+    else:
+        changed = replace(original, outcomes=original.outcomes[:-1])
+
+    with pytest.raises(Exception, match="JCI"):
+        _validate_relations(changed, tables, rows)

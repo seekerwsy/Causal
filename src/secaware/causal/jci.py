@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import hashlib
 import json
+from typing import Any
 
 from secaware.causal.background import typed_adjacency_exclusions
 from secaware.causal.variable_catalog import (
@@ -79,7 +80,7 @@ def _canonical_sha256(value: object) -> str:
     ).hexdigest()
 
 
-def _snapshots(
+def _snapshots_in_order(
     value: object,
     model: type,
     identity: str,
@@ -102,7 +103,30 @@ def _snapshots(
             raise ValueError
         identities.add(item_id)
         result.append(checked)
-    return tuple(sorted(result, key=lambda item: getattr(item, identity)))
+    return tuple(result)
+
+
+def _snapshots(
+    value: object,
+    model: type,
+    identity: str,
+    *,
+    maximum: int = _MAX_ROWS,
+) -> tuple[object, ...]:
+    checked = _snapshots_in_order(value, model, identity, maximum=maximum)
+    return tuple(sorted(checked, key=lambda item: getattr(item, identity)))
+
+
+def _strictly_increasing(value: Sequence[object], key: Callable[[Any], Any]) -> bool:
+    if len(value) < 2:
+        return True
+    previous = key(value[0])
+    for item in value[1:]:
+        current = key(item)
+        if previous >= current:
+            return False
+        previous = current
+    return True
 
 
 def jci_stratum_key(
@@ -518,23 +542,34 @@ def build_jci_tables(
         raise _jci_error() from None
 
 
-def _validate_jci_table_bundle(
+def _checked_jci_table_bundle(
     tables: Sequence[CausalTableRecord],
     rows: Sequence[JCIObservationRecord],
-) -> None:
-    checked_tables = _snapshots(tables, CausalTableRecord, "table_id")
-    checked_rows = _snapshots(rows, JCIObservationRecord, "row_id")
-    if checked_tables != tuple(
-        sorted(checked_tables, key=lambda item: (item.scope_id, item.model_id, item.table_id))
-    ) or checked_rows != tuple(sorted(checked_rows, key=lambda item: (item.table_id, item.row_id))):
+) -> tuple[tuple[CausalTableRecord, ...], tuple[JCIObservationRecord, ...]]:
+    checked_tables = _snapshots_in_order(tables, CausalTableRecord, "table_id")
+    checked_rows = _snapshots_in_order(rows, JCIObservationRecord, "row_id")
+    if not _strictly_increasing(
+        checked_tables,
+        lambda item: (item.scope_id, item.model_id, item.table_id),
+    ) or not _strictly_increasing(
+        checked_rows,
+        lambda item: (item.table_id, item.row_id),
+    ):
         raise ValueError
-    table_ids = {item.table_id for item in checked_tables}
-    if {item.table_id for item in checked_rows} != table_ids or len(
-        {item.assignment_id for item in checked_rows}
-    ) != len(checked_rows):
+    rows_by_table: dict[str, list[JCIObservationRecord]] = {
+        item.table_id: [] for item in checked_tables
+    }
+    assignment_ids: set[str] = set()
+    for row in checked_rows:
+        local = rows_by_table.get(row.table_id)
+        if local is None or row.assignment_id in assignment_ids:
+            raise ValueError
+        assignment_ids.add(row.assignment_id)
+        local.append(row)
+    if any(not local for local in rows_by_table.values()):
         raise ValueError
     for table in checked_tables:
-        local = tuple(item for item in checked_rows if item.table_id == table.table_id)
+        local = tuple(rows_by_table[table.table_id])
         context_indices = tuple(
             index
             for index, variable in enumerate(table.variables)
@@ -585,6 +620,14 @@ def _validate_jci_table_bundle(
         )
         if rebuilt != table:
             raise ValueError
+    return checked_tables, checked_rows
+
+
+def _validate_jci_table_bundle(
+    tables: Sequence[CausalTableRecord],
+    rows: Sequence[JCIObservationRecord],
+) -> None:
+    _checked_jci_table_bundle(tables, rows)
 
 
 def validate_jci_table_bundle(
@@ -594,6 +637,63 @@ def validate_jci_table_bundle(
     """Rebuild persisted JCI tables from exact assignment-bound observations."""
     try:
         _validate_jci_table_bundle(tables, rows)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _jci_error() from None
+
+
+def _validate_jci_relations(
+    assignments: Sequence[AssignmentRecord],
+    outcomes: Sequence[AssignmentOutcomeRecord],
+    variant_graphs: Sequence[PromptTSGRecord],
+    *,
+    variants: Sequence[PromptVariantRecord],
+    hypotheses: Sequence[FrozenHypothesisRecord],
+    protocols: Sequence[ConfirmationProtocolRecord],
+    min_independent_tasks: int,
+    tables: Sequence[CausalTableRecord],
+    rows: Sequence[JCIObservationRecord],
+) -> None:
+    checked_tables, checked_rows = _checked_jci_table_bundle(tables, rows)
+    expected_tables, expected_rows = _build_jci_tables(
+        assignments,
+        outcomes,
+        variant_graphs,
+        variants=variants,
+        hypotheses=hypotheses,
+        protocols=protocols,
+        min_independent_tasks=min_independent_tasks,
+    )
+    if checked_tables != expected_tables or checked_rows != expected_rows:
+        raise ValueError
+
+
+def validate_jci_relations(
+    assignments: Sequence[AssignmentRecord],
+    outcomes: Sequence[AssignmentOutcomeRecord],
+    variant_graphs: Sequence[PromptTSGRecord],
+    *,
+    variants: Sequence[PromptVariantRecord],
+    hypotheses: Sequence[FrozenHypothesisRecord],
+    protocols: Sequence[ConfirmationProtocolRecord],
+    min_independent_tasks: int,
+    tables: Sequence[CausalTableRecord],
+    rows: Sequence[JCIObservationRecord],
+) -> None:
+    """Prove exact persisted-table closure against every upstream producer."""
+    try:
+        _validate_jci_relations(
+            assignments,
+            outcomes,
+            variant_graphs,
+            variants=variants,
+            hypotheses=hypotheses,
+            protocols=protocols,
+            min_independent_tasks=min_independent_tasks,
+            tables=tables,
+            rows=rows,
+        )
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
@@ -672,10 +772,39 @@ def build_jci_background(
         raise _jci_error() from None
 
 
+def _validate_jci_background_bundle(
+    table: CausalTableRecord,
+    base: BackgroundKnowledgeRecord,
+    jci: JCIBackgroundKnowledgeRecord,
+) -> None:
+    checked_table = _snapshots_in_order((table,), CausalTableRecord, "table_id")[0]
+    checked_base = _snapshots_in_order((base,), BackgroundKnowledgeRecord, "knowledge_id")[0]
+    checked_jci = _snapshots_in_order((jci,), JCIBackgroundKnowledgeRecord, "knowledge_id")[0]
+    expected_base, expected_jci = _build_jci_background(checked_table)
+    if checked_base != expected_base or checked_jci != expected_jci:
+        raise ValueError
+
+
+def validate_jci_background_bundle(
+    table: CausalTableRecord,
+    base: BackgroundKnowledgeRecord,
+    jci: JCIBackgroundKnowledgeRecord,
+) -> None:
+    """Validate exact table-bound knowledge before backend conversion."""
+    try:
+        _validate_jci_background_bundle(table, base, jci)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _jci_error() from None
+
+
 __all__ = [
     "JCI_CONTEXT_EXOGENEITY",
     "build_jci_background",
     "build_jci_tables",
     "jci_stratum_key",
+    "validate_jci_background_bundle",
+    "validate_jci_relations",
     "validate_jci_table_bundle",
 ]

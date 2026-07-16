@@ -4,7 +4,11 @@ import pytest
 from causallearn.graph.GraphNode import GraphNode
 
 from secaware.causal.background import to_causal_learn_background
-from secaware.causal.jci import JCI_CONTEXT_EXOGENEITY, build_jci_background
+from secaware.causal.jci import (
+    JCI_CONTEXT_EXOGENEITY,
+    build_jci_background,
+    validate_jci_background_bundle,
+)
 import hashlib
 import json
 from secaware.schema.causal import (
@@ -186,6 +190,49 @@ def test_context_category_domain_must_be_exact_arm_roles() -> None:
             arm_roles=(ArmRole.NOOP_REWRITE, ArmRole.TARGET_PATCH),
             category_codes=(0, 1),
         )
+
+
+def test_table_bound_background_boundary_accepts_roundtrip_before_backend_conversion() -> None:
+    table = _table()
+    base, jci = build_jci_background(table)
+    persisted_base = type(base).model_validate(base.model_dump(mode="json"))
+    persisted_jci = JCIBackgroundKnowledgeRecord.model_validate(jci.model_dump(mode="json"))
+
+    validate_jci_background_bundle(table, persisted_base, persisted_jci)
+    to_causal_learn_background(persisted_base)
+    to_causal_learn_background(persisted_jci.materialized_background_knowledge)
+
+
+def test_table_bound_background_rejects_extra_system_constraint_with_new_digests() -> None:
+    table = _table()
+    base, _jci = build_jci_background(table)
+    system_ids = tuple(item for item, _tier in base.tiers)
+    extra = next(
+        (left, right)
+        for left in system_ids
+        for right in system_ids
+        if left != right
+        and (left, right) not in base.forbidden_directions
+        and tuple(sorted((left, right))) not in base.forbidden_adjacencies
+    )
+    forged_base = type(base).from_content(
+        table_id=base.table_id,
+        variable_ids=(*system_ids, "c.arm"),
+        tiers=base.tiers,
+        unconstrained_variable_ids=("c.arm",),
+        forbidden_directions=(*base.forbidden_directions, extra),
+        forbidden_adjacencies=base.forbidden_adjacencies,
+        required_directions=(),
+    )
+    forged_jci = JCIBackgroundKnowledgeRecord.from_base(
+        forged_base,
+        assumption_ids=(JCI_CONTEXT_EXOGENEITY,),
+        added_forbidden_directions=tuple((variable_id, "c.arm") for variable_id in system_ids),
+        required_directions=(),
+    )
+
+    with pytest.raises(Exception, match="JCI"):
+        validate_jci_background_bundle(table, forged_base, forged_jci)
 
 
 def test_forged_system_variable_declaration_is_rejected_before_backend_conversion() -> None:
