@@ -48,7 +48,7 @@ from secaware.schema.experiments import (
     RandomizationManifestRecord,
 )
 from secaware.schema.generation import GenerationRequestRecord, provider_provenance_sha256
-from secaware.schema.records import CanonicalGeneratedCodeRecord
+from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import ArmRole
 from secaware.schema.generation import GenerationProvenance
 from secaware.schema.oracle import AnalyzerFindingRecord, OracleRecord, SecurityLabel
@@ -66,6 +66,45 @@ _POLICY_LOCK = (
     / "policy.lock.json"
 )
 _ACTIVE_STAGE_RUNNER = None
+_IN_CALL_COORDINATOR_DELEGATE = None
+_IN_CALL_COORDINATOR_ARMED = False
+_IN_CALL_COORDINATOR_CALLS = 0
+_IN_CALL_COORDINATOR_REPLACEMENT_CALLS = 0
+_CAPTURE_VALIDATOR_DELEGATE = None
+_CAPTURE_VALIDATOR_FAILURE = None
+
+
+def _replacement_confirmation_oracle_coordinator(*_args, **_kwargs):
+    global _IN_CALL_COORDINATOR_REPLACEMENT_CALLS
+    _IN_CALL_COORDINATOR_REPLACEMENT_CALLS += 1
+    return confirmation_oracle_module.ConfirmationOracleStageResult(
+        assignment_count=0,
+        generated_count=0,
+        terminal_no_code_count=0,
+        oracle_count=0,
+    )
+
+
+def _in_call_confirmation_oracle_coordinator(*args, **kwargs):
+    global _IN_CALL_COORDINATOR_CALLS
+    if _IN_CALL_COORDINATOR_DELEGATE is None:  # pragma: no cover - test setup guard
+        raise AssertionError("coordinator delegate is missing")
+    result = _IN_CALL_COORDINATOR_DELEGATE(*args, **kwargs)
+    if _IN_CALL_COORDINATOR_ARMED:
+        _IN_CALL_COORDINATOR_CALLS += 1
+        confirmation_oracle_module._run_confirmation_oracle_stage = (
+            _replacement_confirmation_oracle_coordinator
+        )
+    return result
+
+
+def _capture_then_fail_upstream_validation(*args, **kwargs):
+    if _CAPTURE_VALIDATOR_DELEGATE is None:  # pragma: no cover - test setup guard
+        raise AssertionError("validation delegate is missing")
+    result = _CAPTURE_VALIDATOR_DELEGATE(*args, **kwargs)
+    if _CAPTURE_VALIDATOR_FAILURE is not None:
+        raise _CAPTURE_VALIDATOR_FAILURE
+    return result
 
 
 def _valid_runtime():
@@ -325,6 +364,22 @@ def test_confirmation_oracle_runtime_contract_binds_validation_only_policy_loade
 
     changed = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
     assert changed["preflight.load_policy_bundle"] != baseline["preflight.load_policy_bundle"]
+
+
+def test_confirmation_oracle_runtime_contract_binds_actual_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    assert "runtime.coordinator" in baseline
+
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "_run_confirmation_oracle_stage",
+        _replacement_confirmation_oracle_coordinator,
+    )
+
+    changed = confirmation_oracle_module.confirmation_oracle_runtime_callable_contract()
+    assert changed["runtime.coordinator"] != baseline["runtime.coordinator"]
 
 
 def test_run_oracle_confirmation_cli_maps_to_confirm_arm_stage(
@@ -1092,6 +1147,96 @@ def _oracle_bytes(store: RunStore) -> tuple[bytes, bytes]:
     )
 
 
+def _retained_confirmation_snapshots(error: BaseException) -> tuple[object, ...]:
+    retained: list[object] = []
+    pending = [error]
+    visited: set[int] = set()
+    while pending:
+        current_error = pending.pop()
+        if id(current_error) in visited:
+            continue
+        visited.add(id(current_error))
+        current = current_error.__traceback__
+        while current is not None:
+            if current.tb_frame.f_globals.get("__name__") == confirmation_oracle_module.__name__:
+                snapshot = current.tb_frame.f_locals.get("snapshot")
+                if snapshot is not None:
+                    retained.append(snapshot)
+            current = current.tb_next
+        if current_error.__cause__ is not None:
+            pending.append(current_error.__cause__)
+        if current_error.__context__ is not None:
+            pending.append(current_error.__context__)
+    return tuple(retained)
+
+
+def test_terminal_validation_rejects_pre_call_coordinator_replacement_without_invocation(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, store = _generated_confirmation_store
+    committed = _committed_oracle_bytes(config, store)
+    calls = 0
+
+    def replaced_coordinator(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return confirmation_oracle_module.ConfirmationOracleStageResult(
+            assignment_count=0,
+            generated_count=0,
+            terminal_no_code_count=0,
+            oracle_count=0,
+        )
+
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "_run_confirmation_oracle_stage",
+        replaced_coordinator,
+    )
+    with pytest.raises(SecAwareError) as captured:
+        confirmation_oracle_module._validate_committed_confirmation_run(config, store)
+
+    assert captured.value.code is ErrorCode.MANIFEST_CONFLICT
+    assert calls == 0
+    assert _oracle_bytes(store) == committed
+
+
+def test_terminal_validation_rejects_in_call_coordinator_replacement(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    global _IN_CALL_COORDINATOR_DELEGATE
+    global _IN_CALL_COORDINATOR_ARMED
+    global _IN_CALL_COORDINATOR_CALLS
+    global _IN_CALL_COORDINATOR_REPLACEMENT_CALLS
+
+    config, store = _generated_confirmation_store
+    _IN_CALL_COORDINATOR_DELEGATE = confirmation_oracle_module._run_confirmation_oracle_stage
+    _IN_CALL_COORDINATOR_ARMED = False
+    _IN_CALL_COORDINATOR_CALLS = 0
+    _IN_CALL_COORDINATOR_REPLACEMENT_CALLS = 0
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "_run_confirmation_oracle_stage",
+        _in_call_confirmation_oracle_coordinator,
+    )
+    committed = _committed_oracle_bytes(config, store)
+    _IN_CALL_COORDINATOR_ARMED = True
+    try:
+        with pytest.raises(SecAwareError) as captured:
+            confirmation_oracle_module._validate_committed_confirmation_run(config, store)
+
+        assert captured.value.code is ErrorCode.CONTRACT
+        assert _IN_CALL_COORDINATOR_CALLS == 1
+        assert _IN_CALL_COORDINATOR_REPLACEMENT_CALLS == 0
+        assert _oracle_bytes(store) == committed
+    finally:
+        _IN_CALL_COORDINATOR_DELEGATE = None
+        _IN_CALL_COORDINATOR_ARMED = False
+        _IN_CALL_COORDINATOR_CALLS = 0
+        _IN_CALL_COORDINATOR_REPLACEMENT_CALLS = 0
+
+
 def test_terminal_validation_rejects_pre_call_policy_loader_drift_without_invocation(
     _generated_confirmation_store,
     monkeypatch: pytest.MonkeyPatch,
@@ -1108,7 +1253,7 @@ def test_terminal_validation_rejects_pre_call_policy_loader_drift_without_invoca
 
     monkeypatch.setattr(confirmation_oracle_module, "load_policy_bundle", drifted_loader)
     with pytest.raises(SecAwareError) as captured:
-        confirmation_oracle_module.validate_committed_confirmation_run(config, store)
+        confirmation_oracle_module._validate_committed_confirmation_run(config, store)
 
     assert captured.value.code is ErrorCode.MANIFEST_CONFLICT
     assert calls == 0
@@ -1145,11 +1290,111 @@ def test_terminal_validation_rejects_in_call_policy_loader_drift_and_preserves_c
     committed = _committed_oracle_bytes(config, store)
 
     with pytest.raises(SecAwareError) as captured:
-        confirmation_oracle_module.validate_committed_confirmation_run(config, store)
+        confirmation_oracle_module._validate_committed_confirmation_run(config, store)
 
     assert captured.value.code is ErrorCode.CONTRACT
     assert calls == 1
     assert _oracle_bytes(store) == committed
+
+
+def test_terminal_validation_ordinary_failure_releases_captured_snapshot(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    global _CAPTURE_VALIDATOR_DELEGATE
+    global _CAPTURE_VALIDATOR_FAILURE
+
+    config, store = _generated_confirmation_store
+    _CAPTURE_VALIDATOR_DELEGATE = confirmation_oracle_module._validate_upstream_bundles
+    _CAPTURE_VALIDATOR_FAILURE = None
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "_validate_upstream_bundles",
+        _capture_then_fail_upstream_validation,
+    )
+    committed = _committed_oracle_bytes(config, store)
+    prompt = read_jsonl(store.path("inputs", "prompts.jsonl"), PromptRecord)[0].prompt
+    code = read_jsonl(
+        store.path("generation", "confirmation_code.jsonl"),
+        CanonicalGeneratedCodeRecord,
+        allow_empty=False,
+    )[0].code
+    private_failure = SecAwareError(
+        code=ErrorCode.CONTRACT,
+        stage="private-validation",
+        message="private captured validation failure",
+    )
+    _CAPTURE_VALIDATOR_FAILURE = private_failure
+    try:
+        with pytest.raises(SecAwareError) as captured:
+            confirmation_oracle_module._validate_committed_confirmation_run(config, store)
+
+        assert captured.value is not private_failure
+        assert captured.value.code is ErrorCode.CONTRACT
+        assert _retained_confirmation_snapshots(captured.value) == ()
+        surfaces = "\n".join(
+            (
+                str(captured.value),
+                "".join(traceback.format_exception(captured.value)),
+                repr(captured.value.to_dict()),
+                _secaware_frame_locals(captured.value),
+            )
+        )
+        assert "private captured validation failure" not in surfaces
+        assert prompt not in surfaces
+        assert code not in surfaces
+        assert _oracle_bytes(store) == committed
+    finally:
+        _CAPTURE_VALIDATOR_DELEGATE = None
+        _CAPTURE_VALIDATOR_FAILURE = None
+
+
+@pytest.mark.parametrize(
+    "control",
+    (MemoryError("memory"), KeyboardInterrupt("keyboard"), SystemExit("exit")),
+)
+def test_terminal_validation_fatal_failure_releases_captured_snapshot(
+    _generated_confirmation_store,
+    monkeypatch: pytest.MonkeyPatch,
+    control: BaseException,
+) -> None:
+    global _CAPTURE_VALIDATOR_DELEGATE
+    global _CAPTURE_VALIDATOR_FAILURE
+
+    config, store = _generated_confirmation_store
+    _CAPTURE_VALIDATOR_DELEGATE = confirmation_oracle_module._validate_upstream_bundles
+    _CAPTURE_VALIDATOR_FAILURE = None
+    monkeypatch.setattr(
+        confirmation_oracle_module,
+        "_validate_upstream_bundles",
+        _capture_then_fail_upstream_validation,
+    )
+    committed = _committed_oracle_bytes(config, store)
+    prompt = read_jsonl(store.path("inputs", "prompts.jsonl"), PromptRecord)[0].prompt
+    code = read_jsonl(
+        store.path("generation", "confirmation_code.jsonl"),
+        CanonicalGeneratedCodeRecord,
+        allow_empty=False,
+    )[0].code
+    _CAPTURE_VALIDATOR_FAILURE = control
+    try:
+        with pytest.raises(type(control)) as captured:
+            confirmation_oracle_module._validate_committed_confirmation_run(config, store)
+
+        assert captured.value is control
+        assert _retained_confirmation_snapshots(captured.value) == ()
+        surfaces = "\n".join(
+            (
+                "".join(traceback.format_exception(captured.value)),
+                _secaware_frame_locals(captured.value),
+            )
+        )
+        assert prompt not in surfaces
+        assert code not in surfaces
+        assert _oracle_bytes(store) == committed
+    finally:
+        _CAPTURE_VALIDATOR_DELEGATE = None
+        _CAPTURE_VALIDATOR_FAILURE = None
 
 
 def test_confirmation_oracle_skip_and_tamper_repair(

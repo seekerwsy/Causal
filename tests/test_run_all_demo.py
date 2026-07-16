@@ -685,26 +685,45 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
 
     analyzer_calls = tuple(runner.calls)
     provider_calls = CountingConfirmationProvider.calls
+    stage_calls: list[str] = []
 
-    second = CliRunner().invoke(
-        app,
-        ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
-    )
+    def reject_completed_stage(name: str):
+        def reject(*_args: object, **_kwargs: object) -> None:
+            stage_calls.append(name)
+            pytest.fail(f"completed run reached stage {name}")
 
-    assert second.exit_code == 0, second.output
-    assert "SecAware randomized confirmation complete" in second.output
-    assert tuple(runner.calls) == analyzer_calls
-    assert CountingConfirmationProvider.calls == provider_calls
-    assert _run_tree_bytes(run_dir) == committed
+        return reject
 
-    terminal_output = run_dir / "oracle" / "confirmation_oracle.jsonl"
-    terminal_manifest = run_dir / ".stages" / "run-oracle-confirmation.json"
-    assignments_path = run_dir / "interventions" / "assignments.jsonl"
-    for tampered_path in (terminal_output, assignments_path):
-        original = tampered_path.read_bytes()
-        tampered_path.write_bytes(original + b"\n")
-        tampered = _run_tree_bytes(run_dir)
-        rejected = CliRunner().invoke(
+    with pytest.MonkeyPatch.context() as completed_patch:
+        for stage_name in (
+            "_prepare",
+            "extract_prompt_tsg_stage",
+            "generate_observed_stage",
+            "run_oracle_stage",
+            "discover_stage",
+            "run_prompt_variant_freeze_stage",
+            "run_confirmation_randomization_stage",
+            "run_confirmation_generation_stage",
+            "run_confirmation_oracle_stage",
+        ):
+            completed_patch.setattr(
+                cli_module,
+                stage_name,
+                reject_completed_stage(stage_name),
+            )
+
+        second = CliRunner().invoke(
+            app,
+            ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
+        )
+
+        assert second.exit_code == 0, second.output
+        assert "SecAware randomized confirmation complete" in second.output
+        assert tuple(runner.calls) == analyzer_calls
+        assert CountingConfirmationProvider.calls == provider_calls
+        assert _run_tree_bytes(run_dir) == committed
+
+        forced_completed = CliRunner().invoke(
             app,
             [
                 "run-all",
@@ -715,20 +734,62 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
                 "--force",
             ],
         )
-        assert rejected.exit_code != 0
-        assert _run_tree_bytes(run_dir) == tampered
+
+        assert forced_completed.exit_code == int(ErrorCode.MANIFEST_CONFLICT)
+        normalized_force_error = " ".join(forced_completed.output.split()).casefold()
+        assert "completed run" in normalized_force_error
+        assert "immutable" in normalized_force_error
+        assert "start a new run" in normalized_force_error
+        assert tuple(runner.calls) == analyzer_calls
+        assert CountingConfirmationProvider.calls == provider_calls
+        assert _run_tree_bytes(run_dir) == committed
+    assert stage_calls == []
+
+    terminal_output = run_dir / "oracle" / "confirmation_oracle.jsonl"
+    terminal_manifest = run_dir / ".stages" / "run-oracle-confirmation.json"
+    assignments_path = run_dir / "interventions" / "assignments.jsonl"
+    for tampered_path in (terminal_output, assignments_path):
+        original = tampered_path.read_bytes()
+        tampered_path.write_bytes(original + b"\n")
+        tampered = _run_tree_bytes(run_dir)
+        for force_args in ((), ("--force",)):
+            rejected = CliRunner().invoke(
+                app,
+                [
+                    "run-all",
+                    "--config",
+                    "configs/demo.yaml",
+                    "--run-dir",
+                    str(run_dir),
+                    *force_args,
+                ],
+            )
+            assert rejected.exit_code != 0
+            assert tuple(runner.calls) == analyzer_calls
+            assert CountingConfirmationProvider.calls == provider_calls
+            assert _run_tree_bytes(run_dir) == tampered
         tampered_path.write_bytes(original)
 
     for missing_path in (terminal_output, terminal_manifest):
         original = missing_path.read_bytes()
         missing_path.unlink()
         partial = _run_tree_bytes(run_dir)
-        rejected = CliRunner().invoke(
-            app,
-            ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
-        )
-        assert rejected.exit_code != 0
-        assert _run_tree_bytes(run_dir) == partial
+        for force_args in ((), ("--force",)):
+            rejected = CliRunner().invoke(
+                app,
+                [
+                    "run-all",
+                    "--config",
+                    "configs/demo.yaml",
+                    "--run-dir",
+                    str(run_dir),
+                    *force_args,
+                ],
+            )
+            assert rejected.exit_code != 0
+            assert tuple(runner.calls) == analyzer_calls
+            assert CountingConfirmationProvider.calls == provider_calls
+            assert _run_tree_bytes(run_dir) == partial
         missing_path.write_bytes(original)
 
     for future_relative in (
@@ -741,12 +802,22 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         future.parent.mkdir(parents=True, exist_ok=True)
         future.write_text("{}\n", encoding="utf-8")
         future_snapshot = _run_tree_bytes(run_dir)
-        rejected = CliRunner().invoke(
-            app,
-            ["run-all", "--config", "configs/demo.yaml", "--run-dir", str(run_dir)],
-        )
-        assert rejected.exit_code != 0
-        assert _run_tree_bytes(run_dir) == future_snapshot
+        for force_args in ((), ("--force",)):
+            rejected = CliRunner().invoke(
+                app,
+                [
+                    "run-all",
+                    "--config",
+                    "configs/demo.yaml",
+                    "--run-dir",
+                    str(run_dir),
+                    *force_args,
+                ],
+            )
+            assert rejected.exit_code != 0
+            assert tuple(runner.calls) == analyzer_calls
+            assert CountingConfirmationProvider.calls == provider_calls
+            assert _run_tree_bytes(run_dir) == future_snapshot
         future.unlink()
 
     assert _run_tree_bytes(run_dir) == committed
@@ -890,6 +961,20 @@ def test_prompt_graph_outcome_boundary_and_breaking_migration_are_documented() -
     assert "prompt_tsg.jsonl" in migration
     assert "no per-prompt fallback" in normalized_migration
     assert "not automatically upgraded" in normalized_migration
+
+
+def test_completed_randomized_confirmation_run_immutability_is_documented() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    migration = (REPO_ROOT / "docs" / "migrations" / "randomized-confirmation.md").read_text(
+        encoding="utf-8"
+    )
+
+    for document in (readme, migration):
+        normalized = " ".join(document.split()).casefold()
+        assert "completed run" in normalized
+        assert "immutable" in normalized
+        assert "start a new run" in normalized
+        assert "--force" in normalized
 
 
 def test_run_all_demo_fails_closed_before_legacy_oracle_publication(tmp_path: Path) -> None:

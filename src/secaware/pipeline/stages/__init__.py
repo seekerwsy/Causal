@@ -8,7 +8,6 @@ from secaware.pipeline.stages.confirmation_generation import (
 from secaware.pipeline.stages.confirmation_oracle import (
     ConfirmationOracleStageResult,
     run_confirmation_oracle_stage,
-    validate_committed_confirmation_run,
 )
 from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryStageResult,
@@ -37,5 +36,4 @@ __all__ = [
     "run_confirmation_oracle_stage",
     "run_confirmation_randomization_stage",
     "run_prompt_variant_freeze_stage",
-    "validate_committed_confirmation_run",
 ]

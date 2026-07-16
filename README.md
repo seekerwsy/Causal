@@ -94,6 +94,10 @@ secaware run-oracle --config configs/demo.yaml --run-dir runs/demo --condition c
 hypothesis discovery, variant construction, complete-block randomization, confirmation generation,
 and the independent confirmation Oracle in that order. It stops at the committed confirmation
 Oracle. M6 owns analysis, JCI, effects, and reporting, so M5 never creates those future artifacts.
+Once that terminal Oracle and its manifest form a valid completed run, the run directory is
+immutable. A later `run-all` validates and reuses it without executing providers or analyzers;
+`run-all --force` is rejected as well. Start a new run directory instead of deleting, rebuilding,
+or overwriting a completed run.
 
 The migration is intentionally breaking: `intervene` and `generate-counterfactual` are no longer
 registered commands, and paired two-arm artifacts are not accepted as randomized-confirmation

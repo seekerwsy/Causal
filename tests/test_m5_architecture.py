@@ -190,6 +190,8 @@ def test_m5_public_stage_package_exports_the_complete_pipeline() -> None:
         "run_confirmation_oracle_stage",
     ):
         assert callable(getattr(stages, name))
+    assert not hasattr(stages, "validate_committed_confirmation_run")
+    assert "validate_committed_confirmation_run" not in stages.__all__
 
 
 def test_executor_and_extractors_have_distinct_system_template_hashes() -> None:

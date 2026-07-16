@@ -52,10 +52,8 @@ from secaware.pipeline.jsonl_stage import (
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
 from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
 from secaware.pipeline.stages.confirmation_generation import run_confirmation_generation_stage
-from secaware.pipeline.stages.confirmation_oracle import (
-    run_confirmation_oracle_stage,
-    validate_committed_confirmation_run,
-)
+from secaware.pipeline.stages import confirmation_oracle as confirmation_oracle_stage
+from secaware.pipeline.stages.confirmation_oracle import run_confirmation_oracle_stage
 from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryTerminalStatus,
     fci_discovery_stage,
@@ -2091,10 +2089,15 @@ def run_all_command(
         store.path(".stages", "run-oracle-confirmation.json"),
     )
     if any(path.exists() or path.is_symlink() for path in terminal_paths):
-        validate_committed_confirmation_run(cfg, store)
-        if not force:
-            console.print(f"SecAware randomized confirmation complete: {store.root}")
-            return
+        confirmation_oracle_stage._validate_committed_confirmation_run(cfg, store)
+        if force:
+            raise SecAwareError(
+                code=ErrorCode.MANIFEST_CONFLICT,
+                stage="run-all",
+                message="completed run is immutable; start a new run directory",
+            )
+        console.print(f"SecAware randomized confirmation complete: {store.root}")
+        return
     _prepare(cfg, store)
     extract_prompt_tsg_stage(cfg, store, force=force)
     generate_observed_stage(cfg, store, force=force)

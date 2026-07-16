@@ -69,6 +69,13 @@ run-oracle --condition confirmation
 `run-all` executes that sequence and stops after the committed confirmation Oracle. Pairing,
 effect estimation, JCI analysis, and reporting belong to M6 and cannot publish during M5.
 
+A valid terminal Oracle plus its stage manifest marks a completed run. The completed run is
+immutable: a later `run-all` first validates the complete committed chain and then exits without
+calling a generation provider or analyzer. `run-all --force` cannot overwrite, rebuild, or delete
+that commit and fails closed with instructions to start a new run directory. Partial, tampered,
+untrusted, or future-artifact states are rejected before this immutable-completion decision for
+both forced and unforced invocations.
+
 ## Removed two-arm artifacts and commands
 
 The `intervene` and `generate-counterfactual` commands are no longer registered with Typer. They

@@ -1133,36 +1133,59 @@ def _run_confirmation_oracle_stage(
         )
 
 
-def run_confirmation_oracle_stage(
+def _execute_confirmation_oracle_boundary(
     config: AppConfig,
     store: RunStore,
     *,
     force: bool,
+    validate_only: bool,
 ) -> ConfirmationOracleStageResult:
-    """Run the public fail-closed confirmation Oracle stage."""
-
     runtime_callables: dict[str, object] = {}
     runtime_contract: dict[str, Mapping[str, str]] = {}
+    current_runtime: dict[str, object] = {}
     analyzer_runtime: _AnalyzerRuntime | None = None
+    coordinator: object | None = None
     failure_code: ErrorCode | None = None
     control: MemoryError | KeyboardInterrupt | SystemExit | None = None
     result: ConfirmationOracleStageResult | None = None
     caught: BaseException | None = None
     try:
-        runtime_callables = _confirmation_oracle_runtime_callables()
+        coordinator = _run_confirmation_oracle_stage
+        runtime_callables = _confirmation_oracle_runtime_callables(coordinator=coordinator)
         runtime_contract = {
             name: _runtime_callable_descriptor(value)
             for name, value in sorted(runtime_callables.items())
         }
+        if validate_only:
+            runtime_callables["input.guard_no_future_artifacts"](
+                store,
+                traversal=runtime_callables["input.bounded_tree"],
+            )
+            store.require_committed_output(
+                _STAGE,
+                (store.path("oracle", _OUTPUT_NAME),),
+            )
         analyzer_runtime = runtime_callables["runtime.analyzer_factory"](config.oracle)
-        result = _run_confirmation_oracle_stage(
+        result = runtime_callables["runtime.coordinator"](
             config,
             store,
             force=force,
             analyzer_runtime=analyzer_runtime,
             runtime_callables=runtime_callables,
             runtime_contract=runtime_contract,
+            validate_only=validate_only,
         )
+        current_runtime = _confirmation_oracle_runtime_callables()
+        if (
+            tuple(sorted(current_runtime)) != tuple(sorted(runtime_callables))
+            or any(current_runtime[name] is not value for name, value in runtime_callables.items())
+            or {
+                name: _runtime_callable_descriptor(value)
+                for name, value in sorted(current_runtime.items())
+            }
+            != runtime_contract
+        ):
+            raise _error("confirmation Oracle runtime callable bundle changed")
     except _FATAL as error:
         control = error
     except SecAwareError as error:
@@ -1170,17 +1193,19 @@ def run_confirmation_oracle_stage(
         failure_code = error.code
     except Exception as error:
         caught = error
-        failure_code = ErrorCode.ANALYZER_FAILED
+        failure_code = ErrorCode.MANIFEST_CONFLICT if validate_only else ErrorCode.ANALYZER_FAILED
     finally:
         config = None  # type: ignore[assignment]
         store = None  # type: ignore[assignment]
         analyzer_runtime = None  # type: ignore[assignment]
+        coordinator = None
+        current_runtime = {}
         runtime_callables = {}
         runtime_contract = {}
         _clear_exception(caught)
         caught = None
+        _clear_exception(control)
     if control is not None:
-        control.__traceback__ = None
         raised_control = control
         control = None
         raise raised_control
@@ -1191,54 +1216,41 @@ def run_confirmation_oracle_stage(
     return result
 
 
-def validate_committed_confirmation_run(
+def run_confirmation_oracle_stage(
+    config: AppConfig,
+    store: RunStore,
+    *,
+    force: bool,
+) -> ConfirmationOracleStageResult:
+    """Run the public fail-closed confirmation Oracle stage."""
+
+    return _execute_confirmation_oracle_boundary(
+        config,
+        store,
+        force=force,
+        validate_only=False,
+    )
+
+
+def _validate_committed_confirmation_run(
     config: AppConfig,
     store: RunStore,
 ) -> ConfirmationOracleStageResult:
     """Validate one terminal M5 commit without executing providers or analyzers."""
 
-    runtime_callables: dict[str, object] = {}
-    runtime_contract: dict[str, Mapping[str, str]] = {}
-    analyzer_runtime: _AnalyzerRuntime | None = None
-    try:
-        runtime_callables = _confirmation_oracle_runtime_callables()
-        runtime_contract = {
-            name: _runtime_callable_descriptor(value)
-            for name, value in sorted(runtime_callables.items())
-        }
-        runtime_callables["input.guard_no_future_artifacts"](
-            store,
-            traversal=runtime_callables["input.bounded_tree"],
-        )
-        store.require_committed_output(
-            _STAGE,
-            (store.path("oracle", _OUTPUT_NAME),),
-        )
-        analyzer_runtime = runtime_callables["runtime.analyzer_factory"](config.oracle)
-        return _run_confirmation_oracle_stage(
-            config,
-            store,
-            force=False,
-            analyzer_runtime=analyzer_runtime,
-            runtime_callables=runtime_callables,
-            runtime_contract=runtime_contract,
-            validate_only=True,
-        )
-    except _FATAL:
-        raise
-    except SecAwareError:
-        raise
-    except Exception:
-        raise _public_error(ErrorCode.MANIFEST_CONFLICT) from None
-    finally:
-        config = None  # type: ignore[assignment]
-        store = None  # type: ignore[assignment]
-        analyzer_runtime = None
-        runtime_callables = {}
-        runtime_contract = {}
+    return _execute_confirmation_oracle_boundary(
+        config,
+        store,
+        force=False,
+        validate_only=True,
+    )
 
 
-def _confirmation_oracle_runtime_callables() -> dict[str, object]:
+def _confirmation_oracle_runtime_callables(
+    *, coordinator: object | None = None
+) -> dict[str, object]:
+    if coordinator is None:
+        coordinator = _run_confirmation_oracle_stage
     return {
         "adapter.bandit_argv": oracle_aggregator.bandit_argv,
         "adapter.parse_bandit_report": oracle_aggregator.parse_bandit_report,
@@ -1274,6 +1286,7 @@ def _confirmation_oracle_runtime_callables() -> dict[str, object]:
         "preflight.run_oracle_preflight": run_oracle_preflight,
         "relation.validate_confirmation_oracle_coverage": validate_confirmation_oracle_coverage,
         "runtime.analyzer_factory": _ANALYZER_RUNTIME_FACTORY,
+        "runtime.coordinator": coordinator,
         "runtime.production_runner": run_analyzer_process,
         "runtime.validator": validate_analyzer_runtime,
         "transaction.execute_jsonl_stage_transaction": execute_jsonl_stage_transaction,
@@ -1312,6 +1325,5 @@ __all__ = [
     "confirmation_oracle_output_policy_contract",
     "confirmation_oracle_runtime_callable_contract",
     "run_confirmation_oracle_stage",
-    "validate_committed_confirmation_run",
     "validate_confirmation_oracle_coverage",
 ]
