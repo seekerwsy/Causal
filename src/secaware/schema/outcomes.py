@@ -12,12 +12,15 @@ from typing import Any, ClassVar, Literal, NoReturn, Self
 from pydantic import ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from secaware.schema.common import MAX_MODEL_ID_CHARS, SafeValidationMixin, VersionedModel
+from secaware.schema.causal import jci_row_id_from_content
 from secaware.schema.experiments import ArmRole, AssignmentExecutionStatus
 
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
 _OUTCOME_ID_PATTERN = r"^assignment_outcome_[0-9a-f]{64}$"
+_TABLE_ID_PATTERN = r"^table_[0-9a-f]{64}$"
+_ROW_ID_PATTERN = r"^row_[0-9a-f]{64}$"
 _FUNCTIONAL_OUTCOME_ID_PATTERN = r"^functional_outcome_[0-9a-f]{64}$"
 _ITT_EFFECT_ID_PATTERN = r"^itt_effect_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
@@ -349,6 +352,65 @@ class AssignmentOutcomeRecord(_OutcomeContract):
         return self
 
 
+class JCIObservationRecord(_OutcomeContract):
+    """One assignment-bound categorical row in a JCI causal table."""
+
+    _safe_validation_message: ClassVar[str] = "JCI observation failed validation"
+
+    schema_version: Literal["1.0"]
+    table_id: str = Field(pattern=_TABLE_ID_PATTERN)
+    row_id: str = Field(pattern=_ROW_ID_PATTERN)
+    assignment_id: str = Field(pattern=_ASSIGNMENT_ID_PATTERN)
+    task_id: str
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    target_instance_id: str = Field(pattern=_TARGET_INSTANCE_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
+    values: tuple[StrictInt, ...] = Field(min_length=2, max_length=64)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        try:
+            payload = {"schema_version": "1.0", **content}
+            row_id = jci_row_id_from_content(
+                assignment_id=payload["assignment_id"],
+                task_id=payload["task_id"],
+                target_spec_id=payload["target_spec_id"],
+                target_instance_id=payload["target_instance_id"],
+                arm_protocol_id=payload["arm_protocol_id"],
+                protocol_instance_id=payload["protocol_instance_id"],
+                values=payload["values"],
+            )
+            return cls(**payload, row_id=row_id)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            _raise_safe(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        expected = jci_row_id_from_content(
+            assignment_id=self.assignment_id,
+            task_id=self.task_id,
+            target_spec_id=self.target_spec_id,
+            target_instance_id=self.target_instance_id,
+            arm_protocol_id=self.arm_protocol_id,
+            protocol_instance_id=self.protocol_instance_id,
+            values=self.values,
+        )
+        if (
+            _IDENTIFIER_PATTERN.fullmatch(self.task_id) is None
+            or any(value < 0 for value in self.values)
+            or self.row_id != expected
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class FunctionalOutcomeRecord(_OutcomeContract):
     """Independent assignment-bound result from one pre-registered evaluator."""
 
@@ -404,4 +466,5 @@ __all__ = [
     "FunctionalOutcomeRecord",
     "FunctionalOutcomeStatus",
     "ITTEffectRecord",
+    "JCIObservationRecord",
 ]

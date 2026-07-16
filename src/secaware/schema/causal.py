@@ -11,6 +11,7 @@ from typing import Any, ClassVar, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.experiments import ArmRole, ConfirmationProtocolRecord
 from secaware.schema.features import FeatureFamily, FeatureOperation
 
 
@@ -19,6 +20,12 @@ _TABLE_ID_PATTERN = r"^table_[0-9a-f]{64}$"
 _ROW_ID_PATTERN = r"^row_[0-9a-f]{64}$"
 _PAG_ID_PATTERN = r"^pag_[0-9a-f]{64}$"
 _BK_ID_PATTERN = r"^bk_[0-9a-f]{64}$"
+_JCI_BK_ID_PATTERN = r"^jci_bk_[0-9a-f]{64}$"
+_ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
+_TARGET_ID_PATTERN = r"^target_[0-9a-f]{64}$"
+_TARGET_INSTANCE_ID_PATTERN = r"^target_instance_[0-9a-f]{64}$"
+_PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
+_PROTOCOL_INSTANCE_ID_PATTERN = r"^protocol_instance_[0-9a-f]{64}$"
 _DRAW_ID_PATTERN = r"^draw_[0-9a-f]{64}$"
 _BOOTSTRAP_PAG_ID_PATTERN = r"^bootstrap_pag_[0-9a-f]{64}$"
 _PATH_ID_PATTERN = r"^path_[0-9a-f]{64}$"
@@ -66,6 +73,31 @@ def _row_id_from_content(
     values: Sequence[int],
 ) -> str:
     return f"row_{_digest((task_id, prompt_id, model_id, seed_id, tuple(values)))}"
+
+
+def jci_row_id_from_content(
+    *,
+    assignment_id: str,
+    task_id: str,
+    target_spec_id: str,
+    target_instance_id: str,
+    arm_protocol_id: str,
+    protocol_instance_id: str,
+    values: Sequence[int],
+) -> str:
+    """Return the table-independent semantic row identity used by JCI records."""
+    return "row_" + _digest(
+        {
+            "schema_version": "1.0",
+            "assignment_id": assignment_id,
+            "task_id": task_id,
+            "target_spec_id": target_spec_id,
+            "target_instance_id": target_instance_id,
+            "arm_protocol_id": arm_protocol_id,
+            "protocol_instance_id": protocol_instance_id,
+            "values": tuple(values),
+        }
+    )
 
 
 def _content(model: StrictModel, *derived_fields: str) -> dict[str, Any]:
@@ -124,6 +156,92 @@ class VariableRole(str, Enum):
     X = "x"
     Y = "y"
     C = "c"
+
+
+_SUPPORTED_JCI_CONTEXT_ORDERS = frozenset(
+    {
+        (ArmRole.TARGET_PATCH, ArmRole.NOOP_REWRITE),
+        (
+            ArmRole.TARGET_PATCH,
+            ArmRole.NOOP_REWRITE,
+            ArmRole.LENGTH_MATCHED_PLACEBO,
+            ArmRole.GENERIC_SECURITY_REMINDER,
+        ),
+        (ArmRole.TARGET_REMOVE, ArmRole.NOOP_RETAIN),
+        (
+            ArmRole.TARGET_REMOVE,
+            ArmRole.NOOP_RETAIN,
+            ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+            ArmRole.GENERIC_SECURITY_REPLACEMENT,
+        ),
+        (ArmRole.TASK_TARGET, ArmRole.TASK_NOOP, ArmRole.TASK_LENGTH_PLACEBO),
+        (
+            ArmRole.TASK_TARGET,
+            ArmRole.TASK_NOOP,
+            ArmRole.TASK_LENGTH_PLACEBO,
+            ArmRole.TASK_GENERIC_CONTROL,
+        ),
+        (ArmRole.PRESENTATION_TARGET, ArmRole.PRESENTATION_NOOP),
+        (
+            ArmRole.PRESENTATION_TARGET,
+            ArmRole.PRESENTATION_NOOP,
+            ArmRole.PRESENTATION_MATCHED_CONTROL,
+        ),
+    }
+)
+
+
+class JCIStratum(_CausalContract):
+    """Exact semantic grouping key for randomized-context discovery."""
+
+    _safe_validation_message: ClassVar[str] = "JCI stratum failed validation"
+
+    scope_id: str
+    model_id: str
+    hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> Self:
+        if not _valid_identifier(self.scope_id) or not _valid_identifier(self.model_id):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class JCIContextSpec(_CausalContract):
+    """One categorical randomized-arm context in frozen protocol order."""
+
+    _safe_validation_message: ClassVar[str] = "JCI context failed validation"
+
+    variable_id: Literal["c.arm"] = "c.arm"
+    arm_roles: tuple[ArmRole, ...] = Field(min_length=2, max_length=4)
+    category_codes: tuple[int, ...] = Field(min_length=2, max_length=4)
+
+    @field_validator("arm_roles", mode="before")
+    @classmethod
+    def parse_arm_roles(cls, value: object) -> object:
+        snapshot = _snapshot_json_arrays(value)
+        if type(snapshot) is not tuple:
+            return snapshot
+        return tuple(_exact_enum_value(item, ArmRole) for item in snapshot)
+
+    @classmethod
+    def from_protocol(cls, protocol: ConfirmationProtocolRecord) -> Self:
+        try:
+            checked = ConfirmationProtocolRecord.model_validate(protocol, strict=True)
+            roles = checked.arm_roles
+            return cls(arm_roles=roles, category_codes=tuple(range(len(roles))))
+        except Exception:
+            raise cls._safe_error() from None
+
+    @model_validator(mode="after")
+    def validate_categories(self) -> Self:
+        if self.arm_roles not in _SUPPORTED_JCI_CONTEXT_ORDERS or self.category_codes != tuple(
+            range(len(self.arm_roles))
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
 
 
 class EndpointMark(str, Enum):
@@ -290,6 +408,101 @@ class CausalTableRecord(_CausalVersionedContract):
             table_id=f"table_{table_sha256}",
             table_sha256=table_sha256,
         )
+
+    @classmethod
+    def from_jci_content(
+        cls,
+        *,
+        scope_id: str,
+        cwe: str,
+        model_id: str,
+        variables: Sequence[CausalVariableSpec],
+        independent_task_count: int,
+        observation_payload: Sequence[tuple[str, str, str, str, str, str, str, Sequence[int]]],
+    ) -> Self:
+        """Build one table from assignment-bound JCI observation semantics."""
+        try:
+            ordered = tuple(sorted(variables, key=lambda item: item.variable_id))
+            observations = tuple(sorted(observation_payload))
+            row_count = len(observations)
+            if (
+                not 2 <= len(ordered) <= _MAX_VARIABLES
+                or not 2 <= row_count <= _MAX_ROWS
+                or type(independent_task_count) is not int
+                or not 2 <= independent_task_count <= row_count
+            ):
+                raise ValueError
+            row_ids: set[str] = set()
+            assignment_ids: set[str] = set()
+            task_ids: set[str] = set()
+            for (
+                row_id,
+                assignment_id,
+                task_id,
+                target_spec_id,
+                target_instance_id,
+                arm_protocol_id,
+                protocol_instance_id,
+                values,
+            ) in observations:
+                encoded = tuple(values)
+                if (
+                    re.fullmatch(_ROW_ID_PATTERN, row_id) is None
+                    or re.fullmatch(_ASSIGNMENT_ID_PATTERN, assignment_id) is None
+                    or not _valid_identifier(task_id)
+                    or re.fullmatch(_TARGET_ID_PATTERN, target_spec_id) is None
+                    or re.fullmatch(_TARGET_INSTANCE_ID_PATTERN, target_instance_id) is None
+                    or re.fullmatch(_PROTOCOL_ID_PATTERN, arm_protocol_id) is None
+                    or re.fullmatch(_PROTOCOL_INSTANCE_ID_PATTERN, protocol_instance_id) is None
+                    or len(encoded) != len(ordered)
+                    or any(
+                        type(value) is not int or not 0 <= value < len(variable.states)
+                        for value, variable in zip(encoded, ordered, strict=True)
+                    )
+                    or row_id
+                    != jci_row_id_from_content(
+                        assignment_id=assignment_id,
+                        task_id=task_id,
+                        target_spec_id=target_spec_id,
+                        target_instance_id=target_instance_id,
+                        arm_protocol_id=arm_protocol_id,
+                        protocol_instance_id=protocol_instance_id,
+                        values=encoded,
+                    )
+                ):
+                    raise ValueError
+                row_ids.add(row_id)
+                assignment_ids.add(assignment_id)
+                task_ids.add(task_id)
+            if (
+                len(row_ids) != row_count
+                or len(assignment_ids) != row_count
+                or len(task_ids) != independent_task_count
+            ):
+                raise ValueError
+            record_content = {
+                "schema_version": "1.0",
+                "scope_id": scope_id,
+                "cwe": cwe,
+                "model_id": model_id,
+                "variables": ordered,
+                "row_count": row_count,
+                "independent_task_count": independent_task_count,
+            }
+            table_sha256 = _digest(
+                {
+                    **record_content,
+                    "table_kind": "jci-assignment-v1",
+                    "observations": observations,
+                }
+            )
+            return cls(
+                **record_content,
+                table_id=f"table_{table_sha256}",
+                table_sha256=table_sha256,
+            )
+        except Exception:
+            raise cls._safe_error() from None
 
     @model_validator(mode="after")
     def validate_semantics_and_digest(self) -> Self:
@@ -634,6 +847,116 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
             )
             or self.knowledge_sha256 != expected
             or self.knowledge_id != f"bk_{expected}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class JCIBackgroundKnowledgeRecord(_CausalVersionedContract):
+    """Authenticated provenance for the explicit randomized-context assumption."""
+
+    _safe_validation_message: ClassVar[str] = "JCI background knowledge failed validation"
+
+    schema_version: Literal["1.0"]
+    knowledge_id: str = Field(pattern=_JCI_BK_ID_PATTERN)
+    base_background_knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
+    assumption_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    added_forbidden_directions: tuple[tuple[str, str], ...] = Field(
+        min_length=1,
+        max_length=_MAX_VARIABLES - 1,
+    )
+    required_directions: tuple[tuple[str, str], ...] = ()
+    materialized_background_knowledge: BackgroundKnowledgeRecord
+    knowledge_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @classmethod
+    def from_base(
+        cls,
+        base: BackgroundKnowledgeRecord,
+        *,
+        assumption_ids: Sequence[str],
+        added_forbidden_directions: Sequence[tuple[str, str]],
+        required_directions: Sequence[tuple[str, str]] = (),
+    ) -> Self:
+        try:
+            checked = BackgroundKnowledgeRecord.model_validate(base, strict=True)
+            assumptions = tuple(sorted(assumption_ids))
+            additions = tuple(sorted(added_forbidden_directions))
+            required = tuple(sorted(required_directions))
+            materialized = BackgroundKnowledgeRecord.from_content(
+                table_id=checked.table_id,
+                variable_ids=tuple(
+                    sorted(
+                        {
+                            *(item for item, _tier in checked.tiers),
+                            *checked.unconstrained_variable_ids,
+                        }
+                    )
+                ),
+                tiers=checked.tiers,
+                unconstrained_variable_ids=checked.unconstrained_variable_ids,
+                forbidden_directions=tuple(sorted({*checked.forbidden_directions, *additions})),
+                forbidden_adjacencies=checked.forbidden_adjacencies,
+                required_directions=required,
+            )
+            payload = {
+                "schema_version": "1.0",
+                "base_background_knowledge_sha256": checked.knowledge_sha256,
+                "assumption_ids": assumptions,
+                "added_forbidden_directions": additions,
+                "required_directions": required,
+                "materialized_background_knowledge": materialized,
+            }
+            digest = _digest(payload)
+            return cls(
+                **payload,
+                knowledge_id=f"jci_bk_{digest}",
+                knowledge_sha256=digest,
+            )
+        except Exception:
+            raise cls._safe_error() from None
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        expected_assumptions = ("jci.randomized_context_exogeneity.v1",)
+        materialized = self.materialized_background_knowledge
+        base_forbidden = set(materialized.forbidden_directions) - set(
+            self.added_forbidden_directions
+        )
+        reconstructed_base = BackgroundKnowledgeRecord.from_content(
+            table_id=materialized.table_id,
+            variable_ids=tuple(
+                sorted(
+                    {
+                        *(item for item, _tier in materialized.tiers),
+                        *materialized.unconstrained_variable_ids,
+                    }
+                )
+            ),
+            tiers=materialized.tiers,
+            unconstrained_variable_ids=materialized.unconstrained_variable_ids,
+            forbidden_directions=tuple(sorted(base_forbidden)),
+            forbidden_adjacencies=materialized.forbidden_adjacencies,
+            required_directions=(),
+        )
+        payload = _content(self, "knowledge_id", "knowledge_sha256")
+        expected = _digest(payload)
+        if (
+            self.assumption_ids != expected_assumptions
+            or self.added_forbidden_directions != tuple(sorted(self.added_forbidden_directions))
+            or len(self.added_forbidden_directions) != len(set(self.added_forbidden_directions))
+            or any(
+                source == "c.arm" or target != "c.arm"
+                for source, target in self.added_forbidden_directions
+            )
+            or self.required_directions
+            or materialized.required_directions
+            or materialized.unconstrained_variable_ids != ("c.arm",)
+            or self.base_background_knowledge_sha256 != reconstructed_base.knowledge_sha256
+            or not set(self.added_forbidden_directions) <= set(materialized.forbidden_directions)
+            or set(self.added_forbidden_directions) & base_forbidden
+            or self.knowledge_sha256 != expected
+            or self.knowledge_id != f"jci_bk_{expected}"
         ):
             raise ValueError(self._safe_validation_message)
         return self
