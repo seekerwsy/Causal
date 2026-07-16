@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import shutil
@@ -8,10 +9,16 @@ from pathlib import Path
 
 import pytest
 
+from m5_executor_fixtures import request
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore
+from secaware.io.transaction import (
+    ArtifactTransaction,
+    TransactionArtifact,
+    recover_transaction,
+)
 from secaware.pipeline.artifact import sha256_path
 from secaware.pipeline.bounded_traversal import BoundedTreeEntry
 from secaware.pipeline.manifest import read_stage_manifest
@@ -22,14 +29,22 @@ from secaware.pipeline.stages.prompt_variants import (
     prompt_variant_stage_policy_sha256,
 )
 from secaware.pipeline.stages.randomization import RANDOMIZATION_OUTPUTS
-from secaware.schema.experiments import RandomizationManifestRecord
+from secaware.pipeline.stage_contracts import functional_outcome_import_stage_contract_payload
+from secaware.schema.experiments import (
+    ConfirmationProtocolRecord,
+    FeatureFamily,
+    RandomizationManifestRecord,
+)
 from secaware.schema.outcomes import (
     FunctionalOutcomeRecord,
     FunctionalOutcomeStatus,
 )
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
-from test_functional_outcome_contract import _functional_case
+from test_functional_outcome_contract import (
+    _functional_case,
+    _functional_outcome,
+)
 
 
 def _assignment_digest(assignments: tuple[object, ...]) -> str:
@@ -80,6 +95,7 @@ def _commit_outputs(
 
 def _stage_case(tmp_path: Path):
     assignment, protocol, contract, outcome = _functional_case()
+    safety_protocol = request(FeatureFamily.SAFETY_CONTROL).protocol
     prompts = tmp_path / "prompts.jsonl"
     attestations = tmp_path / "attestations.jsonl"
     contracts = tmp_path / "functional_contracts.jsonl"
@@ -115,7 +131,9 @@ def _stage_case(tmp_path: Path):
         tuple(
             (
                 path,
-                (protocol,) if name == "confirmation_protocols.jsonl" else (),
+                tuple(sorted((protocol, safety_protocol), key=lambda item: item.arm_protocol_id))
+                if name == "confirmation_protocols.jsonl"
+                else (),
             )
             for path, (name, _model) in zip(task4_paths, PROMPT_VARIANT_OUTPUTS, strict=True)
         ),
@@ -150,6 +168,22 @@ def _bytes(store: RunStore) -> tuple[bytes, bytes]:
     )
 
 
+def _remove_committed_safety_protocol(store: RunStore) -> None:
+    protocol_path = store.path("interventions", "confirmation_protocols.jsonl")
+    protocols = read_jsonl(
+        protocol_path,
+        ConfirmationProtocolRecord,
+        required=True,
+        allow_empty=False,
+    )
+    task_protocols = tuple(
+        item for item in protocols if item.feature_family is FeatureFamily.TASK_FUNCTION
+    )
+    assert len(task_protocols) == 1
+    assert len(protocols) > len(task_protocols)
+    write_jsonl(protocol_path, task_protocols)
+
+
 def test_import_stage_transactionally_publishes_exact_sorted_external_results(
     tmp_path: Path,
 ) -> None:
@@ -175,6 +209,23 @@ def test_import_stage_transactionally_publishes_exact_sorted_external_results(
     assert sum(key.startswith("@external/") for key in manifest.inputs) == 2
 
 
+def test_import_stage_contract_fingerprint_binds_declared_downstream_order_and_families() -> None:
+    payload = functional_outcome_import_stage_contract_payload()
+
+    assert payload["confirmation_stage_order"][4:] == [
+        "import-functional-outcomes",
+        "assemble-assignment-outcomes",
+        "estimate-confirmation-effects",
+        "jci-confirmation",
+        "rfci-confirmation",
+        "reporting",
+    ]
+    downstream_families = payload["confirmation_stage_manifest_families"][5:]
+    assert "confirm" in downstream_families[0]
+    assert "effects" in downstream_families[1]
+    assert payload["stage_version_affix_pattern"]
+
+
 @pytest.mark.parametrize("mutation", ("missing", "duplicate", "extra", "contract", "policy"))
 def test_import_stage_requires_exact_contract_and_assignment_coverage(
     tmp_path: Path, mutation: str
@@ -190,7 +241,7 @@ def test_import_stage_requires_exact_contract_and_assignment_coverage(
             outcome,
             FunctionalOutcomeRecord.from_content(
                 assignment_id="assignment_" + "f" * 64,
-                functional_outcome_contract_id=contract.contract_id,
+                contract_id=contract.contract_id,
                 evaluator_policy_sha256=contract.evaluator_policy_sha256,
                 status=FunctionalOutcomeStatus.UNKNOWN,
                 evidence_sha256="f" * 64,
@@ -200,7 +251,7 @@ def test_import_stage_requires_exact_contract_and_assignment_coverage(
         records = (
             FunctionalOutcomeRecord.from_content(
                 assignment_id=assignment.assignment_id,
-                functional_outcome_contract_id="functional_contract_" + "f" * 64,
+                contract_id="functional_contract_" + "f" * 64,
                 evaluator_policy_sha256=contract.evaluator_policy_sha256,
                 status=outcome.status,
                 evidence_sha256=outcome.evidence_sha256,
@@ -210,7 +261,7 @@ def test_import_stage_requires_exact_contract_and_assignment_coverage(
         records = (
             FunctionalOutcomeRecord.from_content(
                 assignment_id=assignment.assignment_id,
-                functional_outcome_contract_id=contract.contract_id,
+                contract_id=contract.contract_id,
                 evaluator_policy_sha256="f" * 64,
                 status=outcome.status,
                 evidence_sha256=outcome.evidence_sha256,
@@ -246,6 +297,25 @@ def test_import_stage_rejects_invalid_external_result_paths(tmp_path: Path, kind
     with pytest.raises(SecAwareError) as captured:
         import_functional_outcomes_stage(config, store, path)
     assert captured.value.code in {ErrorCode.CONTRACT, ErrorCode.MANIFEST_CONFLICT}
+
+
+def test_import_stage_rejects_lexical_parent_traversal_without_path_leak(tmp_path: Path) -> None:
+    config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
+    secret_component = "lexical-secret-component"
+    (results.parent / secret_component).mkdir()
+    traversing_path = results.parent / secret_component / ".." / results.name
+
+    with pytest.raises(SecAwareError) as captured:
+        import_functional_outcomes_stage(config, store, traversing_path)
+
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert secret_component not in str(captured.value)
+    cursor = captured.value.__traceback__
+    while cursor is not None:
+        if "/src/secaware/" in cursor.tb_frame.f_code.co_filename.replace("\\", "/"):
+            assert secret_component not in repr(dict(cursor.tb_frame.f_locals))
+        cursor = cursor.tb_next
+    assert not store.path("analysis", "functional_outcomes.jsonl").exists()
 
 
 def test_import_stage_does_not_derive_functional_results_from_prompts_or_oracle(
@@ -290,6 +360,31 @@ def test_force_failure_rolls_back_and_preserves_old_commit(tmp_path: Path) -> No
         import_functional_outcomes_stage(config, store, results, force=True)
 
     assert _bytes(store) == before
+
+
+def test_legal_force_atomically_replaces_committed_functional_outcome(tmp_path: Path) -> None:
+    config, store, results, assignment, _protocol, contract, _outcome = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    replacement = _functional_outcome(
+        assignment_id=assignment.assignment_id,
+        contract_id=contract.contract_id,
+        evaluator_policy_sha256=contract.evaluator_policy_sha256,
+        status=FunctionalOutcomeStatus.FAIL,
+        evidence_sha256="d" * 64,
+    )
+    write_jsonl(results, (replacement,))
+
+    result = import_functional_outcomes_stage(config, store, results, force=True)
+
+    assert result.outcome_count == 1
+    assert read_jsonl(
+        store.path("analysis", "functional_outcomes.jsonl"),
+        FunctionalOutcomeRecord,
+        required=True,
+        allow_empty=False,
+    ) == [replacement]
+    assert _bytes(store) != before
 
 
 def test_future_analysis_artifact_blocks_import_and_preserves_commit(tmp_path: Path) -> None:
@@ -344,6 +439,68 @@ def test_manifest_only_future_outcome_stage_blocks_import_and_preserves_commit(
     assert _bytes(store) == before
 
 
+@pytest.mark.parametrize(
+    "manifest_name",
+    (
+        "effects.json",
+        "v2-confirm.json",
+        "estimate-confirmation-effects-v2.json",
+        "jci-confirmation-v3.json",
+        "rfci-analysis-2026.json",
+        "reporting-v2.json",
+    ),
+)
+def test_any_downstream_stage_manifest_variant_blocks_import_and_preserves_commit(
+    tmp_path: Path,
+    monkeypatch,
+    manifest_name: str,
+) -> None:
+    config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    store.path(".stages", manifest_name).write_text("{}\n", encoding="utf-8")
+    real_guard = functional_stage._guard_no_future_artifacts
+
+    def controlled_guard(run_store: RunStore) -> None:
+        def future_manifest_only(*_args, **_kwargs):
+            yield BoundedTreeEntry(
+                relative_path=f".stages/{manifest_name}",
+                name=manifest_name,
+                is_file=True,
+                is_dir=False,
+            )
+
+        real_guard(run_store, traversal=future_manifest_only)
+
+    monkeypatch.setattr(functional_stage, "_guard_no_future_artifacts", controlled_guard)
+
+    with pytest.raises(SecAwareError) as captured:
+        import_functional_outcomes_stage(config, store, results, force=True)
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert captured.value.stage == "import-functional-outcomes"
+    assert _bytes(store) == before
+
+
+def test_future_guard_allows_only_backups_owned_by_active_transaction(tmp_path: Path) -> None:
+    config, store, results, *_rest = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    output = store.path("analysis", "functional_outcomes.jsonl")
+    manifest = store.path(".stages", "import-functional-outcomes.json")
+    transaction = ArtifactTransaction.begin(
+        store.path(".stages", ".import-functional-outcomes.transaction.json"),
+        (
+            TransactionArtifact(output, "output0"),
+            TransactionArtifact(manifest, "manifest"),
+        ),
+    )
+    transaction.backup(0)
+    transaction.backup(1)
+    try:
+        functional_stage._guard_no_future_artifacts(store)
+    finally:
+        recover_transaction(transaction)
+
+
 def test_randomization_manifest_and_assignment_index_are_revalidated(tmp_path: Path) -> None:
     config, store, results, assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
     manifest_path = store.path("interventions", "randomization_manifest.jsonl")
@@ -370,6 +527,74 @@ def test_randomization_manifest_and_assignment_index_are_revalidated(tmp_path: P
 
     with pytest.raises(SecAwareError):
         import_functional_outcomes_stage(config, store, results)
+
+
+def test_producer_universe_mutation_after_hold_before_capture_is_rejected(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    real_hold = RunStore.hold_committed_output
+    mutated = False
+
+    @contextmanager
+    def mutate_after_hold(
+        current: RunStore,
+        stage: str,
+        output_paths,
+        *,
+        expected_catalog_sha256: str | None = None,
+    ):
+        nonlocal mutated
+        with real_hold(
+            current,
+            stage,
+            output_paths,
+            expected_catalog_sha256=expected_catalog_sha256,
+        ) as hashes:
+            if current is store and stage == "randomize-confirmation" and not mutated:
+                _remove_committed_safety_protocol(store)
+                mutated = True
+            yield hashes
+
+    monkeypatch.setattr(RunStore, "hold_committed_output", mutate_after_hold)
+    monkeypatch.setattr(functional_stage, "_guard_no_future_artifacts", lambda _store: None)
+
+    with pytest.raises(SecAwareError):
+        import_functional_outcomes_stage(config, store, results, force=True)
+
+    assert mutated
+    assert _bytes(store) == before
+
+
+def test_producer_universe_mutation_after_capture_before_commit_preserves_old_commit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    real_validate = functional_stage.validate_functional_outcomes
+    mutated = False
+
+    def mutate_after_capture(*args, **kwargs):
+        nonlocal mutated
+        value = real_validate(*args, **kwargs)
+        if not mutated:
+            _remove_committed_safety_protocol(store)
+            mutated = True
+        return value
+
+    monkeypatch.setattr(functional_stage, "validate_functional_outcomes", mutate_after_capture)
+    monkeypatch.setattr(functional_stage, "_guard_no_future_artifacts", lambda _store: None)
+
+    with pytest.raises(SecAwareError):
+        import_functional_outcomes_stage(config, store, results, force=True)
+
+    assert mutated
+    assert _bytes(store) == before
 
 
 def test_import_stage_holds_both_m5_producer_leases(tmp_path: Path, monkeypatch) -> None:

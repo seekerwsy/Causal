@@ -210,9 +210,7 @@ def assemble_assignment_outcomes(
             protocol = protocol_by_id.get(assignment.arm_protocol_id)
             functional = functional_by_assignment.get(assignment_id)
             contract = (
-                contract_by_id.get(functional.functional_outcome_contract_id)
-                if functional is not None
-                else None
+                contract_by_id.get(functional.contract_id) if functional is not None else None
             )
             if execution.status is AssignmentExecutionStatus.GENERATED:
                 if oracle is None:

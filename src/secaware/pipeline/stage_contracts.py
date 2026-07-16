@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import re
 
 from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
 from secaware.config import (
@@ -65,6 +66,74 @@ _RANDOMIZATION_STAGE = "randomize-confirmation"
 _CONFIRMATION_GENERATION_STAGE = "generate-confirmation"
 _CONFIRMATION_ORACLE_STAGE = "run-oracle-confirmation"
 _FUNCTIONAL_OUTCOME_IMPORT_STAGE = "import-functional-outcomes"
+
+CONFIRMATION_STAGE_ORDER = (
+    "build-confirmation-variants",
+    "randomize-confirmation",
+    "generate-confirmation",
+    "run-oracle-confirmation",
+    _FUNCTIONAL_OUTCOME_IMPORT_STAGE,
+    "assemble-assignment-outcomes",
+    "estimate-confirmation-effects",
+    "jci-confirmation",
+    "rfci-confirmation",
+    "reporting",
+)
+_CONFIRMATION_STAGE_MANIFEST_FAMILIES = (
+    ("build-confirmation-variants",),
+    ("randomize-confirmation",),
+    ("generate-confirmation",),
+    ("run-oracle-confirmation",),
+    (_FUNCTIONAL_OUTCOME_IMPORT_STAGE,),
+    (
+        "assemble-assignment-outcomes",
+        "assignment-outcomes",
+        "confirm",
+        "confirmation-outcomes",
+        "confirm-outcomes",
+    ),
+    (
+        "effects",
+        "estimate-effects",
+        "estimate-confirmation-effects",
+        "confirmation-effects",
+        "confirm-effects",
+    ),
+    ("jci", "jci-analysis", "jci-confirmation"),
+    ("rfci", "rfci-analysis", "rfci-confirmation"),
+    ("report", "reports", "reporting"),
+)
+_STAGE_VERSION_AFFIX = re.compile(
+    r"^(?:v[1-9][0-9]{0,5}|20[0-9]{2}(?:-[01][0-9](?:-[0-3][0-9])?)?)$"
+)
+
+
+def _matches_stage_manifest_family(value: str, family: str) -> bool:
+    if value == family:
+        return True
+    if value.startswith(family + "-"):
+        return _STAGE_VERSION_AFFIX.fullmatch(value[len(family) + 1 :]) is not None
+    if value.endswith("-" + family):
+        return _STAGE_VERSION_AFFIX.fullmatch(value[: -(len(family) + 1)]) is not None
+    return False
+
+
+def confirmation_stage_is_downstream(stage_name: str, *, after: str) -> bool:
+    """Classify only declared confirmation-stage manifest families and bounded variants."""
+
+    if (
+        type(stage_name) is not str
+        or type(after) is not str
+        or after not in CONFIRMATION_STAGE_ORDER
+    ):
+        return False
+    candidate = stage_name.casefold()
+    if candidate != stage_name or not 1 <= len(candidate) <= 128:
+        return False
+    for index, families in enumerate(_CONFIRMATION_STAGE_MANIFEST_FAMILIES):
+        if any(_matches_stage_manifest_family(candidate, family) for family in families):
+            return index > CONFIRMATION_STAGE_ORDER.index(after)
+    return False
 
 
 def _schema_sha256(model: type) -> str:
@@ -322,6 +391,11 @@ def functional_outcome_import_stage_contract_payload() -> dict[str, object]:
         "functional_contract_schema": _schema_sha256(FunctionalOutcomeContractRecord),
         "functional_outcome_schema": _schema_sha256(FunctionalOutcomeRecord),
         "producer_manifest_schema": _schema_sha256(StageManifest),
+        "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
+        "confirmation_stage_manifest_families": [
+            list(families) for families in _CONFIRMATION_STAGE_MANIFEST_FAMILIES
+        ],
+        "stage_version_affix_pattern": _STAGE_VERSION_AFFIX.pattern,
     }
 
 
@@ -332,6 +406,8 @@ def functional_outcome_import_stage_contract_sha256(stage: str) -> str | None:
 
 
 __all__ = [
+    "CONFIRMATION_STAGE_ORDER",
+    "confirmation_stage_is_downstream",
     "discovery_stage_contract_payload",
     "discovery_stage_contract_sha256",
     "prompt_variant_stage_contract_payload",

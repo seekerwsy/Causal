@@ -214,7 +214,7 @@ class FunctionalOutcomeRecord(_OutcomeContract):
     schema_version: Literal["1.0"]
     functional_outcome_id: str = Field(pattern=_FUNCTIONAL_OUTCOME_ID_PATTERN)
     assignment_id: str = Field(pattern=_ASSIGNMENT_ID_PATTERN)
-    functional_outcome_contract_id: str = Field(pattern=_FUNCTIONAL_CONTRACT_ID_PATTERN)
+    contract_id: str = Field(pattern=_FUNCTIONAL_CONTRACT_ID_PATTERN)
     evaluator_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
     status: FunctionalOutcomeStatus
     evidence_sha256: str = Field(pattern=_SHA256_PATTERN)

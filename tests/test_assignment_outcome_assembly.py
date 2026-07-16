@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -385,13 +386,22 @@ def test_task_protocol_requires_exact_independent_functional_outcome() -> None:
             )
 
 
+def test_task_function_assignment_cannot_omit_functional_universe_arguments() -> None:
+    assignment, execution, oracle, delta, _protocol, _contract, _functional = (
+        _functional_generated_case()
+    )
+
+    with pytest.raises(Exception):
+        assemble_assignment_outcomes((assignment,), (execution,), (oracle,), (delta,))
+
+
 def test_functional_status_is_independent_and_only_bound_as_provenance() -> None:
     assignment, execution, oracle, delta, protocol, contract, functional = (
         _functional_generated_case()
     )
     unknown = FunctionalOutcomeRecord.from_content(
         assignment_id=functional.assignment_id,
-        functional_outcome_contract_id=functional.functional_outcome_contract_id,
+        contract_id=functional.contract_id,
         evaluator_policy_sha256=functional.evaluator_policy_sha256,
         status=FunctionalOutcomeStatus.UNKNOWN,
         evidence_sha256="f" * 64,
@@ -416,6 +426,46 @@ def test_functional_status_is_independent_and_only_bound_as_provenance() -> None
     )[0]
     assert base.secure_functional_success == changed.secure_functional_success == 1
     assert base.source_digests_sha256 != changed.source_digests_sha256
+
+
+def test_source_digest_is_hash_of_complete_sorted_labeled_producer_digest_mapping() -> None:
+    assignment, execution, oracle, delta, protocol, contract, functional = (
+        _functional_generated_case()
+    )
+
+    row = assemble_assignment_outcomes(
+        (assignment,),
+        (execution,),
+        (oracle,),
+        (delta,),
+        protocols=(protocol,),
+        functional_contracts=(contract,),
+        functional_outcomes=(functional,),
+    )[0]
+
+    def canonical_sha256(value: object) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    producers = {
+        "assignment_record": canonical_sha256(assignment.model_dump(mode="json")),
+        "confirmation_protocol_record": canonical_sha256(protocol.model_dump(mode="json")),
+        "execution_record": canonical_sha256(execution.model_dump(mode="json")),
+        "functional_contract_record": canonical_sha256(contract.model_dump(mode="json")),
+        "functional_outcome_record": canonical_sha256(functional.model_dump(mode="json")),
+        "graph_delta_record": canonical_sha256(delta.model_dump(mode="json")),
+        "oracle_record": canonical_sha256(oracle.model_dump(mode="json")),
+    }
+    sorted_labeled_preimage = {label: producers[label] for label in sorted(producers)}
+
+    assert row.source_digests_sha256 == canonical_sha256(sorted_labeled_preimage)
 
 
 def test_terminal_generated_cross_coverage_is_rejected() -> None:

@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from m5_executor_fixtures import request
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.outcomes.functional import validate_functional_outcomes
 from secaware.schema.experiments import (
     AssignmentRecord,
@@ -12,6 +13,23 @@ from secaware.schema.experiments import (
     FunctionalOutcomeContractRecord,
 )
 from secaware.schema.outcomes import FunctionalOutcomeRecord, FunctionalOutcomeStatus
+
+
+def _functional_outcome(
+    *,
+    assignment_id: str,
+    contract_id: str,
+    evaluator_policy_sha256: str,
+    status: FunctionalOutcomeStatus,
+    evidence_sha256: str,
+) -> FunctionalOutcomeRecord:
+    return FunctionalOutcomeRecord.from_content(
+        assignment_id=assignment_id,
+        contract_id=contract_id,
+        evaluator_policy_sha256=evaluator_policy_sha256,
+        status=status,
+        evidence_sha256=evidence_sha256,
+    )
 
 
 def _functional_case():
@@ -47,9 +65,9 @@ def _functional_case():
         rng_version="sha256-rejection-fisher-yates-v1",
         randomization_plan_sha256="2" * 64,
     )
-    outcome = FunctionalOutcomeRecord.from_content(
+    outcome = _functional_outcome(
         assignment_id=assignment.assignment_id,
-        functional_outcome_contract_id=contract.contract_id,
+        contract_id=contract.contract_id,
         evaluator_policy_sha256=contract.evaluator_policy_sha256,
         status=FunctionalOutcomeStatus.PASS,
         evidence_sha256="3" * 64,
@@ -58,12 +76,15 @@ def _functional_case():
 
 
 def test_functional_outcome_is_strict_frozen_content_addressed_and_text_free() -> None:
-    _assignment, _protocol, _contract, outcome = _functional_case()
+    _assignment, _protocol, contract, outcome = _functional_case()
 
     assert outcome.schema_version == "1.0"
     assert outcome.functional_outcome_id.startswith("functional_outcome_")
     assert repr(outcome) == "FunctionalOutcomeRecord()"
     assert str(outcome) == "FunctionalOutcomeRecord()"
+    assert outcome.contract_id == contract.contract_id
+    assert "contract_id" in outcome.model_dump(mode="json")
+    assert "functional_outcome_contract_id" not in outcome.model_dump(mode="json")
     assert {"prompt", "code", "finding", "findings", "evidence"}.isdisjoint(
         FunctionalOutcomeRecord.model_fields
     )
@@ -78,7 +99,7 @@ def test_functional_outcome_accepts_only_the_finite_status_contract(
     assignment, _protocol, contract, _outcome = _functional_case()
     record = FunctionalOutcomeRecord.from_content(
         assignment_id=assignment.assignment_id,
-        functional_outcome_contract_id=contract.contract_id,
+        contract_id=contract.contract_id,
         evaluator_policy_sha256=contract.evaluator_policy_sha256,
         status=status,
         evidence_sha256="4" * 64,
@@ -90,12 +111,21 @@ def test_functional_outcome_id_binds_status_policy_and_evidence() -> None:
     assignment, _protocol, contract, outcome = _functional_case()
     changed = FunctionalOutcomeRecord.from_content(
         assignment_id=assignment.assignment_id,
-        functional_outcome_contract_id=contract.contract_id,
+        contract_id=contract.contract_id,
         evaluator_policy_sha256=contract.evaluator_policy_sha256,
         status=FunctionalOutcomeStatus.UNKNOWN,
         evidence_sha256=outcome.evidence_sha256,
     )
     assert outcome.functional_outcome_id != changed.functional_outcome_id
+
+    changed_contract = FunctionalOutcomeRecord.from_content(
+        assignment_id=assignment.assignment_id,
+        contract_id="functional_contract_" + "d" * 64,
+        evaluator_policy_sha256=contract.evaluator_policy_sha256,
+        status=outcome.status,
+        evidence_sha256=outcome.evidence_sha256,
+    )
+    assert outcome.functional_outcome_id != changed_contract.functional_outcome_id
 
     forged = outcome.model_copy(update={"evidence_sha256": "9" * 64})
     with pytest.raises(ValidationError):
@@ -119,7 +149,7 @@ def test_independent_functional_outcomes_require_exact_preregistered_coverage(
     elif mutation == "extra":
         other = FunctionalOutcomeRecord.from_content(
             assignment_id="assignment_" + "f" * 64,
-            functional_outcome_contract_id=contract.contract_id,
+            contract_id=contract.contract_id,
             evaluator_policy_sha256=contract.evaluator_policy_sha256,
             status=FunctionalOutcomeStatus.UNKNOWN,
             evidence_sha256="5" * 64,
@@ -131,7 +161,7 @@ def test_independent_functional_outcomes_require_exact_preregistered_coverage(
         outcomes = (
             FunctionalOutcomeRecord.from_content(
                 assignment_id=assignment.assignment_id,
-                functional_outcome_contract_id="functional_contract_" + "e" * 64,
+                contract_id="functional_contract_" + "e" * 64,
                 evaluator_policy_sha256=contract.evaluator_policy_sha256,
                 status=outcome.status,
                 evidence_sha256=outcome.evidence_sha256,
@@ -141,7 +171,7 @@ def test_independent_functional_outcomes_require_exact_preregistered_coverage(
         outcomes = (
             FunctionalOutcomeRecord.from_content(
                 assignment_id=assignment.assignment_id,
-                functional_outcome_contract_id=contract.contract_id,
+                contract_id=contract.contract_id,
                 evaluator_policy_sha256="e" * 64,
                 status=outcome.status,
                 evidence_sha256=outcome.evidence_sha256,
@@ -150,6 +180,16 @@ def test_independent_functional_outcomes_require_exact_preregistered_coverage(
 
     with pytest.raises(Exception):
         validate_functional_outcomes(assignments, protocols, contracts, outcomes)
+
+
+def test_task_function_assignment_cannot_omit_protocol_contract_and_outcome_universe() -> None:
+    assignment, _protocol, _contract, _outcome = _functional_case()
+
+    with pytest.raises(SecAwareError) as captured:
+        validate_functional_outcomes((assignment,), (), (), ())
+
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert captured.value.stage == "functional_outcomes"
 
 
 def test_non_task_protocol_does_not_require_or_accept_a_functional_record() -> None:
@@ -184,11 +224,12 @@ def test_non_task_protocol_does_not_require_or_accept_a_functional_record() -> N
     )
 
     assert validate_functional_outcomes((safety_assignment,), (safety_protocol,), (), ()) == ()
+    assert validate_functional_outcomes((safety_assignment,), (), (), ()) == ()
     with pytest.raises(Exception):
         validate_functional_outcomes((safety_assignment,), (safety_protocol,), (contract,), ())
     extra = FunctionalOutcomeRecord.from_content(
         assignment_id=safety_assignment.assignment_id,
-        functional_outcome_contract_id=outcome.functional_outcome_contract_id,
+        contract_id=outcome.contract_id,
         evaluator_policy_sha256=outcome.evaluator_policy_sha256,
         status=outcome.status,
         evidence_sha256=outcome.evidence_sha256,
@@ -203,7 +244,7 @@ def test_functional_outcome_rejects_unknown_fields_raw_evidence_and_invalid_hash
     assignment, _protocol, contract, _outcome = _functional_case()
     values = {
         "assignment_id": assignment.assignment_id,
-        "functional_outcome_contract_id": contract.contract_id,
+        "contract_id": contract.contract_id,
         "evaluator_policy_sha256": contract.evaluator_policy_sha256,
         "status": FunctionalOutcomeStatus.PASS,
         "evidence_sha256": "3" * 64,
@@ -217,6 +258,12 @@ def test_functional_outcome_rejects_unknown_fields_raw_evidence_and_invalid_hash
         payload = {**values, **update}
         with pytest.raises(ValidationError):
             FunctionalOutcomeRecord.from_content(**payload)
+
+    with pytest.raises(ValidationError):
+        FunctionalOutcomeRecord.from_content(
+            **values,
+            functional_outcome_contract_id=contract.contract_id,
+        )
 
 
 def test_contract_registry_rejects_duplicate_and_unreferenced_records() -> None:

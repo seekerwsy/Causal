@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.experiments import (
+    ArmRole,
     AssignmentRecord,
     ConfirmationProtocolRecord,
     FeatureFamily,
@@ -20,6 +21,14 @@ from secaware.schema.outcomes import FunctionalOutcomeRecord
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
+_TASK_FUNCTION_ARM_ROLES = frozenset(
+    {
+        ArmRole.TASK_TARGET,
+        ArmRole.TASK_NOOP,
+        ArmRole.TASK_LENGTH_PLACEBO,
+        ArmRole.TASK_GENERIC_CONTROL,
+    }
+)
 
 
 def _error() -> SecAwareError:
@@ -94,7 +103,14 @@ def validate_functional_outcomes(
         if not assignment_by_id:
             raise ValueError
         if not protocol_by_id:
-            if contract_by_id or outcome_by_assignment:
+            if (
+                contract_by_id
+                or outcome_by_assignment
+                or any(
+                    assignment.arm_role in _TASK_FUNCTION_ARM_ROLES
+                    for assignment in assignment_by_id.values()
+                )
+            ):
                 raise ValueError
             return ()
 
@@ -133,7 +149,7 @@ def validate_functional_outcomes(
             contract = contract_by_id.get(contract_id)
             if (
                 contract is None
-                or outcome.functional_outcome_contract_id != contract.contract_id
+                or outcome.contract_id != contract.contract_id
                 or outcome.evaluator_policy_sha256 != contract.evaluator_policy_sha256
             ):
                 raise ValueError

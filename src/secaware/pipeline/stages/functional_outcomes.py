@@ -8,7 +8,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
+from typing import Mapping
 
 from pydantic import BaseModel
 
@@ -20,6 +22,7 @@ from secaware.outcomes.functional import validate_functional_outcomes
 from secaware.pipeline.bounded_traversal import BoundedTraversalError, iter_bounded_tree
 from secaware.pipeline.jsonl_stage import JsonlOutputSpec, execute_jsonl_stage_transaction
 from secaware.pipeline.manifest import StageManifest
+from secaware.pipeline.stage_contracts import confirmation_stage_is_downstream
 from secaware.pipeline.stages.prompt_variants import PROMPT_VARIANT_OUTPUTS
 from secaware.pipeline.stages.randomization import RANDOMIZATION_OUTPUTS
 from secaware.schema.experiments import (
@@ -44,7 +47,8 @@ _MAX_RELATIVE_PATH_CHARS = 4096
 _MAX_NAME_CHARS = 255
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _FUTURE_DIRS = frozenset({"effects", "reports", "report", "jci", "rfci", "mechanisms"})
-_FUTURE_STAGE_MANIFESTS = frozenset({"assemble-assignment-outcomes.json"})
+_TRANSACTION_TOKEN = re.compile(r"^[0-9a-f]{32}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +208,108 @@ def _assignment_digest(assignments: tuple[AssignmentRecord, ...]) -> str:
     ).hexdigest()
 
 
+def _transaction_target_key(path: Path) -> str:
+    return hashlib.sha256(
+        ("secaware-transaction-v1\x00" + os.path.normcase(str(path))).encode(
+            "utf-8",
+            errors="strict",
+        )
+    ).hexdigest()
+
+
+def _active_transaction_backup_paths(store: RunStore) -> frozenset[str]:
+    journal_path = store.path(".stages", f".{_STAGE}.transaction.json")
+    try:
+        journal_path.lstat()
+    except FileNotFoundError:
+        return frozenset()
+    payload, _snapshot = _read_snapshot(journal_path, allow_empty=False)
+    try:
+        if len(payload) > 64 * 1024:
+            raise ValueError
+        value = load_strict_json_bytes(payload)
+        if type(value) is not dict or set(value) != {
+            "schema_version",
+            "token",
+            "state",
+            "artifacts",
+        }:
+            raise ValueError
+        token = value["token"]
+        artifacts = value["artifacts"]
+        output = store.path("analysis", _OUTPUT_NAME)
+        manifest = store.path(".stages", f"{_STAGE}.json")
+        expected_targets = (_transaction_target_key(output), _transaction_target_key(manifest))
+        if (
+            value["schema_version"] != "1.0"
+            or type(token) is not str
+            or _TRANSACTION_TOKEN.fullmatch(token) is None
+            or value["state"] not in {"recovery", "postcommit"}
+            or type(artifacts) is not list
+            or len(artifacts) != 2
+        ):
+            raise ValueError
+        for artifact, expected_target in zip(artifacts, expected_targets, strict=True):
+            if type(artifact) is not dict or set(artifact) != {
+                "target_key",
+                "old_exists",
+                "old_sha256",
+                "committed_sha256",
+            }:
+                raise ValueError
+            old_exists = artifact["old_exists"]
+            old_sha256 = artifact["old_sha256"]
+            committed_sha256 = artifact["committed_sha256"]
+            if (
+                artifact["target_key"] != expected_target
+                or type(old_exists) is not bool
+                or (
+                    old_exists
+                    and (type(old_sha256) is not str or _SHA256.fullmatch(old_sha256) is None)
+                )
+                or (not old_exists and old_sha256 is not None)
+                or (
+                    committed_sha256 is not None
+                    and (
+                        type(committed_sha256) is not str
+                        or _SHA256.fullmatch(committed_sha256) is None
+                    )
+                )
+            ):
+                raise ValueError
+        return frozenset(
+            {
+                f"analysis/.{_OUTPUT_NAME}.{token}.output0.recovery.backup",
+                f".stages/.{_STAGE}.json.{token}.manifest.recovery.backup",
+            }
+        )
+    finally:
+        payload = b""
+
+
+def _validate_producer_commitments(
+    store: RunStore,
+    producer_outputs: Mapping[str, tuple[Path, ...]],
+    producer_manifests: Mapping[str, StageManifest],
+    files: Mapping[Path, _FileSnapshot],
+    held_output_sha256: Mapping[str, Mapping[str, str]],
+) -> None:
+    if set(producer_outputs) != set(producer_manifests) or set(producer_outputs) != set(
+        held_output_sha256
+    ):
+        raise _error("functional outcome producer commitment failed validation")
+    for stage, paths in producer_outputs.items():
+        relative_paths = tuple(path.relative_to(store.root).as_posix() for path in paths)
+        captured = {relative: files[path].sha256 for relative, path in zip(relative_paths, paths)}
+        manifest = producer_manifests[stage]
+        if (
+            tuple(manifest.outputs) != relative_paths
+            or manifest.output_sha256 != captured
+            or dict(held_output_sha256[stage]) != captured
+        ):
+            raise _error("functional outcome producer commitment failed validation")
+
+
 def _validate_randomization_index(
     manifest: RandomizationManifestRecord,
     assignments: tuple[AssignmentRecord, ...],
@@ -228,6 +334,7 @@ def _validate_randomization_index(
 def _guard_no_future_artifacts(store: RunStore, *, traversal=iter_bounded_tree) -> None:
     failed = False
     try:
+        owned_transaction_backups = _active_transaction_backup_paths(store)
         for entry in traversal(
             store.root,
             max_entries=_MAX_TRAVERSAL_ENTRIES,
@@ -237,19 +344,22 @@ def _guard_no_future_artifacts(store: RunStore, *, traversal=iter_bounded_tree) 
         ):
             if not entry.is_file:
                 continue
-            parts = entry.relative_path.replace("\\", "/").split("/")
+            relative_path = entry.relative_path.replace("\\", "/").casefold()
+            if relative_path in owned_transaction_backups:
+                continue
+            parts = relative_path.split("/")
             if parts[0].casefold() in _FUTURE_DIRS:
                 raise ValueError
             if (
                 len(parts) == 2
                 and parts[0].casefold() == ".stages"
-                and parts[1].casefold() in _FUTURE_STAGE_MANIFESTS
+                and parts[1].endswith(".json")
+                and confirmation_stage_is_downstream(parts[1][:-5], after=_STAGE)
             ):
                 raise ValueError
             if (
                 parts[0].casefold() == "analysis"
-                and entry.relative_path.replace("\\", "/").casefold()
-                != "analysis/functional_outcomes.jsonl"
+                and relative_path != "analysis/functional_outcomes.jsonl"
             ):
                 raise ValueError
     except _FATAL:
@@ -277,6 +387,10 @@ def import_functional_outcomes_stage(
         effective_config = AppConfig.model_validate(config.model_dump(mode="python"))
         effective_store = store
         external_results_path = Path(results_path)
+        if not external_results_path.parts or any(
+            part in {".", ".."} for part in external_results_path.parts
+        ):
+            raise ValueError
         contract_value = effective_config.data.functional_outcome_contracts_path
         if contract_value is None:
             raise ValueError
@@ -284,6 +398,8 @@ def import_functional_outcomes_stage(
     except _FATAL:
         raise
     except Exception:
+        results_path = ""
+        external_results_path = Path()
         raise _error("functional outcome stage arguments failed validation") from None
 
     task4_paths = tuple(
@@ -294,6 +410,15 @@ def import_functional_outcomes_stage(
     )
     task4_manifest = effective_store.path(".stages", "build-confirmation-variants.json")
     task5_manifest = effective_store.path(".stages", "randomize-confirmation.json")
+    producer_outputs = {
+        "build-confirmation-variants": task4_paths,
+        "randomize-confirmation": task5_paths,
+    }
+    producer_manifest_paths = {
+        "build-confirmation-variants": task4_manifest,
+        "randomize-confirmation": task5_manifest,
+    }
+    held_output_sha256: dict[str, dict[str, str]] = {}
     inputs = (
         contract_path,
         external_results_path,
@@ -321,6 +446,8 @@ def import_functional_outcomes_stage(
         payloads: list[bytes] = []
         files: list[_FileSnapshot] = []
         payload_by_path: dict[Path, bytes] = {}
+        file_by_path: dict[Path, _FileSnapshot] = {}
+        producer_manifests: dict[str, StageManifest] = {}
         try:
             combined = 0
             protocol_path = next(
@@ -337,8 +464,18 @@ def import_functional_outcomes_stage(
                 payloads.append(payload)
                 files.append(file)
             payload_by_path = dict(zip(inputs, payloads, strict=True))
-            _parse_stage_manifest(payload_by_path[task4_manifest], "build-confirmation-variants")
-            _parse_stage_manifest(payload_by_path[task5_manifest], "randomize-confirmation")
+            file_by_path = {item.path: item for item in files}
+            producer_manifests = {
+                stage: _parse_stage_manifest(payload_by_path[path], stage)
+                for stage, path in producer_manifest_paths.items()
+            }
+            _validate_producer_commitments(
+                effective_store,
+                producer_outputs,
+                producer_manifests,
+                file_by_path,
+                held_output_sha256,
+            )
             randomization_manifest_path = next(
                 path
                 for path, (name, _model) in zip(task5_paths, RANDOMIZATION_OUTPUTS, strict=True)
@@ -383,6 +520,8 @@ def import_functional_outcomes_stage(
             payloads.clear()
             files.clear()
             payload_by_path = {}
+            file_by_path = {}
+            producer_manifests = {}
             payload = b""
             file = None
             protocols = ()
@@ -396,14 +535,38 @@ def import_functional_outcomes_stage(
         if snapshot is None:
             raise _error("functional outcome input snapshot failed validation")
         _guard_no_future_artifacts(effective_store)
-        for expected in snapshot.files:
-            payload, current = _read_snapshot(
-                expected.path,
-                allow_empty=expected.identity[4] == 0,
+        current_files: dict[Path, _FileSnapshot] = {}
+        producer_manifests: dict[str, StageManifest] = {}
+        manifest_stage_by_path = {path: stage for stage, path in producer_manifest_paths.items()}
+        payload = b""
+        try:
+            for expected in snapshot.files:
+                payload, current = _read_snapshot(
+                    expected.path,
+                    allow_empty=expected.identity[4] == 0,
+                )
+                if current != expected:
+                    raise _error("functional outcome inputs changed during import")
+                current_files[expected.path] = current
+                producer_stage = manifest_stage_by_path.get(expected.path)
+                if producer_stage is not None:
+                    producer_manifests[producer_stage] = _parse_stage_manifest(
+                        payload,
+                        producer_stage,
+                    )
+                payload = b""
+            _validate_producer_commitments(
+                effective_store,
+                producer_outputs,
+                producer_manifests,
+                current_files,
+                held_output_sha256,
             )
-            del payload
-            if current != expected:
-                raise _error("functional outcome inputs changed during import")
+        finally:
+            payload = b""
+            current_files = {}
+            producer_manifests = {}
+            manifest_stage_by_path = {}
         _validate_randomization_index(snapshot.manifest, snapshot.assignments)
         if (
             validate_functional_outcomes(
@@ -443,13 +606,9 @@ def import_functional_outcomes_stage(
         if checked != snapshot.outcomes:
             raise _error("functional outcome output bundle failed validation")
 
-    producer_outputs = {
-        "build-confirmation-variants": task4_paths,
-        "randomize-confirmation": task5_paths,
-    }
     with ExitStack() as stack:
         for producer_stage in sorted(producer_outputs):
-            stack.enter_context(
+            committed = stack.enter_context(
                 effective_store.hold_committed_output(
                     producer_stage,
                     producer_outputs[producer_stage],
@@ -460,6 +619,7 @@ def import_functional_outcomes_stage(
                     ),
                 )
             )
+            held_output_sha256[producer_stage] = dict(committed)
         execute_jsonl_stage_transaction(
             effective_store,
             stage=_STAGE,
