@@ -49,6 +49,7 @@ _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _FUTURE_DIRS = frozenset({"effects", "reports", "report", "jci", "rfci", "mechanisms"})
 _TRANSACTION_TOKEN = re.compile(r"^[0-9a-f]{32}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +96,10 @@ def _identity(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
+def _is_reparse_point(value: os.stat_result) -> bool:
+    return bool(getattr(value, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def _read_snapshot(path: Path, *, allow_empty: bool) -> tuple[bytes, _FileSnapshot]:
     descriptor = -1
     buffer = bytearray()
@@ -104,6 +109,7 @@ def _read_snapshot(path: Path, *, allow_empty: bool) -> tuple[bytes, _FileSnapsh
         before = path.lstat()
         if (
             not stat.S_ISREG(before.st_mode)
+            or _is_reparse_point(before)
             or before.st_nlink != 1
             or before.st_size > _MAX_FILE_BYTES
             or (not allow_empty and before.st_size < 1)
@@ -126,7 +132,11 @@ def _read_snapshot(path: Path, *, allow_empty: bool) -> tuple[bytes, _FileSnapsh
             remaining -= len(chunk)
         after = os.fstat(descriptor)
         after_path = path.lstat()
-        if _identity(after) != _identity(opened) or _identity(after_path) != _identity(opened):
+        if (
+            _identity(after) != _identity(opened)
+            or _identity(after_path) != _identity(opened)
+            or _is_reparse_point(after_path)
+        ):
             raise ValueError
         result = (bytes(buffer), _FileSnapshot(path, digest.hexdigest(), _identity(after_path)))
     except _FATAL:
@@ -249,7 +259,23 @@ def _active_transaction_backup_paths(store: RunStore) -> frozenset[str]:
             or len(artifacts) != 2
         ):
             raise ValueError
-        for artifact, expected_target in zip(artifacts, expected_targets, strict=True):
+        backups = (
+            (
+                output.with_name(f".{output.name}.{token}.output0.recovery.backup"),
+                f"analysis/.{_OUTPUT_NAME}.{token}.output0.recovery.backup",
+            ),
+            (
+                manifest.with_name(f".{manifest.name}.{token}.manifest.recovery.backup"),
+                f".stages/.{_STAGE}.json.{token}.manifest.recovery.backup",
+            ),
+        )
+        owned: set[str] = set()
+        for artifact, expected_target, (backup, relative_backup) in zip(
+            artifacts,
+            expected_targets,
+            backups,
+            strict=True,
+        ):
             if type(artifact) is not dict or set(artifact) != {
                 "target_key",
                 "old_exists",
@@ -277,12 +303,20 @@ def _active_transaction_backup_paths(store: RunStore) -> frozenset[str]:
                 )
             ):
                 raise ValueError
-        return frozenset(
-            {
-                f"analysis/.{_OUTPUT_NAME}.{token}.output0.recovery.backup",
-                f".stages/.{_STAGE}.json.{token}.manifest.recovery.backup",
-            }
-        )
+            if old_exists:
+                _backup_payload, backup_snapshot = _read_snapshot(backup, allow_empty=True)
+                _backup_payload = b""
+                if backup_snapshot.sha256 != old_sha256:
+                    raise ValueError
+                owned.add(relative_backup)
+            else:
+                try:
+                    backup.lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise ValueError
+        return frozenset(owned)
     finally:
         payload = b""
 

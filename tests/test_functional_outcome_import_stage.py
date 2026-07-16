@@ -387,6 +387,62 @@ def test_legal_force_atomically_replaces_committed_functional_outcome(tmp_path: 
     assert _bytes(store) != before
 
 
+def test_force_rejects_transaction_backup_that_does_not_match_journal(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config, store, results, assignment, _protocol, contract, _outcome = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    replacement = _functional_outcome(
+        assignment_id=assignment.assignment_id,
+        contract_id=contract.contract_id,
+        evaluator_policy_sha256=contract.evaluator_policy_sha256,
+        status=FunctionalOutcomeStatus.FAIL,
+        evidence_sha256="e" * 64,
+    )
+    write_jsonl(results, (replacement,))
+    real_guard = functional_stage._guard_no_future_artifacts
+    guard_calls = 0
+
+    def mismatch_backup_journal_on_precommit(run_store: RunStore) -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 2:
+            journal_path = run_store.path(".stages", ".import-functional-outcomes.transaction.json")
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            artifact = journal["artifacts"][0]
+            assert artifact["old_exists"] is True
+            original_sha256 = artifact["old_sha256"]
+            artifact["old_sha256"] = "0" * 64 if original_sha256 != "0" * 64 else "1" * 64
+            backup = run_store.path(
+                "analysis",
+                f".functional_outcomes.jsonl.{journal['token']}.output0.recovery.backup",
+            )
+            assert sha256_path(backup) == original_sha256
+            assert sha256_path(backup) != artifact["old_sha256"]
+            journal_path.write_text(
+                json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
+        real_guard(run_store)
+
+    monkeypatch.setattr(
+        functional_stage,
+        "_guard_no_future_artifacts",
+        mismatch_backup_journal_on_precommit,
+    )
+
+    with pytest.raises(SecAwareError) as captured:
+        import_functional_outcomes_stage(config, store, results, force=True)
+
+    assert guard_calls == 2
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert captured.value.stage == "import-functional-outcomes"
+    assert _bytes(store) == before
+
+
 def test_future_analysis_artifact_blocks_import_and_preserves_commit(tmp_path: Path) -> None:
     config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
     import_functional_outcomes_stage(config, store, results)
@@ -499,6 +555,45 @@ def test_future_guard_allows_only_backups_owned_by_active_transaction(tmp_path: 
         functional_stage._guard_no_future_artifacts(store)
     finally:
         recover_transaction(transaction)
+
+
+@pytest.mark.parametrize("mutation", ("content", "type"))
+def test_future_guard_rejects_transaction_backup_entity_drift(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    config, store, results, *_rest = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    output = store.path("analysis", "functional_outcomes.jsonl")
+    manifest = store.path(".stages", "import-functional-outcomes.json")
+    transaction = ArtifactTransaction.begin(
+        store.path(".stages", ".import-functional-outcomes.transaction.json"),
+        (
+            TransactionArtifact(output, "output0"),
+            TransactionArtifact(manifest, "manifest"),
+        ),
+    )
+    transaction.backup(0)
+    transaction.backup(1)
+    backup = output.with_name(f".{output.name}.{transaction.journal.token}.output0.recovery.backup")
+    backup_bytes = backup.read_bytes()
+    if mutation == "content":
+        backup.write_bytes(backup_bytes + b"\n")
+    else:
+        backup.unlink()
+        backup.mkdir()
+    try:
+        with pytest.raises(SecAwareError) as captured:
+            functional_stage._guard_no_future_artifacts(store)
+        assert captured.value.code is ErrorCode.CONTRACT
+        assert captured.value.stage == "import-functional-outcomes"
+    finally:
+        if backup.is_dir():
+            backup.rmdir()
+        backup.write_bytes(backup_bytes)
+        recover_transaction(transaction)
+    assert _bytes(store) == before
 
 
 def test_randomization_manifest_and_assignment_index_are_revalidated(tmp_path: Path) -> None:
