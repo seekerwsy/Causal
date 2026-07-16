@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from importlib.util import resolve_name
 from pathlib import Path
 import tomllib
 
@@ -40,6 +41,29 @@ def _attribute_parts(node: ast.Attribute) -> tuple[str, ...] | None:
     return (current.id, *reversed(parts))
 
 
+def _package_for_path(path: Path) -> str | None:
+    parts: list[str] = []
+    parent = path.parent
+    while (parent / "__init__.py").is_file():
+        parts.append(parent.name)
+        parent = parent.parent
+    return ".".join(reversed(parts)) or None
+
+
+def _import_from_module(path: Path, node: ast.ImportFrom) -> str:
+    module = node.module or ""
+    if node.level == 0:
+        return module
+    relative = f"{'.' * node.level}{module}"
+    package = _package_for_path(path)
+    if package is None:
+        return relative
+    try:
+        return resolve_name(relative, package)
+    except ImportError:
+        return relative
+
+
 def _symbols_under(root: Path) -> set[str]:
     symbols: set[str] = set()
     for path in sorted(root.rglob("*.py")):
@@ -52,7 +76,7 @@ def _symbols_under(root: Path) -> set[str]:
                     local_name = alias.asname or alias.name.partition(".")[0]
                     aliases[local_name] = alias.name if alias.asname else local_name
             elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
+                module = _import_from_module(path, node)
                 if module:
                     symbols.add(module)
                 for alias in node.names:
@@ -69,9 +93,21 @@ def _symbols_under(root: Path) -> set[str]:
     return symbols
 
 
+def _relative_import_candidate(tmp_path: Path, source: str) -> Path:
+    package = tmp_path / "secaware"
+    causal = package / "causal"
+    causal.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (causal / "__init__.py").write_text("", encoding="utf-8")
+    (causal / "candidate.py").write_text(source, encoding="utf-8")
+    return causal
+
+
 def _prompt_only_causal_violations(symbols: set[str]) -> set[str]:
     violations: set[str] = set()
     for item in {symbol.casefold() for symbol in symbols}:
+        if item.startswith("."):
+            violations.add(item)
         if any(
             fragment in item
             for fragment in (
@@ -83,6 +119,8 @@ def _prompt_only_causal_violations(symbols: set[str]) -> set[str]:
         ):
             violations.add(item)
         if ".intervention" in item and item not in _ALLOWED_INTERVENTION_SYMBOLS:
+            violations.add(item)
+        if item == "secaware.generation" or item.startswith("secaware.generation."):
             violations.add(item)
         if ".confirmation" in item and item not in _ALLOWED_CONFIRMATION_SCHEMA_SYMBOLS:
             violations.add(item)
@@ -138,6 +176,76 @@ def test_prompt_only_import_gate_rejects_nonwhitelisted_intervention(
     assert "secaware.intervention.arm_catalog.materialize_arm_protocol" in violations
     assert "secaware.intervention.arm_catalog" not in violations
     assert "secaware.intervention.arm_catalog.target_feature_from_protocol" not in violations
+
+
+def test_prompt_only_import_gate_resolves_relative_intervention_module(
+    tmp_path: Path,
+) -> None:
+    root = _relative_import_candidate(
+        tmp_path,
+        "from ..intervention.executors import GraphNativeExecutor as Executor\n",
+    )
+
+    violations = _prompt_only_causal_violations(_symbols_under(root))
+
+    assert "secaware.intervention.executors" in violations
+    assert "secaware.intervention.executors.graphnativeexecutor" in violations
+
+
+def test_prompt_only_import_gate_resolves_relative_arm_catalog_symbols(
+    tmp_path: Path,
+) -> None:
+    root = _relative_import_candidate(
+        tmp_path,
+        "from ..intervention.arm_catalog import (\n"
+        "    materialize_arm_protocol as materialize,\n"
+        "    target_feature_from_protocol as target_feature,\n"
+        ")\n",
+    )
+
+    violations = _prompt_only_causal_violations(_symbols_under(root))
+
+    assert "secaware.intervention.arm_catalog.materialize_arm_protocol" in violations
+    assert "secaware.intervention.arm_catalog" not in violations
+    assert "secaware.intervention.arm_catalog.target_feature_from_protocol" not in violations
+
+
+def test_prompt_only_import_gate_rejects_relative_generation_implementation(
+    tmp_path: Path,
+) -> None:
+    root = _relative_import_candidate(
+        tmp_path,
+        "from ..generation.result_importer import import_offline_results as importer\n",
+    )
+
+    violations = _prompt_only_causal_violations(_symbols_under(root))
+
+    assert "secaware.generation.result_importer" in violations
+    assert "secaware.generation.result_importer.import_offline_results" in violations
+
+
+def test_prompt_only_import_gate_resolves_empty_relative_module(
+    tmp_path: Path,
+) -> None:
+    root = _relative_import_candidate(tmp_path, "from .. import intervention as layer\n")
+
+    violations = _prompt_only_causal_violations(_symbols_under(root))
+
+    assert "secaware.intervention" in violations
+
+
+def test_prompt_only_import_gate_fails_closed_on_relative_level_overflow(
+    tmp_path: Path,
+) -> None:
+    root = _relative_import_candidate(
+        tmp_path,
+        "from ...schema.causal import JCIStratum\n",
+    )
+
+    violations = _prompt_only_causal_violations(_symbols_under(root))
+
+    assert "...schema.causal" in violations
+    assert "...schema.causal.jcistratum" in violations
 
 
 def test_causal_table_builder_cannot_read_generated_code_or_findings() -> None:
