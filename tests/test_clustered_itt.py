@@ -619,6 +619,48 @@ def test_low_level_bootstrap_rejects_worst_case_json_bytes_before_rng(monkeypatc
     assert not rng_constructed
 
 
+def test_low_level_bootstrap_rejects_worst_case_sampled_row_budget_before_rng(
+    monkeypatch,
+) -> None:
+    import secaware.analysis.cluster_bootstrap as bootstrap_module
+
+    protocol = _safety_protocol()
+    samples = 10_000
+    draw_width = 2
+    max_cluster_size = (5_000_000 // (samples * draw_width)) + 1
+    rows = (
+        *(
+            _assignment_outcome(
+                protocol,
+                "task-large",
+                protocol.arm_roles[0],
+                assignment_nonce=f"large-{index}",
+            )
+            for index in range(max_cluster_size)
+        ),
+        _assignment_outcome(protocol, "task-small", protocol.arm_roles[0]),
+    )
+    rng_constructed = False
+
+    class ForbiddenRNG:
+        def __init__(self, _seed: bytes) -> None:
+            nonlocal rng_constructed
+            rng_constructed = True
+            raise AssertionError("sampled-row guard must run before RNG construction")
+
+    monkeypatch.setattr(bootstrap_module, "DeterministicRNG", ForbiddenRNG)
+
+    with pytest.raises(Exception, match="bootstrap"):
+        task_cluster_bootstrap(
+            rows,
+            lambda _sample: 0.0,
+            samples=samples,
+            seed_material=b"sampled-row-budget-probe",
+            max_failed_fraction=0.0,
+        )
+    assert not rng_constructed
+
+
 def test_estimator_rejects_global_task_draw_budget_before_any_bootstrap(monkeypatch) -> None:
     import secaware.analysis.itt as itt_module
 
@@ -638,6 +680,44 @@ def test_estimator_rejects_global_task_draw_budget_before_any_bootstrap(monkeypa
         nonlocal bootstrap_called
         bootstrap_called = True
         raise AssertionError("global budget must run before bootstrap")
+
+    monkeypatch.setattr(itt_module, "task_cluster_bootstrap", forbidden_bootstrap)
+
+    with pytest.raises(Exception, match="work budget"):
+        estimate_itt(
+            rows,
+            _analysis_config(bootstrap_samples=samples),
+            protocols=(protocol,),
+        )
+    assert not bootstrap_called
+
+
+def test_estimator_preflight_counts_equal_repeat_row_amplification(monkeypatch) -> None:
+    import secaware.analysis.itt as itt_module
+
+    protocol = _safety_protocol()
+    samples = 10_000
+    task_ids = ("task-a", "task-b")
+    rows_per_repeat = len(task_ids) * len(protocol.arm_roles)
+    repeats = (5_000_000 // (rows_per_repeat * samples * len(protocol.contrasts))) + 1
+    rows = tuple(
+        _assignment_outcome(
+            protocol,
+            task_id,
+            arm_role,
+            assignment_nonce=f"repeat-{repeat}",
+        )
+        for task_id in task_ids
+        for arm_role in protocol.arm_roles
+        for repeat in range(repeats)
+    )
+    assert len(rows) * samples * len(protocol.contrasts) > 5_000_000
+    bootstrap_called = False
+
+    def forbidden_bootstrap(*_args, **_kwargs):
+        nonlocal bootstrap_called
+        bootstrap_called = True
+        raise AssertionError("row work budget must run before bootstrap")
 
     monkeypatch.setattr(itt_module, "task_cluster_bootstrap", forbidden_bootstrap)
 

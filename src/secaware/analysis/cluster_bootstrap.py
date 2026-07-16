@@ -17,6 +17,7 @@ from secaware.schema.outcomes import AssignmentOutcomeRecord
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _MAX_TOTAL_TASK_DRAW_ENTRIES = 1_000_000
+_MAX_TOTAL_SAMPLED_ROW_ENTRIES = 5_000_000
 _MAX_TASK_DRAW_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
@@ -107,6 +108,7 @@ def task_cluster_bootstrap(
         if not task_ids:
             raise _error()
         task_draw_entries = len(task_ids) * samples
+        sampled_row_entries = task_draw_entries * max(len(by_task[task_id]) for task_id in task_ids)
         largest_encoded_task_id = max(
             len(
                 json.dumps(
@@ -121,6 +123,7 @@ def task_cluster_bootstrap(
         task_draw_manifest_bytes = 2 + samples * (per_draw_bytes + 1)
         if (
             task_draw_entries > _MAX_TOTAL_TASK_DRAW_ENTRIES
+            or sampled_row_entries > _MAX_TOTAL_SAMPLED_ROW_ENTRIES
             or task_draw_manifest_bytes > _MAX_TASK_DRAW_MANIFEST_BYTES
         ):
             raise _error()

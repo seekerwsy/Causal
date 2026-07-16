@@ -32,7 +32,7 @@ from secaware.schema.outcomes import (
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
-_MAX_ESTIMATOR_TASK_DRAWS = 5_000_000
+_MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES = 5_000_000
 _RESERVED_OUTCOMES = frozenset(
     {
         "y_secure_functional",
@@ -583,16 +583,15 @@ def estimate_itt(
         )
         semantic_rows.setdefault(key, []).append(row)
 
-    total_task_draws = 0
+    total_sampled_row_entries = 0
     for semantic_key, grouped in semantic_rows.items():
         protocol = protocol_by_id[semantic_key[2]]
-        task_count = len({row.task_id for row in grouped})
         runnable_contrasts = sum(
             _bootstrap_will_run(protocol, contrast, support_by_protocol)
             for contrast in contrasts_by_protocol[protocol.arm_protocol_id]
         )
-        total_task_draws += task_count * config.bootstrap_samples * runnable_contrasts
-        if total_task_draws > _MAX_ESTIMATOR_TASK_DRAWS:
+        total_sampled_row_entries += len(grouped) * config.bootstrap_samples * runnable_contrasts
+        if total_sampled_row_entries > _MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES:
             raise _itt_error("ITT bootstrap work budget failed validation")
 
     effects: list[ITTEffectRecord] = []
