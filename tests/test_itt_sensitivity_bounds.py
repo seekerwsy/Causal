@@ -5,7 +5,13 @@ import pytest
 from m5_executor_fixtures import request
 from secaware.analysis.itt import estimate_itt
 from secaware.pipeline.artifact import canonical_sha256
-from secaware.schema.experiments import ArmRole, FeatureFamily, FeatureOperation
+from secaware.schema.experiments import (
+    ArmRole,
+    ConfirmationProtocolRecord,
+    FeatureFamily,
+    FeatureOperation,
+    FunctionalOutcomeContractRecord,
+)
 from secaware.schema.outcomes import FunctionalOutcomeRecord, FunctionalOutcomeStatus
 
 from test_clustered_itt import (
@@ -29,6 +35,31 @@ def _functional_outcomes(rows, contract, statuses=None):
         )
         for row in rows
     )
+
+
+def _contract_with(**updates: object) -> FunctionalOutcomeContractRecord:
+    content: dict[str, object] = {
+        "task_feature_id": "task.database_query",
+        "outcome_id": "y_task_database_functional",
+        "expected_add_sign": "positive",
+        "expected_remove_sign": "negative",
+        "generic_control_feature_id": "task.input_consumption",
+        "evaluator_policy_sha256": "9" * 64,
+    }
+    content.update(updates)
+    return FunctionalOutcomeContractRecord.from_content(**content)
+
+
+def _protocol_with_contract_id(
+    protocol: ConfirmationProtocolRecord,
+    contract: FunctionalOutcomeContractRecord,
+) -> ConfirmationProtocolRecord:
+    content = protocol.model_dump(
+        mode="python",
+        exclude={"schema_version", "arm_protocol_id", "contrast_set_sha256"},
+    )
+    content["functional_outcome_contract_id"] = contract.contract_id
+    return ConfirmationProtocolRecord.from_content(**content)
 
 
 def test_oracle_unknown_is_zero_for_point_and_flipped_only_in_binary_bounds() -> None:
@@ -280,4 +311,55 @@ def test_partial_extra_or_wrong_functional_provenance_fails_closed() -> None:
             _analysis_config(),
             protocols=(protocol,),
             functional_outcomes=complete,
+        )
+
+
+@pytest.mark.parametrize(
+    "contract",
+    (
+        _contract_with(task_feature_id="task.file_read"),
+        _contract_with(generic_control_feature_id="task.file_read"),
+        _contract_with(expected_add_sign="two_sided"),
+        _contract_with(outcome_id="y_task_database_alternative"),
+    ),
+)
+def test_task_contract_semantics_must_match_frozen_protocol_arms_and_primary(
+    contract: FunctionalOutcomeContractRecord,
+) -> None:
+    execution_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    )
+    protocol = _protocol_with_contract_id(execution_request.protocol, contract)
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    functional = _functional_outcomes(rows, contract)
+    assert ConfirmationProtocolRecord.model_validate(protocol) == protocol
+
+    with pytest.raises(Exception, match="functional"):
+        estimate_itt(
+            rows,
+            _analysis_config(),
+            protocols=(protocol,),
+            functional_contracts=(contract,),
+            functional_outcomes=functional,
+        )
+
+
+def test_unsupported_task_effect_still_validates_supplied_contract_semantics() -> None:
+    execution_request = request(
+        FeatureFamily.TASK_FUNCTION,
+        FeatureOperation.ADD,
+        with_functional_contract=True,
+    )
+    contract = _contract_with(task_feature_id="task.file_read")
+    protocol = _protocol_with_contract_id(execution_request.protocol, contract)
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+
+    with pytest.raises(Exception, match="functional"):
+        estimate_itt(
+            rows,
+            _analysis_config(),
+            protocols=(protocol,),
+            functional_contracts=(contract,),
         )

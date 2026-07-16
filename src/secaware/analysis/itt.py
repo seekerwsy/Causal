@@ -158,6 +158,9 @@ def _validate_assignment_relation(
     if {row.arm_protocol_id for row in rows} != set(protocols):
         raise _itt_error()
     instance_pairs: dict[tuple[str, str, str, str, str], set[tuple[str, str]]] = {}
+    pair_owners: dict[tuple[str, str], str] = {}
+    target_instance_owners: dict[str, str] = {}
+    protocol_instance_owners: dict[str, str] = {}
     for row in rows:
         protocol = protocols.get(row.arm_protocol_id)
         if (
@@ -174,11 +177,60 @@ def _validate_assignment_relation(
             row.model_id,
             row.task_id,
         )
-        instance_pairs.setdefault(task_key, set()).add(
-            (row.target_instance_id, row.protocol_instance_id)
-        )
+        pair = (row.target_instance_id, row.protocol_instance_id)
+        instance_pairs.setdefault(task_key, set()).add(pair)
+        for owners, instance_id in (
+            (target_instance_owners, row.target_instance_id),
+            (protocol_instance_owners, row.protocol_instance_id),
+        ):
+            owner = owners.setdefault(instance_id, row.task_id)
+            if owner != row.task_id:
+                raise _itt_error()
+        pair_owner = pair_owners.setdefault(pair, row.task_id)
+        if pair_owner != row.task_id:
+            raise _itt_error()
     if any(len(pairs) != 1 for pairs in instance_pairs.values()):
         raise _itt_error()
+
+
+def _validate_task_contract_semantics(
+    protocol: ConfirmationProtocolRecord,
+    contract: FunctionalOutcomeContractRecord,
+) -> None:
+    target_arms = tuple(arm for arm in protocol.arms if arm.role is ArmRole.TASK_TARGET)
+    generic_arms = tuple(arm for arm in protocol.arms if arm.role is ArmRole.TASK_GENERIC_CONTROL)
+    primary = tuple(
+        contrast
+        for contrast in protocol.contrasts
+        if contrast.priority == "primary"
+        and contrast.treatment_arm is ArmRole.TASK_TARGET
+        and contrast.control_arm is ArmRole.TASK_NOOP
+    )
+    expected_sign = (
+        contract.expected_add_sign
+        if protocol.operation.value == "add"
+        else contract.expected_remove_sign
+    )
+    if (
+        len(target_arms) != 1
+        or len(target_arms[0].allowed_delta.allowed_transitions) != 1
+        or target_arms[0].allowed_delta.allowed_transitions[0].feature_id
+        != contract.task_feature_id
+        or len(primary) != 1
+        or primary[0].outcome_id != contract.outcome_id
+        or primary[0].expected_sign != expected_sign
+    ):
+        raise _itt_error("functional outcome relation failed validation")
+    generic_feature_id = contract.generic_control_feature_id
+    if generic_feature_id is None:
+        if generic_arms:
+            raise _itt_error("functional outcome relation failed validation")
+    elif (
+        len(generic_arms) != 1
+        or len(generic_arms[0].allowed_delta.allowed_transitions) != 1
+        or generic_arms[0].allowed_delta.allowed_transitions[0].feature_id != generic_feature_id
+    ):
+        raise _itt_error("functional outcome relation failed validation")
 
 
 def _validate_functional_relation(
@@ -225,11 +277,8 @@ def _validate_functional_relation(
         if contract_id is None:
             raise _itt_error("functional outcome relation failed validation")
         contract = contract_by_id.get(contract_id)
-        if contract is not None and not any(
-            contrast.outcome_id == contract.outcome_id and contrast.priority == "primary"
-            for contrast in protocol.contrasts
-        ):
-            raise _itt_error("functional outcome relation failed validation")
+        if contract is not None:
+            _validate_task_contract_semantics(protocol, contract)
     if not outcome_records:
         return False, contract_by_id, {}
     if not contract_records:

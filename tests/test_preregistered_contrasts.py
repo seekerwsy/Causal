@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from m5_executor_fixtures import request
+import secaware.schema as public_schema
 from secaware.analysis.contrasts import materialize_contrasts, validate_contrasts
 from secaware.schema.experiments import ArmRole, FeatureFamily, FeatureOperation
 from secaware.schema.outcomes import ContrastSpecRecord
@@ -104,6 +105,11 @@ def test_flattened_contrast_schema_is_exact_strict_and_frozen() -> None:
         record.priority = "diagnostic"  # type: ignore[misc]
     with pytest.raises(ValidationError):
         ContrastSpecRecord.model_validate({**record.model_dump(mode="json"), "extra": 1})
+
+
+def test_task2_records_are_not_added_to_the_aggregate_schema_api() -> None:
+    assert not hasattr(public_schema, "ContrastSpecRecord")
+    assert not hasattr(public_schema, "ITTEffectRecord")
 
 
 def test_arbitrary_observed_arm_contrast_is_rejected_against_protocol_commitment() -> None:

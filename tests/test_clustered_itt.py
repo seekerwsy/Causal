@@ -210,6 +210,27 @@ def test_duplicate_assignment_rows_and_multiple_instance_pairs_are_rejected() ->
         estimate_itt((changed, *rows[1:]), _analysis_config(), protocols=(protocol,))
 
 
+@pytest.mark.parametrize("reuse", ("pair", "target", "protocol"))
+def test_task_bound_instance_ids_cannot_be_reused_by_another_task(reuse: str) -> None:
+    protocol = _safety_protocol()
+    rows = _complete_rows(protocol, ("task-a", "task-b"))
+    owner = next(row for row in rows if row.task_id == "task-a")
+    forged: list[AssignmentOutcomeRecord] = []
+    for row in rows:
+        if row.task_id != "task-b":
+            forged.append(row)
+            continue
+        content = row.model_dump(mode="python", exclude={"outcome_id"})
+        if reuse in {"pair", "target"}:
+            content["target_instance_id"] = owner.target_instance_id
+        if reuse in {"pair", "protocol"}:
+            content["protocol_instance_id"] = owner.protocol_instance_id
+        forged.append(AssignmentOutcomeRecord.from_content(**content))
+
+    with pytest.raises(Exception, match="ITT"):
+        estimate_itt(tuple(forged), _analysis_config(), protocols=(protocol,))
+
+
 def test_semantic_protocol_pools_many_distinct_task_instances() -> None:
     protocol = _safety_protocol()
     tasks = tuple(f"task-{index:02d}" for index in range(20))
