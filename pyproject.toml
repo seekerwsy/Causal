@@ -35,6 +35,10 @@ oracle = [
   "semgrep==1.168.0",
   "bandit==1.9.4",
 ]
+rfci = [
+  "JPype1==1.7.1; python_version >= '3.12'",
+  "py-tetrad @ git+https://github.com/cmu-phil/py-tetrad.git@a30707264aa4363a23ac5f136a70bbdd62212f07 ; python_version >= '3.12'",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

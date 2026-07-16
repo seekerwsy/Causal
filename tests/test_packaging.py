@@ -7,6 +7,7 @@ import json
 from importlib.metadata import entry_points, metadata, requires
 from pathlib import Path
 import shutil
+import tomllib
 import zipfile
 
 import pytest
@@ -251,11 +252,22 @@ def test_project_declares_exact_oracle_extra_and_test_marker() -> None:
 
 def test_project_declares_exact_no_java_minimum_causal_backend() -> None:
     package_requirements = requires("secaware") or []
+    minimum_requirements = [item for item in package_requirements if 'extra == "rfci"' not in item]
 
-    assert "causal-learn==0.1.4.7" in package_requirements
-    lowered = "\n".join(package_requirements).casefold()
+    assert "causal-learn==0.1.4.7" in minimum_requirements
+    lowered = "\n".join(minimum_requirements).casefold()
     assert "py-tetrad" not in lowered
     assert "jpype" not in lowered
+
+
+def test_project_declares_exact_python312_only_rfci_extra() -> None:
+    metadata = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert metadata["project"]["optional-dependencies"]["rfci"] == [
+        "JPype1==1.7.1; python_version >= '3.12'",
+        "py-tetrad @ git+https://github.com/cmu-phil/py-tetrad.git@"
+        "a30707264aa4363a23ac5f136a70bbdd62212f07 ; python_version >= '3.12'",
+    ]
 
 
 def test_project_pins_offline_wheel_build_toolchain() -> None:

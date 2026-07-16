@@ -119,6 +119,48 @@ class _OutcomeContract(SafeValidationMixin, VersionedModel):
         return f"{type(self).__name__}()"
 
 
+class RFCICapabilityRecord(_OutcomeContract):
+    """Bounded, import-free availability evidence for optional py-tetrad RFCI."""
+
+    schema_version: Literal["1.0"]
+    available: StrictBool
+    status: Literal["disabled", "available", "unavailable"]
+    requires_java: Literal[True] = True
+    python_version: str = Field(min_length=3, max_length=64, pattern=r"^[0-9]+(?:\.[0-9]+){1,3}$")
+    java_major: StrictInt | None = Field(default=None, ge=1, le=999)
+    jpype_version: str | None = Field(default=None, min_length=1, max_length=64)
+    py_tetrad_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    tetrad_jar_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    reason_code: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_status(self) -> Self:
+        available_status = self.status == "available"
+        if self.available != available_status:
+            raise ValueError(self._safe_validation_message)
+        if available_status:
+            if (
+                self.reason_code is not None
+                or self.java_major is None
+                or self.java_major < 21
+                or self.jpype_version is None
+                or self.py_tetrad_commit is None
+                or self.tetrad_jar_sha256 is None
+            ):
+                raise ValueError(self._safe_validation_message)
+        elif self.reason_code is None:
+            raise ValueError(self._safe_validation_message)
+        if self.status == "disabled" and (
+            self.reason_code != "disabled"
+            or self.java_major is not None
+            or self.jpype_version is not None
+            or self.py_tetrad_commit is not None
+            or self.tetrad_jar_sha256 is not None
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class ContrastSpecRecord(_OutcomeContract):
     """One flattened contrast authenticated by its content-addressed protocol."""
 
@@ -641,4 +683,5 @@ __all__ = [
     "ITTEffectRecord",
     "JCIOrientationDeltaRecord",
     "JCIObservationRecord",
+    "RFCICapabilityRecord",
 ]

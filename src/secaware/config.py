@@ -158,6 +158,26 @@ class FCIDiscoveryConfig(SafeValidationMixin, StrictModel):
     )
 
 
+class RFCIConfig(StrictModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    enabled: bool = False
+    py_tetrad_commit: Literal["a30707264aa4363a23ac5f136a70bbdd62212f07"] = (
+        "a30707264aa4363a23ac5f136a70bbdd62212f07"
+    )
+    jpype_version: Literal["1.7.1"] = "1.7.1"
+    minimum_java_major: Literal[21] = 21
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0, allow_inf_nan=False)
+    depth: int = Field(default=3, ge=0, le=8)
+    max_discriminating_path_length: int = Field(default=6, ge=1, le=16)
+    timeout_seconds: float = Field(default=180.0, gt=0.0, le=3600.0, allow_inf_nan=False)
+
+
 class InterventionLLMConfig(SafeValidationMixin, StrictModel):
     """Executor-only provider policy; never shared with Prompt extraction."""
 
@@ -588,6 +608,7 @@ class AppConfig(StrictModel):
     data: DataConfig
     tsg: TSGConfig = Field(default_factory=TSGConfig)
     discovery: FCIDiscoveryConfig = Field(default_factory=FCIDiscoveryConfig)
+    rfci: RFCIConfig = Field(default_factory=RFCIConfig)
     intervention: InterventionConfig
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     randomization: RandomizationConfig = Field(default_factory=RandomizationConfig)
