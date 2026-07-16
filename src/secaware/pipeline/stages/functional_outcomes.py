@@ -254,7 +254,7 @@ def _active_transaction_backup_paths(store: RunStore) -> frozenset[str]:
             value["schema_version"] != "1.0"
             or type(token) is not str
             or _TRANSACTION_TOKEN.fullmatch(token) is None
-            or value["state"] not in {"recovery", "postcommit"}
+            or value["state"] != "recovery"
             or type(artifacts) is not list
             or len(artifacts) != 2
         ):
@@ -294,13 +294,7 @@ def _active_transaction_backup_paths(store: RunStore) -> frozenset[str]:
                     and (type(old_sha256) is not str or _SHA256.fullmatch(old_sha256) is None)
                 )
                 or (not old_exists and old_sha256 is not None)
-                or (
-                    committed_sha256 is not None
-                    and (
-                        type(committed_sha256) is not str
-                        or _SHA256.fullmatch(committed_sha256) is None
-                    )
-                )
+                or committed_sha256 is not None
             ):
                 raise ValueError
             if old_exists:
@@ -465,7 +459,7 @@ def import_functional_outcomes_stage(
     output_spec = JsonlOutputSpec(
         output,
         FunctionalOutcomeRecord,
-        require_nonempty=True,
+        require_nonempty=False,
         max_records=_MAX_RECORDS,
         max_line_chars=_MAX_LINE_BYTES,
         max_total_chars=_MAX_FILE_BYTES,
@@ -489,9 +483,12 @@ def import_functional_outcomes_stage(
                 for path, (name, _model) in zip(task4_paths, PROMPT_VARIANT_OUTPUTS, strict=True)
                 if name == "confirmation_protocols.jsonl"
             )
-            empty_task4_paths = set(task4_paths) - {protocol_path}
+            empty_input_paths = (set(task4_paths) - {protocol_path}) | {
+                contract_path,
+                external_results_path,
+            }
             for path in inputs:
-                payload, file = _read_snapshot(path, allow_empty=path in empty_task4_paths)
+                payload, file = _read_snapshot(path, allow_empty=path in empty_input_paths)
                 combined += len(payload)
                 if combined > _MAX_COMBINED_BYTES:
                     raise _error("functional outcome input resource limit exceeded")
@@ -524,7 +521,7 @@ def import_functional_outcomes_stage(
                 payload_by_path[protocol_path], ConfirmationProtocolRecord, allow_empty=False
             )
             contracts = _parse_jsonl(
-                payload_by_path[contract_path], FunctionalOutcomeContractRecord, allow_empty=False
+                payload_by_path[contract_path], FunctionalOutcomeContractRecord, allow_empty=True
             )
             manifests = _parse_jsonl(
                 payload_by_path[randomization_manifest_path],
@@ -667,11 +664,11 @@ def import_functional_outcomes_stage(
         )
         if snapshot is None:
             raise _error("functional outcome input snapshot failed validation")
-        imported_payload, _file = _read_snapshot(output, allow_empty=False)
+        imported_payload, _file = _read_snapshot(output, allow_empty=True)
         imported = _parse_jsonl(
             imported_payload,
             FunctionalOutcomeRecord,
-            allow_empty=False,
+            allow_empty=True,
         )
         checked = validate_functional_outcomes(
             snapshot.assignments,

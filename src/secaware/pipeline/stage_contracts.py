@@ -77,6 +77,7 @@ CONFIRMATION_STAGE_ORDER = (
     "estimate-confirmation-effects",
     "jci-confirmation",
     "rfci-confirmation",
+    "mechanisms",
     "reporting",
 )
 _CONFIRMATION_STAGE_MANIFEST_FAMILIES = (
@@ -99,8 +100,9 @@ _CONFIRMATION_STAGE_MANIFEST_FAMILIES = (
         "confirmation-effects",
         "confirm-effects",
     ),
-    ("jci", "jci-analysis", "jci-confirmation"),
-    ("rfci", "rfci-analysis", "rfci-confirmation"),
+    ("analyze-jci", "jci", "jci-analysis", "jci-confirmation"),
+    ("analyze-rfci", "rfci", "rfci-analysis", "rfci-confirmation"),
+    ("mechanisms",),
     ("report", "reports", "reporting"),
 )
 _STAGE_VERSION_AFFIX = re.compile(

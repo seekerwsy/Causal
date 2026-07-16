@@ -19,19 +19,29 @@ from secaware.io.transaction import (
     TransactionArtifact,
     recover_transaction,
 )
+from secaware.outcomes.functional import validate_functional_outcomes
 from secaware.pipeline.artifact import sha256_path
 from secaware.pipeline.bounded_traversal import BoundedTreeEntry
 from secaware.pipeline.manifest import read_stage_manifest
+import secaware.pipeline.stages.confirmation_generation as confirmation_generation_stage
+import secaware.pipeline.stages.confirmation_oracle as confirmation_oracle_stage
 from secaware.pipeline.stages.functional_outcomes import import_functional_outcomes_stage
 import secaware.pipeline.stages.functional_outcomes as functional_stage
+import secaware.pipeline.stages.prompt_variants as prompt_variant_stage
 from secaware.pipeline.stages.prompt_variants import (
     PROMPT_VARIANT_OUTPUTS,
     prompt_variant_stage_policy_sha256,
 )
+import secaware.pipeline.stages.randomization as randomization_stage
 from secaware.pipeline.stages.randomization import RANDOMIZATION_OUTPUTS
-from secaware.pipeline.stage_contracts import functional_outcome_import_stage_contract_payload
+from secaware.pipeline.stage_contracts import (
+    confirmation_stage_is_downstream,
+    functional_outcome_import_stage_contract_payload,
+)
 from secaware.schema.experiments import (
+    AssignmentRecord,
     ConfirmationProtocolRecord,
+    ExperimentalUnit,
     FeatureFamily,
     RandomizationManifestRecord,
 )
@@ -161,6 +171,105 @@ def _stage_case(tmp_path: Path):
     return config, store, results, assignment, protocol, contract, outcome
 
 
+def _empty_stage_case(tmp_path: Path, *, include_unassigned_task_protocol: bool):
+    safety_request = request(FeatureFamily.SAFETY_CONTROL)
+    safety_protocol = safety_request.protocol
+    unit = ExperimentalUnit(
+        task_id=safety_request.protocol_instance.task_id,
+        hypothesis_id=safety_protocol.hypothesis_id,
+        target_spec_id=safety_request.target.target_spec_id,
+        model_id=safety_request.hypothesis.model_id,
+        seed_slot=0,
+    )
+    assignment = AssignmentRecord.from_content(
+        block_id=AssignmentRecord.block_id_from_key(
+            unit.task_id,
+            unit.hypothesis_id,
+            unit.target_spec_id,
+            safety_protocol.arm_protocol_id,
+            unit.model_id,
+        ),
+        experimental_unit=unit,
+        target_spec_id=safety_request.target.target_spec_id,
+        target_instance_id=safety_request.target_instance.target_instance_id,
+        arm_protocol_id=safety_protocol.arm_protocol_id,
+        protocol_instance_id=safety_request.protocol_instance.protocol_instance_id,
+        variant_id="variant_" + "8" * 64,
+        arm_role=safety_request.arm.role,
+        seed_id=101,
+        rng_version="sha256-rejection-fisher-yates-v1",
+        randomization_plan_sha256="9" * 64,
+    )
+    _task_assignment, task_protocol, task_contract, _task_outcome = _functional_case()
+    protocols = (
+        tuple(sorted((safety_protocol, task_protocol), key=lambda item: item.arm_protocol_id))
+        if include_unassigned_task_protocol
+        else (safety_protocol,)
+    )
+    contracts_records = (task_contract,) if include_unassigned_task_protocol else ()
+    prompts = tmp_path / "prompts.jsonl"
+    attestations = tmp_path / "attestations.jsonl"
+    contracts = tmp_path / "functional_contracts.jsonl"
+    results = tmp_path / "external_functional_results.jsonl"
+    write_jsonl(prompts, ({"placeholder": True},))
+    write_jsonl(attestations, ({"placeholder": True},))
+    write_jsonl(contracts, contracts_records)
+    write_jsonl(results, ())
+    config = AppConfig.model_validate(
+        {
+            "run": {
+                "name": "empty-functional-import",
+                "random_seed": 7,
+                "output_dir": str(tmp_path / "run"),
+            },
+            "data": {
+                "prompts_path": str(prompts),
+                "prompt_attestations_path": str(attestations),
+                "functional_outcome_contracts_path": str(contracts),
+            },
+            "tsg": {"prompt_extractor": "deterministic_catalog_v1", "llm": None},
+            "intervention": {"executor": "deterministic"},
+        }
+    )
+    store = RunStore(config)
+    store.prepare()
+    task4_paths = tuple(
+        store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
+    )
+    _commit_outputs(
+        store,
+        "build-confirmation-variants",
+        tuple(
+            (
+                path,
+                protocols if name == "confirmation_protocols.jsonl" else (),
+            )
+            for path, (name, _model) in zip(task4_paths, PROMPT_VARIANT_OUTPUTS, strict=True)
+        ),
+    )
+    manifest = RandomizationManifestRecord.from_content(
+        global_seed=config.run.random_seed,
+        rng_version=assignment.rng_version,
+        randomization_plan_sha256=assignment.randomization_plan_sha256,
+        block_ids=(assignment.block_id,),
+        assignment_ids=(assignment.assignment_id,),
+        assignments_sha256=_assignment_digest((assignment,)),
+    )
+    task5_paths = tuple(store.path("interventions", name) for name, _model in RANDOMIZATION_OUTPUTS)
+    _commit_outputs(
+        store,
+        "randomize-confirmation",
+        tuple(
+            (
+                path,
+                (manifest,) if name == "randomization_manifest.jsonl" else (assignment,),
+            )
+            for path, (name, _model) in zip(task5_paths, RANDOMIZATION_OUTPUTS, strict=True)
+        ),
+    )
+    return config, store, results, (assignment,), protocols, contracts_records
+
+
 def _bytes(store: RunStore) -> tuple[bytes, bytes]:
     return (
         store.path("analysis", "functional_outcomes.jsonl").read_bytes(),
@@ -209,6 +318,51 @@ def test_import_stage_transactionally_publishes_exact_sorted_external_results(
     assert sum(key.startswith("@external/") for key in manifest.inputs) == 2
 
 
+@pytest.mark.parametrize("include_unassigned_task_protocol", (False, True))
+def test_import_stage_commits_canonical_empty_functional_relation(
+    tmp_path: Path,
+    include_unassigned_task_protocol: bool,
+) -> None:
+    config, store, results, assignments, protocols, contracts = _empty_stage_case(
+        tmp_path,
+        include_unassigned_task_protocol=include_unassigned_task_protocol,
+    )
+    assert validate_functional_outcomes(assignments, protocols, contracts, ()) == ()
+
+    result = import_functional_outcomes_stage(config, store, results)
+
+    output = store.path("analysis", "functional_outcomes.jsonl")
+    assert output.read_bytes() == b""
+    assert (
+        read_jsonl(
+            output,
+            FunctionalOutcomeRecord,
+            required=True,
+            allow_empty=True,
+        )
+        == []
+    )
+    assert result.assignment_count == 1
+    assert result.outcome_count == 0
+    assert read_stage_manifest(
+        store.path(".stages", "import-functional-outcomes.json")
+    ).outputs == ["analysis/functional_outcomes.jsonl"]
+
+
+def test_task_assignment_still_rejects_empty_contract_and_result_files(tmp_path: Path) -> None:
+    config, store, results, *_rest = _stage_case(tmp_path)
+    contract_value = config.data.functional_outcome_contracts_path
+    assert contract_value is not None
+    write_jsonl(Path(contract_value), ())
+    write_jsonl(results, ())
+
+    with pytest.raises(SecAwareError) as captured:
+        import_functional_outcomes_stage(config, store, results)
+
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert not store.path("analysis", "functional_outcomes.jsonl").exists()
+
+
 def test_import_stage_contract_fingerprint_binds_declared_downstream_order_and_families() -> None:
     payload = functional_outcome_import_stage_contract_payload()
 
@@ -218,12 +372,36 @@ def test_import_stage_contract_fingerprint_binds_declared_downstream_order_and_f
         "estimate-confirmation-effects",
         "jci-confirmation",
         "rfci-confirmation",
+        "mechanisms",
         "reporting",
     ]
     downstream_families = payload["confirmation_stage_manifest_families"][5:]
     assert "confirm" in downstream_families[0]
     assert "effects" in downstream_families[1]
     assert payload["stage_version_affix_pattern"]
+
+
+def test_downstream_registry_covers_existing_preceding_guard_name_sets() -> None:
+    preceding_guard_names = frozenset().union(
+        prompt_variant_stage._FUTURE_STAGE_NAMES,
+        randomization_stage._FUTURE_STAGE_NAMES,
+        confirmation_generation_stage._FUTURE_STAGE_NAMES,
+        confirmation_oracle_stage._FUTURE_STAGE_NAMES,
+    )
+    expected_downstream = confirmation_oracle_stage._FUTURE_STAGE_NAMES - {
+        "import-functional-outcomes"
+    }
+    expected_not_downstream = preceding_guard_names - expected_downstream
+
+    assert expected_downstream <= preceding_guard_names
+    assert all(
+        confirmation_stage_is_downstream(name, after="import-functional-outcomes")
+        for name in expected_downstream
+    )
+    assert not any(
+        confirmation_stage_is_downstream(name, after="import-functional-outcomes")
+        for name in expected_not_downstream
+    )
 
 
 @pytest.mark.parametrize("mutation", ("missing", "duplicate", "extra", "contract", "policy"))
@@ -443,6 +621,61 @@ def test_force_rejects_transaction_backup_that_does_not_match_journal(
     assert _bytes(store) == before
 
 
+@pytest.mark.parametrize("journal_state", ("postcommit", "recovery_with_committed_digest"))
+def test_force_rejects_impossible_precommit_transaction_journal_state(
+    tmp_path: Path,
+    monkeypatch,
+    journal_state: str,
+) -> None:
+    config, store, results, assignment, _protocol, contract, _outcome = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+    replacement = _functional_outcome(
+        assignment_id=assignment.assignment_id,
+        contract_id=contract.contract_id,
+        evaluator_policy_sha256=contract.evaluator_policy_sha256,
+        status=FunctionalOutcomeStatus.FAIL,
+        evidence_sha256="a" * 64,
+    )
+    write_jsonl(results, (replacement,))
+    real_guard = functional_stage._guard_no_future_artifacts
+    guard_calls = 0
+
+    def mutate_journal_on_precommit(run_store: RunStore) -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 2:
+            journal_path = run_store.path(".stages", ".import-functional-outcomes.transaction.json")
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            if journal_state == "postcommit":
+                journal["state"] = "postcommit"
+                for artifact in journal["artifacts"]:
+                    artifact["committed_sha256"] = "b" * 64
+            else:
+                assert journal["state"] == "recovery"
+                journal["artifacts"][0]["committed_sha256"] = "b" * 64
+            journal_path.write_text(
+                json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
+        real_guard(run_store)
+
+    monkeypatch.setattr(
+        functional_stage,
+        "_guard_no_future_artifacts",
+        mutate_journal_on_precommit,
+    )
+
+    with pytest.raises(SecAwareError) as captured:
+        import_functional_outcomes_stage(config, store, results, force=True)
+
+    assert guard_calls == 2
+    assert captured.value.code is ErrorCode.CONTRACT
+    assert captured.value.stage == "import-functional-outcomes"
+    assert _bytes(store) == before
+
+
 def test_future_analysis_artifact_blocks_import_and_preserves_commit(tmp_path: Path) -> None:
     config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
     import_functional_outcomes_stage(config, store, results)
@@ -535,6 +768,28 @@ def test_any_downstream_stage_manifest_variant_blocks_import_and_preserves_commi
     assert captured.value.code is ErrorCode.CONTRACT
     assert captured.value.stage == "import-functional-outcomes"
     assert _bytes(store) == before
+
+
+@pytest.mark.parametrize("family", ("analyze-jci", "analyze-rfci", "mechanisms"))
+def test_known_downstream_manifest_families_and_bounded_variants_block_force(
+    tmp_path: Path,
+    family: str,
+) -> None:
+    config, store, results, *_rest = _stage_case(tmp_path)
+    import_functional_outcomes_stage(config, store, results)
+    before = _bytes(store)
+
+    for stage_name in (family, f"{family}-v2", f"{family}-2026-07-16"):
+        future = store.path(".stages", f"{stage_name}.json")
+        future.write_text("{}\n", encoding="utf-8")
+        try:
+            with pytest.raises(SecAwareError) as captured:
+                import_functional_outcomes_stage(config, store, results, force=True)
+            assert captured.value.code is ErrorCode.CONTRACT
+            assert captured.value.stage == "import-functional-outcomes"
+            assert _bytes(store) == before
+        finally:
+            future.unlink(missing_ok=True)
 
 
 def test_future_guard_allows_only_backups_owned_by_active_transaction(tmp_path: Path) -> None:
