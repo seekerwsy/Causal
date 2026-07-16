@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from enum import Enum
 import hashlib
 import json
@@ -11,8 +12,13 @@ from typing import Any, ClassVar, Literal, NoReturn, Self
 
 from pydantic import ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
-from secaware.schema.common import MAX_MODEL_ID_CHARS, SafeValidationMixin, VersionedModel
-from secaware.schema.causal import jci_row_id_from_content
+from secaware.schema.common import (
+    MAX_MODEL_ID_CHARS,
+    SafeValidationMixin,
+    StrictModel,
+    VersionedModel,
+)
+from secaware.schema.causal import EndpointMark, jci_row_id_from_content
 from secaware.schema.experiments import ArmRole, AssignmentExecutionStatus
 
 
@@ -23,6 +29,8 @@ _TABLE_ID_PATTERN = r"^table_[0-9a-f]{64}$"
 _ROW_ID_PATTERN = r"^row_[0-9a-f]{64}$"
 _FUNCTIONAL_OUTCOME_ID_PATTERN = r"^functional_outcome_[0-9a-f]{64}$"
 _ITT_EFFECT_ID_PATTERN = r"^itt_effect_[0-9a-f]{64}$"
+_JCI_DELTA_ID_PATTERN = r"^jci_delta_[0-9a-f]{64}$"
+_PAG_ID_PATTERN = r"^pag_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
 _TARGET_ID_PATTERN = r"^target_[0-9a-f]{64}$"
 _TARGET_INSTANCE_ID_PATTERN = r"^target_instance_[0-9a-f]{64}$"
@@ -32,6 +40,8 @@ _VARIANT_ID_PATTERN = r"^variant_[0-9a-f]{64}$"
 _FUNCTIONAL_CONTRACT_ID_PATTERN = r"^functional_contract_[0-9a-f]{64}$"
 _MULTIPLICITY_ID_PATTERN = r"^multiplicity_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
+_CAUSAL_VARIABLE_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
+_MAX_PAG_EDGE_CHANGES = 64 * 63 // 2
 
 _OUTCOME_SOURCES = {
     "y_secure_functional": "y.secure_functional",
@@ -411,6 +421,168 @@ class JCIObservationRecord(_OutcomeContract):
         return self
 
 
+class EndpointChangeRecord(SafeValidationMixin, StrictModel):
+    """One canonical edge-pair difference without per-assumption attribution."""
+
+    _safe_validation_message: ClassVar[str] = "JCI endpoint change failed validation"
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+        protected_namespaces=(),
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    left: str
+    right: str
+    raw_left_mark: EndpointMark | None
+    raw_right_mark: EndpointMark | None
+    constrained_left_mark: EndpointMark | None
+    constrained_right_mark: EndpointMark | None
+    change_kind: Literal["edge_added", "edge_removed", "marks_changed"]
+
+    @field_validator(
+        "raw_left_mark",
+        "raw_right_mark",
+        "constrained_left_mark",
+        "constrained_right_mark",
+        mode="before",
+    )
+    @classmethod
+    def parse_endpoint_mark(cls, value: object) -> object:
+        return None if value is None else _exact_enum(value, EndpointMark)
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize_endpoints(cls, value: object) -> object:
+        if isinstance(value, cls) or not isinstance(value, Mapping):
+            return value
+        payload = dict(value)
+        left = payload.get("left")
+        right = payload.get("right")
+        if isinstance(left, str) and isinstance(right, str) and right < left:
+            payload["left"], payload["right"] = right, left
+            for prefix in ("raw", "constrained"):
+                payload[f"{prefix}_left_mark"], payload[f"{prefix}_right_mark"] = (
+                    payload.get(f"{prefix}_right_mark"),
+                    payload.get(f"{prefix}_left_mark"),
+                )
+        return payload
+
+    @model_validator(mode="after")
+    def validate_change(self) -> Self:
+        raw = (self.raw_left_mark, self.raw_right_mark)
+        constrained = (self.constrained_left_mark, self.constrained_right_mark)
+        raw_present = all(mark is not None for mark in raw)
+        constrained_present = all(mark is not None for mark in constrained)
+        coherent = (
+            (
+                self.change_kind == "edge_added"
+                and not raw_present
+                and raw == (None, None)
+                and constrained_present
+            )
+            or (
+                self.change_kind == "edge_removed"
+                and raw_present
+                and not constrained_present
+                and constrained == (None, None)
+            )
+            or (
+                self.change_kind == "marks_changed"
+                and raw_present
+                and constrained_present
+                and raw != constrained
+            )
+        )
+        if (
+            _CAUSAL_VARIABLE_PATTERN.fullmatch(self.left) is None
+            or _CAUSAL_VARIABLE_PATTERN.fullmatch(self.right) is None
+            or self.left >= self.right
+            or not coherent
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class JCIOrientationDeltaRecord(_OutcomeContract):
+    """Content-addressed PAG delta attributed only to a complete assumption set."""
+
+    _safe_validation_message: ClassVar[str] = "JCI orientation delta failed validation"
+
+    schema_version: Literal["1.0"]
+    delta_id: str = Field(pattern=_JCI_DELTA_ID_PATTERN)
+    raw_pag_id: str = Field(pattern=_PAG_ID_PATTERN)
+    constrained_pag_id: str = Field(pattern=_PAG_ID_PATTERN)
+    assumption_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    assumption_set_sha256: str = Field(pattern=_SHA256_PATTERN)
+    per_assumption_attribution: Literal[False] = False
+    changes: tuple[EndpointChangeRecord, ...] = Field(max_length=_MAX_PAG_EDGE_CHANGES)
+
+    @classmethod
+    def from_content(
+        cls,
+        *,
+        raw_pag_id: str,
+        constrained_pag_id: str,
+        assumption_ids: Sequence[str],
+        changes: Sequence[EndpointChangeRecord],
+    ) -> Self:
+        payload: dict[str, Any] | None = None
+        result: Self | None = None
+        failed = False
+        try:
+            if not 1 <= len(assumption_ids) <= 8 or len(changes) > _MAX_PAG_EDGE_CHANGES:
+                raise ValueError
+            assumptions = tuple(sorted(assumption_ids))
+            ordered_changes = tuple(sorted(changes, key=lambda item: (item.left, item.right)))
+            payload = {
+                "schema_version": "1.0",
+                "raw_pag_id": raw_pag_id,
+                "constrained_pag_id": constrained_pag_id,
+                "assumption_ids": assumptions,
+                "assumption_set_sha256": _canonical_sha256(assumptions),
+                "per_assumption_attribution": False,
+                "changes": ordered_changes,
+            }
+            digest_payload = {
+                **payload,
+                "changes": tuple(item.model_dump(mode="json") for item in ordered_changes),
+            }
+            result = cls(
+                **payload,
+                delta_id=f"jci_delta_{_canonical_sha256(digest_payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            failed = True
+        if failed:
+            if payload is not None:
+                payload.clear()
+            _raise_safe(cls)
+        return result
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        pairs = tuple((item.left, item.right) for item in self.changes)
+        expected = _canonical_sha256(_content(self, "delta_id"))
+        if (
+            self.raw_pag_id == self.constrained_pag_id
+            or self.assumption_ids != tuple(sorted(self.assumption_ids))
+            or len(self.assumption_ids) != len(set(self.assumption_ids))
+            or any(_IDENTIFIER_PATTERN.fullmatch(item) is None for item in self.assumption_ids)
+            or self.assumption_set_sha256 != _canonical_sha256(self.assumption_ids)
+            or pairs != tuple(sorted(pairs))
+            or len(pairs) != len(set(pairs))
+            or self.delta_id != f"jci_delta_{expected}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class FunctionalOutcomeRecord(_OutcomeContract):
     """Independent assignment-bound result from one pre-registered evaluator."""
 
@@ -463,8 +635,10 @@ __all__ = [
     "AssignmentOutcomeRecord",
     "ContrastSpecRecord",
     "CWESecurityOutcome",
+    "EndpointChangeRecord",
     "FunctionalOutcomeRecord",
     "FunctionalOutcomeStatus",
     "ITTEffectRecord",
+    "JCIOrientationDeltaRecord",
     "JCIObservationRecord",
 ]

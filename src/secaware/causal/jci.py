@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 import hashlib
 import json
 from typing import Any
 
-from secaware.causal.background import typed_adjacency_exclusions
+import numpy as np
+
+from secaware.causal.background import (
+    typed_adjacency_exclusions,
+    validate_pag_against_background,
+)
 from secaware.causal.variable_catalog import (
     CWE_SECURITY_OUTCOME,
     PRIMARY_OUTCOME,
@@ -18,6 +24,8 @@ from secaware.causal.variable_catalog import (
     declaration_sha256,
 )
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.config import FCIDiscoveryConfig
+from secaware.discovery.fci_supervisor import FCIRunner
 from secaware.intervention.arm_catalog import target_feature_from_protocol
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
@@ -27,6 +35,8 @@ from secaware.schema.causal import (
     JCIBackgroundKnowledgeRecord,
     JCIContextSpec,
     JCIStratum,
+    PAGRecord,
+    PAGRunKind,
     VariableRole,
     jci_row_id_from_content,
 )
@@ -38,7 +48,12 @@ from secaware.schema.experiments import (
     PromptVariantRecord,
 )
 from secaware.schema.features import FeatureState
-from secaware.schema.outcomes import AssignmentOutcomeRecord, JCIObservationRecord
+from secaware.schema.outcomes import (
+    AssignmentOutcomeRecord,
+    EndpointChangeRecord,
+    JCIObservationRecord,
+    JCIOrientationDeltaRecord,
+)
 from secaware.schema.tsg import MotifId, PromptTSGRecord
 from secaware.tsg.graph import record_to_multidigraph
 from secaware.tsg.motifs import motif_query_vector
@@ -799,11 +814,344 @@ def validate_jci_background_bundle(
         raise _jci_error() from None
 
 
+def _matrix_for_exact_rows(
+    table: CausalTableRecord,
+    rows: Sequence[JCIObservationRecord],
+) -> np.ndarray:
+    checked_tables, checked_rows = _checked_jci_table_bundle((table,), rows)
+    checked_table = checked_tables[0]
+    if any(row.table_id != checked_table.table_id for row in checked_rows):
+        raise ValueError
+    matrix = np.asarray(tuple(row.values for row in checked_rows), dtype=np.int64)
+    if matrix.shape != (checked_table.row_count, len(checked_table.variables)):
+        raise ValueError
+    result = np.array(matrix, dtype=np.int64, order="C", copy=True)
+    result.flags.writeable = False
+    return result
+
+
+def matrix_for_exact_rows(
+    table: CausalTableRecord,
+    rows: Sequence[JCIObservationRecord],
+) -> np.ndarray:
+    """Rebuild one immutable matrix only from its exact Task-3 JCI row relation."""
+    try:
+        return _matrix_for_exact_rows(table, rows)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _jci_error() from None
+
+
+def _base_background_from_jci(
+    provenance: JCIBackgroundKnowledgeRecord,
+) -> BackgroundKnowledgeRecord:
+    checked = _snapshots_in_order((provenance,), JCIBackgroundKnowledgeRecord, "knowledge_id")[0]
+    materialized = checked.materialized_background_knowledge
+    base = BackgroundKnowledgeRecord.from_content(
+        table_id=materialized.table_id,
+        variable_ids=tuple(
+            sorted(
+                {
+                    *(item for item, _tier in materialized.tiers),
+                    *materialized.unconstrained_variable_ids,
+                }
+            )
+        ),
+        tiers=materialized.tiers,
+        unconstrained_variable_ids=materialized.unconstrained_variable_ids,
+        forbidden_directions=tuple(
+            sorted(set(materialized.forbidden_directions) - set(checked.added_forbidden_directions))
+        ),
+        forbidden_adjacencies=materialized.forbidden_adjacencies,
+        required_directions=(),
+    )
+    if base.knowledge_sha256 != checked.base_background_knowledge_sha256:
+        raise ValueError
+    return base
+
+
+def _checked_pag_for_run(
+    pag: PAGRecord,
+    table: CausalTableRecord,
+    knowledge: BackgroundKnowledgeRecord,
+    config: FCIDiscoveryConfig,
+    run_kind: PAGRunKind,
+) -> PAGRecord:
+    checked_pag = _snapshots_in_order((pag,), PAGRecord, "pag_id")[0]
+    expected_variables = tuple(item.variable_id for item in table.variables)
+    if (
+        checked_pag.run_kind is not run_kind
+        or checked_pag.table_id != table.table_id
+        or checked_pag.backend != config.backend
+        or checked_pag.backend_version != config.backend_version
+        or checked_pag.ci_test != config.ci_test
+        or checked_pag.config_sha256 != _canonical_sha256(config.model_dump(mode="json"))
+        or checked_pag.background_knowledge_sha256 != knowledge.knowledge_sha256
+        or checked_pag.variable_ids != expected_variables
+    ):
+        raise ValueError
+    validate_pag_against_background(checked_pag, knowledge)
+    return checked_pag
+
+
+def _checked_jci_pag_pair(
+    raw_pag: PAGRecord,
+    constrained_pag: PAGRecord,
+    provenance: JCIBackgroundKnowledgeRecord,
+) -> tuple[PAGRecord, PAGRecord, JCIBackgroundKnowledgeRecord]:
+    checked_provenance = _snapshots_in_order(
+        (provenance,), JCIBackgroundKnowledgeRecord, "knowledge_id"
+    )[0]
+    checked_raw = _snapshots_in_order((raw_pag,), PAGRecord, "pag_id")[0]
+    checked_constrained = _snapshots_in_order((constrained_pag,), PAGRecord, "pag_id")[0]
+    base = _base_background_from_jci(checked_provenance)
+    constrained_knowledge = checked_provenance.materialized_background_knowledge
+    if (
+        checked_raw.run_kind is not PAGRunKind.JCI_RAW
+        or checked_constrained.run_kind is not PAGRunKind.JCI_CONSTRAINED
+        or checked_raw.table_id != checked_constrained.table_id
+        or checked_raw.backend != checked_constrained.backend
+        or checked_raw.backend_version != checked_constrained.backend_version
+        or checked_raw.ci_test != checked_constrained.ci_test
+        or checked_raw.config_sha256 != checked_constrained.config_sha256
+        or checked_raw.variable_ids != checked_constrained.variable_ids
+        or checked_raw.background_knowledge_sha256 != base.knowledge_sha256
+        or checked_constrained.background_knowledge_sha256 != constrained_knowledge.knowledge_sha256
+        or checked_raw.table_id != constrained_knowledge.table_id
+    ):
+        raise ValueError
+    validate_pag_against_background(checked_raw, base)
+    validate_pag_against_background(checked_constrained, constrained_knowledge)
+    return checked_raw, checked_constrained, checked_provenance
+
+
+def _compare_jci_pags(
+    raw_pag: PAGRecord,
+    constrained_pag: PAGRecord,
+    provenance: JCIBackgroundKnowledgeRecord,
+) -> JCIOrientationDeltaRecord:
+    checked_raw, checked_constrained, checked_provenance = _checked_jci_pag_pair(
+        raw_pag, constrained_pag, provenance
+    )
+    raw_by_pair = {(edge.left, edge.right): edge for edge in checked_raw.edges}
+    constrained_by_pair = {(edge.left, edge.right): edge for edge in checked_constrained.edges}
+    changes: list[EndpointChangeRecord] = []
+    for left, right in sorted(set(raw_by_pair) | set(constrained_by_pair)):
+        raw_edge = raw_by_pair.get((left, right))
+        constrained_edge = constrained_by_pair.get((left, right))
+        if raw_edge is None:
+            change_kind = "edge_added"
+        elif constrained_edge is None:
+            change_kind = "edge_removed"
+        elif (
+            raw_edge.left_mark,
+            raw_edge.right_mark,
+        ) != (
+            constrained_edge.left_mark,
+            constrained_edge.right_mark,
+        ):
+            change_kind = "marks_changed"
+        else:
+            continue
+        changes.append(
+            EndpointChangeRecord(
+                left=left,
+                right=right,
+                raw_left_mark=None if raw_edge is None else raw_edge.left_mark,
+                raw_right_mark=None if raw_edge is None else raw_edge.right_mark,
+                constrained_left_mark=(
+                    None if constrained_edge is None else constrained_edge.left_mark
+                ),
+                constrained_right_mark=(
+                    None if constrained_edge is None else constrained_edge.right_mark
+                ),
+                change_kind=change_kind,
+            )
+        )
+    return JCIOrientationDeltaRecord.from_content(
+        raw_pag_id=checked_raw.pag_id,
+        constrained_pag_id=checked_constrained.pag_id,
+        assumption_ids=checked_provenance.assumption_ids,
+        changes=changes,
+    )
+
+
+def compare_jci_pags(
+    raw_pag: PAGRecord,
+    constrained_pag: PAGRecord,
+    provenance: JCIBackgroundKnowledgeRecord,
+) -> JCIOrientationDeltaRecord:
+    """Diff canonical edge pairs under the complete enabled JCI assumption set."""
+    try:
+        return _compare_jci_pags(raw_pag, constrained_pag, provenance)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _jci_error() from None
+
+
+@dataclass(frozen=True, slots=True)
+class JCIAnalysisResult:
+    raw_pag: PAGRecord
+    constrained_pag: PAGRecord
+    delta: JCIOrientationDeltaRecord
+
+    def __post_init__(self) -> None:
+        try:
+            raw = _snapshots_in_order((self.raw_pag,), PAGRecord, "pag_id")[0]
+            constrained = _snapshots_in_order((self.constrained_pag,), PAGRecord, "pag_id")[0]
+            delta = _snapshots_in_order((self.delta,), JCIOrientationDeltaRecord, "delta_id")[0]
+            if (
+                raw.run_kind is not PAGRunKind.JCI_RAW
+                or constrained.run_kind is not PAGRunKind.JCI_CONSTRAINED
+                or delta.raw_pag_id != raw.pag_id
+                or delta.constrained_pag_id != constrained.pag_id
+            ):
+                raise ValueError
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise _jci_error() from None
+
+
+def _analyze_jci_stratum(
+    table: CausalTableRecord,
+    rows: Sequence[JCIObservationRecord],
+    config: FCIDiscoveryConfig,
+    runner: FCIRunner,
+) -> JCIAnalysisResult:
+    checked_tables, checked_rows = _checked_jci_table_bundle((table,), rows)
+    checked_table = checked_tables[0]
+    checked_config = FCIDiscoveryConfig.model_validate(config, strict=True)
+    base, provenance = _build_jci_background(checked_table)
+    _validate_jci_background_bundle(checked_table, base, provenance)
+
+    raw_matrix = _matrix_for_exact_rows(checked_table, checked_rows)
+    matrix_signature = (
+        raw_matrix.shape,
+        raw_matrix.dtype.str,
+        raw_matrix.tobytes(order="C"),
+    )
+    raw_pag = _checked_pag_for_run(
+        runner.run(
+            raw_matrix,
+            checked_table,
+            base,
+            checked_config,
+            PAGRunKind.JCI_RAW,
+        ),
+        checked_table,
+        base,
+        checked_config,
+        PAGRunKind.JCI_RAW,
+    )
+
+    constrained_matrix = _matrix_for_exact_rows(checked_table, checked_rows)
+    if (
+        constrained_matrix.shape,
+        constrained_matrix.dtype.str,
+        constrained_matrix.tobytes(order="C"),
+    ) != matrix_signature:
+        raise ValueError
+    constrained_knowledge = provenance.materialized_background_knowledge
+    constrained_pag = _checked_pag_for_run(
+        runner.run(
+            constrained_matrix,
+            checked_table,
+            constrained_knowledge,
+            checked_config,
+            PAGRunKind.JCI_CONSTRAINED,
+        ),
+        checked_table,
+        constrained_knowledge,
+        checked_config,
+        PAGRunKind.JCI_CONSTRAINED,
+    )
+    delta = _compare_jci_pags(raw_pag, constrained_pag, provenance)
+    return JCIAnalysisResult(
+        raw_pag=raw_pag,
+        constrained_pag=constrained_pag,
+        delta=delta,
+    )
+
+
+def analyze_jci_stratum(
+    table: CausalTableRecord,
+    rows: Sequence[JCIObservationRecord],
+    config: FCIDiscoveryConfig,
+    runner: FCIRunner,
+) -> JCIAnalysisResult:
+    """Run raw and assumption-constrained FCI on one identical JCI stratum."""
+    try:
+        return _analyze_jci_stratum(table, rows, config, runner)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _jci_error() from None
+
+
+def _validate_jci_analysis_result(
+    table: CausalTableRecord,
+    rows: Sequence[JCIObservationRecord],
+    config: FCIDiscoveryConfig,
+    result: JCIAnalysisResult,
+) -> None:
+    checked_tables, checked_rows = _checked_jci_table_bundle((table,), rows)
+    checked_table = checked_tables[0]
+    # Rebuilding authenticates the complete row payload committed by table_id;
+    # PAGRecord binds that table_id rather than a second, divergent matrix digest.
+    _matrix_for_exact_rows(checked_table, checked_rows)
+    checked_config = FCIDiscoveryConfig.model_validate(config, strict=True)
+    if type(result) is not JCIAnalysisResult:
+        raise ValueError
+    base, provenance = _build_jci_background(checked_table)
+    _validate_jci_background_bundle(checked_table, base, provenance)
+    raw = _checked_pag_for_run(
+        result.raw_pag,
+        checked_table,
+        base,
+        checked_config,
+        PAGRunKind.JCI_RAW,
+    )
+    constrained = _checked_pag_for_run(
+        result.constrained_pag,
+        checked_table,
+        provenance.materialized_background_knowledge,
+        checked_config,
+        PAGRunKind.JCI_CONSTRAINED,
+    )
+    supplied_delta = _snapshots_in_order((result.delta,), JCIOrientationDeltaRecord, "delta_id")[0]
+    expected_delta = _compare_jci_pags(raw, constrained, provenance)
+    if supplied_delta != expected_delta:
+        raise ValueError
+
+
+def validate_jci_analysis_result(
+    table: CausalTableRecord,
+    rows: Sequence[JCIObservationRecord],
+    config: FCIDiscoveryConfig,
+    result: JCIAnalysisResult,
+) -> None:
+    """Revalidate persisted paired PAGs and exact delta without rerunning FCI."""
+    try:
+        _validate_jci_analysis_result(table, rows, config, result)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _jci_error() from None
+
+
 __all__ = [
     "JCI_CONTEXT_EXOGENEITY",
+    "JCIAnalysisResult",
+    "analyze_jci_stratum",
     "build_jci_background",
     "build_jci_tables",
+    "compare_jci_pags",
     "jci_stratum_key",
+    "matrix_for_exact_rows",
+    "validate_jci_analysis_result",
     "validate_jci_background_bundle",
     "validate_jci_relations",
     "validate_jci_table_bundle",
