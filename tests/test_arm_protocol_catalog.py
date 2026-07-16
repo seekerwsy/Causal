@@ -905,6 +905,16 @@ def test_protocol_is_cross_task_semantic_and_has_no_instance_coordinates() -> No
     assert "counterpart_prompt_id" not in type(protocol).model_fields
 
 
+def test_public_target_feature_api_reads_the_single_target_transition() -> None:
+    hypothesis = _hypothesis()
+    protocol = materialize_arm_protocol(
+        hypothesis,
+        _target("safety.path_normalization", FeatureOperation.ADD, hypothesis=hypothesis),
+    )
+
+    assert arm_catalog.target_feature_from_protocol(protocol) == "safety.path_normalization"
+
+
 def test_arm_catalog_is_finite_and_exposes_no_runtime_registration_hook() -> None:
     public_names = set(arm_catalog.__all__)
     assert public_names == {
@@ -914,6 +924,7 @@ def test_arm_catalog_is_finite_and_exposes_no_runtime_registration_hook() -> Non
         "is_confirmation_target_feature",
         "materialize_arm_protocol",
         "revalidate_arm_protocol",
+        "target_feature_from_protocol",
     }
     assert not any(
         "register" in name.casefold() or "plugin" in name.casefold() for name in dir(arm_catalog)

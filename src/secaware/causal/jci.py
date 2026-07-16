@@ -18,7 +18,7 @@ from secaware.causal.variable_catalog import (
     declaration_sha256,
 )
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.intervention.arm_catalog import _target_feature_from_protocol
+from secaware.intervention.arm_catalog import target_feature_from_protocol
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
     CausalTableRecord,
@@ -369,7 +369,7 @@ def _build_jci_tables(
             or protocol.target_spec_id != assignment.target_spec_id
             or protocol.feature_family is not hypothesis.feature_family
             or protocol.operation not in hypothesis.permitted_operations
-            or _target_feature_from_protocol(protocol) != hypothesis.target_feature_id
+            or target_feature_from_protocol(protocol) != hypothesis.target_feature_id
             or assignment.arm_role not in protocol.arm_roles
         ):
             raise ValueError

@@ -10,6 +10,23 @@ from secaware.cli import app
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_ALLOWED_INTERVENTION_SYMBOLS = {
+    "secaware.intervention.arm_catalog",
+    "secaware.intervention.arm_catalog.target_feature_from_protocol",
+}
+_ALLOWED_CONFIRMATION_SCHEMA_SYMBOLS = {
+    "secaware.schema.experiments.confirmationprotocolrecord",
+}
+_ALLOWED_JCI_SCHEMA_SYMBOLS = {
+    "secaware.schema.causal.jci_row_id_from_content",
+    "secaware.schema.causal.jcibackgroundknowledgerecord",
+    "secaware.schema.causal.jcibackgroundknowledgerecord.from_base",
+    "secaware.schema.causal.jcicontextspec",
+    "secaware.schema.causal.jcicontextspec.from_protocol",
+    "secaware.schema.causal.jcistratum",
+    "secaware.schema.outcomes.jciobservationrecord",
+    "secaware.schema.outcomes.jciobservationrecord.from_content",
+}
 
 
 def _attribute_parts(node: ast.Attribute) -> tuple[str, ...] | None:
@@ -52,6 +69,28 @@ def _symbols_under(root: Path) -> set[str]:
     return symbols
 
 
+def _prompt_only_causal_violations(symbols: set[str]) -> set[str]:
+    violations: set[str] = set()
+    for item in {symbol.casefold() for symbol in symbols}:
+        if any(
+            fragment in item
+            for fragment in (
+                "generatedcoderecord",
+                "canonicalgeneratedcoderecord",
+                "python_ast_utils",
+                "code_tsg",
+            )
+        ):
+            violations.add(item)
+        if ".intervention" in item and item not in _ALLOWED_INTERVENTION_SYMBOLS:
+            violations.add(item)
+        if ".confirmation" in item and item not in _ALLOWED_CONFIRMATION_SCHEMA_SYMBOLS:
+            violations.add(item)
+        if ".jci" in item and item not in _ALLOWED_JCI_SCHEMA_SYMBOLS:
+            violations.add(item)
+    return violations
+
+
 def _first_executable_statement(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> ast.stmt:
@@ -66,17 +105,9 @@ def _first_executable_statement(
 
 
 def test_causal_package_is_prompt_only() -> None:
-    imports = {item.casefold() for item in _symbols_under(ROOT / "src" / "secaware" / "causal")}
-    forbidden = (
-        "generatedcoderecord",
-        "canonicalgeneratedcoderecord",
-        "python_ast_utils",
-        "code_tsg",
-        ".intervention",
-        ".confirmation",
-        ".jci",
-    )
-    assert not {item for item in imports if any(fragment in item for fragment in forbidden)}
+    symbols = _symbols_under(ROOT / "src" / "secaware" / "causal")
+
+    assert not _prompt_only_causal_violations(symbols)
 
 
 def test_prompt_only_import_gate_resolves_aliased_attribute_chains(tmp_path: Path) -> None:
@@ -86,6 +117,27 @@ def test_prompt_only_import_gate_resolves_aliased_attribute_chains(tmp_path: Pat
     )
 
     assert "secaware.schema.records.GeneratedCodeRecord" in _symbols_under(tmp_path)
+
+
+def test_prompt_only_import_gate_rejects_nonwhitelisted_intervention(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "candidate.py").write_text(
+        "from secaware.intervention.arm_catalog import (\n"
+        "    materialize_arm_protocol,\n"
+        "    target_feature_from_protocol,\n"
+        ")\n"
+        "from secaware.intervention.executors import GraphNativeExecutor\n",
+        encoding="utf-8",
+    )
+
+    violations = _prompt_only_causal_violations(_symbols_under(tmp_path))
+
+    assert "secaware.intervention.executors" in violations
+    assert "secaware.intervention.executors.graphnativeexecutor" in violations
+    assert "secaware.intervention.arm_catalog.materialize_arm_protocol" in violations
+    assert "secaware.intervention.arm_catalog" not in violations
+    assert "secaware.intervention.arm_catalog.target_feature_from_protocol" not in violations
 
 
 def test_causal_table_builder_cannot_read_generated_code_or_findings() -> None:

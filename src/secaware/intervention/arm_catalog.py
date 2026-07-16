@@ -480,7 +480,7 @@ def _presentation_contrasts(
     return tuple(result)
 
 
-def _target_feature_from_protocol(protocol: _Protocol) -> str:
+def target_feature_from_protocol(protocol: _Protocol) -> str:
     target_role = {
         (_Family.SAFETY_CONTROL, _Operation.ADD): _ArmRole.TARGET_PATCH,
         (_Family.SAFETY_CONTROL, _Operation.REMOVE): _ArmRole.TARGET_REMOVE,
@@ -534,7 +534,7 @@ def _validate_hypothesis_match(protocol: _Protocol) -> None:
 
 def _validate_materialized_protocol(protocol: _Protocol) -> None:
     """Rebuild all finite family semantics without trusting record IDs."""
-    feature_id = _target_feature_from_protocol(protocol)
+    feature_id = target_feature_from_protocol(protocol)
     spec = prompt_feature_spec(feature_id)
     if (
         not spec.intervenable
@@ -867,4 +867,5 @@ __all__ = [
     "is_confirmation_target_feature",
     "materialize_arm_protocol",
     "revalidate_arm_protocol",
+    "target_feature_from_protocol",
 ]
