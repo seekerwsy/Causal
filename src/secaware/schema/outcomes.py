@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import Enum
 import hashlib
 import json
+import math
 import re
 from typing import Any, ClassVar, Literal, NoReturn, Self
 
@@ -18,6 +19,7 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
 _OUTCOME_ID_PATTERN = r"^assignment_outcome_[0-9a-f]{64}$"
 _FUNCTIONAL_OUTCOME_ID_PATTERN = r"^functional_outcome_[0-9a-f]{64}$"
+_ITT_EFFECT_ID_PATTERN = r"^itt_effect_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
 _TARGET_ID_PATTERN = r"^target_[0-9a-f]{64}$"
 _TARGET_INSTANCE_ID_PATTERN = r"^target_instance_[0-9a-f]{64}$"
@@ -25,7 +27,18 @@ _PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
 _PROTOCOL_INSTANCE_ID_PATTERN = r"^protocol_instance_[0-9a-f]{64}$"
 _VARIANT_ID_PATTERN = r"^variant_[0-9a-f]{64}$"
 _FUNCTIONAL_CONTRACT_ID_PATTERN = r"^functional_contract_[0-9a-f]{64}$"
+_MULTIPLICITY_ID_PATTERN = r"^multiplicity_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
+
+_OUTCOME_SOURCES = {
+    "y_secure_functional": "y.secure_functional",
+    "y_cwe_secure": "y.cwe_security",
+    "y_cwe_insecure": "y.cwe_security",
+    "y_cwe_unknown": "y.cwe_security",
+    "y_oracle_evaluable": "y.oracle_evaluable",
+    "y_parse_ok": "y.parse_ok",
+    "y_functional_ok": "y.functional_ok",
+}
 
 
 class CWESecurityOutcome(str, Enum):
@@ -91,6 +104,123 @@ class _OutcomeContract(SafeValidationMixin, VersionedModel):
 
     def __str__(self) -> str:
         return f"{type(self).__name__}()"
+
+
+class ContrastSpecRecord(_OutcomeContract):
+    """One flattened contrast authenticated by its content-addressed protocol."""
+
+    schema_version: Literal["1.0"]
+    contrast_id: str
+    arm_contrast_id: str
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    treatment_arm: ArmRole
+    control_arm: ArmRole
+    source_outcome_variable_id: str
+    outcome_id: str
+    priority: Literal["primary", "secondary", "diagnostic"]
+    expected_sign: Literal["positive", "negative", "null", "two_sided"]
+    multiplicity_family_id: str = Field(pattern=_MULTIPLICITY_ID_PATTERN)
+
+    @field_validator("treatment_arm", "control_arm", mode="before")
+    @classmethod
+    def parse_arm_role(cls, value: object) -> object:
+        return _exact_enum(value, ArmRole)
+
+    @model_validator(mode="after")
+    def validate_coordinates(self) -> Self:
+        expected_source = _OUTCOME_SOURCES.get(
+            self.outcome_id,
+            self.outcome_id.replace("y_", "y.", 1),
+        )
+        if (
+            _IDENTIFIER_PATTERN.fullmatch(self.contrast_id) is None
+            or _IDENTIFIER_PATTERN.fullmatch(self.arm_contrast_id) is None
+            or _IDENTIFIER_PATTERN.fullmatch(self.source_outcome_variable_id) is None
+            or _IDENTIFIER_PATTERN.fullmatch(self.outcome_id) is None
+            or not self.outcome_id.startswith("y_")
+            or self.contrast_id != f"{self.arm_contrast_id}.{self.outcome_id}"
+            or self.treatment_arm is self.control_arm
+            or self.source_outcome_variable_id != expected_source
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class ITTEffectRecord(_OutcomeContract):
+    """One content-addressed semantic-protocol randomized ITT estimate."""
+
+    schema_version: Literal["1.0"]
+    effect_id: str = Field(pattern=_ITT_EFFECT_ID_PATTERN)
+    hypothesis_id: str = Field(pattern=_HYPOTHESIS_ID_PATTERN)
+    target_spec_id: str = Field(pattern=_TARGET_ID_PATTERN)
+    arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
+    model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS)
+    contrast_id: str
+    outcome_id: str
+    treatment_n: StrictInt = Field(ge=1)
+    control_n: StrictInt = Field(ge=1)
+    independent_task_n: StrictInt = Field(ge=2)
+    risk_difference: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    ci_low: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    ci_high: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    sensitivity_low: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    sensitivity_high: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    status: Literal[
+        "confirmed_expected_direction",
+        "opposite_direction",
+        "inconclusive",
+        "negative_control_consistent",
+        "negative_control_shift",
+        "unsupported",
+        "unsupported_missing_functional_outcome",
+    ]
+    assignment_universe_sha256: str = Field(pattern=_SHA256_PATTERN)
+    target_instance_universe_sha256: str = Field(pattern=_SHA256_PATTERN)
+    bootstrap_manifest_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        result: Self | None = None
+        failed = False
+        try:
+            payload = {"schema_version": "1.0", **content}
+            result = cls(
+                **payload,
+                effect_id=f"itt_effect_{_canonical_sha256(payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            failed = True
+        if failed:
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            _raise_safe(cls)
+        return result
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        numeric = (
+            self.risk_difference,
+            self.ci_low,
+            self.ci_high,
+            self.sensitivity_low,
+            self.sensitivity_high,
+        )
+        if (
+            not all(math.isfinite(value) for value in numeric)
+            or self.ci_low > self.ci_high
+            or self.sensitivity_low > self.risk_difference
+            or self.risk_difference > self.sensitivity_high
+            or _IDENTIFIER_PATTERN.fullmatch(self.model_id) is None
+            or _IDENTIFIER_PATTERN.fullmatch(self.contrast_id) is None
+            or _IDENTIFIER_PATTERN.fullmatch(self.outcome_id) is None
+            or self.effect_id != f"itt_effect_{_canonical_sha256(_content(self, 'effect_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
 
 
 class AssignmentOutcomeRecord(_OutcomeContract):
@@ -258,7 +388,9 @@ class FunctionalOutcomeRecord(_OutcomeContract):
 __all__ = [
     "AssignmentEvaluability",
     "AssignmentOutcomeRecord",
+    "ContrastSpecRecord",
     "CWESecurityOutcome",
     "FunctionalOutcomeRecord",
     "FunctionalOutcomeStatus",
+    "ITTEffectRecord",
 ]

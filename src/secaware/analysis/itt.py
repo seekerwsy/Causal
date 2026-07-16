@@ -1,0 +1,629 @@
+"""Pre-registered randomized ITT estimates over semantic protocol groups."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TypeVar
+
+from pydantic import BaseModel
+
+from secaware.analysis.cluster_bootstrap import linear_percentile, task_cluster_bootstrap
+from secaware.analysis.contrasts import materialize_contrasts, validate_contrasts
+from secaware.analysis.multiple_testing import bonferroni_percentile_quantiles
+from secaware.config import AnalysisConfig
+from secaware.pipeline.artifact import canonical_sha256
+from secaware.schema.common import model_shape_is_intact
+from secaware.schema.experiments import (
+    ArmRole,
+    ConfirmationProtocolRecord,
+    FunctionalOutcomeContractRecord,
+)
+from secaware.schema.features import FeatureFamily
+from secaware.schema.outcomes import (
+    AssignmentEvaluability,
+    AssignmentOutcomeRecord,
+    ContrastSpecRecord,
+    CWESecurityOutcome,
+    FunctionalOutcomeRecord,
+    FunctionalOutcomeStatus,
+    ITTEffectRecord,
+)
+
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+_FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
+_RESERVED_OUTCOMES = frozenset(
+    {
+        "y_secure_functional",
+        "y_cwe_secure",
+        "y_cwe_insecure",
+        "y_cwe_unknown",
+        "y_oracle_evaluable",
+        "y_parse_ok",
+        "y_functional_ok",
+    }
+)
+
+
+def _itt_error(message: str = "ITT estimation failed validation") -> ValueError:
+    return ValueError(message)
+
+
+def _trusted_records(
+    values: Iterable[_ModelT],
+    model: type[_ModelT],
+    key_field: str,
+    *,
+    allow_empty: bool,
+) -> tuple[tuple[_ModelT, ...], dict[str, _ModelT]]:
+    if isinstance(values, (str, bytes, Mapping)):
+        raise _itt_error()
+    records: list[_ModelT] = []
+    by_key: dict[str, _ModelT] = {}
+    try:
+        for index, value in enumerate(values):
+            if index >= 100_000 or type(value) is not model or not model_shape_is_intact(value):
+                raise _itt_error()
+            checked = model.model_validate(
+                value.model_dump(mode="python", round_trip=True, warnings=False)
+            )
+            key = getattr(checked, key_field)
+            if type(key) is not str or key in by_key:
+                raise _itt_error()
+            records.append(checked)
+            by_key[key] = checked
+        if not allow_empty and not records:
+            raise _itt_error()
+        return tuple(records), by_key
+    except _FATAL:
+        raise
+    except ValueError:
+        raise
+    except Exception:
+        raise _itt_error() from None
+
+
+def risk_difference(
+    rows: Sequence[AssignmentOutcomeRecord],
+    treatment: ArmRole,
+    control: ArmRole,
+    value: Callable[[AssignmentOutcomeRecord], int],
+) -> tuple[float, int, int]:
+    """Difference in assignment-arm means without diagnostic filtering."""
+
+    if (
+        isinstance(rows, (str, bytes, Mapping))
+        or type(treatment) is not ArmRole
+        or type(control) is not ArmRole
+        or treatment is control
+        or not callable(value)
+    ):
+        raise _itt_error("insufficient contrast assignment support")
+    treated: list[int] = []
+    controls: list[int] = []
+    try:
+        for row in rows:
+            if type(row) is not AssignmentOutcomeRecord:
+                raise _itt_error("insufficient contrast assignment support")
+            if row.arm_role is treatment:
+                projected = value(row)
+                if type(projected) is not int or projected not in {0, 1}:
+                    raise _itt_error("contrast outcome projection failed validation")
+                treated.append(projected)
+            elif row.arm_role is control:
+                projected = value(row)
+                if type(projected) is not int or projected not in {0, 1}:
+                    raise _itt_error("contrast outcome projection failed validation")
+                controls.append(projected)
+        if not treated or not controls:
+            raise _itt_error("insufficient contrast assignment support")
+        return (
+            (sum(treated) / len(treated)) - (sum(controls) / len(controls)),
+            len(treated),
+            len(controls),
+        )
+    except _FATAL:
+        raise
+
+
+def _validated_config(config: AnalysisConfig) -> AnalysisConfig:
+    if type(config) is not AnalysisConfig or not model_shape_is_intact(config):
+        raise _itt_error()
+    try:
+        return AnalysisConfig.model_validate(
+            config.model_dump(mode="python", round_trip=True, warnings=False)
+        )
+    except _FATAL:
+        raise
+    except Exception:
+        raise _itt_error() from None
+
+
+def _protocol_index(
+    protocols: Iterable[ConfirmationProtocolRecord],
+) -> tuple[tuple[ConfirmationProtocolRecord, ...], dict[str, ConfirmationProtocolRecord]]:
+    trusted, by_id = _trusted_records(
+        protocols,
+        ConfirmationProtocolRecord,
+        "arm_protocol_id",
+        allow_empty=False,
+    )
+    return trusted, by_id
+
+
+def _validate_assignment_relation(
+    rows: tuple[AssignmentOutcomeRecord, ...],
+    protocols: dict[str, ConfirmationProtocolRecord],
+) -> None:
+    if {row.arm_protocol_id for row in rows} != set(protocols):
+        raise _itt_error()
+    instance_pairs: dict[tuple[str, str, str, str, str], set[tuple[str, str]]] = {}
+    for row in rows:
+        protocol = protocols.get(row.arm_protocol_id)
+        if (
+            protocol is None
+            or row.hypothesis_id != protocol.hypothesis_id
+            or row.target_spec_id != protocol.target_spec_id
+            or row.arm_role not in protocol.arm_roles
+        ):
+            raise _itt_error()
+        task_key = (
+            row.hypothesis_id,
+            row.target_spec_id,
+            row.arm_protocol_id,
+            row.model_id,
+            row.task_id,
+        )
+        instance_pairs.setdefault(task_key, set()).add(
+            (row.target_instance_id, row.protocol_instance_id)
+        )
+    if any(len(pairs) != 1 for pairs in instance_pairs.values()):
+        raise _itt_error()
+
+
+def _validate_functional_relation(
+    rows: tuple[AssignmentOutcomeRecord, ...],
+    protocols: dict[str, ConfirmationProtocolRecord],
+    contracts: Iterable[FunctionalOutcomeContractRecord],
+    functional_outcomes: Iterable[FunctionalOutcomeRecord],
+) -> tuple[
+    bool,
+    dict[str, FunctionalOutcomeContractRecord],
+    dict[str, FunctionalOutcomeRecord],
+]:
+    contract_records, contract_by_id = _trusted_records(
+        contracts,
+        FunctionalOutcomeContractRecord,
+        "contract_id",
+        allow_empty=True,
+    )
+    outcome_records, outcome_by_assignment = _trusted_records(
+        functional_outcomes,
+        FunctionalOutcomeRecord,
+        "assignment_id",
+        allow_empty=True,
+    )
+    task_protocols = {
+        protocol_id: protocol
+        for protocol_id, protocol in protocols.items()
+        if protocol.feature_family is FeatureFamily.TASK_FUNCTION
+    }
+    referenced_contract_ids = {
+        protocol.functional_outcome_contract_id for protocol in task_protocols.values()
+    }
+    if None in referenced_contract_ids:
+        raise _itt_error("functional outcome relation failed validation")
+    expected_contract_ids = {item for item in referenced_contract_ids if item is not None}
+    if not task_protocols:
+        if contract_records or outcome_records:
+            raise _itt_error("functional outcome relation failed validation")
+        return True, {}, {}
+    if contract_records and set(contract_by_id) != expected_contract_ids:
+        raise _itt_error("functional outcome relation failed validation")
+    for protocol in task_protocols.values():
+        contract_id = protocol.functional_outcome_contract_id
+        if contract_id is None:
+            raise _itt_error("functional outcome relation failed validation")
+        contract = contract_by_id.get(contract_id)
+        if contract is not None and not any(
+            contrast.outcome_id == contract.outcome_id and contrast.priority == "primary"
+            for contrast in protocol.contrasts
+        ):
+            raise _itt_error("functional outcome relation failed validation")
+    if not outcome_records:
+        return False, contract_by_id, {}
+    if not contract_records:
+        raise _itt_error("functional outcome relation failed validation")
+    task_rows = tuple(row for row in rows if row.arm_protocol_id in task_protocols)
+    expected_assignments = {row.assignment_id for row in task_rows}
+    if set(outcome_by_assignment) != expected_assignments:
+        raise _itt_error("functional outcome relation failed validation")
+    row_by_assignment = {row.assignment_id: row for row in task_rows}
+    for assignment_id, outcome in outcome_by_assignment.items():
+        row = row_by_assignment[assignment_id]
+        protocol = task_protocols[row.arm_protocol_id]
+        contract_id = protocol.functional_outcome_contract_id
+        contract = contract_by_id.get(contract_id or "")
+        if (
+            contract is None
+            or outcome.contract_id != contract.contract_id
+            or outcome.evaluator_policy_sha256 != contract.evaluator_policy_sha256
+        ):
+            raise _itt_error("functional outcome relation failed validation")
+    return True, contract_by_id, outcome_by_assignment
+
+
+def _outcome_projection(
+    protocol: ConfirmationProtocolRecord,
+    contrast: ContrastSpecRecord,
+    *,
+    functional_supported: bool,
+    contract_by_id: dict[str, FunctionalOutcomeContractRecord],
+    functional_by_assignment: dict[str, FunctionalOutcomeRecord],
+) -> tuple[
+    Callable[[AssignmentOutcomeRecord], int],
+    Callable[[AssignmentOutcomeRecord], bool],
+    bool,
+]:
+    outcome_id = contrast.outcome_id
+    if outcome_id == "y_secure_functional":
+        return (
+            lambda row: row.secure_functional_success,
+            lambda row: row.oracle_evaluability is AssignmentEvaluability.UNKNOWN_PARSE_FAILURE,
+            False,
+        )
+    if outcome_id == "y_cwe_secure":
+        return (
+            lambda row: int(row.cwe_security_outcome is CWESecurityOutcome.SECURE),
+            lambda row: row.oracle_evaluability is AssignmentEvaluability.UNKNOWN_PARSE_FAILURE,
+            False,
+        )
+    if outcome_id == "y_cwe_insecure":
+        return (
+            lambda row: int(row.cwe_security_outcome is CWESecurityOutcome.INSECURE),
+            lambda row: row.oracle_evaluability is AssignmentEvaluability.UNKNOWN_PARSE_FAILURE,
+            False,
+        )
+    if outcome_id == "y_cwe_unknown":
+        return (
+            lambda row: int(row.cwe_security_outcome is CWESecurityOutcome.UNKNOWN),
+            lambda _row: False,
+            False,
+        )
+    if outcome_id == "y_oracle_evaluable":
+        return (
+            lambda row: int(row.oracle_evaluability is AssignmentEvaluability.EVALUABLE),
+            lambda _row: False,
+            False,
+        )
+    if outcome_id == "y_parse_ok":
+        return lambda row: int(row.parse_ok), lambda _row: False, False
+    if outcome_id == "y_functional_ok":
+        return lambda row: int(row.functional_ok), lambda _row: False, False
+
+    contract_id = protocol.functional_outcome_contract_id
+    contract = contract_by_id.get(contract_id or "")
+    if (
+        protocol.feature_family is not FeatureFamily.TASK_FUNCTION
+        or outcome_id in _RESERVED_OUTCOMES
+        or (contract is not None and contract.outcome_id != outcome_id)
+    ):
+        raise _itt_error("functional outcome projection failed validation")
+    if not functional_supported:
+        return lambda _row: 0, lambda _row: False, True
+    if contract is None:
+        raise _itt_error("functional outcome relation failed validation")
+
+    def functional_value(row: AssignmentOutcomeRecord) -> int:
+        outcome = functional_by_assignment.get(row.assignment_id)
+        if outcome is None:
+            raise _itt_error("functional outcome relation failed validation")
+        return int(outcome.status is FunctionalOutcomeStatus.PASS)
+
+    def functional_unknown(row: AssignmentOutcomeRecord) -> bool:
+        outcome = functional_by_assignment.get(row.assignment_id)
+        if outcome is None:
+            raise _itt_error("functional outcome relation failed validation")
+        return outcome.status is FunctionalOutcomeStatus.UNKNOWN
+
+    return functional_value, functional_unknown, False
+
+
+def _sensitivity_bounds(
+    rows: tuple[AssignmentOutcomeRecord, ...],
+    contrast: ContrastSpecRecord,
+    observed: Callable[[AssignmentOutcomeRecord], int],
+    unknown: Callable[[AssignmentOutcomeRecord], bool],
+    point: float,
+) -> tuple[float, float]:
+    def best(row: AssignmentOutcomeRecord) -> int:
+        if not unknown(row):
+            return observed(row)
+        return int(row.arm_role is contrast.treatment_arm)
+
+    def worst(row: AssignmentOutcomeRecord) -> int:
+        if not unknown(row):
+            return observed(row)
+        return int(row.arm_role is not contrast.treatment_arm)
+
+    best_effect, _, _ = risk_difference(
+        rows,
+        contrast.treatment_arm,
+        contrast.control_arm,
+        best,
+    )
+    worst_effect, _, _ = risk_difference(
+        rows,
+        contrast.treatment_arm,
+        contrast.control_arm,
+        worst,
+    )
+    return min(point, best_effect, worst_effect), max(point, best_effect, worst_effect)
+
+
+def _status(
+    protocol: ConfirmationProtocolRecord,
+    contrast: ContrastSpecRecord,
+    *,
+    ci_low: float,
+    ci_high: float,
+    functional_supported: bool,
+) -> str:
+    if protocol.feature_family is FeatureFamily.TASK_FUNCTION and not functional_supported:
+        return "unsupported_missing_functional_outcome"
+    if protocol.feature_family is FeatureFamily.PRESENTATION_CONTROL:
+        return (
+            "negative_control_consistent" if ci_low <= 0.0 <= ci_high else "negative_control_shift"
+        )
+    if contrast.expected_sign == "positive":
+        if ci_low > 0.0:
+            return "confirmed_expected_direction"
+        if ci_high < 0.0:
+            return "opposite_direction"
+    elif contrast.expected_sign == "negative":
+        if ci_high < 0.0:
+            return "confirmed_expected_direction"
+        if ci_low > 0.0:
+            return "opposite_direction"
+    elif contrast.expected_sign == "two_sided" and not ci_low <= 0.0 <= ci_high:
+        return "confirmed_expected_direction"
+    elif contrast.expected_sign == "null" and not ci_low <= 0.0 <= ci_high:
+        return "opposite_direction"
+    return "inconclusive"
+
+
+def _analysis_config_payload(config: AnalysisConfig) -> dict[str, object]:
+    return {
+        "bootstrap_samples": config.bootstrap_samples,
+        "percentile_method": config.percentile_method,
+        "max_failed_bootstrap_fraction": config.max_failed_bootstrap_fraction,
+        "ci_level": config.ci_level,
+        "multiplicity_method": config.multiplicity_method,
+        "min_independent_tasks": config.min_independent_tasks,
+    }
+
+
+def estimate_itt(
+    outcomes: Iterable[AssignmentOutcomeRecord],
+    analysis_config: AnalysisConfig,
+    *,
+    protocols: Iterable[ConfirmationProtocolRecord],
+    contrasts: Iterable[ContrastSpecRecord] | None = None,
+    functional_contracts: Iterable[FunctionalOutcomeContractRecord] = (),
+    functional_outcomes: Iterable[FunctionalOutcomeRecord] = (),
+) -> tuple[ITTEffectRecord, ...]:
+    """Estimate every and only pre-registered semantic-protocol contrast."""
+
+    config = _validated_config(analysis_config)
+    protocol_records, protocol_by_id = _protocol_index(protocols)
+    frozen_contrasts = (
+        materialize_contrasts(protocol_records)
+        if contrasts is None
+        else validate_contrasts(protocol_records, contrasts)
+    )
+    rows, _rows_by_assignment = _trusted_records(
+        outcomes,
+        AssignmentOutcomeRecord,
+        "assignment_id",
+        allow_empty=False,
+    )
+    _validate_assignment_relation(rows, protocol_by_id)
+    functional_supported, contract_by_id, functional_by_assignment = _validate_functional_relation(
+        rows,
+        protocol_by_id,
+        functional_contracts,
+        functional_outcomes,
+    )
+    family_sizes: dict[str, int] = {}
+    for contrast in frozen_contrasts:
+        family_sizes[contrast.multiplicity_family_id] = (
+            family_sizes.get(contrast.multiplicity_family_id, 0) + 1
+        )
+    contrasts_by_protocol: dict[str, list[ContrastSpecRecord]] = {}
+    for contrast in frozen_contrasts:
+        contrasts_by_protocol.setdefault(contrast.arm_protocol_id, []).append(contrast)
+    semantic_rows: dict[
+        tuple[str, str, str, str],
+        list[AssignmentOutcomeRecord],
+    ] = {}
+    for row in rows:
+        key = (
+            row.hypothesis_id,
+            row.target_spec_id,
+            row.arm_protocol_id,
+            row.model_id,
+        )
+        semantic_rows.setdefault(key, []).append(row)
+
+    effects: list[ITTEffectRecord] = []
+    for semantic_key in sorted(semantic_rows):
+        hypothesis_id, target_spec_id, protocol_id, model_id = semantic_key
+        protocol = protocol_by_id[protocol_id]
+        group_rows = tuple(sorted(semantic_rows[semantic_key], key=lambda item: item.assignment_id))
+        task_ids = tuple(sorted({row.task_id for row in group_rows}))
+        if len(task_ids) < config.min_independent_tasks:
+            raise _itt_error("ITT requires minimum independent task count")
+        assignment_universe_sha256 = canonical_sha256(
+            {
+                "schema_version": "1.0",
+                "semantic_group": list(semantic_key),
+                "assignment_ids": [row.assignment_id for row in group_rows],
+            }
+        )
+        instance_universe = sorted(
+            {(row.task_id, row.target_instance_id, row.protocol_instance_id) for row in group_rows}
+        )
+        target_instance_universe_sha256 = canonical_sha256(
+            {
+                "schema_version": "1.0",
+                "semantic_group": list(semantic_key),
+                "instances": [
+                    {
+                        "task_id": task_id,
+                        "target_instance_id": target_instance_id,
+                        "protocol_instance_id": protocol_instance_id,
+                    }
+                    for task_id, target_instance_id, protocol_instance_id in instance_universe
+                ],
+            }
+        )
+        for contrast in contrasts_by_protocol[protocol_id]:
+            observed, unknown, unsupported_custom = _outcome_projection(
+                protocol,
+                contrast,
+                functional_supported=functional_supported,
+                contract_by_id=contract_by_id,
+                functional_by_assignment=functional_by_assignment,
+            )
+            point, treatment_n, control_n = risk_difference(
+                group_rows,
+                contrast.treatment_arm,
+                contrast.control_arm,
+                observed,
+            )
+            effect_group = (
+                hypothesis_id,
+                target_spec_id,
+                protocol_id,
+                model_id,
+                contrast.contrast_id,
+                contrast.outcome_id,
+            )
+            config_payload = _analysis_config_payload(config)
+            if unsupported_custom:
+                ci_low = ci_high = sensitivity_low = sensitivity_high = point = 0.0
+                bootstrap_manifest_sha256 = canonical_sha256(
+                    {
+                        "schema_version": "1.0",
+                        "state": "unsupported-not-run",
+                        "reason": "missing-functional-outcome",
+                        "effect_group": list(effect_group),
+                        "analysis_config": config_payload,
+                        "assignment_universe_sha256": assignment_universe_sha256,
+                        "target_instance_universe_sha256": (target_instance_universe_sha256),
+                    }
+                )
+            else:
+                sensitivity_low, sensitivity_high = _sensitivity_bounds(
+                    group_rows,
+                    contrast,
+                    observed,
+                    unknown,
+                    point,
+                )
+                seed_material = bytes.fromhex(
+                    canonical_sha256(
+                        {
+                            "schema_version": "1.0",
+                            "bootstrap_seed_kind": "semantic-itt-v1",
+                            "effect_group": list(effect_group),
+                            "assignment_universe_sha256": assignment_universe_sha256,
+                        }
+                    )
+                )
+                bootstrap = task_cluster_bootstrap(
+                    group_rows,
+                    lambda sampled: risk_difference(
+                        sampled,
+                        contrast.treatment_arm,
+                        contrast.control_arm,
+                        observed,
+                    )[0],
+                    samples=config.bootstrap_samples,
+                    seed_material=seed_material,
+                    max_failed_fraction=config.max_failed_bootstrap_fraction,
+                )
+                low_q, high_q = bonferroni_percentile_quantiles(
+                    confidence_level=config.ci_level,
+                    number_of_pre_registered_contrasts=family_sizes[
+                        contrast.multiplicity_family_id
+                    ],
+                    multiplicity_method=config.multiplicity_method,
+                )
+                ci_low = linear_percentile(
+                    bootstrap.estimates,
+                    low_q,
+                    method=config.percentile_method,
+                )
+                ci_high = linear_percentile(
+                    bootstrap.estimates,
+                    high_q,
+                    method=config.percentile_method,
+                )
+                bootstrap_manifest_sha256 = canonical_sha256(
+                    {
+                        "schema_version": "1.0",
+                        "state": "completed",
+                        "effect_group": list(effect_group),
+                        "analysis_config": config_payload,
+                        "family_size": family_sizes[contrast.multiplicity_family_id],
+                        "percentile_quantiles": [low_q, high_q],
+                        "cluster_manifest_sha256": bootstrap.manifest_sha256,
+                        "assignment_universe_sha256": assignment_universe_sha256,
+                        "target_instance_universe_sha256": (target_instance_universe_sha256),
+                    }
+                )
+            effects.append(
+                ITTEffectRecord.from_content(
+                    hypothesis_id=hypothesis_id,
+                    target_spec_id=target_spec_id,
+                    arm_protocol_id=protocol_id,
+                    model_id=model_id,
+                    contrast_id=contrast.contrast_id,
+                    outcome_id=contrast.outcome_id,
+                    treatment_n=treatment_n,
+                    control_n=control_n,
+                    independent_task_n=len(task_ids),
+                    risk_difference=point,
+                    ci_low=ci_low,
+                    ci_high=ci_high,
+                    sensitivity_low=sensitivity_low,
+                    sensitivity_high=sensitivity_high,
+                    status=_status(
+                        protocol,
+                        contrast,
+                        ci_low=ci_low,
+                        ci_high=ci_high,
+                        functional_supported=functional_supported,
+                    ),
+                    assignment_universe_sha256=assignment_universe_sha256,
+                    target_instance_universe_sha256=target_instance_universe_sha256,
+                    bootstrap_manifest_sha256=bootstrap_manifest_sha256,
+                )
+            )
+    return tuple(
+        sorted(
+            effects,
+            key=lambda item: (
+                item.hypothesis_id,
+                item.target_spec_id,
+                item.arm_protocol_id,
+                item.model_id,
+                item.contrast_id,
+                item.outcome_id,
+            ),
+        )
+    )
+
+
+__all__ = ["estimate_itt", "risk_difference"]

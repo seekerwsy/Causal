@@ -555,11 +555,32 @@ class OracleConfig(SafeValidationMixin, StrictModel):
 
 
 class AnalysisConfig(StrictModel):
-    bootstrap_samples: int = 200
-    ci_level: float = 0.95
-    min_eligible_pairs: int = 2
-    min_flip_rate: float = 0.05
-    max_side_effect_rate_confirmed: float = 0.10
+    model_config = ConfigDict(
+        extra="forbid",
+        revalidate_instances="always",
+        strict=True,
+    )
+
+    bootstrap_samples: StrictInt = Field(default=200, ge=1, le=100_000)
+    percentile_method: Literal["linear-v1"] = "linear-v1"
+    max_failed_bootstrap_fraction: float = Field(
+        default=0.10,
+        ge=0.0,
+        lt=1.0,
+        allow_inf_nan=False,
+    )
+    ci_level: float = Field(default=0.95, gt=0.0, lt=1.0, allow_inf_nan=False)
+    multiplicity_method: Literal["bonferroni"] = "bonferroni"
+    min_independent_tasks: StrictInt = Field(default=20, ge=2, le=100_000)
+    # Retained until Task 7 removes the legacy pair-estimation path.
+    min_eligible_pairs: StrictInt = Field(default=2, ge=1, le=100_000)
+    min_flip_rate: float = Field(default=0.05, ge=0.0, le=1.0, allow_inf_nan=False)
+    max_side_effect_rate_confirmed: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
 
 
 class AppConfig(StrictModel):

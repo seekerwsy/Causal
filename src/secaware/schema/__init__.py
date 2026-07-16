@@ -76,9 +76,11 @@ from secaware.schema.oracle import (
 from secaware.schema.outcomes import (
     AssignmentEvaluability,
     AssignmentOutcomeRecord,
+    ContrastSpecRecord,
     CWESecurityOutcome,
     FunctionalOutcomeRecord,
     FunctionalOutcomeStatus,
+    ITTEffectRecord,
 )
 from secaware.schema.records import (
     CanonicalGeneratedCodeRecord,
@@ -122,6 +124,7 @@ __all__ = [
     "CausalTableRecord",
     "CausalVariableSpec",
     "CWESecurityOutcome",
+    "ContrastSpecRecord",
     "ConfirmationProtocolInstanceRecord",
     "ConfirmationProtocolRecord",
     "ExperimentalUnit",
@@ -150,6 +153,7 @@ __all__ = [
     "GenerationRequestRecord",
     "GeneratedCodeRecord",
     "HypothesisRecord",
+    "ITTEffectRecord",
     "InterventionRecord",
     "InterventionExecutorKind",
     "InterventionMode",
