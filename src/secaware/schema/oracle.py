@@ -131,6 +131,18 @@ def _snapshot_analyzers(value: object) -> tuple[AnalyzerProvenanceRecord, ...]:
     return tuple(snapshots)
 
 
+def _is_completed_parse_failure(record: "OracleRecord") -> bool:
+    """Keep assignment-only terminal states outside the M4B Oracle contract."""
+
+    return (
+        record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+        and not record.parse_ok
+        and not record.functional_ok
+        and record.severity == "none"
+        and not record.findings
+    )
+
+
 class OracleRecord(SafeValidationMixin, VersionedModel):
     _safe_validation_message = _INVALID_ORACLE_MESSAGE
 
@@ -305,13 +317,7 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
 
         if self.security_label is SecurityLabel.UNKNOWN:
-            if (
-                self.evaluability is not OracleEvaluability.UNKNOWN_PARSE_FAILURE
-                or self.parse_ok
-                or self.functional_ok
-                or self.severity != "none"
-                or self.findings
-            ):
+            if not _is_completed_parse_failure(self):
                 raise ValueError(_INVALID_ORACLE_MESSAGE)
             return self
         if self.evaluability is not OracleEvaluability.EVALUABLE or not self.parse_ok:

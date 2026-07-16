@@ -73,6 +73,13 @@ from secaware.schema.oracle import (
     OracleRecord,
     SecurityLabel,
 )
+from secaware.schema.outcomes import (
+    AssignmentEvaluability,
+    AssignmentOutcomeRecord,
+    CWESecurityOutcome,
+    FunctionalOutcomeRecord,
+    FunctionalOutcomeStatus,
+)
 from secaware.schema.records import (
     CanonicalGeneratedCodeRecord,
     GeneratedCodeRecord,
@@ -96,6 +103,8 @@ __all__ = [
     "AssignmentRecord",
     "AssignmentExecutionRecord",
     "AssignmentExecutionStatus",
+    "AssignmentEvaluability",
+    "AssignmentOutcomeRecord",
     "ArmRole",
     "ArmSpecRecord",
     "CONFIRMATION_CONTROL_ONLY_FEATURE_IDS",
@@ -112,6 +121,7 @@ __all__ = [
     "CausalObservationRecord",
     "CausalTableRecord",
     "CausalVariableSpec",
+    "CWESecurityOutcome",
     "ConfirmationProtocolInstanceRecord",
     "ConfirmationProtocolRecord",
     "ExperimentalUnit",
@@ -130,6 +140,8 @@ __all__ = [
     "FindingRecord",
     "FrozenTSGAttributes",
     "FunctionalOutcomeContractRecord",
+    "FunctionalOutcomeRecord",
+    "FunctionalOutcomeStatus",
     "GraphDeltaRecord",
     "GenerationParameters",
     "GenerationCondition",

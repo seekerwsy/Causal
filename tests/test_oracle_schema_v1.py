@@ -178,6 +178,22 @@ def test_completed_parse_failure_is_the_only_legal_unknown_oracle_state() -> Non
     assert record.severity == "none"
 
 
+def test_assignment_only_no_code_state_does_not_expand_oracle_evaluability() -> None:
+    assert {item.value for item in OracleEvaluability} == {
+        "evaluable",
+        "unknown_parse_failure",
+    }
+    payload = _canonical_oracle_payload(security_label="secure")
+    payload.update(
+        parse_ok=False,
+        functional_ok=False,
+        security_label="unknown",
+        evaluability="not_required_no_code",
+    )
+    with pytest.raises(ValidationError):
+        OracleRecord.model_validate(payload)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

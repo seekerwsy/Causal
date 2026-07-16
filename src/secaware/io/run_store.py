@@ -25,6 +25,7 @@ from secaware.pipeline.stage_contracts import (
     confirmation_oracle_stage_contract_sha256,
     confirmation_generation_stage_contract_sha256,
     discovery_stage_contract_sha256,
+    functional_outcome_import_stage_contract_sha256,
     prompt_variant_stage_contract_sha256,
     randomization_stage_contract_sha256,
 )
@@ -74,6 +75,7 @@ _CONFIRMATION_GENERATION_OUTPUTS = (
     "generation/confirmation_execution.jsonl",
     "generation/confirmation_code.jsonl",
 )
+_FUNCTIONAL_OUTCOME_IMPORT_OUTPUTS = ("analysis/functional_outcomes.jsonl",)
 
 
 def _synchronized(method: Callable[..., _Result]) -> Callable[..., _Result]:
@@ -513,6 +515,11 @@ class RunStore:
             and tuple(relative_outputs) != _CONFIRMATION_ORACLE_OUTPUTS
         ):
             raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if (
+            stage == "import-functional-outcomes"
+            and tuple(relative_outputs) != _FUNCTIONAL_OUTCOME_IMPORT_OUTPUTS
+        ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
         valid_digest = (
@@ -648,6 +655,7 @@ class RunStore:
                     or randomization_stage_contract_sha256(stage)
                     or confirmation_generation_stage_contract_sha256(stage, self.config.generation)
                     or confirmation_oracle_stage_contract_sha256(stage)
+                    or functional_outcome_import_stage_contract_sha256(stage)
                     or discovery_stage_contract_sha256(stage)
                 )
             ),

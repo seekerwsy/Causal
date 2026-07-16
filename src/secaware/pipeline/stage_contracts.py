@@ -32,6 +32,7 @@ from secaware.schema.causal import (
 )
 from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.oracle import OracleRecord
+from secaware.schema.outcomes import FunctionalOutcomeRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
@@ -63,6 +64,7 @@ _PROMPT_VARIANT_STAGE = "build-confirmation-variants"
 _RANDOMIZATION_STAGE = "randomize-confirmation"
 _CONFIRMATION_GENERATION_STAGE = "generate-confirmation"
 _CONFIRMATION_ORACLE_STAGE = "run-oracle-confirmation"
+_FUNCTIONAL_OUTCOME_IMPORT_STAGE = "import-functional-outcomes"
 
 
 def _schema_sha256(model: type) -> str:
@@ -305,6 +307,30 @@ def confirmation_oracle_stage_contract_sha256(stage: str) -> str | None:
     return canonical_sha256(confirmation_oracle_stage_contract_payload())
 
 
+def functional_outcome_import_stage_contract_payload() -> dict[str, object]:
+    """Bind external functional imports to frozen M5 and output schemas."""
+
+    from secaware.pipeline.manifest import StageManifest
+
+    return {
+        "stage": _FUNCTIONAL_OUTCOME_IMPORT_STAGE,
+        "contract_version": "independent-functional-outcome-import-v1",
+        "app_config_schema": _schema_sha256(AppConfig),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "randomization_manifest_schema": _schema_sha256(RandomizationManifestRecord),
+        "protocol_schema": _schema_sha256(ConfirmationProtocolRecord),
+        "functional_contract_schema": _schema_sha256(FunctionalOutcomeContractRecord),
+        "functional_outcome_schema": _schema_sha256(FunctionalOutcomeRecord),
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+    }
+
+
+def functional_outcome_import_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _FUNCTIONAL_OUTCOME_IMPORT_STAGE:
+        return None
+    return canonical_sha256(functional_outcome_import_stage_contract_payload())
+
+
 __all__ = [
     "discovery_stage_contract_payload",
     "discovery_stage_contract_sha256",
@@ -316,4 +342,6 @@ __all__ = [
     "confirmation_generation_stage_contract_sha256",
     "confirmation_oracle_stage_contract_payload",
     "confirmation_oracle_stage_contract_sha256",
+    "functional_outcome_import_stage_contract_payload",
+    "functional_outcome_import_stage_contract_sha256",
 ]

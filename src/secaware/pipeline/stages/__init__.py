@@ -14,6 +14,10 @@ from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryTerminalStatus,
     fci_discovery_stage,
 )
+from secaware.pipeline.stages.functional_outcomes import (
+    FunctionalOutcomeImportStageResult,
+    import_functional_outcomes_stage,
+)
 from secaware.pipeline.stages.prompt_variants import (
     PromptVariantStageResult,
     run_prompt_variant_freeze_stage,
@@ -28,10 +32,12 @@ __all__ = [
     "ConfirmationOracleStageResult",
     "FCIDiscoveryStageResult",
     "FCIDiscoveryTerminalStatus",
+    "FunctionalOutcomeImportStageResult",
     "PromptVariantStageResult",
     "RandomizationStageResult",
     "assemble_causal_tables_stage",
     "fci_discovery_stage",
+    "import_functional_outcomes_stage",
     "run_confirmation_generation_stage",
     "run_confirmation_oracle_stage",
     "run_confirmation_randomization_stage",
