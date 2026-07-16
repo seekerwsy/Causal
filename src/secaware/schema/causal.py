@@ -920,6 +920,12 @@ class JCIBackgroundKnowledgeRecord(_CausalVersionedContract):
     def validate_semantics_and_digest(self) -> Self:
         expected_assumptions = ("jci.randomized_context_exogeneity.v1",)
         materialized = self.materialized_background_knowledge
+        system_variable_ids = tuple(
+            sorted(variable_id for variable_id, _tier in materialized.tiers)
+        )
+        expected_exogeneity_additions = tuple(
+            (variable_id, "c.arm") for variable_id in system_variable_ids
+        )
         base_forbidden = set(materialized.forbidden_directions) - set(
             self.added_forbidden_directions
         )
@@ -952,6 +958,7 @@ class JCIBackgroundKnowledgeRecord(_CausalVersionedContract):
             or self.required_directions
             or materialized.required_directions
             or materialized.unconstrained_variable_ids != ("c.arm",)
+            or self.added_forbidden_directions != expected_exogeneity_additions
             or self.base_background_knowledge_sha256 != reconstructed_base.knowledge_sha256
             or not set(self.added_forbidden_directions) <= set(materialized.forbidden_directions)
             or set(self.added_forbidden_directions) & base_forbidden

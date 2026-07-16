@@ -17,6 +17,7 @@ from secaware.causal.variable_catalog import (
     declaration_sha256,
 )
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.intervention.arm_catalog import _target_feature_from_protocol
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
     CausalTableRecord,
@@ -113,10 +114,7 @@ def jci_stratum_key(
         checked_assignment = AssignmentRecord.model_validate(assignment, strict=True)
         checked_hypothesis = FrozenHypothesisRecord.model_validate(hypothesis, strict=True)
         unit = checked_assignment.experimental_unit
-        if (
-            unit.hypothesis_id != checked_hypothesis.hypothesis_id
-            or unit.model_id != checked_hypothesis.model_id
-        ):
+        if unit.hypothesis_id != checked_hypothesis.hypothesis_id:
             raise ValueError
         return JCIStratum(
             scope_id=checked_hypothesis.scope_id,
@@ -325,6 +323,8 @@ def _build_jci_tables(
     strata: dict[JCIStratum, list[AssignmentRecord]] = defaultdict(list)
     target_owner: dict[str, tuple[str, str, str]] = {}
     protocol_owner: dict[str, tuple[str, str, str, str]] = {}
+    target_instance_by_coordinate: dict[tuple[str, str, str], str] = {}
+    protocol_instance_by_coordinate: dict[tuple[str, str, str, str], str] = {}
     for assignment in checked_assignments:
         unit = assignment.experimental_unit
         outcome = outcome_by_assignment[assignment.assignment_id]
@@ -345,6 +345,7 @@ def _build_jci_tables(
             or protocol.target_spec_id != assignment.target_spec_id
             or protocol.feature_family is not hypothesis.feature_family
             or protocol.operation not in hypothesis.permitted_operations
+            or _target_feature_from_protocol(protocol) != hypothesis.target_feature_id
             or assignment.arm_role not in protocol.arm_roles
         ):
             raise ValueError
@@ -360,7 +361,20 @@ def _build_jci_tables(
             assignment.protocol_instance_id,
             protocol_coordinate,
         )
-        if prior_target != target_coordinate or prior_protocol != protocol_coordinate:
+        coordinate_target_instance = target_instance_by_coordinate.setdefault(
+            target_coordinate,
+            assignment.target_instance_id,
+        )
+        coordinate_protocol_instance = protocol_instance_by_coordinate.setdefault(
+            protocol_coordinate,
+            assignment.protocol_instance_id,
+        )
+        if (
+            prior_target != target_coordinate
+            or prior_protocol != protocol_coordinate
+            or coordinate_target_instance != assignment.target_instance_id
+            or coordinate_protocol_instance != assignment.protocol_instance_id
+        ):
             raise ValueError
         strata[jci_stratum_key(assignment, hypothesis)].append(assignment)
 

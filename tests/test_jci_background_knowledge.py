@@ -94,6 +94,53 @@ def test_recomputed_outer_digest_cannot_hide_forged_base_binding() -> None:
         )
 
 
+def test_exogeneity_artifact_rejects_partial_system_to_context_set_with_new_digest() -> None:
+    base, jci = build_jci_background(_table())
+    additions = jci.added_forbidden_directions[:-1]
+    materialized = type(base).from_content(
+        table_id=base.table_id,
+        variable_ids=tuple(
+            sorted(
+                {
+                    *(item for item, _tier in base.tiers),
+                    *base.unconstrained_variable_ids,
+                }
+            )
+        ),
+        tiers=base.tiers,
+        unconstrained_variable_ids=base.unconstrained_variable_ids,
+        forbidden_directions=tuple(sorted({*base.forbidden_directions, *additions})),
+        forbidden_adjacencies=base.forbidden_adjacencies,
+        required_directions=(),
+    )
+    payload = {
+        "schema_version": "1.0",
+        "base_background_knowledge_sha256": base.knowledge_sha256,
+        "assumption_ids": (JCI_CONTEXT_EXOGENEITY,),
+        "added_forbidden_directions": additions,
+        "required_directions": (),
+        "materialized_background_knowledge": materialized,
+    }
+    digest_payload = json.loads(
+        json.dumps(payload, default=lambda item: item.model_dump(mode="json"))
+    )
+    digest = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+    with pytest.raises(Exception, match="JCI"):
+        JCIBackgroundKnowledgeRecord(
+            **payload,
+            knowledge_id="jci_bk_" + digest,
+            knowledge_sha256=digest,
+        )
+
+
 def test_context_one_hot_or_nominal_tier_materialization_is_rejected() -> None:
     table = _table()
     context = next(item for item in table.variables if item.variable_id == "c.arm")

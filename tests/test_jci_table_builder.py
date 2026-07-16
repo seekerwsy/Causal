@@ -15,16 +15,19 @@ from secaware.causal.jci import (
 from secaware.intervention.executors import (
     DETERMINISTIC_INTERVENTION_POLICY_SHA256,
 )
+from secaware.intervention.arm_catalog import _safety_contrasts
 from secaware.schema.causal import JCIContextSpec, JCIStratum, VariableRole
 from secaware.schema.experiments import (
     ArmRole,
     AssignmentExecutionStatus,
     AssignmentRecord,
+    ConfirmationProtocolRecord,
     ExperimentalUnit,
     FeatureFamily,
     FeatureOperation,
     PromptRole,
     PromptVariantRecord,
+    TargetSpecRecord,
 )
 from secaware.schema.outcomes import (
     AssignmentEvaluability,
@@ -280,6 +283,136 @@ def _replace_variant(
     return PromptVariantRecord.from_content(**content)
 
 
+def _fixture_for_model(
+    fixture: JCIFixture,
+    model_id: str,
+    *,
+    replace_instances: bool = False,
+) -> JCIFixture:
+    variant_by_old_id: dict[str, PromptVariantRecord] = {}
+    for variant in fixture.variants:
+        if replace_instances:
+            target_instance_id = "target_instance_" + _sha(
+                variant.task_id, model_id, "different-target"
+            )
+            protocol_instance_id = "protocol_instance_" + _sha(
+                variant.task_id, model_id, "different-protocol"
+            )
+            changed = _replace_variant(
+                variant,
+                target_instance_id=target_instance_id,
+                protocol_instance_id=protocol_instance_id,
+            )
+        else:
+            changed = variant
+        variant_by_old_id[variant.variant_id] = changed
+    assignments: list[AssignmentRecord] = []
+    outcomes: list[AssignmentOutcomeRecord] = []
+    outcome_by_assignment = {item.assignment_id: item for item in fixture.outcomes}
+    for assignment in fixture.assignments:
+        variant = variant_by_old_id[assignment.variant_id]
+        unit = assignment.experimental_unit.model_copy(update={"model_id": model_id})
+        changed = _replace_assignment(
+            assignment,
+            block_id=AssignmentRecord.block_id_from_key(
+                unit.task_id,
+                unit.hypothesis_id,
+                unit.target_spec_id,
+                assignment.arm_protocol_id,
+                model_id,
+            ),
+            experimental_unit=unit,
+            target_instance_id=variant.target_instance_id,
+            protocol_instance_id=variant.protocol_instance_id,
+            variant_id=variant.variant_id,
+        )
+        original_outcome = outcome_by_assignment[assignment.assignment_id]
+        assignments.append(changed)
+        outcomes.append(_outcome(changed, secure=bool(original_outcome.secure_functional_success)))
+    return replace(
+        fixture,
+        assignments=tuple(assignments),
+        outcomes=tuple(outcomes),
+        variants=tuple(variant_by_old_id.values()),
+    )
+
+
+def _combine_model_fixtures(left: JCIFixture, right: JCIFixture) -> JCIFixture:
+    variants = {item.variant_id: item for item in (*left.variants, *right.variants)}
+    graphs = {item.graph_id: item for item in (*left.graphs, *right.graphs)}
+    return JCIFixture(
+        assignments=(*left.assignments, *right.assignments),
+        outcomes=(*left.outcomes, *right.outcomes),
+        graphs=tuple(graphs[key] for key in sorted(graphs)),
+        variants=tuple(variants[key] for key in sorted(variants)),
+        hypotheses=left.hypotheses,
+        protocols=left.protocols,
+    )
+
+
+def _fixture_rebound_to_protocol(
+    fixture: JCIFixture,
+    protocol: ConfirmationProtocolRecord,
+) -> JCIFixture:
+    variants: list[PromptVariantRecord] = []
+    assignments: list[AssignmentRecord] = []
+    outcomes: list[AssignmentOutcomeRecord] = []
+    outcome_by_assignment = {item.assignment_id: item for item in fixture.outcomes}
+    for original_variant, original_assignment in zip(
+        fixture.variants,
+        fixture.assignments,
+        strict=True,
+    ):
+        task_id = original_variant.task_id
+        target_instance_id = "target_instance_" + _sha(task_id, protocol.target_spec_id)
+        protocol_instance_id = "protocol_instance_" + _sha(task_id, protocol.arm_protocol_id)
+        variant = _replace_variant(
+            original_variant,
+            target_spec_id=protocol.target_spec_id,
+            target_instance_id=target_instance_id,
+            arm_protocol_id=protocol.arm_protocol_id,
+            protocol_instance_id=protocol_instance_id,
+        )
+        unit = original_assignment.experimental_unit.model_copy(
+            update={"target_spec_id": protocol.target_spec_id}
+        )
+        assignment = _replace_assignment(
+            original_assignment,
+            block_id=AssignmentRecord.block_id_from_key(
+                task_id,
+                unit.hypothesis_id,
+                protocol.target_spec_id,
+                protocol.arm_protocol_id,
+                unit.model_id,
+            ),
+            experimental_unit=unit,
+            target_spec_id=protocol.target_spec_id,
+            target_instance_id=target_instance_id,
+            arm_protocol_id=protocol.arm_protocol_id,
+            protocol_instance_id=protocol_instance_id,
+            variant_id=variant.variant_id,
+        )
+        variants.append(variant)
+        assignments.append(assignment)
+        outcomes.append(
+            _outcome(
+                assignment,
+                secure=bool(
+                    outcome_by_assignment[
+                        original_assignment.assignment_id
+                    ].secure_functional_success
+                ),
+            )
+        )
+    return replace(
+        fixture,
+        assignments=tuple(assignments),
+        outcomes=tuple(outcomes),
+        variants=tuple(variants),
+        protocols=(protocol,),
+    )
+
+
 def test_jci_tables_pool_task_instances_but_never_semantic_strata() -> None:
     safety_add = fixture_for(task_count=20)
     safety_remove = fixture_for(FeatureFamily.SAFETY_CONTROL, FeatureOperation.REMOVE)
@@ -311,6 +444,61 @@ def test_jci_tables_pool_task_instances_but_never_semantic_strata() -> None:
         assert len({row.protocol_instance_id for row in local}) == table.independent_task_count
         assert len({row.target_spec_id for row in local}) == 1
         assert len({row.arm_protocol_id for row in local}) == 1
+
+
+def test_generation_model_is_a_stratum_not_a_frozen_hypothesis_constraint() -> None:
+    model_a = fixture_for()
+    model_b = _fixture_for_model(model_a, "model-b")
+
+    tables, rows = build_fixture(_combine_model_fixtures(model_a, model_b))
+
+    assert {table.model_id for table in tables} == {"model-a", "model-b"}
+    assert len(tables) == 2
+    for task_id in {item.task_id for item in rows}:
+        local = tuple(item for item in rows if item.task_id == task_id)
+        assert len({item.target_instance_id for item in local}) == 1
+        assert len({item.protocol_instance_id for item in local}) == 1
+
+
+def test_same_semantic_task_coordinate_cannot_change_instances_across_models() -> None:
+    model_a = fixture_for()
+    model_b = _fixture_for_model(model_a, "model-b", replace_instances=True)
+
+    with pytest.raises(Exception, match="JCI"):
+        build_fixture(_combine_model_fixtures(model_a, model_b))
+
+
+def test_protocol_target_transition_must_match_frozen_hypothesis_feature() -> None:
+    fixture = fixture_for()
+    hypothesis = fixture.hypotheses[0]
+    foreign = request(
+        FeatureFamily.SAFETY_CONTROL,
+        FeatureOperation.ADD,
+        feature_id="safety.input_validation",
+    ).protocol
+    target = TargetSpecRecord.from_content(
+        hypothesis_id=hypothesis.hypothesis_id,
+        frozen_hypothesis_sha256=hypothesis.hypothesis_sha256,
+        feature_family=foreign.feature_family,
+        feature_id="safety.input_validation",
+        operation=foreign.operation,
+        hypothesis_outcome_variable_id=foreign.hypothesis_outcome_variable_id,
+        hypothesis_outcome_estimand_id=foreign.hypothesis_outcome_estimand_id,
+        expected_hypothesis_contrast_sign=foreign.expected_hypothesis_contrast_sign,
+    )
+    content = foreign.model_dump(mode="python", exclude={"arm_protocol_id", "contrast_set_sha256"})
+    content.update(
+        hypothesis_id=hypothesis.hypothesis_id,
+        frozen_hypothesis_sha256=hypothesis.hypothesis_sha256,
+        target_spec_id=target.target_spec_id,
+        contrasts=_safety_contrasts(target),
+    )
+    protocol = ConfirmationProtocolRecord.from_content(**content)
+    assert protocol.feature_family is hypothesis.feature_family
+    assert protocol.operation is FeatureOperation.ADD
+
+    with pytest.raises(Exception, match="JCI"):
+        build_fixture(_fixture_rebound_to_protocol(fixture, protocol))
 
 
 def test_exact_protocol_order_is_one_categorical_context_not_one_hot() -> None:
