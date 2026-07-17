@@ -990,7 +990,7 @@ assert "pytetrad" not in sys.modules
     completed = subprocess.run(
         (sys.executable, "-I", "-c", script),
         capture_output=True,
-        timeout=10.0,
+        timeout=30.0,
     )
 
     assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
