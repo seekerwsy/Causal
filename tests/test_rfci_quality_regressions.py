@@ -962,3 +962,35 @@ def test_rfci_exports_are_consistent() -> None:
     assert schema.RFCICapabilityRecord is RFCICapabilityRecord
     assert discovery.run_rfci_sensitivity is not None
     assert discovery.validate_rfci_sensitivity_result is not None
+
+
+def test_discovery_rfci_exports_are_lazy_after_freeze_import_in_fresh_python() -> None:
+    script = """
+import subprocess
+import sys
+
+def forbidden_process(*_args, **_kwargs):
+    raise AssertionError("minimum RFCI import started an external process")
+
+from secaware.causal.freeze import revalidate_frozen_hypothesis
+assert callable(revalidate_frozen_hypothesis)
+assert "secaware.discovery.rfci_backend" not in sys.modules
+subprocess.Popen = forbidden_process
+from secaware.discovery import (
+    detect_rfci_capability,
+    run_rfci_sensitivity,
+    validate_rfci_sensitivity_result,
+)
+assert callable(detect_rfci_capability)
+assert callable(run_rfci_sensitivity)
+assert callable(validate_rfci_sensitivity_result)
+assert "jpype" not in sys.modules
+assert "pytetrad" not in sys.modules
+"""
+    completed = subprocess.run(
+        (sys.executable, "-I", "-c", script),
+        capture_output=True,
+        timeout=10.0,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
