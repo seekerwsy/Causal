@@ -129,7 +129,7 @@ def _mutated_payload(
                 right="y.secure_functional",
                 left_mark=EndpointMark.ARROW,
                 right_mark=EndpointMark.TAIL,
-            ).model_dump(mode="json")
+            )
         ]
     else:  # pragma: no cover - fixed test input
         raise AssertionError
@@ -213,12 +213,12 @@ def test_supervisor_runs_spawn_picklable_worker_and_revalidates_payload() -> Non
 
 
 def test_supervisor_terminates_a_hung_worker_without_leaking_children() -> None:
-    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+    from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
 
     table = _table()
     baseline = {child.pid for child in multiprocessing.active_children()}
     started = time.monotonic()
-    with pytest.raises(SecAwareError, match="timed out"):
+    with pytest.raises(SecAwareError, match="timed out") as caught:
         SpawnedFCIRunner(timeout_seconds=0.1, worker=_never_returns).run(
             _matrix(),
             table,
@@ -226,6 +226,9 @@ def test_supervisor_terminates_a_hung_worker_without_leaking_children() -> None:
             _config(),
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind.TIMEOUT.value,
+    }
     assert time.monotonic() - started < 2.0
     assert {child.pid for child in multiprocessing.active_children()} <= baseline
     assert not any(
@@ -256,16 +259,24 @@ def test_supervisor_times_out_on_a_partial_pipe_frame_without_blocking_parent() 
 
 
 @pytest.mark.parametrize(
-    "worker",
-    (_crashes, _oversized, _malformed, _no_payload, _noncanonical, _multiple),
+    ("worker", "expected_kind"),
+    (
+        (_crashes, "backend_failure"),
+        (_oversized, "invalid_output"),
+        (_malformed, "invalid_output"),
+        (_no_payload, "backend_failure"),
+        (_noncanonical, "invalid_output"),
+        (_multiple, "invalid_output"),
+    ),
 )
 def test_supervisor_safely_rejects_crash_oversize_malformed_or_multiple_payloads(
     worker: Any,
+    expected_kind: str,
 ) -> None:
-    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+    from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
 
     table = _table()
-    with pytest.raises(SecAwareError):
+    with pytest.raises(SecAwareError) as caught:
         SpawnedFCIRunner(timeout_seconds=2.0, worker=worker).run(
             _matrix(),
             table,
@@ -273,14 +284,48 @@ def test_supervisor_safely_rejects_crash_oversize_malformed_or_multiple_payloads
             _config(),
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind(expected_kind).value,
+    }
+
+
+def test_supervisor_propagates_parent_parse_memory_error_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.discovery.fci_supervisor as supervisor
+
+    table = _table()
+    injected = MemoryError("parent PAG parsing exhausted memory")
+    baseline = {child.pid for child in multiprocessing.active_children()}
+
+    def fail_parent_parse(*_args: Any, **_kwargs: Any) -> None:
+        raise injected
+
+    monkeypatch.setattr(supervisor.PAGRecord, "model_validate_json", fail_parent_parse)
+
+    with pytest.raises(MemoryError) as caught:
+        supervisor.SpawnedFCIRunner(timeout_seconds=2.0, worker=_returns_valid).run(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.OBSERVATIONAL_REFERENCE,
+        )
+
+    assert caught.value is injected
+    assert {child.pid for child in multiprocessing.active_children()} <= baseline
+    assert not any(
+        thread.name == "secaware-fci-pipe-reader" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
 
 
 @pytest.mark.parametrize("mutation", ("table", "config", "background", "run_kind", "bk_edge"))
 def test_supervisor_parent_rejects_child_provenance_mutations(mutation: str) -> None:
-    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+    from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
 
     table = _table()
-    with pytest.raises(SecAwareError):
+    with pytest.raises(SecAwareError) as caught:
         SpawnedFCIRunner(
             timeout_seconds=2.0,
             worker=partial(_mutated_payload, mutation=mutation),
@@ -291,14 +336,17 @@ def test_supervisor_parent_rejects_child_provenance_mutations(mutation: str) -> 
             _config(),
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind.INVALID_OUTPUT.value,
+    }
 
 
 def test_supervisor_rejects_non_spawn_picklable_injected_worker_before_launch() -> None:
-    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+    from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
 
     worker = lambda *_args: None  # noqa: E731
     table = _table()
-    with pytest.raises(SecAwareError):
+    with pytest.raises(SecAwareError) as caught:
         SpawnedFCIRunner(timeout_seconds=2.0, worker=worker).run(
             _matrix(),
             table,
@@ -306,6 +354,9 @@ def test_supervisor_rejects_non_spawn_picklable_injected_worker_before_launch() 
             _config(),
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind.INVALID_INPUT.value,
+    }
 
 
 def test_production_supervisor_selects_real_pinned_worker() -> None:
@@ -354,10 +405,10 @@ def test_supervisor_rejects_nonfinite_or_out_of_bounds_timeout_override(
 
 
 def test_supervisor_rejects_rfci_run_kind_before_spawn() -> None:
-    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+    from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
 
     table = _table()
-    with pytest.raises(SecAwareError):
+    with pytest.raises(SecAwareError) as caught:
         SpawnedFCIRunner(timeout_seconds=2.0, worker=_returns_valid).run(
             _matrix(),
             table,
@@ -365,15 +416,18 @@ def test_supervisor_rejects_rfci_run_kind_before_spawn() -> None:
             _config(),
             PAGRunKind.RFCI_SENSITIVITY,
         )
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind.INVALID_INPUT.value,
+    }
 
 
 def test_supervisor_rejects_tampered_parent_inputs_before_spawn() -> None:
-    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+    from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
 
     table = _table()
     tampered = deepcopy(table)
     object.__setattr__(tampered, "row_count", 5)
-    with pytest.raises(SecAwareError):
+    with pytest.raises(SecAwareError) as caught:
         SpawnedFCIRunner(timeout_seconds=2.0, worker=_returns_valid).run(
             _matrix(),
             tampered,
@@ -381,3 +435,6 @@ def test_supervisor_rejects_tampered_parent_inputs_before_spawn() -> None:
             _config(),
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind.INVALID_INPUT.value,
+    }

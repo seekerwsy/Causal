@@ -16,9 +16,9 @@ from secaware.schema.outcomes import AssignmentOutcomeRecord
 
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
-_MAX_TOTAL_TASK_DRAW_ENTRIES = 1_000_000
-_MAX_TOTAL_SAMPLED_ROW_ENTRIES = 5_000_000
-_MAX_TASK_DRAW_MANIFEST_BYTES = 16 * 1024 * 1024
+MAX_CLUSTER_TASK_DRAW_ENTRIES = 1_000_000
+MAX_CLUSTER_SAMPLED_ROW_ENTRIES = 5_000_000
+MAX_CLUSTER_TASK_DRAW_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,9 +122,9 @@ def task_cluster_bootstrap(
         per_draw_bytes = 2 + len(task_ids) * (largest_encoded_task_id + 1)
         task_draw_manifest_bytes = 2 + samples * (per_draw_bytes + 1)
         if (
-            task_draw_entries > _MAX_TOTAL_TASK_DRAW_ENTRIES
-            or sampled_row_entries > _MAX_TOTAL_SAMPLED_ROW_ENTRIES
-            or task_draw_manifest_bytes > _MAX_TASK_DRAW_MANIFEST_BYTES
+            task_draw_entries > MAX_CLUSTER_TASK_DRAW_ENTRIES
+            or sampled_row_entries > MAX_CLUSTER_SAMPLED_ROW_ENTRIES
+            or task_draw_manifest_bytes > MAX_CLUSTER_TASK_DRAW_MANIFEST_BYTES
         ):
             raise _error()
         clusters = {
@@ -198,4 +198,11 @@ def task_cluster_bootstrap(
         raise _error() from None
 
 
-__all__ = ["ClusterBootstrapResult", "linear_percentile", "task_cluster_bootstrap"]
+__all__ = [
+    "ClusterBootstrapResult",
+    "MAX_CLUSTER_SAMPLED_ROW_ENTRIES",
+    "MAX_CLUSTER_TASK_DRAW_ENTRIES",
+    "MAX_CLUSTER_TASK_DRAW_MANIFEST_BYTES",
+    "linear_percentile",
+    "task_cluster_bootstrap",
+]

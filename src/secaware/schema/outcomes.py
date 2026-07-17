@@ -29,6 +29,8 @@ _TABLE_ID_PATTERN = r"^table_[0-9a-f]{64}$"
 _ROW_ID_PATTERN = r"^row_[0-9a-f]{64}$"
 _FUNCTIONAL_OUTCOME_ID_PATTERN = r"^functional_outcome_[0-9a-f]{64}$"
 _ITT_EFFECT_ID_PATTERN = r"^itt_effect_[0-9a-f]{64}$"
+_EFFECT_DRAW_ID_PATTERN = r"^effect_bootstrap_draw_[0-9a-f]{64}$"
+_ANALYSIS_FAILURE_ID_PATTERN = r"^analysis_failure_[0-9a-f]{64}$"
 _JCI_DELTA_ID_PATTERN = r"^jci_delta_[0-9a-f]{64}$"
 _PAG_ID_PATTERN = r"^pag_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
@@ -74,6 +76,20 @@ class FunctionalOutcomeStatus(str, Enum):
     PASS = "pass"
     FAIL = "fail"
     UNKNOWN = "unknown"
+
+
+class AnalysisStage(str, Enum):
+    EFFECTS = "effects"
+    JCI = "jci"
+    RFCI = "rfci"
+
+
+class AnalysisFailureReason(str, Enum):
+    INSUFFICIENT_SUPPORT = "insufficient_support"
+    BOOTSTRAP_FAILURE = "bootstrap_failure"
+    DEGENERATE_GSQ_SUPPORT = "degenerate_gsq_support"
+    BACKEND_TIMEOUT = "backend_timeout"
+    BACKEND_FAILURE = "backend_failure"
 
 
 def _canonical_sha256(value: object) -> str:
@@ -334,6 +350,132 @@ class ITTEffectRecord(_OutcomeContract):
         return self
 
 
+class EffectBootstrapDrawRecord(_OutcomeContract):
+    """One persisted task-cluster draw bound to its completed ITT effect."""
+
+    _safe_validation_message: ClassVar[str] = "effect bootstrap draw failed validation"
+
+    schema_version: Literal["1.0"]
+    draw_id: str = Field(pattern=_EFFECT_DRAW_ID_PATTERN)
+    effect_id: str = Field(pattern=_ITT_EFFECT_ID_PATTERN)
+    replicate_index: StrictInt = Field(ge=0, le=9_999)
+    sampled_task_ids: tuple[str, ...] = Field(min_length=1, max_length=100_000)
+    estimate: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    assignment_universe_sha256: str = Field(pattern=_SHA256_PATTERN)
+    bootstrap_manifest_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("sampled_task_ids", mode="before")
+    @classmethod
+    def snapshot_sampled_task_ids(cls, value: object) -> object:
+        if type(value) not in {list, tuple}:
+            return value
+        return tuple(value)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        try:
+            if content.get("estimate") == 0 and type(content.get("estimate")) is not bool:
+                content["estimate"] = 0.0
+            payload = {"schema_version": "1.0", **content}
+            return cls(
+                **payload,
+                draw_id=f"effect_bootstrap_draw_{_canonical_sha256(payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            _raise_safe(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        if (
+            not math.isfinite(self.estimate)
+            or (self.estimate == 0.0 and math.copysign(1.0, self.estimate) < 0.0)
+            or any(
+                _IDENTIFIER_PATTERN.fullmatch(task_id) is None
+                or task_id != task_id.strip()
+                or any(ord(character) < 0x20 or ord(character) == 0x7F for character in task_id)
+                for task_id in self.sampled_task_ids
+            )
+            or self.draw_id
+            != f"effect_bootstrap_draw_{_canonical_sha256(_content(self, 'draw_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class AnalysisFailureRecord(_OutcomeContract):
+    """Generic content-addressed failure for bounded optional analyses."""
+
+    _safe_validation_message: ClassVar[str] = "analysis failure failed validation"
+
+    schema_version: Literal["1.0"]
+    failure_id: str = Field(pattern=_ANALYSIS_FAILURE_ID_PATTERN)
+    stage: AnalysisStage
+    subject_id: str
+    reason_code: AnalysisFailureReason
+    config_sha256: str = Field(pattern=_SHA256_PATTERN)
+    input_bundle_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("stage", mode="before")
+    @classmethod
+    def parse_stage(cls, value: object) -> object:
+        return _exact_enum(value, AnalysisStage)
+
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def parse_reason(cls, value: object) -> object:
+        return _exact_enum(value, AnalysisFailureReason)
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        try:
+            payload = {"schema_version": "1.0", **content}
+            return cls(
+                **payload,
+                failure_id=f"analysis_failure_{_canonical_sha256(payload)}",
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            _raise_safe(cls)
+
+    @model_validator(mode="after")
+    def validate_semantics_and_digest(self) -> Self:
+        allowed = {
+            AnalysisStage.EFFECTS: {
+                AnalysisFailureReason.INSUFFICIENT_SUPPORT,
+                AnalysisFailureReason.BOOTSTRAP_FAILURE,
+            },
+            AnalysisStage.JCI: {
+                AnalysisFailureReason.INSUFFICIENT_SUPPORT,
+                AnalysisFailureReason.DEGENERATE_GSQ_SUPPORT,
+                AnalysisFailureReason.BACKEND_TIMEOUT,
+                AnalysisFailureReason.BACKEND_FAILURE,
+            },
+            AnalysisStage.RFCI: {
+                AnalysisFailureReason.BACKEND_TIMEOUT,
+                AnalysisFailureReason.BACKEND_FAILURE,
+            },
+        }
+        if (
+            _IDENTIFIER_PATTERN.fullmatch(self.subject_id) is None
+            or self.reason_code not in allowed[self.stage]
+            or self.failure_id
+            != f"analysis_failure_{_canonical_sha256(_content(self, 'failure_id'))}"
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class AssignmentOutcomeRecord(_OutcomeContract):
     """One exact conservative primary outcome per randomized assignment."""
 
@@ -464,6 +606,13 @@ class JCIObservationRecord(_OutcomeContract):
     arm_protocol_id: str = Field(pattern=_PROTOCOL_ID_PATTERN)
     protocol_instance_id: str = Field(pattern=_PROTOCOL_INSTANCE_ID_PATTERN)
     values: tuple[StrictInt, ...] = Field(min_length=2, max_length=64)
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def snapshot_values(cls, value: object) -> object:
+        if type(value) not in {list, tuple}:
+            return value
+        return tuple(value)
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
@@ -608,6 +757,13 @@ class JCIOrientationDeltaRecord(_OutcomeContract):
     per_assumption_attribution: Literal[False] = False
     changes: tuple[EndpointChangeRecord, ...] = Field(max_length=_MAX_PAG_EDGE_CHANGES)
 
+    @field_validator("assumption_ids", "changes", mode="before")
+    @classmethod
+    def snapshot_sequence_fields(cls, value: object) -> object:
+        if type(value) not in {list, tuple}:
+            return value
+        return tuple(value)
+
     @classmethod
     def from_content(
         cls,
@@ -718,10 +874,14 @@ class FunctionalOutcomeRecord(_OutcomeContract):
 
 
 __all__ = [
+    "AnalysisFailureReason",
+    "AnalysisFailureRecord",
+    "AnalysisStage",
     "AssignmentEvaluability",
     "AssignmentOutcomeRecord",
     "ContrastSpecRecord",
     "CWESecurityOutcome",
+    "EffectBootstrapDrawRecord",
     "EndpointChangeRecord",
     "FunctionalOutcomeRecord",
     "FunctionalOutcomeStatus",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import Enum
 import json
 import multiprocessing
 from multiprocessing.connection import Connection
@@ -38,6 +39,13 @@ _JOIN_GRACE_SECONDS = 0.5
 _Worker = Callable[[Connection, bytes, np.ndarray], None]
 
 
+class FCISupervisorFailureKind(str, Enum):
+    TIMEOUT = "timeout"
+    BACKEND_FAILURE = "backend_failure"
+    INVALID_OUTPUT = "invalid_output"
+    INVALID_INPUT = "invalid_input"
+
+
 class FCIRunner(Protocol):
     def run(
         self,
@@ -50,11 +58,16 @@ class FCIRunner(Protocol):
         raise NotImplementedError
 
 
-def _supervisor_error(message: str = "FCI worker failed validation") -> SecAwareError:
+def _supervisor_error(
+    message: str = "FCI worker failed validation",
+    *,
+    failure_kind: FCISupervisorFailureKind = FCISupervisorFailureKind.INVALID_OUTPUT,
+) -> SecAwareError:
     return SecAwareError(
         code=ErrorCode.ANALYSIS_INVALID,
         stage="causal.discovery.supervisor",
         message=message,
+        details={"failure_kind": failure_kind.value},
     )
 
 
@@ -158,7 +171,7 @@ class SpawnedFCIRunner:
             or type(timeout_seconds) is bool
             or not 0.0 < float(timeout_seconds) <= 3600.0
         ):
-            raise _supervisor_error()
+            raise _supervisor_error(failure_kind=FCISupervisorFailureKind.INVALID_INPUT)
         self._timeout_seconds = None if timeout_seconds is None else float(timeout_seconds)
         self._worker = _causal_learn_fci_worker if worker is None else worker
 
@@ -182,6 +195,7 @@ class SpawnedFCIRunner:
         timed_out = False
         invalid_transport = False
         payloads: list[bytes] = []
+        failure_kind = FCISupervisorFailureKind.INVALID_INPUT
         try:
             base_config = FCIDiscoveryConfig.model_validate(config)
             effective_config = base_config
@@ -227,6 +241,7 @@ class SpawnedFCIRunner:
                 args=(send_connection, job_json, checked_matrix),
             )
             deadline = time.monotonic() + timeout
+            failure_kind = FCISupervisorFailureKind.BACKEND_FAILURE
             process.start()
             send_connection.close()
             send_connection = None
@@ -265,13 +280,26 @@ class SpawnedFCIRunner:
                         break
 
             if timed_out:
-                raise _supervisor_error("FCI worker timed out")
-            if invalid_transport or process.exitcode != 0 or len(payloads) != 1:
-                raise _supervisor_error()
+                raise _supervisor_error(
+                    "FCI worker timed out",
+                    failure_kind=FCISupervisorFailureKind.TIMEOUT,
+                )
+            if invalid_transport or len(payloads) > 1:
+                raise _supervisor_error(
+                    failure_kind=FCISupervisorFailureKind.INVALID_OUTPUT,
+                )
+            if process.exitcode != 0 or len(payloads) != 1:
+                raise _supervisor_error(
+                    failure_kind=FCISupervisorFailureKind.BACKEND_FAILURE,
+                )
             payload = payloads[0]
+            failure_kind = FCISupervisorFailureKind.INVALID_OUTPUT
             record = PAGRecord.model_validate_json(payload)
             if _canonical_json(record.model_dump(mode="json")) != payload:
-                raise _supervisor_error("FCI worker returned noncanonical output")
+                raise _supervisor_error(
+                    "FCI worker returned noncanonical output",
+                    failure_kind=FCISupervisorFailureKind.INVALID_OUTPUT,
+                )
             expected_variables = tuple(item.variable_id for item in checked_table.variables)
             if (
                 record.table_id != checked_table.table_id
@@ -283,18 +311,28 @@ class SpawnedFCIRunner:
                 or record.variable_ids != expected_variables
                 or record.run_kind is not checked_run_kind
             ):
-                raise _supervisor_error("FCI worker provenance failed validation")
+                raise _supervisor_error(
+                    "FCI worker provenance failed validation",
+                    failure_kind=FCISupervisorFailureKind.INVALID_OUTPUT,
+                )
             try:
                 validate_pag_against_background(record, checked_knowledge)
             except SecAwareError:
-                raise _supervisor_error("FCI worker violated background knowledge") from None
+                raise _supervisor_error(
+                    "FCI worker violated background knowledge",
+                    failure_kind=FCISupervisorFailureKind.INVALID_OUTPUT,
+                ) from None
             return record
-        except (KeyboardInterrupt, SystemExit):
+        except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
-        except SecAwareError:
-            raise
+        except SecAwareError as error:
+            if error.stage == "causal.discovery.supervisor" and error.details.get(
+                "failure_kind"
+            ) in {item.value for item in FCISupervisorFailureKind}:
+                raise
+            raise _supervisor_error(failure_kind=failure_kind) from None
         except BaseException:
-            raise _supervisor_error() from None
+            raise _supervisor_error(failure_kind=failure_kind) from None
         finally:
             if process is not None:
                 _terminate_and_join(process)
@@ -320,4 +358,4 @@ class SpawnedFCIRunner:
             config = None  # type: ignore[assignment]
 
 
-__all__ = ["FCIRunner", "SpawnedFCIRunner"]
+__all__ = ["FCIRunner", "FCISupervisorFailureKind", "SpawnedFCIRunner"]

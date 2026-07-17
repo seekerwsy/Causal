@@ -368,7 +368,6 @@ def test_import_stage_contract_fingerprint_binds_declared_downstream_order_and_f
 
     assert payload["confirmation_stage_order"][4:] == [
         "import-functional-outcomes",
-        "assemble-assignment-outcomes",
         "estimate-confirmation-effects",
         "jci-confirmation",
         "rfci-confirmation",
@@ -376,8 +375,12 @@ def test_import_stage_contract_fingerprint_binds_declared_downstream_order_and_f
         "reporting",
     ]
     downstream_families = payload["confirmation_stage_manifest_families"][5:]
-    assert "confirm" in downstream_families[0]
-    assert "effects" in downstream_families[1]
+    assert downstream_families[0] == ["estimate-confirmation-effects"]
+    assert all(
+        legacy not in family
+        for family in downstream_families
+        for legacy in ("assemble-assignment-outcomes", "confirm", "effects", "estimate-effects")
+    )
     assert payload["stage_version_affix_pattern"]
 
 
@@ -388,19 +391,33 @@ def test_downstream_registry_covers_existing_preceding_guard_name_sets() -> None
         confirmation_generation_stage._FUTURE_STAGE_NAMES,
         confirmation_oracle_stage._FUTURE_STAGE_NAMES,
     )
-    expected_downstream = confirmation_oracle_stage._FUTURE_STAGE_NAMES - {
-        "import-functional-outcomes"
+    expected_existing_downstream = {
+        "analyze-jci",
+        "analyze-rfci",
+        "jci",
+        "rfci",
+        "mechanisms",
+        "report",
+        "reporting",
     }
-    expected_not_downstream = preceding_guard_names - expected_downstream
+    recognized = {
+        name
+        for name in preceding_guard_names
+        if confirmation_stage_is_downstream(name, after="import-functional-outcomes")
+    }
 
-    assert expected_downstream <= preceding_guard_names
+    assert recognized == expected_existing_downstream
     assert all(
         confirmation_stage_is_downstream(name, after="import-functional-outcomes")
-        for name in expected_downstream
+        for name in (
+            "estimate-confirmation-effects",
+            "jci-confirmation",
+            "rfci-confirmation",
+        )
     )
     assert not any(
         confirmation_stage_is_downstream(name, after="import-functional-outcomes")
-        for name in expected_not_downstream
+        for name in ("confirm", "effects", "estimate-effects")
     )
 
 
@@ -699,14 +716,14 @@ def test_manifest_only_future_outcome_stage_blocks_import_and_preserves_commit(
     config, store, results, _assignment, _protocol, _contract, _outcome = _stage_case(tmp_path)
     import_functional_outcomes_stage(config, store, results)
     before = _bytes(store)
-    store.path(".stages", "assemble-assignment-outcomes.json").write_text("{}\n", encoding="utf-8")
+    store.path(".stages", "estimate-confirmation-effects.json").write_text("{}\n", encoding="utf-8")
     real_guard = functional_stage._guard_no_future_artifacts
 
     def controlled_guard(run_store: RunStore) -> None:
         def future_manifest_only(*_args, **_kwargs):
             yield BoundedTreeEntry(
-                relative_path=".stages/assemble-assignment-outcomes.json",
-                name="assemble-assignment-outcomes.json",
+                relative_path=".stages/estimate-confirmation-effects.json",
+                name="estimate-confirmation-effects.json",
                 is_file=True,
                 is_dir=False,
             )
@@ -731,8 +748,8 @@ def test_manifest_only_future_outcome_stage_blocks_import_and_preserves_commit(
 @pytest.mark.parametrize(
     "manifest_name",
     (
-        "effects.json",
-        "v2-confirm.json",
+        "estimate-confirmation-effects.json",
+        "v2-estimate-confirmation-effects.json",
         "estimate-confirmation-effects-v2.json",
         "jci-confirmation-v3.json",
         "rfci-analysis-2026.json",

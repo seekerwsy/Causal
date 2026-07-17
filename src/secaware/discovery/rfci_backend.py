@@ -6,6 +6,7 @@ from collections.abc import Callable
 from collections.abc import Sequence
 import base64
 import csv
+from enum import Enum
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -35,7 +36,7 @@ from secaware.causal.pag import pag_from_causal_learn
 from secaware.config import FCIDiscoveryConfig, RFCIConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.pipeline.artifact import canonical_sha256
-from secaware.process_isolation import run_isolated_process
+from secaware.process_isolation import IsolatedProcessFailureKind, run_isolated_process
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
     CausalObservationRecord,
@@ -75,6 +76,13 @@ _PYTHON_VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}$")
 _JAVA_VERSION = re.compile(r'(?:openjdk|java)\s+version\s+"([0-9]+)(?:\.([0-9]+))?', re.I)
 
 _SearchFactory = Callable[[pd.DataFrame], Any]
+
+
+class RFCIBackendFailureKind(str, Enum):
+    TIMEOUT = "timeout"
+    BACKEND_FAILURE = "backend_failure"
+    INVALID_OUTPUT = "invalid_output"
+    INVALID_INPUT = "invalid_input"
 
 
 class _DistributionEvidence(StrictModel):
@@ -143,11 +151,16 @@ class _RFCIWorkerJob(StrictModel):
     matrix: _MatrixTransportRecord
 
 
-def _rfci_error(message: str = "RFCI worker failed validation") -> SecAwareError:
+def _rfci_error(
+    message: str = "RFCI worker failed validation",
+    *,
+    failure_kind: RFCIBackendFailureKind = RFCIBackendFailureKind.INVALID_OUTPUT,
+) -> SecAwareError:
     return SecAwareError(
         code=ErrorCode.ANALYSIS_INVALID,
         stage="causal.discovery.rfci",
         message=message,
+        details={"failure_kind": failure_kind.value},
     )
 
 
@@ -1241,6 +1254,29 @@ def _validate_available_capability(
     return checked
 
 
+def validate_rfci_capability(
+    capability: RFCICapabilityRecord,
+    config: RFCIConfig,
+) -> RFCICapabilityRecord:
+    """Validate capability status and provenance against one exact RFCI config."""
+
+    try:
+        checked_config = RFCIConfig.model_validate(config)
+        checked = RFCICapabilityRecord.model_validate(capability)
+        if checked_config.enabled:
+            if checked.status == "disabled":
+                raise ValueError
+        elif checked.status != "disabled":
+            raise ValueError
+        if checked.available:
+            return _validate_available_capability(checked, checked_config)
+        return checked
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _rfci_error("RFCI capability relation failed validation") from None
+
+
 def _canonical_json(value: object) -> bytes:
     return json.dumps(
         value,
@@ -1377,6 +1413,7 @@ def _run_subprocess_rfci(
     config: RFCIConfig,
     evidence: _RFCICapabilityEvidence,
 ) -> PAGRecord:
+    failure_kind = RFCIBackendFailureKind.INVALID_INPUT
     try:
         with tempfile.TemporaryDirectory(prefix="secaware-rfci-") as raw_directory:
             directory = Path(raw_directory).resolve(strict=True)
@@ -1394,25 +1431,47 @@ def _run_subprocess_rfci(
                 _decode_job(job_json)
                 job_path = directory / "job.json"
                 _write_exclusive(job_path, job_json, limit=_MAX_JOB_BYTES)
+                worker_argv = _build_rfci_worker_argv(job_path)
+                worker_environment = _worker_environment(evidence)
+                failure_kind = RFCIBackendFailureKind.BACKEND_FAILURE
                 process_result = run_isolated_process(
-                    _build_rfci_worker_argv(job_path),
+                    worker_argv,
                     cwd=directory,
-                    environment=_worker_environment(evidence),
+                    environment=worker_environment,
                     timeout_seconds=config.timeout_seconds,
                     max_stdout_bytes=_MAX_PAYLOAD_BYTES,
                     max_stderr_bytes=64 * 1024,
                     require_canonical_json=True,
                 )
-                pag = PAGRecord.model_validate_json(process_result.stdout)
-                result = RFCISensitivityResult(capability=evidence.capability, pag=pag)
-                validate_rfci_sensitivity_result(result, table, knowledge, config)
+                failure_kind = RFCIBackendFailureKind.INVALID_OUTPUT
+                try:
+                    pag = PAGRecord.model_validate_json(process_result.stdout)
+                    result = RFCISensitivityResult(capability=evidence.capability, pag=pag)
+                    validate_rfci_sensitivity_result(result, table, knowledge, config)
+                except (MemoryError, KeyboardInterrupt, SystemExit):
+                    raise
+                except Exception:
+                    raise _rfci_error(failure_kind=RFCIBackendFailureKind.INVALID_OUTPUT) from None
                 return pag
             finally:
                 lease.close()
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
+    except SecAwareError as error:
+        if error.stage == "causal.discovery.rfci" and error.details.get("failure_kind") in {
+            item.value for item in RFCIBackendFailureKind
+        }:
+            raise
+        if error.stage == "process.isolation":
+            try:
+                isolated_kind = IsolatedProcessFailureKind(error.details.get("failure_kind"))
+                failure_kind = RFCIBackendFailureKind(isolated_kind.value)
+            except (TypeError, ValueError):
+                failure_kind = RFCIBackendFailureKind.INVALID_OUTPUT
+            raise _rfci_error(failure_kind=failure_kind) from None
+        raise _rfci_error(failure_kind=failure_kind) from None
     except Exception:
-        raise _rfci_error() from None
+        raise _rfci_error(failure_kind=failure_kind) from None
 
 
 def _sanitize_worker_import_path(evidence: _RFCICapabilityEvidence) -> None:
@@ -1538,19 +1597,14 @@ def validate_rfci_sensitivity_result(
         checked_table = CausalTableRecord.model_validate(table)
         checked_knowledge = BackgroundKnowledgeRecord.model_validate(knowledge)
         checked_config = RFCIConfig.model_validate(config)
-        checked_capability = checked_result.capability
+        checked_capability = validate_rfci_capability(
+            checked_result.capability,
+            checked_config,
+        )
         if not checked_capability.available:
             if checked_result.pag is not None:
                 raise ValueError
-            if (
-                checked_capability.status == "disabled"
-                and checked_config.enabled
-                or checked_capability.status == "unavailable"
-                and not checked_config.enabled
-            ):
-                raise ValueError
             return checked_result
-        _validate_available_capability(checked_capability, checked_config)
         pag = checked_result.pag
         expected_variables = tuple(item.variable_id for item in checked_table.variables)
         if (
@@ -1573,22 +1627,32 @@ def validate_rfci_sensitivity_result(
         raise _rfci_error("RFCI result relation failed validation") from None
 
 
-def run_rfci_sensitivity(
+def _run_rfci_sensitivity_with_capability(
     table: CausalTableRecord,
     rows: Sequence[CausalObservationRecord | JCIObservationRecord],
     knowledge: BackgroundKnowledgeRecord,
     config: RFCIConfig,
+    *,
+    capability: RFCICapabilityRecord,
 ) -> RFCISensitivityResult:
-    """Return capability evidence and an optional PAG from an exact persisted row relation."""
+    """Run from capability evidence frozen by an internal transactional caller."""
     try:
         checked_config = RFCIConfig.model_validate(config)
+        checked_capability = RFCICapabilityRecord.model_validate(capability)
+        checked_capability = validate_rfci_capability(checked_capability, checked_config)
         if not checked_config.enabled:
-            checked_capability = detect_rfci_capability(checked_config)
             return RFCISensitivityResult(capability=checked_capability, pag=None)
-        checked_capability = detect_rfci_capability(checked_config)
         if not checked_capability.available:
             return RFCISensitivityResult(capability=checked_capability, pag=None)
-        evidence = _collect_runtime_evidence(checked_config)
+        try:
+            evidence = _collect_runtime_evidence(checked_config)
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise _rfci_error(
+                "RFCI runtime provenance failed validation",
+                failure_kind=RFCIBackendFailureKind.BACKEND_FAILURE,
+            ) from None
         if evidence.capability != checked_capability:
             raise ValueError
         checked_table, matrix = _authenticated_rfci_matrix(table, rows)
@@ -1620,14 +1684,35 @@ def run_rfci_sensitivity(
         raise _rfci_error() from None
 
 
+def run_rfci_sensitivity(
+    table: CausalTableRecord,
+    rows: Sequence[CausalObservationRecord | JCIObservationRecord],
+    knowledge: BackgroundKnowledgeRecord,
+    config: RFCIConfig,
+) -> RFCISensitivityResult:
+    """Self-probe capability and return an optional PAG for one exact row relation."""
+
+    checked_config = RFCIConfig.model_validate(config)
+    capability = detect_rfci_capability(checked_config)
+    return _run_rfci_sensitivity_with_capability(
+        table,
+        rows,
+        knowledge,
+        checked_config,
+        capability=capability,
+    )
+
+
 __all__ = [
     "JPYPE_VERSION",
     "MINIMUM_JAVA_MAJOR",
     "PY_TETRAD_COMMIT",
+    "RFCIBackendFailureKind",
     "RFCI_BACKEND",
     "TETRAD_JAR_SHA256",
     "detect_rfci_capability",
     "expanded_forbidden_directions",
     "run_rfci_sensitivity",
+    "validate_rfci_capability",
     "validate_rfci_sensitivity_result",
 ]

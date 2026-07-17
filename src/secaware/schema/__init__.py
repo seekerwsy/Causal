@@ -74,9 +74,13 @@ from secaware.schema.oracle import (
     SecurityLabel,
 )
 from secaware.schema.outcomes import (
+    AnalysisFailureReason,
+    AnalysisFailureRecord,
+    AnalysisStage,
     AssignmentEvaluability,
     AssignmentOutcomeRecord,
     CWESecurityOutcome,
+    EffectBootstrapDrawRecord,
     FunctionalOutcomeRecord,
     FunctionalOutcomeStatus,
     RFCICapabilityRecord,
@@ -101,6 +105,9 @@ from secaware.schema.tsg import (
 )
 
 __all__ = [
+    "AnalysisFailureReason",
+    "AnalysisFailureRecord",
+    "AnalysisStage",
     "AllowedDeltaRecord",
     "AssignmentRecord",
     "AssignmentExecutionRecord",
@@ -124,6 +131,7 @@ __all__ = [
     "CausalTableRecord",
     "CausalVariableSpec",
     "CWESecurityOutcome",
+    "EffectBootstrapDrawRecord",
     "ConfirmationProtocolInstanceRecord",
     "ConfirmationProtocolRecord",
     "ExperimentalUnit",

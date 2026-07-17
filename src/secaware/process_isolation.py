@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -20,11 +21,21 @@ _CLEANUP_SECONDS = 1.0
 _MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 
 
-def _process_error() -> SecAwareError:
+class IsolatedProcessFailureKind(str, Enum):
+    TIMEOUT = "timeout"
+    BACKEND_FAILURE = "backend_failure"
+    INVALID_OUTPUT = "invalid_output"
+    INVALID_INPUT = "invalid_input"
+
+
+def _process_error(
+    failure_kind: IsolatedProcessFailureKind = IsolatedProcessFailureKind.BACKEND_FAILURE,
+) -> SecAwareError:
     return SecAwareError(
         code=ErrorCode.ANALYSIS_INVALID,
         stage="process.isolation",
         message="isolated process failed validation",
+        details={"failure_kind": failure_kind.value},
     )
 
 
@@ -243,6 +254,7 @@ def run_isolated_process(
     stdout = bytearray()
     stderr = bytearray()
     overflow = threading.Event()
+    failure_kind = IsolatedProcessFailureKind.INVALID_INPUT
     try:
         checked_argv = tuple(argv)
         checked_cwd = Path(cwd).resolve(strict=True)
@@ -262,6 +274,7 @@ def run_isolated_process(
             or not 0 < max_stderr_bytes <= _MAX_CAPTURE_BYTES
         ):
             raise ValueError
+        failure_kind = IsolatedProcessFailureKind.BACKEND_FAILURE
         options: dict[str, object] = {}
         if os.name == "nt":
             options["creationflags"] = (
@@ -303,7 +316,7 @@ def run_isolated_process(
         deadline = time.monotonic() + float(timeout_seconds)
         while process.poll() is None and not overflow.is_set():
             if time.monotonic() >= deadline:
-                raise TimeoutError
+                raise _process_error(IsolatedProcessFailureKind.TIMEOUT)
             time.sleep(_POLL_SECONDS)
         returncode = process.poll()
         _terminate_tree(process, job)
@@ -311,23 +324,31 @@ def run_isolated_process(
         for reader in readers:
             reader.join(_CLEANUP_SECONDS)
         if (
-            returncode != 0
-            or overflow.is_set()
+            overflow.is_set()
             or any(reader.is_alive() for reader in readers)
             or len(stdout) > max_stdout_bytes
             or len(stderr) > max_stderr_bytes
         ):
-            raise ValueError
+            raise _process_error(IsolatedProcessFailureKind.INVALID_OUTPUT)
+        if returncode != 0:
+            raise _process_error(IsolatedProcessFailureKind.BACKEND_FAILURE)
         payload = bytes(stdout)
         if require_canonical_json:
+            failure_kind = IsolatedProcessFailureKind.INVALID_OUTPUT
             decoded = json.loads(payload.decode("utf-8"))
             if _canonical_json_bytes(decoded) != payload:
                 raise ValueError
         return IsolatedProcessResult(stdout=payload, stderr=bytes(stderr), returncode=returncode)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
+    except SecAwareError as error:
+        if error.stage == "process.isolation" and error.details.get("failure_kind") in {
+            item.value for item in IsolatedProcessFailureKind
+        }:
+            raise
+        raise _process_error(failure_kind) from None
     except Exception:
-        raise _process_error() from None
+        raise _process_error(failure_kind) from None
     finally:
         if process is not None:
             _terminate_tree(process, job)
@@ -344,4 +365,4 @@ def run_isolated_process(
                 pass
 
 
-__all__ = ["IsolatedProcessResult", "run_isolated_process"]
+__all__ = ["IsolatedProcessFailureKind", "IsolatedProcessResult", "run_isolated_process"]

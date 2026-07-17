@@ -860,10 +860,19 @@ def test_matrix_transport_reads_and_verifies_one_descriptor(
     assert set(stated) == set(opened)
 
 
-@pytest.mark.parametrize("mode", ("oversize", "partial", "timeout", "crash"))
+@pytest.mark.parametrize(
+    ("mode", "expected_kind"),
+    (
+        ("oversize", "invalid_output"),
+        ("partial", "invalid_output"),
+        ("timeout", "timeout"),
+        ("crash", "backend_failure"),
+    ),
+)
 def test_fixed_subprocess_transport_rejects_failure_and_cleans_up(
     tmp_path: Path,
     mode: str,
+    expected_kind: str,
 ) -> None:
     import secaware
 
@@ -876,7 +885,7 @@ def test_fixed_subprocess_transport_rejects_failure_and_cleans_up(
         "timeout": "import time;time.sleep(30)",
         "crash": "import os;os._exit(7)",
     }
-    with pytest.raises(SecAwareError):
+    with pytest.raises(SecAwareError) as exc_info:
         process_isolation.run_isolated_process(
             (sys.executable, "-I", "-c", scripts[mode]),
             cwd=tmp_path,
@@ -886,7 +895,56 @@ def test_fixed_subprocess_transport_rejects_failure_and_cleans_up(
             max_stderr_bytes=4096,
             require_canonical_json=True,
         )
+    assert exc_info.value.details == {"failure_kind": expected_kind}
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("stream_name", ("stdout", "stderr"))
+def test_isolated_process_overflow_while_child_alive_is_invalid_output_and_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stream_name: str,
+) -> None:
+    import secaware
+
+    process_isolation = secaware.process_isolation
+    processes: list[subprocess.Popen[bytes]] = []
+    readers: list[object] = []
+    real_popen = process_isolation.subprocess.Popen
+    real_thread = process_isolation.threading.Thread
+
+    def tracked_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def tracked_thread(*args: object, **kwargs: object) -> object:
+        reader = real_thread(*args, **kwargs)
+        readers.append(reader)
+        return reader
+
+    monkeypatch.setattr(process_isolation.subprocess, "Popen", tracked_popen)
+    monkeypatch.setattr(process_isolation.threading, "Thread", tracked_thread)
+    script = (
+        "import sys,time;"
+        f"stream=sys.{stream_name}.buffer;"
+        "stream.write(b'x'*8192);stream.flush();time.sleep(30)"
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        process_isolation.run_isolated_process(
+            (sys.executable, "-I", "-c", script),
+            cwd=tmp_path,
+            environment={"PATH": "", "PYTHONUTF8": "1"},
+            timeout_seconds=5.0,
+            max_stdout_bytes=4096,
+            max_stderr_bytes=4096,
+            require_canonical_json=False,
+        )
+
+    assert exc_info.value.details == {"failure_kind": "invalid_output"}
+    assert len(processes) == 1 and processes[0].poll() is not None
+    assert len(readers) == 2 and all(not reader.is_alive() for reader in readers)
 
 
 def test_isolated_process_reaps_descendant_holding_stdout_open(tmp_path: Path) -> None:

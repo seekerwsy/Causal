@@ -25,9 +25,13 @@ from secaware.pipeline.stage_contracts import (
     confirmation_oracle_stage_contract_sha256,
     confirmation_generation_stage_contract_sha256,
     discovery_stage_contract_sha256,
+    effect_stage_contract_sha256,
     functional_outcome_import_stage_contract_sha256,
+    jci_stage_contract_sha256,
     prompt_variant_stage_contract_sha256,
     randomization_stage_contract_sha256,
+    report_stage_contract_sha256,
+    rfci_stage_contract_sha256,
 )
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.tsg.contract import PROMPT_TSG_STAGE_CONTRACT_SHA256
@@ -76,6 +80,27 @@ _CONFIRMATION_GENERATION_OUTPUTS = (
     "generation/confirmation_code.jsonl",
 )
 _FUNCTIONAL_OUTCOME_IMPORT_OUTPUTS = ("analysis/functional_outcomes.jsonl",)
+_EFFECT_STAGE_OUTPUTS = (
+    "analysis/assignment_outcomes.jsonl",
+    "analysis/contrast_specs.jsonl",
+    "analysis/effect_bootstrap_draws.jsonl",
+    "analysis/itt_effects.jsonl",
+    "analysis/effect_failures.jsonl",
+)
+_JCI_STAGE_OUTPUTS = (
+    "analysis/jci_tables.jsonl",
+    "analysis/jci_observations.jsonl",
+    "analysis/jci_raw_pags.jsonl",
+    "analysis/jci_background_knowledge.jsonl",
+    "analysis/jci_constrained_pags.jsonl",
+    "analysis/jci_orientation_deltas.jsonl",
+    "analysis/jci_failures.jsonl",
+)
+_RFCI_STAGE_OUTPUTS = (
+    "analysis/rfci_capability.jsonl",
+    "analysis/rfci_pags.jsonl",
+    "analysis/rfci_failures.jsonl",
+)
 
 
 def _synchronized(method: Callable[..., _Result]) -> Callable[..., _Result]:
@@ -462,6 +487,9 @@ class RunStore:
             "discover",
             "intervene",
             "confirm",
+            "estimate-confirmation-effects",
+            "jci-confirmation",
+            "rfci-confirmation",
         } or stage.startswith(
             (
                 "plan-generation-",
@@ -519,6 +547,15 @@ class RunStore:
             stage == "import-functional-outcomes"
             and tuple(relative_outputs) != _FUNCTIONAL_OUTCOME_IMPORT_OUTPUTS
         ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if (
+            stage == "estimate-confirmation-effects"
+            and tuple(relative_outputs) != _EFFECT_STAGE_OUTPUTS
+        ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "jci-confirmation" and tuple(relative_outputs) != _JCI_STAGE_OUTPUTS:
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "rfci-confirmation" and tuple(relative_outputs) != _RFCI_STAGE_OUTPUTS:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:
@@ -656,6 +693,10 @@ class RunStore:
                     or confirmation_generation_stage_contract_sha256(stage, self.config.generation)
                     or confirmation_oracle_stage_contract_sha256(stage)
                     or functional_outcome_import_stage_contract_sha256(stage)
+                    or effect_stage_contract_sha256(stage)
+                    or jci_stage_contract_sha256(stage)
+                    or rfci_stage_contract_sha256(stage)
+                    or report_stage_contract_sha256(stage)
                     or discovery_stage_contract_sha256(stage)
                 )
             ),

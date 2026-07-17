@@ -64,6 +64,7 @@ _FUTURE_STAGE_NAMES = frozenset(
         "generate-confirmation",
         "run-oracle-confirmation",
         "import-functional-outcomes",
+        "estimate-confirmation-effects",
         "analyze-jci",
         "analyze-rfci",
         "effects",

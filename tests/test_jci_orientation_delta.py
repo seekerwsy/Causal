@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from secaware.causal.jci import build_jci_background
@@ -134,6 +136,20 @@ def test_no_change_delta_is_content_addressed_and_empty() -> None:
     assert first == second
     assert first.changes == ()
     assert first.delta_id.startswith("jci_delta_")
+
+
+def test_orientation_delta_strict_json_roundtrip_snapshots_sequence_fields() -> None:
+    from secaware.causal.jci import compare_jci_pags
+    from secaware.schema.outcomes import JCIOrientationDeltaRecord
+
+    table, _rows = _jci_table_and_rows()
+    _base, knowledge = build_jci_background(table)
+    delta = compare_jci_pags(_raw_pag(), _constrained_pag(), knowledge)
+    payload = json.loads(delta.model_dump_json())
+
+    assert type(payload["assumption_ids"]) is list
+    assert type(payload["changes"]) is list
+    assert JCIOrientationDeltaRecord.model_validate(payload, strict=True) == delta
 
 
 def test_endpoint_change_canonicalizes_endpoint_order_and_swaps_all_marks() -> None:

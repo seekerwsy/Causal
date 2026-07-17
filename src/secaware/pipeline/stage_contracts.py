@@ -5,14 +5,25 @@ from __future__ import annotations
 import importlib.metadata
 import re
 
+from secaware.analysis.itt import (
+    MAX_ESTIMATOR_ARTIFACT_RECORDS,
+    MAX_ESTIMATOR_DRAW_RECORDS,
+)
 from secaware.causal.variable_catalog import VARIABLE_CATALOG_SHA256
+from secaware.causal.jci_limits import (
+    MAX_JCI_FCI_RUNS,
+    MAX_JCI_MATRIX_CELLS,
+    MAX_JCI_TABLES,
+)
 from secaware.config import (
     AppConfig,
+    AnalysisConfig,
     FCIDiscoveryConfig,
     GenerationConfig,
     InterventionConfig,
     OracleConfig,
     RandomizationConfig,
+    RFCIConfig,
     TSGConfig,
 )
 from secaware.pipeline.artifact import canonical_sha256
@@ -27,13 +38,24 @@ from secaware.schema.causal import (
     CausalTableRecord,
     DiscoveryFailureRecord,
     FrozenHypothesisRecord,
+    JCIBackgroundKnowledgeRecord,
     PAGRecord,
     PathPatternRecord,
     PathSupportRecord,
 )
 from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.oracle import OracleRecord
-from secaware.schema.outcomes import FunctionalOutcomeRecord
+from secaware.schema.outcomes import (
+    AnalysisFailureRecord,
+    AssignmentOutcomeRecord,
+    ContrastSpecRecord,
+    EffectBootstrapDrawRecord,
+    FunctionalOutcomeRecord,
+    ITTEffectRecord,
+    JCIObservationRecord,
+    JCIOrientationDeltaRecord,
+    RFCICapabilityRecord,
+)
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
@@ -66,6 +88,10 @@ _RANDOMIZATION_STAGE = "randomize-confirmation"
 _CONFIRMATION_GENERATION_STAGE = "generate-confirmation"
 _CONFIRMATION_ORACLE_STAGE = "run-oracle-confirmation"
 _FUNCTIONAL_OUTCOME_IMPORT_STAGE = "import-functional-outcomes"
+_EFFECT_STAGE = "estimate-confirmation-effects"
+_JCI_STAGE = "jci-confirmation"
+_RFCI_STAGE = "rfci-confirmation"
+_REPORT_STAGE = "report"
 
 CONFIRMATION_STAGE_ORDER = (
     "build-confirmation-variants",
@@ -73,8 +99,7 @@ CONFIRMATION_STAGE_ORDER = (
     "generate-confirmation",
     "run-oracle-confirmation",
     _FUNCTIONAL_OUTCOME_IMPORT_STAGE,
-    "assemble-assignment-outcomes",
-    "estimate-confirmation-effects",
+    _EFFECT_STAGE,
     "jci-confirmation",
     "rfci-confirmation",
     "mechanisms",
@@ -86,20 +111,7 @@ _CONFIRMATION_STAGE_MANIFEST_FAMILIES = (
     ("generate-confirmation",),
     ("run-oracle-confirmation",),
     (_FUNCTIONAL_OUTCOME_IMPORT_STAGE,),
-    (
-        "assemble-assignment-outcomes",
-        "assignment-outcomes",
-        "confirm",
-        "confirmation-outcomes",
-        "confirm-outcomes",
-    ),
-    (
-        "effects",
-        "estimate-effects",
-        "estimate-confirmation-effects",
-        "confirmation-effects",
-        "confirm-effects",
-    ),
+    (_EFFECT_STAGE,),
     ("analyze-jci", "jci", "jci-analysis", "jci-confirmation"),
     ("analyze-rfci", "rfci", "rfci-analysis", "rfci-confirmation"),
     ("mechanisms",),
@@ -407,11 +419,165 @@ def functional_outcome_import_stage_contract_sha256(stage: str) -> str | None:
     return canonical_sha256(functional_outcome_import_stage_contract_payload())
 
 
+def effect_stage_contract_payload() -> dict[str, object]:
+    """Bind the transactional effects stage to its exact persisted schemas."""
+
+    from secaware.pipeline.manifest import StageManifest
+
+    return {
+        "stage": _EFFECT_STAGE,
+        "contract_version": "confirmation-effects-v1",
+        "app_config_schema": _schema_sha256(AppConfig),
+        "analysis_config_schema": _schema_sha256(AnalysisConfig),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "execution_schema": _schema_sha256(AssignmentExecutionRecord),
+        "oracle_schema": _schema_sha256(OracleRecord),
+        "graph_delta_schema": _schema_sha256(GraphDeltaRecord),
+        "protocol_schema": _schema_sha256(ConfirmationProtocolRecord),
+        "functional_contract_schema": _schema_sha256(FunctionalOutcomeContractRecord),
+        "functional_outcome_schema": _schema_sha256(FunctionalOutcomeRecord),
+        "assignment_outcome_schema": _schema_sha256(AssignmentOutcomeRecord),
+        "contrast_schema": _schema_sha256(ContrastSpecRecord),
+        "effect_draw_schema": _schema_sha256(EffectBootstrapDrawRecord),
+        "itt_effect_schema": _schema_sha256(ITTEffectRecord),
+        "analysis_failure_schema": _schema_sha256(AnalysisFailureRecord),
+        "cluster_bootstrap_rng_version": RNG_VERSION,
+        "max_estimator_artifact_records": MAX_ESTIMATOR_ARTIFACT_RECORDS,
+        "max_estimator_draw_records": MAX_ESTIMATOR_DRAW_RECORDS,
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+        "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
+    }
+
+
+def effect_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _EFFECT_STAGE:
+        return None
+    return canonical_sha256(effect_stage_contract_payload())
+
+
+def jci_stage_contract_payload() -> dict[str, object]:
+    """Bind JCI publication to exact schemas and causal-learn semantics."""
+
+    from secaware.pipeline.manifest import StageManifest
+
+    return {
+        "stage": _JCI_STAGE,
+        "contract_version": "confirmation-jci-v1",
+        "variable_catalog_sha256": VARIABLE_CATALOG_SHA256,
+        "app_config_schema": _schema_sha256(AppConfig),
+        "discovery_config_schema": _schema_sha256(FCIDiscoveryConfig),
+        "table_schema": _schema_sha256(CausalTableRecord),
+        "observation_schema": _schema_sha256(JCIObservationRecord),
+        "pag_schema": _schema_sha256(PAGRecord),
+        "background_provenance_schema": _schema_sha256(JCIBackgroundKnowledgeRecord),
+        "orientation_delta_schema": _schema_sha256(JCIOrientationDeltaRecord),
+        "failure_schema": _schema_sha256(AnalysisFailureRecord),
+        "max_jci_tables": MAX_JCI_TABLES,
+        "max_jci_fci_runs": MAX_JCI_FCI_RUNS,
+        "max_jci_matrix_cells": MAX_JCI_MATRIX_CELLS,
+        "causal_learn_required_version": "0.1.4.7",
+        "causal_learn_runtime_version": _causal_learn_version(),
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+        "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
+    }
+
+
+def jci_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _JCI_STAGE:
+        return None
+    return canonical_sha256(jci_stage_contract_payload())
+
+
+def rfci_stage_contract_payload() -> dict[str, object]:
+    """Bind optional RFCI publication to its pinned authenticated backend."""
+
+    from secaware.discovery.rfci_backend import (
+        JPYPE_VERSION,
+        MINIMUM_JAVA_MAJOR,
+        PY_TETRAD_COMMIT,
+        RFCI_BACKEND,
+        TETRAD_JAR_SHA256,
+    )
+    from secaware.pipeline.manifest import StageManifest
+
+    return {
+        "stage": _RFCI_STAGE,
+        "contract_version": "confirmation-rfci-v1",
+        "app_config_schema": _schema_sha256(AppConfig),
+        "rfci_config_schema": _schema_sha256(RFCIConfig),
+        "table_schema": _schema_sha256(CausalTableRecord),
+        "observation_schema": _schema_sha256(JCIObservationRecord),
+        "background_provenance_schema": _schema_sha256(JCIBackgroundKnowledgeRecord),
+        "pag_schema": _schema_sha256(PAGRecord),
+        "capability_schema": _schema_sha256(RFCICapabilityRecord),
+        "failure_schema": _schema_sha256(AnalysisFailureRecord),
+        "backend": RFCI_BACKEND,
+        "py_tetrad_commit": PY_TETRAD_COMMIT,
+        "jpype_version": JPYPE_VERSION,
+        "minimum_java_major": MINIMUM_JAVA_MAJOR,
+        "tetrad_jar_sha256": TETRAD_JAR_SHA256,
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+        "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
+    }
+
+
+def rfci_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _RFCI_STAGE:
+        return None
+    return canonical_sha256(rfci_stage_contract_payload())
+
+
+def report_stage_contract_payload() -> dict[str, object]:
+    """Bind final reports to their mixed-format schemas and finite policy."""
+
+    from secaware.pipeline.manifest import StageManifest
+    from secaware.reports.tables import EFFECT_FIELDS, FAILURE_FIELDS, JCI_ORIENTATION_FIELDS
+
+    return {
+        "stage": _REPORT_STAGE,
+        "contract_version": "prompt-only-reporting-v1",
+        "app_config_schema": _schema_sha256(AppConfig),
+        "pag_schema": _schema_sha256(PAGRecord),
+        "hypothesis_schema": _schema_sha256(FrozenHypothesisRecord),
+        "variant_schema": _schema_sha256(PromptVariantRecord),
+        "graph_delta_schema": _schema_sha256(GraphDeltaRecord),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "assignment_outcome_schema": _schema_sha256(AssignmentOutcomeRecord),
+        "contrast_schema": _schema_sha256(ContrastSpecRecord),
+        "itt_effect_schema": _schema_sha256(ITTEffectRecord),
+        "jci_orientation_schema": _schema_sha256(JCIOrientationDeltaRecord),
+        "rfci_capability_schema": _schema_sha256(RFCICapabilityRecord),
+        "analysis_failure_schema": _schema_sha256(AnalysisFailureRecord),
+        "effect_fields": list(EFFECT_FIELDS),
+        "jci_orientation_fields": list(JCI_ORIENTATION_FIELDS),
+        "failure_fields": list(FAILURE_FIELDS),
+        "max_input_records": 100_000,
+        "max_input_line_chars": 4_000_000,
+        "max_input_total_chars": 256_000_000,
+        "max_report_records": 300_000,
+        "max_report_line_bytes": 8_000_000,
+        "max_report_input_file_bytes": 1_000_000_000,
+        "max_report_input_total_bytes": 4_000_000_000,
+        "max_report_file_bytes": 64_000_000,
+        "max_report_total_bytes": 256_000_000,
+        "producer_manifest_schema": _schema_sha256(StageManifest),
+        "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
+    }
+
+
+def report_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _REPORT_STAGE:
+        return None
+    return canonical_sha256(report_stage_contract_payload())
+
+
 __all__ = [
     "CONFIRMATION_STAGE_ORDER",
     "confirmation_stage_is_downstream",
     "discovery_stage_contract_payload",
     "discovery_stage_contract_sha256",
+    "effect_stage_contract_payload",
+    "effect_stage_contract_sha256",
     "prompt_variant_stage_contract_payload",
     "prompt_variant_stage_contract_sha256",
     "randomization_stage_contract_payload",
@@ -422,4 +588,10 @@ __all__ = [
     "confirmation_oracle_stage_contract_sha256",
     "functional_outcome_import_stage_contract_payload",
     "functional_outcome_import_stage_contract_sha256",
+    "jci_stage_contract_payload",
+    "jci_stage_contract_sha256",
+    "rfci_stage_contract_payload",
+    "rfci_stage_contract_sha256",
+    "report_stage_contract_payload",
+    "report_stage_contract_sha256",
 ]

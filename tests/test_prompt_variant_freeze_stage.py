@@ -592,6 +592,9 @@ def _stage_store(
     max_protocols: int = 8,
     max_protocol_instances: int = 256,
     max_arm_executions: int = 2048,
+    rfci_enabled: bool = False,
+    discovery_min_independent_tasks: int = 20,
+    randomization_min_independent_tasks: int = 20,
 ) -> tuple[AppConfig, RunStore]:
     if task_count < 1 or (confirmation_feature_ids is not None and task_count != 1):
         raise ValueError("unsupported task count")
@@ -685,6 +688,15 @@ def _stage_store(
                 "functional_outcome_contracts_path": None,
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1", "llm": None},
+            "discovery": {
+                "min_independent_tasks": discovery_min_independent_tasks,
+            },
+            "rfci": {"enabled": rfci_enabled},
+            "randomization": {
+                "min_independent_tasks_per_semantic_protocol": (
+                    randomization_min_independent_tasks
+                ),
+            },
             "intervention": intervention,
         }
     )

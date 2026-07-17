@@ -92,6 +92,7 @@ _FUTURE_DIRS = frozenset({"analysis", "effects", "reports", "report", "jci", "rf
 _FUTURE_STAGE_NAMES = frozenset(
     {
         "import-functional-outcomes",
+        "estimate-confirmation-effects",
         "confirm",
         "analyze-jci",
         "analyze-rfci",

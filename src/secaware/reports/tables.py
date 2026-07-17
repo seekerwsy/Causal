@@ -1,230 +1,394 @@
+"""Deterministic, side-effect-free rendering for Prompt-only reports."""
+
+from __future__ import annotations
+
 import csv
-from collections import Counter, defaultdict
-from pathlib import Path
+from dataclasses import dataclass
+import html
+from io import StringIO
+import json
+from typing import Iterable, Mapping, Sequence
 
-from secaware.io.jsonl import write_jsonl
-from secaware.reports.mechanism_cards import build_mechanism_card
-from secaware.schema.hypotheses import HypothesisRecord
-from secaware.schema.interventions import InterventionRecord
-from secaware.schema.records import PromptRecord
-from secaware.schema.results import EffectRecord, PairResult
+from secaware.pipeline.artifact import canonical_sha256
+from secaware.schema.causal import (
+    BootstrapFailureRecord,
+    DiscoveryFailureRecord,
+    FrozenHypothesisRecord,
+)
+from secaware.schema.experiments import (
+    AssignmentRecord,
+    GraphDeltaRecord,
+    PreRandomizationExclusionRecord,
+    PromptVariantRecord,
+)
+from secaware.schema.outcomes import (
+    AnalysisFailureRecord,
+    AssignmentOutcomeRecord,
+    ITTEffectRecord,
+    JCIOrientationDeltaRecord,
+    RFCICapabilityRecord,
+)
 
 
-def write_reports(
-    report_dir: str | Path,
-    *,
-    prompts: list[PromptRecord],
-    hypotheses_all: list[HypothesisRecord],
-    hypotheses_selected: list[HypothesisRecord],
-    interventions: list[InterventionRecord],
-    pairs: list[PairResult],
-    effects: list[EffectRecord],
-) -> None:
-    report_dir = Path(report_dir)
-    report_dir.mkdir(parents=True, exist_ok=True)
-    write_funnel(report_dir / "funnel.csv", hypotheses_selected, interventions, pairs, effects)
-    write_effects(report_dir / "effects.csv", hypotheses_selected, effects)
-    write_failures(report_dir / "failures.csv", interventions, pairs)
-    write_cards(report_dir / "mechanism_cards.jsonl", hypotheses_selected, interventions, effects)
-    write_summary(
-        report_dir / "summary.md",
-        prompts=prompts,
-        hypotheses_all=hypotheses_all,
-        hypotheses_selected=hypotheses_selected,
-        interventions=interventions,
-        effects=effects,
+EFFECT_FIELDS = (
+    "schema_version",
+    "effect_id",
+    "hypothesis_id",
+    "target_spec_id",
+    "arm_protocol_id",
+    "model_id",
+    "contrast_id",
+    "outcome_id",
+    "treatment_n",
+    "control_n",
+    "independent_task_n",
+    "risk_difference",
+    "ci_low",
+    "ci_high",
+    "sensitivity_low",
+    "sensitivity_high",
+    "status",
+    "assignment_universe_sha256",
+    "target_instance_universe_sha256",
+    "bootstrap_manifest_sha256",
+)
+
+JCI_ORIENTATION_FIELDS = (
+    "schema_version",
+    "delta_id",
+    "raw_pag_id",
+    "constrained_pag_id",
+    "assumption_ids",
+    "assumption_set_sha256",
+    "per_assumption_attribution",
+    "changes",
+)
+
+FAILURE_FIELDS = (
+    "source_stage",
+    "record_id",
+    "subject_id",
+    "reason_code",
+    "config_sha256",
+    "input_bundle_sha256",
+    "detail_sha256",
+)
+
+RFCI_CAPABILITY_PREFIX = "- RFCI capability record: "
+_MARKDOWN_CODE_ESCAPES = frozenset("\\`[]()\r\n")
+
+
+@dataclass(frozen=True, slots=True)
+class ReportDocuments:
+    discovery_pags: bytes
+    hypotheses: bytes
+    interventions: bytes
+    assignments: bytes
+    effects: bytes
+    jci_orientations: bytes
+    failures: bytes
+    hypothesis_cards: bytes
+    summary: bytes
+
+    def ordered(self) -> tuple[bytes, ...]:
+        return (
+            self.discovery_pags,
+            self.hypotheses,
+            self.interventions,
+            self.assignments,
+            self.effects,
+            self.jci_orientations,
+            self.failures,
+            self.hypothesis_cards,
+            self.summary,
+        )
+
+
+def canonical_jsonl_bytes(records: Iterable[Mapping[str, object]]) -> bytes:
+    lines = tuple(
+        json.dumps(
+            dict(record),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        for record in records
+    )
+    return (("\n".join(lines) + "\n") if lines else "").encode("utf-8")
+
+
+def canonical_markdown_code(value: str) -> str:
+    escaped = html.escape(value, quote=True)
+    encoded = "".join(
+        f"&#{ord(character)};"
+        if character in _MARKDOWN_CODE_ESCAPES or ord(character) < 0x20
+        else character
+        for character in escaped
+    )
+    return f"`{encoded}`"
+
+
+def decode_canonical_markdown_code(value: str) -> str:
+    if len(value) < 2 or value[0] != "`" or value[-1] != "`" or "\n" in value or "\r" in value:
+        raise ValueError("report Markdown scalar failed validation")
+    decoded = html.unescape(value[1:-1])
+    if canonical_markdown_code(decoded) != value:
+        raise ValueError("report Markdown scalar failed validation")
+    return decoded
+
+
+def _csv_value(value: object) -> object:
+    if value is None:
+        return ""
+    if type(value) is bool:
+        return "true" if value else "false"
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    return value
+
+
+def canonical_csv_bytes(
+    fields: Sequence[str],
+    rows: Iterable[Mapping[str, object]],
+) -> bytes:
+    handle = StringIO(newline="")
+    writer = csv.DictWriter(
+        handle,
+        fieldnames=list(fields),
+        extrasaction="raise",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: _csv_value(row.get(field)) for field in fields})
+    return handle.getvalue().encode("utf-8")
+
+
+def build_intervention_rows(
+    variants: Sequence[PromptVariantRecord],
+    deltas: Sequence[GraphDeltaRecord],
+) -> tuple[dict[str, object], ...]:
+    delta_by_id = {item.delta_id: item for item in deltas}
+    if len(delta_by_id) != len(deltas) or {item.delta_id for item in variants} != set(delta_by_id):
+        raise ValueError("report intervention provenance failed validation")
+    rows: list[dict[str, object]] = []
+    for variant in sorted(variants, key=lambda item: item.variant_id):
+        delta = delta_by_id[variant.delta_id]
+        payload = variant.model_dump(mode="json", exclude={"prompt_text"})
+        payload["graph_delta"] = delta.model_dump(mode="json")
+        digest = canonical_sha256(payload)
+        rows.append(
+            {
+                **payload,
+                "report_record_id": f"reported_intervention_{digest}",
+                "report_record_sha256": digest,
+            }
+        )
+    return tuple(rows)
+
+
+def build_assignment_rows(
+    assignments: Sequence[AssignmentRecord],
+    outcomes: Sequence[AssignmentOutcomeRecord],
+) -> tuple[dict[str, object], ...]:
+    outcome_by_assignment = {item.assignment_id: item for item in outcomes}
+    if len(outcome_by_assignment) != len(outcomes) or {
+        item.assignment_id for item in assignments
+    } != set(outcome_by_assignment):
+        raise ValueError("report assignment provenance failed validation")
+    rows: list[dict[str, object]] = []
+    for assignment in sorted(assignments, key=lambda item: item.assignment_id):
+        payload = assignment.model_dump(mode="json")
+        payload["assignment_outcome"] = outcome_by_assignment[assignment.assignment_id].model_dump(
+            mode="json"
+        )
+        digest = canonical_sha256(payload)
+        rows.append(
+            {
+                **payload,
+                "report_record_id": f"reported_assignment_{digest}",
+                "report_record_sha256": digest,
+            }
+        )
+    return tuple(rows)
+
+
+def build_effect_rows(effects: Sequence[ITTEffectRecord]) -> tuple[dict[str, object], ...]:
+    return tuple(
+        item.model_dump(mode="json") for item in sorted(effects, key=lambda item: item.effect_id)
     )
 
 
-def write_funnel(
-    path: Path,
-    hypotheses: list[HypothesisRecord],
-    interventions: list[InterventionRecord],
-    pairs: list[PairResult],
-    effects: list[EffectRecord],
-) -> None:
-    effect_by_h = {effect.hypothesis_id: effect for effect in effects}
-    pairs_by_h: dict[str, list[PairResult]] = defaultdict(list)
-    interventions_by_h: dict[str, list[InterventionRecord]] = defaultdict(list)
-    for pair in pairs:
-        pairs_by_h[pair.hypothesis_id].append(pair)
-    for intervention in interventions:
-        interventions_by_h[intervention.hypothesis_id].append(intervention)
-    rows = []
-    for hypothesis in hypotheses:
-        h_interventions = interventions_by_h[hypothesis.hypothesis_id]
-        h_pairs = pairs_by_h[hypothesis.hypothesis_id]
-        effect = effect_by_h.get(hypothesis.hypothesis_id)
+def build_jci_orientation_rows(
+    deltas: Sequence[JCIOrientationDeltaRecord],
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        item.model_dump(mode="json") for item in sorted(deltas, key=lambda item: item.delta_id)
+    )
+
+
+def _analysis_failure_row(record: AnalysisFailureRecord) -> dict[str, object]:
+    return {
+        "source_stage": record.stage.value,
+        "record_id": record.failure_id,
+        "subject_id": record.subject_id,
+        "reason_code": record.reason_code.value,
+        "config_sha256": record.config_sha256,
+        "input_bundle_sha256": record.input_bundle_sha256,
+        "detail_sha256": "",
+    }
+
+
+def build_failure_rows(
+    bootstrap_failures: Sequence[BootstrapFailureRecord],
+    discovery_failures: Sequence[DiscoveryFailureRecord],
+    exclusions: Sequence[PreRandomizationExclusionRecord],
+    effect_failures: Sequence[AnalysisFailureRecord],
+    jci_failures: Sequence[AnalysisFailureRecord],
+    rfci_failures: Sequence[AnalysisFailureRecord],
+) -> tuple[dict[str, object], ...]:
+    rows: list[dict[str, object]] = []
+    for record in bootstrap_failures:
         rows.append(
             {
-                "hypothesis_id": hypothesis.hypothesis_id,
-                "factor_type": hypothesis.factor_type.value,
-                "attempted_interventions": len(h_interventions),
-                "patch_success": sum(1 for item in h_interventions if item.patch_success),
-                "round_trip_valid": sum(1 for item in h_interventions if item.round_trip_valid),
-                "semantic_valid": sum(1 for item in h_interventions if item.semantic_valid),
-                "target_changed": sum(1 for item in h_interventions if item.target_changed),
-                "functional_preserved": sum(
-                    1
-                    for pair in h_pairs
-                    if pair.functional_observed and pair.functional_counterfactual
-                ),
-                "eligible_pairs": effect.eligible_pairs if effect else 0,
-                "confirmed_pairs": sum(1 for pair in h_pairs if pair.flip_type == "secure_flip"),
-                "status": effect.status if effect else "unsupported",
+                "source_stage": "fci-discovery-bootstrap",
+                "record_id": record.failure_id,
+                "subject_id": record.draw_id,
+                "reason_code": record.reason_code.value,
+                "config_sha256": record.fci_config_sha256,
+                "input_bundle_sha256": "",
+                "detail_sha256": record.detail_sha256,
             }
         )
-    _write_csv(path, rows)
-
-
-def write_effects(
-    path: Path,
-    hypotheses: list[HypothesisRecord],
-    effects: list[EffectRecord],
-) -> None:
-    hypothesis_by_id = {hypothesis.hypothesis_id: hypothesis for hypothesis in hypotheses}
-    rows = []
-    for effect in effects:
-        hypothesis = hypothesis_by_id.get(effect.hypothesis_id)
+    for record in discovery_failures:
         rows.append(
             {
-                "hypothesis_id": effect.hypothesis_id,
-                "factor_type": effect.factor_type,
-                "scope_cwe": hypothesis.scope.get("cwe", "") if hypothesis else effect.scope_cwe,
-                "scope_task_family": (
-                    hypothesis.scope.get("task_family", "")
-                    if hypothesis
-                    else effect.scope_task_family
-                ),
-                "eligible_pairs": effect.eligible_pairs,
-                "per_protocol_risk_difference": effect.per_protocol_risk_difference,
-                "ci_low": effect.ci_low,
-                "ci_high": effect.ci_high,
-                "itt_risk_difference": effect.itt_risk_difference,
-                "secure_flip_rate": effect.secure_flip_rate,
-                "insecure_flip_rate": effect.insecure_flip_rate,
-                "side_effect_rate": effect.side_effect_rate,
-                "status": effect.status,
-                "main_failure_reason": effect.main_failure_reason or "",
+                "source_stage": "fci-discovery",
+                "record_id": record.failure_id,
+                "subject_id": record.table_id,
+                "reason_code": record.reason_code.value,
+                "config_sha256": record.fci_config_sha256,
+                "input_bundle_sha256": record.table_sha256,
+                "detail_sha256": record.detail_sha256,
             }
         )
-    _write_csv(path, rows)
-
-
-def write_failures(
-    path: Path,
-    interventions: list[InterventionRecord],
-    pairs: list[PairResult],
-) -> None:
-    examples: dict[tuple[str, str], tuple[str, str]] = {}
-    counts: Counter[tuple[str, str]] = Counter()
-    for intervention in interventions:
-        if intervention.failure_reason:
-            key = (intervention.failure_reason.value, intervention.factor_type.value)
-            counts[key] += 1
-            examples.setdefault(key, (intervention.prompt_id, intervention.hypothesis_id))
-    for pair in pairs:
-        if pair.failure_reason:
-            key = (pair.failure_reason, pair.factor_type)
-            counts[key] += 1
-            examples.setdefault(key, (pair.prompt_id, pair.hypothesis_id))
-    rows = [
-        {
-            "failure_reason": reason,
-            "count": count,
-            "factor_type": factor_type,
-            "example_prompt_id": examples[(reason, factor_type)][0],
-            "example_hypothesis_id": examples[(reason, factor_type)][1],
-        }
-        for (reason, factor_type), count in counts.items()
-    ]
-    _write_csv(path, rows)
-
-
-def write_cards(
-    path: Path,
-    hypotheses: list[HypothesisRecord],
-    interventions: list[InterventionRecord],
-    effects: list[EffectRecord],
-) -> None:
-    effect_by_h = {effect.hypothesis_id: effect for effect in effects}
-    attempted = Counter(intervention.hypothesis_id for intervention in interventions)
-    cards = [
-        build_mechanism_card(
-            hypothesis,
-            effect_by_h.get(hypothesis.hypothesis_id),
-            attempted=attempted[hypothesis.hypothesis_id],
+    for record in exclusions:
+        rows.append(
+            {
+                "source_stage": "build-confirmation-variants",
+                "record_id": record.exclusion_id,
+                "subject_id": record.task_id,
+                "reason_code": ";".join(item.value for item in record.failure_codes),
+                "config_sha256": "",
+                "input_bundle_sha256": "",
+                "detail_sha256": record.detail_sha256,
+            }
         )
-        for hypothesis in hypotheses
-    ]
-    write_jsonl(path, cards)
+    rows.extend(
+        _analysis_failure_row(record)
+        for group in (effect_failures, jci_failures, rfci_failures)
+        for record in group
+    )
+    return tuple(sorted(rows, key=lambda row: (str(row["source_stage"]), str(row["record_id"]))))
 
 
-def write_summary(
-    path: Path,
+def render_summary(
     *,
-    prompts: list[PromptRecord],
-    hypotheses_all: list[HypothesisRecord],
-    hypotheses_selected: list[HypothesisRecord],
-    interventions: list[InterventionRecord],
-    effects: list[EffectRecord],
-) -> None:
-    discover_count = sum(1 for prompt in prompts if prompt.split == "discover")
-    confirm_count = sum(1 for prompt in prompts if prompt.split == "confirm")
-    confirmed = sum(1 for effect in effects if effect.status == "confirmed")
-    directional = sum(1 for effect in effects if effect.status == "directional")
-    unsupported = sum(1 for effect in effects if effect.status == "unsupported")
+    hypotheses: Sequence[FrozenHypothesisRecord],
+    variants: Sequence[PromptVariantRecord],
+    assignments: Sequence[AssignmentRecord],
+    effects: Sequence[ITTEffectRecord],
+    jci_deltas: Sequence[JCIOrientationDeltaRecord],
+    failure_count: int,
+    capability: RFCICapabilityRecord,
+    pag_counts: Mapping[str, int],
+) -> bytes:
+    status_counts: dict[str, int] = {}
+    for effect in effects:
+        status_counts[effect.status] = status_counts.get(effect.status, 0) + 1
+    capability_json = json.dumps(
+        capability.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
     lines = [
-        "# SecAware Run Summary",
+        "# SecAware Prompt-Only Run Summary",
         "",
-        "## Dataset",
-        f"number of prompts: {len(prompts)}",
-        f"discover prompts: {discover_count}",
-        f"confirm prompts: {confirm_count}",
+        "Endpoint marks are preserved without causal reinterpretation.",
         "",
         "## Discovery",
-        f"number of candidate hypotheses: {len(hypotheses_all)}",
-        f"number of selected hypotheses: {len(hypotheses_selected)}",
         "",
-        "## Intervention",
-        f"attempted interventions: {len(interventions)}",
-        f"semantic-valid interventions: {sum(1 for item in interventions if item.semantic_valid)}",
-        f"target-changing interventions: {sum(1 for item in interventions if item.target_changed)}",
+        f"- Frozen hypotheses: {len(hypotheses)}",
+        f"- Observational reference PAGs: {pag_counts.get('observational_reference', 0)}",
+        f"- JCI raw PAGs: {pag_counts.get('jci_raw', 0)}",
+        f"- JCI constrained PAGs: {pag_counts.get('jci_constrained', 0)}",
+        f"- RFCI sensitivity PAGs: {pag_counts.get('rfci_sensitivity', 0)}",
         "",
-        "## Confirmation",
-        f"confirmed mechanisms: {confirmed}",
-        f"directional mechanisms: {directional}",
-        f"unsupported mechanisms: {unsupported}",
+        "## Randomized confirmation",
         "",
-        "## Main Effects",
-        "| hypothesis_id | factor_type | risk_difference | CI | status |",
-        "| --- | --- | ---: | --- | --- |",
+        f"- Frozen Prompt variants: {len(variants)}",
+        f"- Committed assignments: {len(assignments)}",
+        f"- Published ITT effects: {len(effects)}",
+        f"- JCI orientation deltas: {len(jci_deltas)}",
+        "",
+        "## Effect statuses",
+        "",
     ]
-    for effect in effects:
-        lines.append(
-            f"| {effect.hypothesis_id} | {effect.factor_type} | "
-            f"{effect.per_protocol_risk_difference:.3f} | "
-            f"[{effect.ci_low:.3f}, {effect.ci_high:.3f}] | {effect.status} |"
-        )
-    lines.extend(["", "## Main Failures"])
-    failure_counts = Counter(
-        effect.main_failure_reason for effect in effects if effect.main_failure_reason
-    )
-    if failure_counts:
-        for reason, count in failure_counts.most_common():
-            lines.append(f"- {reason}: {count}")
+    if status_counts:
+        lines.extend(f"- {status}: {status_counts[status]}" for status in sorted(status_counts))
     else:
         lines.append("- none")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines.extend(
+        [
+            "",
+            "## Optional RFCI capability",
+            "",
+            f"- RFCI status: {capability.status}",
+            f"- RFCI reason: {canonical_markdown_code(capability.reason_code or 'none')}",
+            f"{RFCI_CAPABILITY_PREFIX}{canonical_markdown_code(capability_json)}",
+            "",
+            "## Typed failures",
+            "",
+            f"- Total: {failure_count}",
+        ]
+    )
+    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    if rows:
-        fields = list(rows[0].keys())
-    else:
-        fields = ["empty"]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
+def write_reports(*args: object, **kwargs: object) -> object:
+    """Compatibility import surface; the transactional implementation lives in the stage."""
+
+    from secaware.pipeline.stages.reporting import write_reports as stage_write_reports
+
+    return stage_write_reports(*args, **kwargs)
+
+
+__all__ = [
+    "EFFECT_FIELDS",
+    "FAILURE_FIELDS",
+    "JCI_ORIENTATION_FIELDS",
+    "RFCI_CAPABILITY_PREFIX",
+    "ReportDocuments",
+    "build_assignment_rows",
+    "build_effect_rows",
+    "build_failure_rows",
+    "build_intervention_rows",
+    "build_jci_orientation_rows",
+    "canonical_csv_bytes",
+    "canonical_jsonl_bytes",
+    "canonical_markdown_code",
+    "decode_canonical_markdown_code",
+    "render_summary",
+    "write_reports",
+]

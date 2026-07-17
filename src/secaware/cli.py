@@ -63,7 +63,7 @@ from secaware.pipeline.stages.prompt_extraction import (
 )
 from secaware.pipeline.stages.prompt_variants import run_prompt_variant_freeze_stage
 from secaware.pipeline.stages.randomization import run_confirmation_randomization_stage
-from secaware.reports.tables import write_reports
+from secaware.pipeline.stages.reporting import write_reports
 from secaware.schema.hypotheses import HypothesisRecord
 from secaware.schema.generation import (
     GenerationAttemptRecord,
@@ -1852,41 +1852,7 @@ def _retired_confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -
 
 
 def report_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    del config
-    stage = "report"
-    inputs = [
-        store.path("inputs", "prompts.jsonl"),
-        store.path("discovery", "hypotheses_all.jsonl"),
-        store.path("discovery", "hypotheses_selected.jsonl"),
-        store.path("interventions", "interventions.jsonl"),
-        store.path("analysis", "pair_results.jsonl"),
-        store.path("analysis", "hypothesis_effects.jsonl"),
-    ]
-    outputs = [
-        store.path("reports", "funnel.csv"),
-        store.path("reports", "effects.csv"),
-        store.path("reports", "failures.csv"),
-        store.path("reports", "mechanism_cards.jsonl"),
-        store.path("reports", "summary.md"),
-    ]
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-    write_reports(
-        store.path("reports"),
-        prompts=_prompt_records(store),
-        hypotheses_all=read_jsonl(
-            store.path("discovery", "hypotheses_all.jsonl"), HypothesisRecord
-        ),  # type: ignore[arg-type]
-        hypotheses_selected=read_jsonl(
-            store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord
-        ),  # type: ignore[arg-type]
-        interventions=read_jsonl(
-            store.path("interventions", "interventions.jsonl"), InterventionRecord
-        ),  # type: ignore[arg-type]
-        pairs=read_jsonl(store.path("analysis", "pair_results.jsonl"), PairResult),  # type: ignore[arg-type]
-        effects=read_jsonl(store.path("analysis", "hypothesis_effects.jsonl"), EffectRecord),  # type: ignore[arg-type]
-    )
-    store.record_stage(stage, inputs, outputs)
+    write_reports(config, store, force=force)
 
 
 def _matches_scope(prompt: PromptRecord, hypothesis: HypothesisRecord) -> bool:

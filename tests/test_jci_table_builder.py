@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
+import json
 from typing import Iterable
 
 import pytest
@@ -49,6 +50,10 @@ from secaware.schema.tsg import PromptTSGRecord
 
 def _sha(*parts: object) -> str:
     return hashlib.sha256("|".join(str(part) for part in parts).encode()).hexdigest()
+
+
+def _blind_task_id(task_id: str) -> str:
+    return "blind_task_" + _sha(task_id, "jci-builder-fixture")
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +139,7 @@ def fixture_for(
             prompt_id = "variant_prompt_" + _sha(task_id, arm.role.value, "prompt")
             source = PromptRecord(
                 prompt_id=prompt_id,
-                task_id=task_id,
+                task_id=_blind_task_id(task_id),
                 split="confirm",
                 language=base.source_prompt.language,
                 task_family=base.source_prompt.task_family,
@@ -537,6 +542,33 @@ def test_jci_tables_pool_task_instances_but_never_semantic_strata() -> None:
         assert len({row.arm_protocol_id for row in local}) == 1
 
 
+def test_jci_builder_accepts_exact_blinded_graph_task_namespace() -> None:
+    fixture = fixture_for()
+
+    tables, rows = build_fixture(fixture)
+
+    assert tables and rows
+    assert all(graph.task_id.startswith("blind_task_") for graph in fixture.graphs)
+
+
+@pytest.mark.parametrize(
+    "mutated_task_id",
+    (
+        "task-safety_control-add-reserved-000",
+        "masked_task_" + "a" * 64,
+    ),
+)
+def test_jci_builder_rejects_unblinded_or_wrong_namespace_graph_task_id(
+    mutated_task_id: str,
+) -> None:
+    fixture = fixture_for()
+    changed_graph = fixture.graphs[0].model_copy(update={"task_id": mutated_task_id})
+    changed = replace(fixture, graphs=(changed_graph, *fixture.graphs[1:]))
+
+    with pytest.raises(Exception, match="JCI"):
+        build_fixture(changed)
+
+
 def test_generation_model_is_a_stratum_not_a_frozen_hypothesis_constraint() -> None:
     model_a = fixture_for()
     model_b = _fixture_for_model(model_a, "model-b")
@@ -805,6 +837,18 @@ def test_jci_observations_are_frozen_content_addressed_and_bounded() -> None:
             protocol_instance_id=row.protocol_instance_id,
             values=tuple(0 for _ in range(65)),
         )
+
+
+def test_jci_observation_strict_json_roundtrip_snapshots_values_only() -> None:
+    _table, row = (lambda result: (result[0][0], result[1][0]))(build_fixture(fixture_for()))
+    payload = json.loads(row.model_dump_json())
+
+    assert type(payload["values"]) is list
+    assert JCIObservationRecord.model_validate(payload, strict=True) == row
+
+    payload["values"][0] = True
+    with pytest.raises(Exception, match="JCI"):
+        JCIObservationRecord.model_validate(payload, strict=True)
 
 
 @pytest.mark.parametrize("mutation", ("missing", "duplicate", "wrong-table", "forged-bundle"))

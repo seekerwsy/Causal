@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from typing import Any
 
 import numpy as np
@@ -63,6 +64,7 @@ from secaware.tsg.queries import feature_state
 JCI_CONTEXT_EXOGENEITY = "jci.randomized_context_exogeneity.v1"
 _MAX_ROWS = 100_000
 _MAX_VARIABLES = 64
+_BLIND_TASK_ID_RE = re.compile(r"blind_task_[0-9a-f]{64}\Z")
 _TASK_FAMILY_STATES = (
     "authorization",
     "command_execution",
@@ -375,7 +377,7 @@ def _build_jci_tables(
             not _same_outcome_coordinates(assignment, outcome)
             or not _same_variant_coordinates(assignment, variant)
             or graph.prompt_id != variant.variant_prompt_id
-            or graph.task_id != variant.task_id
+            or _BLIND_TASK_ID_RE.fullmatch(graph.task_id) is None
             or graph.extractor_policy_sha256 != variant.extractor_policy_sha256
             or graph.proposal_id != variant.proposal_id
             or graph.cwe != hypothesis.cwe

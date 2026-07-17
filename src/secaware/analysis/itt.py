@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -20,10 +21,14 @@ from secaware.schema.experiments import (
 )
 from secaware.schema.features import FeatureFamily
 from secaware.schema.outcomes import (
+    AnalysisFailureReason,
+    AnalysisFailureRecord,
+    AnalysisStage,
     AssignmentEvaluability,
     AssignmentOutcomeRecord,
     ContrastSpecRecord,
     CWESecurityOutcome,
+    EffectBootstrapDrawRecord,
     FunctionalOutcomeRecord,
     FunctionalOutcomeStatus,
     ITTEffectRecord,
@@ -32,7 +37,9 @@ from secaware.schema.outcomes import (
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
-_MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES = 5_000_000
+MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES = 5_000_000
+MAX_ESTIMATOR_ARTIFACT_RECORDS = 125_000
+MAX_ESTIMATOR_DRAW_RECORDS = 125_000
 _RESERVED_OUTCOMES = frozenset(
     {
         "y_secure_functional",
@@ -44,6 +51,13 @@ _RESERVED_OUTCOMES = frozenset(
         "y_functional_ok",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ITTEstimationResult:
+    effects: tuple[ITTEffectRecord, ...]
+    draws: tuple[EffectBootstrapDrawRecord, ...]
+    failures: tuple[AnalysisFailureRecord, ...]
 
 
 def _itt_error(message: str = "ITT estimation failed validation") -> ValueError:
@@ -531,7 +545,7 @@ def _bootstrap_will_run(
     )
 
 
-def estimate_itt(
+def calculate_itt(
     outcomes: Iterable[AssignmentOutcomeRecord],
     analysis_config: AnalysisConfig,
     *,
@@ -539,8 +553,8 @@ def estimate_itt(
     contrasts: Iterable[ContrastSpecRecord] | None = None,
     functional_contracts: Iterable[FunctionalOutcomeContractRecord] = (),
     functional_outcomes: Iterable[FunctionalOutcomeRecord] = (),
-) -> tuple[ITTEffectRecord, ...]:
-    """Estimate every and only pre-registered semantic-protocol contrast."""
+) -> ITTEstimationResult:
+    """Calculate effects, persisted bootstrap draws, and bounded analysis failures."""
 
     config = _validated_config(analysis_config)
     protocol_records, protocol_by_id = _protocol_index(protocols)
@@ -561,6 +575,21 @@ def estimate_itt(
         protocol_by_id,
         functional_contracts,
         functional_outcomes,
+    )
+    config_sha256 = canonical_sha256(
+        {"schema_version": "1.0", "analysis_config": _analysis_config_payload(config)}
+    )
+    input_bundle_sha256 = canonical_sha256(
+        {
+            "schema_version": "1.0",
+            "assignment_outcome_ids": sorted(row.outcome_id for row in rows),
+            "protocol_ids": sorted(record.arm_protocol_id for record in protocol_records),
+            "contrast_ids": sorted(record.contrast_id for record in frozen_contrasts),
+            "functional_contract_ids": sorted(contract_by_id),
+            "functional_outcome_ids": sorted(
+                record.functional_outcome_id for record in functional_by_assignment.values()
+            ),
+        }
     )
     family_sizes: dict[str, int] = {}
     for contrast in frozen_contrasts:
@@ -584,24 +613,55 @@ def estimate_itt(
         semantic_rows.setdefault(key, []).append(row)
 
     total_sampled_row_entries = 0
+    total_artifact_records = 0
+    total_draw_records = 0
     for semantic_key, grouped in semantic_rows.items():
         protocol = protocol_by_id[semantic_key[2]]
+        total_artifact_records += len(contrasts_by_protocol[protocol.arm_protocol_id])
         runnable_contrasts = sum(
             _bootstrap_will_run(protocol, contrast, support_by_protocol)
             for contrast in contrasts_by_protocol[protocol.arm_protocol_id]
         )
+        if len({row.task_id for row in grouped}) >= config.min_independent_tasks:
+            total_draw_records += config.bootstrap_samples * runnable_contrasts
         total_sampled_row_entries += len(grouped) * config.bootstrap_samples * runnable_contrasts
-        if total_sampled_row_entries > _MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES:
-            raise _itt_error("ITT bootstrap work budget failed validation")
+    if total_sampled_row_entries > MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES:
+        raise _itt_error("ITT bootstrap work budget failed validation")
+    if total_artifact_records > MAX_ESTIMATOR_ARTIFACT_RECORDS:
+        raise _itt_error("ITT artifact budget failed validation")
+    if total_draw_records > MAX_ESTIMATOR_DRAW_RECORDS:
+        raise _itt_error("ITT draw artifact budget failed validation")
 
     effects: list[ITTEffectRecord] = []
+    draws: list[EffectBootstrapDrawRecord] = []
+    failures: list[AnalysisFailureRecord] = []
     for semantic_key in sorted(semantic_rows):
         hypothesis_id, target_spec_id, protocol_id, model_id = semantic_key
         protocol = protocol_by_id[protocol_id]
         group_rows = tuple(sorted(semantic_rows[semantic_key], key=lambda item: item.assignment_id))
         task_ids = tuple(sorted({row.task_id for row in group_rows}))
         if len(task_ids) < config.min_independent_tasks:
-            raise _itt_error("ITT requires minimum independent task count")
+            for contrast in contrasts_by_protocol[protocol_id]:
+                coordinate_sha256 = canonical_sha256(
+                    {
+                        "schema_version": "1.0",
+                        "effect_coordinate": [
+                            *semantic_key,
+                            contrast.contrast_id,
+                            contrast.outcome_id,
+                        ],
+                    }
+                )
+                failures.append(
+                    AnalysisFailureRecord.from_content(
+                        stage=AnalysisStage.EFFECTS,
+                        subject_id=f"effect_coordinate_{coordinate_sha256}",
+                        reason_code=AnalysisFailureReason.INSUFFICIENT_SUPPORT,
+                        config_sha256=config_sha256,
+                        input_bundle_sha256=input_bundle_sha256,
+                    )
+                )
+            continue
         assignment_universe_sha256 = canonical_sha256(
             _assignment_universe_payload(semantic_key, group_rows)
         )
@@ -682,18 +742,38 @@ def estimate_itt(
                         }
                     )
                 )
-                bootstrap = task_cluster_bootstrap(
-                    group_rows,
-                    lambda sampled: risk_difference(
-                        sampled,
-                        contrast.treatment_arm,
-                        contrast.control_arm,
-                        observed,
-                    )[0],
-                    samples=config.bootstrap_samples,
-                    seed_material=seed_material,
-                    max_failed_fraction=config.max_failed_bootstrap_fraction,
-                )
+                try:
+                    bootstrap = task_cluster_bootstrap(
+                        group_rows,
+                        lambda sampled: risk_difference(
+                            sampled,
+                            contrast.treatment_arm,
+                            contrast.control_arm,
+                            observed,
+                        )[0],
+                        samples=config.bootstrap_samples,
+                        seed_material=seed_material,
+                        max_failed_fraction=config.max_failed_bootstrap_fraction,
+                    )
+                except _FATAL:
+                    raise
+                except ValueError:
+                    coordinate_sha256 = canonical_sha256(
+                        {
+                            "schema_version": "1.0",
+                            "effect_coordinate": list(effect_group),
+                        }
+                    )
+                    failures.append(
+                        AnalysisFailureRecord.from_content(
+                            stage=AnalysisStage.EFFECTS,
+                            subject_id=f"effect_coordinate_{coordinate_sha256}",
+                            reason_code=AnalysisFailureReason.BOOTSTRAP_FAILURE,
+                            config_sha256=config_sha256,
+                            input_bundle_sha256=input_bundle_sha256,
+                        )
+                    )
+                    continue
                 if (
                     bootstrap.failed_replicates != 0
                     or len(bootstrap.estimates) != config.bootstrap_samples
@@ -703,7 +783,22 @@ def estimate_itt(
                         for draw in bootstrap.task_draws
                     )
                 ):
-                    raise _itt_error("ITT bootstrap manifest failed validation")
+                    coordinate_sha256 = canonical_sha256(
+                        {
+                            "schema_version": "1.0",
+                            "effect_coordinate": list(effect_group),
+                        }
+                    )
+                    failures.append(
+                        AnalysisFailureRecord.from_content(
+                            stage=AnalysisStage.EFFECTS,
+                            subject_id=f"effect_coordinate_{coordinate_sha256}",
+                            reason_code=AnalysisFailureReason.BOOTSTRAP_FAILURE,
+                            config_sha256=config_sha256,
+                            input_bundle_sha256=input_bundle_sha256,
+                        )
+                    )
+                    continue
                 low_q, high_q = bonferroni_percentile_quantiles(
                     confidence_level=config.ci_level,
                     number_of_pre_registered_contrasts=family_sizes[
@@ -735,35 +830,48 @@ def estimate_itt(
                         "target_instance_universe_sha256": (target_instance_universe_sha256),
                     }
                 )
-            effects.append(
-                ITTEffectRecord.from_content(
-                    hypothesis_id=hypothesis_id,
-                    target_spec_id=target_spec_id,
-                    arm_protocol_id=protocol_id,
-                    model_id=model_id,
-                    contrast_id=contrast.contrast_id,
-                    outcome_id=contrast.outcome_id,
-                    treatment_n=treatment_n,
-                    control_n=control_n,
-                    independent_task_n=len(task_ids),
-                    risk_difference=point,
+            effect = ITTEffectRecord.from_content(
+                hypothesis_id=hypothesis_id,
+                target_spec_id=target_spec_id,
+                arm_protocol_id=protocol_id,
+                model_id=model_id,
+                contrast_id=contrast.contrast_id,
+                outcome_id=contrast.outcome_id,
+                treatment_n=treatment_n,
+                control_n=control_n,
+                independent_task_n=len(task_ids),
+                risk_difference=point,
+                ci_low=ci_low,
+                ci_high=ci_high,
+                sensitivity_low=sensitivity_low,
+                sensitivity_high=sensitivity_high,
+                status=_status(
+                    protocol,
+                    contrast,
                     ci_low=ci_low,
                     ci_high=ci_high,
-                    sensitivity_low=sensitivity_low,
-                    sensitivity_high=sensitivity_high,
-                    status=_status(
-                        protocol,
-                        contrast,
-                        ci_low=ci_low,
-                        ci_high=ci_high,
-                        functional_supported=support_by_protocol[protocol_id],
-                    ),
-                    assignment_universe_sha256=assignment_universe_sha256,
-                    target_instance_universe_sha256=target_instance_universe_sha256,
-                    bootstrap_manifest_sha256=bootstrap_manifest_sha256,
-                )
+                    functional_supported=support_by_protocol[protocol_id],
+                ),
+                assignment_universe_sha256=assignment_universe_sha256,
+                target_instance_universe_sha256=target_instance_universe_sha256,
+                bootstrap_manifest_sha256=bootstrap_manifest_sha256,
             )
-    return tuple(
+            effects.append(effect)
+            if effect.status != "unsupported_missing_functional_outcome":
+                draws.extend(
+                    EffectBootstrapDrawRecord.from_content(
+                        effect_id=effect.effect_id,
+                        replicate_index=replicate_index,
+                        sampled_task_ids=sampled_task_ids,
+                        estimate=estimate,
+                        assignment_universe_sha256=assignment_universe_sha256,
+                        bootstrap_manifest_sha256=bootstrap_manifest_sha256,
+                    )
+                    for replicate_index, (sampled_task_ids, estimate) in enumerate(
+                        zip(bootstrap.task_draws, bootstrap.estimates, strict=True)
+                    )
+                )
+    ordered_effects = tuple(
         sorted(
             effects,
             key=lambda item: (
@@ -776,6 +884,36 @@ def estimate_itt(
             ),
         )
     )
+    ordered_draws = tuple(sorted(draws, key=lambda item: (item.effect_id, item.replicate_index)))
+    ordered_failures = tuple(sorted(failures, key=lambda item: item.subject_id))
+    return ITTEstimationResult(ordered_effects, ordered_draws, ordered_failures)
+
+
+def estimate_itt(
+    outcomes: Iterable[AssignmentOutcomeRecord],
+    analysis_config: AnalysisConfig,
+    *,
+    protocols: Iterable[ConfirmationProtocolRecord],
+    contrasts: Iterable[ContrastSpecRecord] | None = None,
+    functional_contracts: Iterable[FunctionalOutcomeContractRecord] = (),
+    functional_outcomes: Iterable[FunctionalOutcomeRecord] = (),
+) -> tuple[ITTEffectRecord, ...]:
+    """Compatibility wrapper returning only successfully estimated ITT effects."""
+
+    result = calculate_itt(
+        outcomes,
+        analysis_config,
+        protocols=protocols,
+        contrasts=contrasts,
+        functional_contracts=functional_contracts,
+        functional_outcomes=functional_outcomes,
+    )
+    reasons = {failure.reason_code for failure in result.failures}
+    if AnalysisFailureReason.INSUFFICIENT_SUPPORT in reasons:
+        raise _itt_error("ITT requires minimum independent task count")
+    if AnalysisFailureReason.BOOTSTRAP_FAILURE in reasons:
+        raise _itt_error("ITT bootstrap manifest failed validation")
+    return result.effects
 
 
 def validate_itt_effects(
@@ -814,4 +952,13 @@ def validate_itt_effects(
         raise _itt_error("ITT effect relation failed validation") from None
 
 
-__all__ = ["estimate_itt", "risk_difference", "validate_itt_effects"]
+__all__ = [
+    "ITTEstimationResult",
+    "MAX_ESTIMATOR_ARTIFACT_RECORDS",
+    "MAX_ESTIMATOR_DRAW_RECORDS",
+    "MAX_ESTIMATOR_SAMPLED_ROW_ENTRIES",
+    "calculate_itt",
+    "estimate_itt",
+    "risk_difference",
+    "validate_itt_effects",
+]

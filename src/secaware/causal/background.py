@@ -31,7 +31,6 @@ _OBSERVATIONAL_RUN_KINDS = frozenset(
     {
         PAGRunKind.OBSERVATIONAL_REFERENCE,
         PAGRunKind.OBSERVATIONAL_BOOTSTRAP,
-        PAGRunKind.RFCI_SENSITIVITY,
     }
 )
 
