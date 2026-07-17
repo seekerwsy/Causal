@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from copy import deepcopy
+from importlib.machinery import ModuleSpec
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +12,12 @@ PINNED_COMMIT = "a30707264aa4363a23ac5f136a70bbdd62212f07"
 PINNED_JAR_SHA256 = "3c898047c26a909495925d3e50264150f58ee57cd5b48d95683c45e3ab0e17f4"
 
 
+def _package_spec(name: str) -> ModuleSpec:
+    spec = ModuleSpec(name, loader=None, origin=f"C:/site/{name}/__init__.py")
+    spec.submodule_search_locations = [f"C:/site/{name}"]
+    return spec
+
+
 def _enable_probe(monkeypatch: pytest.MonkeyPatch) -> object:
     from secaware.discovery import rfci_backend
 
@@ -18,8 +25,9 @@ def _enable_probe(monkeypatch: pytest.MonkeyPatch) -> object:
     monkeypatch.setattr(
         rfci_backend.importlib.util,
         "find_spec",
-        lambda name: object() if name in {"jpype", "pytetrad"} else None,
+        lambda name: _package_spec(name) if name in {"jpype", "pytetrad"} else None,
     )
+    monkeypatch.setattr(rfci_backend, "_authenticate_installed_module", lambda *_args: None)
     monkeypatch.setattr(
         rfci_backend.importlib.metadata,
         "version",
@@ -212,76 +220,47 @@ def test_direct_url_metadata_is_read_with_a_hard_byte_limit(
         def read_text(self, _name: str) -> str:
             raise AssertionError("unbounded Distribution.read_text must not be used")
 
-    monkeypatch.setattr(rfci_backend.importlib.metadata, "distribution", lambda _name: Distribution())
+    monkeypatch.setattr(
+        rfci_backend.importlib.metadata, "distribution", lambda _name: Distribution()
+    )
 
     commit, _jar_sha = rfci_backend._inspect_py_tetrad_installation()
 
     assert commit is None
 
 
-@pytest.mark.parametrize("producer", ("overflow", "timeout"))
-def test_java_probe_caps_output_and_cleans_up_overflow_or_timeout(
+@pytest.mark.parametrize("failure", ("overflow", "timeout"))
+def test_java_probe_uses_bounded_tree_owned_process_runner(
     monkeypatch: pytest.MonkeyPatch,
-    producer: str,
+    failure: str,
 ) -> None:
     from secaware.discovery import rfci_backend
+    from secaware.errors import ErrorCode, SecAwareError
 
-    class Stream:
-        closed = False
-
-        def read(self, size: int) -> bytes:
-            if self.closed or producer == "timeout":
-                return b""
-            return b"x" * size
-
-        def close(self) -> None:
-            self.closed = True
-
-    class Process:
-        pid = 2_147_483_646
-
-        def __init__(self) -> None:
-            self.stdout = Stream()
-            self.returncode: int | None = None
-            self.killed = False
-            self.waited = False
-
-        def poll(self) -> int | None:
-            return self.returncode
-
-        def kill(self) -> None:
-            self.killed = True
-            self.returncode = -9
-            self.stdout.close()
-
-        def wait(self, timeout: float | None = None) -> int:
-            del timeout
-            self.waited = True
-            return -9 if self.returncode is None else self.returncode
-
-    process = Process()
-    taskkill_calls: list[list[str]] = []
-
-    def taskkill_only(command: list[str], *_args: object, **_kwargs: object) -> object:
-        if not command or command[0] != "taskkill":
-            raise AssertionError("java probe must not use capture_output subprocess.run")
-        taskkill_calls.append(command)
-        return object()
-
-    monkeypatch.setattr(rfci_backend.subprocess, "Popen", lambda *_args, **_kwargs: process)
-    monkeypatch.setattr(rfci_backend.subprocess, "run", taskkill_only)
-    monkeypatch.setattr(rfci_backend, "_JAVA_PROBE_TIMEOUT_SECONDS", 0.05)
-
-    assert rfci_backend._detect_java_major() is None
-    assert process.killed is True
-    assert process.waited is True
-    assert process.stdout.closed is True
-    if rfci_backend.os.name == "nt":
-        assert taskkill_calls
-    assert not any(
-        thread.name == "secaware-java-version-reader" and thread.is_alive()
-        for thread in __import__("threading").enumerate()
+    java = rfci_backend._JavaRuntimeEvidence(
+        executable="C:/jdk/bin/java.exe",
+        home="C:/jdk",
+        jvm_library="C:/jdk/bin/server/jvm.dll",
+        executable_sha256="0" * 64,
+        jvm_library_sha256="1" * 64,
+        major=1,
     )
+    calls: list[dict[str, object]] = []
+
+    def fail(*_args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        raise SecAwareError(
+            code=ErrorCode.ANALYSIS_INVALID,
+            stage="process.isolation",
+            message=failure,
+        )
+
+    monkeypatch.setattr(rfci_backend, "run_isolated_process", fail)
+
+    with pytest.raises(SecAwareError):
+        rfci_backend._probe_java_runtime(java)
+    assert calls[0]["max_stdout_bytes"] == rfci_backend._MAX_JAVA_VERSION_OUTPUT_CHARS
+    assert calls[0]["max_stderr_bytes"] == rfci_backend._MAX_JAVA_VERSION_OUTPUT_CHARS
 
 
 def test_no_argument_detection_is_an_active_nonfatal_probe(
@@ -344,8 +323,9 @@ def test_missing_optional_dependencies_are_nonfatal(
     monkeypatch.setattr(
         rfci_backend.importlib.util,
         "find_spec",
-        lambda name: object() if name in present else None,
+        lambda name: _package_spec(name) if name in present else None,
     )
+    monkeypatch.setattr(rfci_backend, "_authenticate_installed_module", lambda *_args: None)
     monkeypatch.setattr(rfci_backend.importlib.metadata, "version", lambda _name: "1.7.1")
 
     capability = rfci_backend.detect_rfci_capability(RFCIConfig(enabled=True))

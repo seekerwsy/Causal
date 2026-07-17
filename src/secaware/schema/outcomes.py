@@ -42,6 +42,10 @@ _MULTIPLICITY_ID_PATTERN = r"^multiplicity_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _CAUSAL_VARIABLE_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _MAX_PAG_EDGE_CHANGES = 64 * 63 // 2
+_RFCI_BACKEND = "py_tetrad_rfci_v1"
+_RFCI_PY_TETRAD_COMMIT = "a30707264aa4363a23ac5f136a70bbdd62212f07"
+_RFCI_JPYPE_VERSION = "1.7.1"
+_RFCI_TETRAD_JAR_SHA256 = "3c898047c26a909495925d3e50264150f58ee57cd5b48d95683c45e3ab0e17f4"
 
 _OUTCOME_SOURCES = {
     "y_secure_functional": "y.secure_functional",
@@ -182,7 +186,13 @@ class RFCISensitivityResult(SafeValidationMixin, StrictModel):
             if (
                 self.pag is None
                 or self.pag.run_kind is not PAGRunKind.RFCI_SENSITIVITY
-                or self.pag.backend_version != self.capability.py_tetrad_commit
+                or self.pag.backend != _RFCI_BACKEND
+                or self.pag.backend_version != _RFCI_PY_TETRAD_COMMIT
+                or self.capability.py_tetrad_commit != _RFCI_PY_TETRAD_COMMIT
+                or self.capability.jpype_version != _RFCI_JPYPE_VERSION
+                or self.capability.tetrad_jar_sha256 != _RFCI_TETRAD_JAR_SHA256
+                or self.capability.java_major is None
+                or self.capability.java_major < 21
             ):
                 raise ValueError(self._safe_validation_message)
         elif self.pag is not None:
@@ -719,4 +729,5 @@ __all__ = [
     "JCIOrientationDeltaRecord",
     "JCIObservationRecord",
     "RFCICapabilityRecord",
+    "RFCISensitivityResult",
 ]

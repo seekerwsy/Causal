@@ -79,6 +79,8 @@ from secaware.schema.outcomes import (
     CWESecurityOutcome,
     FunctionalOutcomeRecord,
     FunctionalOutcomeStatus,
+    RFCICapabilityRecord,
+    RFCISensitivityResult,
 )
 from secaware.schema.records import (
     CanonicalGeneratedCodeRecord,
@@ -172,6 +174,8 @@ __all__ = [
     "PromptRecord",
     "PromptVariantRecord",
     "RandomizationManifestRecord",
+    "RFCICapabilityRecord",
+    "RFCISensitivityResult",
     "PreRegisteredContrastSpec",
     "PreRandomizationExclusionRecord",
     "PreRandomizationFailureCode",
