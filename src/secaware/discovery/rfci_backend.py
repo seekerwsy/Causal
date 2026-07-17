@@ -331,9 +331,18 @@ def detect_rfci_capability(config: RFCIConfig | None = None) -> RFCICapabilityRe
                 status="disabled",
                 reason_code="disabled",
             )
-        python_version = _runtime_python_version()
-        if _PYTHON_VERSION.fullmatch(python_version) is None:
-            python_version = "0.0"
+        candidate = _runtime_python_version()
+        if (
+            type(candidate) is not str
+            or not 3 <= len(candidate) <= 64
+            or _PYTHON_VERSION.fullmatch(candidate) is None
+        ):
+            return _capability_record(
+                python_version=python_version,
+                status="unavailable",
+                reason_code="capability_probe_failed",
+            )
+        python_version = candidate
         if not _python_supports_rfci(python_version):
             return _capability_record(
                 python_version=python_version,

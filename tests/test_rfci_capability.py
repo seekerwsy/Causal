@@ -149,6 +149,42 @@ def test_runtime_version_probe_exception_is_safe_unavailability(
     assert capability.python_version == "0.0"
 
 
+@pytest.mark.parametrize(
+    "candidate",
+    (None, 312, object(), "3." + "1" * (64 * 1024)),
+    ids=("none", "integer", "object", "oversized-string"),
+)
+def test_malformed_runtime_version_is_safe_and_stops_downstream_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    candidate: object,
+) -> None:
+    from secaware.config import RFCIConfig
+    from secaware.discovery import rfci_backend
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("malformed runtime version must stop capability probing")
+
+    original_import = builtins.__import__
+
+    def guarded_import(name: str, *args: object, **kwargs: object) -> object:
+        if name.split(".", 1)[0] in {"jpype", "pytetrad"}:
+            raise AssertionError("malformed runtime version must not import optional runtime")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(rfci_backend, "_runtime_python_version", lambda: candidate)
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    monkeypatch.setattr(rfci_backend.importlib.util, "find_spec", forbidden)
+    monkeypatch.setattr(rfci_backend.importlib.metadata, "version", forbidden)
+    monkeypatch.setattr(rfci_backend, "_inspect_py_tetrad_installation", forbidden)
+    monkeypatch.setattr(rfci_backend, "_detect_java_major", forbidden)
+
+    capability = rfci_backend.detect_rfci_capability(RFCIConfig(enabled=True))
+
+    assert capability.status == "unavailable"
+    assert capability.reason_code == "capability_probe_failed"
+    assert capability.python_version == "0.0"
+
+
 def test_direct_url_metadata_is_read_with_a_hard_byte_limit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:
