@@ -39,3 +39,19 @@ def null_factor_scm(n: int, seed: int) -> pd.DataFrame:
             "y.secure_functional": rng.integers(0, 2, size=n),
         }
     )
+
+
+def deterministic_context_scm(n_per_arm: int, seed: int) -> pd.DataFrame:
+    """Return four randomized arms with a deterministic target-feature relation."""
+    rng = np.random.default_rng(seed)
+    context = np.repeat(np.arange(4, dtype=np.int64), n_per_arm)
+    target_feature = (context == 0).astype(np.int64)
+    noise = rng.binomial(1, 0.10, size=context.size)
+    outcome = np.bitwise_xor(target_feature, noise)
+    return pd.DataFrame(
+        {
+            "c.arm": context,
+            "x.target_feature": target_feature,
+            "y.secure_functional": outcome,
+        }
+    )
