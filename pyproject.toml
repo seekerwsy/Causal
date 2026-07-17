@@ -54,6 +54,7 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
   "oracle_tools: requires the exact locked Semgrep and Bandit executables",
+  "rfci_real: requires the pinned optional py-tetrad, JPype, and JDK RFCI runtime",
 ]
 
 [tool.ruff]
