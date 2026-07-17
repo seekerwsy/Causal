@@ -7,6 +7,8 @@ import inspect
 import json
 import os
 from pathlib import Path
+import py_compile
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -33,6 +35,21 @@ from test_rfci_adapter import (
 def _record_row(relative_path: str, payload: bytes) -> str:
     digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
     return f"{relative_path},sha256={digest},{len(payload)}\n"
+
+
+def _inactive_capability(status: str) -> RFCICapabilityRecord:
+    return RFCICapabilityRecord(
+        schema_version="1.0",
+        available=False,
+        status=status,
+        requires_java=True,
+        python_version="3.12.9",
+        java_major=None,
+        jpype_version=None,
+        py_tetrad_commit=None,
+        tetrad_jar_sha256=None,
+        reason_code="disabled" if status == "disabled" else "jpype_missing",
+    )
 
 
 class _Poison:
@@ -186,6 +203,99 @@ def test_distribution_authenticator_accepts_complete_recorded_package(tmp_path: 
     )
 
     assert evidence.module_origin == str(source.resolve())
+
+
+@pytest.mark.parametrize("flags", (("-I",), ("-I", "-B")), ids=("isolated", "isolated-no-write"))
+def test_python_isolation_flags_still_read_existing_source_backed_bytecode(
+    tmp_path: Path,
+    flags: tuple[str, ...],
+) -> None:
+    source = tmp_path / "probe.py"
+    trusted = b"VALUE = 'trusted'   \n"
+    unchecked = b"VALUE = 'unchecked' \n"
+    assert len(trusted) == len(unchecked)
+    fixed_time = 1_700_000_000
+    source.write_bytes(unchecked)
+    os.utime(source, (fixed_time, fixed_time))
+    py_compile.compile(
+        str(source),
+        doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+    )
+    source.write_bytes(trusted)
+    os.utime(source, (fixed_time, fixed_time))
+
+    completed = subprocess.run(
+        (
+            sys.executable,
+            *flags,
+            "-c",
+            "import sys;sys.path.insert(0,sys.argv[1]);import probe;sys.stdout.write(probe.VALUE)",
+            str(tmp_path),
+        ),
+        check=True,
+        capture_output=True,
+        timeout=5.0,
+    )
+
+    assert completed.stdout == b"unchecked"
+
+
+def test_rfci_worker_argv_creates_fresh_private_cache_prefix(tmp_path: Path) -> None:
+    from secaware.discovery import rfci_backend
+
+    job_root = tmp_path / "job"
+    job_root.mkdir()
+    job_path = job_root / "job.json"
+    job_path.write_bytes(b"{}")
+
+    argv = rfci_backend._build_rfci_worker_argv(job_path)
+
+    cache = job_root / "cache"
+    assert cache.is_dir()
+    assert not cache.is_symlink()
+    assert tuple(cache.iterdir()) == ()
+    assert cache.resolve().parent == job_root.resolve()
+    assert argv == (
+        sys.executable,
+        "-I",
+        "-B",
+        "-X",
+        f"pycache_prefix={cache.resolve()}",
+        "-m",
+        "secaware.discovery._rfci_worker",
+        str(job_path.resolve()),
+    )
+
+
+@pytest.mark.parametrize(
+    ("dont_write_bytecode", "prefix_kind"),
+    ((False, "exact"), (True, "none"), (True, "wrong")),
+)
+def test_rfci_worker_rejects_inexact_python_cache_runtime_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dont_write_bytecode: bool,
+    prefix_kind: str,
+) -> None:
+    from secaware.discovery import rfci_backend
+
+    job_root = tmp_path / "job"
+    cache = job_root / "cache"
+    cache.mkdir(parents=True)
+    job_path = job_root / "job.json"
+    job_path.write_bytes(b"{}")
+    prefix = {"exact": str(cache.resolve()), "none": None, "wrong": str(tmp_path / "wrong")}
+    monkeypatch.setattr(sys, "dont_write_bytecode", dont_write_bytecode)
+    monkeypatch.setattr(sys, "pycache_prefix", prefix[prefix_kind])
+    monkeypatch.setattr(
+        rfci_backend,
+        "_decode_job",
+        lambda _payload: pytest.fail("invalid Python cache runtime reached job decoding"),
+    )
+
+    with pytest.raises(ValueError):
+        rfci_backend._execute_worker_job(job_path)
 
 
 def test_installed_module_authentication_requires_exact_single_package_location(
@@ -471,8 +581,12 @@ def test_worker_rejects_parent_evidence_mismatch_before_import(
 ) -> None:
     from secaware.discovery import rfci_backend
 
+    cache = tmp_path / "cache"
+    cache.mkdir()
     job_path = tmp_path / "job.json"
     job_path.write_bytes(b"{}")
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.setattr(sys, "pycache_prefix", str(cache.resolve()))
     expected = object()
     monkeypatch.setattr(
         rfci_backend,
@@ -572,6 +686,68 @@ def test_public_relation_validator_rejects_recomputed_config_provenance() -> Non
         rfci_backend.validate_rfci_sensitivity_result(result, table, knowledge, config)
 
 
+def test_relation_validator_rejects_disabled_config_with_available_pag() -> None:
+    from secaware.causal.background import build_background_knowledge
+    from secaware.discovery import rfci_backend
+
+    table = _table()
+    knowledge = build_background_knowledge(table)
+    config = RFCIConfig()
+    pag = PAGRecord.from_content(
+        run_kind=PAGRunKind.RFCI_SENSITIVITY,
+        table_id=table.table_id,
+        backend="py_tetrad_rfci_v1",
+        backend_version=PINNED_COMMIT,
+        ci_test="gsq",
+        config_sha256=canonical_sha256(config.model_dump(mode="json")),
+        background_knowledge_sha256=knowledge.knowledge_sha256,
+        variable_ids=tuple(item.variable_id for item in table.variables),
+        edges=(),
+    )
+    result = RFCISensitivityResult(capability=_capability(), pag=pag)
+
+    with pytest.raises(SecAwareError):
+        rfci_backend.validate_rfci_sensitivity_result(result, table, knowledge, config)
+
+
+def test_relation_validator_rejects_enabled_config_with_disabled_capability() -> None:
+    from secaware.causal.background import build_background_knowledge
+    from secaware.discovery import rfci_backend
+
+    table = _table()
+    knowledge = build_background_knowledge(table)
+    result = RFCISensitivityResult(capability=_inactive_capability("disabled"), pag=None)
+
+    with pytest.raises(SecAwareError):
+        rfci_backend.validate_rfci_sensitivity_result(result, table, knowledge, _config())
+
+
+@pytest.mark.parametrize(
+    ("config", "status"),
+    ((RFCIConfig(), "disabled"), (_config(), "unavailable")),
+    ids=("disabled-disabled", "enabled-unavailable"),
+)
+def test_relation_validator_accepts_matching_inactive_state(
+    config: RFCIConfig,
+    status: str,
+) -> None:
+    from secaware.causal.background import build_background_knowledge
+    from secaware.discovery import rfci_backend
+
+    table = _table()
+    knowledge = build_background_knowledge(table)
+    result = RFCISensitivityResult(capability=_inactive_capability(status), pag=None)
+
+    assert rfci_backend.validate_rfci_sensitivity_result(result, table, knowledge, config) == result
+
+
+def test_available_capability_validation_requires_enabled_config() -> None:
+    from secaware.discovery import rfci_backend
+
+    with pytest.raises(ValueError):
+        rfci_backend._validate_available_capability(_capability(), RFCIConfig())
+
+
 def test_rfci_production_source_contains_no_pickle_or_multiprocessing_transport() -> None:
     from secaware.discovery import rfci_backend
 
@@ -611,6 +787,77 @@ def test_raw_matrix_transport_binds_shape_length_and_lease_cleanup(tmp_path: Pat
     path = lease.path
     lease.close()
     assert not path.exists()
+
+
+def test_matrix_transport_never_returns_same_length_replacement_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from secaware.discovery import rfci_backend
+    import numpy as np
+
+    matrix = np.asarray(((0, 1), (1, 0)), dtype=np.int64)
+    replacement = np.asarray(((9, 9), (9, 9)), dtype=np.int64).tobytes(order="C")
+    lease = rfci_backend._write_matrix_transport(matrix, tmp_path)
+    original_hash = rfci_backend._hash_regular_file
+
+    def hash_then_replace(path: Path, *, limit: int) -> tuple[str, int]:
+        result = original_hash(path, limit=limit)
+        replacement_path = tmp_path / "replacement.raw"
+        replacement_path.write_bytes(replacement)
+        os.replace(replacement_path, lease.path)
+        return result
+
+    monkeypatch.setattr(rfci_backend, "_hash_regular_file", hash_then_replace)
+
+    returned = rfci_backend._read_matrix_transport(lease.record, trusted_root=tmp_path)
+
+    assert hashlib.sha256(returned.tobytes(order="C")).hexdigest() == lease.record.sha256
+
+
+def test_matrix_transport_reads_and_verifies_one_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from secaware.discovery import rfci_backend
+    import numpy as np
+
+    matrix = np.asarray(((0, 1), (1, 0)), dtype=np.int64)
+    lease = rfci_backend._write_matrix_transport(matrix, tmp_path)
+    original_open = os.open
+    original_fstat = os.fstat
+    original_read_bytes = Path.read_bytes
+    opened: list[int] = []
+    stated: list[int] = []
+
+    def tracked_open(path: object, flags: int, *args: object) -> int:
+        descriptor = original_open(path, flags, *args)
+        if Path(path) == lease.path:
+            opened.append(descriptor)
+        return descriptor
+
+    def tracked_fstat(descriptor: int) -> os.stat_result:
+        if descriptor in opened:
+            stated.append(descriptor)
+        return original_fstat(descriptor)
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path.resolve() == lease.path.resolve():
+            raise AssertionError("matrix transport must not reopen by path")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "fstat", tracked_fstat)
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    try:
+        returned = rfci_backend._read_matrix_transport(lease, trusted_root=tmp_path)
+    finally:
+        lease.close()
+
+    assert hashlib.sha256(returned.tobytes(order="C")).hexdigest() == lease.record.sha256
+    assert len(opened) == 1
+    assert len(stated) >= 2
+    assert set(stated) == set(opened)
 
 
 @pytest.mark.parametrize("mode", ("oversize", "partial", "timeout", "crash"))

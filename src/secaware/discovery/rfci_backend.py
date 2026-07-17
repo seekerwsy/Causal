@@ -1030,6 +1030,7 @@ def _read_matrix_transport(
     *,
     trusted_root: str | Path | None = None,
 ) -> np.ndarray:
+    descriptor = -1
     try:
         record = transport.record if isinstance(transport, _MatrixTransportLease) else transport
         checked = _MatrixTransportRecord.model_validate(record)
@@ -1043,17 +1044,37 @@ def _read_matrix_transport(
         resolved.relative_to(root)
         if _path_has_symlink(path, root):
             raise ValueError
-        payload_sha256, payload_size = _hash_regular_file(
-            resolved,
-            limit=100_000 * 64 * 8,
-        )
-        if payload_size != checked.byte_length or payload_sha256 != checked.sha256:
-            raise ValueError
-        payload = resolved.read_bytes()
         expected = checked.rows * checked.columns * 8
-        if len(payload) != expected or expected != checked.byte_length:
+        if expected != checked.byte_length:
             raise ValueError
-        matrix = np.frombuffer(payload, dtype=np.dtype(_MATRIX_DTYPE)).reshape(
+        descriptor = os.open(
+            resolved,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size != expected:
+            raise ValueError
+        payload = bytearray()
+        while len(payload) <= expected:
+            chunk = os.read(descriptor, min(_HASH_CHUNK_BYTES, expected + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        after = os.fstat(descriptor)
+        if (
+            len(payload) != expected
+            or hashlib.sha256(payload).hexdigest() != checked.sha256
+            or (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+        ):
+            raise ValueError
+        matrix = np.frombuffer(bytes(payload), dtype=np.dtype(_MATRIX_DTYPE)).reshape(
             (checked.rows, checked.columns)
         )
         if matrix.flags.writeable or not matrix.flags.c_contiguous:
@@ -1063,6 +1084,9 @@ def _read_matrix_transport(
         raise
     except Exception:
         raise _rfci_error("RFCI matrix transport failed validation") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _authenticated_rfci_matrix(
@@ -1202,7 +1226,8 @@ def _validate_available_capability(
 ) -> RFCICapabilityRecord:
     checked = RFCICapabilityRecord.model_validate(capability)
     if (
-        not checked.available
+        not config.enabled
+        or not checked.available
         or checked.status != "available"
         or checked.reason_code is not None
         or not _python_supports_rfci(checked.python_version)
@@ -1319,6 +1344,32 @@ def _worker_environment(evidence: _RFCICapabilityEvidence) -> dict[str, str]:
     return environment
 
 
+def _build_rfci_worker_argv(job_path: str | Path) -> tuple[str, ...]:
+    path = Path(job_path).resolve(strict=True)
+    root = path.parent.resolve(strict=True)
+    if not path.is_file() or not root.is_dir():
+        raise ValueError
+    cache = root / "cache"
+    cache.mkdir(mode=0o700)
+    checked_cache = cache.resolve(strict=True)
+    if (
+        cache.is_symlink()
+        or checked_cache.parent != root
+        or next(checked_cache.iterdir(), None) is not None
+    ):
+        raise ValueError
+    return (
+        sys.executable,
+        "-I",
+        "-B",
+        "-X",
+        f"pycache_prefix={checked_cache}",
+        "-m",
+        "secaware.discovery._rfci_worker",
+        str(path),
+    )
+
+
 def _run_subprocess_rfci(
     table: CausalTableRecord,
     matrix: np.ndarray,
@@ -1344,7 +1395,7 @@ def _run_subprocess_rfci(
                 job_path = directory / "job.json"
                 _write_exclusive(job_path, job_json, limit=_MAX_JOB_BYTES)
                 process_result = run_isolated_process(
-                    (sys.executable, "-I", "-m", "secaware.discovery._rfci_worker", str(job_path)),
+                    _build_rfci_worker_argv(job_path),
                     cwd=directory,
                     environment=_worker_environment(evidence),
                     timeout_seconds=config.timeout_seconds,
@@ -1403,6 +1454,16 @@ def _verify_loaded_distribution(evidence: _DistributionEvidence) -> None:
 
 def _execute_worker_job(job_path: str | Path) -> bytes:
     path = Path(job_path).resolve(strict=True)
+    cache = path.parent / "cache"
+    expected_cache = cache.resolve(strict=True)
+    if (
+        sys.dont_write_bytecode is not True
+        or sys.pycache_prefix != str(expected_cache)
+        or cache.is_symlink()
+        or expected_cache.parent != path.parent
+        or next(expected_cache.iterdir(), None) is not None
+    ):
+        raise ValueError
     file_stat = path.stat()
     if not stat.S_ISREG(file_stat.st_mode) or not 0 < file_stat.st_size <= _MAX_JOB_BYTES:
         raise ValueError
@@ -1480,6 +1541,13 @@ def validate_rfci_sensitivity_result(
         checked_capability = checked_result.capability
         if not checked_capability.available:
             if checked_result.pag is not None:
+                raise ValueError
+            if (
+                checked_capability.status == "disabled"
+                and checked_config.enabled
+                or checked_capability.status == "unavailable"
+                and not checked_config.enabled
+            ):
                 raise ValueError
             return checked_result
         _validate_available_capability(checked_capability, checked_config)
