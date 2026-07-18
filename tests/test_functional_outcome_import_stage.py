@@ -394,6 +394,7 @@ def test_downstream_registry_covers_existing_preceding_guard_name_sets() -> None
     expected_existing_downstream = {
         "analyze-jci",
         "analyze-rfci",
+        "estimate-confirmation-effects",
         "jci",
         "rfci",
         "mechanisms",

@@ -33,8 +33,13 @@ from secaware.schema.causal import (
 
 _MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
 _MAX_JOB_BYTES = 1024 * 1024
+_MAX_WORKER_BYTES = 64 * 1024
+_MAX_CONTROL_FRAME_BYTES = 64
 _POLL_INTERVAL_SECONDS = 0.01
 _JOIN_GRACE_SECONDS = 0.5
+_SPAWN_STARTUP_TIMEOUT_SECONDS = 30.0
+_READY_FRAME = b"secaware-fci-ready-v1"
+_GO_FRAME = b"secaware-fci-go-v1"
 
 _Worker = Callable[[Connection, bytes, np.ndarray], None]
 
@@ -121,6 +126,35 @@ def _causal_learn_fci_worker(
             pass
 
 
+def _bootstrap_fci_worker(
+    control_connection: Connection,
+    send_connection: Connection,
+    worker_pickle: bytes,
+    job_json: bytes,
+    matrix: np.ndarray,
+) -> None:
+    """Restore one parent-selected worker before starting its execution budget."""
+    try:
+        if type(worker_pickle) is not bytes or not 0 < len(worker_pickle) <= _MAX_WORKER_BYTES:
+            return
+        worker = ForkingPickler.loads(worker_pickle)
+        if not callable(worker):
+            return
+        control_connection.send_bytes(_READY_FRAME)
+        if control_connection.recv_bytes(_MAX_CONTROL_FRAME_BYTES) != _GO_FRAME:
+            return
+        control_connection.close()
+        worker(send_connection, job_json, matrix)
+    except BaseException:
+        return
+    finally:
+        for connection in (control_connection, send_connection):
+            try:
+                connection.close()
+            except BaseException:
+                pass
+
+
 def _terminate_and_join(process: multiprocessing.Process) -> None:
     try:
         if process.is_alive():
@@ -191,6 +225,8 @@ class SpawnedFCIRunner:
         process: multiprocessing.Process | None = None
         receive_connection: Connection | None = None
         send_connection: Connection | None = None
+        control_connection: Connection | None = None
+        child_control_connection: Connection | None = None
         reader: threading.Thread | None = None
         timed_out = False
         invalid_transport = False
@@ -233,18 +269,64 @@ class SpawnedFCIRunner:
             # Validate the exact bytes the child will receive and fail before spawn
             # when a test-injected worker cannot satisfy spawn pickling semantics.
             _decode_job(job_json)
-            ForkingPickler.dumps(self._worker)
+            worker_pickle = bytes(ForkingPickler.dumps(self._worker))
+            if not 0 < len(worker_pickle) <= _MAX_WORKER_BYTES:
+                raise ValueError
             context = multiprocessing.get_context("spawn")
             receive_connection, send_connection = context.Pipe(duplex=False)
+            control_connection, child_control_connection = context.Pipe(duplex=True)
             process = context.Process(
-                target=self._worker,
-                args=(send_connection, job_json, checked_matrix),
+                target=_bootstrap_fci_worker,
+                args=(
+                    child_control_connection,
+                    send_connection,
+                    worker_pickle,
+                    job_json,
+                    checked_matrix,
+                ),
             )
-            deadline = time.monotonic() + timeout
+            startup_deadline = time.monotonic() + _SPAWN_STARTUP_TIMEOUT_SECONDS
             failure_kind = FCISupervisorFailureKind.BACKEND_FAILURE
             process.start()
             send_connection.close()
             send_connection = None
+            child_control_connection.close()
+            child_control_connection = None
+
+            ready = False
+            invalid_control = False
+            while True:
+                remaining = startup_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _supervisor_error(
+                        "FCI worker startup timed out",
+                        failure_kind=FCISupervisorFailureKind.TIMEOUT,
+                    )
+                if control_connection.poll(min(_POLL_INTERVAL_SECONDS, remaining)):
+                    try:
+                        control_frame = control_connection.recv_bytes(_MAX_CONTROL_FRAME_BYTES)
+                        if control_frame == _READY_FRAME:
+                            ready = True
+                        else:
+                            invalid_control = True
+                    except EOFError:
+                        pass
+                    except OSError:
+                        invalid_control = True
+                    break
+                if not process.is_alive():
+                    process.join(_JOIN_GRACE_SECONDS)
+                    break
+            if invalid_control:
+                raise _supervisor_error(
+                    "FCI worker startup control failed validation",
+                    failure_kind=FCISupervisorFailureKind.INVALID_OUTPUT,
+                )
+            if not ready:
+                raise _supervisor_error(
+                    failure_kind=FCISupervisorFailureKind.BACKEND_FAILURE,
+                )
+
             events: Queue[tuple[str, bytes | None]] = Queue(maxsize=3)
             reader = threading.Thread(
                 target=_read_pipe_messages,
@@ -253,6 +335,10 @@ class SpawnedFCIRunner:
                 daemon=True,
             )
             reader.start()
+            deadline = time.monotonic() + timeout
+            control_connection.send_bytes(_GO_FRAME)
+            control_connection.close()
+            control_connection = None
 
             while True:
                 remaining = deadline - time.monotonic()
@@ -336,7 +422,12 @@ class SpawnedFCIRunner:
         finally:
             if process is not None:
                 _terminate_and_join(process)
-            for connection in (receive_connection, send_connection):
+            for connection in (
+                receive_connection,
+                send_connection,
+                control_connection,
+                child_control_connection,
+            ):
                 if connection is not None:
                     try:
                         connection.close()

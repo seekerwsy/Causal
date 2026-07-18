@@ -49,6 +49,21 @@ M5_STAGE_OUTPUTS = {
     "run-oracle-confirmation": ("oracle/confirmation_oracle.jsonl",),
 }
 
+FINAL_SEALED_STAGE_OUTPUTS = {
+    "import-functional-outcomes": ("analysis/functional_outcomes.jsonl",),
+    "report": (
+        "reports/discovery_pags.jsonl",
+        "reports/hypotheses.jsonl",
+        "reports/interventions.jsonl",
+        "reports/assignments.jsonl",
+        "reports/effects.csv",
+        "reports/jci_orientations.csv",
+        "reports/failures.csv",
+        "reports/hypothesis_cards.jsonl",
+        "reports/summary.md",
+    ),
+}
+
 
 def test_cli_does_not_define_jsonl_stage_transaction_runner() -> None:
     assert not hasattr(pipeline_cli, "_execute_jsonl_stage_transaction")
@@ -71,6 +86,29 @@ def test_run_store_rejects_reordered_or_incomplete_m5_outputs(
 ) -> None:
     store = _store(tmp_path)
     outputs = M5_STAGE_OUTPUTS[stage]
+    invalid = tuple(reversed(outputs)) if len(outputs) > 1 else ()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        store._validate_stage_output_contract(stage, invalid)
+
+    assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
+
+
+def test_run_store_registers_final_sealed_output_contracts(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    for stage, relative_outputs in FINAL_SEALED_STAGE_OUTPUTS.items():
+        assert store._requires_output_seal(stage)
+        store._validate_stage_output_contract(stage, relative_outputs)
+
+
+@pytest.mark.parametrize("stage", tuple(FINAL_SEALED_STAGE_OUTPUTS))
+def test_run_store_rejects_reordered_or_incomplete_final_outputs(
+    tmp_path: Path,
+    stage: str,
+) -> None:
+    store = _store(tmp_path)
+    outputs = FINAL_SEALED_STAGE_OUTPUTS[stage]
     invalid = tuple(reversed(outputs)) if len(outputs) > 1 else ()
 
     with pytest.raises(SecAwareError) as exc_info:
@@ -182,10 +220,10 @@ def _begin_deferred_stage_commit(
     return store.begin_stage_commit(stage)
 
 
-def _record_report_stage(store: RunStore, input_path: Path, outputs: list[Path]) -> Path:
-    assert store.should_skip_stage("report", [input_path], outputs, force=False) is False
-    store.record_stage("report", [input_path], outputs)
-    manifest_path = store.path(".stages", "report.json")
+def _record_test_stage(store: RunStore, input_path: Path, outputs: list[Path]) -> Path:
+    assert store.should_skip_stage("test-report", [input_path], outputs, force=False) is False
+    store.record_stage("test-report", [input_path], outputs)
+    manifest_path = store.path(".stages", "test-report.json")
     assert manifest_path.is_file()
     return manifest_path
 
@@ -199,7 +237,7 @@ def _hold_stage_lease_until_process_exit(
 ) -> None:
     store = RunStore(AppConfig.model_validate(config_payload))
     decision = store.should_skip_stage(
-        "report",
+        "test-report",
         [Path(input_path)],
         [Path(output_path)],
         force=False,
@@ -219,9 +257,9 @@ def _probe_held_committed_stage_from_process(
     output = Path(output_path)
     outcomes: list[int | str] = []
     for operation in (
-        lambda: store.should_skip_stage("report", [source], [output], force=True),
-        lambda: store.invalidate_stage("report"),
-        lambda: store.require_committed_stage("report", [source], [output]),
+        lambda: store.should_skip_stage("test-report", [source], [output], force=True),
+        lambda: store.invalidate_stage("test-report"),
+        lambda: store.require_committed_stage("test-report", [source], [output]),
     ):
         try:
             operation()
@@ -313,32 +351,32 @@ def test_stage_is_skippable_only_after_matching_manifest_is_recorded(tmp_path: P
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
-    store.record_stage("report", [input_path], [output_path])
+    store.record_stage("test-report", [input_path], [output_path])
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
-    manifest_path = store.path(".stages", "report.json")
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is True
+    manifest_path = store.path(".stages", "test-report.json")
     assert manifest_path.is_file()
     manifest = read_stage_manifest(manifest_path)
     assert manifest.schema_version == "1.0"
-    assert manifest.stage == "report"
+    assert manifest.stage == "test-report"
     assert manifest.inputs == {"inputs/source.txt": sha256_file(input_path)}
     assert manifest.outputs == ["reports/result.txt"]
     assert manifest.output_sha256 == {"reports/result.txt": sha256_path(output_path)}
     assert manifest.config_sha256 == canonical_sha256(store.config.model_dump(mode="json"))
     assert manifest.code_version == __version__
-    assert manifest.fingerprint == store.stage_fingerprint("report", [input_path])
+    assert manifest.fingerprint == store.stage_fingerprint("test-report", [input_path])
 
 
 def test_committed_stage_and_output_gates_accept_a_valid_manifest(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
+    manifest_path = _record_test_stage(store, input_path, [output_path])
     before = manifest_path.read_bytes()
 
-    store.require_committed_stage("report", [input_path], [output_path])
-    store.require_committed_output("report", [output_path])
+    store.require_committed_stage("test-report", [input_path], [output_path])
+    store.require_committed_output("test-report", [output_path])
 
     assert manifest_path.read_bytes() == before
 
@@ -346,16 +384,16 @@ def test_committed_stage_and_output_gates_accept_a_valid_manifest(tmp_path: Path
 def test_committed_gates_return_defensive_output_hash_copies(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    _record_report_stage(store, input_path, [output_path])
+    _record_test_stage(store, input_path, [output_path])
     expected = {"reports/result.txt": sha256_path(output_path)}
 
-    stage_hashes = store.require_committed_stage("report", [input_path], [output_path])
-    output_hashes = store.require_committed_output("report", [output_path])
+    stage_hashes = store.require_committed_stage("test-report", [input_path], [output_path])
+    output_hashes = store.require_committed_output("test-report", [output_path])
     stage_hashes["reports/result.txt"] = "0" * 64
     output_hashes.clear()
 
-    assert store.require_committed_stage("report", [input_path], [output_path]) == expected
-    assert store.require_committed_output("report", [output_path]) == expected
+    assert store.require_committed_stage("test-report", [input_path], [output_path]) == expected
+    assert store.require_committed_output("test-report", [output_path]) == expected
 
 
 def test_held_committed_stage_blocks_mutation_and_allows_holder_revalidation(
@@ -364,33 +402,39 @@ def test_held_committed_stage_blocks_mutation_and_allows_holder_revalidation(
     holder = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)
-    manifest_path = _record_report_stage(holder, input_path, [output_path])
+    manifest_path = _record_test_stage(holder, input_path, [output_path])
     manifest_bytes = manifest_path.read_bytes()
     expected = {"reports/result.txt": sha256_path(output_path)}
 
-    with holder.hold_committed_stage("report", [input_path], [output_path]) as hashes:
+    with holder.hold_committed_stage("test-report", [input_path], [output_path]) as hashes:
         hashes["reports/result.txt"] = "0" * 64
-        assert holder.require_committed_stage("report", [input_path], [output_path]) == expected
+        assert (
+            holder.require_committed_stage("test-report", [input_path], [output_path]) == expected
+        )
         for operation in (
-            lambda: holder.should_skip_stage("report", [input_path], [output_path], force=True),
-            lambda: holder.invalidate_stage("report"),
-            lambda: holder.abort_stage("report"),
-            lambda: contender.should_skip_stage("report", [input_path], [output_path], force=True),
-            lambda: contender.invalidate_stage("report"),
-            lambda: contender.require_committed_stage("report", [input_path], [output_path]),
+            lambda: holder.should_skip_stage(
+                "test-report", [input_path], [output_path], force=True
+            ),
+            lambda: holder.invalidate_stage("test-report"),
+            lambda: holder.abort_stage("test-report"),
+            lambda: contender.should_skip_stage(
+                "test-report", [input_path], [output_path], force=True
+            ),
+            lambda: contender.invalidate_stage("test-report"),
+            lambda: contender.require_committed_stage("test-report", [input_path], [output_path]),
         ):
             with pytest.raises(SecAwareError) as exc_info:
                 operation()
             assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
         assert manifest_path.read_bytes() == manifest_bytes
 
-    assert contender.require_committed_stage("report", [input_path], [output_path]) == expected
+    assert contender.require_committed_stage("test-report", [input_path], [output_path]) == expected
     assert manifest_path.read_bytes() == manifest_bytes
 
 
 @pytest.mark.parametrize(
     "stages",
-    [(), ("",), ("   ",), ("report", "report")],
+    [(), ("",), ("   ",), ("test-report", "test-report")],
 )
 def test_multi_stage_dependency_lease_rejects_invalid_stage_sets(
     tmp_path: Path,
@@ -460,12 +504,12 @@ def test_multi_stage_dependency_lease_acquires_in_total_order(
 def test_held_committed_stage_blocks_other_process_operations(tmp_path: Path) -> None:
     holder = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)
-    manifest_path = _record_report_stage(holder, input_path, [output_path])
+    manifest_path = _record_test_stage(holder, input_path, [output_path])
     manifest_bytes = manifest_path.read_bytes()
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
 
-    with holder.hold_committed_stage("report", [input_path], [output_path]):
+    with holder.hold_committed_stage("test-report", [input_path], [output_path]):
         process = context.Process(
             target=_probe_held_committed_stage_from_process,
             args=(
@@ -502,15 +546,15 @@ def test_held_committed_stage_releases_on_control_flow_exit(
     holder = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)
-    _record_report_stage(holder, input_path, [output_path])
+    _record_test_stage(holder, input_path, [output_path])
     signal = signal_type("private-held-dependency-control-flow")
 
     with pytest.raises(signal_type) as exc_info:
-        with holder.hold_committed_stage("report", [input_path], [output_path]):
+        with holder.hold_committed_stage("test-report", [input_path], [output_path]):
             raise signal
 
     assert exc_info.value is signal
-    assert contender.require_committed_stage("report", [input_path], [output_path])
+    assert contender.require_committed_stage("test-report", [input_path], [output_path])
 
 
 @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
@@ -522,7 +566,7 @@ def test_held_committed_stage_closes_handle_when_lock_acquisition_is_interrupted
     holder = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)
-    _record_report_stage(holder, input_path, [output_path])
+    _record_test_stage(holder, input_path, [output_path])
     signal = signal_type("private-held-dependency-acquisition-control-flow")
     real_lock = RunStore._lock_stage_handle
     handles: list[object] = []
@@ -538,7 +582,7 @@ def test_held_committed_stage_closes_handle_when_lock_acquisition_is_interrupted
         staticmethod(interrupt_after_lock),
     )
     with pytest.raises(signal_type) as exc_info:
-        with holder.hold_committed_stage("report", [input_path], [output_path]):
+        with holder.hold_committed_stage("test-report", [input_path], [output_path]):
             pytest.fail("interrupted lease acquisition must not enter the context")
 
     assert exc_info.value is signal
@@ -551,7 +595,7 @@ def test_held_committed_stage_closes_handle_when_lock_acquisition_is_interrupted
     if not was_closed:
         RunStore._release_stage_handle(handle)  # type: ignore[arg-type]
     assert was_closed
-    assert contender.require_committed_stage("report", [input_path], [output_path])
+    assert contender.require_committed_stage("test-report", [input_path], [output_path])
 
 
 def test_run_store_close_releases_held_dependency_without_deleting_manifest(
@@ -560,14 +604,14 @@ def test_run_store_close_releases_held_dependency_without_deleting_manifest(
     holder = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)
-    manifest_path = _record_report_stage(holder, input_path, [output_path])
-    guard = holder.hold_committed_stage("report", [input_path], [output_path])
+    manifest_path = _record_test_stage(holder, input_path, [output_path])
+    guard = holder.hold_committed_stage("test-report", [input_path], [output_path])
     guard.__enter__()
 
     holder.close()
 
     assert manifest_path.exists()
-    assert contender.require_committed_stage("report", [input_path], [output_path])
+    assert contender.require_committed_stage("test-report", [input_path], [output_path])
     guard.__exit__(None, None, None)
 
 
@@ -577,20 +621,20 @@ def test_stale_held_context_cannot_release_a_reacquired_dependency_lease(
     holder = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(holder)
-    _record_report_stage(holder, input_path, [output_path])
-    stale_guard = holder.hold_committed_stage("report", [input_path], [output_path])
+    _record_test_stage(holder, input_path, [output_path])
+    stale_guard = holder.hold_committed_stage("test-report", [input_path], [output_path])
     stale_guard.__enter__()
     holder.close()
-    current_guard = holder.hold_committed_stage("report", [input_path], [output_path])
+    current_guard = holder.hold_committed_stage("test-report", [input_path], [output_path])
     current_guard.__enter__()
 
     stale_guard.__exit__(None, None, None)
 
     with pytest.raises(SecAwareError) as exc_info:
-        contender.require_committed_stage("report", [input_path], [output_path])
+        contender.require_committed_stage("test-report", [input_path], [output_path])
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     current_guard.__exit__(None, None, None)
-    assert contender.require_committed_stage("report", [input_path], [output_path])
+    assert contender.require_committed_stage("test-report", [input_path], [output_path])
 
 
 @pytest.mark.parametrize(
@@ -603,7 +647,7 @@ def test_committed_stage_gate_rejects_forged_manifest_without_mutating_it(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
+    manifest_path = _record_test_stage(store, input_path, [output_path])
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     if forged_field == "stage":
         payload["stage"] = "private-forged-stage"
@@ -618,7 +662,7 @@ def test_committed_stage_gate_rejects_forged_manifest_without_mutating_it(
     forged_bytes = manifest_path.read_bytes()
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.require_committed_stage("report", [input_path], [output_path])
+        store.require_committed_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(
@@ -635,13 +679,13 @@ def test_committed_output_gate_rejects_tampering_without_mutating_manifest(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
+    manifest_path = _record_test_stage(store, input_path, [output_path])
     manifest_bytes = manifest_path.read_bytes()
     secret = "private-uncommitted-output"
     output_path.write_text(secret, encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.require_committed_output("report", [output_path])
+        store.require_committed_output("test-report", [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(exc_info.value, secret, str(output_path))
@@ -651,12 +695,12 @@ def test_committed_output_gate_rejects_tampering_without_mutating_manifest(
 def test_successful_skip_does_not_authorize_a_later_stage_record(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
+    manifest_path = _record_test_stage(store, input_path, [output_path])
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is True
     output_path.write_text("changed-without-execution\n", encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert not manifest_path.exists()
@@ -669,17 +713,17 @@ def test_same_stage_reentry_is_rejected_without_destroying_active_execution(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
     if state == "sealed":
-        store.seal_stage_outputs("report", [output_path])
+        store.seal_stage_outputs("test-report", [output_path])
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.should_skip_stage("report", [input_path], [output_path], force=False)
+        store.should_skip_stage("test-report", [input_path], [output_path], force=False)
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(exc_info.value)
-    store.record_stage("report", [input_path], [output_path])
-    assert store.path(".stages", "report.json").exists()
+    store.record_stage("test-report", [input_path], [output_path])
+    assert store.path(".stages", "test-report.json").exists()
 
 
 def test_same_stage_concurrent_decision_has_one_executor_and_one_conflict(
@@ -695,7 +739,7 @@ def test_same_stage_concurrent_decision_has_one_executor_and_one_conflict(
         start.wait()
         try:
             should_skip = store.should_skip_stage(
-                "report",
+                "test-report",
                 [input_path],
                 [output_path],
                 force=False,
@@ -716,8 +760,8 @@ def test_same_stage_concurrent_decision_has_one_executor_and_one_conflict(
 
     assert all(not thread.is_alive() for thread in threads)
     assert sorted(outcomes) == ["error-40", "skip-False"]
-    store.record_stage("report", [input_path], [output_path])
-    assert store.path(".stages", "report.json").exists()
+    store.record_stage("test-report", [input_path], [output_path])
+    assert store.path(".stages", "test-report.json").exists()
 
 
 def test_cross_instance_stage_lease_blocks_without_clearing_owner_state(
@@ -726,17 +770,17 @@ def test_cross_instance_stage_lease_blocks_without_clearing_owner_state(
     owner = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(owner)
-    lock_path = owner.path(".stages", "report.lock")
+    lock_path = owner.path(".stages", "test-report.lock")
     secret = "private-cross-instance-lease-secret"
 
-    assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert owner.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
     assert lock_path.is_file()
     inode = lock_path.stat().st_ino
 
     with pytest.raises(SecAwareError) as decision_info:
-        contender.should_skip_stage("report", [input_path], [output_path], force=False)
+        contender.should_skip_stage("test-report", [input_path], [output_path], force=False)
     with pytest.raises(SecAwareError) as invalidation_info:
-        contender.invalidate_stage("report")
+        contender.invalidate_stage("test-report")
 
     assert decision_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert invalidation_info.value.code is ErrorCode.MANIFEST_CONFLICT
@@ -746,13 +790,13 @@ def test_cross_instance_stage_lease_blocks_without_clearing_owner_state(
         str(os.getpid()),
         secret,
     )
-    assert owner.stage_is_active("report")
+    assert owner.stage_is_active("test-report")
 
-    owner.record_stage("report", [input_path], [output_path])
+    owner.record_stage("test-report", [input_path], [output_path])
 
     assert secret.encode() not in lock_path.read_bytes()
     assert str(os.getpid()).encode() not in lock_path.read_bytes()
-    assert contender.should_skip_stage("report", [input_path], [output_path], force=False)
+    assert contender.should_skip_stage("test-report", [input_path], [output_path], force=False)
     assert lock_path.is_file()
     assert lock_path.stat().st_ino == inode
 
@@ -1005,7 +1049,7 @@ def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
     owner = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(owner)
-    manifest_path = _record_report_stage(owner, input_path, [output_path])
+    manifest_path = _record_test_stage(owner, input_path, [output_path])
     before = manifest_path.read_bytes()
     entered = threading.Event()
     release = threading.Event()
@@ -1022,7 +1066,7 @@ def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
 
     def decide() -> None:
         try:
-            owner.should_skip_stage("report", [input_path], [output_path], force=False)
+            owner.should_skip_stage("test-report", [input_path], [output_path], force=False)
         except BaseException as error:
             decision_errors.append(error)
 
@@ -1031,9 +1075,9 @@ def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
     assert entered.wait(timeout=5)
     try:
         with pytest.raises(SecAwareError) as require_info:
-            contender.require_committed_stage("report", [input_path], [output_path])
+            contender.require_committed_stage("test-report", [input_path], [output_path])
         with pytest.raises(SecAwareError) as invalidate_info:
-            contender.invalidate_stage("report")
+            contender.invalidate_stage("test-report")
 
         assert require_info.value.code is ErrorCode.MANIFEST_CONFLICT
         assert invalidate_info.value.code is ErrorCode.MANIFEST_CONFLICT
@@ -1045,7 +1089,7 @@ def test_nonowner_cannot_trust_or_delete_manifest_while_owner_holds_lease(
 
     assert not thread.is_alive()
     assert decision_errors == []
-    owner.abort_stage("report")
+    owner.abort_stage("test-report")
 
 
 @pytest.mark.parametrize("release_path", ["skip", "record", "reject", "invalidate", "abort"])
@@ -1056,32 +1100,35 @@ def test_stage_lease_is_released_on_every_terminal_path(
     owner = _store(tmp_path)
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(owner)
-    lock_path = owner.path(".stages", "report.lock")
+    lock_path = owner.path(".stages", "test-report.lock")
 
     if release_path == "skip":
-        _record_report_stage(owner, input_path, [output_path])
-        assert owner.should_skip_stage("report", [input_path], [output_path], force=False)
+        _record_test_stage(owner, input_path, [output_path])
+        assert owner.should_skip_stage("test-report", [input_path], [output_path], force=False)
     else:
-        assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
+        assert (
+            owner.should_skip_stage("test-report", [input_path], [output_path], force=False)
+            is False
+        )
         if release_path == "record":
-            owner.record_stage("report", [input_path], [output_path])
+            owner.record_stage("test-report", [input_path], [output_path])
         elif release_path == "reject":
             output_path.unlink()
             with pytest.raises(SecAwareError):
-                owner.record_stage("report", [input_path], [output_path])
+                owner.record_stage("test-report", [input_path], [output_path])
             output_path.write_text("replacement\n", encoding="utf-8")
         elif release_path == "invalidate":
-            owner.invalidate_stage("report")
+            owner.invalidate_stage("test-report")
         else:
-            owner.abort_stage("report")
+            owner.abort_stage("test-report")
 
     assert lock_path.is_file()
     acquired = contender.should_skip_stage(
-        "report", [input_path], [output_path], force=release_path != "skip"
+        "test-report", [input_path], [output_path], force=release_path != "skip"
     )
     assert acquired is (release_path == "skip")
     if not acquired:
-        contender.abort_stage("report")
+        contender.abort_stage("test-report")
 
 
 def test_closed_stage_lease_handle_allows_another_store_to_recover(
@@ -1091,12 +1138,15 @@ def test_closed_stage_lease_handle_allows_another_store_to_recover(
     contender = _store(tmp_path)
     input_path, output_path = _input_and_output(owner)
 
-    assert owner.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    owner._stage_leases["report"].close()
+    assert owner.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
+    owner._stage_leases["test-report"].close()
 
-    assert contender.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    contender.abort_stage("report")
-    owner.abort_stage("report")
+    assert (
+        contender.should_skip_stage("test-report", [input_path], [output_path], force=False)
+        is False
+    )
+    contender.abort_stage("test-report")
+    owner.abort_stage("test-report")
 
 
 def test_stage_decision_baseexception_releases_lease_and_pending_state(
@@ -1115,12 +1165,15 @@ def test_stage_decision_baseexception_releases_lease_and_pending_state(
     monkeypatch.setattr(run_store_module, "manifest_allows_skip", interrupt_decision)
 
     with pytest.raises(KeyboardInterrupt):
-        owner.should_skip_stage("report", [input_path], [output_path], force=False)
+        owner.should_skip_stage("test-report", [input_path], [output_path], force=False)
 
     monkeypatch.setattr(run_store_module, "manifest_allows_skip", real_allows_skip)
-    assert not owner.stage_is_active("report")
-    assert contender.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    contender.abort_stage("report")
+    assert not owner.stage_is_active("test-report")
+    assert (
+        contender.should_skip_stage("test-report", [input_path], [output_path], force=False)
+        is False
+    )
+    contender.abort_stage("test-report")
 
 
 def test_stage_lease_is_released_automatically_when_owner_process_exits(
@@ -1147,7 +1200,7 @@ def test_stage_lease_is_released_automatically_when_owner_process_exits(
     assert receive_ready.recv() is False
     try:
         with pytest.raises(SecAwareError) as exc_info:
-            store.should_skip_stage("report", [input_path], [output_path], force=False)
+            store.should_skip_stage("test-report", [input_path], [output_path], force=False)
         assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     finally:
         release.set()
@@ -1158,8 +1211,8 @@ def test_stage_lease_is_released_automatically_when_owner_process_exits(
         receive_ready.close()
 
     assert process.exitcode == 0
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    store.abort_stage("report")
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
+    store.abort_stage("test-report")
 
 
 def test_stage_inputs_rejects_a_missing_required_input(tmp_path: Path) -> None:
@@ -1321,12 +1374,12 @@ def test_compatibility_generation_seals_canonical_output_before_commit(
 def test_stage_skip_is_invalidated_by_input_content_change(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    store.record_stage("report", [input_path], [output_path])
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
+    store.record_stage("test-report", [input_path], [output_path])
 
     input_path.write_text("input-v2\n", encoding="utf-8")
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
 
 def test_stage_skip_is_invalidated_by_resolved_config_change(tmp_path: Path) -> None:
@@ -1334,19 +1387,19 @@ def test_stage_skip_is_invalidated_by_resolved_config_change(tmp_path: Path) -> 
     input_path, output_path = _input_and_output(original_store)
     assert (
         original_store.should_skip_stage(
-            "report",
+            "test-report",
             [input_path],
             [output_path],
             force=False,
         )
         is False
     )
-    original_store.record_stage("report", [input_path], [output_path])
+    original_store.record_stage("test-report", [input_path], [output_path])
     changed_store = _store(tmp_path, bootstrap_samples=201)
 
     assert (
         changed_store.should_skip_stage(
-            "report",
+            "test-report",
             [input_path],
             [output_path],
             force=False,
@@ -1361,22 +1414,22 @@ def test_stage_skip_requires_every_declared_output(tmp_path: Path) -> None:
     second_output = store.path("reports", "second.txt")
     second_output.write_text("second\n", encoding="utf-8")
     outputs = [first_output, second_output]
-    assert store.should_skip_stage("report", [input_path], outputs, force=False) is False
-    store.record_stage("report", [input_path], outputs)
+    assert store.should_skip_stage("test-report", [input_path], outputs, force=False) is False
+    store.record_stage("test-report", [input_path], outputs)
 
     second_output.unlink()
 
-    assert store.should_skip_stage("report", [input_path], outputs, force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], outputs, force=False) is False
 
 
 def test_stage_skip_is_invalidated_by_output_content_change(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
+    manifest_path = _record_test_stage(store, input_path, [output_path])
 
     output_path.write_text("tampered-output\n", encoding="utf-8")
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
     assert not manifest_path.exists()
 
 
@@ -1388,12 +1441,12 @@ def test_record_stage_hashes_directory_outputs(tmp_path: Path) -> None:
     output_path.mkdir()
     (output_path / "result.txt").write_text("output\n", encoding="utf-8")
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    store.record_stage("report", [input_path], [output_path])
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
+    store.record_stage("test-report", [input_path], [output_path])
 
-    manifest = read_stage_manifest(store.path(".stages", "report.json"))
+    manifest = read_stage_manifest(store.path(".stages", "test-report.json"))
     assert manifest.output_sha256 == {"reports/directory-output": sha256_path(output_path)}
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is True
 
 
 def test_sealed_output_hash_is_committed_as_the_manifest_expectation(
@@ -1402,14 +1455,14 @@ def test_sealed_output_hash_is_committed_as_the_manifest_expectation(
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
     expected_hash = sha256_path(output_path)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
-    store.seal_stage_outputs("report", [output_path])
-    store.verify_sealed_outputs("report", [output_path])
-    assert not store.path(".stages", "report.json").exists()
-    store.record_stage("report", [input_path], [output_path])
+    store.seal_stage_outputs("test-report", [output_path])
+    store.verify_sealed_outputs("test-report", [output_path])
+    assert not store.path(".stages", "test-report.json").exists()
+    store.record_stage("test-report", [input_path], [output_path])
 
-    manifest = read_stage_manifest(store.path(".stages", "report.json"))
+    manifest = read_stage_manifest(store.path(".stages", "test-report.json"))
     assert manifest.output_sha256 == {"reports/result.txt": expected_hash}
 
 
@@ -1418,19 +1471,19 @@ def test_sealed_output_verification_rejects_mutation_and_clears_stage_state(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = store.path(".stages", "report.json")
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
-    store.seal_stage_outputs("report", [output_path])
+    manifest_path = store.path(".stages", "test-report.json")
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
+    store.seal_stage_outputs("test-report", [output_path])
     output_path.write_text("changed-after-seal\n", encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.verify_sealed_outputs("report", [output_path])
+        store.verify_sealed_outputs("test-report", [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(exc_info.value)
     assert not manifest_path.exists()
     with pytest.raises(SecAwareError) as record_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
     assert record_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
@@ -1441,13 +1494,16 @@ def test_output_seal_misuse_invalidates_all_stage_authorization(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = store.path(".stages", "report.json")
+    manifest_path = store.path(".stages", "test-report.json")
     if misuse == "without_pending":
-        manifest_path = _record_report_stage(store, input_path, [output_path])
+        manifest_path = _record_test_stage(store, input_path, [output_path])
     else:
-        assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+        assert (
+            store.should_skip_stage("test-report", [input_path], [output_path], force=False)
+            is False
+        )
         if misuse == "duplicate":
-            store.seal_stage_outputs("report", [output_path])
+            store.seal_stage_outputs("test-report", [output_path])
     seal_outputs = [output_path]
     if misuse == "paths_mismatch":
         other_output = store.path("reports", "other.txt")
@@ -1455,13 +1511,13 @@ def test_output_seal_misuse_invalidates_all_stage_authorization(
         seal_outputs = [other_output]
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.seal_stage_outputs("report", seal_outputs)
+        store.seal_stage_outputs("test-report", seal_outputs)
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(exc_info.value)
     assert not manifest_path.exists()
     with pytest.raises(SecAwareError) as record_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
     assert record_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
@@ -1470,10 +1526,10 @@ def test_output_seal_path_escape_is_a_safe_manifest_conflict(tmp_path: Path) -> 
     input_path, output_path = _input_and_output(store)
     outside_output = tmp_path / "private-outside-output.txt"
     outside_output.write_text("private output\n", encoding="utf-8")
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.seal_stage_outputs("report", [outside_output])
+        store.seal_stage_outputs("test-report", [outside_output])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(
@@ -1482,7 +1538,7 @@ def test_output_seal_path_escape_is_a_safe_manifest_conflict(tmp_path: Path) -> 
         "private-outside-output",
     )
     with pytest.raises(SecAwareError):
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
 
 def test_output_seal_hash_failure_is_safe_and_clears_pending_state(
@@ -1493,7 +1549,7 @@ def test_output_seal_hash_failure_is_safe_and_clears_pending_state(
     input_path, output_path = _input_and_output(store)
     secret = "private-seal-hash-failure"
     real_sha256_path = run_store_module.sha256_path
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
     def fail_output_hash(path: Path) -> str:
         if Path(path) == output_path:
@@ -1503,12 +1559,12 @@ def test_output_seal_hash_failure_is_safe_and_clears_pending_state(
     monkeypatch.setattr(run_store_module, "sha256_path", fail_output_hash)
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.seal_stage_outputs("report", [output_path])
+        store.seal_stage_outputs("test-report", [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(exc_info.value, secret, str(output_path), "OSError")
     with pytest.raises(SecAwareError):
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
 
 def test_generation_stage_record_requires_a_prior_output_seal(tmp_path: Path) -> None:
@@ -1594,7 +1650,7 @@ def test_record_stage_rejects_output_changed_after_manifest_write(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = store.path(".stages", "report.json")
+    manifest_path = store.path(".stages", "test-report.json")
     real_write = run_store_module.write_stage_manifest
 
     def write_then_change(path: Path, manifest: object) -> None:
@@ -1602,10 +1658,10 @@ def test_record_stage_rejects_output_changed_after_manifest_write(
         output_path.write_text("changed-after-manifest-write\n", encoding="utf-8")
 
     monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_change)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert exc_info.value.details == {}
@@ -1618,7 +1674,7 @@ def test_record_stage_wraps_manifest_publish_failure_without_details(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = store.path(".stages", "report.json")
+    manifest_path = store.path(".stages", "test-report.json")
     real_write = run_store_module.write_stage_manifest
     secret = "private-manifest-publish-error"
 
@@ -1627,10 +1683,10 @@ def test_record_stage_wraps_manifest_publish_failure_without_details(
         raise OSError(secret)
 
     monkeypatch.setattr(run_store_module, "write_stage_manifest", write_then_fail)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     _assert_manifest_error_is_safe(
@@ -1648,7 +1704,7 @@ def test_record_stage_wraps_output_hash_failure_without_path_or_error(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = store.path(".stages", "report.json")
+    manifest_path = store.path(".stages", "test-report.json")
     real_sha256_path = run_store_module.sha256_path
     secret = "private-output-hash-error"
 
@@ -1658,10 +1714,10 @@ def test_record_stage_wraps_output_hash_failure_without_path_or_error(
         return real_sha256_path(path)
 
     monkeypatch.setattr(run_store_module, "sha256_path", fail_output_hash)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     error = exc_info.value
     assert error.code is ErrorCode.MANIFEST_CONFLICT
@@ -1673,9 +1729,9 @@ def test_force_disables_stage_skip(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
-    store.record_stage("report", [input_path], [output_path])
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is True
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=True) is False
+    store.record_stage("test-report", [input_path], [output_path])
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is True
 
 
 @pytest.mark.parametrize("invalidation", ["force", "input", "config", "outputs"])
@@ -1686,7 +1742,7 @@ def test_execution_decision_invalidates_previous_manifest(
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
     outputs = [output_path]
-    manifest_path = _record_report_stage(store, input_path, outputs)
+    manifest_path = _record_test_stage(store, input_path, outputs)
     force = invalidation == "force"
     if invalidation == "input":
         input_path.write_text("changed-input\n", encoding="utf-8")
@@ -1697,7 +1753,7 @@ def test_execution_decision_invalidates_previous_manifest(
         second_output.write_text("second\n", encoding="utf-8")
         outputs = [output_path, second_output]
 
-    assert store.should_skip_stage("report", [input_path], outputs, force=force) is False
+    assert store.should_skip_stage("test-report", [input_path], outputs, force=force) is False
     assert not manifest_path.exists()
 
 
@@ -1706,35 +1762,35 @@ def test_failed_stage_cannot_reuse_manifest_after_partial_output_overwrite(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
+    manifest_path = _record_test_stage(store, input_path, [output_path])
 
-    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=True) is False
     assert not manifest_path.exists()
     output_path.write_text("partial-stage-output\n", encoding="utf-8")
 
     with pytest.raises(SecAwareError) as reentry_info:
-        store.should_skip_stage("report", [input_path], [output_path], force=False)
+        store.should_skip_stage("test-report", [input_path], [output_path], force=False)
     assert reentry_info.value.code is ErrorCode.MANIFEST_CONFLICT
-    store.invalidate_stage("report")
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    store.invalidate_stage("test-report")
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
 
 def test_record_conflict_cannot_restore_stale_manifest_skip(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
     original_input = input_path.read_text(encoding="utf-8")
-    manifest_path = _record_report_stage(store, input_path, [output_path])
-    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+    manifest_path = _record_test_stage(store, input_path, [output_path])
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=True) is False
     output_path.write_text("partial-stage-output\n", encoding="utf-8")
     input_path.write_text("changed-during-stage\n", encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert not manifest_path.exists()
     input_path.write_text(original_input, encoding="utf-8")
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
 
 def test_manifest_invalidation_wraps_unlink_failure(
@@ -1743,7 +1799,7 @@ def test_manifest_invalidation_wraps_unlink_failure(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    _record_report_stage(store, input_path, [output_path])
+    _record_test_stage(store, input_path, [output_path])
 
     def fail_unlink(path: Path, missing_ok: bool = False) -> None:
         del path, missing_ok
@@ -1752,7 +1808,7 @@ def test_manifest_invalidation_wraps_unlink_failure(
     monkeypatch.setattr(Path, "unlink", fail_unlink)
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.should_skip_stage("report", [input_path], [output_path], force=True)
+        store.should_skip_stage("test-report", [input_path], [output_path], force=True)
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
     assert "private filesystem failure" not in str(exc_info.value)
@@ -1763,14 +1819,14 @@ def test_public_stage_invalidation_clears_manifest_and_pending_snapshot(
 ) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    manifest_path = _record_report_stage(store, input_path, [output_path])
-    assert store.should_skip_stage("report", [input_path], [output_path], force=True) is False
+    manifest_path = _record_test_stage(store, input_path, [output_path])
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=True) is False
 
-    store.invalidate_stage("report")
+    store.invalidate_stage("test-report")
 
     assert not manifest_path.exists()
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
 
@@ -1779,11 +1835,11 @@ def test_record_stage_rejects_a_missing_declared_output(tmp_path: Path) -> None:
     input_path = store.path("inputs", "source.txt")
     input_path.write_text("input\n", encoding="utf-8")
     output_path = store.path("reports", "missing.txt")
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
 
     with pytest.raises(SecAwareError) as exc_info:
         store.record_stage(
-            "report",
+            "test-report",
             [input_path],
             [output_path],
         )
@@ -1792,7 +1848,7 @@ def test_record_stage_rejects_a_missing_declared_output(tmp_path: Path) -> None:
 
     output_path.write_text("late-output\n", encoding="utf-8")
     with pytest.raises(SecAwareError) as retry_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert retry_info.value.code is ErrorCode.MANIFEST_CONFLICT
 
@@ -1802,36 +1858,36 @@ def test_record_stage_requires_an_execution_snapshot(tmp_path: Path) -> None:
     input_path, output_path = _input_and_output(store)
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
-    assert not store.path(".stages", "report.json").exists()
+    assert not store.path(".stages", "test-report.json").exists()
 
 
 def test_record_stage_rejects_input_changed_after_execution_snapshot(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
     input_path.write_text("changed-during-stage\n", encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
-    assert not store.path(".stages", "report.json").exists()
+    assert not store.path(".stages", "test-report.json").exists()
 
 
 def test_record_stage_rejects_config_changed_after_execution_snapshot(tmp_path: Path) -> None:
     store = _store(tmp_path)
     input_path, output_path = _input_and_output(store)
-    assert store.should_skip_stage("report", [input_path], [output_path], force=False) is False
+    assert store.should_skip_stage("test-report", [input_path], [output_path], force=False) is False
     store.config.analysis.bootstrap_samples += 1
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [output_path])
+        store.record_stage("test-report", [input_path], [output_path])
 
     assert exc_info.value.code is ErrorCode.MANIFEST_CONFLICT
-    assert not store.path(".stages", "report.json").exists()
+    assert not store.path(".stages", "test-report.json").exists()
 
 
 def test_record_stage_rejects_output_path_escape(tmp_path: Path) -> None:
@@ -1842,10 +1898,10 @@ def test_record_stage_rejects_output_path_escape(tmp_path: Path) -> None:
     outside_output.write_text("outside\n", encoding="utf-8")
 
     with pytest.raises(SecAwareError) as exc_info:
-        store.record_stage("report", [input_path], [outside_output])
+        store.record_stage("test-report", [input_path], [outside_output])
 
     assert exc_info.value.code is ErrorCode.CONTRACT
-    assert not store.path(".stages", "report.json").exists()
+    assert not store.path(".stages", "test-report.json").exists()
 
 
 def test_cli_source_no_longer_calls_legacy_should_skip() -> None:

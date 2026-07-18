@@ -166,42 +166,28 @@ def test_heuristic_and_two_arm_commands_are_not_cli_reachable() -> None:
     assert "discover_hypotheses" not in source
     assert "tsg-qcd" not in help_result.output.casefold()
     registered = {item.name for item in app.registered_commands}
-    assert {
-        "confirm",
-        "report",
-        "intervene",
-        "generate-counterfactual",
-    }.isdisjoint(registered)
+    assert {"intervene", "generate-counterfactual"}.isdisjoint(registered)
 
 
-@pytest.mark.parametrize(
-    "command",
-    ("plan-generation", "generate", "import-generation", "run-oracle"),
-)
-def test_generic_cli_rejects_counterfactual_condition(
-    command: str,
+def test_oracle_cli_rejects_counterfactual_condition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    arguments = [command, "--condition", "counterfactual", "--config", "missing.yaml"]
-    if command == "import-generation":
-        arguments.extend(("--results", "missing.jsonl"))
-    if command == "run-oracle":
-        monkeypatch.setattr(
-            cli_module,
-            "_load",
-            lambda *_args, **_kwargs: pytest.fail("invalid condition reached the callback"),
-        )
-    result = CliRunner().invoke(app, arguments)
+    monkeypatch.setattr(
+        cli_module,
+        "_load",
+        lambda *_args, **_kwargs: pytest.fail("invalid condition reached the callback"),
+    )
 
-    if command == "run-oracle":
-        normalized = " ".join(result.output.split()).casefold()
-        assert result.exit_code == 2
-        assert "invalid value" in normalized
-        assert "observed" in normalized
-        assert "confirmation" in normalized
-        return
-    assert result.exit_code == int(ErrorCode.CONFIG)
-    assert "only the observed condition is reachable" in result.output
+    result = CliRunner().invoke(
+        app,
+        ["run-oracle", "--condition", "counterfactual", "--config", "missing.yaml"],
+    )
+
+    normalized = " ".join(result.output.split()).casefold()
+    assert result.exit_code == 2
+    assert "invalid value" in normalized
+    assert "observed" in normalized
+    assert "confirmation" in normalized
 
 
 def test_fci_stage_commits_reference_bootstrap_support_and_freeze(

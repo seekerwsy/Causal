@@ -9,7 +9,7 @@ from io import StringIO
 import json
 from typing import Iterable, Mapping, Sequence
 
-from secaware.pipeline.artifact import canonical_sha256
+from secaware.canonical import canonical_sha256
 from secaware.schema.causal import (
     BootstrapFailureRecord,
     DiscoveryFailureRecord,
@@ -366,14 +366,6 @@ def render_summary(
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def write_reports(*args: object, **kwargs: object) -> object:
-    """Compatibility import surface; the transactional implementation lives in the stage."""
-
-    from secaware.pipeline.stages.reporting import write_reports as stage_write_reports
-
-    return stage_write_reports(*args, **kwargs)
-
-
 __all__ = [
     "EFFECT_FIELDS",
     "FAILURE_FIELDS",
@@ -390,5 +382,4 @@ __all__ = [
     "canonical_markdown_code",
     "decode_canonical_markdown_code",
     "render_summary",
-    "write_reports",
 ]

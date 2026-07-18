@@ -26,7 +26,7 @@ from secaware.schema.causal import (
 )
 from secaware.schema.experiments import ArmRole
 from secaware.schema.outcomes import JCIObservationRecord
-from tests.synthetic.scm_fixtures import deterministic_context_scm
+from synthetic.scm_fixtures import deterministic_context_scm
 
 
 _ARM_ROLES = (

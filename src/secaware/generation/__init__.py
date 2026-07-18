@@ -1,7 +1,6 @@
 from secaware.generation.providers import get_provider
 from secaware.generation.request_planner import (
     plan_confirmation_requests,
-    plan_counterfactual_requests,
     plan_observed_requests,
     sha256_text,
 )
@@ -18,7 +17,6 @@ __all__ = [
     "canonical_generated_code_from_request",
     "execute_confirmation_requests",
     "import_offline_results",
-    "plan_counterfactual_requests",
     "plan_confirmation_requests",
     "plan_observed_requests",
     "sha256_text",

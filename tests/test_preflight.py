@@ -34,10 +34,16 @@ CLI_COMMANDS = [
     "preflight",
     "extract-prompt-tsg",
     "generate-observed",
-    "plan-generation",
-    "import-generation",
     "run-oracle",
     "discover",
+    "build-confirmation-variants",
+    "randomize-confirmation",
+    "generate-confirmation",
+    "import-functional-outcomes",
+    "confirm",
+    "analyze-jci",
+    "analyze-rfci",
+    "report",
     "run-all",
 ]
 
@@ -917,7 +923,7 @@ def test_every_cli_command_uses_safe_error_boundary(
     )
 
     args = [command, "--config", str(config_path)]
-    if command == "import-generation":
+    if command == "import-functional-outcomes":
         args.extend(["--results", str(tmp_path / "unused-results.jsonl")])
     result = CliRunner().invoke(app, args)
 

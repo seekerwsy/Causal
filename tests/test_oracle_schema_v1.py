@@ -647,7 +647,7 @@ def test_oracle_config_validation_hides_values_and_frame_locals() -> None:
     _assert_safe_validation_error(exc_info.value, secret, field)
 
 
-def test_results_module_reexports_canonical_oracle_contracts() -> None:
+def test_schema_package_reexports_canonical_oracle_contracts() -> None:
     from secaware.schema import (
         AnalyzerFindingRecord as PackageAnalyzerFindingRecord,
     )
@@ -655,13 +655,8 @@ def test_results_module_reexports_canonical_oracle_contracts() -> None:
         AnalyzerProvenanceRecord as PackageAnalyzerProvenanceRecord,
     )
     from secaware.schema import OracleRecord as PackageOracleRecord
-    from secaware.schema.results import FindingRecord
-    from secaware.schema.results import OracleRecord as ResultsOracleRecord
-    from secaware.schema.results import SecurityLabel as ResultsSecurityLabel
 
-    assert FindingRecord is AnalyzerFindingRecord
-    assert ResultsOracleRecord is OracleRecord is PackageOracleRecord
-    assert ResultsSecurityLabel is SecurityLabel
+    assert OracleRecord is PackageOracleRecord
     assert PackageAnalyzerFindingRecord is AnalyzerFindingRecord
     assert PackageAnalyzerProvenanceRecord is AnalyzerProvenanceRecord
 

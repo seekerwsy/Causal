@@ -7,8 +7,9 @@ import json
 from importlib.metadata import entry_points, metadata, requires
 from pathlib import Path
 import shutil
-import tomllib
 import zipfile
+
+import tomllib
 
 import pytest
 
@@ -24,6 +25,21 @@ from secaware.extractors.llm_facts import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
+MIGRATION_FILES = (
+    Path("docs/migrations/prompt-tsg-v2.md"),
+    Path("docs/migrations/fci-discovery.md"),
+    Path("docs/migrations/randomized-confirmation.md"),
+    Path("docs/migrations/prompt-only-fci-jci.md"),
+)
+
+
+def test_repository_root_has_no_uv_lock() -> None:
+    assert not (PROJECT_ROOT / "uv.lock").exists()
+
+
+def test_project_declares_python312_as_the_only_supported_minor_line() -> None:
+    project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["requires-python"] == ">=3.12,<3.13"
 
 
 def _clean_source_ignore(_directory: str, names: list[str]) -> set[str]:
@@ -45,9 +61,9 @@ def _copy_clean_build_source(source: Path, destination: Path) -> None:
     destination.mkdir(parents=True)
     for filename in ("pyproject.toml", "README.md"):
         shutil.copy2(source / filename, destination / filename)
-    migration = Path("docs/migrations/randomized-confirmation.md")
-    (destination / migration.parent).mkdir(parents=True)
-    shutil.copy2(source / migration, destination / migration)
+    for migration in MIGRATION_FILES:
+        (destination / migration.parent).mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source / migration, destination / migration)
     shutil.copytree(
         source / "src",
         destination / "src",
@@ -294,10 +310,15 @@ def test_python_m_secaware_oracle_cli_shows_oracle_help() -> None:
     assert "standalone security oracle" in result.stdout
 
 
-def test_built_wheel_contains_templates_and_randomized_confirmation_migration(
+def test_built_wheel_contains_templates_and_all_breaking_migrations(
     tmp_path: Path,
 ) -> None:
     assert not any(tmp_path.iterdir())
+    assert all((PROJECT_ROOT / migration).is_file() for migration in MIGRATION_FILES)
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert set(pyproject["tool"]["setuptools"]["data-files"]["share/doc/secaware/migrations"]) == {
+        migration.as_posix() for migration in MIGRATION_FILES
+    }
     original_generated = _project_generated_fingerprint()
     clean_source = tmp_path / "clean-source"
     _copy_clean_build_source(PROJECT_ROOT, clean_source)
@@ -340,6 +361,22 @@ def test_built_wheel_contains_templates_and_randomized_confirmation_migration(
     wheels = tuple(wheel_dir.glob("*.whl"))
     assert len(wheels) == 1
     with zipfile.ZipFile(wheels[0]) as archive:
+        assert not any(name == "tests" or name.startswith("tests/") for name in archive.namelist())
+        metadata_members = [
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        ]
+        assert len(metadata_members) == 1
+        metadata_text = archive.read(metadata_members[0]).decode("utf-8")
+        requires_python = [
+            line.removeprefix("Requires-Python: ")
+            for line in metadata_text.replace("\r\n", "\n").splitlines()
+            if line.startswith("Requires-Python: ")
+        ]
+        assert len(requires_python) == 1
+        assert {specifier.strip() for specifier in requires_python[0].split(",")} == {
+            ">=3.12",
+            "<3.13",
+        }
         packaged = {
             member: archive.read(member)
             for member in (
@@ -347,13 +384,15 @@ def test_built_wheel_contains_templates_and_randomized_confirmation_migration(
                 "secaware/extractors/prompts/llm_direct_graph_v1.txt",
             )
         }
-        migration_members = tuple(
-            name
-            for name in archive.namelist()
-            if name.endswith("share/doc/secaware/migrations/randomized-confirmation.md")
-        )
-        assert len(migration_members) == 1
-        packaged_migration = archive.read(migration_members[0])
+        packaged_migrations = {}
+        for migration in MIGRATION_FILES:
+            migration_members = tuple(
+                name
+                for name in archive.namelist()
+                if name.endswith(f"share/doc/secaware/migrations/{migration.name}")
+            )
+            assert len(migration_members) == 1
+            packaged_migrations[migration] = archive.read(migration_members[0])
 
     expected = {
         "secaware/extractors/prompts/llm_facts_v1.txt": (
@@ -371,10 +410,9 @@ def test_built_wheel_contains_templates_and_randomized_confirmation_migration(
         assert payload == source_payload
         assert hashlib.sha256(payload).hexdigest() == expected_sha256
 
-    assert (
-        packaged_migration
-        == (PROJECT_ROOT / "docs" / "migrations" / "randomized-confirmation.md").read_bytes()
-    )
+    assert packaged_migrations == {
+        migration: (PROJECT_ROOT / migration).read_bytes() for migration in MIGRATION_FILES
+    }
 
     _assert_wheel_resources_load_in_isolation(wheels[0], tmp_path / "isolated")
 
@@ -383,8 +421,7 @@ def test_package_and_config_examples_contain_no_embedded_secrets() -> None:
     candidates = (
         PROJECT_ROOT / "README.md",
         PROJECT_ROOT / "pyproject.toml",
-        PROJECT_ROOT / "docs" / "migrations" / "prompt-tsg-v2.md",
-        PROJECT_ROOT / "docs" / "migrations" / "randomized-confirmation.md",
+        *(PROJECT_ROOT / migration for migration in MIGRATION_FILES),
         *(PROJECT_ROOT / "configs").glob("*.yaml"),
         *(PROJECT_ROOT / "src" / "secaware" / "extractors" / "prompts").glob("*.txt"),
     )

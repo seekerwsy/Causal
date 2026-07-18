@@ -27,7 +27,7 @@ from secaware.schema.tsg import (
     TSGScalar,
     TSG_SCHEMA_VERSION,
 )
-from secaware.tsg.catalog import MOTIF_VERSION, ONTOLOGY_VERSION
+from secaware.tsg.catalog import MOTIF_VERSION, ONTOLOGY_VERSION, PROMPT_TSG_CATALOG
 
 _BUILDER_NODE_FIELDS = frozenset({"node_type", "label", "attributes"})
 _COMMITTED_NODE_FIELDS = _BUILDER_NODE_FIELDS | {"semantic_key_sha256"}
@@ -538,7 +538,6 @@ def _graph_from_models(
 
 
 def _derive_shadow(graph: nx.MultiDiGraph) -> dict[str, TSGScalar]:
-    from secaware.schema.hypotheses import FactorType
     from secaware.schema.tsg import MotifId
     from secaware.tsg.features import derive_shadow
 
@@ -549,7 +548,7 @@ def _derive_shadow(graph: nx.MultiDiGraph) -> dict[str, TSGScalar]:
             raise _InvalidInput from None
         raise RuntimeError from None
     expected_boolean_keys = {
-        *(f"factor.{factor.value}_required" for factor in FactorType),
+        *(f"feature.{entry.target_feature_id}.required" for entry in PROMPT_TSG_CATALOG),
         *(f"motif.{motif.value}" for motif in MotifId),
     }
     expected_keys = expected_boolean_keys | {"graph.node_count", "graph.edge_count"}

@@ -6,7 +6,7 @@
 
 **Architecture:** Exact assignment/outcome joins first produce one outcome row per committed assignment. Primary effects use only assigned arms and task-cluster resampling; JCI is a downstream structural analysis using the same rows plus one categorical arm context, while RFCI remains an isolated optional backend. Reports consume committed effect/PAG/failure artifacts and cannot feed back into hypotheses, variants, assignments, or effects.
 
-**Tech Stack:** Python 3.10/3.12, Pydantic 2, NumPy/Pandas, causal-learn 0.1.4.7, existing deterministic RNG, optional py-tetrad commit `a30707264aa4363a23ac5f136a70bbdd62212f07`, optional JPype1 1.7.1/JDK 21+, pytest, Ruff.
+**Tech Stack:** Python 3.12, Pydantic 2, NumPy/Pandas, causal-learn 0.1.4.7, existing deterministic RNG, optional py-tetrad commit `a30707264aa4363a23ac5f136a70bbdd62212f07`, optional JPype1 1.7.1/JDK 21+, pytest, Ruff.
 
 ---
 
@@ -666,7 +666,7 @@ def test_rfci_adapter_uses_gsquare_and_never_sets_required_edges(fake_tetrad_sea
 ```
 
 Cover disabled, missing JPype, missing py-tetrad, missing/old Java, wrong py-tetrad commit/JAR hash,
-Python 3.10 minimum behavior, Python 3.12 capability, BK tiers/forbidden pairs, required-edge absence,
+Python 3.12 runtime behavior and RFCI capability, BK tiers/forbidden pairs, required-edge absence,
 PAG codec, timeout/child crash, sensitivity-only status, config drift, and no import/startup of JPype
 when RFCI is disabled.
 
@@ -1059,10 +1059,9 @@ Expected: every command exits zero; the base environment imports and tests witho
 
 - [ ] **Step 6: Run Python-version and optional capability matrices**
 
-On Python 3.10 and 3.12 minimum environments:
+On the Python 3.12 minimum environment:
 
 ```powershell
-uv run --no-project --python 3.10 --with-editable ".[dev,api]" pytest -q
 uv run --no-project --python 3.12 --with-editable ".[dev,api]" pytest -q
 ```
 

@@ -123,7 +123,7 @@ def test_fact_proposal_builds_canonical_graph_independent_of_fact_order() -> Non
     )
 
 
-def test_llm_facts_without_relations_do_not_infer_deterministic_legacy_paths() -> None:
+def test_llm_facts_without_relations_do_not_infer_catalog_ontology_paths() -> None:
     proposal = _facts_proposal()
     assert proposal.backend is PromptExtractorBackend.LLM_FACTS_V1
 

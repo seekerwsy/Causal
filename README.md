@@ -5,10 +5,11 @@ security mechanism discovery and confirmation.
 
 ## Architecture and causal boundary
 
-Prompt TSG v2 supplies pre-treatment graph factors: its canonical graph is the authority for
-prompt-side factor and motif queries used in discovery and intervention validation. The `shadow`
-mapping is a read-only audit projection derived from that graph. It is never authoritative and is
-not an input to discovery, intervention, confirmation, or security labeling.
+Prompt TSG supplies semantic task-feature and target-feature relationships for extraction and
+intervention validation. Prompt TSG edges are not causal edges and are never passed to FCI, JCI,
+or RFCI as causal adjacencies. The `shadow` mapping is a read-only audit projection derived from
+the graph. It is never authoritative and is not an input to discovery, intervention, confirmation,
+or security labeling.
 
 The only security outcome `Y` comes from the independent Semgrep 1.168.0 plus Bandit 1.9.4
 Oracle. Prompt TSG does not classify generated code, and its graph factors cannot create, replace,
@@ -92,12 +93,12 @@ secaware run-oracle --config configs/demo.yaml --run-dir runs/demo --condition c
 
 `run-all` executes observed generation and Oracle evaluation, local-table assembly, frozen FCI
 hypothesis discovery, variant construction, complete-block randomization, confirmation generation,
-and the independent confirmation Oracle in that order. It stops at the committed confirmation
-Oracle. M6 owns analysis, JCI, effects, and reporting, so M5 never creates those future artifacts.
-Once that terminal Oracle and its manifest form a valid completed run, the run directory is
-immutable. A later `run-all` validates and reuses it without executing providers or analyzers;
-`run-all --force` is rejected as well. Start a new run directory instead of deleting, rebuilding,
-or overwriting a completed run.
+and the independent confirmation Oracle in that order. It then requires any preregistered
+functional outcomes, estimates randomized effects, runs secondary JCI and optional RFCI, and
+publishes the report bundle. Once the report and its manifest form a valid completed run, the run
+directory is immutable. A later `run-all` validates and reuses it without executing providers or
+analyzers; `run-all --force` is rejected as well. Start a new run directory instead of deleting,
+rebuilding, or overwriting a completed run.
 
 The migration is intentionally breaking: `intervene` and `generate-counterfactual` are no longer
 registered commands, and paired two-arm artifacts are not accepted as randomized-confirmation
@@ -106,7 +107,25 @@ security-neutral prompt invariant, per-arm deltas, text/graph execution modes, L
 assumption, blind extractor boundary, seed slots, assignment commit point, terminal-no-code
 handling, and exact artifact replacements.
 
-Install the core development environment and run the unit suite with:
+## Prompt-only confirmation analysis in M6
+
+Randomized ITT is the primary confirmatory estimate. JCI is secondary and cannot alter the
+randomized ITT or frozen hypotheses. RFCI is an optional Java-backed sensitivity analysis; a
+disabled or unavailable RFCI runtime is reported as capability provenance and does not redefine
+the primary result. PAG circle endpoints remain circles unless a declared, separately recorded
+constraint supplies an orientation.
+
+Generated code is used only by the independent Oracle and an explicitly configured functional
+evaluator. Missing or invalid functional evidence is unknown/non-evaluable, not a negative
+outcome; best/worst-case sensitivity bounds retain all randomized assignments. Pre-randomization
+exclusions are committed before assignment, while post-assignment generation, Oracle, or evaluator
+failures remain in their assigned ITT arms.
+
+See the [Prompt-only FCI/JCI migration](docs/migrations/prompt-only-fci-jci.md) for the exact
+artifact inventory, digest bindings, regeneration procedure, and upgrade boundary.
+
+SecAware supports Python 3.12 patch releases only (`>=3.12,<3.13`). Install the core development
+environment and run the unit suite with:
 
 ```bash
 pip install -e ".[dev]"

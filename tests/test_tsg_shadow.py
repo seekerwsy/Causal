@@ -11,10 +11,10 @@ import secaware.tsg.features as shadow_features
 import secaware.tsg.motifs as motif_queries
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.prompt_tsg_extractor import extract_prompt_tsg
-from secaware.schema.hypotheses import FactorType
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import MotifId
+from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.features import derive_shadow
 from secaware.tsg.graph import graph_sha256, multidigraph_to_record, record_to_multidigraph
 
@@ -53,7 +53,7 @@ def _expected_keys() -> tuple[str, ...]:
     return tuple(
         sorted(
             (
-                *(f"factor.{factor.value}_required" for factor in FactorType),
+                *(f"feature.{entry.target_feature_id}.required" for entry in PROMPT_TSG_CATALOG),
                 *(f"motif.{motif.value}" for motif in MotifId),
                 "graph.node_count",
                 "graph.edge_count",
@@ -88,7 +88,7 @@ def test_shadow_has_complete_finite_sorted_projection_and_graph_counts() -> None
     assert all(
         type(value) is bool
         for key, value in record.shadow.items()
-        if key.startswith(("factor.", "motif."))
+        if key.startswith(("feature.", "motif."))
     )
 
 
@@ -188,12 +188,12 @@ def test_shadow_uses_one_canonical_snapshot_during_live_graph_mutation(
 ) -> None:
     graph = record_to_multidigraph(extract_prompt_tsg(_path_prompt()))
     expected = derive_shadow(graph)
-    original = motif_queries._has_factor_requirement
+    original = motif_queries._has_feature_requirement
     mutated = False
 
-    def mutate_after_snapshot(snapshot: nx.MultiDiGraph, factor_type: FactorType) -> bool:
+    def mutate_after_snapshot(snapshot: nx.MultiDiGraph, target_feature_id: str) -> bool:
         nonlocal mutated
-        result = original(snapshot, factor_type)
+        result = original(snapshot, target_feature_id)
         if not mutated:
             mutated = True
             source_edge = next(
@@ -204,6 +204,6 @@ def test_shadow_uses_one_canonical_snapshot_during_live_graph_mutation(
             graph.remove_edge(*source_edge)
         return result
 
-    monkeypatch.setattr(motif_queries, "_has_factor_requirement", mutate_after_snapshot)
+    monkeypatch.setattr(motif_queries, "_has_feature_requirement", mutate_after_snapshot)
 
     assert derive_shadow(graph) == expected

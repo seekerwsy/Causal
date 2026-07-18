@@ -29,7 +29,7 @@ from secaware.schema.causal import (
     VariableRole,
 )
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
-from tests.synthetic.scm_fixtures import (
+from synthetic.scm_fixtures import (
     latent_confounding_scm,
     null_factor_scm,
     true_chain_scm,

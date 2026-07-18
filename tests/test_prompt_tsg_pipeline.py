@@ -928,11 +928,13 @@ def test_prompt_tsg_stage_contract_change_invalidates_skip_only_for_prompt_stage
     extract_prompt_tsg_stage(config, store, force=False)  # type: ignore[arg-type]
     prompt_input = store.path("inputs", "prompts.jsonl")
     prompt_outputs = _prompt_extraction_outputs(store)
-    report_output = store.path("reports", "result.txt")
-    report_output.write_text("ready\n", encoding="utf-8")
-    assert not store.should_skip_stage("report", [prompt_input], [report_output], force=False)
-    store.record_stage("report", [prompt_input], [report_output])
-    report_fingerprint = store.stage_fingerprint("report", [prompt_input])
+    unrelated_output = store.path("reports", "result.txt")
+    unrelated_output.write_text("ready\n", encoding="utf-8")
+    assert not store.should_skip_stage(
+        "test-report", [prompt_input], [unrelated_output], force=False
+    )
+    store.record_stage("test-report", [prompt_input], [unrelated_output])
+    unrelated_fingerprint = store.stage_fingerprint("test-report", [prompt_input])
 
     monkeypatch.setattr(
         run_store_module,
@@ -951,8 +953,8 @@ def test_prompt_tsg_stage_contract_change_invalidates_skip_only_for_prompt_stage
         preserve_committed=True,
     )
     store.abort_stage("extract-prompt-tsg")
-    assert store.stage_fingerprint("report", [prompt_input]) == report_fingerprint
-    assert store.should_skip_stage("report", [prompt_input], [report_output], force=False)
+    assert store.stage_fingerprint("test-report", [prompt_input]) == unrelated_fingerprint
+    assert store.should_skip_stage("test-report", [prompt_input], [unrelated_output], force=False)
 
 
 def test_prompt_tsg_seal_rejection_retains_lease_until_rollback_finishes(

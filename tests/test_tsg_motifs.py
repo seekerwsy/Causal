@@ -10,7 +10,6 @@ import pytest
 
 import secaware.tsg.motifs as motif_queries
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.hypotheses import FactorType
 from secaware.schema.features import (
     FeatureFamily,
     FeatureState,
@@ -32,20 +31,20 @@ from secaware.tsg.graph import (
 )
 from secaware.tsg.motifs import (
     MOTIF_SPECS,
-    factor_query_vector,
+    feature_requirement_vector,
     find_motif_matches,
-    has_factor_requirement,
+    has_feature_requirement,
     motif_query_vector,
 )
 
 
-_MOTIF_BY_FACTOR = {
-    FactorType.INPUT_VALIDATION: MotifId.UNTRUSTED_SOURCE_TO_SENSITIVE_SINK_WITHOUT_GUARD,
-    FactorType.PATH_NORMALIZATION: MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD,
-    FactorType.SQL_PARAMETERIZATION: MotifId.USER_STRING_TO_SQL_WITHOUT_PARAMETERIZATION,
-    FactorType.SAFE_SUBPROCESS: MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD,
-    FactorType.AUTHORIZATION_CHECK: MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD,
-    FactorType.SAFE_DESERIALIZATION: MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK,
+_MOTIF_BY_TARGET_FEATURE = {
+    "safety.input_validation": MotifId.UNTRUSTED_SOURCE_TO_SENSITIVE_SINK_WITHOUT_GUARD,
+    "safety.path_normalization": MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD,
+    "safety.sql_parameterization": MotifId.USER_STRING_TO_SQL_WITHOUT_PARAMETERIZATION,
+    "safety.safe_subprocess": MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD,
+    "safety.authorization_check": MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD,
+    "safety.safe_deserialization": MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK,
 }
 
 
@@ -136,21 +135,22 @@ def test_task2_does_not_publish_feature_state_query() -> None:
 
 
 def _unsafe_flow(
-    factor_type: FactorType = FactorType.PATH_NORMALIZATION,
+    target_feature_id: str = "safety.path_normalization",
     *,
     flow_hops: int = 1,
 ) -> nx.MultiDiGraph:
-    entry = next(item for item in PROMPT_TSG_CATALOG if item.factor_type is factor_type)
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.target_feature_id == target_feature_id)
+    semantic_name = target_feature_id.removeprefix("safety.")
     graph = nx.MultiDiGraph()
-    source = _add_node(graph, f"{factor_type.value}:source", NodeType.SOURCE, "user_input")
-    data = _add_node(graph, f"{factor_type.value}:data", NodeType.DATA_OBJECT, entry.data_label)
-    sink = _add_node(graph, f"{factor_type.value}:sink", NodeType.SINK, entry.sink_label)
+    source = _add_node(graph, f"{semantic_name}:source", NodeType.SOURCE, "user_input")
+    data = _add_node(graph, f"{semantic_name}:data", NodeType.DATA_OBJECT, entry.data_label)
+    sink = _add_node(graph, f"{semantic_name}:sink", NodeType.SINK, entry.sink_label)
     _add_edge(graph, source, data, EdgeType.SOURCE_OF)
     previous = data
     for index in range(flow_hops - 1):
         intermediate = _add_node(
             graph,
-            f"{factor_type.value}:intermediate:{index}",
+            f"{semantic_name}:intermediate:{index}",
             NodeType.DATA_OBJECT,
             f"intermediate_{index}",
         )
@@ -170,7 +170,7 @@ def _node(graph: nx.MultiDiGraph, node_type: NodeType, label: str) -> str:
 
 def _add_guard_structure(
     graph: nx.MultiDiGraph,
-    factor_type: FactorType,
+    target_feature_id: str,
     *,
     guard_label: str | None = None,
     requirement_label: str | None = None,
@@ -178,16 +178,17 @@ def _add_guard_structure(
     guard_data: bool = True,
     guard_sink: bool = True,
 ) -> tuple[str, str]:
-    entry = next(item for item in PROMPT_TSG_CATALOG if item.factor_type is factor_type)
+    entry = next(item for item in PROMPT_TSG_CATALOG if item.target_feature_id == target_feature_id)
+    semantic_name = target_feature_id.removeprefix("safety.")
     guard = _add_node(
         graph,
-        f"{factor_type.value}:guard:{guard_label or entry.guard_label}",
+        f"{semantic_name}:guard:{guard_label or entry.guard_label}",
         guard_type,
         guard_label or entry.guard_label,
     )
     requirement = _add_node(
         graph,
-        f"{factor_type.value}:requirement:{requirement_label or entry.requirement_label}",
+        f"{semantic_name}:requirement:{requirement_label or entry.requirement_label}",
         NodeType.PROMPT_REQUIREMENT,
         requirement_label or entry.requirement_label,
     )
@@ -211,7 +212,12 @@ def _add_guard_structure(
 
 def test_disconnected_guard_does_not_protect_flow() -> None:
     graph = _unsafe_flow()
-    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION, guard_data=False, guard_sink=False)
+    _add_guard_structure(
+        graph,
+        "safety.path_normalization",
+        guard_data=False,
+        guard_sink=False,
+    )
 
     matches = find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)
 
@@ -222,7 +228,7 @@ def test_disconnected_guard_does_not_protect_flow() -> None:
 
 def test_same_flow_guard_removes_unguarded_match() -> None:
     graph = _unsafe_flow()
-    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION)
+    _add_guard_structure(graph, "safety.path_normalization")
 
     assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
 
@@ -237,7 +243,7 @@ def test_same_flow_guard_removes_unguarded_match() -> None:
 )
 def test_wrong_or_partial_guard_does_not_protect(guard_options: dict[str, object]) -> None:
     graph = _unsafe_flow()
-    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION, **guard_options)
+    _add_guard_structure(graph, "safety.path_normalization", **guard_options)
 
     assert len(find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD)) == 1
 
@@ -250,7 +256,7 @@ def test_guard_relation_from_any_path_data_or_sink_node_protects(
     guard_options: dict[str, object],
 ) -> None:
     graph = _unsafe_flow()
-    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION, **guard_options)
+    _add_guard_structure(graph, "safety.path_normalization", **guard_options)
 
     assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
 
@@ -262,7 +268,7 @@ def test_guard_edges_from_wrong_data_or_sink_nodes_do_not_protect(
     graph = _unsafe_flow()
     _, guard = _add_guard_structure(
         graph,
-        FactorType.PATH_NORMALIZATION,
+        "safety.path_normalization",
         guard_data=False,
         guard_sink=False,
     )
@@ -314,7 +320,7 @@ def test_guard_relation_from_intermediate_path_data_node_protects() -> None:
     graph = _unsafe_flow(flow_hops=2)
     _, guard = _add_guard_structure(
         graph,
-        FactorType.PATH_NORMALIZATION,
+        "safety.path_normalization",
         guard_data=False,
         guard_sink=False,
     )
@@ -328,7 +334,7 @@ def test_guard_relation_from_data_node_outside_matched_path_does_not_protect() -
     graph = _unsafe_flow()
     _, guard = _add_guard_structure(
         graph,
-        FactorType.PATH_NORMALIZATION,
+        "safety.path_normalization",
         guard_data=False,
         guard_sink=False,
     )
@@ -340,7 +346,7 @@ def test_guard_relation_from_data_node_outside_matched_path_does_not_protect() -
 
 def test_requirement_must_use_requires_edge() -> None:
     graph = _unsafe_flow()
-    requirement, guard = _add_guard_structure(graph, FactorType.PATH_NORMALIZATION)
+    requirement, guard = _add_guard_structure(graph, "safety.path_normalization")
     key = next(iter(graph[requirement][guard]))
     graph.remove_edge(requirement, guard, key)
     _add_edge(graph, requirement, guard, EdgeType.RELATED_TO)
@@ -351,7 +357,7 @@ def test_requirement_must_use_requires_edge() -> None:
 def test_parallel_edges_are_distinct_and_evidence_is_deterministic() -> None:
     graph = _unsafe_flow()
     entry = next(
-        item for item in PROMPT_TSG_CATALOG if item.factor_type is FactorType.PATH_NORMALIZATION
+        item for item in PROMPT_TSG_CATALOG if item.target_feature_id == "safety.path_normalization"
     )
     source = _node(graph, NodeType.SOURCE, "user_input")
     data = _node(graph, NodeType.DATA_OBJECT, entry.data_label)
@@ -371,7 +377,7 @@ def test_parallel_edges_are_distinct_and_evidence_is_deterministic() -> None:
 def test_cycles_terminate_without_revisiting_nodes_and_are_deterministic() -> None:
     graph = _unsafe_flow(flow_hops=2)
     entry = next(
-        item for item in PROMPT_TSG_CATALOG if item.factor_type is FactorType.PATH_NORMALIZATION
+        item for item in PROMPT_TSG_CATALOG if item.target_feature_id == "safety.path_normalization"
     )
     data = _node(graph, NodeType.DATA_OBJECT, entry.data_label)
     intermediate = _node(graph, NodeType.DATA_OBJECT, "intermediate_0")
@@ -396,7 +402,7 @@ def test_eight_edge_path_matches_but_nine_edge_path_does_not() -> None:
 def _parallel_match_graph(count: int) -> nx.MultiDiGraph:
     graph = _unsafe_flow()
     entry = next(
-        item for item in PROMPT_TSG_CATALOG if item.factor_type is FactorType.PATH_NORMALIZATION
+        item for item in PROMPT_TSG_CATALOG if item.target_feature_id == "safety.path_normalization"
     )
     source = _node(graph, NodeType.SOURCE, "user_input")
     data = _node(graph, NodeType.DATA_OBJECT, entry.data_label)
@@ -536,7 +542,7 @@ def test_high_branching_without_eligible_sink_is_pruned(
 @pytest.mark.parametrize("count", (256, 257))
 def test_guarded_candidates_still_enforce_match_bound(count: int) -> None:
     graph = _parallel_match_graph(count)
-    _add_guard_structure(graph, FactorType.PATH_NORMALIZATION)
+    _add_guard_structure(graph, "safety.path_normalization")
 
     if count == 256:
         assert find_motif_matches(graph, MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD) == ()
@@ -579,29 +585,32 @@ def test_invalid_motif_and_noncanonical_graph_fail_closed() -> None:
         assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
-def test_catalog_mapping_is_total_unique_and_all_six_families_query() -> None:
+def test_catalog_mapping_is_total_unique_and_all_six_features_query() -> None:
     assert tuple(MOTIF_SPECS) == tuple(MotifId)
-    assert {spec.factor_type for spec in MOTIF_SPECS.values()} == set(FactorType)
+    assert {spec.target_feature_id for spec in MOTIF_SPECS.values()} == {
+        entry.target_feature_id for entry in PROMPT_TSG_CATALOG
+    }
     assert len(MOTIF_SPECS) == 6
 
-    for factor_type, motif_id in _MOTIF_BY_FACTOR.items():
-        graph = _unsafe_flow(factor_type)
+    for target_feature_id, motif_id in _MOTIF_BY_TARGET_FEATURE.items():
+        graph = _unsafe_flow(target_feature_id)
         assert len(find_motif_matches(graph, motif_id)) == 1
         assert tuple(item for item, _ in motif_query_vector(graph)) == tuple(MotifId)
         assert dict(motif_query_vector(graph))[motif_id] is True
 
 
-def test_factor_requirement_queries_live_typed_graph_and_mutation() -> None:
+def test_feature_requirement_queries_live_typed_graph_and_mutation() -> None:
     graph = _unsafe_flow()
-    requirement, guard = _add_guard_structure(graph, FactorType.PATH_NORMALIZATION)
+    requirement, guard = _add_guard_structure(graph, "safety.path_normalization")
+    expected_targets = tuple(entry.target_feature_id for entry in PROMPT_TSG_CATALOG)
 
-    assert has_factor_requirement(graph, FactorType.PATH_NORMALIZATION) is True
-    assert tuple(item for item, _ in factor_query_vector(graph)) == tuple(FactorType)
-    assert dict(factor_query_vector(graph))[FactorType.PATH_NORMALIZATION] is True
+    assert has_feature_requirement(graph, "safety.path_normalization") is True
+    assert tuple(item for item, _ in feature_requirement_vector(graph)) == expected_targets
+    assert dict(feature_requirement_vector(graph))["safety.path_normalization"] is True
 
     edge_key = next(iter(graph[requirement][guard]))
     graph.remove_edge(requirement, guard, edge_key)
-    assert has_factor_requirement(graph, FactorType.PATH_NORMALIZATION) is False
+    assert has_feature_requirement(graph, "safety.path_normalization") is False
 
 
 @pytest.mark.parametrize(

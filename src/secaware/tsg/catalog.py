@@ -5,12 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 import re
 
-from secaware.schema.hypotheses import FactorType
-from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
+from secaware.schema.features import FeatureFamily
+from secaware.tsg.feature_catalog import (
+    PROMPT_FEATURE_CATALOG,
+    PROMPT_FEATURE_CATALOG_SHA256,
+    prompt_feature_spec,
+)
 
 
-ONTOLOGY_VERSION = "1.0"
-MOTIF_VERSION = "1.0"
+ONTOLOGY_VERSION = "1.1"
+MOTIF_VERSION = "1.1"
 
 _MAX_TERMS_PER_KIND = 8
 _MAX_CATALOG_TEXT_BYTES = 96
@@ -20,7 +24,8 @@ _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 
 @dataclass(frozen=True, slots=True)
 class PromptOntologyEntry:
-    factor_type: FactorType
+    task_feature_id: str
+    target_feature_id: str
     operation_label: str
     data_label: str
     sink_label: str
@@ -33,7 +38,8 @@ class PromptOntologyEntry:
 
 PROMPT_TSG_CATALOG = (
     PromptOntologyEntry(
-        factor_type=FactorType.INPUT_VALIDATION,
+        task_feature_id="task.input_consumption",
+        target_feature_id="safety.input_validation",
         operation_label="inspect_input",
         data_label="untrusted_field",
         sink_label="input_consumer",
@@ -44,7 +50,8 @@ PROMPT_TSG_CATALOG = (
         cwe="CWE-20",
     ),
     PromptOntologyEntry(
-        factor_type=FactorType.PATH_NORMALIZATION,
+        task_feature_id="task.file_read",
+        target_feature_id="safety.path_normalization",
         operation_label="open_file",
         data_label="user_path",
         sink_label="file_open",
@@ -59,7 +66,8 @@ PROMPT_TSG_CATALOG = (
         cwe="CWE-22",
     ),
     PromptOntologyEntry(
-        factor_type=FactorType.SQL_PARAMETERIZATION,
+        task_feature_id="task.database_query",
+        target_feature_id="safety.sql_parameterization",
         operation_label="build_sql_statement",
         data_label="user_query_value",
         sink_label="database_execute",
@@ -70,7 +78,8 @@ PROMPT_TSG_CATALOG = (
         cwe="CWE-89",
     ),
     PromptOntologyEntry(
-        factor_type=FactorType.SAFE_SUBPROCESS,
+        task_feature_id="task.process_launch",
+        target_feature_id="safety.safe_subprocess",
         operation_label="launch_process",
         data_label="command_argument",
         sink_label="process_spawn",
@@ -81,7 +90,8 @@ PROMPT_TSG_CATALOG = (
         cwe="CWE-78",
     ),
     PromptOntologyEntry(
-        factor_type=FactorType.AUTHORIZATION_CHECK,
+        task_feature_id="task.privileged_action",
+        target_feature_id="safety.authorization_check",
         operation_label="perform_privileged_action",
         data_label="authorization_subject",
         sink_label="protected_action",
@@ -92,7 +102,8 @@ PROMPT_TSG_CATALOG = (
         cwe="CWE-862",
     ),
     PromptOntologyEntry(
-        factor_type=FactorType.SAFE_DESERIALIZATION,
+        task_feature_id="task.object_deserialization",
+        target_feature_id="safety.safe_deserialization",
         operation_label="decode_serialized_object",
         data_label="serialized_payload",
         sink_label="object_loader",
@@ -106,12 +117,25 @@ PROMPT_TSG_CATALOG = (
 
 
 def _validate_catalog() -> None:
-    expected_factors = tuple(FactorType)
+    expected_tasks = tuple(
+        spec.feature_id
+        for spec in PROMPT_FEATURE_CATALOG
+        if spec.feature_family is FeatureFamily.TASK_FUNCTION and spec.structural_node_types
+    )
+    expected_targets = tuple(
+        spec.feature_id
+        for spec in PROMPT_FEATURE_CATALOG
+        if spec.feature_family is FeatureFamily.SAFETY_CONTROL
+        and spec.structural_node_types
+        and spec.structural_edge_types
+        and spec.intervenable
+    )
     if (
         type(PROMPT_TSG_CATALOG) is not tuple
-        or tuple(entry.factor_type for entry in PROMPT_TSG_CATALOG) != expected_factors
+        or tuple(entry.task_feature_id for entry in PROMPT_TSG_CATALOG) != expected_tasks
+        or tuple(entry.target_feature_id for entry in PROMPT_TSG_CATALOG) != expected_targets
     ):
-        raise RuntimeError("invalid prompt TSG catalog factors")
+        raise RuntimeError("invalid prompt TSG catalog feature pairs")
     if len(PROMPT_TSG_CATALOG) != 6 or any(
         type(entry) is not PromptOntologyEntry for entry in PROMPT_TSG_CATALOG
     ):
@@ -120,6 +144,20 @@ def _validate_catalog() -> None:
     labels: list[str] = []
     terms: list[str] = []
     for entry in PROMPT_TSG_CATALOG:
+        try:
+            task = prompt_feature_spec(entry.task_feature_id)
+            target = prompt_feature_spec(entry.target_feature_id)
+        except KeyError:
+            raise RuntimeError("invalid prompt TSG catalog feature") from None
+        if (
+            task.feature_family is not FeatureFamily.TASK_FUNCTION
+            or target.feature_family is not FeatureFamily.SAFETY_CONTROL
+            or task.deterministic_terms != entry.domain_terms
+            or target.deterministic_terms != entry.guard_terms
+            or task.applicable_cwes != (entry.cwe,)
+            or target.applicable_cwes != (entry.cwe,)
+        ):
+            raise RuntimeError("invalid prompt TSG catalog feature semantics")
         entry_labels = (
             entry.operation_label,
             entry.data_label,
@@ -154,7 +192,15 @@ def _validate_catalog() -> None:
 
     if len(labels) != len(set(labels)) or len(terms) != len(set(terms)):
         raise RuntimeError("duplicate prompt TSG catalog text")
-    forbidden_fields = {"secure", "insecure", "outcome", "motif", "features"}
+    forbidden_fields = {
+        "factor_type",
+        "hypothesis",
+        "secure",
+        "insecure",
+        "outcome",
+        "motif",
+        "features",
+    }
     if forbidden_fields & {field.name.casefold() for field in fields(PromptOntologyEntry)}:
         raise RuntimeError("outcome field in prompt TSG catalog")
 
@@ -164,14 +210,14 @@ _validate_catalog()
 PROMPT_TSG_CATALOG_SHA256 = PROMPT_FEATURE_CATALOG_SHA256
 
 
-def prompt_ontology_entry(factor_type: FactorType) -> PromptOntologyEntry:
-    """Return the reviewed entry for one exact factor enum value."""
-    if type(factor_type) is not FactorType:
-        raise KeyError("unknown prompt ontology factor")
+def prompt_ontology_entry(target_feature_id: str) -> PromptOntologyEntry:
+    """Return the reviewed ontology entry for one exact safety target feature."""
+    if type(target_feature_id) is not str:
+        raise KeyError("unknown prompt ontology feature")
     for entry in PROMPT_TSG_CATALOG:
-        if entry.factor_type is factor_type:
+        if entry.target_feature_id == target_feature_id:
             return entry
-    raise KeyError("unknown prompt ontology factor")  # pragma: no cover
+    raise KeyError("unknown prompt ontology feature")  # pragma: no cover
 
 
 __all__ = [

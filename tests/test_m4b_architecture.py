@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from importlib.util import resolve_name
 from pathlib import Path
+
 import tomllib
 
 from typer.testing import CliRunner
@@ -296,9 +297,7 @@ def test_cli_exposes_fci_discovery_without_heuristic_or_old_two_arm_commands() -
     for retired in (
         "tsg-qcd",
         "intervene",
-        "confirm",
         "generate-counterfactual",
-        "report",
     ):
         assert retired not in registered
 

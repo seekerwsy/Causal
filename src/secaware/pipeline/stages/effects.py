@@ -44,6 +44,7 @@ from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.experiments import (
     AssignmentExecutionRecord,
     AssignmentRecord,
+    ConfirmationProtocolRecord,
     FunctionalOutcomeContractRecord,
     RandomizationManifestRecord,
 )
@@ -346,6 +347,22 @@ def _validate_output_coverage(
             raise _error()
 
 
+def _assigned_analysis_bundle(
+    protocols: tuple[ConfirmationProtocolRecord, ...],
+    assignments: tuple[AssignmentRecord, ...],
+) -> tuple[tuple[ConfirmationProtocolRecord, ...], tuple[ContrastSpecRecord, ...]]:
+    assigned_protocol_ids = {assignment.arm_protocol_id for assignment in assignments}
+    selected_protocols = tuple(
+        protocol for protocol in protocols if protocol.arm_protocol_id in assigned_protocol_ids
+    )
+    if (
+        not assigned_protocol_ids
+        or {protocol.arm_protocol_id for protocol in selected_protocols} != assigned_protocol_ids
+    ):
+        raise _error("effect stage assignment protocol universe failed validation")
+    return selected_protocols, materialize_contrasts(selected_protocols)
+
+
 def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> EffectsStageResult:
     """Publish the complete effects bundle while holding every producer lease."""
 
@@ -557,10 +574,25 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                 nonlocal built
                 if snapshot is None:
                     raise _error()
-                protocols = snapshot.task4_groups[2]
+                frozen_protocols = snapshot.task4_groups[2]
                 assignments = snapshot.assignments
                 deltas = snapshot.task4_groups[7]
-                contrasts = materialize_contrasts(protocols)
+                protocols, contrasts = _assigned_analysis_bundle(
+                    frozen_protocols,  # type: ignore[arg-type]
+                    assignments,
+                )
+                contract_ids = {
+                    protocol.functional_outcome_contract_id
+                    for protocol in protocols
+                    if protocol.functional_outcome_contract_id is not None
+                }
+                contracts = tuple(
+                    contract
+                    for contract in snapshot.contracts
+                    if contract.contract_id in contract_ids
+                )
+                if {contract.contract_id for contract in contracts} != contract_ids:
+                    raise _error("effect stage functional contract universe failed validation")
                 if not assignments or not snapshot.fci_groups[6] or not contrasts:
                     raise _error("effect stage estimand universe is empty")
                 outcomes = assemble_assignment_outcomes(
@@ -569,7 +601,7 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                     snapshot.oracles,
                     deltas,
                     protocols=protocols,
-                    functional_contracts=snapshot.contracts,
+                    functional_contracts=contracts,
                     functional_outcomes=snapshot.functional_outcomes,
                 )
                 result = calculate_itt(
@@ -577,7 +609,7 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                     config.analysis,
                     protocols=protocols,
                     contrasts=contrasts,
-                    functional_contracts=snapshot.contracts,
+                    functional_contracts=contracts,
                     functional_outcomes=snapshot.functional_outcomes,
                 )
                 _validate_output_coverage(

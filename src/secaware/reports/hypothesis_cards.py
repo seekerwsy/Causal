@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Sequence
 
-from secaware.pipeline.artifact import canonical_sha256
+from secaware.canonical import canonical_sha256
 from secaware.schema.causal import FrozenHypothesisRecord
 from secaware.schema.outcomes import ITTEffectRecord
 

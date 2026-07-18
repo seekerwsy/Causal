@@ -101,6 +101,17 @@ _RFCI_STAGE_OUTPUTS = (
     "analysis/rfci_pags.jsonl",
     "analysis/rfci_failures.jsonl",
 )
+_REPORT_STAGE_OUTPUTS = (
+    "reports/discovery_pags.jsonl",
+    "reports/hypotheses.jsonl",
+    "reports/interventions.jsonl",
+    "reports/assignments.jsonl",
+    "reports/effects.csv",
+    "reports/jci_orientations.csv",
+    "reports/failures.csv",
+    "reports/hypothesis_cards.jsonl",
+    "reports/summary.md",
+)
 
 
 def _synchronized(method: Callable[..., _Result]) -> Callable[..., _Result]:
@@ -487,9 +498,11 @@ class RunStore:
             "discover",
             "intervene",
             "confirm",
+            "import-functional-outcomes",
             "estimate-confirmation-effects",
             "jci-confirmation",
             "rfci-confirmation",
+            "report",
         } or stage.startswith(
             (
                 "plan-generation-",
@@ -556,6 +569,8 @@ class RunStore:
         if stage == "jci-confirmation" and tuple(relative_outputs) != _JCI_STAGE_OUTPUTS:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
         if stage == "rfci-confirmation" and tuple(relative_outputs) != _RFCI_STAGE_OUTPUTS:
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "report" and tuple(relative_outputs) != _REPORT_STAGE_OUTPUTS:
             raise self._manifest_conflict(stage, "stage output contract is invalid")
 
     def _catalog_binding(self, stage: str, catalog_sha256: str | None) -> str | None:

@@ -1,16 +1,12 @@
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from enum import Enum
-import os
 from pathlib import Path
 import tempfile
-from typing import Any, Literal, Optional, TypeVar, cast
+from typing import Literal, Optional, TypeVar, cast
 
 import typer
-from pydantic import BaseModel
 
-from secaware.analysis.effects import estimate_effects
-from secaware.analysis.pairing import build_pairs
 from secaware.commands.common import cli_action
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
@@ -22,15 +18,11 @@ from secaware.generation.openai_compatible_provider import (
 from secaware.generation.request_planner import (
     MAX_GENERATION_AXIS_ITEMS,
     MAX_GENERATION_REQUESTS,
-    plan_counterfactual_requests,
     plan_observed_requests,
 )
 from secaware.generation.result_importer import (
-    MAX_OFFLINE_IMPORT_RECORDS,
     canonical_generated_code_from_request,
-    import_offline_results,
 )
-from secaware.intervention.operators import apply_intervention
 from secaware.io.jsonl import canonical_jsonl_sha256, read_jsonl, write_jsonl
 from secaware.io.run_store import RunStore, StageCommitLease
 from secaware.io.transaction import (
@@ -45,46 +37,47 @@ from secaware.logging_utils import console
 from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.pipeline.artifact import sha256_path
-from secaware.pipeline.jsonl_stage import (
-    JsonlOutputSpec,
-    execute_jsonl_stage_transaction,
-)
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
 from secaware.pipeline.stages.causal_tables import assemble_causal_tables_stage
 from secaware.pipeline.stages.confirmation_generation import run_confirmation_generation_stage
-from secaware.pipeline.stages import confirmation_oracle as confirmation_oracle_stage
 from secaware.pipeline.stages.confirmation_oracle import run_confirmation_oracle_stage
 from secaware.pipeline.stages.fci_discovery import (
     FCIDiscoveryTerminalStatus,
     fci_discovery_stage,
 )
+from secaware.pipeline.stages.effects import effects_stage
+from secaware.pipeline.stages.functional_outcomes import import_functional_outcomes_stage
+from secaware.pipeline.stages.jci import jci_stage
 from secaware.pipeline.stages.prompt_extraction import (
     run_prompt_extraction_stage as extract_prompt_tsg_stage,
 )
-from secaware.pipeline.stages.prompt_variants import run_prompt_variant_freeze_stage
+from secaware.pipeline.stages.prompt_variants import (
+    PROMPT_VARIANT_OUTPUTS,
+    run_prompt_variant_freeze_stage,
+)
 from secaware.pipeline.stages.randomization import run_confirmation_randomization_stage
-from secaware.pipeline.stages.reporting import write_reports
-from secaware.schema.hypotheses import HypothesisRecord
+from secaware.pipeline.stages.reporting import (
+    REPORT_STAGE_OUTPUTS,
+    validate_committed_reports,
+    write_reports,
+)
+from secaware.pipeline.stages.rfci import rfci_stage
+from secaware.schema.experiments import ConfirmationProtocolRecord
 from secaware.schema.generation import (
     GenerationAttemptRecord,
     GenerationProvenance,
     GenerationRequestRecord,
-    OfflineGenerationResultRecord,
     sha256_text,
 )
-from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import (
     CanonicalGeneratedCodeRecord,
     PromptRecord,
 )
 from secaware.schema.oracle import OracleRecord
-from secaware.schema.results import EffectRecord, PairResult
-from secaware.schema.tsg import PromptTSGRecord
-from secaware.tsg.catalog import PROMPT_TSG_CATALOG_SHA256
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
-GenerationCondition = Literal["observed", "counterfactual"]
-GenerationMode = Literal["offline", "provider"]
+GenerationCondition = Literal["observed"]
 
 
 class OracleCLICondition(str, Enum):
@@ -115,90 +108,13 @@ def _prompt_records(store: RunStore) -> list[PromptRecord]:
     return read_jsonl(store.path("inputs", "prompts.jsonl"), PromptRecord)  # type: ignore[return-value]
 
 
-def _prompt_tsg_coordinate_error(stage: str) -> SecAwareError:
-    return SecAwareError(
-        code=ErrorCode.TSG_INVALID,
-        stage=stage,
-        message="Prompt TSG coordinates failed validation",
-    )
-
-
-def _validated_prompt_tsg_coordinates(
-    store: RunStore,
-    *,
-    stage: str,
-) -> tuple[list[PromptRecord], dict[str, PromptTSGRecord]]:
-    prompts: list[PromptRecord] = []
-    prompt_tsgs: list[PromptTSGRecord] = []
-    prompt_ids: list[str] = []
-    graph_prompt_ids: list[str] = []
-    prompt_tsg_by_id: dict[str, PromptTSGRecord] = {}
-    try:
-        prompts = _prompt_records(store)
-        prompt_tsgs = cast(
-            list[PromptTSGRecord],
-            read_jsonl(
-                store.path("tsg", "prompt_tsg.jsonl"),
-                PromptTSGRecord,
-                required=True,
-                allow_empty=False,
-                stage=stage,
-            ),
-        )
-        prompt_ids = [prompt.prompt_id for prompt in prompts]
-        graph_prompt_ids = [prompt_tsg.prompt_id for prompt_tsg in prompt_tsgs]
-        if (
-            not prompt_ids
-            or len(prompt_ids) != len(set(prompt_ids))
-            or len(graph_prompt_ids) != len(set(graph_prompt_ids))
-            or set(prompt_ids) != set(graph_prompt_ids)
-        ):
-            raise ValueError("invalid Prompt TSG coordinates")
-        prompt_tsg_by_id = {prompt_tsg.prompt_id: prompt_tsg for prompt_tsg in prompt_tsgs}
-        return prompts, prompt_tsg_by_id
-    except (KeyboardInterrupt, SystemExit):
-        prompts.clear()
-        prompt_tsgs.clear()
-        prompt_ids.clear()
-        graph_prompt_ids.clear()
-        prompt_tsg_by_id.clear()
-        raise
-    except Exception:
-        prompts.clear()
-        prompt_tsgs.clear()
-        prompt_ids.clear()
-        graph_prompt_ids.clear()
-        prompt_tsg_by_id.clear()
-        raise _prompt_tsg_coordinate_error(stage) from None
-
-
 def _generation_condition(value: str) -> GenerationCondition:
-    if value == "observed" or value == "counterfactual":
-        return cast(GenerationCondition, value)
-    raise SecAwareError(
-        code=ErrorCode.CONFIG,
-        stage="generation",
-        message="generation condition is invalid",
-    )
-
-
-def _cli_generation_condition(value: str) -> GenerationCondition:
     if value == "observed":
         return cast(GenerationCondition, value)
     raise SecAwareError(
         code=ErrorCode.CONFIG,
         stage="generation",
         message="only the observed condition is reachable before randomized confirmation",
-    )
-
-
-def _generation_mode(value: str) -> GenerationMode:
-    if value == "offline" or value == "provider":
-        return cast(GenerationMode, value)
-    raise SecAwareError(
-        code=ErrorCode.CONFIG,
-        stage="generation",
-        message="generation mode is invalid",
     )
 
 
@@ -394,54 +310,6 @@ def _invalidate_alternate_generation_stages(
     )
 
 
-def _validate_offline_results_path(
-    store: RunStore,
-    *,
-    stage: str,
-    condition: GenerationCondition,
-    results: Path,
-) -> None:
-    protected = [
-        store.path("generation", f"{condition}_requests.jsonl"),
-        store.path("generation", f"{condition}_code.jsonl"),
-        store.path("generation", f"{condition}_attempts.jsonl"),
-        store.path(".stages", f"plan-generation-{condition}.json"),
-        store.path(".stages", f"plan-provider-generation-{condition}.json"),
-        store.path(".stages", f"import-generation-{condition}.json"),
-        store.path(".stages", f"generate-provider-{condition}.json"),
-        store.path(".stages", f"generate-{condition}.json"),
-        store.path("config.resolved.yaml"),
-        store.path("inputs", "prompts.jsonl"),
-        store.path("interventions", "interventions.jsonl"),
-        Path(store.config.data.prompts_path),
-    ]
-    invalid = False
-    try:
-        resolved_results = results.resolve()
-        for protected_path in protected:
-            if resolved_results == protected_path.resolve():
-                invalid = True
-                break
-            if (
-                results.exists()
-                and protected_path.exists()
-                and os.path.samefile(
-                    results,
-                    protected_path,
-                )
-            ):
-                invalid = True
-                break
-    except (OSError, TypeError, ValueError):
-        invalid = True
-    if invalid:
-        raise _generation_stage_error(
-            ErrorCode.CONTRACT,
-            stage,
-            "offline generation results path conflicts with run artifacts",
-        )
-
-
 def _execute_generation_stage(
     store: RunStore,
     stage: str,
@@ -482,43 +350,6 @@ def _execute_generation_stage(
     )
 
 
-def _require_committed_generation_plan(
-    store: RunStore,
-    *,
-    condition: GenerationCondition,
-    import_stage: str,
-    legacy_stage: str,
-    provider_stage: str,
-    ledger: Path,
-) -> None:
-    plan_stage = f"plan-generation-{condition}"
-    plan_inputs = [store.path("inputs", "prompts.jsonl")]
-    if condition == "counterfactual":
-        plan_inputs.append(store.path("interventions", "interventions.jsonl"))
-    try:
-        store.require_committed_stage(plan_stage, plan_inputs, [ledger])
-    except SecAwareError:
-        pass
-    else:
-        return
-    cleanup_failed = False
-    for stage in (import_stage, legacy_stage, provider_stage):
-        try:
-            store.invalidate_stage(stage)
-        except SecAwareError:
-            cleanup_failed = True
-    message = (
-        "generation producer trust failure could not be cleaned up"
-        if cleanup_failed
-        else "generation request ledger is not committed"
-    )
-    raise _generation_stage_error(
-        ErrorCode.MANIFEST_CONFLICT,
-        import_stage,
-        message,
-    )
-
-
 def _require_committed_provider_generation_plan(
     store: RunStore,
     *,
@@ -528,8 +359,6 @@ def _require_committed_provider_generation_plan(
 ) -> str:
     plan_stage = f"plan-provider-generation-{condition}"
     plan_inputs = [store.path("inputs", "prompts.jsonl")]
-    if condition == "counterfactual":
-        plan_inputs.append(store.path("interventions", "interventions.jsonl"))
     try:
         output_sha256 = store.require_committed_stage(plan_stage, plan_inputs, [ledger])
     except SecAwareError:
@@ -560,8 +389,6 @@ def _hold_committed_provider_generation_plan(
 ) -> Iterator[str]:
     plan_stage = f"plan-provider-generation-{condition}"
     plan_inputs = [store.path("inputs", "prompts.jsonl")]
-    if condition == "counterfactual":
-        plan_inputs.append(store.path("interventions", "interventions.jsonl"))
     entered = False
     try:
         with store.hold_committed_stage(plan_stage, plan_inputs, [ledger]) as output_sha256:
@@ -589,37 +416,6 @@ def _hold_committed_provider_generation_plan(
         ) from None
 
 
-def _require_committed_generation_code(
-    store: RunStore,
-    *,
-    condition: str,
-    consumer_stage: str,
-    code_output: Path,
-) -> None:
-    for producer_stage in (
-        f"import-generation-{condition}",
-        f"generate-provider-{condition}",
-        f"generate-{condition}",
-    ):
-        producer_outputs = [code_output]
-        if producer_stage.startswith("generate-provider-"):
-            producer_outputs.append(store.path("generation", f"{condition}_attempts.jsonl"))
-        try:
-            store.require_committed_output(producer_stage, producer_outputs)
-        except SecAwareError:
-            continue
-        return
-    try:
-        store.invalidate_stage(consumer_stage)
-    except SecAwareError:
-        pass
-    raise _generation_stage_error(
-        ErrorCode.MANIFEST_CONFLICT,
-        consumer_stage,
-        "generation code does not have a committed producer",
-    )
-
-
 @contextmanager
 def _hold_committed_generation_code(
     store: RunStore,
@@ -631,7 +427,6 @@ def _hold_committed_generation_code(
     producer_stage: str | None = None
     producer_outputs: list[Path] = []
     for candidate in (
-        f"import-generation-{condition}",
         f"generate-provider-{condition}",
         f"generate-{condition}",
     ):
@@ -825,29 +620,18 @@ def _stale_transaction_paths(path: Path, *suffixes: str) -> list[Path]:
     return stale
 
 
-def plan_generation_stage(
+def _plan_provider_observed_generation(
     config: AppConfig,
     store: RunStore,
     *,
-    condition: GenerationCondition,
-    mode: GenerationMode = "offline",
     force: bool,
 ) -> None:
-    condition = _generation_condition(condition)
-    mode = _generation_mode(mode)
-    if mode == "provider":
-        stage = f"plan-provider-generation-{condition}"
-        alternate_stage = f"plan-generation-{condition}"
-        provider_config = _openai_provider_config(config, stage=stage)
-    else:
-        stage = f"plan-generation-{condition}"
-        alternate_stage = f"plan-provider-generation-{condition}"
-        provider_config = None
+    stage = "plan-provider-generation-observed"
+    alternate_stage = "plan-generation-observed"
+    provider_config = _openai_provider_config(config, stage=stage)
     prompts_path = store.path("inputs", "prompts.jsonl")
     inputs = [prompts_path]
-    if condition == "counterfactual":
-        inputs.append(store.path("interventions", "interventions.jsonl"))
-    output = store.path("generation", f"{condition}_requests.jsonl")
+    output = store.path("generation", "observed_requests.jsonl")
     outputs = [output]
     _invalidate_alternate_generation_stage(
         store,
@@ -865,38 +649,16 @@ def plan_generation_stage(
             allow_empty=False,
             max_records=MAX_GENERATION_AXIS_ITEMS,
         )
-        if provider_config is not None:
-            planning_options: dict[str, object] = {
-                "endpoint_type": "chat_completions",
-                "endpoint_identity": provider_config.base_url,
-                "parameters": provider_config.parameters,
-                "system_template": provider_config.system_template,
-                "system_template_version": provider_config.system_template_version,
-            }
-        else:
-            planning_options = {"endpoint_type": "offline"}
-        if condition == "observed":
-            records = plan_observed_requests(
-                prompts,
-                config.generation.models,
-                config.generation.seeds,
-                **planning_options,  # type: ignore[arg-type]
-            )
-        else:
-            interventions = _read_generation_records(
-                inputs[1],
-                InterventionRecord,
-                stage=stage,
-                allow_empty=False,
-                max_records=MAX_GENERATION_AXIS_ITEMS,
-            )
-            records = plan_counterfactual_requests(
-                {prompt.prompt_id: prompt for prompt in prompts},
-                interventions,
-                config.generation.models,
-                config.generation.seeds,
-                **planning_options,  # type: ignore[arg-type]
-            )
+        records = plan_observed_requests(
+            prompts,
+            config.generation.models,
+            config.generation.seeds,
+            endpoint_type="chat_completions",
+            endpoint_identity=provider_config.base_url,
+            parameters=provider_config.parameters,
+            system_template=provider_config.system_template,
+            system_template_version=provider_config.system_template_version,
+        )
         _write_generation_records(output, cast(list[object], records), stage=stage)
         store.seal_stage_outputs(stage, outputs)
         _read_verified_generation_records(
@@ -914,110 +676,13 @@ def plan_generation_stage(
     _execute_generation_stage(store, stage, execute)
 
 
-def import_generation_stage(
+def _generate_provider_observed(
     config: AppConfig,
     store: RunStore,
     *,
-    condition: GenerationCondition,
-    results_path: Path,
     force: bool,
 ) -> None:
-    del config
-    condition = _generation_condition(condition)
-    stage = f"import-generation-{condition}"
-    legacy_stage = f"generate-{condition}"
-    provider_stage = f"generate-provider-{condition}"
-    ledger = store.path("generation", f"{condition}_requests.jsonl")
-    output = store.path("generation", f"{condition}_code.jsonl")
-    outputs = [output]
-    results = Path(results_path)
-
-    _validate_offline_results_path(
-        store,
-        stage=stage,
-        condition=condition,
-        results=results,
-    )
-
-    if not results.is_file():
-        invalidation_failure: SecAwareError | None = None
-        for producer_stage in (stage, legacy_stage, provider_stage):
-            try:
-                store.invalidate_stage(producer_stage)
-            except SecAwareError as error:
-                invalidation_failure = error
-        if invalidation_failure is not None:
-            raise _generation_stage_error(
-                invalidation_failure.code,
-                stage,
-                "generation producer trust failure could not be cleaned up",
-                retryable=invalidation_failure.retryable,
-            )
-        raise _generation_stage_error(
-            ErrorCode.EXTERNAL_INPUT_REQUIRED,
-            stage,
-            "offline generation results are required",
-            retryable=True,
-        )
-
-    _require_committed_generation_plan(
-        store,
-        condition=condition,
-        import_stage=stage,
-        legacy_stage=legacy_stage,
-        provider_stage=provider_stage,
-        ledger=ledger,
-    )
-    _invalidate_alternate_generation_stages(
-        store,
-        stage=stage,
-        alternate_stages=(legacy_stage, provider_stage),
-    )
-    inputs = [ledger, results]
-    if _generation_stage_should_skip(store, stage, inputs, outputs, force=force):
-        return
-
-    def execute() -> None:
-        expected = _read_generation_records(
-            ledger,
-            GenerationRequestRecord,
-            stage=stage,
-            allow_empty=False,
-            max_records=MAX_OFFLINE_IMPORT_RECORDS,
-        )
-        received = _read_generation_records(
-            results,
-            OfflineGenerationResultRecord,
-            stage=stage,
-            allow_empty=True,
-            max_records=MAX_OFFLINE_IMPORT_RECORDS,
-        )
-        imported = import_offline_results(expected, received)
-        _write_generation_records(output, cast(list[object], imported), stage=stage)
-        store.seal_stage_outputs(stage, outputs)
-        _read_verified_generation_records(
-            store,
-            output,
-            CanonicalGeneratedCodeRecord,
-            imported,
-            outputs,
-            stage=stage,
-            max_records=MAX_OFFLINE_IMPORT_RECORDS,
-            mismatch_message="canonical generation output changed during publication",
-        )
-        store.record_stage(stage, inputs, outputs)
-
-    _execute_generation_stage(store, stage, execute)
-
-
-def generate_provider_stage(
-    config: AppConfig,
-    store: RunStore,
-    *,
-    condition: GenerationCondition,
-    force: bool,
-) -> None:
-    condition = _generation_condition(condition)
+    condition: GenerationCondition = "observed"
     stage = f"generate-provider-{condition}"
     provider_config = _openai_provider_config(config, stage=stage)
     ledger = store.path("generation", f"{condition}_requests.jsonl")
@@ -1181,17 +846,14 @@ def generate_provider_stage(
 
 def generate_observed_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     if config.generation.provider == "openai_compatible":
-        plan_generation_stage(
+        _plan_provider_observed_generation(
             config,
             store,
-            condition="observed",
-            mode="provider",
             force=force,
         )
-        generate_provider_stage(
+        _generate_provider_observed(
             config,
             store,
-            condition="observed",
             force=force,
         )
         return
@@ -1534,9 +1196,7 @@ def run_oracle_stage(
     control: KeyboardInterrupt | SystemExit | None = None
     stage = "oracle"
     try:
-        stage = (
-            f"run-oracle-{condition}" if condition in {"observed", "counterfactual"} else "oracle"
-        )
+        stage = f"run-oracle-{condition}" if condition == "observed" else "oracle"
         _run_oracle_stage(
             config,
             store,
@@ -1577,292 +1237,41 @@ def discover_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
         )
 
 
-def intervene_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    stage = "intervene"
-    inputs = [
-        store.path("inputs", "prompts.jsonl"),
-        store.path("tsg", "prompt_tsg.jsonl"),
-        store.path("discovery", "hypotheses_selected.jsonl"),
-    ]
-    output = store.path("interventions", "interventions.jsonl")
-    paired_output = store.path("interventions", "paired_prompts.jsonl")
-
-    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        all_prompts, prompt_tsg_by_id = _validated_prompt_tsg_coordinates(
-            store,
-            stage=stage,
-        )
-        prompts = [prompt for prompt in all_prompts if prompt.split == "confirm"]
-        hypotheses = read_jsonl(
-            store.path("discovery", "hypotheses_selected.jsonl"),
-            HypothesisRecord,
-            required=True,
-            allow_empty=True,
-            stage=stage,
-        )
-        interventions: list[InterventionRecord] = []
-        for hypothesis in hypotheses:
-            if "risk_down" not in config.intervention.enabled_directions:
-                continue
-            for prompt in prompts:
-                if not _matches_scope(prompt, hypothesis):
-                    continue
-                interventions.append(
-                    apply_intervention(prompt, prompt_tsg_by_id[prompt.prompt_id], hypothesis)
-                )
-        paired_prompts = [
-            {
-                "intervention_id": item.intervention_id,
-                "prompt_id": item.prompt_id,
-                "hypothesis_id": item.hypothesis_id,
-                "original_prompt": item.original_prompt,
-                "counterfactual_prompt": item.counterfactual_prompt,
-            }
-            for item in interventions
-        ]
-        return [interventions, paired_prompts]
-
-    producer_outputs = {
-        "discover": [
-            store.path("discovery", "hypotheses_all.jsonl"),
-            store.path("discovery", "hypotheses_selected.jsonl"),
-        ],
-        "extract-prompt-tsg": [
-            store.path("tsg", "prompt_extraction_proposals.jsonl"),
-            store.path("tsg", "prompt_tsg.jsonl"),
-        ],
-    }
-    with ExitStack() as stack:
-        for producer_stage in sorted(producer_outputs):
-            if producer_stage == "extract-prompt-tsg":
-                producer_context = store.hold_committed_stage(
-                    producer_stage,
-                    [store.path("inputs", "prompts.jsonl")],
-                    producer_outputs[producer_stage],
-                    expected_catalog_sha256=PROMPT_TSG_CATALOG_SHA256,
-                )
-            else:
-                producer_context = store.hold_committed_output(
-                    producer_stage,
-                    producer_outputs[producer_stage],
-                )
-            stack.enter_context(producer_context)
-        execute_jsonl_stage_transaction(
-            store,
-            stage=stage,
-            inputs=inputs,
-            outputs=(
-                JsonlOutputSpec(output, InterventionRecord),
-                JsonlOutputSpec(paired_output, None),
-            ),
-            force=force,
-            build=build,
-        )
-
-
-def generate_counterfactual_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    if config.generation.provider == "openai_compatible":
-        plan_generation_stage(
-            config,
-            store,
-            condition="counterfactual",
-            mode="provider",
-            force=force,
-        )
-        generate_provider_stage(
-            config,
-            store,
-            condition="counterfactual",
-            force=force,
-        )
-        return
-    stage = "generate-counterfactual"
-    inputs = [
-        store.path("inputs", "prompts.jsonl"),
-        store.path("interventions", "interventions.jsonl"),
-    ]
-    if config.generation.provider == "file" and config.generation.file_provider_dir is not None:
-        inputs.append(Path(config.generation.file_provider_dir))
-    output = store.path("generation", "counterfactual_code.jsonl")
-    outputs = [output]
-    _invalidate_alternate_generation_stages(
-        store,
-        stage=stage,
-        alternate_stages=(
-            "import-generation-counterfactual",
-            "generate-provider-counterfactual",
-        ),
-    )
-    if store.should_skip_stage(stage, inputs, outputs, force):
-        return
-
-    def execute() -> None:
-        prompts = {prompt.prompt_id: prompt for prompt in _prompt_records(store)}
-        interventions = read_jsonl(
-            store.path("interventions", "interventions.jsonl"), InterventionRecord
-        )
-        provider = get_provider(
-            config.generation.provider,
-            file_provider_dir=config.generation.file_provider_dir,
-        )
-        if config.generation.provider == "mock":
-            requests = plan_counterfactual_requests(
-                prompts,
-                interventions,  # type: ignore[arg-type]
-                config.generation.models,
-                config.generation.seeds,
-                endpoint_type="mock",
-            )
-            producer = "mock"
-        elif config.generation.provider == "file":
-            requests = plan_counterfactual_requests(
-                prompts,
-                interventions,  # type: ignore[arg-type]
-                config.generation.models,
-                config.generation.seeds,
-                endpoint_type="offline",
-                endpoint_identity=config.generation.file_provider_dir,
-            )
-            producer = "file_provider"
-        else:
-            raise _generation_stage_error(
-                ErrorCode.CONFIG,
-                stage,
-                "generation provider is unavailable",
-            )
-        records = [
-            canonical_generated_code_from_request(
-                request,
-                provider.generate(
-                    request.prompt,
-                    model_id=request.model_id,
-                    seed=request.seed_id,
-                    language=request.language,
-                ),
-                GenerationProvenance(
-                    producer=producer,
-                    producer_version="compatibility-v1",
-                ),
-            )
-            for request in requests
-        ]
-        write_jsonl(output, records)
-        store.seal_stage_outputs(stage, outputs)
-        _read_verified_generation_records(
-            store,
-            output,
-            CanonicalGeneratedCodeRecord,
-            records,
-            outputs,
-            stage=stage,
-            max_records=MAX_GENERATION_REQUESTS,
-            mismatch_message="generated code artifact failed canonical readback",
-        )
-        store.record_stage(stage, inputs, outputs)
-
-    _execute_generation_stage(store, stage, execute)
-
-
-def confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    stage = "confirm"
-    del config, store, force
-    raise _oracle_stage_error(
-        ErrorCode.CONTRACT,
-        stage,
-        "legacy two-arm confirmation artifacts require regeneration with the randomized confirmation protocol",
-    )
-
-
-def _retired_confirm_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
-    """Retained implementation body until the legacy surface is removed in Task 8."""
-
-    stage = "confirm"
-    inputs = [
-        store.path("interventions", "interventions.jsonl"),
-        store.path("oracle", "observed_oracle.jsonl"),
-        store.path("oracle", "counterfactual_oracle.jsonl"),
-        store.path("discovery", "hypotheses_selected.jsonl"),
-    ]
-    pair_output = store.path("analysis", "pair_results.jsonl")
-    effect_output = store.path("analysis", "hypothesis_effects.jsonl")
-    outputs = [pair_output, effect_output]
-    observed_output = store.path("oracle", "observed_oracle.jsonl")
-    counterfactual_output = store.path("oracle", "counterfactual_oracle.jsonl")
-
-    def build() -> Sequence[Sequence[BaseModel | dict[Any, Any]]]:
-        interventions = cast(
-            list[InterventionRecord],
-            read_jsonl(
-                store.path("interventions", "interventions.jsonl"),
-                InterventionRecord,
-            ),
-        )
-        observed = _read_oracle_output(
-            observed_output,
-            stage=stage,
-            condition="observed",
-        )
-        counterfactual = _read_oracle_output(
-            counterfactual_output,
-            stage=stage,
-            condition="counterfactual",
-        )
-        pairs = build_pairs(interventions, observed, counterfactual)
-        effects = estimate_effects(
-            pairs,
-            bootstrap_samples=config.analysis.bootstrap_samples,
-            ci_level=config.analysis.ci_level,
-            min_eligible_pairs=config.analysis.min_eligible_pairs,
-            min_flip_rate=config.analysis.min_flip_rate,
-            max_side_effect_rate_confirmed=config.analysis.max_side_effect_rate_confirmed,
-            random_seed=config.run.random_seed,
-        )
-        hypotheses = {
-            hypothesis.hypothesis_id: hypothesis
-            for hypothesis in read_jsonl(
-                store.path("discovery", "hypotheses_selected.jsonl"), HypothesisRecord
-            )
-        }
-        for effect in effects:
-            hypothesis = hypotheses.get(effect.hypothesis_id)
-            if hypothesis:
-                effect.scope_cwe = hypothesis.scope.get("cwe", "")
-                effect.scope_task_family = hypothesis.scope.get("task_family", "")
-        return [pairs, effects]
-
-    with ExitStack() as stack:
-        stack.enter_context(store.hold_committed_output("run-oracle-observed", [observed_output]))
-        stack.enter_context(
-            store.hold_committed_output(
-                "run-oracle-counterfactual",
-                [counterfactual_output],
-            )
-        )
-        execute_jsonl_stage_transaction(
-            store,
-            stage=stage,
-            inputs=inputs,
-            outputs=(
-                JsonlOutputSpec(outputs[0], PairResult),
-                JsonlOutputSpec(outputs[1], EffectRecord),
-            ),
-            force=force,
-            build=build,
-        )
-
-
 def report_stage(config: AppConfig, store: RunStore, *, force: bool) -> None:
     write_reports(config, store, force=force)
 
 
-def _matches_scope(prompt: PromptRecord, hypothesis: HypothesisRecord) -> bool:
-    task_family = hypothesis.scope.get("task_family")
-    cwe = hypothesis.scope.get("cwe")
-    return (not task_family or prompt.task_family == task_family) and (not cwe or prompt.cwe == cwe)
-
-
-def _safe_id(value: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in value)
+def _require_committed_functional_outcomes_for_frozen_protocols(store: RunStore) -> None:
+    variant_outputs = tuple(
+        store.path("interventions", name) for name, _model in PROMPT_VARIANT_OUTPUTS
+    )
+    protocol_path = store.path("interventions", "confirmation_protocols.jsonl")
+    with store.hold_committed_output(
+        "build-confirmation-variants",
+        variant_outputs,
+        expected_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+    ):
+        protocols = cast(
+            list[ConfirmationProtocolRecord],
+            read_jsonl(
+                protocol_path,
+                ConfirmationProtocolRecord,
+                required=True,
+                allow_empty=False,
+                max_records=100_000,
+                max_line_chars=4_000_000,
+                max_total_chars=256_000_000,
+                stage="run-all",
+            ),
+        )
+        requires_functional_outcomes = any(
+            protocol.functional_outcome_contract_id is not None for protocol in protocols
+        )
+    if requires_functional_outcomes:
+        store.require_committed_output(
+            "import-functional-outcomes",
+            (store.path("analysis", "functional_outcomes.jsonl"),),
+        )
 
 
 @app.callback()
@@ -1911,74 +1320,6 @@ def generate_observed_command(
     cfg, store = _load(config, run_dir)
     _prepare(cfg, store)
     generate_observed_stage(cfg, store, force=force)
-
-
-@app.command("plan-generation")
-@cli_action
-def plan_generation_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    condition: str = typer.Option("observed", "--condition"),
-    mode: str = typer.Option("offline", "--mode", hidden=True),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    validated_condition = _cli_generation_condition(condition)
-    validated_mode = _generation_mode(mode)
-    cfg, store = _load(config, run_dir)
-    _prepare(cfg, store)
-    plan_generation_stage(
-        cfg,
-        store,
-        condition=validated_condition,
-        mode=validated_mode,
-        force=force,
-    )
-
-
-@app.command("generate")
-@cli_action
-def generate_command(
-    config: Path = typer.Option(..., "--config"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    condition: str = typer.Option("observed", "--condition"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    validated_condition = _cli_generation_condition(condition)
-    cfg, store = _load(config, run_dir)
-    _prepare(cfg, store)
-    plan_generation_stage(
-        cfg,
-        store,
-        condition=validated_condition,
-        mode="provider",
-        force=force,
-    )
-    generate_provider_stage(
-        cfg,
-        store,
-        condition=validated_condition,
-        force=force,
-    )
-
-
-@app.command("import-generation")
-@cli_action
-def import_generation_command(
-    config: Path = typer.Option(..., "--config"),
-    results: Path = typer.Option(..., "--results"),
-    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
-    condition: str = typer.Option("observed", "--condition"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    validated_condition = _cli_generation_condition(condition)
-    cfg, store = _load(config, run_dir)
-    import_generation_stage(
-        cfg,
-        store,
-        condition=validated_condition,
-        results_path=results,
-        force=force,
-    )
 
 
 @app.command("run-oracle")
@@ -2042,6 +1383,62 @@ def generate_confirmation_command(
     run_confirmation_generation_stage(cfg, store, force=force)
 
 
+@app.command("import-functional-outcomes")
+@cli_action
+def import_functional_outcomes_command(
+    config: Path = typer.Option(..., "--config"),
+    results: Path = typer.Option(..., "--results"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    import_functional_outcomes_stage(cfg, store, results_path=results, force=force)
+
+
+@app.command("confirm")
+@cli_action
+def confirm_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    effects_stage(cfg, store, force=force)
+
+
+@app.command("analyze-jci")
+@cli_action
+def analyze_jci_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    jci_stage(cfg, store, force=force)
+
+
+@app.command("analyze-rfci")
+@cli_action
+def analyze_rfci_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    rfci_stage(cfg, store, force=force)
+
+
+@app.command("report")
+@cli_action
+def report_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    write_reports(cfg, store, force=force)
+
+
 @app.command("run-all")
 @cli_action
 def run_all_command(
@@ -2050,19 +1447,17 @@ def run_all_command(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     cfg, store = _load(config, run_dir)
-    terminal_paths = (
-        store.path("oracle", "confirmation_oracle.jsonl"),
-        store.path(".stages", "run-oracle-confirmation.json"),
-    )
+    report_outputs = tuple(store.root / relative for relative in REPORT_STAGE_OUTPUTS)
+    terminal_paths = (*report_outputs, store.path(".stages", "report.json"))
     if any(path.exists() or path.is_symlink() for path in terminal_paths):
-        confirmation_oracle_stage._validate_committed_confirmation_run(cfg, store)
+        validate_committed_reports(cfg, store)
         if force:
             raise SecAwareError(
                 code=ErrorCode.MANIFEST_CONFLICT,
                 stage="run-all",
                 message="completed run is immutable; start a new run directory",
             )
-        console.print(f"SecAware randomized confirmation complete: {store.root}")
+        console.print(f"SecAware analysis complete: {store.root}")
         return
     _prepare(cfg, store)
     extract_prompt_tsg_stage(cfg, store, force=force)
@@ -2073,7 +1468,12 @@ def run_all_command(
     run_confirmation_randomization_stage(cfg, store, force=force)
     run_confirmation_generation_stage(cfg, store, force=force)
     run_confirmation_oracle_stage(cfg, store, force=force)
-    console.print(f"SecAware randomized confirmation complete: {store.root}")
+    _require_committed_functional_outcomes_for_frozen_protocols(store)
+    effects_stage(cfg, store, force=force)
+    jci_stage(cfg, store, force=force)
+    rfci_stage(cfg, store, force=force)
+    write_reports(cfg, store, force=force)
+    console.print(f"SecAware analysis complete: {store.root}")
 
 
 if __name__ == "__main__":

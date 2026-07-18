@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -94,6 +95,32 @@ def test_jci_stage_declares_exact_ordered_outputs() -> None:
         JCIOrientationDeltaRecord,
         AnalysisFailureRecord,
     )
+
+
+def test_jci_analysis_universe_excludes_frozen_protocol_without_committed_assignment() -> None:
+    module = import_module("secaware.pipeline.stages.jci")
+    assigned_protocol = SimpleNamespace(arm_protocol_id="arm_protocol_" + "1" * 64)
+    excluded_protocol = SimpleNamespace(arm_protocol_id="arm_protocol_" + "0" * 64)
+    assignments = (SimpleNamespace(arm_protocol_id=assigned_protocol.arm_protocol_id),)
+
+    selected = module._assigned_protocol_universe(
+        (assigned_protocol, excluded_protocol),
+        assignments,
+    )
+
+    assert selected == (assigned_protocol,)
+
+
+def test_jci_analysis_universe_rejects_dangling_assignment_protocol() -> None:
+    module = import_module("secaware.pipeline.stages.jci")
+    frozen_protocol = SimpleNamespace(arm_protocol_id="arm_protocol_" + "1" * 64)
+    dangling_assignment = SimpleNamespace(arm_protocol_id="arm_protocol_" + "0" * 64)
+
+    with pytest.raises(SecAwareError, match="assignment protocol universe"):
+        module._assigned_protocol_universe(
+            (frozen_protocol,),
+            (dangling_assignment,),
+        )
 
 
 def test_run_store_enforces_exact_jci_output_contract(tmp_path: Path) -> None:

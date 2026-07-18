@@ -10,7 +10,7 @@ from typing import cast
 import networkx as nx
 
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.schema.hypotheses import FactorType
+from secaware.schema.features import FeatureFamily
 from secaware.schema.tsg import (
     EdgeType,
     MAX_MOTIF_HOPS,
@@ -21,6 +21,7 @@ from secaware.schema.tsg import (
     NodeType,
 )
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG, prompt_ontology_entry
+from secaware.tsg.feature_catalog import prompt_feature_spec
 from secaware.tsg.graph import _InvalidInput as _GraphInvalidInput
 from secaware.tsg.graph import _canonical_query_graph
 
@@ -28,7 +29,8 @@ from secaware.tsg.graph import _canonical_query_graph
 @dataclass(frozen=True, slots=True)
 class MotifSpec:
     motif_id: MotifId
-    factor_type: FactorType
+    task_feature_id: str
+    target_feature_id: str
     source_types: tuple[NodeType, ...]
     data_label: str
     sink_label: str
@@ -39,25 +41,29 @@ class MotifSpec:
     max_hops: int
 
 
-_MOTIF_BY_FACTOR = {
-    FactorType.INPUT_VALIDATION: MotifId.UNTRUSTED_SOURCE_TO_SENSITIVE_SINK_WITHOUT_GUARD,
-    FactorType.PATH_NORMALIZATION: MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD,
-    FactorType.SQL_PARAMETERIZATION: MotifId.USER_STRING_TO_SQL_WITHOUT_PARAMETERIZATION,
-    FactorType.SAFE_SUBPROCESS: MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD,
-    FactorType.AUTHORIZATION_CHECK: MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD,
-    FactorType.SAFE_DESERIALIZATION: MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK,
+_MOTIF_BY_TARGET_FEATURE = {
+    "safety.input_validation": MotifId.UNTRUSTED_SOURCE_TO_SENSITIVE_SINK_WITHOUT_GUARD,
+    "safety.path_normalization": MotifId.USER_PATH_TO_FILE_OPEN_WITHOUT_GUARD,
+    "safety.sql_parameterization": MotifId.USER_STRING_TO_SQL_WITHOUT_PARAMETERIZATION,
+    "safety.safe_subprocess": MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD,
+    "safety.authorization_check": MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD,
+    "safety.safe_deserialization": MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK,
 }
 
 
 def _build_specs() -> MappingProxyType[MotifId, MotifSpec]:
-    by_motif = {motif_id: factor_type for factor_type, motif_id in _MOTIF_BY_FACTOR.items()}
+    entry_by_target = {entry.target_feature_id: entry for entry in PROMPT_TSG_CATALOG}
+    by_motif = {
+        motif_id: entry_by_target[target_feature_id]
+        for target_feature_id, motif_id in _MOTIF_BY_TARGET_FEATURE.items()
+    }
     specs: dict[MotifId, MotifSpec] = {}
     for motif_id in MotifId:
-        factor_type = by_motif[motif_id]
-        entry = prompt_ontology_entry(factor_type)
+        entry = by_motif[motif_id]
         specs[motif_id] = MotifSpec(
             motif_id=motif_id,
-            factor_type=factor_type,
+            task_feature_id=entry.task_feature_id,
+            target_feature_id=entry.target_feature_id,
             source_types=(NodeType.SOURCE,),
             data_label=entry.data_label,
             sink_label=entry.sink_label,
@@ -70,9 +76,18 @@ def _build_specs() -> MappingProxyType[MotifId, MotifSpec]:
     if (
         tuple(specs) != tuple(MotifId)
         or len(specs) != 6
-        or {spec.factor_type for spec in specs.values()} != set(FactorType)
+        or {spec.target_feature_id for spec in specs.values()}
+        != {entry.target_feature_id for entry in PROMPT_TSG_CATALOG}
+        or {spec.task_feature_id for spec in specs.values()}
+        != {entry.task_feature_id for entry in PROMPT_TSG_CATALOG}
         or {spec.motif_id for spec in specs.values()} != set(MotifId)
-        or tuple(entry.factor_type for entry in PROMPT_TSG_CATALOG) != tuple(FactorType)
+        or any(
+            prompt_feature_spec(spec.task_feature_id).feature_family
+            is not FeatureFamily.TASK_FUNCTION
+            or prompt_feature_spec(spec.target_feature_id).feature_family
+            is not FeatureFamily.SAFETY_CONTROL
+            for spec in specs.values()
+        )
     ):
         raise RuntimeError("invalid finite prompt motif catalog")
     return MappingProxyType(specs)
@@ -81,7 +96,7 @@ def _build_specs() -> MappingProxyType[MotifId, MotifSpec]:
 MOTIF_SPECS = _build_specs()
 
 _ShadowQueryInputs = tuple[
-    tuple[tuple[FactorType, bool], ...],
+    tuple[tuple[str, bool], ...],
     tuple[tuple[MotifId, bool], ...],
     int,
     int,
@@ -291,8 +306,8 @@ def _find_matches(
     return tuple(sorted(matches, key=lambda match: (match.node_path, match.edge_path)))
 
 
-def _has_factor_requirement(graph: nx.MultiDiGraph, factor_type: FactorType) -> bool:
-    entry = prompt_ontology_entry(factor_type)
+def _has_feature_requirement(graph: nx.MultiDiGraph, target_feature_id: str) -> bool:
+    entry = prompt_ontology_entry(target_feature_id)
     for requirement_id, requirement in sorted(graph.nodes(data=True), key=lambda item: item[0]):
         if (
             requirement["node_type"] is not NodeType.PROMPT_REQUIREMENT
@@ -351,45 +366,55 @@ def find_motif_matches(
     return result
 
 
-def _try_has_factor_requirement(
+def _try_has_feature_requirement(
     graph: nx.MultiDiGraph,
-    factor_type: FactorType,
+    target_feature_id: str,
 ) -> bool | _FailureKind:
     try:
-        if type(factor_type) is not FactorType:
+        if (
+            type(target_feature_id) is not str
+            or prompt_feature_spec(target_feature_id).feature_family
+            is not FeatureFamily.SAFETY_CONTROL
+        ):
             raise _InvalidQuery from None
-        return _has_factor_requirement(_snapshot_graph(graph), factor_type)
-    except _InvalidQuery:
+        return _has_feature_requirement(_snapshot_graph(graph), target_feature_id)
+    except (_InvalidQuery, KeyError):
         return _FailureKind.INVALID_INPUT
     except Exception:
         return _FailureKind.INTERNAL
 
 
-def has_factor_requirement(graph: nx.MultiDiGraph, factor_type: FactorType) -> bool:
-    """Query an exact typed requirement-to-guard structure from the live graph."""
-    result = _try_has_factor_requirement(graph, factor_type)
+def has_feature_requirement(graph: nx.MultiDiGraph, target_feature_id: str) -> bool:
+    """Query one catalog-bound requirement-to-guard structure from the live graph."""
+    result = _try_has_feature_requirement(graph, target_feature_id)
     if isinstance(result, _FailureKind):
         graph = cast(nx.MultiDiGraph, None)
-        factor_type = cast(FactorType, None)
+        target_feature_id = cast(str, None)
         _raise_failure(result)
     return result
 
 
-def _try_factor_query_vector(
+def _try_feature_requirement_vector(
     graph: nx.MultiDiGraph,
-) -> tuple[tuple[FactorType, bool], ...] | _FailureKind:
+) -> tuple[tuple[str, bool], ...] | _FailureKind:
     try:
         snapshot = _snapshot_graph(graph)
-        return tuple((factor, _has_factor_requirement(snapshot, factor)) for factor in FactorType)
+        return tuple(
+            (
+                entry.target_feature_id,
+                _has_feature_requirement(snapshot, entry.target_feature_id),
+            )
+            for entry in PROMPT_TSG_CATALOG
+        )
     except _InvalidQuery:
         return _FailureKind.INVALID_INPUT
     except Exception:
         return _FailureKind.INTERNAL
 
 
-def factor_query_vector(graph: nx.MultiDiGraph) -> tuple[tuple[FactorType, bool], ...]:
-    """Return the complete factor-requirement vector in enum order."""
-    result = _try_factor_query_vector(graph)
+def feature_requirement_vector(graph: nx.MultiDiGraph) -> tuple[tuple[str, bool], ...]:
+    """Return the complete structural requirement vector in catalog order."""
+    result = _try_feature_requirement_vector(graph)
     if isinstance(result, _FailureKind):
         graph = cast(nx.MultiDiGraph, None)
         _raise_failure(result)
@@ -435,8 +460,12 @@ def _try_shadow_query_inputs(
 ) -> _ShadowQueryInputs | _FailureKind:
     try:
         snapshot = _snapshot_graph(graph)
-        factors = tuple(
-            (factor, _has_factor_requirement(snapshot, factor)) for factor in FactorType
+        features = tuple(
+            (
+                entry.target_feature_id,
+                _has_feature_requirement(snapshot, entry.target_feature_id),
+            )
+            for entry in PROMPT_TSG_CATALOG
         )
         motifs = tuple(
             (
@@ -452,7 +481,7 @@ def _try_shadow_query_inputs(
             )
             for motif_id in MotifId
         )
-        return factors, motifs, snapshot.number_of_nodes(), snapshot.number_of_edges()
+        return features, motifs, snapshot.number_of_nodes(), snapshot.number_of_edges()
     except _InvalidQuery:
         return _FailureKind.INVALID_INPUT
     except Exception:
@@ -471,8 +500,8 @@ def _shadow_query_inputs(graph: nx.MultiDiGraph) -> _ShadowQueryInputs:
 __all__ = [
     "MOTIF_SPECS",
     "MotifSpec",
-    "factor_query_vector",
+    "feature_requirement_vector",
     "find_motif_matches",
-    "has_factor_requirement",
+    "has_feature_requirement",
     "motif_query_vector",
 ]

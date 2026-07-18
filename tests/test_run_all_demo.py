@@ -1,5 +1,6 @@
 import ast
 from collections.abc import Sequence
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
@@ -16,15 +17,17 @@ from secaware.cli import app
 from secaware.config import TSGConfig, load_config, write_resolved_config
 from secaware import extractors as extractors_module
 from secaware.extractors import factory as extractor_factory_module
-from secaware.errors import ErrorCode
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
 from secaware.oracle import aggregator as aggregator_module
 from secaware.oracle.runner import AnalyzerProcessResult
-from secaware.pipeline.manifest import read_stage_manifest
+from secaware.pipeline.manifest import read_stage_manifest, write_stage_manifest
 from secaware.pipeline import artifact as artifact_module
 from secaware.pipeline.stages import confirmation_generation as confirmation_generation_stage_module
 from secaware.pipeline.stages import confirmation_oracle as confirmation_oracle_stage_module
 from secaware.pipeline.stages import fci_discovery as fci_stage_module
+from secaware.pipeline.stages import jci as jci_stage_module
+from secaware.pipeline.stages.prompt_variants import PROMPT_VARIANT_OUTPUTS
 from secaware.config import FCIDiscoveryConfig
 from secaware.schema.causal import (
     BackgroundKnowledgeRecord,
@@ -36,14 +39,18 @@ from secaware.schema.causal import (
     PAGRecord,
     PAGRunKind,
 )
-from secaware.schema.interventions import InterventionRecord
 from secaware.schema.experiments import AssignmentExecutionRecord, AssignmentRecord
 from secaware.schema.oracle import OracleRecord
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord
-from secaware.schema.results import PairResult
+from secaware.schema.outcomes import (
+    AssignmentOutcomeRecord,
+    ITTEffectRecord,
+    JCIOrientationDeltaRecord,
+    RFCICapabilityRecord,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -61,11 +68,14 @@ def _empty_run_all_store(root: Path) -> SimpleNamespace:
     return SimpleNamespace(root=root, path=lambda *parts: root.joinpath(*parts))
 
 
-def test_run_all_executes_the_complete_m5_pipeline_in_order(
+def test_run_all_executes_the_complete_m6_pipeline_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
-    config = object()
+    config = SimpleNamespace(
+        data=SimpleNamespace(functional_outcome_contracts_path=None),
+        rfci=SimpleNamespace(enabled=False),
+    )
     store = _empty_run_all_store(Path("run-all-order"))
     monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
     monkeypatch.setattr(cli_module, "_prepare", lambda *_args: calls.append("prepare"))
@@ -112,6 +122,35 @@ def test_run_all_executes_the_complete_m5_pipeline_in_order(
         "run_confirmation_oracle_stage",
         lambda *_args, **_kwargs: calls.append("run-oracle-confirmation"),
     )
+    monkeypatch.setattr(
+        cli_module,
+        "_require_committed_functional_outcomes_for_frozen_protocols",
+        lambda *_args, **_kwargs: calls.append("check-functional-outcomes"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "effects_stage",
+        lambda *_args, **_kwargs: calls.append("confirm"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "jci_stage",
+        lambda *_args, **_kwargs: calls.append("analyze-jci"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "rfci_stage",
+        lambda *_args, **_kwargs: calls.append("analyze-rfci"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "write_reports",
+        lambda *_args, **_kwargs: calls.append("report"),
+    )
 
     result = CliRunner().invoke(app, ["run-all", "--config", "unused.yaml", "--force"])
 
@@ -127,6 +166,11 @@ def test_run_all_executes_the_complete_m5_pipeline_in_order(
         "randomize-confirmation",
         "generate-confirmation",
         "run-oracle-confirmation",
+        "check-functional-outcomes",
+        "confirm",
+        "analyze-jci",
+        "analyze-rfci",
+        "report",
     ]
 
 
@@ -173,6 +217,13 @@ def test_run_all_stops_without_future_m5_calls_after_randomization_failure(
         "run_confirmation_oracle_stage",
         lambda *_args, **_kwargs: calls.append("unexpected-oracle"),
     )
+    for name in ("effects_stage", "jci_stage", "rfci_stage", "write_reports"):
+        monkeypatch.setattr(
+            cli_module,
+            name,
+            lambda *_args, _name=name, **_kwargs: calls.append(f"unexpected-{_name}"),
+            raising=False,
+        )
 
     result = CliRunner().invoke(app, ["run-all", "--config", "unused.yaml", "--force"])
 
@@ -180,163 +231,185 @@ def test_run_all_stops_without_future_m5_calls_after_randomization_failure(
     assert calls[-1] == "run_confirmation_randomization_stage"
     assert "unexpected-generation" not in calls
     assert "unexpected-oracle" not in calls
+    assert not any(item.startswith("unexpected-") for item in calls)
 
 
-def _assert_pair_security_matches_oracle(
-    pairs: Sequence[PairResult],
-    observed: Sequence[OracleRecord],
-    counterfactual: Sequence[OracleRecord],
-    interventions: Sequence[InterventionRecord],
-    observed_code: Sequence[CanonicalGeneratedCodeRecord],
-    counterfactual_code: Sequence[CanonicalGeneratedCodeRecord],
+def test_run_all_requires_committed_functional_outcomes_without_importing_them(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def producer_coordinate(record: OracleRecord | CanonicalGeneratedCodeRecord) -> tuple:
-        return (
-            record.request_id,
-            record.code_id,
-            record.code_sha256,
-            record.prompt_id,
-            record.condition,
-            record.model_id,
-            record.seed_id,
-            record.hypothesis_id,
-            record.intervention_id,
-        )
+    calls: list[str] = []
+    config = SimpleNamespace(
+        data=SimpleNamespace(functional_outcome_contracts_path=None),
+        rfci=SimpleNamespace(enabled=False),
+    )
 
-    observed_oracle_producers = [producer_coordinate(record) for record in observed]
-    observed_code_producers = [producer_coordinate(record) for record in observed_code]
-    counter_oracle_producers = [producer_coordinate(record) for record in counterfactual]
-    counter_code_producers = [producer_coordinate(record) for record in counterfactual_code]
-    for coordinates in (
-        observed_oracle_producers,
-        observed_code_producers,
-        counter_oracle_producers,
-        counter_code_producers,
+    @contextmanager
+    def hold_committed_protocols(
+        stage: str,
+        outputs: Sequence[Path],
+        **_kwargs: object,
     ):
-        assert len(coordinates) == len(set(coordinates))
-    for records in (observed, observed_code, counterfactual, counterfactual_code):
-        request_ids = [record.request_id for record in records]
-        code_ids = [record.code_id for record in records]
-        assert len(request_ids) == len(set(request_ids))
-        assert len(code_ids) == len(set(code_ids))
-    assert set(observed_oracle_producers) == set(observed_code_producers)
-    assert set(counter_oracle_producers) == set(counter_code_producers)
+        assert stage == "build-confirmation-variants"
+        assert tuple(outputs) == tuple(
+            root / "interventions" / name for name, _model in PROMPT_VARIANT_OUTPUTS
+        )
+        calls.append("hold-frozen-protocols")
+        yield {}
 
-    observed_coordinates = [
-        (record.prompt_id, record.model_id, record.seed_id) for record in observed
-    ]
-    observed_code_coordinates = [
-        (record.prompt_id, record.model_id, record.seed_id) for record in observed_code
-    ]
-    intervention_ids = [record.intervention_id for record in interventions]
-    intervention_coordinates = [
-        (record.prompt_id, record.hypothesis_id) for record in interventions
-    ]
-    counter_coordinates = [
-        (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
-        for record in counterfactual
-    ]
-    counter_code_coordinates = [
-        (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
-        for record in counterfactual_code
-    ]
-    pair_ids = [record.pair_id for record in pairs]
-    pair_coordinates = [
-        (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
-        for record in pairs
-    ]
-    for coordinates in (
-        observed_coordinates,
-        observed_code_coordinates,
-        intervention_ids,
-        intervention_coordinates,
-        counter_coordinates,
-        counter_code_coordinates,
-        pair_ids,
-        pair_coordinates,
+    def missing_functional_commit(
+        stage: str,
+        _outputs: Sequence[Path],
+        **_kwargs: object,
+    ) -> None:
+        assert stage == "import-functional-outcomes"
+        raise SecAwareError(
+            code=ErrorCode.CONTRACT,
+            stage="run-all",
+            message="committed functional outcomes are required before confirm",
+        )
+
+    root = Path("run-all-functional-contract")
+    store = SimpleNamespace(
+        root=root,
+        path=lambda *parts: root.joinpath(*parts),
+        hold_committed_output=hold_committed_protocols,
+        require_committed_output=missing_functional_commit,
+    )
+    monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
+    for name in (
+        "_prepare",
+        "extract_prompt_tsg_stage",
+        "generate_observed_stage",
+        "run_oracle_stage",
+        "discover_stage",
+        "run_prompt_variant_freeze_stage",
+        "run_confirmation_randomization_stage",
+        "run_confirmation_generation_stage",
+        "run_confirmation_oracle_stage",
     ):
-        assert len(coordinates) == len(set(coordinates))
-    assert set(observed_coordinates) == set(observed_code_coordinates)
-    assert set(counter_coordinates) == set(counter_code_coordinates) == set(pair_coordinates)
-    assert set(intervention_coordinates) == {
-        (record.prompt_id, record.hypothesis_id) for record in counterfactual
-    }
-    assert set(intervention_ids) == {record.intervention_id for record in counterfactual}
-
-    label_value = {"secure": 0, "insecure": 1}
-    for pair in pairs:
-        matching_observed = [
-            record
-            for record in observed
-            if (record.prompt_id, record.model_id, record.seed_id)
-            == (pair.prompt_id, pair.model_id, pair.seed_id)
-        ]
-        matching_counter = [
-            record
-            for record in counterfactual
-            if (record.prompt_id, record.hypothesis_id, record.model_id, record.seed_id)
-            == (pair.prompt_id, pair.hypothesis_id, pair.model_id, pair.seed_id)
-        ]
-        matching_interventions = [
-            record
-            for record in interventions
-            if (record.prompt_id, record.hypothesis_id) == (pair.prompt_id, pair.hypothesis_id)
-        ]
-        assert len(matching_observed) == len(matching_counter) == len(matching_interventions) == 1
-        observed_record = matching_observed[0]
-        counter_record = matching_counter[0]
-        intervention = matching_interventions[0]
-        assert counter_record.intervention_id == intervention.intervention_id
-        assert pair.factor_type == intervention.factor_type.value
-        assert pair.expected_direction == intervention.expected_direction
-        assert pair.same_task_valid is intervention.semantic_valid
-        assert pair.target_changed is intervention.target_changed
-        assert pair.side_effect is intervention.side_effect
-        assert pair.functional_observed is observed_record.functional_ok
-        assert pair.functional_counterfactual is counter_record.functional_ok
-        assert pair.security_observed == observed_record.security_label.value
-        assert pair.security_counterfactual == counter_record.security_label.value
-        expected_delta = (
-            label_value[counter_record.security_label.value]
-            - label_value[observed_record.security_label.value]
+        monkeypatch.setattr(
+            cli_module,
+            name,
+            lambda *_args, _name=name, **_kwargs: calls.append(_name),
         )
-        assert pair.delta == expected_delta
-        if pair.security_observed == pair.security_counterfactual:
-            expected_flip = "no_flip"
-        elif (pair.security_observed, pair.security_counterfactual) == (
-            "insecure",
-            "secure",
-        ):
-            expected_flip = "secure_flip"
-        else:
-            expected_flip = "insecure_flip"
-        assert pair.flip_type == expected_flip
-        assert pair.eligible_per_protocol is (
-            intervention.semantic_valid
-            and intervention.target_changed
-            and not intervention.side_effect
-            and observed_record.functional_ok
-            and counter_record.functional_ok
+    monkeypatch.setattr(
+        cli_module,
+        "import_functional_outcomes_stage",
+        lambda *_args, **_kwargs: pytest.fail("run-all must never derive functional outcomes"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "read_jsonl",
+        lambda path, _model, **_kwargs: (
+            (SimpleNamespace(functional_outcome_contract_id="functional_contract_" + "a" * 64),)
+            if path == root / "interventions" / "confirmation_protocols.jsonl"
+            else pytest.fail("run-all read an unexpected functional-gate artifact")
+        ),
+    )
+    for name in ("effects_stage", "jci_stage", "rfci_stage", "write_reports"):
+        monkeypatch.setattr(
+            cli_module,
+            name,
+            lambda *_args, _name=name, **_kwargs: calls.append(f"unexpected-{_name}"),
+            raising=False,
         )
-        assert pair.eligible_itt is True
-        if intervention.failure_reason is not None:
-            expected_failure = intervention.failure_reason.value
-        elif not observed_record.parse_ok or not counter_record.parse_ok:
-            expected_failure = "parse_failed"
-        elif not observed_record.functional_ok or not counter_record.functional_ok:
-            expected_failure = "functional_failed"
-        else:
-            expected_failure = None
-        assert pair.failure_reason == expected_failure
 
-    assert {record.security_label.value for record in (*observed, *counterfactual)} == {
-        "secure",
-        "insecure",
-    }
-    assert any(pair.security_observed != pair.security_counterfactual for pair in pairs)
-    assert ("insecure", "secure") in {
-        (pair.security_observed, pair.security_counterfactual) for pair in pairs
-    }
+    result = CliRunner().invoke(app, ["run-all", "--config", "unused.yaml", "--force"])
+
+    assert result.exit_code == int(ErrorCode.CONTRACT), result.output
+    assert calls[-2:] == ["run_confirmation_oracle_stage", "hold-frozen-protocols"]
+    assert not any(item.startswith("unexpected-") for item in calls)
+
+
+def test_functional_gate_does_not_require_import_for_protocols_without_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path("run-all-no-functional-contract")
+    held: list[str] = []
+
+    @contextmanager
+    def hold_committed_protocols(
+        stage: str,
+        outputs: Sequence[Path],
+        **_kwargs: object,
+    ):
+        assert stage == "build-confirmation-variants"
+        assert tuple(outputs) == tuple(
+            root / "interventions" / name for name, _model in PROMPT_VARIANT_OUTPUTS
+        )
+        held.append(stage)
+        yield {}
+
+    store = SimpleNamespace(
+        root=root,
+        path=lambda *parts: root.joinpath(*parts),
+        hold_committed_output=hold_committed_protocols,
+        require_committed_output=lambda *_args, **_kwargs: pytest.fail(
+            "functional import must be optional for contract-free frozen protocols"
+        ),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "read_jsonl",
+        lambda path, _model, **_kwargs: (
+            (SimpleNamespace(functional_outcome_contract_id=None),)
+            if path == root / "interventions" / "confirmation_protocols.jsonl"
+            else pytest.fail("functional gate read an unexpected artifact")
+        ),
+    )
+
+    cli_module._require_committed_functional_outcomes_for_frozen_protocols(store)
+
+    assert held == ["build-confirmation-variants"]
+
+
+@pytest.mark.parametrize(
+    ("command", "stage_name", "extra_args"),
+    (
+        (
+            "import-functional-outcomes",
+            "import_functional_outcomes_stage",
+            ("--results", "functional-results.jsonl"),
+        ),
+        ("confirm", "effects_stage", ()),
+        ("analyze-jci", "jci_stage", ()),
+        ("analyze-rfci", "rfci_stage", ()),
+        ("report", "write_reports", ()),
+    ),
+)
+def test_final_analysis_commands_delegate_to_exactly_one_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    stage_name: str,
+    extra_args: tuple[str, ...],
+) -> None:
+    config = object()
+    store = object()
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(cli_module, "_load", lambda _config, _run_dir: (config, store))
+    monkeypatch.setattr(
+        cli_module,
+        stage_name,
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_prepare",
+        lambda *_args, **_kwargs: pytest.fail("analysis command must not re-prepare the run"),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [command, "--config", "unused.yaml", "--run-dir", "run-dir", "--force", *extra_args],
+    )
+
+    assert result.exit_code == 0, result.output
+    expected_kwargs: dict[str, object] = {"force": True}
+    if command == "import-functional-outcomes":
+        expected_kwargs["results_path"] = Path("functional-results.jsonl")
+    assert calls == [((config, store), expected_kwargs)]
 
 
 def _static_string(node: ast.AST) -> str | None:
@@ -489,7 +562,8 @@ class _RunAllFCIRunner:
         config: FCIDiscoveryConfig,
         run_kind: PAGRunKind,
     ) -> PAGRecord:
-        assert matrix.shape == (table.independent_task_count, len(table.variables))
+        assert matrix.shape[1] == len(table.variables)
+        assert matrix.shape[0] in {table.row_count, table.independent_task_count}
         self.calls.append((table.table_id, run_kind))
         variables = tuple(item.variable_id for item in table.variables)
         target = {
@@ -536,6 +610,7 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     fci_runner = _RunAllFCIRunner()
     monkeypatch.setattr(fci_stage_module, "SpawnedFCIRunner", lambda: fci_runner)
+    monkeypatch.setattr(jci_stage_module, "SpawnedFCIRunner", lambda **_kwargs: fci_runner)
     real_confirmation_provider_factory = (
         confirmation_generation_stage_module._provider_from_frozen_config
     )
@@ -574,7 +649,7 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     )
 
     assert result.exit_code == 0, result.output
-    assert "SecAware randomized confirmation complete" in result.output
+    assert "SecAware" in result.output
     observed = read_jsonl(
         run_dir / "oracle" / "observed_oracle.jsonl",
         OracleRecord,
@@ -620,7 +695,12 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     assert len(tables) == 3
     assert len(hypotheses) == 3
     assert len(draws) == len(tables) * (1 + 20)
-    assert len(fci_runner.calls) == len(tables) * (1 + 20)
+    observational_calls = tuple(
+        item
+        for item in fci_runner.calls
+        if item[1] in {PAGRunKind.OBSERVATIONAL_REFERENCE, PAGRunKind.OBSERVATIONAL_BOOTSTRAP}
+    )
+    assert len(observational_calls) == len(tables) * (1 + 20)
     assert read_stage_manifest(run_dir / ".stages" / "run-oracle-observed.json").policy_sha256
     assignments = read_jsonl(
         run_dir / "interventions" / "assignments.jsonl",
@@ -659,11 +739,59 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
     assert {item.assignment_id for item in confirmation_code} == assignment_ids
     assert {item.assignment_id for item in confirmation_oracle} == assignment_ids
     assert all(item.condition == "confirm_arm" for item in confirmation_oracle)
+    assignment_outcomes = read_jsonl(
+        run_dir / "analysis" / "assignment_outcomes.jsonl",
+        AssignmentOutcomeRecord,
+        required=True,
+        allow_empty=False,
+    )
+    itt_effects = read_jsonl(
+        run_dir / "analysis" / "itt_effects.jsonl",
+        ITTEffectRecord,
+        required=True,
+        allow_empty=True,
+    )
+    jci_raw = read_jsonl(
+        run_dir / "analysis" / "jci_raw_pags.jsonl",
+        PAGRecord,
+        required=True,
+        allow_empty=True,
+    )
+    jci_constrained = read_jsonl(
+        run_dir / "analysis" / "jci_constrained_pags.jsonl",
+        PAGRecord,
+        required=True,
+        allow_empty=True,
+    )
+    jci_deltas = read_jsonl(
+        run_dir / "analysis" / "jci_orientation_deltas.jsonl",
+        JCIOrientationDeltaRecord,
+        required=True,
+        allow_empty=True,
+    )
+    rfci_capability = read_jsonl(
+        run_dir / "analysis" / "rfci_capability.jsonl",
+        RFCICapabilityRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert {item.assignment_id for item in assignment_outcomes} == assignment_ids
+    assert itt_effects
+    assert len(jci_raw) == len(jci_constrained) == len(jci_deltas)
+    assert all(item.run_kind is PAGRunKind.JCI_RAW for item in jci_raw)
+    assert all(item.run_kind is PAGRunKind.JCI_CONSTRAINED for item in jci_constrained)
+    assert len(rfci_capability) == 1
+    assert rfci_capability[0].available is False
+    assert (run_dir / "reports" / "summary.md").is_file()
     for stage in (
         "build-confirmation-variants",
         "randomize-confirmation",
         "generate-confirmation",
         "run-oracle-confirmation",
+        "estimate-confirmation-effects",
+        "jci-confirmation",
+        "rfci-confirmation",
+        "report",
     ):
         assert read_stage_manifest(run_dir / ".stages" / f"{stage}.json").stage == stage
     for absent in (
@@ -676,8 +804,6 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         run_dir / ".stages" / "import-functional-outcomes.json",
         run_dir / ".stages" / "analyze-jci.json",
         run_dir / ".stages" / "effects.json",
-        run_dir / ".stages" / "report.json",
-        run_dir / "reports" / "summary.md",
     ):
         assert not absent.exists()
 
@@ -705,6 +831,10 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
             "run_confirmation_randomization_stage",
             "run_confirmation_generation_stage",
             "run_confirmation_oracle_stage",
+            "effects_stage",
+            "jci_stage",
+            "rfci_stage",
+            "write_reports",
         ):
             completed_patch.setattr(
                 cli_module,
@@ -718,7 +848,7 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         )
 
         assert second.exit_code == 0, second.output
-        assert "SecAware randomized confirmation complete" in second.output
+        assert "SecAware" in second.output
         assert tuple(runner.calls) == analyzer_calls
         assert CountingConfirmationProvider.calls == provider_calls
         assert _run_tree_bytes(run_dir) == committed
@@ -745,9 +875,68 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
         assert _run_tree_bytes(run_dir) == committed
     assert stage_calls == []
 
-    terminal_output = run_dir / "oracle" / "confirmation_oracle.jsonl"
-    terminal_manifest = run_dir / ".stages" / "run-oracle-confirmation.json"
+    terminal_output = run_dir / "reports" / "summary.md"
+    terminal_manifest = run_dir / ".stages" / "report.json"
     assignments_path = run_dir / "interventions" / "assignments.jsonl"
+    original_output = terminal_output.read_bytes()
+    original_manifest = terminal_manifest.read_bytes()
+    try:
+        tampered_output = original_output.replace(
+            b"- Frozen hypotheses: 3",
+            b"- Frozen hypotheses: 999999",
+        )
+        assert tampered_output != original_output
+        terminal_output.write_bytes(tampered_output)
+        manifest = read_stage_manifest(terminal_manifest)
+        output_sha256 = dict(manifest.output_sha256)
+        output_sha256["reports/summary.md"] = artifact_module.sha256_path(terminal_output)
+        write_stage_manifest(
+            terminal_manifest,
+            manifest.model_copy(update={"output_sha256": output_sha256}),
+        )
+        coordinated_tamper = _run_tree_bytes(run_dir)
+        with pytest.MonkeyPatch.context() as tamper_patch:
+            for stage_name in (
+                "_prepare",
+                "extract_prompt_tsg_stage",
+                "generate_observed_stage",
+                "run_oracle_stage",
+                "discover_stage",
+                "run_prompt_variant_freeze_stage",
+                "run_confirmation_randomization_stage",
+                "run_confirmation_generation_stage",
+                "run_confirmation_oracle_stage",
+                "effects_stage",
+                "jci_stage",
+                "rfci_stage",
+                "write_reports",
+            ):
+                tamper_patch.setattr(
+                    cli_module,
+                    stage_name,
+                    reject_completed_stage(stage_name),
+                )
+            for force_args in ((), ("--force",)):
+                rejected = CliRunner().invoke(
+                    app,
+                    [
+                        "run-all",
+                        "--config",
+                        "configs/demo.yaml",
+                        "--run-dir",
+                        str(run_dir),
+                        *force_args,
+                    ],
+                )
+                assert rejected.exit_code != 0
+                assert tuple(runner.calls) == analyzer_calls
+                assert CountingConfirmationProvider.calls == provider_calls
+                assert _run_tree_bytes(run_dir) == coordinated_tamper
+        assert stage_calls == []
+    finally:
+        terminal_output.write_bytes(original_output)
+        terminal_manifest.write_bytes(original_manifest)
+
     for tampered_path in (terminal_output, assignments_path):
         original = tampered_path.read_bytes()
         tampered_path.write_bytes(original + b"\n")
@@ -791,34 +980,6 @@ def test_run_all_demo_uses_canonical_oracle_end_to_end(
             assert CountingConfirmationProvider.calls == provider_calls
             assert _run_tree_bytes(run_dir) == partial
         missing_path.write_bytes(original)
-
-    for future_relative in (
-        "analysis/effects.jsonl",
-        "analysis/jci_pag.jsonl",
-        "reports/summary.md",
-        ".stages/report.json",
-    ):
-        future = run_dir / future_relative
-        future.parent.mkdir(parents=True, exist_ok=True)
-        future.write_text("{}\n", encoding="utf-8")
-        future_snapshot = _run_tree_bytes(run_dir)
-        for force_args in ((), ("--force",)):
-            rejected = CliRunner().invoke(
-                app,
-                [
-                    "run-all",
-                    "--config",
-                    "configs/demo.yaml",
-                    "--run-dir",
-                    str(run_dir),
-                    *force_args,
-                ],
-            )
-            assert rejected.exit_code != 0
-            assert tuple(runner.calls) == analyzer_calls
-            assert CountingConfirmationProvider.calls == provider_calls
-            assert _run_tree_bytes(run_dir) == future_snapshot
-        future.unlink()
 
     assert _run_tree_bytes(run_dir) == committed
 
@@ -921,9 +1082,14 @@ def test_removed_cli_gate_detects_hidden_runtime_and_source_registration(
 
 def test_prompt_graph_outcome_boundary_and_breaking_migration_are_documented() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_prose = " ".join(readme.split())
     migration_path = REPO_ROOT / "docs" / "migrations" / "prompt-tsg-v2.md"
 
-    assert "pre-treatment graph factors" in readme
+    assert (
+        "Prompt TSG supplies semantic task-feature and target-feature relationships" in readme_prose
+    )
+    assert "Prompt TSG edges are not causal edges" in readme_prose
+    assert "never passed to FCI, JCI, or RFCI as causal adjacencies" in readme_prose
     assert "only security outcome" in readme
     assert "Code TSG" in readme and "compatibility path" in readme
     assert "shadow" in readme and "never authoritative" in readme

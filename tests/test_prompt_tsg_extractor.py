@@ -53,11 +53,9 @@ def _prompt(
 
 
 def _feature_specs(entry: PromptOntologyEntry) -> tuple[FeatureSpec, FeatureSpec]:
-    task = next(
-        spec for spec in PROMPT_FEATURE_CATALOG if spec.deterministic_terms == entry.domain_terms
-    )
+    task = next(spec for spec in PROMPT_FEATURE_CATALOG if spec.feature_id == entry.task_feature_id)
     safety = next(
-        spec for spec in PROMPT_FEATURE_CATALOG if spec.deterministic_terms == entry.guard_terms
+        spec for spec in PROMPT_FEATURE_CATALOG if spec.feature_id == entry.target_feature_id
     )
     return task, safety
 
@@ -84,7 +82,7 @@ def _feature_structure(graph: object, feature_id: str) -> list[tuple[str, dict[s
         if feature_id == task.feature_id:
             labels = {
                 entry.operation_label,
-                f"{entry.factor_type.value}_source",
+                f"{entry.target_feature_id.removeprefix('safety.')}_source",
                 entry.data_label,
                 entry.sink_label,
                 entry.cwe,
@@ -127,7 +125,7 @@ def _assert_sanitized_error(
         traceback_cursor = traceback_cursor.tb_next
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.target_feature_id)
 def test_each_cwe_domain_phrase_emits_one_present_task_feature(
     entry: PromptOntologyEntry,
 ) -> None:
@@ -145,7 +143,7 @@ def test_each_cwe_domain_phrase_emits_one_present_task_feature(
     assert record.shadow["graph.node_count"] == len(record.nodes)
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.target_feature_id)
 def test_each_cwe_guard_phrase_emits_task_and_safety_feature_states(
     entry: PromptOntologyEntry,
 ) -> None:
@@ -161,7 +159,7 @@ def test_each_cwe_guard_phrase_emits_task_and_safety_feature_states(
     assert _feature_edges(graph, safety.feature_id) >= set(safety.structural_edge_types)
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.target_feature_id)
 def test_absent_domain_evidence_is_an_explicit_absent_state(entry: PromptOntologyEntry) -> None:
     task, safety = _feature_specs(entry)
     graph = record_to_multidigraph(
@@ -174,7 +172,7 @@ def test_absent_domain_evidence_is_an_explicit_absent_state(entry: PromptOntolog
     assert not _feature_structure(graph, safety.feature_id)
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.target_feature_id)
 def test_detached_guard_evidence_does_not_create_a_present_control(
     entry: PromptOntologyEntry,
 ) -> None:
@@ -276,7 +274,7 @@ def test_deterministic_wrapper_preserves_same_flow_guard_projection() -> None:
     assert {EdgeType.SOURCE_OF, EdgeType.MAPS_TO, EdgeType.GUARDED_BY} <= edge_types
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.target_feature_id)
 def test_unknown_language_marks_in_scope_finite_features_unresolved(
     entry: PromptOntologyEntry,
 ) -> None:
@@ -334,7 +332,7 @@ def test_evidence_uses_earliest_match_and_preserves_raw_span_digest() -> None:
     }
 
 
-@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.factor_type.value)
+@pytest.mark.parametrize("entry", PROMPT_TSG_CATALOG, ids=lambda item: item.target_feature_id)
 def test_only_bounded_evidence_and_finite_feature_states_are_persisted(
     entry: PromptOntologyEntry,
 ) -> None:

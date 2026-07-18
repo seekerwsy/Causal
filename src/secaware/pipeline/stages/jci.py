@@ -152,6 +152,22 @@ def _error(message: str = "JCI stage artifact validation failed") -> SecAwareErr
     )
 
 
+def _assigned_protocol_universe(
+    protocols: tuple[ConfirmationProtocolRecord, ...],
+    assignments: tuple[AssignmentRecord, ...],
+) -> tuple[ConfirmationProtocolRecord, ...]:
+    assigned_protocol_ids = {assignment.arm_protocol_id for assignment in assignments}
+    selected = tuple(
+        protocol for protocol in protocols if protocol.arm_protocol_id in assigned_protocol_ids
+    )
+    if (
+        not assigned_protocol_ids
+        or {protocol.arm_protocol_id for protocol in selected} != assigned_protocol_ids
+    ):
+        raise _error("JCI assignment protocol universe failed validation")
+    return selected
+
+
 def _read(path: Path, model: type[BaseModel], *, allow_empty: bool) -> tuple[BaseModel, ...]:
     return tuple(
         read_jsonl(
@@ -443,15 +459,20 @@ def jci_stage(
                     or not randomization[1]
                 ):
                     raise _error("JCI stage input universe is empty")
+                assignments = tuple(randomization[1])
+                protocols = _assigned_protocol_universe(
+                    tuple(task4[2]),  # type: ignore[arg-type]
+                    assignments,  # type: ignore[arg-type]
+                )
                 snapshot = _Snapshot(
                     input_paths=input_paths,
                     input_sha256=input_sha256,
-                    assignments=tuple(randomization[1]),  # type: ignore[arg-type]
+                    assignments=assignments,  # type: ignore[arg-type]
                     outcomes=tuple(outcomes),  # type: ignore[arg-type]
                     variant_graphs=tuple(task4[6]),  # type: ignore[arg-type]
                     variants=tuple(task4[8]),  # type: ignore[arg-type]
                     hypotheses=tuple(fci[6]),
-                    protocols=tuple(task4[2]),  # type: ignore[arg-type]
+                    protocols=protocols,
                 )
                 return input_sha256
 

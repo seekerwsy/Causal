@@ -82,6 +82,40 @@ def _crashes(_send_connection: Any, _job_json: bytes, _matrix: np.ndarray) -> No
     os._exit(7)
 
 
+def _restore_worker_after_delay(delay_seconds: float, crash: bool) -> Any:
+    time.sleep(delay_seconds)
+    return _crashes if crash else _returns_valid
+
+
+class _DelayedRestoreWorker:
+    def __init__(self, delay_seconds: float, *, crash: bool = False) -> None:
+        self._delay_seconds = delay_seconds
+        self._crash = crash
+
+    def __call__(self, _send_connection: Any, _job_json: bytes, _matrix: np.ndarray) -> None:
+        raise AssertionError("worker must be restored before execution")
+
+    def __reduce__(self) -> tuple[Any, tuple[float, bool]]:
+        return (_restore_worker_after_delay, (self._delay_seconds, self._crash))
+
+
+def _bootstrap_with_control_frame(
+    control_connection: Any,
+    send_connection: Any,
+    _worker_pickle: bytes,
+    _job_json: bytes,
+    _matrix: np.ndarray,
+    *,
+    frame: bytes | None,
+) -> None:
+    try:
+        if frame is not None:
+            control_connection.send_bytes(frame)
+    finally:
+        control_connection.close()
+        send_connection.close()
+
+
 def _oversized(send_connection: Any, _job_json: bytes, _matrix: np.ndarray) -> None:
     send_connection.send_bytes(b"x" * (4 * 1024 * 1024 + 1))
 
@@ -212,14 +246,125 @@ def test_supervisor_runs_spawn_picklable_worker_and_revalidates_payload() -> Non
     assert pag.run_kind is PAGRunKind.OBSERVATIONAL_REFERENCE
 
 
-def test_supervisor_terminates_a_hung_worker_without_leaking_children() -> None:
+def test_supervisor_backend_timeout_starts_after_worker_restore() -> None:
+    from secaware.discovery.fci_supervisor import SpawnedFCIRunner
+
+    table = _table()
+    pag = SpawnedFCIRunner(
+        timeout_seconds=0.5,
+        worker=_DelayedRestoreWorker(1.0),
+    ).run(
+        _matrix(),
+        table,
+        build_background_knowledge(table),
+        _config(),
+        PAGRunKind.OBSERVATIONAL_REFERENCE,
+    )
+
+    assert pag.table_id == table.table_id
+
+
+def test_supervisor_classifies_crash_after_worker_restore_as_backend_failure() -> None:
     from secaware.discovery.fci_supervisor import FCISupervisorFailureKind, SpawnedFCIRunner
+
+    table = _table()
+    with pytest.raises(SecAwareError) as caught:
+        SpawnedFCIRunner(
+            timeout_seconds=0.5,
+            worker=_DelayedRestoreWorker(1.0, crash=True),
+        ).run(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.OBSERVATIONAL_REFERENCE,
+        )
+
+    assert caught.value.details == {
+        "failure_kind": FCISupervisorFailureKind.BACKEND_FAILURE.value,
+    }
+
+
+def test_supervisor_bounds_worker_restore_with_separate_startup_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import secaware.discovery.fci_supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "_SPAWN_STARTUP_TIMEOUT_SECONDS", 0.05, raising=False)
+    table = _table()
+    baseline = {child.pid for child in multiprocessing.active_children()}
+    with pytest.raises(SecAwareError, match="startup timed out") as caught:
+        supervisor.SpawnedFCIRunner(
+            timeout_seconds=2.0,
+            worker=_DelayedRestoreWorker(0.2),
+        ).run(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.OBSERVATIONAL_REFERENCE,
+        )
+
+    assert caught.value.details == {
+        "failure_kind": supervisor.FCISupervisorFailureKind.TIMEOUT.value,
+    }
+    assert {child.pid for child in multiprocessing.active_children()} <= baseline
+    assert not any(
+        thread.name == "secaware-fci-pipe-reader" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+@pytest.mark.parametrize(
+    ("frame", "expected_kind"),
+    (
+        (b"invalid-ready", "invalid_output"),
+        (b"x" * 65, "invalid_output"),
+        (None, "backend_failure"),
+        (b"secaware-fci-ready-v1", "backend_failure"),
+    ),
+)
+def test_supervisor_fails_closed_on_startup_control_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    frame: bytes | None,
+    expected_kind: str,
+) -> None:
+    import secaware.discovery.fci_supervisor as supervisor
+
+    monkeypatch.setattr(
+        supervisor,
+        "_bootstrap_fci_worker",
+        partial(_bootstrap_with_control_frame, frame=frame),
+    )
+    table = _table()
+    baseline = {child.pid for child in multiprocessing.active_children()}
+    with pytest.raises(SecAwareError) as caught:
+        supervisor.SpawnedFCIRunner(timeout_seconds=2.0, worker=_returns_valid).run(
+            _matrix(),
+            table,
+            build_background_knowledge(table),
+            _config(),
+            PAGRunKind.OBSERVATIONAL_REFERENCE,
+        )
+
+    assert caught.value.details == {
+        "failure_kind": supervisor.FCISupervisorFailureKind(expected_kind).value,
+    }
+    assert {child.pid for child in multiprocessing.active_children()} <= baseline
+    assert not any(
+        thread.name == "secaware-fci-pipe-reader" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+def test_supervisor_terminates_a_hung_worker_without_leaking_children() -> None:
+    import secaware.discovery.fci_supervisor as supervisor
 
     table = _table()
     baseline = {child.pid for child in multiprocessing.active_children()}
     started = time.monotonic()
-    with pytest.raises(SecAwareError, match="timed out") as caught:
-        SpawnedFCIRunner(timeout_seconds=0.1, worker=_never_returns).run(
+    with pytest.raises(SecAwareError, match="FCI worker timed out$") as caught:
+        supervisor.SpawnedFCIRunner(timeout_seconds=0.1, worker=_never_returns).run(
             _matrix(),
             table,
             build_background_knowledge(table),
@@ -227,9 +372,12 @@ def test_supervisor_terminates_a_hung_worker_without_leaking_children() -> None:
             PAGRunKind.OBSERVATIONAL_REFERENCE,
         )
     assert caught.value.details == {
-        "failure_kind": FCISupervisorFailureKind.TIMEOUT.value,
+        "failure_kind": supervisor.FCISupervisorFailureKind.TIMEOUT.value,
     }
-    assert time.monotonic() - started < 2.0
+    lifecycle_bound = (
+        supervisor._SPAWN_STARTUP_TIMEOUT_SECONDS + 0.1 + 3 * supervisor._JOIN_GRACE_SECONDS + 1.0
+    )
+    assert time.monotonic() - started < lifecycle_bound
     assert {child.pid for child in multiprocessing.active_children()} <= baseline
     assert not any(
         thread.name == "secaware-fci-pipe-reader" and thread.is_alive()

@@ -299,9 +299,9 @@ expected_exports = {
     "MOTIF_VERSION", "ONTOLOGY_VERSION", "PROMPT_TSG_CATALOG",
     "PROMPT_TSG_CATALOG_SHA256", "PromptOntologyEntry", "MOTIF_SPECS",
     "MotifSpec", "canonical_edge_id", "canonical_node_id", "build_prompt_tsg", "derive_shadow",
-    "factor_query_vector", "find_motif_matches", "graph_sha256",
+    "feature_requirement_vector", "find_motif_matches", "graph_sha256",
     "feature_state", "feature_state_nodes", "feature_state_vector", "feature_states_by_family",
-    "has_factor_requirement", "multidigraph_to_record", "prompt_ontology_entry",
+    "has_feature_requirement", "multidigraph_to_record", "prompt_ontology_entry",
     "record_to_multidigraph", "motif_query_vector", "validate_proposal",
 }
 if set(package.__all__) != expected_exports:

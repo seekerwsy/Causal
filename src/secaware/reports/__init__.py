@@ -1,3 +1,3 @@
-from secaware.reports.tables import write_reports
+"""Pure rendering helpers used by the report publication stage."""
 
-__all__ = ["write_reports"]
+__all__: tuple[str, ...] = ()

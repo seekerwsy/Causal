@@ -7,7 +7,7 @@ name = "secaware"
 version = "0.2.0"
 description = "TSG-driven prompt-side security mechanism discovery and confirmation."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
   "causal-learn==0.1.4.7",
   "pydantic>=2.5,<3",
@@ -48,7 +48,12 @@ where = ["src"]
 "secaware.intervention" = ["prompts/*.txt"]
 
 [tool.setuptools.data-files]
-"share/doc/secaware/migrations" = ["docs/migrations/randomized-confirmation.md"]
+"share/doc/secaware/migrations" = [
+  "docs/migrations/prompt-tsg-v2.md",
+  "docs/migrations/fci-discovery.md",
+  "docs/migrations/randomized-confirmation.md",
+  "docs/migrations/prompt-only-fci-jci.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

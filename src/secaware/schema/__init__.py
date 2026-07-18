@@ -63,8 +63,6 @@ from secaware.schema.experiments import (
     TargetSpecRecord,
     is_confirmation_target_feature,
 )
-from secaware.schema.hypotheses import FactorType, HypothesisRecord
-from secaware.schema.interventions import FailureReason, InterventionRecord
 from secaware.schema.oracle import (
     AnalyzerFindingRecord,
     AnalyzerProvenanceRecord,
@@ -91,7 +89,6 @@ from secaware.schema.records import (
     GeneratedCodeRecord,
     PromptRecord,
 )
-from secaware.schema.results import EffectRecord, PairResult
 from secaware.schema.tsg import (
     EdgeType,
     FrozenTSGAttributes,
@@ -137,16 +134,13 @@ __all__ = [
     "ExperimentalUnit",
     "AnalyzerFindingRecord",
     "AnalyzerProvenanceRecord",
-    "EffectRecord",
     "EdgeType",
     "EndpointType",
     "EndpointMark",
-    "FactorType",
     "FeatureFamily",
     "FeatureOperation",
     "FeatureState",
     "FeatureTransition",
-    "FailureReason",
     "FindingRecord",
     "FrozenTSGAttributes",
     "FunctionalOutcomeContractRecord",
@@ -159,8 +153,6 @@ __all__ = [
     "GenerationProvenance",
     "GenerationRequestRecord",
     "GeneratedCodeRecord",
-    "HypothesisRecord",
-    "InterventionRecord",
     "InterventionExecutorKind",
     "InterventionMode",
     "LengthMatchRecord",
@@ -176,7 +168,6 @@ __all__ = [
     "PAGEdgeRecord",
     "PAGRecord",
     "PAGRunKind",
-    "PairResult",
     "PathPatternRecord",
     "PathSupportRecord",
     "PromptRecord",

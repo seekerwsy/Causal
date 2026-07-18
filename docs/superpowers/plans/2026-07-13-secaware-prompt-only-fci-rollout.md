@@ -6,7 +6,7 @@
 
 **Architecture:** Keep Prompt TSG as the sole feature authority and the independent Oracle as the sole security-outcome authority. Implement extraction, observational discovery, randomized prompt confirmation, and secondary JCI/RFCI analysis as four transactional layers whose artifacts are joined only by strict IDs and digests.
 
-**Tech Stack:** Python 3.10/3.12, Pydantic 2, NetworkX 3, causal-learn 0.1.4.7, NumPy/Pandas, Typer, pytest, Ruff; optional py-tetrad at commit `a30707264aa4363a23ac5f136a70bbdd62212f07`, JPype1 1.7.1, and JDK 21+.
+**Tech Stack:** Python 3.12, Pydantic 2, NetworkX 3, causal-learn 0.1.4.7, NumPy/Pandas, Typer, pytest, Ruff; optional py-tetrad at commit `a30707264aa4363a23ac5f136a70bbdd62212f07`, JPype1 1.7.1, and JDK 21+.
 
 ---
 
@@ -168,7 +168,7 @@ Gate:
 Run after M6:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q
+uv run --no-project --python 3.12 --with-editable ".[dev,api]" pytest -q
 .\.venv\Scripts\ruff.exe check src tests
 .\.venv\Scripts\ruff.exe format --check src tests
 .\.venv\Scripts\python.exe -m compileall -q src tests

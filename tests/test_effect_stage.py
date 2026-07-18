@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -202,6 +203,35 @@ def _commit_adversarial_producer_bundle(
 def test_effect_stage_declares_exact_ordered_outputs_and_no_jci_rfci_inputs() -> None:
     assert tuple(path.as_posix() for path, _model in EFFECT_STAGE_OUTPUTS) == EXPECTED_OUTPUTS
     assert all("jci" not in path.name and "rfci" not in path.name for path in EFFECT_STAGE_INPUTS)
+
+
+def test_effect_analysis_universe_excludes_frozen_protocol_without_committed_assignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assigned_protocol = SimpleNamespace(arm_protocol_id="arm_protocol_" + "1" * 64)
+    excluded_protocol = SimpleNamespace(arm_protocol_id="arm_protocol_" + "0" * 64)
+    frozen_protocols = (assigned_protocol, excluded_protocol)
+    assignments = (SimpleNamespace(arm_protocol_id=assigned_protocol.arm_protocol_id),)
+    seen: list[tuple] = []
+    expected_contrasts = (object(),)
+
+    def capture_materialization(selected):
+        selected = tuple(selected)
+        seen.append(selected)
+        return expected_contrasts
+
+    monkeypatch.setattr(effects_module, "materialize_contrasts", capture_materialization)
+
+    selected_protocols, contrasts = effects_module._assigned_analysis_bundle(
+        frozen_protocols,
+        assignments,
+    )
+
+    assigned_protocol_ids = {assignment.arm_protocol_id for assignment in assignments}
+    assert {protocol.arm_protocol_id for protocol in frozen_protocols} > assigned_protocol_ids
+    assert {protocol.arm_protocol_id for protocol in selected_protocols} == assigned_protocol_ids
+    assert seen == [selected_protocols]
+    assert contrasts is expected_contrasts
 
 
 def test_effect_output_specs_cover_bounded_estimator_and_cluster_artifacts(

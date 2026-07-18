@@ -15,7 +15,6 @@ from secaware.schema.generation import (
 )
 from secaware.config import GenerationConfig
 from secaware.schema.experiments import AssignmentRecord, PromptVariantRecord
-from secaware.schema.interventions import InterventionRecord
 from secaware.schema.records import PromptRecord
 
 
@@ -326,24 +325,6 @@ def plan_observed_requests(
     _ensure_unique_request_coordinates(records)
     _ensure_unique_request_ids(records)
     return records
-
-
-def plan_counterfactual_requests(
-    prompts_by_id: Mapping[str, PromptRecord],
-    interventions: Iterable[InterventionRecord],
-    models: Iterable[str],
-    seeds: Iterable[int],
-    *,
-    endpoint_type: EndpointType,
-    endpoint_identity: str | None = None,
-    parameters: ParameterInput = None,
-    system_template: str = "",
-    system_template_version: str = "none",
-) -> list[GenerationRequestRecord]:
-    raise _planner_error(
-        ErrorCode.CONTRACT,
-        "legacy counterfactual generation requires regeneration as confirmation arms",
-    )
 
 
 def plan_confirmation_requests(

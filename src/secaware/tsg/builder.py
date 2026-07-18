@@ -33,25 +33,23 @@ _EDGE_ENDPOINT_TYPES = {
 }
 
 
-def _legacy_feature_pairs() -> tuple[tuple[FeatureSpec, FeatureSpec, PromptOntologyEntry], ...]:
+def _ontology_feature_pairs() -> tuple[tuple[FeatureSpec, FeatureSpec, PromptOntologyEntry], ...]:
     pairs = []
     for entry in PROMPT_TSG_CATALOG:
         task = next(
-            spec
-            for spec in PROMPT_FEATURE_CATALOG
-            if spec.deterministic_terms == entry.domain_terms
+            spec for spec in PROMPT_FEATURE_CATALOG if spec.feature_id == entry.task_feature_id
         )
         safety = next(
-            spec for spec in PROMPT_FEATURE_CATALOG if spec.deterministic_terms == entry.guard_terms
+            spec for spec in PROMPT_FEATURE_CATALOG if spec.feature_id == entry.target_feature_id
         )
         pairs.append((task, safety, entry))
     return tuple(pairs)
 
 
-_LEGACY_FEATURE_PAIRS = _legacy_feature_pairs()
-_LEGACY_FEATURE_IDS = frozenset(
+_ONTOLOGY_FEATURE_PAIRS = _ontology_feature_pairs()
+_ONTOLOGY_FEATURE_IDS = frozenset(
     spec.feature_id
-    for task_spec, safety_spec, _ in _LEGACY_FEATURE_PAIRS
+    for task_spec, safety_spec, _ in _ONTOLOGY_FEATURE_PAIRS
     for spec in (task_spec, safety_spec)
 )
 
@@ -103,7 +101,7 @@ def _add_fact_structure(
         )
 
 
-def _legacy_node(
+def _ontology_node(
     graph: nx.MultiDiGraph,
     feature_id: str,
     role: str,
@@ -111,7 +109,7 @@ def _legacy_node(
     label: str,
     attributes: dict[str, str | int],
 ) -> str:
-    key = f"proposal-legacy:{feature_id}:{role}"
+    key = f"proposal-ontology:{feature_id}:{role}"
     graph.add_node(
         key,
         node_type=node_type,
@@ -121,14 +119,14 @@ def _legacy_node(
     return key
 
 
-def _add_legacy_domain_flow(
+def _add_ontology_domain_flow(
     graph: nx.MultiDiGraph,
     task_spec: FeatureSpec,
     entry: PromptOntologyEntry,
     span: EvidenceSpan,
 ) -> tuple[str, str]:
     attributes = _evidence_attributes(span)
-    operation = _legacy_node(
+    operation = _ontology_node(
         graph,
         task_spec.feature_id,
         "operation",
@@ -136,15 +134,15 @@ def _add_legacy_domain_flow(
         entry.operation_label,
         attributes,
     )
-    source = _legacy_node(
+    source = _ontology_node(
         graph,
         task_spec.feature_id,
         "source",
         NodeType.SOURCE,
-        f"{entry.factor_type.value}_source",
+        f"{entry.target_feature_id.removeprefix('safety.')}_source",
         attributes,
     )
-    data = _legacy_node(
+    data = _ontology_node(
         graph,
         task_spec.feature_id,
         "data",
@@ -152,7 +150,7 @@ def _add_legacy_domain_flow(
         entry.data_label,
         attributes,
     )
-    sink = _legacy_node(
+    sink = _ontology_node(
         graph,
         task_spec.feature_id,
         "sink",
@@ -160,7 +158,7 @@ def _add_legacy_domain_flow(
         entry.sink_label,
         attributes,
     )
-    cwe = _legacy_node(
+    cwe = _ontology_node(
         graph,
         task_spec.feature_id,
         "cwe",
@@ -180,7 +178,7 @@ def _add_legacy_domain_flow(
     return data, sink
 
 
-def _add_legacy_guard(
+def _add_ontology_guard(
     graph: nx.MultiDiGraph,
     task_spec: FeatureSpec,
     safety_spec: FeatureSpec,
@@ -188,7 +186,7 @@ def _add_legacy_guard(
     span: EvidenceSpan,
 ) -> None:
     attributes = _evidence_attributes(span)
-    requirement = _legacy_node(
+    requirement = _ontology_node(
         graph,
         safety_spec.feature_id,
         "requirement",
@@ -196,7 +194,7 @@ def _add_legacy_guard(
         entry.requirement_label,
         attributes,
     )
-    guard = _legacy_node(
+    guard = _ontology_node(
         graph,
         safety_spec.feature_id,
         "guard",
@@ -211,7 +209,7 @@ def _add_legacy_guard(
         attributes=dict(attributes),
     )
     for role in ("data", "sink"):
-        target = f"proposal-legacy:{task_spec.feature_id}:{role}"
+        target = f"proposal-ontology:{task_spec.feature_id}:{role}"
         if target in graph:
             graph.add_edge(
                 target,
@@ -221,19 +219,19 @@ def _add_legacy_guard(
             )
 
 
-def _add_legacy_fact_compatibility(
+def _add_ontology_fact_structure(
     graph: nx.MultiDiGraph,
     trusted: PromptExtractionProposalRecord,
 ) -> None:
     facts = {fact.feature_id: fact for fact in trusted.facts}
-    for task_spec, _, entry in _LEGACY_FEATURE_PAIRS:
+    for task_spec, _, entry in _ONTOLOGY_FEATURE_PAIRS:
         fact = facts[task_spec.feature_id]
         if fact.state is FeatureState.PRESENT:
-            _add_legacy_domain_flow(graph, task_spec, entry, fact.evidence[0])
-    for task_spec, safety_spec, entry in _LEGACY_FEATURE_PAIRS:
+            _add_ontology_domain_flow(graph, task_spec, entry, fact.evidence[0])
+    for task_spec, safety_spec, entry in _ONTOLOGY_FEATURE_PAIRS:
         fact = facts[safety_spec.feature_id]
         if fact.state is FeatureState.PRESENT:
-            _add_legacy_guard(graph, task_spec, safety_spec, entry, fact.evidence[0])
+            _add_ontology_guard(graph, task_spec, safety_spec, entry, fact.evidence[0])
 
 
 def _build_structural_graph(
@@ -245,17 +243,22 @@ def _build_structural_graph(
         PromptExtractorBackend.LLM_FACTS_V1,
         PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
     }:
-        deterministic_legacy = trusted.backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
+        materializes_reviewed_ontology = (
+            trusted.backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
+        )
         for fact in trusted.facts:
             states[fact.feature_id] = fact.state
             if fact.state is FeatureState.PRESENT:
                 spec = next(
                     item for item in PROMPT_FEATURE_CATALOG if item.feature_id == fact.feature_id
                 )
-                if not deterministic_legacy or spec.feature_id not in _LEGACY_FEATURE_IDS:
+                if (
+                    not materializes_reviewed_ontology
+                    or spec.feature_id not in _ONTOLOGY_FEATURE_IDS
+                ):
                     _add_fact_structure(graph, spec, fact.evidence[0])
-        if deterministic_legacy:
-            _add_legacy_fact_compatibility(graph, trusted)
+        if materializes_reviewed_ontology:
+            _add_ontology_fact_structure(graph, trusted)
         return graph, states
 
     aliases: dict[str, str] = {}

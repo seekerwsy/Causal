@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -163,7 +164,21 @@ def test_report_stage_declares_complete_outputs_and_only_upstream_inputs() -> No
     assert set(module.REPORT_STAGE_INPUTS) == set(EXPECTED_REPORT_INPUTS)
     assert all(path.parts[0] != "reports" for path in module.REPORT_STAGE_INPUTS)
     assert all("code" not in path.name for path in module.REPORT_STAGE_INPUTS)
-    assert not RunStore._requires_output_seal("report")
+    assert RunStore._requires_output_seal("report")
+
+
+def test_report_contract_binds_render_shapes_and_every_failure_source_schema() -> None:
+    contracts = import_module("secaware.pipeline.stage_contracts")
+    payload = contracts.report_stage_contract_payload()
+
+    assert payload["render_contract_version"] == "prompt-only-report-render-v1"
+    assert payload["jsonl_row_shape_version"] == "prompt-only-report-jsonl-v1"
+    assert payload["csv_row_shape_version"] == "prompt-only-report-csv-v1"
+    assert payload["hypothesis_card_shape_version"] == "prompt-only-hypothesis-card-v1"
+    assert payload["summary_shape_version"] == "prompt-only-summary-v1"
+    assert payload["bootstrap_failure_schema"]
+    assert payload["discovery_failure_schema"]
+    assert payload["analysis_failure_schema"]
 
 
 def test_cli_report_stage_delegates_only_to_prompt_only_reporting(
@@ -386,6 +401,28 @@ def test_valid_skip_authenticates_typed_sources_without_running_report_builder(
     assert _report_commit_bytes(store) == before
 
 
+def test_validate_committed_reports_never_rebuilds(published_reports, monkeypatch) -> None:
+    module, store, result, _before, _after = published_reports
+    monkeypatch.setattr(
+        module,
+        "_build_documents",
+        lambda _snapshot: pytest.fail("validate-only path rebuilt reports"),
+    )
+
+    assert module.validate_committed_reports(store.config, store) == result
+
+
+def test_validate_committed_reports_rejects_invalid_pending_transaction(published_reports) -> None:
+    module, store, _result, _before, _after = published_reports
+    journal = store.path(".stages", ".report.transaction.json")
+    journal.write_text("{}\n", encoding="utf-8", newline="\n")
+    try:
+        with pytest.raises(SecAwareError, match="transaction recovery failed"):
+            module.validate_committed_reports(store.config, store)
+    finally:
+        journal.unlink(missing_ok=True)
+
+
 COORDINATED_SKIP_MUTATIONS = (
     "duplicate",
     "dangling",
@@ -537,6 +574,328 @@ def test_force_failure_restores_all_reports_and_manifest_byte_for_byte(
         module.write_reports(store.config, store, force=True)
 
     assert _report_commit_bytes(store) == before
+
+
+FATAL_EXCEPTION_TYPES = (MemoryError, KeyboardInterrupt, SystemExit)
+PAIRED_FATAL_EXCEPTION_TYPES = (
+    (MemoryError, KeyboardInterrupt),
+    (KeyboardInterrupt, SystemExit),
+    (SystemExit, MemoryError),
+)
+TRIPLE_FATAL_EXCEPTION_TYPES = (
+    (MemoryError, KeyboardInterrupt, SystemExit),
+    (KeyboardInterrupt, SystemExit, MemoryError),
+    (SystemExit, MemoryError, KeyboardInterrupt),
+)
+
+
+def _raise_exact(error: BaseException) -> None:
+    raise error
+
+
+def _run_report_precommit_failure(
+    module,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    active_error: BaseException,
+    recovery_error: BaseException | None,
+    abort_error: BaseException | None = None,
+    cleanup_error: BaseException | None = None,
+) -> tuple[BaseException, list[str]]:
+    active = True
+    aborts: list[str] = []
+
+    def abort(stage: str) -> None:
+        nonlocal active
+        aborts.append(stage)
+        active = False
+        if abort_error is not None:
+            _raise_exact(abort_error)
+
+    store = SimpleNamespace(
+        path=lambda *parts: tmp_path.joinpath(*parts),
+        should_skip_stage=lambda *_args, **_kwargs: False,
+        stage_is_active=lambda stage: stage == "report" and active,
+        abort_stage=abort,
+    )
+    transaction = SimpleNamespace(backup=lambda _count: None)
+    monkeypatch.setattr(
+        module.ArtifactTransaction,
+        "begin",
+        lambda *_args, **_kwargs: transaction,
+    )
+
+    def recover(_transaction: object) -> None:
+        if recovery_error is not None:
+            _raise_exact(recovery_error)
+
+    monkeypatch.setattr(module, "recover_transaction", recover)
+    if cleanup_error is not None:
+        monkeypatch.setattr(module, "_cleanup_paths", lambda _paths: _raise_exact(cleanup_error))
+
+    try:
+        module._execute_report_transaction(
+            store,
+            inputs=(),
+            outputs=(),
+            force=False,
+            validate_only=False,
+            capture_input_snapshot=lambda: (),
+            verify_input_snapshot=lambda: None,
+            validate_committed=lambda: None,
+            build=lambda: _raise_exact(active_error),
+        )
+    except BaseException as error:
+        return error, aborts
+    pytest.fail("report transaction unexpectedly succeeded")
+
+
+@pytest.mark.parametrize("fatal_type", FATAL_EXCEPTION_TYPES)
+def test_finalize_ordinary_failure_yields_later_fatal_release(
+    fatal_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    ordinary = RuntimeError("finalize")
+    release_fatal = fatal_type("release")
+    store = SimpleNamespace(
+        finalize_stage_commit=lambda _lease: _raise_exact(ordinary),
+        ensure_stage_commit_released=lambda _lease: _raise_exact(release_fatal),
+    )
+
+    with pytest.raises(BaseException) as exc_info:
+        module._finalize_stage_commit(store, object())
+
+    assert exc_info.value is release_fatal
+
+
+@pytest.mark.parametrize(("active_type", "release_type"), PAIRED_FATAL_EXCEPTION_TYPES)
+def test_finalize_active_fatal_preserves_identity_over_later_fatal_release(
+    active_type: type[BaseException],
+    release_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    active_fatal = active_type("finalize")
+    release_fatal = release_type("release")
+    store = SimpleNamespace(
+        finalize_stage_commit=lambda _lease: _raise_exact(active_fatal),
+        ensure_stage_commit_released=lambda _lease: _raise_exact(release_fatal),
+    )
+
+    with pytest.raises(BaseException) as exc_info:
+        module._finalize_stage_commit(store, object())
+
+    assert exc_info.value is active_fatal
+
+
+@pytest.mark.parametrize("fatal_type", FATAL_EXCEPTION_TYPES)
+def test_active_fatal_precommit_survives_transaction_state_rollback_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fatal_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    active_fatal = fatal_type("active")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=active_fatal,
+        recovery_error=TransactionStateError(),
+    )
+
+    assert raised is active_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize("fatal_type", FATAL_EXCEPTION_TYPES)
+def test_ordinary_precommit_failure_yields_fatal_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fatal_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    rollback_fatal = fatal_type("rollback")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=RuntimeError("active"),
+        recovery_error=rollback_fatal,
+    )
+
+    assert raised is rollback_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize(("active_type", "abort_type"), PAIRED_FATAL_EXCEPTION_TYPES)
+def test_active_fatal_survives_fatal_abort_after_transaction_state_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_type: type[BaseException],
+    abort_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    active_fatal = active_type("active")
+    abort_fatal = abort_type("abort")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=active_fatal,
+        recovery_error=TransactionStateError(),
+        abort_error=abort_fatal,
+    )
+
+    assert raised is active_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize("fatal_type", FATAL_EXCEPTION_TYPES)
+def test_ordinary_failure_yields_fatal_abort_after_transaction_state_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fatal_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    abort_fatal = fatal_type("abort")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=RuntimeError("active"),
+        recovery_error=TransactionStateError(),
+        abort_error=abort_fatal,
+    )
+
+    assert raised is abort_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize(("active_type", "rollback_type"), PAIRED_FATAL_EXCEPTION_TYPES)
+def test_active_fatal_precommit_preserves_identity_over_fatal_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_type: type[BaseException],
+    rollback_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    active_fatal = active_type("active")
+    rollback_fatal = rollback_type("rollback")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=active_fatal,
+        recovery_error=rollback_fatal,
+    )
+
+    assert raised is active_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize(
+    ("active_type", "rollback_type", "abort_type"),
+    TRIPLE_FATAL_EXCEPTION_TYPES,
+)
+def test_active_fatal_survives_fatal_rollback_and_fatal_abort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_type: type[BaseException],
+    rollback_type: type[BaseException],
+    abort_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    active_fatal = active_type("active")
+    rollback_fatal = rollback_type("rollback")
+    abort_fatal = abort_type("abort")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=active_fatal,
+        recovery_error=rollback_fatal,
+        abort_error=abort_fatal,
+    )
+
+    assert raised is active_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize(("rollback_type", "abort_type"), PAIRED_FATAL_EXCEPTION_TYPES)
+def test_fatal_rollback_survives_later_fatal_abort_after_ordinary_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rollback_type: type[BaseException],
+    abort_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    rollback_fatal = rollback_type("rollback")
+    abort_fatal = abort_type("abort")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=RuntimeError("active"),
+        recovery_error=rollback_fatal,
+        abort_error=abort_fatal,
+    )
+
+    assert raised is rollback_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize(("active_type", "cleanup_type"), PAIRED_FATAL_EXCEPTION_TYPES)
+def test_active_fatal_precommit_preserves_identity_over_fatal_candidate_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_type: type[BaseException],
+    cleanup_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    active_fatal = active_type("active")
+    cleanup_fatal = cleanup_type("cleanup")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=active_fatal,
+        recovery_error=None,
+        cleanup_error=cleanup_fatal,
+    )
+
+    assert raised is active_fatal
+    assert aborts == ["report"]
+
+
+@pytest.mark.parametrize("fatal_type", FATAL_EXCEPTION_TYPES)
+def test_ordinary_precommit_failure_yields_fatal_candidate_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fatal_type: type[BaseException],
+) -> None:
+    module = import_module("secaware.pipeline.stages.reporting")
+    cleanup_fatal = fatal_type("cleanup")
+
+    raised, aborts = _run_report_precommit_failure(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_error=RuntimeError("active"),
+        recovery_error=None,
+        cleanup_error=cleanup_fatal,
+    )
+
+    assert raised is cleanup_fatal
+    assert aborts == ["report"]
 
 
 def test_first_publish_failure_leaves_no_ghost_report_or_manifest(
@@ -946,6 +1305,43 @@ def test_snapshot_validation_rejects_misplaced_failures_and_invalid_capability_s
     inconsistent = snapshot.rfci_capability.model_copy(update={"status": "available"})
     with pytest.raises(SecAwareError):
         module._validate_snapshot(replace(snapshot, rfci_capability=inconsistent))
+
+
+def test_snapshot_uses_protocol_scoped_contrast_identity(
+    published_reports,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, store, _result, _before, _after = published_reports
+    snapshot = _capture_snapshot(module, store, monkeypatch)
+    assert snapshot.contrasts and snapshot.effects
+    effect = snapshot.effects[0]
+    matching = next(
+        contrast
+        for contrast in snapshot.contrasts
+        if (contrast.arm_protocol_id, contrast.contrast_id)
+        == (effect.arm_protocol_id, effect.contrast_id)
+    )
+    foreign_protocol_id = "arm_protocol_" + "0" * 64
+    assert foreign_protocol_id != matching.arm_protocol_id
+    same_id_other_protocol = matching.model_copy(update={"arm_protocol_id": foreign_protocol_id})
+
+    module._validate_snapshot(
+        replace(snapshot, contrasts=(*snapshot.contrasts, same_id_other_protocol))
+    )
+
+    with pytest.raises(SecAwareError):
+        module._validate_snapshot(replace(snapshot, contrasts=(*snapshot.contrasts, matching)))
+
+    without_matching = tuple(
+        contrast
+        for contrast in snapshot.contrasts
+        if (contrast.arm_protocol_id, contrast.contrast_id)
+        != (effect.arm_protocol_id, effect.contrast_id)
+    )
+    with pytest.raises(SecAwareError):
+        module._validate_snapshot(
+            replace(snapshot, contrasts=(*without_matching, same_id_other_protocol))
+        )
 
 
 @pytest.mark.parametrize(

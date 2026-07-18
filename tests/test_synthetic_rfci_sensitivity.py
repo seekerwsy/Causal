@@ -19,7 +19,7 @@ from secaware.schema.causal import (
     PAGRunKind,
 )
 from secaware.schema.outcomes import RFCICapabilityRecord
-from tests.synthetic.scm_fixtures import (
+from synthetic.scm_fixtures import (
     latent_confounding_scm,
     null_factor_scm,
     true_chain_scm,

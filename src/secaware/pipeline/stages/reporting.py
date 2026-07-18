@@ -382,6 +382,12 @@ def _unique(records: Sequence[BaseModel], field: str) -> None:
         raise _error()
 
 
+def _unique_coordinates(records: Sequence[BaseModel], fields: tuple[str, ...]) -> None:
+    values = tuple(tuple(getattr(record, field) for field in fields) for record in records)
+    if len(values) != len(set(values)):
+        raise _error()
+
+
 def _validate_snapshot(snapshot: _Snapshot) -> None:
     record_groups: tuple[Sequence[BaseModel], ...] = (
         snapshot.observational_pags,
@@ -446,11 +452,11 @@ def _validate_snapshot(snapshot: _Snapshot) -> None:
         (snapshot.variants, "variant_id"),
         (snapshot.assignments, "assignment_id"),
         (snapshot.outcomes, "assignment_id"),
-        (snapshot.contrasts, "contrast_id"),
         (snapshot.effects, "effect_id"),
         (snapshot.jci_deltas, "delta_id"),
     ):
         _unique(records, id_field)
+    _unique_coordinates(snapshot.contrasts, ("arm_protocol_id", "contrast_id"))
     if not snapshot.hypotheses:
         raise _error("report hypothesis universe is empty")
     hypothesis_ids = {item.hypothesis_id for item in snapshot.hypotheses}
@@ -460,8 +466,8 @@ def _validate_snapshot(snapshot: _Snapshot) -> None:
         != {item.assignment_id for item in snapshot.outcomes}
         or {item.delta_id for item in snapshot.variants}
         != {item.delta_id for item in snapshot.deltas}
-        or {item.contrast_id for item in snapshot.effects}
-        - {item.contrast_id for item in snapshot.contrasts}
+        or {(item.arm_protocol_id, item.contrast_id) for item in snapshot.effects}
+        - {(item.arm_protocol_id, item.contrast_id) for item in snapshot.contrasts}
     ):
         raise _error()
     raw_ids = {item.pag_id for item in snapshot.jci_raw_pags}
@@ -924,6 +930,20 @@ def _cleanup_paths(paths: Sequence[Path | None]) -> None:
         raise _error("report transaction cleanup failed")
 
 
+def _cleanup_failed_stage(
+    store: RunStore,
+) -> MemoryError | KeyboardInterrupt | SystemExit | None:
+    if not store.stage_is_active(_STAGE):
+        return None
+    try:
+        store.abort_stage(_STAGE)
+    except (MemoryError, KeyboardInterrupt, SystemExit) as error:
+        return error
+    except SecAwareError:
+        pass
+    return None
+
+
 def _finalize_stage_commit(store: RunStore, lease: StageCommitLease) -> None:
     failure: BaseException | None = None
     try:
@@ -934,7 +954,10 @@ def _finalize_stage_commit(store: RunStore, lease: StageCommitLease) -> None:
         try:
             store.ensure_stage_commit_released(lease)
         except BaseException as error:
-            if failure is None:
+            if failure is None or (
+                isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit))
+                and not isinstance(failure, (MemoryError, KeyboardInterrupt, SystemExit))
+            ):
                 failure = error
     if failure is not None:
         raise failure
@@ -946,11 +969,14 @@ def _execute_report_transaction(
     inputs: tuple[Path, ...],
     outputs: tuple[_OutputSpec, ...],
     force: bool,
+    validate_only: bool,
     capture_input_snapshot: Callable[[], tuple[str, ...]],
     verify_input_snapshot: Callable[[], None],
     validate_committed: Callable[[], None],
     build: Callable[[], ReportDocuments],
 ) -> bool:
+    if type(validate_only) is not bool:
+        raise _error("report validation mode failed validation")
     output_paths = tuple(spec.path for spec in outputs)
     manifest_path = store.path(".stages", f"{_STAGE}.json")
     journal_path = store.path(".stages", f".{_STAGE}.transaction.json")
@@ -983,6 +1009,14 @@ def _execute_report_transaction(
         captured = capture_input_snapshot()
         return captured
 
+    def validate_skip() -> None:
+        verify_input_snapshot()
+        for spec in outputs:
+            data = spec.path.read_bytes()
+            _validate_output_bytes(spec, data)
+        validate_committed()
+        verify_input_snapshot()
+
     if store.should_skip_stage(
         _STAGE,
         inputs,
@@ -991,14 +1025,13 @@ def _execute_report_transaction(
         preserve_committed=True,
         after_lease_acquired=recover_or_cleanup,
         input_snapshot=capture_once,
-        before_skip=verify_input_snapshot,
+        before_skip=validate_skip,
     ):
-        for spec in outputs:
-            data = spec.path.read_bytes()
-            _validate_output_bytes(spec, data)
-        validate_committed()
-        verify_input_snapshot()
         return True
+
+    if validate_only:
+        store.abort_stage(_STAGE)
+        raise _error("committed report validation failed")
 
     candidates: list[Path | None] = [None] * len(outputs)
     transaction: ArtifactTransaction | None = None
@@ -1057,12 +1090,28 @@ def _execute_report_transaction(
         if transaction is not None and not commit_point:
             try:
                 recover_transaction(transaction)
+            except (MemoryError, KeyboardInterrupt, SystemExit) as recovery_error:
+                _cleanup_failed_stage(store)
+                if isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit)):
+                    raise error
+                failure = recovery_error
+                raise
             except TransactionStateError:
-                if store.stage_is_active(_STAGE):
-                    store.abort_stage(_STAGE)
+                cleanup_control = _cleanup_failed_stage(store)
+                if isinstance(error, (MemoryError, KeyboardInterrupt, SystemExit)):
+                    raise error
+                if cleanup_control is not None:
+                    failure = cleanup_control
+                    raise cleanup_control
                 raise _error("report output transaction rollback failed") from None
-        if not commit_point and store.stage_is_active(_STAGE):
-            store.abort_stage(_STAGE)
+        if not commit_point:
+            cleanup_control = _cleanup_failed_stage(store)
+            if cleanup_control is not None and not isinstance(
+                error,
+                (MemoryError, KeyboardInterrupt, SystemExit),
+            ):
+                failure = cleanup_control
+                raise cleanup_control
         if isinstance(error, TransactionStateError):
             raise _error("report output transaction failed") from None
         raise
@@ -1070,6 +1119,9 @@ def _execute_report_transaction(
         if not commit_point:
             try:
                 _cleanup_paths(candidates)
+            except (MemoryError, KeyboardInterrupt, SystemExit):
+                if not isinstance(failure, (MemoryError, KeyboardInterrupt, SystemExit)):
+                    raise
             except SecAwareError:
                 if failure is None:
                     raise
@@ -1105,6 +1157,8 @@ def write_reports(
     config: AppConfig,
     store: RunStore,
     force: bool = False,
+    *,
+    _validate_only: bool = False,
 ) -> ReportingStageResult:
     """Publish exactly nine reports without modifying any producer artifact."""
 
@@ -1235,6 +1289,7 @@ def write_reports(
                 inputs=input_paths,
                 outputs=outputs,
                 force=force,
+                validate_only=_validate_only,
                 capture_input_snapshot=capture,
                 verify_input_snapshot=verify,
                 validate_committed=validate_committed,
@@ -1288,10 +1343,18 @@ def write_reports(
             raise _error() from None
 
 
+def validate_committed_reports(
+    config: AppConfig,
+    store: RunStore,
+) -> ReportingStageResult:
+    return write_reports(config, store, force=False, _validate_only=True)
+
+
 __all__ = [
     "REPORT_PRODUCER_STAGES",
     "REPORT_STAGE_INPUTS",
     "REPORT_STAGE_OUTPUTS",
     "ReportingStageResult",
+    "validate_committed_reports",
     "write_reports",
 ]
