@@ -49,6 +49,7 @@ def test_default_rfci_config_is_strict_frozen_bounded_and_disabled() -> None:
 
     assert config.model_dump(mode="json") == {
         "enabled": False,
+        "exclude_selection_bias": True,
         "py_tetrad_commit": PINNED_COMMIT,
         "jpype_version": "1.7.1",
         "minimum_java_major": 21,
@@ -59,6 +60,8 @@ def test_default_rfci_config_is_strict_frozen_bounded_and_disabled() -> None:
     }
     with pytest.raises(ValidationError):
         RFCIConfig(unexpected=True)
+    with pytest.raises(ValidationError):
+        RFCIConfig(exclude_selection_bias=False)
     with pytest.raises(ValidationError):
         config.enabled = True  # type: ignore[misc]
 

@@ -652,7 +652,7 @@ def test_result_rejects_non_authoritative_available_capability(
     capability: RFCICapabilityRecord,
 ) -> None:
     with pytest.raises(ValidationError):
-        RFCISensitivityResult(capability=capability, pag=_forged_pag(backend="py_tetrad_rfci_v1"))
+        RFCISensitivityResult(capability=capability, pag=_forged_pag(backend="py_tetrad_rfci_v2"))
 
 
 def test_result_rejects_nonproduction_backend_even_with_recomputed_pag_id() -> None:
@@ -672,7 +672,7 @@ def test_public_relation_validator_rejects_recomputed_config_provenance() -> Non
     pag = PAGRecord.from_content(
         run_kind=PAGRunKind.RFCI_SENSITIVITY,
         table_id=table.table_id,
-        backend="py_tetrad_rfci_v1",
+        backend="py_tetrad_rfci_v2",
         backend_version=PINNED_COMMIT,
         ci_test="gsq",
         config_sha256=canonical_sha256(wrong_config.model_dump(mode="json")),
@@ -696,7 +696,7 @@ def test_relation_validator_rejects_disabled_config_with_available_pag() -> None
     pag = PAGRecord.from_content(
         run_kind=PAGRunKind.RFCI_SENSITIVITY,
         table_id=table.table_id,
-        backend="py_tetrad_rfci_v1",
+        backend="py_tetrad_rfci_v2",
         backend_version=PINNED_COMMIT,
         ci_test="gsq",
         config_sha256=canonical_sha256(config.model_dump(mode="json")),

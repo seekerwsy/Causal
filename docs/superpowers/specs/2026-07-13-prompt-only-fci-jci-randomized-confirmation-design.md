@@ -345,9 +345,19 @@ confirmation outcomes can never add, remove, rerank, or rewrite a frozen hypothe
 ### 6.4 Optional RFCI sensitivity backend
 
 `py-tetrad` RFCI is optional, marked `requires_java=true`, and isolated behind a backend adapter. Its
-absence cannot make the minimum causal-learn pipeline unavailable. Its JDK, JAR, JPype, algorithm,
-test, and knowledge versions are locked. RFCI produces sensitivity artifacts only and does not
-replace the primary FCI result without a future approved protocol.
+absence cannot make the minimum causal-learn pipeline unavailable. The v2 adapter declares
+`exclude_selection_bias=true` and passes the corresponding `excludeSelectionBias=true` parameter
+to Tetrad before RFCI runs so Tetrad applies background-knowledge orientation under the declared
+no-selection-bias assumption. The adapter reads the parameter back and fails closed unless it is
+true. This assumption belongs only to the optional RFCI sensitivity backend; it does not change the
+causal-learn FCI result, frozen hypotheses, or randomized ITT.
+
+The JDK, JAR, JPype, algorithm, test, knowledge, and RFCI configuration versions are locked. The
+adapter serializes Tetrad's PAG through the shared endpoint codec and validates it against the
+declared background knowledge; it never rewrites circle endpoints or otherwise post-processes PAG
+orientation locally. RFCI produces sensitivity artifacts only and does not replace the primary FCI
+result without a future approved protocol. Existing run directories produced under RFCI v1 cannot
+be upgraded in place; v2 requires a new run directory.
 
 ## 7. Typed Intervention Targets
 

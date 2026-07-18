@@ -17,6 +17,13 @@ JCI is secondary and cannot alter, replace, filter, or select the randomized ITT
 
 RFCI is optional, requires the pinned Java/JPype/py-tetrad runtime, and cannot block or redefine the primary ITT result when unavailable.
 
+RFCI v2 declares `exclude_selection_bias=true` and sets Tetrad's
+`excludeSelectionBias=true` parameter before search. This no-selection-bias assumption makes Tetrad
+apply the declared background-knowledge orientation inside RFCI. It is confined to the optional
+sensitivity backend and does not alter causal-learn FCI, the frozen hypotheses, or randomized ITT.
+The persisted graph is Tetrad's original PAG serialized through the shared endpoint codec: no local
+post-processing rewrites circle endpoints into arrows or relaxes background-knowledge validation.
+
 Generated code is consumed only by the independent Oracle and an explicitly configured functional evaluator; it is never a causal variable.
 
 Missing, invalid, or unavailable functional evaluation is `unknown`/`non-evaluable`, never a negative outcome.
@@ -69,6 +76,9 @@ configuration, background-knowledge, bootstrap, path, and freeze digests; random
 usage, and code digests; functional records bind evaluator policy and evidence; ITT records bind
 the assignment universe, target-instance universe, and bootstrap manifest; JCI deltas bind their
 assumption set; and RFCI capability provenance binds the optional runtime and Tetrad JAR digest.
+RFCI v2 PAG provenance additionally binds the strict `exclude_selection_bias=true` configuration,
+and the RFCI stage contract names that dependency explicitly. Existing v1 run directories cannot be
+upgraded in place; run v2 in a new directory so both provenance chains remain separately auditable.
 The nine report outputs preserve those source identifiers and digests rather than recomputing or
 mutating producer artifacts.
 

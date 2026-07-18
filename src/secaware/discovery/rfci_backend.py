@@ -56,7 +56,7 @@ PY_TETRAD_COMMIT = "a30707264aa4363a23ac5f136a70bbdd62212f07"
 JPYPE_VERSION = "1.7.1"
 MINIMUM_JAVA_MAJOR = 21
 TETRAD_JAR_SHA256 = "3c898047c26a909495925d3e50264150f58ee57cd5b48d95683c45e3ab0e17f4"
-RFCI_BACKEND = "py_tetrad_rfci_v1"
+RFCI_BACKEND = "py_tetrad_rfci_v2"
 
 _PY_TETRAD_URL = "https://github.com/cmu-phil/py-tetrad.git"
 _MAX_JAR_BYTES = 64 * 1024 * 1024
@@ -1181,6 +1181,9 @@ def _run_rfci_adapter(
         variable_ids = tuple(item.variable_id for item in checked_table.variables)
         frame = pd.DataFrame(checked_matrix, columns=variable_ids, copy=True)
         search = search_factory(frame)
+        search.params.set("excludeSelectionBias", checked_config.exclude_selection_bias)
+        if search.params.getBoolean("excludeSelectionBias") is not True:
+            raise ValueError
         search.use_g_square(alpha=checked_config.alpha)
         for variable_id, tier in checked_knowledge.tiers:
             search.add_to_tier(tier, variable_id)

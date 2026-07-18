@@ -502,9 +502,10 @@ def rfci_stage_contract_payload() -> dict[str, object]:
 
     return {
         "stage": _RFCI_STAGE,
-        "contract_version": "confirmation-rfci-v1",
+        "contract_version": "confirmation-rfci-v2",
         "app_config_schema": _schema_sha256(AppConfig),
         "rfci_config_schema": _schema_sha256(RFCIConfig),
+        "exclude_selection_bias": RFCIConfig().exclude_selection_bias,
         "table_schema": _schema_sha256(CausalTableRecord),
         "observation_schema": _schema_sha256(JCIObservationRecord),
         "background_provenance_schema": _schema_sha256(JCIBackgroundKnowledgeRecord),

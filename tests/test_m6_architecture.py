@@ -365,13 +365,19 @@ def test_jci_assumption_provenance_cannot_claim_per_assumption_attribution() -> 
 
 
 def test_rfci_is_an_optional_java_extra_and_never_a_base_dependency() -> None:
+    from secaware.pipeline.stage_contracts import rfci_stage_contract_payload
+
     metadata = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     base = "\n".join(metadata["project"]["dependencies"]).casefold()
     rfci_extra = "\n".join(metadata["project"]["optional-dependencies"]["rfci"]).casefold()
 
     assert RFCIConfig().enabled is False
+    assert RFCIConfig().exclude_selection_bias is True
     assert "jpype" not in base and "py-tetrad" not in base and "java" not in base
     assert "jpype" in rfci_extra and "py-tetrad" in rfci_extra
+    contract = rfci_stage_contract_payload()
+    assert contract["backend"] == "py_tetrad_rfci_v2"
+    assert contract["exclude_selection_bias"] is True
     assert {path.as_posix() for path, _model in RFCI_STAGE_OUTPUTS} == {
         "analysis/rfci_capability.jsonl",
         "analysis/rfci_pags.jsonl",

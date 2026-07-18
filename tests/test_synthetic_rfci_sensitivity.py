@@ -147,6 +147,17 @@ class _Graph:
         return self._edges
 
 
+class _FakeTetradParameters:
+    def __init__(self) -> None:
+        self.values: dict[str, object] = {}
+
+    def set(self, key: str, value: object) -> None:
+        self.values[key] = value
+
+    def getBoolean(self, key: str) -> object:
+        return self.values.get(key)
+
+
 class _FakeTetradSearch:
     instances: list["_FakeTetradSearch"] = []
     backend_edges: tuple[tuple[str, str, Endpoint, Endpoint], ...] = ()
@@ -157,6 +168,7 @@ class _FakeTetradSearch:
         self.tiers: list[tuple[int, str]] = []
         self.forbidden_directions: list[tuple[str, str]] = []
         self.rfci_kwargs: dict[str, object] | None = None
+        self.params = _FakeTetradParameters()
         type(self).instances.append(self)
 
     def use_g_square(self, *, alpha: float) -> None:
@@ -367,6 +379,7 @@ def test_fake_rfci_core_preserves_family_shaped_backend_graphs(
     search = _FakeTetradSearch.instances[0]
     assert tuple(search.frame.columns) == tuple(item.variable_id for item in table.variables)
     assert search.frame.to_numpy(dtype=np.int64).tobytes(order="C") == matrix.tobytes(order="C")
+    assert search.params.values == {"excludeSelectionBias": True}
     assert search.alpha == config.alpha
     assert set(search.tiers) == {(tier, variable_id) for variable_id, tier in knowledge.tiers}
     assert set(search.forbidden_directions) == set(

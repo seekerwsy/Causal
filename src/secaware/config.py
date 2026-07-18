@@ -167,6 +167,7 @@ class RFCIConfig(StrictModel):
     )
 
     enabled: bool = False
+    exclude_selection_bias: Literal[True] = True
     py_tetrad_commit: Literal["a30707264aa4363a23ac5f136a70bbdd62212f07"] = (
         "a30707264aa4363a23ac5f136a70bbdd62212f07"
     )

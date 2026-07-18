@@ -144,7 +144,7 @@ def test_rfci_backend_uses_supplied_frozen_capability_without_reprobe(
     pag = PAGRecord.from_content(
         run_kind=PAGRunKind.RFCI_SENSITIVITY,
         table_id=table.table_id,
-        backend="py_tetrad_rfci_v1",
+        backend="py_tetrad_rfci_v2",
         backend_version=config.py_tetrad_commit,
         ci_test="gsq",
         config_sha256=canonical_sha256(config.model_dump(mode="json")),

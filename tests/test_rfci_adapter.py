@@ -27,6 +27,24 @@ from secaware.schema.causal import (
 
 PINNED_COMMIT = "a30707264aa4363a23ac5f136a70bbdd62212f07"
 PINNED_JAR_SHA256 = "3c898047c26a909495925d3e50264150f58ee57cd5b48d95683c45e3ab0e17f4"
+RFCI_BACKEND_V2 = "py_tetrad_rfci_v2"
+
+
+class _FakeTetradParameters:
+    def __init__(self, search: "_FakeTetradSearch") -> None:
+        self.search = search
+        self.values: dict[str, object] = {}
+
+    def set(self, key: str, value: object) -> None:
+        self.search.events.append(("set", key, value))
+        self.values[key] = value
+
+    def getBoolean(self, key: str) -> object:
+        self.search.events.append(("getBoolean", key))
+        readback = type(self.search).parameter_readback
+        if isinstance(readback, Exception):
+            raise readback
+        return self.values.get(key) if readback is True else readback
 
 
 class _Node:
@@ -78,6 +96,7 @@ class _Graph:
 class _FakeTetradSearch:
     instances: list["_FakeTetradSearch"] = []
     graph_factory: Any = None
+    parameter_readback: object = True
 
     def __init__(self, frame: Any) -> None:
         self.frame = frame
@@ -87,6 +106,8 @@ class _FakeTetradSearch:
         self.forbidden_directions: list[tuple[str, str]] = []
         self.required_edges: list[tuple[str, str]] = []
         self.rfci_kwargs: dict[str, object] | None = None
+        self.events: list[tuple[object, ...]] = []
+        self.params = _FakeTetradParameters(self)
         type(self).instances.append(self)
 
     def use_g_square(self, *, alpha: float) -> None:
@@ -100,6 +121,7 @@ class _FakeTetradSearch:
         self.forbidden_directions.append((source, target))
 
     def run_rfci(self, **kwargs: object) -> None:
+        self.events.append(("run_rfci",))
         self.rfci_kwargs = kwargs
 
     def get_causal_learn(self) -> _Graph:
@@ -278,7 +300,7 @@ def _valid_payload(job_json: bytes) -> bytes:
     pag = PAGRecord.from_content(
         run_kind=PAGRunKind.RFCI_SENSITIVITY,
         table_id=table.table_id,
-        backend="py_tetrad_rfci_v1",
+        backend=RFCI_BACKEND_V2,
         backend_version=config.py_tetrad_commit,
         ci_test="gsq",
         config_sha256=canonical_sha256(config.model_dump(mode="json")),
@@ -314,6 +336,7 @@ def _mutates_config(send_connection: Any, job_json: bytes, _matrix: np.ndarray) 
 def _reset_fake_search() -> None:
     _FakeTetradSearch.instances.clear()
     _FakeTetradSearch.graph_factory = None
+    _FakeTetradSearch.parameter_readback = True
 
 
 def test_rfci_adapter_uses_exact_table_rows_gsquare_knowledge_and_run_settings() -> None:
@@ -343,6 +366,11 @@ def test_rfci_adapter_uses_exact_table_rows_gsquare_knowledge_and_run_settings()
     }
     assert set(search.forbidden_directions) == expected_forbidden
     assert search.required_edges == []
+    assert search.events[:2] == [
+        ("set", "excludeSelectionBias", True),
+        ("getBoolean", "excludeSelectionBias"),
+    ]
+    assert search.events[-1] == ("run_rfci",)
     assert search.rfci_kwargs == {
         "depth": 4,
         "stable_fas": True,
@@ -350,9 +378,33 @@ def test_rfci_adapter_uses_exact_table_rows_gsquare_knowledge_and_run_settings()
         "complete_rule_set_used": True,
     }
     assert pag.run_kind is PAGRunKind.RFCI_SENSITIVITY
-    assert pag.backend == "py_tetrad_rfci_v1"
+    assert pag.backend == RFCI_BACKEND_V2
     assert pag.backend_version == PINNED_COMMIT
     assert pag.config_sha256 == canonical_sha256(config.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize(
+    "readback",
+    (None, False, RuntimeError("parameter readback failed")),
+    ids=("missing", "false", "exception"),
+)
+def test_rfci_adapter_fails_closed_when_orientation_mode_readback_is_not_true(
+    readback: object,
+) -> None:
+    _FakeTetradSearch.parameter_readback = readback
+    table = _table()
+
+    with pytest.raises(SecAwareError):
+        _run_fake_adapter(
+            table,
+            _rows(table),
+            build_background_knowledge(table),
+            _config(),
+        )
+
+    search = _FakeTetradSearch.instances[0]
+    assert search.rfci_kwargs is None
+    assert ("run_rfci",) not in search.events
 
 
 def test_rfci_adapter_converts_only_through_shared_pag_endpoint_codec() -> None:
@@ -502,7 +554,7 @@ def test_rfci_public_boundary_rebuilds_matrix_from_exact_authenticated_rows() ->
         _config(),
     )
 
-    assert pag.backend == "py_tetrad_rfci_v1"
+    assert pag.backend == RFCI_BACKEND_V2
     assert np.array_equal(
         _FakeTetradSearch.instances[0].frame.to_numpy(dtype=np.int64),
         np.asarray(tuple(item.values for item in _rows(table)), dtype=np.int64),
@@ -623,7 +675,7 @@ def test_rfci_public_boundary_accepts_exact_authenticated_jci_rows(
         return PAGRecord.from_content(
             run_kind=PAGRunKind.RFCI_SENSITIVITY,
             table_id=table.table_id,
-            backend="py_tetrad_rfci_v1",
+            backend=RFCI_BACKEND_V2,
             backend_version=PINNED_COMMIT,
             ci_test="gsq",
             config_sha256=canonical_sha256(config.model_dump(mode="json")),  # type: ignore[attr-defined]
