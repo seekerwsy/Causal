@@ -14,7 +14,7 @@
 
 \newcommand{\tool}{SecAware\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
-\newcommand{\resultslot}{\textbf{[Frozen paper-run headline results]}}
+\newcommand{\resultslot}{\mbox{\emph{Frozen-run results pending.}}}
 
 \acmConference[FSE 2027]{The ACM International Conference on the Foundations
 of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
@@ -144,9 +144,10 @@ target-specific variant can require resolving and normalizing the path under
 \texttt{base\_dir} and rejecting any resolution outside that directory. A
 no-op variant preserves the original security semantics, a length-matched
 placebo changes presentation only, and a generic-control variant requests
-secure coding without naming path confinement. This illustrative example
-defines an intervention question; it does not report a generated program or an
-effect.
+secure coding without naming path confinement. Together, these controls
+isolate rewrite, presentation/length, and generic security-cue effects,
+respectively. This illustrative example defines an intervention question; it
+does not report a generated program or an effect.
 
 \subsection{Units, Outcomes, and Claim Scope}
 
@@ -165,34 +166,24 @@ this boundary. Task identity is the clustering unit because prompt variants,
 arm assignments, and seed slots derived from the same programming request are
 not independent.
 
-Every committed assignment must receive the prespecified
-\emph{secure-and-functional} outcome before publication. Success requires a
-generated candidate that parses, passes the committed functional check, and
-receives a secure Oracle label. Valid terminal generation failure, parse or
-functional failure, and valid Oracle-unknown are retained as observed
-non-successes under the outcome policy. A missing or corrupt required producer
-is instead a contract failure: it blocks publication and triggers deterministic
-replay of the same assignment manifest rather than changing the denominator or
-being encoded as an outcome.
+The primary analysis estimates task-clustered assigned-arm ITT on a
+prespecified \emph{secure-and-functional} outcome for every committed
+assignment. Valid terminal non-successes remain in the assigned-arm
+denominator; a missing or corrupt required producer instead blocks publication
+and requires deterministic replay of the same assignment manifest.
 
-For each CWE/security scope and model, \tool constructs a separate local table.
-$W$ contains approved pre-treatment task metadata; $X$ contains direct and
-relational Prompt TSG queries; $Y$ contains independently committed outcomes;
-and the secondary JCI table adds one categorical arm-context variable $C$.
-Model identity remains an analysis coordinate and provenance field.
+$W$ contains approved pre-treatment task metadata, $X$ contains direct and
+relational Prompt TSG queries, and $Y$ contains independently committed
+outcomes. The secondary JCI table adds one categorical arm-context variable
+$C$; model identity remains an analysis coordinate and provenance field.
 
-The \prompttsg and the learned partial ancestral graph (PAG) have different
-semantics. Prompt TSG edges encode typed task, security, and presentation
-structure; they are not causal edges. PAG endpoint marks record the
-uncertainty of learned relations under FCI. Generated code is input only to the
-independent security Oracle and functional evaluator, not a source of causal
-variables or code-side mechanism claims.
-
-Accordingly, the framework's causal claims concern frozen, prompt-side
-interventions and their hypothesis-, target-, operation-, model-, and
-CWE-specific assigned-arm effects on held-out tasks. Observational paths remain
-candidate evidence, while confirmatory claims require the preregistered
-task-clustered ITT contrast and its complete outcome provenance.
+The \prompttsg defines typed prompt structure and the editable queries supplied
+to discovery, while the PAG preserves FCI uncertainty over learned relations.
+Generated code is used only by the independent security Oracle and functional
+checker. Observational paths therefore form hypotheses, and confirmatory claims
+are limited to task-clustered assigned-arm effects of frozen prompt
+interventions on held-out tasks within their hypothesis, target, operation,
+model, and CWE scopes.
 
 \section{Methodology}
 
