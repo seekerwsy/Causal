@@ -14,10 +14,15 @@
 | Four arms apply to Safety ADD and Safety REMOVE | Approved causal design Section 8 | [Causal design Sections 8.1–8.2](../../docs/superpowers/specs/2026-07-13-prompt-only-fci-jci-randomized-confirmation-design.md#8-family-specific-arm-protocols), exact Safety ADD roles `TARGET_PATCH`, `NOOP_REWRITE`, `LENGTH_MATCHED_PLACEBO`, `GENERIC_SECURITY_REMINDER` and Safety REMOVE roles `TARGET_REMOVE`, `NOOP_RETAIN`, `LENGTH_MATCHED_SHAM_EDIT`, `GENERIC_SECURITY_REPLACEMENT`; specification-only; no execution evidence | Current prose overgeneralizes | Qualify abstract, contribution, and figure language |
 | Valid terminal non-success differs from missing or corrupt producer evidence | Approved causal design Sections 4.2, 11.1, and 15 | [Causal design Section 4.2](../../docs/superpowers/specs/2026-07-13-prompt-only-fci-jci-randomized-confirmation-design.md#42-outcome-encoding), [Section 11.1](../../docs/superpowers/specs/2026-07-13-prompt-only-fci-jci-randomized-confirmation-design.md#111-assignment-principle), and [Section 15](../../docs/superpowers/specs/2026-07-13-prompt-only-fci-jci-randomized-confirmation-design.md#15-failure-semantics), exact valid-terminal outcome encoding versus missing/corrupt producer replay contract; specification-only; no execution evidence; no final result artifact | Current prose is ambiguous | State zero versus replay boundary exactly |
 | External adapters, RQ2 runs, RQ4 study, and final paper run are incomplete | Approved RQ design Section 12 and causal-boundary reference | [RQ design Section 12](../../docs/superpowers/specs/2026-07-22-paper-research-questions-design.md#12-required-new-evaluation-work) and [implementation-status boundary](../../.agents/skills/secaware-fse-paper/references/causal-boundaries.md#implementation-status-boundary): computational work lacks a frozen paper-run manifest and table-builder provenance; [RQ4 Sections 10 and 12](../../docs/superpowers/specs/2026-07-22-paper-research-questions-design.md#10-rq4-operationalization) separately lack frozen protocol, participant-data, randomization, and analysis provenance; specification-only; no execution evidence | Planned, not executed | Use future tense and keep result slots |
-| RQ1–RQ4 quantitative findings | Frozen final run and table builders required | [RQ1–RQ3 operationalization, Sections 5–9](../../docs/superpowers/specs/2026-07-22-paper-research-questions-design.md#5-rq1-operationalization) requires a frozen computational run manifest, dataset/model provenance, and exact table-builder field mapping; [RQ4 Section 10](../../docs/superpowers/specs/2026-07-22-paper-research-questions-design.md#10-rq4-operationalization) separately requires frozen protocol, participant data, randomization, and analysis provenance; specification-only; no execution evidence; no qualifying artifact identified | Blocked by evidence | Keep every result cell as `--` |
+| RQ1–RQ4 quantitative findings | Frozen computational run manifest and table builders; or frozen RQ4 protocol, participant-data, randomization, and analysis artifacts plus an analysis/table builder | [RQ1–RQ3 operationalization, Sections 5–9](../../docs/superpowers/specs/2026-07-22-paper-research-questions-design.md#5-rq1-operationalization) requires a frozen computational run manifest, dataset/model provenance, and exact table-builder field mapping; [RQ4 Section 10](../../docs/superpowers/specs/2026-07-22-paper-research-questions-design.md#10-rq4-operationalization) separately requires frozen protocol, participant data, randomization, and analysis provenance; specification-only; no execution evidence; no qualifying artifact identified | Blocked by evidence | Keep every result cell as `--` |
 
 ## Baseline Verification (2026-07-30)
 
+- **Recorded versions:** The pre-revision baseline source is revision
+  `a88e81c`. Task 1 revision content and its recorded contract-regression state
+  correspond to content state `f9773fa`. This ledger is the saved execution
+  record; no separate raw-log path is claimed. The present documentation-only
+  consistency repair is followed by a fresh contract rerun before its commit.
 - **Environment and working directories:** Windows PowerShell; repository
   virtual environment at `D:\MyCode\Causal\.venv`; repository root
   `D:\MyCode\Causal`; LaTeX build directory
@@ -33,7 +38,7 @@
 - **Visual baseline:** `pdftoppm -png -r 120 out\secaware-fse2027-draft.pdf ..\tmp\pdfs\current-draft\page`
   generated 9 PNG files in `paper/tmp/pdfs/current-draft`. These are
   uncommitted temporary visual artifacts.
-- **Conflict scan:**
+- **Conflict scan (run from `D:\MyCode\Causal\paper`, i.e. `paper`):**
   `rg -n -S "one-hot|fallback|four-arm|After assignment, re-extraction|design-stage|skeleton|placeholder outcomes|no quantitative findings" fse2027\secaware-fse2027-draft.tex`
   matched 12 lines: `four-arm` 4, `design-stage` 2, `fallback` 1,
   `After assignment, re-extraction` 1, `one-hot` 1,

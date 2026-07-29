@@ -34,10 +34,14 @@ From the repository root, run the project paper contract with:
 
 ## Current Scope
 
-The draft intentionally focuses on method and research-question design. Result
-tables are skeletons and must be filled only from one frozen final run directory.
-Use the project-local `secaware-fse-paper` skill for manuscript audits,
-revisions, verified result backfilling, and pre-submission checks.
+The draft intentionally focuses on method and research-question design.
+Computational result tables must be populated only from one frozen
+computational run directory and manifest through a traceable table builder.
+RQ4 human-study results instead require separately frozen protocol,
+participant-data, randomization, and analysis artifacts plus a traceable
+analysis/table-building step. Use the project-local `secaware-fse-paper` skill
+for manuscript audits, revisions, verified result backfilling, and
+pre-submission checks.
 
 The 2026-07-29 narrative revision organizes the method as Security-Aware
 Prompt Representation, Stability-Guided Causal Discovery, and Causal Effect
