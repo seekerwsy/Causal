@@ -41,7 +41,8 @@ revisions, verified result backfilling, and pre-submission checks.
 
 The 2026-07-29 narrative revision organizes the method as Security-Aware
 Prompt Representation, Stability-Guided Causal Discovery, and Causal Effect
-Confirmation. Its evidence ledger is `revision-evidence-ledger.md`.
+Confirmation. Its evidence ledger is the
+[revision evidence ledger](revision-evidence-ledger.md).
 
 The manuscript may describe verified core capabilities in the present tense,
 but external RQ1 adapters, paper RQ2 runs, the RQ4 study, and the frozen final
