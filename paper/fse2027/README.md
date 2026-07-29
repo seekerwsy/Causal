@@ -38,3 +38,12 @@ The draft intentionally focuses on method and research-question design. Result
 tables are skeletons and must be filled only from one frozen final run directory.
 Use the project-local `secaware-fse-paper` skill for manuscript audits,
 revisions, verified result backfilling, and pre-submission checks.
+
+The 2026-07-29 narrative revision organizes the method as Security-Aware
+Prompt Representation, Stability-Guided Causal Discovery, and Causal Effect
+Confirmation. Its evidence ledger is `revision-evidence-ledger.md`.
+
+The manuscript may describe verified core capabilities in the present tense,
+but external RQ1 adapters, paper RQ2 runs, the RQ4 study, and the frozen final
+paper run remain future work. Every numerical result stays `--` until a frozen
+manifest and table builder supply exact provenance.
