@@ -8,11 +8,13 @@
 \usepackage{flafter}
 \usepackage{multirow}
 \usepackage{placeins}
+\usepackage{tikz}
 \usepackage{xspace}
+\usetikzlibrary{arrows.meta,fit,positioning}
 
 \newcommand{\tool}{SecAware\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
-\newcommand{\todo}[1]{\textbf{[TODO: #1]}}
+\newcommand{\resultslot}{\textbf{[Frozen paper-run headline results]}}
 
 \acmConference[FSE 2027]{The ACM International Conference on the Foundations
 of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
@@ -31,26 +33,22 @@ Generation}
 }
 
 \begin{abstract}
-Prompts that appear functionally adequate can still omit or weaken constraints
-that affect the security of LLM-generated code. Existing explanation and
-perturbation methods can identify suspicious text or associations, but they do
-not by themselves establish whether a prompt-side factor can be changed while
-preserving the task or whether the assigned change improves security on
-held-out tasks. We present \tool, a TSG-constrained causal discovery and
-randomized counterfactual confirmation framework. \tool extracts a typed
-prompt-side task-security graph, constructs local causal-variable tables for
-each security scope, and derives background knowledge without treating graph
-structure as causation. It runs observational FCI with a G-square conditional
-independence test, evaluates path stability with task-cluster bootstrap
-resampling, and freezes selected hypotheses before confirmation. On held-out
-tasks, four-arm randomized block experiments estimate assigned-arm,
-task-clustered intent-to-treat effects on secure-and-functional and
-CWE-specific outcomes. A secondary JCI analysis represents randomized arms as
-context variables, and optional RFCI provides a sensitivity backend. The
-design separates prompt-side mechanisms from generated-code outcome
-provenance and retains failed, null, and conflicting evidence. This
-design-stage draft specifies the method and evaluation protocol; numerical
-results remain intentionally blank until one frozen paper run is available.
+Natural-language prompts are part of the security boundary of LLM code
+generation: they can specify the required behavior while leaving validation,
+authorization, trust boundaries, or safe-API constraints implicit. Existing
+attribution and perturbation methods can expose influential text, yet they do
+not by themselves turn that evidence into a task-preserving prompt
+intervention with a confirmatory effect estimate. We present \tool, a
+three-stage framework that constructs a security-aware prompt representation,
+discovers stable prompt-side hypotheses with structure-constrained FCI, and
+tests frozen hypotheses through held-out prompt interventions. The discovery
+stage combines graph-derived variables, typed background knowledge, and
+task-cluster bootstrap stability while preserving PAG uncertainty. The
+confirmation stage freezes family-specific prompt variants before blocked
+random assignment and estimates task-clustered assigned-arm intent-to-treat
+effects on secure-and-functional outcomes. A fixed-budget evidence funnel
+connects native candidates, target mappings, valid protocols, randomized
+hypotheses, and confirmed effects across methods. \resultslot
 \end{abstract}
 
 \begin{CCSXML}
@@ -77,54 +75,80 @@ discovery, randomized experiments, prompt analysis}
 
 \section{Introduction}
 
-LLM-based code generation makes natural-language prompts part of the software
-security boundary. A prompt may state the required functionality while leaving
-trust boundaries, validation, authorization, or safe-API constraints implicit.
-The resulting code can be functional yet insecure. A useful explanation must
-therefore do more than rank tokens: it should identify an editable prompt-side
-factor, state the uncertainty of its observational evidence, and test a
-prespecified intervention without changing the underlying programming task.
+Natural-language prompts now participate directly in the security boundary of
+code generation. They often specify what a program should do while leaving
+validation, authorization, trust boundaries, or safe-API constraints implicit.
+Studies of AI-assisted code generation show that functional-looking outputs
+can still contain security weaknesses and that developers may overestimate the
+security of assisted solutions~\cite{pearce2022copilot,perry2023assistants}.
+The practical question is therefore not only which prompt text matters, but
+which missing or weakly scoped requirement can be edited without changing the
+programming task.
 
-Three issues make this difficult. First, prompt requirements have typed and
-relational structure that surface text alone may obscure. Second, structure in
-a prompt representation must not be mistaken for a causal graph. Third,
-confirmation is vulnerable to post-treatment selection if only successful or
-semantically convenient edits are analyzed. A defensible workflow must keep
-feature extraction, causal discovery, intervention assignment, generated-code
-evaluation, and effect estimation separate and auditable.
+Feature attribution, concept-based interpretation, and rationale evaluation
+offer complementary views of model
+behavior~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser},
+but importance or plausibility alone does not identify the effect of an
+editable prompt requirement. Perturbations can further reveal behavioral
+sensitivity to changed text, yet an unconstrained change may alter task
+semantics, presentation, and security content together. These signals are
+valuable evidence sources, but they do not by themselves supply a
+task-preserving intervention or a confirmatory effect estimate.
 
-\tool addresses these issues with a Prompt-only design. It represents the
-input as a \prompttsg, translates graph-derived features into local statistical
-tables, and constrains rather than replaces a standard FCI implementation.
-Candidate paths are stability-screened and frozen before a randomized,
-held-out confirmation stage. Generated code never supplies causal mechanism
-features: it is consumed only by an independent security Oracle and functional
-evaluator. Confirmation uses the assigned arm as treatment and includes all
-assigned units under a prespecified failure policy.
+The missing link is a reproducible progression from \emph{representation}, to
+\emph{hypothesis}, to \emph{effect}. Free-form requirements must first become
+typed, scoped, and editable prompt-side factors. Observational relations among
+those factors must then retain their uncertainty and remain stable across task
+clusters. Finally, the selected hypothesis and its intervention protocol must
+be fixed before held-out outcomes exist, so that confirmation estimates the
+effect of assignment rather than selecting cases in which the intended edit
+happened to succeed.
+
+\tool provides this progression in three stages.
+\textbf{Security-Aware Prompt Representation} converts prompt requirements
+into catalog-bound factors and relational motifs.
+\textbf{Stability-Guided Causal Discovery} combines structure-derived
+constraints, FCI, and task-cluster bootstrap stability to prioritize and
+freeze reproducible prompt-side hypotheses.
+\textbf{Causal Effect Confirmation} constructs family-specific prompt
+variants, randomizes them on held-out tasks, and estimates task-clustered
+assigned-arm intent-to-treat effects. A fixed-budget evidence funnel makes the
+full path auditable, from native candidates through target mapping and valid
+protocols to randomized hypotheses and confirmed effects.
 
 This paper makes the following contributions:
 
 \begin{itemize}
-  \item a Prompt-only typed representation and provenance-separated conversion
-  to local causal-variable tables for individual CWE/security scopes;
-  \item a constrained observational discovery protocol using causal-learn FCI,
-  G-square tests, TSG-derived background knowledge, and task-clustered
-  stability analysis;
-  \item a prevalidated four-arm randomized block design with task-clustered ITT
-  estimation, diagnostic treatment-fidelity measures, and secondary JCI and
-  RFCI analyses; and
-  \item an evaluation plan that compares discovery-to-confirmation yield,
-  representation and analysis ablations, defensive interventions, and expert
-  ratings without converting exploratory evidence into quantitative claims.
+  \item \textbf{Security-aware prompt representation.} A typed, catalog-bound
+  representation converts free-form requirements into scoped, editable
+  security factors and relational motifs.
+  \item \textbf{Stable causal hypothesis discovery.} Structure-derived
+  constraints, FCI, and task-cluster stability analysis prioritize
+  reproducible prompt-side hypotheses and freeze them before confirmation.
+  \item \textbf{Causal effect confirmation.} Family-specific prompt
+  interventions and held-out blocked randomization produce hypothesis-specific
+  assigned-arm ITT evidence without conditioning on realized edit success.
+  \item \textbf{End-to-end evidence accounting.} A fixed-budget funnel exposes
+  whether candidate generation, target mapping, protocolization, randomization,
+  or confirmation limits each method.
 \end{itemize}
 
-\todo{Replace this note with a security-neutral motivating prompt, its frozen
-hypothesis, four assigned prompt variants, and outcome summary from the final
-paper run.}
+\section{Motivating Example and Problem Formulation}
 
-\section{Problem Setup and Scope}
+\subsection{An Editable Prompt-Side Security Factor}
 
-\subsection{Units, Splits, and Outcomes}
+Consider a security-neutral request to implement
+\texttt{read\_report(base\_dir, user\_path)} and return the requested UTF-8
+report. The request fixes the task but leaves path confinement implicit. A
+target-specific variant can require resolving and normalizing the path under
+\texttt{base\_dir} and rejecting any resolution outside that directory. A
+no-op variant preserves the original security semantics, a length-matched
+placebo changes presentation only, and a generic-control variant requests
+secure coding without naming path confinement. This illustrative example
+defines an intervention question; it does not report a generated program or an
+effect.
+
+\subsection{Units, Outcomes, and Claim Scope}
 
 Let a generation unit be indexed by task $t$, prompt variant $v$, model $m$,
 and randomized seed slot $s$:
@@ -133,48 +157,42 @@ and randomized seed slot $s$:
   u = (t, v, m, s).
 \]
 
-Tasks are split before model-based discovery into disjoint discovery and
+Tasks are partitioned before model-based discovery into disjoint discovery and
 confirmation pools. The discovery pool supports observational hypothesis
-formation. The held-out confirmation pool supports prompt construction,
-randomized assignment, code generation, and effect estimation. Task identity
-is the clustering unit because variants and seed slots from the same task are
+formation; the held-out confirmation pool supports prompt construction,
+randomized assignment, code generation, and effect estimation. No task crosses
+this boundary. Task identity is the clustering unit because prompt variants,
+arm assignments, and seed slots derived from the same programming request are
 not independent.
 
-The primary outcome is \emph{secure-and-functional}: generated code must pass
-the locked functional contract and the security Oracle. A CWE-specific security
-outcome is secondary. The run manifest defines fail-closed handling for
-generation, execution, and Oracle failures before assignment; these outcomes
-are not chosen after observing an arm.
+Every committed assignment must receive the prespecified
+\emph{secure-and-functional} outcome before publication. Success requires a
+generated candidate that parses, passes the committed functional check, and
+receives a secure Oracle label. Valid terminal generation failure, parse or
+functional failure, and valid Oracle-unknown are retained as observed
+non-successes under the outcome policy. A missing or corrupt required producer
+is instead a contract failure: it blocks publication and triggers deterministic
+replay of the same assignment manifest rather than changing the denominator or
+being encoded as an outcome.
 
-\subsection{Causal Variables}
+For each CWE/security scope and model, \tool constructs a separate local table.
+$W$ contains approved pre-treatment task metadata; $X$ contains direct and
+relational Prompt TSG queries; $Y$ contains independently committed outcomes;
+and the secondary JCI table adds one categorical arm-context variable $C$.
+Model identity remains an analysis coordinate and provenance field.
 
-For each CWE/security scope and model, \tool constructs a separate local table
-with four variable groups:
-
-\begin{itemize}
-  \item $W$: pre-treatment task and generation metadata allowed by the locked
-  analysis specification;
-  \item $X$: direct Prompt TSG feature states and relational Prompt TSG motifs;
-  \item $Y$: independently produced secure-and-functional and CWE-specific
-  outcomes; and
-  \item $C$: randomized arm-context variables used only in the secondary JCI
-  analysis.
-\end{itemize}
-
-The Prompt TSG and the learned partial ancestral graph (PAG) have different
+The \prompttsg and the learned partial ancestral graph (PAG) have different
 semantics. Prompt TSG edges encode typed task, security, and presentation
-relations. PAG endpoint marks summarize independence information under FCI.
-An edge in the Prompt TSG is never reported as a causal edge. The generated
-program is likewise not a causal-variable graph: it is an evaluation object for
-the Oracle and functional evaluator.
+structure; they are not causal edges. PAG endpoint marks record the
+uncertainty of learned relations under FCI. Generated code is input only to the
+independent security Oracle and functional evaluator, not a source of causal
+variables or code-side mechanism claims.
 
-\subsection{Claim Boundary}
-
-The framework does not invent a new general-purpose causal discovery
-algorithm, identify a unique causal DAG, or interpret every possible PAG path
-as a mechanism. Latent confounding is allowed by FCI, and observational output
-is labeled as candidate evidence. Paper-facing confirmation claims require a
-frozen hypothesis and a randomized assigned-arm contrast on held-out tasks.
+Accordingly, the framework's causal claims concern frozen, prompt-side
+interventions and their hypothesis-, target-, operation-, model-, and
+CWE-specific assigned-arm effects on held-out tasks. Observational paths remain
+candidate evidence, while confirmatory claims require the preregistered
+task-clustered ITT contrast and its complete outcome provenance.
 
 \section{Methodology}
 
@@ -640,5 +658,8 @@ no frozen result dataset to release. Before a results-bearing submission, we
 will archive the anonymous replication package described above and replace this
 statement with its access conditions and persistent location. No demo or mock
 artifact will be presented as final paper evidence.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
 
 \end{document}
