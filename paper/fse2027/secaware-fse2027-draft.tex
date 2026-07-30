@@ -468,6 +468,10 @@ committed assignment remains in its assigned-arm denominator;
 \texttt{target\_changed}, semantic compliance, and non-target drift are
 diagnostics rather than filters.
 
+Throughout the tables, \texttt{--} marks a result slot awaiting
+provenance-verified frozen-run or study backfill; it denotes neither zero, not
+applicable, nor observed missingness.
+
 \subsection{RQ1: Discovery and Confirmation}
 
 \textbf{RQ1. How effectively can different methods discover and confirm
@@ -488,24 +492,77 @@ protocolization, block-freeze coverage, randomized yield, and conditional
 confirmation diagnose where candidates leave the pipeline; they do not replace
 hypothesis-specific ITT evidence. Exact implementations, versions, native
 output contracts, ranking policies, and mappings are bound only by the RQ1
-manifest frozen before the final run.
+manifest frozen before the final run. For every frozen method/rank hypothesis,
+the evidence report retains its target and operation, target-minus-no-op ITT
+estimate and interval, multiplicity-adjusted status, independent-task and arm
+counts, and preregistered secondary contrasts.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering
   \small
-  \caption{RQ1 fixed-budget discovery-to-confirmation funnel. Confirmed yield
-  at $K$ is the primary method-level endpoint; conditional mapping and
-  confirmation rates diagnose where candidates leave the pipeline.}
+  \caption{RQ1 fixed-budget discovery-to-confirmation results. Panel A reports
+  funnel counts. Panel B reports derived yields for the same method families:
+  SA is \tool, Attr.\ is prompt attribution, Concepts is causal prompt
+  concepts, Perturb.\ is prompt perturbation, and Judge is LLM-judge
+  explanation. Confirmed yield at $K$ is the primary method-level endpoint.}
   \label{tab:rq1}
   \begin{tabular}{lrrrrrr}
     \toprule
+    \multicolumn{7}{l}{\textit{Panel A: Funnel counts}} \\
+    \midrule
     Method family & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
     \midrule
     \tool & -- & -- & -- & -- & -- & -- \\
     Prompt attribution & -- & -- & -- & -- & -- & -- \\
-    Prompt concepts & -- & -- & -- & -- & -- & -- \\
+    Causal prompt concepts & -- & -- & -- & -- & -- & -- \\
     Prompt perturbation & -- & -- & -- & -- & -- & -- \\
     LLM-judge explanation & -- & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{lrrrrr}
+    \toprule
+    \multicolumn{6}{l}{\textit{Panel B: Derived yields}} \\
+    \midrule
+    Metric & SA & Attr. & Concepts & Perturb. & Judge \\
+    \midrule
+    Native / $K$ & -- & -- & -- & -- & -- \\
+    Mapped / Native & -- & -- & -- & -- & -- \\
+    Mapped / $K$ & -- & -- & -- & -- & -- \\
+    Protocol / Mapped & -- & -- & -- & -- & -- \\
+    Block-freeze coverage & -- & -- & -- & -- & -- \\
+    Randomized / $K$ & -- & -- & -- & -- & -- \\
+    Confirmed / $K$ & -- & -- & -- & -- & -- \\
+    Confirmed / Randomized & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[!htbp]
+  \centering
+  \small
+  \caption{RQ1 hypothesis-specific confirmation evidence. The frozen RQ1
+  manifest binds method/rank, target/operation, target-minus-no-op ITT,
+  task-clustered interval, multiplicity-adjusted status, independent-task and
+  assigned-arm counts, and preregistered secondary contrasts.}
+  \label{tab:rq1-evidence}
+  \begin{tabular}{llllrr}
+    \toprule
+    Method/rank & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    \midrule
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen RQ1 manifest}} \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{llrrl}
+    \toprule
+    Hyp.\ ID & Adj.\ status & Indep.\ tasks & Arm counts & Secondary contrasts \\
+    \midrule
+    \multicolumn{5}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen RQ1 manifest}} \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -522,9 +579,12 @@ Full versus Reduced representation; the selection comparison is Full versus
 Association selection; Double ablation exposes their interaction. Different
 variants can select different hypotheses, so their hypothesis-specific
 estimands are not exchangeable and must not be reduced to any pooled
-cross-hypothesis ATE.
+cross-hypothesis ATE. To localize where a component contributes, every
+configuration reports the complete RQ1 count funnel and the same eight derived
+yields. Its hypothesis-specific evidence retains the same assigned-arm ITT and
+inferential fields as RQ1.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering
   \small
   \caption{RQ2 isolates the contribution of relational Prompt TSG queries and
@@ -542,6 +602,74 @@ cross-hypothesis ATE.
   \end{tabular}
 \end{table}
 
+\begin{table}[!htbp]
+  \centering
+  \small
+  \caption{RQ2 downstream discovery-to-confirmation results. Panel A reports
+  the complete fixed-budget funnel for every configuration. Panel B reports the
+  corresponding derived yields, allowing representation and selection
+  contributions to be localized to a pipeline stage.}
+  \label{tab:rq2-funnel}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    \multicolumn{7}{l}{\textit{Panel A: Funnel counts}} \\
+    \midrule
+    Variant & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
+    \midrule
+    Full & -- & -- & -- & -- & -- & -- \\
+    Reduced representation & -- & -- & -- & -- & -- & -- \\
+    Association selection & -- & -- & -- & -- & -- & -- \\
+    Double ablation & -- & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{lrrrr}
+    \toprule
+    \multicolumn{5}{l}{\textit{Panel B: Derived yields}} \\
+    \midrule
+    Metric & Full & Reduced & Assoc. & Double \\
+    \midrule
+    Native / $K$ & -- & -- & -- & -- \\
+    Mapped / Native & -- & -- & -- & -- \\
+    Mapped / $K$ & -- & -- & -- & -- \\
+    Protocol / Mapped & -- & -- & -- & -- \\
+    Block-freeze coverage & -- & -- & -- & -- \\
+    Randomized / $K$ & -- & -- & -- & -- \\
+    Confirmed / $K$ & -- & -- & -- & -- \\
+    Confirmed / Randomized & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[!htbp]
+  \centering
+  \small
+  \caption{RQ2 hypothesis-specific confirmation evidence. Each configuration
+  reports its frozen hypothesis and target/operation with target-minus-no-op
+  ITT, task-clustered interval, multiplicity-adjusted status, independent-task
+  and assigned-arm counts, and preregistered secondary contrasts.}
+  \label{tab:rq2-evidence}
+  \begin{tabular}{llllrr}
+    \toprule
+    Variant & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    \midrule
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen RQ2 manifest}} \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{llrrl}
+    \toprule
+    Hyp.\ ID & Adj.\ status & Indep.\ tasks & Arm counts & Secondary contrasts \\
+    \midrule
+    \multicolumn{5}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen RQ2 manifest}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \subsection{RQ3: Defensive Interventions}
 
 \textbf{RQ3. Which prompt-side defensive interventions effectively reduce
@@ -555,7 +683,7 @@ denominator filter. Placebo and generic-arm contrasts test whether evidence is
 target-specific. Each row reports the primary secure-and-functional risk
 difference, task-clustered interval, and evidence level.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering
   \small
   \caption{RQ3 reports hypothesis-specific target-versus-no-op assigned-arm
@@ -566,8 +694,8 @@ difference, task-clustered interval, and evidence level.
     \toprule
     Frozen target & Op. & Outcome & ITT RD & Interval & Evidence \\
     \midrule
-    \multicolumn{6}{c}{\emph{Rows generated from the frozen TargetSpec
-    manifest}} \\
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen TargetSpec manifest}} \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -584,24 +712,44 @@ usefulness of explanations produced by different methods?}
 RQ4 compares anonymous, neutrally wrapped method outputs using ordinal expert
 ratings. Each native output uses the same frozen wrapper: Finding, Evidence,
 Expected direction, Experimental support or uncertainty, and Suggested audit
-or repair action. The only primary RQ4 outcome is overall usefulness, analyzed
-with method as a fixed effect and participant and case as random effects.
-Clarity, evidence sufficiency, credibility, actionability, raw summaries, and
-rankings are secondary or descriptive. Accordingly, RQ4 supports claims about
-perceived utility, not actual security effects, objective
-mechanism-identification accuracy, or repair effectiveness.
+or repair action. Overall usefulness is the only primary RQ4 outcome. Its
+preregistered primary analysis is an ordinal mixed-effects model with method as
+a fixed effect and participant and case as random effects. Methods are ranked
+by preregistered adjusted overall usefulness, reported with an interval, rank,
+and multiplicity-adjusted pairwise contrasts. Raw means and per-dimension
+distributions for clarity, evidence sufficiency, credibility, actionability,
+and usefulness are descriptive; the four nonprimary dimensions are secondary.
+Accordingly, RQ4 supports claims about perceived utility, not actual security
+effects, objective mechanism-identification accuracy, or repair effectiveness.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering
   \small
-  \caption{RQ4 reports ordinal expert ratings and adjusted overall-usefulness
-  contrasts for methods in the frozen human-study manifest.}
+  \caption{RQ4 expert-rating results. Panel A reports descriptive
+  per-dimension ratings. Panel B reports the primary adjusted
+  overall-usefulness ranking and pairwise contrasts for methods bound by the
+  frozen human-study manifest.}
   \label{tab:rq4}
   \begin{tabular}{lrrrrr}
     \toprule
+    \multicolumn{6}{l}{\textit{Panel A: Descriptive ratings}} \\
+    \midrule
     Method & Clarity & Evidence & Credibility & Actionability & Usefulness \\
     \midrule
-    \multicolumn{6}{c}{\emph{Method rows bound by the frozen study manifest}} \\
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen human-study manifest}} \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{lrrrl}
+    \toprule
+    \multicolumn{5}{l}{\textit{Panel B: Primary adjusted ranking}} \\
+    \midrule
+    Method & Adj.\ usefulness & Interval & Rank & Adjusted contrasts \\
+    \midrule
+    \multicolumn{5}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen human-study manifest}} \\
     \bottomrule
   \end{tabular}
 \end{table}
