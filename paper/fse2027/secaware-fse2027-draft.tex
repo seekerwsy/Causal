@@ -751,102 +751,125 @@ effects, objective mechanism-identification accuracy, or repair effectiveness.
   \end{tabular}
 \end{table}
 
+\section{Related Work}
+
+\paragraph{Prompt explanation and interpretation.}
+Integrated Gradients, TCAV, SHAP, and rationale benchmarks expose input
+features, concepts, or evidence associated with model predictions
+\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser}.
+Such explanations can be plausible without being faithful to the model's
+behavior \cite{lyu2024faithful}. \tool treats these approaches as complementary
+discovery families; its distinct objective is to map a method-native candidate
+to an editable prompt-side factor, freeze the hypothesis and expected
+direction, and evaluate a prespecified intervention on held-out tasks.
+
+\paragraph{Security of LLM-generated code.}
+Empirical studies of generated and AI-assisted code identify security risks
+that motivate explicit evaluation of coding assistants
+\cite{pearce2022copilot,perry2023assistants}. SafeCoder and SecCoder instead
+improve secure generation through model-side training or inference
+\cite{he2024safecoder,zhang2024seccoder}. \tool addresses an orthogonal
+question: under a locked generator and evaluation pipeline, which editable
+prompt-side requirements have supported effects?
+
+\paragraph{Causal discovery and heterogeneous contexts.}
+FCI represents latent-variable uncertainty through PAGs
+\cite{spirtes1995fci,zhang2008ancestral}, with an implementation available in
+causal-learn \cite{zheng2024causallearn}; JCI formalizes causal discovery across
+heterogeneous contexts \cite{mooij2020jci}. \tool contributes a
+security-specific operationalization that combines prompt-derived constraints,
+task-cluster stability, a pre-confirmation freeze, and held-out assigned-arm
+effects. It neither introduces FCI or JCI nor claims to recover a unique DAG.
+
 \section{Synthetic Validation}
 
-Synthetic structural causal models test the analysis contracts independently
-of the paper dataset. The suite includes a true $X$--$Z$--$Y$ chain, latent
-confounding, a null factor, and deterministic JCI context relations. Tests check
-PAG/path compatibility, bootstrap stability behavior, preservation of raw and
-constrained JCI outputs, and fail-visible backend behavior. Synthetic recovery
-validates implementation logic; it is not evidence that a paper hypothesis is
-true.
-
-\section{Implementation and Study Status}
-
-The repository implements the core Prompt-only pipeline: Prompt TSG extraction
-and canonicalization, local tables and background knowledge, causal-learn FCI,
-task-cluster bootstrap stability, hypothesis freezing, safety intervention
-families, randomized blocks, task-clustered ITT estimation, JCI artifacts,
-optional RFCI sensitivity, and the independent Oracle/functional-evaluation
-path.
-
-This status does not imply that all paper RQs are complete. External
-method-native adapters and mapping audits, offline RQ2 ablation runs, final RQ1
-and RQ3 table builders and summaries, the RQ4 study infrastructure and expert
-study, and the final frozen paper configuration remain to be completed. Current
-demo/mock \texttt{paper\_v0} artifacts are development evidence and must not be
-used as final paper results. Consequently, this draft contains no quantitative
-findings.
+Synthetic structural causal models exercise the analysis contract independently
+of the paper dataset. They cover a true $X$--$Z$--$Y$ chain, latent confounding,
+a null factor, and deterministic JCI context relations, checking PAG/path
+compatibility, task-cluster stability behavior, preservation of raw and
+constrained JCI outputs, and fail-visible backend behavior. These tests are
+engineering validation; they neither confirm a paper hypothesis nor enter the
+paper's evidence tables.
 
 \section{Threats to Validity}
 
 \paragraph{Construct validity.}
-Security and functionality outcomes depend on the locked Oracle and test
-coverage. Static or dynamic tools can miss vulnerabilities, misclassify safe
-idioms, or fail on unsupported code. The final study must publish tool versions,
-policies, calibration audits, disagreement handling, and failure denominators.
+The secure-and-functional outcome inherits the coverage and calibration limits
+of the locked Oracle and functional checks, including code that is unsupported
+or receives an unknown label. The protocol fixes evaluator versions and
+policies and records evaluability, terminal-status denominators, calibration
+audits, and sensitivity bounds. Effects therefore apply to the declared
+evaluator contract; unknown or unsupported cases do not support claims of
+comprehensive program security.
 
 \paragraph{Discovery validity.}
-FCI returns equivalence-class information rather than a unique causal graph.
-Finite samples, sparse discrete tables, latent confounding, and background
-knowledge can alter PAG endpoints. We preserve circle endpoints, raw PAGs,
-bootstrap instability, and null/conflicting candidates instead of resolving
-ambiguity narratively.
+Finite task samples, sparse local tables, latent common causes, and FCI's
+equivalence-class output can make paths and endpoint marks uncertain.
+Prompt-derived background knowledge constrains only prohibited relations, while
+raw PAG marks and task-cluster bootstrap support retain uncertainty across
+tasks. Discovery claims concern stable possible paths within each frozen
+candidate, model, and CWE scope, not a unique DAG or relations beyond that
+scope.
 
 \paragraph{Internal validity.}
-LLM prompt executors can introduce noncompliance or non-target drift. Freezing
-all variants before generation and randomizing assigned arms protects the
-primary contrast, while treatment-fidelity diagnostics reveal dilution.
-Analyzing only successful edits would reintroduce post-treatment selection, so
-the primary ITT denominator is assignment-based.
+Prompt executors can miss the target or alter non-target semantics, generation
+or evaluation can end in a valid terminal non-success, and missing or corrupt
+producer artifacts can violate the execution contract. Pre-randomization
+validation and variant freezing, balanced random assignment, and recorded
+\texttt{target\_changed}, semantic-compliance, and non-target-drift diagnostics
+make these cases visible; a contract failure replays the same assignment
+manifest. Diagnostics never filter the assigned-arm ITT denominator, so the
+causal claim remains the prespecified contrast among randomized arms.
 
 \paragraph{Multiplicity and selection.}
-Candidate ranking, top-$K$ selection, multiple hypotheses, outcomes, models,
-and contrasts create multiplicity. The final run freezes families, directions,
-and adjustments before confirmation and keeps exploratory analyses separate.
+Candidate ranking, a top-$K$ budget, and multiple methods, hypotheses, outcomes,
+models, and contrasts create a selection and multiplicity burden. The protocol
+freezes the candidate family, directions, outcomes, contrasts, and adjustment
+before confirmation, and reports exploratory analyses separately. Confirmatory
+claims remain within that frozen family; it is not reduced after inspecting
+slot occupancy or outcomes.
 
 \paragraph{External validity.}
-Effects can vary across model families, languages, CWE scopes, task sources,
-prompt styles, and generation settings. Results are reported within the locked
-scope rather than generalized to all LLM code generation.
+Effects can vary with the locked models, tasks, CWE scopes, generator,
+evaluator, prompt styles, and generation settings. Versioned manifests bind
+these coordinates so later studies can be distinguished from the reported
+analysis rather than pooled implicitly. Claims are scoped to the configured
+coordinates; broader settings require separately reported replications.
 
 \paragraph{Human-study validity.}
-RQ4 measures expert perceptions conditional on selected cases and a shared
-wrapper. Ratings may depend on participant experience, explanation length, and
-interface order. Blinding, balanced presentation, participant/case random
-effects, and transparent exclusions limit but do not eliminate these threats.
+Perceived utility can depend on the participant sample, selected cases, sample
+size, wrapper, and presentation order. Anonymous standardized wrappers,
+balanced assignment, recorded eligibility and exclusions, and an ordinal model
+with participant and case random effects address these dependencies. RQ4
+therefore supports a conditional claim about perceived utility, not objective
+security or repair effectiveness.
 
-\section{Reproducibility Plan}
+\section{Reproducibility}
 
-The anonymous replication package will contain frozen discovery and
-confirmation manifests; task splits; Prompt TSG and local-table artifacts;
-background-knowledge digests; raw and constrained PAGs; bootstrap records;
-frozen hypotheses and mappings; prompt variants and validation results;
-assignment blocks; generated-code digests; Oracle and functional outcomes;
-task-clustered effect outputs; JCI/RFCI diagnostics; failure artifacts; and
-scripts that rebuild every results table. Each artifact will record schema,
-configuration, code, and parent-content digests. Exploratory and demo runs will
-remain outside the paper table pipeline.
+The anonymous package will bind task splits, Prompt TSGs, local tables,
+background knowledge, PAGs, bootstrap support, frozen hypotheses and mappings,
+prompt variants, assignment blocks, generated-code digests, Oracle and
+functional outcomes, effect artifacts, and every table to versioned schemas,
+configurations, code revisions, and parent-content digests. Demo runs remain
+outside the paper table pipeline.
 
 \section{Conclusion}
 
-\tool combines Prompt TSG-constrained FCI with randomized held-out confirmation
-to distinguish observational prompt-side candidates from assigned-arm security
-effects. Its design keeps prompt structure separate from causal edges, code
-evaluation separate from mechanism extraction, and intervention diagnostics
-separate from the primary task-clustered ITT denominator. The approved
-evaluation asks how methods traverse the discovery-to-confirmation funnel, how
-representation and causal analysis contribute, which defensive interventions
-work, and how experts perceive the resulting explanations. Quantitative claims
-await one frozen paper run.
+\tool connects security-aware prompt representation, stability-guided causal
+discovery, and causal effect confirmation in one auditable workflow. It turns
+free-form prompt explanations into frozen intervention hypotheses and
+evaluates them with task-clustered assigned-arm evidence on held-out tasks.
+The fixed-budget evaluation further reveals whether representation,
+discovery, operationalization, or confirmation limits each method. This design
+supports precise claims about editable prompt-side security factors while
+preserving uncertainty, failures, and provenance.
 
 \section{Data Availability}
 
-This design-stage manuscript reports no quantitative results and therefore has
-no frozen result dataset to release. Before a results-bearing submission, we
-will archive the anonymous replication package described above and replace this
-statement with its access conditions and persistent location. No demo or mock
-artifact will be presented as final paper evidence.
+The final result dataset has not yet been frozen. Once it is available, the
+anonymous replication package will provide frozen computational and human-study
+provenance together with documented access conditions. A persistent location
+will be stated after one exists.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
