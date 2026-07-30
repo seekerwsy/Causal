@@ -1,0 +1,46 @@
+\begin{tikzpicture}[
+  font=\sffamily\footnotesize,
+  stage/.style={draw=black,rounded corners=2pt,align=center,
+    minimum height=9mm,minimum width=34mm,fill=black!5},
+  artifact/.style={draw=black!70,rounded corners=1.5pt,align=center,
+    minimum height=7mm,minimum width=27mm,fill=white},
+  flow/.style={-{Latex[length=2mm]},semithick},
+  boundary/.style={densely dashed,semithick}
+]
+  \node[stage] (repr) {\textbf{Security-Aware}\\Prompt Representation};
+  \node[stage,right=8mm of repr] (discover) {\textbf{Stability-Guided}\\Causal Discovery};
+  \node[stage,right=13mm of discover] (confirm) {\textbf{Causal Effect}\\Confirmation};
+
+  \node[artifact,below=5mm of repr] (tsg) {Prompt TSG\\local variables};
+  \node[artifact,below=5mm of discover] (hyp) {FCI + task bootstrap\\frozen hypotheses};
+  \node[artifact,below=5mm of confirm] (itt) {typed variants + assignment\\Oracle outcomes + ITT};
+
+  \draw[flow] (repr) -- (discover);
+  \draw[flow] (discover) -- (confirm);
+  \draw[flow] (repr) -- (tsg);
+  \draw[flow] (discover) -- (hyp);
+  \draw[flow] (confirm) -- (itt);
+  \draw[flow] (tsg) -- (hyp);
+  \draw[flow] (hyp) -- (itt);
+
+  \draw[boundary]
+    ([xshift=6mm,yshift=5mm]discover.north east) --
+    ([xshift=6mm,yshift=-17mm]discover.south east)
+    node[midway,rotate=90,fill=white,inner sep=1pt]
+    {\scriptsize hypothesis freeze};
+
+  \node[
+    fit=(repr)(discover)(tsg)(hyp),
+    draw=black!50,
+    rounded corners=3pt,
+    inner sep=3mm,
+    label={[font=\scriptsize]above:discover split}
+  ] {};
+  \node[
+    fit=(confirm)(itt),
+    draw=black!50,
+    rounded corners=3pt,
+    inner sep=3mm,
+    label={[font=\scriptsize]above:held-out confirm split}
+  ] {};
+\end{tikzpicture}

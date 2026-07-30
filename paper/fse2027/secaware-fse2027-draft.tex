@@ -185,169 +185,222 @@ are limited to task-clustered assigned-arm effects of frozen prompt
 interventions on held-out tasks within their hypothesis, target, operation,
 model, and CWE scopes.
 
-\section{Methodology}
+\section{Security-Aware Prompt Representation}
+
+\tool first turns a programming request into factors that can be named,
+scoped, and edited while preserving the requested task. This makes an implicit
+security requirement available as an intervention target and keeps task
+behavior and surface presentation separately auditable.
 
 \begin{figure}[t]
   \centering
-  \fbox{\parbox{0.92\linewidth}{\centering
-    \vspace{1.2em}
-    Discovery tasks $\rightarrow$ Prompt TSGs $\rightarrow$ local tables and
-    background knowledge $\rightarrow$ FCI/bootstrap $\rightarrow$ frozen
-    hypotheses $\rightarrow$ prevalidated four-arm prompts $\rightarrow$
-    randomized held-out generation $\rightarrow$ Oracle/functional outcomes
-    $\rightarrow$ task-clustered ITT and JCI sensitivity
-    \vspace{1.2em}}}
-  \caption{The \tool discovery and randomized confirmation workflow. The final
-  paper will replace this placeholder with a provenance-aware pipeline figure.}
-  \Description{A pipeline from discovery tasks through Prompt TSG extraction,
-  constrained FCI, frozen hypotheses, randomized four-arm confirmation,
-  generated-code evaluation, task-clustered ITT estimation, and JCI analysis.}
+  \resizebox{\linewidth}{!}{%
+    \input{figures/secaware-overview}
+  }
+  \caption{\tool converts prompt semantics into stable, frozen hypotheses and
+  evaluates their security effects on held-out tasks. Prompt TSG edges provide
+  typed structure rather than causal conclusions; generated code enters only
+  the independent Oracle and functional-evaluation path in the confirmation
+  stage.}
+  \Description{Three-stage SecAware workflow. The discover split contains
+  security-aware prompt representation and stability-guided causal discovery.
+  A hypothesis-freeze boundary separates it from causal effect confirmation on
+  held-out tasks using typed prompt variants, block randomization,
+  generated-code evaluation, and assigned-arm ITT estimation.}
   \label{fig:overview}
 \end{figure}
 
-\subsection{Prompt TSG Extraction and Construction}
+\subsection{Typed Prompt Semantics}
 
-The Prompt TSG unifies task, security, and presentation features in one typed
-graph. Task nodes encode requested operations and functional constraints;
-security nodes encode trust assumptions, assets, guards, sanitization
-requirements, and security-relevant relations; presentation nodes encode
-wording or formatting properties used for placebo control. This unified view
-allows an intervention to name its target and its permitted delta while keeping
-non-target layers invariant.
+For each prompt, \tool separates three semantic families. Task-function
+factors describe required operations and functional constraints; safety-control
+factors describe guards, trust boundaries, assets, and security requirements;
+and presentation-control factors describe wording and formatting used for
+matched controls.
 
-The implementation supports three run-locked extraction/construction
-strategies:
+The canonical \prompttsg is a bounded typed multigraph over these families.
+Its relations encode prompt task/security structure---for example, that a
+validation requirement is scoped to a sensitive input---not causal edges.
+Every intervenable identity, scope, state, graph template, query, and permitted
+ADD/REMOVE operation comes from an immutable versioned catalog. Extracted facts
+must satisfy catalog closure and carry exact evidence spans into the prompt.
+Deterministic validation checks those spans, family compatibility, and
+duplicate or conflicting identities. Accepted records undergo canonical
+node/edge identification, ordering, serialization, round-trip validation, and
+digesting. The states \textsc{present}, \textsc{absent},
+\textsc{not-applicable}, and \textsc{unresolved} remain distinct.
 
-\begin{enumerate}
-  \item an LLM emits schema-constrained semantic facts and a deterministic
-  builder creates the graph;
-  \item an LLM emits a complete typed graph that is schema-validated and
-  canonicalized; and
-  \item a finite catalog/rule extractor emits facts for deterministic graph
-  construction as a reproducible fallback.
-\end{enumerate}
+\subsection{Run-Locked Extraction}
 
-The paper run freezes the selected strategy, model, system prompt, schema,
-catalog, and canonicalization version. Extractors do not receive generated
-code, Oracle findings, or outcome labels. Invalid extraction is recorded as an
-explicit failure rather than repaired with an expanding collection of hidden
-security rules.
-
-\subsection{Local Tables and TSG-Derived Background Knowledge}
-
-The builder projects only variables relevant to one CWE/security scope and one
-model into each analysis table. It records variable type, state domain,
-missingness provenance, task cluster, and source artifact. Relational motifs
-are finite, versioned functions of the Prompt TSG, such as a security
-requirement being scoped to a sensitive operation. They describe prompt
-structure, not code-side data flow.
-
-The same typed schema derives background knowledge for discovery:
+One extraction backend is explicitly selected and locked across all discovery
+and confirmation prompts in a run:
 
 \begin{itemize}
-  \item temporal tiers prevent outcomes from causing pre-treatment metadata or
-  prompt features;
-  \item forbidden directions encode provenance and time-order constraints; and
-  \item typed adjacency restrictions remove semantically impossible local
-  adjacencies.
+  \item \texttt{LLM\_FACTS\_V1} emits catalog-bound semantic facts with exact
+  evidence spans for deterministic graph construction;
+  \item \texttt{LLM\_DIRECT\_GRAPH\_V1} emits catalog-bound typed nodes and
+  edges for strict validation and canonicalization; and
+  \item \texttt{DETERMINISTIC\_CATALOG\_V1} applies the reviewed finite matcher
+  and templates as an explicitly selected offline, regression, or sensitivity
+  backend.
 \end{itemize}
 
-These constraints do not require the $X$--$Z$ or $Z$--$Y$ edges of a candidate
-path. Requiring a candidate path in background knowledge would turn discovery
-into confirmation of a supplied answer.
+The run locks provider and endpoint identity, model and template versions,
+catalog and schema digests, decoding settings, request bounds, and timeout
+policy. The extractor receives the prompt as inert data and no target, arm,
+intended delta, generated code, Oracle record, or outcome. It emits one
+semantic candidate. Transport retries may resend only identical request bytes;
+retries that change semantic content and selection among candidates for a
+favorable output are forbidden. A backend or policy change defines a separate
+replication, never a per-prompt switch.
 
-\subsection{Observational FCI and Stability}
+\subsection{Local Causal Variables}
 
-The minimum runnable backend is causal-learn FCI with the G-square conditional
-independence test. It requires no Java runtime. For the reference observational
-draw, the pipeline randomly selects one seed per task so that repeated
-generations do not masquerade as independent observations. It then reruns the
-analysis across task-cluster bootstrap samples, resampling entire tasks and
-selecting one seed per sampled task according to the frozen policy.
+\tool builds a local table for each configured CWE/security scope and model.
+$W$ contains approved pre-treatment task metadata, $X$ finite Prompt TSG
+features or motifs, and $Y$ independently committed Oracle or functional
+outcomes. $C$ is admitted only in secondary JCI, where it is instantiated as
+the single categorical context variable \texttt{C\_arm}. Model identity remains
+an analysis coordinate and provenance field. Raw text, generated code, code
+structure, Oracle finding text, and intervention diagnostics are not
+causal-table variables: generated code enters only the independent Oracle and
+functional evaluator that produce $Y$.
 
-Each run preserves the raw PAG, background-knowledge digest, CI-test
-configuration, selected rows, random seed, and backend diagnostics. The path
-extractor searches for endpoint-compatible possible $X$--$Z$--$Y$ paths and
-summarizes adjacency and endpoint stability across bootstrap replicates. It
-does not orient circles merely to make a path directional. A candidate is
-eligible for freezing only if it meets prespecified support, stability,
-targetability, and provenance conditions.
+\section{Stability-Guided Causal Discovery}
 
-Before confirmation begins, \tool freezes the selected top-$K$ hypotheses,
-their native evidence, feature/TargetSpec mappings, expected directions,
-security scopes, models, operation families, and analysis code/configuration.
-No confirmation outcome may change candidate rank or mapping.
+The second stage converts prompt-side variables into a bounded set of
+intervenable hypotheses. It combines type-derived exclusions with discovery
+that preserves endpoint uncertainty, then tests whether possible paths remain
+stable when whole tasks are resampled.
 
-\subsection{Intervention Construction and Prevalidation}
+\subsection{TSG-Derived Constraints}
 
-An intervention can be executed text-natively or graph-natively. A text-native
-executor edits the original prompt under a TargetSpec. A graph-native executor
-applies a typed graph patch and verbalizes the resulting Prompt TSG. Either path
-may use a deterministic renderer or a locked LLM executor. The final run chooses
-one configuration in advance and records all prompts, model parameters,
-schemas, and retries. Treating the LLM executor as an ideal implementation
-assumption does not remove the need to measure realized fidelity as a
-diagnostic.
+The Prompt TSG supplies variables, background knowledge, and edge constraints;
+it does not supply learned causal edges. Temporal tiers prohibit outcomes from
+causing pre-treatment metadata or prompt factors. Catalog types define
+family- and scope-specific forbidden directions, and typed adjacency
+restrictions exclude semantically impossible local relations. These rules may
+forbid both directions of an adjacency, but they never require a
+feature--outcome edge or any edge on the possible path being tested. \tool
+persists the exact tiers, forbidden pairs, typed adjacency matrix, variable
+order, and background-knowledge digest and validates every learned PAG against
+them.
 
-All variants are constructed, validated, and frozen before randomized code
-generation. Hard pre-randomization gates check schema validity, provenance,
-security-neutral task preservation, family-specific AllowedDelta constraints,
-and absence of outcome or vulnerability-label leakage. A safety intervention
-may change only its target security feature; a functionality intervention may
-change only its target task feature; a placebo may change only presentation.
-Invalid blocks are rejected before assignment and retained in failure
-artifacts.
+\subsection{FCI and Task-Cluster Stability}
 
-After assignment, re-extraction records whether the target changed, whether
-the prompt remained semantically compliant, and whether non-target features
-drifted. These variables diagnose intervention execution. They are not primary
-ITT eligibility filters.
+The minimum backend is the established causal-learn implementation of
+FCI~\cite{spirtes1995fci,zheng2024causallearn}. Its PAG output preserves
+endpoint uncertainty under latent-variable assumptions rather than selecting a
+single convenient orientation~\cite{zhang2008ancestral}. The run locks the
+G-square conditional-independence test, variable order, significance level,
+depth and path bounds, backend version, and background knowledge.
 
-\subsection{Randomized Confirmation Arms}
+The reference draw selects exactly one configured generation seed per task
+using a frozen pre-outcome random policy. Each stability replicate resamples
+task IDs with replacement and selects one seed for each sampled task occurrence
+before rerunning the identical FCI configuration. This task-cluster bootstrap
+does not treat repeated generations from one programming request as independent
+evidence.
 
-For a safety-ADD hypothesis, each eligible block contains four arms:
+Path extraction retains PAG endpoint marks. A candidate begins at a
+catalog-bound intervenable Prompt TSG feature, ends at a preregistered outcome,
+and may traverse only other prompt-side features, motifs, or pre-treatment
+variables. It qualifies only when its canonical variable sequence and
+endpoint-compatible pattern meet the frozen stability rule. \tool applies a
+fixed top-$K$ budget and deterministic ordering; it selects stable possible
+paths rather than claiming recovery of a unique DAG.
+
+\subsection{Hypothesis Freeze}
+
+For each selected path, the frozen record binds hypothesis and target
+coordinates, feature family and operation, outcome/CWE/model scope, reference
+PAG endpoints, task-bootstrap support, expected contrast direction, mapping,
+and the relevant table, catalog, extractor, FCI, CI-test, and
+background-knowledge digests.
+
+This hypothesis freeze is committed before any confirmation variant,
+assignment, generated code, or outcome exists. Held-out evidence may classify
+a frozen hypothesis, but it cannot add, remove, rerank, remap, or rewrite one.
+
+\section{Causal Effect Confirmation}
+
+The third stage turns each frozen hypothesis into a family-valid randomized
+experiment on held-out tasks. Typed variants and their controls are completed
+before assignment, and analysis estimates the effect of assigned prompt roles
+without selecting cases by realized edit success.
+
+\subsection{Typed Intervention Protocols}
+
+A \texttt{TargetSpec} binds the feature family and catalog identity, ADD or
+REMOVE, source prompt role, and exact counterpart requirements. Execution is
+text-native or graph-native and uses either a deterministic renderer or a
+locked LLM executor; the run fixes this choice and its complete provenance.
+
+Four-arm protocols are specific to Safety ADD and Safety REMOVE:
 
 \begin{itemize}
-  \item \verb|TARGET_PATCH|: add the frozen target security feature;
-  \item \verb|NOOP_REWRITE|: rewrite without changing task or security state;
-  \item \verb|LENGTH_MATCHED_PLACEBO|: make a presentation-only edit matched
-  to the target edit's length; and
-  \item \verb|GENERIC_SECURITY_REMINDER|: add a non-targeted security reminder.
+  \item Safety ADD uses \path{TARGET_PATCH}, \path{NOOP_REWRITE},
+  \path{LENGTH_MATCHED_PLACEBO}, and
+  \path{GENERIC_SECURITY_REMINDER}.
+  \item Safety REMOVE uses \path{TARGET_REMOVE}, \path{NOOP_RETAIN},
+  \path{LENGTH_MATCHED_SHAM_EDIT}, and
+  \path{GENERIC_SECURITY_REPLACEMENT}.
 \end{itemize}
 
-For safety-REMOVE, the analogous arms are:
+ADD and REMOVE remain distinct protocols, blocks, and estimands; REMOVE may
+only restore an attested neutral counterpart and never inserts an unsafe
+request.
 
-\begin{itemize}
-  \item \verb|TARGET_REMOVE|;
-  \item \verb|NOOP_RETAIN|;
-  \item \verb|LENGTH_MATCHED_SHAM_EDIT|; and
-  \item \verb|GENERIC_SECURITY_REPLACEMENT|.
-\end{itemize}
+Other families retain family-specific protocols. Task-function ADD/REMOVE
+requires target, no-op, and length-matched placebo roles; a fourth active
+control is permitted only with a reviewed catalog entry and independent
+functional outcome. Presentation experiments use target and no-op plus an
+optional matched presentation control and serve as negative controls.
 
-ADD and REMOVE are distinct protocols and are never pooled into one effect.
-Within each locked task/hypothesis/TargetSpec/protocol/model block, randomized
-seed slots are balanced across arms. Assignment artifacts are frozen before
-generation.
+Each arm has an explicit \texttt{AllowedDelta} that bounds its declared target
+or control change and fixes protected task, safety, and presentation
+projections. Exact source/counterpart provenance and the
+\texttt{SecurityNeutralPromptInvariant} ensure that no variant claims a
+vulnerability, requests unsafe behavior, or reveals an expected Oracle label
+or effect direction.
 
-The target-versus-no-op contrast estimates the effect of the specified feature
-change relative to an operation-matched rewrite. The placebo contrast checks
-whether wording/length alone explains the effect. The generic-reminder contrast
-separates target-specific content from a broad security cue.
+\subsection{Variant Freeze and Block Randomization}
 
-\subsection{Outcome Construction and Provenance Separation}
+Every candidate arm is independently re-extracted with the run-locked Prompt
+extractor while it is blind to the arm role and target. Before assignment, hard
+gates validate schema and catalog integrity, exact evidence and provenance,
+canonical round trips, security-neutral task preservation, the arm-specific
+\texttt{AllowedDelta}, and absence of downstream information. Only after every
+arm for a task/hypothesis/TargetSpec/protocol/model block passes is the complete
+block frozen.
 
-Each assigned prompt is sent to the locked generation model. Generated code is
-evaluated by an independent, versioned security Oracle and functional
-evaluator. The run manifest freezes tool versions, policies, timeouts, and
-failure handling. Outcome artifacts may reference prompt, assignment, code,
-Oracle, and functional-evaluation digests, but the prompt extractor and
-hypothesis freezer cannot read downstream labels. This one-way provenance
-boundary prevents outcome leakage into mechanism construction.
+Target change, semantic compliance, and permissible non-target drift are
+recorded during this arm-blind validation as treatment-fidelity diagnostics.
+They do not decide the hard-gate result, and \texttt{target\_changed}, semantic
+compliance, and non-target drift never filter the primary assigned-arm ITT
+denominator. If one arm fails a hard gate, the complete block is reported as a
+pre-randomization exclusion and receives no assignment.
 
-\subsection{Primary ITT Estimation}
+Within each complete frozen block, a manifested deterministic RNG assigns
+configured seed slots to a balanced permutation of the protocol's finite arm
+roles. The assignment manifest binds block order, prompt variants, model
+parameters, RNG identity and seeds, and request IDs before generation, so
+provider execution order cannot alter treatment.
+
+\subsection{Outcomes and Assigned-Arm ITT}
+
+Generated code enters only the independent, versioned security Oracle and
+functional evaluator. The primary secure-and-functional outcome equals one
+exactly when generation produces a candidate, parsing succeeds, the committed
+functional check passes, and the Oracle labels the result secure. A valid
+terminal generation failure, parse or functional failure, or valid Oracle
+unknown is retained as an observed non-success. Missing, corrupt, or
+unavailable required producer evidence is not encoded as an outcome; it blocks
+publication and triggers deterministic replay of the same manifest.
 
 For frozen hypothesis $h$, target $q$, operation $o$, model $m$, and outcome
-$Y$, the primary estimand is the assigned-arm risk difference
+$Y$, the primary contrast is the hypothesis-specific target-minus-no-op
+assigned-arm ITT risk difference
 
 \[
   \Delta^{\mathrm{ITT}}_{h,q,o,m}
@@ -355,49 +408,52 @@ $Y$, the primary estimand is the assigned-arm risk difference
   - \mathbb{E}[Y \mid A=\mathrm{no\mbox{-}op}].
 \]
 
-The assigned arm $A$ is used regardless of realized target change or semantic
-diagnostics. The denominator therefore includes every randomized unit under
-the prespecified outcome/failure policy. Uncertainty is clustered by task, and
-the multiplicity procedure is frozen for each registered hypothesis family.
-Effects are not pooled across hypothesis, target, operation, model, or CWE
-unless a separate pooled estimand is preregistered.
+Every committed randomized assignment enters the denominator under its
+assigned role. Uncertainty is resampled by task cluster, and confidence
+intervals and multiplicity adjustment follow the frozen hypothesis/contrast
+family. Target-minus-placebo and, where family-valid,
+target-minus-generic-control contrasts assess specificity. Effects remain
+separate by hypothesis, target, operation, model, and CWE unless another
+estimand was approved in advance. Task improvement, harm, and tie rates remain
+descriptive diagnostics, not individual causal flips or substitutes for ITT.
 
-Target-versus-placebo and target-versus-generic contrasts are secondary
-specificity analyses. Per-protocol summaries may be reported only as clearly
-labeled diagnostics. Task-level improvement, harm, and tie rates can describe
-outcome transitions, but they are not interpreted as individual causal flips.
+\subsection{Evidence Levels and Secondary Structural Analysis}
 
-\subsection{JCI and RFCI Sensitivity Analyses}
-
-In the secondary Joint Causal Inference (JCI) analysis, arm indicators enter as
-context variables $C$. \tool first stores the raw augmented PAG, then applies
-only the frozen JCI assumptions and stores the constrained PAG plus every
-orientation delta. Deterministic relations among one-hot arm indicators are
-handled by the locked JCI encoding and synthetic tests; they are not silently
-treated as ordinary independent features.
-
-An optional py-tetrad RFCI backend tests sensitivity to the discovery backend.
-It is not required for the minimum Python-only pipeline. Any violation of
-background-knowledge or endpoint contracts is surfaced as a backend failure,
-not hidden by post-hoc orientation.
-
-\subsection{Evidence and Failure Artifacts}
-
-The reporting layer preserves PAG, hypothesis, intervention, assignment,
-effect, diagnostic, outcome, and failure artifacts with configuration and
-content digests. It uses the following evidence vocabulary:
+\tool uses six approved evidence levels:
 
 \begin{enumerate}
-  \item Observational Candidate;
-  \item Confirmed Intervention Effect;
-  \item Target-Specific Effect;
-  \item Bidirectional Support;
-  \item Directionally Consistent but Inconclusive; and
-  \item Null / Conflicting / Non-Evaluable.
+  \item \textbf{Observational Candidate}: a discover-split stable possible path
+  frozen before confirmation, without a causal confirmation claim.
+  \item \textbf{Confirmed Intervention Effect}: the preregistered
+  target-minus-no-op ITT follows the frozen expected direction, meets the
+  independent-task requirement, and has a multiplicity-adjusted interval
+  excluding zero with complete provenance.
+  \item \textbf{Target-Specific Effect}: a confirmed effect also supported by
+  the preregistered target-minus-placebo and, where family-valid,
+  target-minus-generic contrasts.
+  \item \textbf{Bidirectional Support}: separate ADD and REMOVE protocols
+  independently confirm opposite expected directions for the same feature.
+  \item \textbf{Directionally Consistent but Inconclusive}: the point estimate
+  follows the frozen direction but its adjusted interval includes zero or
+  independent-task support is insufficient.
+  \item \textbf{Null / Conflicting / Non-Evaluable}: the preregistered analysis
+  respectively detects no effect, estimates the opposite direction, or cannot
+  publish an effect because no valid randomization universe or required
+  infrastructure/provenance exists.
 \end{enumerate}
 
-The distinction keeps observational paths, randomized effects, specificity,
-and reverse-operation support from collapsing into one binary label.
+Valid post-assignment terminal non-successes remain assigned data and do not
+create a non-evaluable result. Discovery, demo, and smoke-test artifacts cannot
+be promoted to confirmatory evidence.
+
+JCI treats the finite randomized arm role as one categorical context variable
+and evaluates structural changes under explicit assumptions~\cite{mooij2020jci}.
+It is secondary to the assigned-arm ITT estimate. The context column is
+\texttt{C\_arm}; analyses remain separated by scope, model, frozen hypothesis,
+TargetSpec, and arm protocol. \tool preserves the raw augmented PAG and the
+JCI-constrained PAG with its orientation deltas. Optional py-tetrad RFCI is a
+sensitivity backend. Neither JCI nor RFCI may alter frozen hypotheses,
+assignments, outcomes, primary contrasts, or ITT evidence status.
 
 \section{Research Questions and Evaluation Design}
 
