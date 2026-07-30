@@ -7,7 +7,6 @@
 \usepackage{booktabs}
 \usepackage{flafter}
 \usepackage{multirow}
-\usepackage{placeins}
 \usepackage{tikz}
 \usepackage{xspace}
 \usetikzlibrary{arrows.meta,fit,positioning}
@@ -454,20 +453,28 @@ JCI-constrained PAG with its orientation deltas. Optional py-tetrad RFCI is a
 sensitivity backend. Neither JCI nor RFCI may alter frozen hypotheses,
 assignments, outcomes, primary contrasts, or ITT evidence status.
 
-\section{Research Questions and Evaluation Design}
+\section{Evaluation Design and Results}
+
+All computational methods receive the same discover and confirm task
+manifests, model and seed policy, independent Oracle and functional contract,
+candidate budget, family-valid intervention protocol, randomization, outcome
+encoding, task-cluster uncertainty, and multiplicity policy. Native candidates,
+mappings, directions, and ranks are frozen before confirm outcomes exist.
+
+Discovery uses the discover split, and randomized confirmation uses held-out
+confirm tasks. The primary confirmatory analysis is hypothesis-specific,
+task-clustered assigned-arm ITT on secure-and-functional success. Every
+committed assignment remains in its assigned-arm denominator;
+\texttt{target\_changed}, semantic compliance, and non-target drift are
+diagnostics rather than filters.
 
 \subsection{RQ1: Discovery and Confirmation}
 
 \textbf{RQ1. How effectively can different methods discover and confirm
 security-relevant prompt-side mechanisms in LLM code generation?}
 
-Methods receive the same discovery pool, held-out confirmation pool, fixed
-native candidate budget $K$, model/seed policy, Oracle, randomization protocol,
-and ITT estimator. Each method first emits native candidates without seeing
-confirmation outcomes. Candidates are then mapped to the finite
-FeatureSpec/TargetSpec catalog and frozen before prompt construction.
-
-The comparison follows a fixed funnel:
+RQ1 measures how much confirmable mechanism evidence each method produces from
+the same fixed candidate budget. Its discovery-to-confirmation funnel is:
 
 \[
 K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
@@ -475,138 +482,129 @@ K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
 \rightarrow N_{\mathrm{confirmed}}.
 \]
 
-Candidate utilization, mapping coverage, mapped yield, protocolization rate,
-block-freeze coverage, and randomized yield reveal where a method loses usable
-hypotheses. The method-level primary metric is confirmed yield at $K$.
-Conditional confirmation among randomized hypotheses is diagnostic because it
-omits earlier funnel losses. Hypothesis-specific task-clustered ITT estimates
-retain direction, interval, and multiplicity-adjusted status.
+Across methods, confirmed yield at $K$ is the primary endpoint. Candidate-slot
+utilization, conditional mapping coverage, mapped yield at $K$,
+protocolization, block-freeze coverage, randomized yield, and conditional
+confirmation diagnose where candidates leave the pipeline; they do not replace
+hypothesis-specific ITT evidence. Exact implementations, versions, native
+output contracts, ranking policies, and mappings are bound only by the RQ1
+manifest frozen before the final run.
 
-\begin{table}[htbp]
+\begin{table}[t]
   \centering
   \small
-  \caption{RQ1 fixed-$K$ discovery-to-confirmation funnel. All cells remain
-  blank until the frozen paper run.}
+  \caption{RQ1 fixed-budget discovery-to-confirmation funnel. Confirmed yield
+  at $K$ is the primary method-level endpoint; conditional mapping and
+  confirmation rates diagnose where candidates leave the pipeline.}
   \label{tab:rq1}
   \begin{tabular}{lrrrrrr}
     \toprule
-    Method & $K$ & Native & Mapped & Protocol & Rand. & Confirmed \\
+    Method family & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
     \midrule
     \tool & -- & -- & -- & -- & -- & -- \\
-    Native baseline 1 & -- & -- & -- & -- & -- & -- \\
-    Native baseline 2 & -- & -- & -- & -- & -- & -- \\
-    Native baseline 3 & -- & -- & -- & -- & -- & -- \\
+    Prompt attribution & -- & -- & -- & -- & -- & -- \\
+    Prompt concepts & -- & -- & -- & -- & -- & -- \\
+    Prompt perturbation & -- & -- & -- & -- & -- & -- \\
+    LLM-judge explanation & -- & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
-\FloatBarrier
 
 \subsection{RQ2: Representation and Causal Analysis}
 
 \textbf{RQ2. How do SecAware's structured representation and causal analysis
 components contribute to mechanism discovery and confirmation?}
 
-RQ2 uses a preregistered two-by-two ablation. The full and association variants
-share direct and relational Prompt TSG motifs. The reduced variants retain only
-direct catalog feature states. FCI variants use the complete constrained
-discovery protocol; association variants rank candidates with univariate
-G-square association under the same candidate budget. All downstream mapping,
-freezing, randomization, and ITT steps remain identical.
+RQ2 uses the preregistered two-by-two design to separate the contribution of
+relational Prompt TSG queries from FCI-based selection. All variants retain the
+same fixed budget and confirmation protocol. The representation comparison is
+Full versus Reduced representation; the selection comparison is Full versus
+Association selection; Double ablation exposes their interaction. Different
+variants can select different hypotheses, so their hypothesis-specific
+estimands are not exchangeable and must not be reduced to any pooled
+cross-hypothesis ATE.
 
-\begin{table}[htbp]
+\begin{table}[t]
   \centering
   \small
-  \caption{RQ2 two-by-two component design and placeholder outcomes.}
+  \caption{RQ2 isolates the contribution of relational Prompt TSG queries and
+  FCI-based selection under the same fixed budget and confirmation protocol.}
   \label{tab:rq2}
-  \begin{tabular}{llllr}
+  \begin{tabular}{llllrr}
     \toprule
-    Variant & Representation & Selection & Rand. & Confirmed \\
+    Variant & Representation & Selection & $K$ & Rand. & Conf. \\
     \midrule
-    Full & direct + relational & FCI & -- & -- \\
-    Reduced repr. & direct only & FCI & -- & -- \\
-    Assoc. selection & direct + relational & univ. G-square & -- & -- \\
-    Double ablation & direct only & univ. G-square & -- & -- \\
+    Full & direct + relational & FCI & -- & -- & -- \\
+    Reduced representation & direct only & FCI & -- & -- & -- \\
+    Association selection & direct + relational & G-square & -- & -- & -- \\
+    Double ablation & direct only & G-square & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
-\FloatBarrier
-
-The primary comparison uses confirmed yield at the same $K$; funnel losses and
-hypothesis-specific ITT effects explain whether a difference arises from
-representation, discovery, operationalization, or confirmation.
 
 \subsection{RQ3: Defensive Interventions}
 
 \textbf{RQ3. Which prompt-side defensive interventions effectively reduce
 insecure code generation?}
 
-RQ3 evaluates frozen defensive targets separately under safety-ADD and
-safety-REMOVE protocols. ADD asks whether introducing a specific defensive
-requirement improves secure-and-functional outcomes. REMOVE asks whether
-removing that requirement worsens the outcome and can provide bidirectional
-support. Neither protocol selects tasks using observed baseline insecurity.
+RQ3 estimates target-versus-operation-matched-no-op assigned-arm effects for
+the defensive targets in the frozen TargetSpec manifest. ADD and REMOVE remain
+separate protocols, blocks, multiplicity coordinates, and estimands. Observed
+baseline or no-op insecurity is not an eligibility condition or an ITT
+denominator filter. Placebo and generic-arm contrasts test whether evidence is
+target-specific. Each row reports the primary secure-and-functional risk
+difference, task-clustered interval, and evidence level.
 
-\begin{table}[htbp]
+\begin{table}[t]
   \centering
   \small
-  \caption{RQ3 intervention-effect skeleton. Primary contrasts are target
-  versus operation-matched no-op assigned-arm ITT effects.}
+  \caption{RQ3 reports hypothesis-specific target-versus-no-op assigned-arm
+  effects. ADD and REMOVE remain separate estimands; placebo and generic-arm
+  contrasts assess specificity.}
   \label{tab:rq3}
   \begin{tabular}{lllrrl}
     \toprule
-    Target & Op. & Outcome & ITT RD & Interval & Evidence \\
+    Frozen target & Op. & Outcome & ITT RD & Interval & Evidence \\
     \midrule
-    Input validation & ADD & secure+func. & -- & -- & -- \\
-    Input validation & REMOVE & secure+func. & -- & -- & -- \\
-    Safe API constraint & ADD & secure+func. & -- & -- & -- \\
-    Safe API constraint & REMOVE & secure+func. & -- & -- & -- \\
-    Authorization guard & ADD & secure+func. & -- & -- & -- \\
-    Authorization guard & REMOVE & secure+func. & -- & -- & -- \\
+    \multicolumn{6}{c}{\emph{Rows generated from the frozen TargetSpec
+    manifest}} \\
     \bottomrule
   \end{tabular}
 \end{table}
-\FloatBarrier
 
-Target-versus-placebo and target-versus-generic contrasts assess specificity.
 Target-change, semantic-compliance, non-target-drift, task improvement, harm,
-and tie rates are reported as execution and transition diagnostics rather than
-filters or individual-effect claims.
+and tie rates are descriptive diagnostics. They neither filter the assigned-arm
+ITT denominator nor replace the primary ITT estimates.
 
 \subsection{RQ4: Expert-Perceived Explanation Utility}
 
 \textbf{RQ4. How do security experts rate and rank the perceived quality and
 usefulness of explanations produced by different methods?}
 
-RQ4 is a subjective, conditional-utility study. Each method's native output is
-placed in a neutral wrapper with the same fields: Finding, Evidence, Expected
-direction, Experimental support or uncertainty, and Suggested audit or repair
-action. Method names are hidden and case/method order is balanced.
+RQ4 compares anonymous, neutrally wrapped method outputs using ordinal expert
+ratings. Each native output uses the same frozen wrapper: Finding, Evidence,
+Expected direction, Experimental support or uncertainty, and Suggested audit
+or repair action. The only primary RQ4 outcome is overall usefulness, analyzed
+with method as a fixed effect and participant and case as random effects.
+Clarity, evidence sufficiency, credibility, actionability, raw summaries, and
+rankings are secondary or descriptive. Accordingly, RQ4 supports claims about
+perceived utility, not actual security effects, objective
+mechanism-identification accuracy, or repair effectiveness.
 
-Experts rate clarity, evidence sufficiency, credibility, actionability, and
-overall usefulness. Overall usefulness is the preregistered primary dimension;
-the remaining dimensions explain the ranking. The analysis uses an ordinal
-mixed-effects model with method as a fixed effect and participant and case as
-random effects, followed by multiplicity-adjusted comparisons. The RQ does not
-claim objective mechanism-identification or repair accuracy.
-
-\begin{table}[htbp]
+\begin{table}[t]
   \centering
   \small
-  \caption{RQ4 expert-rating skeleton. Entries will report ordinal summaries
-  and model-based contrasts from the completed study.}
+  \caption{RQ4 reports ordinal expert ratings and adjusted overall-usefulness
+  contrasts for methods in the frozen human-study manifest.}
   \label{tab:rq4}
   \begin{tabular}{lrrrrr}
     \toprule
     Method & Clarity & Evidence & Credibility & Actionability & Usefulness \\
     \midrule
-    \tool & -- & -- & -- & -- & -- \\
-    Baseline 1 & -- & -- & -- & -- & -- \\
-    Baseline 2 & -- & -- & -- & -- & -- \\
-    Baseline 3 & -- & -- & -- & -- & -- \\
+    \multicolumn{6}{c}{\emph{Method rows bound by the frozen study manifest}} \\
     \bottomrule
   \end{tabular}
 \end{table}
-\FloatBarrier
 
 \section{Synthetic Validation}
 
