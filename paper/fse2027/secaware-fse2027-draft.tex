@@ -191,6 +191,9 @@ model, and CWE scopes.
 scoped, and edited while preserving the requested task. This makes an implicit
 security requirement available as an intervention target and keeps task
 behavior and surface presentation separately auditable.
+Figure~\ref{fig:overview} previews this route from representation to hypothesis
+formation and confirmation, with disjoint discover and held-out splits
+separated by a pre-confirmation freeze.
 
 \begin{figure}[t]
   \centering
@@ -218,7 +221,8 @@ factors describe guards, trust boundaries, assets, and security requirements;
 and presentation-control factors describe wording and formatting used for
 matched controls.
 
-The canonical \prompttsg is a bounded typed multigraph over these families.
+We encode these families in a bounded, typed task-security graph over the
+prompt, which we call the \prompttsg.
 Its relations encode prompt task/security structure---for example, that a
 validation requirement is scoped to a sensitive input---not causal edges.
 Every intervenable identity, scope, state, graph template, query, and permitted
@@ -232,27 +236,22 @@ digesting. The states \textsc{present}, \textsc{absent},
 
 \subsection{Run-Locked Extraction}
 
-One extraction backend is explicitly selected and locked across all discovery
-and confirmation prompts in a run:
+\tool supports three ways to build the same catalog-bound representation. An
+LLM can emit catalog-bound semantic facts for deterministic graph construction
+(\path{LLM_FACTS_V1}); it can instead emit a catalog-bound typed graph for
+strict validation and canonicalization
+(\path{LLM_DIRECT_GRAPH_V1}); or the reviewed finite matcher and templates
+can construct the graph deterministically
+(\path{DETERMINISTIC_CATALOG_V1}). Before processing any prompt, a run
+selects exactly one backend and keeps it fixed throughout; per-prompt switching
+and outcome-guided candidate selection are prohibited.
 
-\begin{itemize}
-  \item \texttt{LLM\_FACTS\_V1} emits catalog-bound semantic facts with exact
-  evidence spans for deterministic graph construction;
-  \item \texttt{LLM\_DIRECT\_GRAPH\_V1} emits catalog-bound typed nodes and
-  edges for strict validation and canonicalization; and
-  \item \texttt{DETERMINISTIC\_CATALOG\_V1} applies the reviewed finite matcher
-  and templates as an explicitly selected offline, regression, or sensitivity
-  backend.
-\end{itemize}
-
-The run locks provider and endpoint identity, model and template versions,
-catalog and schema digests, decoding settings, request bounds, and timeout
-policy. The extractor receives the prompt as inert data and no target, arm,
-intended delta, generated code, Oracle record, or outcome. It emits one
-semantic candidate. Transport retries may resend only identical request bytes;
-retries that change semantic content and selection among candidates for a
-favorable output are forbidden. A backend or policy change defines a separate
-replication, never a per-prompt switch.
+The extraction policy fixes provider, model, template, catalog, schema,
+decoding, and request policy. The extractor treats the prompt as inert data and
+is isolated from the target, arm, generated code, Oracle records, and outcomes.
+It emits one semantic candidate. A transport failure may resend identical
+request bytes, but the retry may not change semantic content or choose among
+candidates for a favorable output.
 
 \subsection{Local Causal Variables}
 
