@@ -7,6 +7,7 @@
 \usepackage{booktabs}
 \usepackage{flafter}
 \usepackage{multirow}
+\usepackage{needspace}
 \usepackage{tikz}
 \usepackage{xspace}
 \usetikzlibrary{arrows.meta,fit,positioning}
@@ -561,8 +562,7 @@ counts, and preregistered secondary contrasts.
     \toprule
     Hyp.\ ID & Adj.\ status & Indep.\ tasks & Arm counts & Secondary contrasts \\
     \midrule
-    \multicolumn{5}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen RQ1 manifest}} \\
+    \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -587,32 +587,28 @@ inferential fields as RQ1.
 \begin{table}[!htbp]
   \centering
   \small
-  \caption{RQ2 isolates the contribution of relational Prompt TSG queries and
-  FCI-based selection under the same fixed budget and confirmation protocol.}
+  \caption{RQ2 representation-and-selection ablations and their
+  discovery-to-confirmation results. Panel A gives the preregistered two-by-two
+  design, Panel B reports the complete fixed-budget funnel for every
+  configuration, and Panel C reports the corresponding derived yields.}
   \label{tab:rq2}
-  \begin{tabular}{llllrr}
+  \begin{tabular}{lll}
     \toprule
-    Variant & Representation & Selection & $K$ & Rand. & Conf. \\
+    \multicolumn{3}{l}{\textit{Panel A: Two-by-two design}} \\
     \midrule
-    Full & direct + relational & FCI & -- & -- & -- \\
-    Reduced representation & direct only & FCI & -- & -- & -- \\
-    Association selection & direct + relational & G-square & -- & -- & -- \\
-    Double ablation & direct only & G-square & -- & -- & -- \\
+    Variant & Representation & Selection \\
+    \midrule
+    Full & direct + relational & FCI \\
+    Reduced representation & direct only & FCI \\
+    Association selection & direct + relational & G-square \\
+    Double ablation & direct only & G-square \\
     \bottomrule
   \end{tabular}
-\end{table}
 
-\begin{table}[!htbp]
-  \centering
-  \small
-  \caption{RQ2 downstream discovery-to-confirmation results. Panel A reports
-  the complete fixed-budget funnel for every configuration. Panel B reports the
-  corresponding derived yields, allowing representation and selection
-  contributions to be localized to a pipeline stage.}
-  \label{tab:rq2-funnel}
+  \medskip
   \begin{tabular}{lrrrrrr}
     \toprule
-    \multicolumn{7}{l}{\textit{Panel A: Funnel counts}} \\
+    \multicolumn{7}{l}{\textit{Panel B: Funnel counts}} \\
     \midrule
     Variant & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
     \midrule
@@ -626,7 +622,7 @@ inferential fields as RQ1.
   \medskip
   \begin{tabular}{lrrrr}
     \toprule
-    \multicolumn{5}{l}{\textit{Panel B: Derived yields}} \\
+    \multicolumn{5}{l}{\textit{Panel C: Derived yields}} \\
     \midrule
     Metric & Full & Reduced & Assoc. & Double \\
     \midrule
@@ -664,12 +660,12 @@ inferential fields as RQ1.
     \toprule
     Hyp.\ ID & Adj.\ status & Indep.\ tasks & Arm counts & Secondary contrasts \\
     \midrule
-    \multicolumn{5}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen RQ2 manifest}} \\
+    \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
+\Needspace{8\baselineskip}
 \subsection{RQ3: Defensive Interventions}
 
 \textbf{RQ3. Which prompt-side defensive interventions effectively reduce
@@ -734,7 +730,8 @@ effects, objective mechanism-identification accuracy, or repair effectiveness.
     \toprule
     \multicolumn{6}{l}{\textit{Panel A: Descriptive ratings}} \\
     \midrule
-    Method & Clarity & Evidence & Credibility & Actionability & Usefulness \\
+    Method & Clarity & \shortstack{Evidence\\sufficiency} & Credibility &
+    Actionability & Usefulness \\
     \midrule
     \multicolumn{6}{c}{\emph{Rows are populated only from the
     provenance-verified frozen human-study manifest}} \\
