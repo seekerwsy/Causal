@@ -8,6 +8,7 @@ from typing import Literal, Optional, TypeVar, cast
 import typer
 
 from secaware.commands.common import cli_action
+from secaware.commands.dataset_audit import audit_datasets_command
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.providers import get_provider
@@ -77,6 +78,7 @@ from secaware.schema.oracle import OracleRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
+app.command("audit-datasets")(audit_datasets_command)
 GenerationCondition = Literal["observed"]
 
 

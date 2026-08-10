@@ -13,8 +13,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from secaware.dataset_audit.acquisition import SourceTransport, acquire_pinned_source
 from secaware.dataset_audit.adapters import adapt_record
-from secaware.dataset_audit.catalog import LegacySource
+from secaware.dataset_audit.catalog import LegacySource, cyberseceval_v2_source
 from secaware.dataset_audit.clustering import ClusterItem, build_task_clusters
 from secaware.dataset_audit.migration import migrate_legacy_sources
 from secaware.dataset_audit.neutrality import RULE_VERSION, classify_neutrality
@@ -212,6 +213,7 @@ def execute_audit(
     request: AuditRequest,
     *,
     phase_observer: Callable[[str], None] | None = None,
+    source_transport: SourceTransport | None = None,
 ) -> AuditRunResult:
     if _RUN_ID.fullmatch(request.run_id) is None:
         raise AuditRunConflictError("run ID is invalid")
@@ -257,8 +259,24 @@ def execute_audit(
 
         snapshot = workspace / "datasets" / "snapshots" / "legacy-2026-08-10"
         migration = migrate_legacy_sources(request.source_root, snapshot, request.catalog)
-        _write_jsonl(staging / "file-inventory.jsonl", list(migration.files))
+        inventory: list[Any] = list(migration.files)
         phase("migration")
+        if not request.skip_v2_download:
+            acquisition = acquire_pinned_source(
+                source=cyberseceval_v2_source(),
+                sources_root=workspace / "datasets" / "sources",
+                lock_path=(
+                    workspace
+                    / "datasets"
+                    / "manifests"
+                    / "audit-v1"
+                    / "source-lock.json"
+                ),
+                transport=source_transport,
+            )
+            inventory.append(acquisition)
+            phase("v2_acquisition")
+        _write_jsonl(staging / "file-inventory.jsonl", inventory)
 
         raw_records: list[tuple[LegacySource, int, dict[str, Any]]] = []
         total = 0

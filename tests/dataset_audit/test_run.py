@@ -149,3 +149,28 @@ def test_phase_failure_publishes_failed_run_and_linked_rerun_can_complete(tmp_pa
         replace(request, run_id="recovered-run", supersedes_run_id="failed-run")
     )
     assert rerun.status == "COMPLETE_WITH_RECORD_FAILURES"
+
+
+def test_v2_enabled_run_acquires_pinned_official_source(tmp_path: Path) -> None:
+    request = _request(tmp_path, "v2-run", skip_v2_download=False)
+
+    class FakeTransport:
+        def resolve_commit(self, repository: str, revision: str) -> str:
+            return "b" * 40
+
+        def fetch_bytes(self, repository: str, commit: str, path: str) -> bytes:
+            return b'[{"prompt":"Implement a parser."}]\n'
+
+    result = execute_audit(request, source_transport=FakeTransport())
+
+    assert result.status == "COMPLETE_WITH_RECORD_FAILURES"
+    source_lock = (
+        request.workspace_root
+        / "datasets"
+        / "manifests"
+        / "audit-v1"
+        / "source-lock.json"
+    )
+    assert source_lock.is_file()
+    report = json.loads((result.run_dir / "report.json").read_text("utf-8"))
+    assert "CyberSecEval v2 acquisition remains pending" not in report["gaps"]
