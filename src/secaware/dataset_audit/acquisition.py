@@ -223,6 +223,28 @@ def _verify_existing(
     return AcquisitionResult(commit, target, lock_path, digest, len(payload), "ALREADY_VERIFIED")
 
 
+def _locked_commit(lock_path: Path, source: UpstreamSource) -> str:
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise AcquisitionConflictError("existing source lock is incomplete or unsafe")
+    try:
+        value = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AcquisitionConflictError("existing source lock is unreadable") from error
+    if not isinstance(value, dict):
+        raise AcquisitionConflictError("existing source lock has invalid shape")
+    commit = value.get("resolved_commit")
+    if (
+        value.get("schema_version") != "1.0"
+        or value.get("source_id") != source.source_id
+        or value.get("repository") != source.repository
+        or value.get("relative_path") != source.relative_path
+        or not isinstance(commit, str)
+        or _COMMIT_PATTERN.fullmatch(commit) is None
+    ):
+        raise AcquisitionConflictError("existing source lock does not match source")
+    return commit
+
+
 def acquire_pinned_source(
     *,
     source: UpstreamSource,
@@ -234,9 +256,15 @@ def acquire_pinned_source(
     _validate_source(source)
     if maximum_bytes < 1:
         raise UpstreamUnavailableError("maximum_bytes must be positive")
+    sources_root = Path(sources_root).resolve()
+    lock_path = Path(lock_path).resolve()
     selected_transport = transport or GitHubSourceTransport(maximum_bytes=maximum_bytes)
     try:
-        commit = selected_transport.resolve_commit(source.repository, source.revision).casefold()
+        commit = (
+            _locked_commit(lock_path, source)
+            if lock_path.exists() or lock_path.is_symlink()
+            else selected_transport.resolve_commit(source.repository, source.revision).casefold()
+        )
         if _COMMIT_PATTERN.fullmatch(commit) is None:
             raise ValueError("resolved revision is not an immutable commit")
         payload = selected_transport.fetch_bytes(
@@ -248,8 +276,6 @@ def acquire_pinned_source(
         raise UpstreamUnavailableError("official upstream source is unavailable") from error
     _validate_payload(payload, maximum_bytes)
 
-    sources_root = Path(sources_root).resolve()
-    lock_path = Path(lock_path).resolve()
     target = sources_root / source.source_id / commit / PurePosixPath(source.relative_path).name
     if target.exists() or lock_path.exists() or target.is_symlink() or lock_path.is_symlink():
         return _verify_existing(target, lock_path, commit, payload)

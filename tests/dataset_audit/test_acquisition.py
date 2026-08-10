@@ -71,10 +71,22 @@ def test_existing_identical_pin_is_verified_without_rewrite(tmp_path: Path) -> N
     first = acquire_pinned_source(**arguments, transport=FakeTransport())
     before = first.path.stat().st_mtime_ns
 
-    second = acquire_pinned_source(**arguments, transport=FakeTransport())
+    class LockedTransport(FakeTransport):
+        def resolve_commit(self, repository: str, revision: str) -> str:
+            raise OSError("symbolic revision must not be resolved after lock")
+
+    locked_transport = LockedTransport()
+    second = acquire_pinned_source(**arguments, transport=locked_transport)
 
     assert second.status == "ALREADY_VERIFIED"
     assert second.path.stat().st_mtime_ns == before
+    assert locked_transport.fetch_calls == [
+        (
+            "meta-llama/PurpleLlama",
+            COMMIT,
+            "CybersecurityBenchmarks/datasets/instruct/instruct-v2.json",
+        )
+    ]
 
 
 def test_existing_pin_with_different_bytes_fails_closed(tmp_path: Path) -> None:
