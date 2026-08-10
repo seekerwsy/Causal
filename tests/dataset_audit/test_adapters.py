@@ -132,3 +132,37 @@ def test_file_path_mapping_does_not_expand_to_unapproved_sources() -> None:
 
     assert record.cwe_ids == ()
     assert record.cwe_evidence is CweEvidence.UNRESOLVED
+
+
+def test_language_aliases_are_canonicalized() -> None:
+    python_record = _adapt("cweval_python", {"prompt": "Implement x.", "language": "py"})
+    javascript_record = _adapt("cweval", {"prompt": "Implement y.", "language": "JS"})
+
+    assert python_record.language == "python"
+    assert javascript_record.language == "javascript"
+
+
+def test_existing_mbpp_and_apps_contract_fields_are_inventoried() -> None:
+    mbpp = _adapt(
+        "mbpp",
+        {
+            "prompt": "Implement add.",
+            "test_list": ["assert add(1, 2) == 3"],
+            "challenge_test_list": ["assert add(-1, 1) == 0"],
+        },
+    )
+    apps = _adapt(
+        "apps",
+        {
+            "prompt": "Implement add.",
+            "input_output": '{"inputs":[[1,2]],"outputs":[3]}',
+        },
+    )
+
+    assert mbpp.functional_state is FunctionalState.PRESENT_UNVALIDATED
+    assert {span.field for span in mbpp.functional_evidence_spans} == {
+        "test_list",
+        "challenge_test_list",
+    }
+    assert apps.functional_state is FunctionalState.PRESENT_UNVALIDATED
+    assert apps.functional_evidence_spans[0].field == "input_output"

@@ -37,11 +37,20 @@ _CWE_FIELDS = (
 _FUNCTIONAL_EXECUTABLE_FIELDS = (
     "test",
     "tests",
+    "test_list",
+    "challenge_test_list",
+    "input_output",
     "unit_tests",
     "test_cases",
     "entry_point",
     "functional_eval",
 )
+_LANGUAGE_ALIASES = {
+    "py": "python",
+    "python": "python",
+    "js": "javascript",
+    "javascript": "javascript",
+}
 _FUNCTIONAL_REFERENCE_FIELDS = (
     "test_path",
     "test_case_path",
@@ -169,7 +178,8 @@ def adapt_record(
     prompt_value = _first_nonempty(raw, _PROMPT_FIELDS)
     prompt = prompt_value[1] if prompt_value is not None else None
     language_value = _first_nonempty(raw, _LANGUAGE_FIELDS)
-    language = language_value[1].casefold() if language_value is not None else None
+    language_token = language_value[1].casefold() if language_value is not None else None
+    language = _LANGUAGE_ALIASES.get(language_token, language_token)
     cwe_ids, cwe_evidence, cwe_spans = _cwe_evidence(raw, source_id)
     functional_state, functional_spans = _functional_evidence(raw)
     return AdaptedRecord(
