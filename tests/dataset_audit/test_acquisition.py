@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
 from secaware.dataset_audit.acquisition import (
     AcquisitionConflictError,
+    GitHubSourceTransport,
     UpstreamUnavailableError,
     acquire_pinned_source,
 )
@@ -128,3 +130,24 @@ def test_non_json_or_oversized_payload_is_rejected(tmp_path: Path) -> None:
                 transport=FakeTransport(payload),
                 maximum_bytes=100,
             )
+
+
+def test_github_commit_resolution_falls_back_to_git_on_api_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = GitHubSourceTransport()
+
+    def rate_limited(url: str) -> bytes:
+        raise HTTPError(url, 403, "rate limit exceeded", {}, None)
+
+    fallback_calls: list[tuple[str, str]] = []
+
+    def fallback(repository: str, revision: str) -> str:
+        fallback_calls.append((repository, revision))
+        return COMMIT
+
+    monkeypatch.setattr(transport, "_get", rate_limited)
+    monkeypatch.setattr(transport, "_resolve_commit_with_git", fallback)
+
+    assert transport.resolve_commit("meta-llama/PurpleLlama", "main") == COMMIT
+    assert fallback_calls == [("meta-llama/PurpleLlama", "main")]

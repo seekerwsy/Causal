@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
+import subprocess
 import tempfile
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -22,6 +24,8 @@ from secaware.io.transaction import (
 
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_REVISION_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
 _DEFAULT_MAXIMUM_BYTES = 256 * 1024 * 1024
 
 
@@ -60,7 +64,13 @@ class GitHubSourceTransport:
         self.maximum_bytes = maximum_bytes
 
     def _get(self, url: str) -> bytes:
-        request = Request(url, headers={"Accept": "application/vnd.github+json"})
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "SecAware-dataset-audit/1.0",
+            },
+        )
         with urlopen(request, timeout=self.timeout_seconds) as response:
             declared = response.headers.get("Content-Length")
             if declared is not None and int(declared) > self.maximum_bytes:
@@ -70,8 +80,56 @@ class GitHubSourceTransport:
             raise ValueError("upstream response exceeds byte limit")
         return payload
 
+    def _resolve_commit_with_git(self, repository: str, revision: str) -> str:
+        if (
+            _REPOSITORY_PATTERN.fullmatch(repository) is None
+            or _REVISION_PATTERN.fullmatch(revision) is None
+            or ".." in revision
+        ):
+            raise ValueError("repository or revision is unsafe")
+        ref = f"refs/heads/{revision}"
+        options: dict[str, object] = {}
+        if os.name == "nt":
+            options["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run(
+            [
+                "git",
+                "ls-remote",
+                "--refs",
+                "--exit-code",
+                f"https://github.com/{repository}.git",
+                ref,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            timeout=self.timeout_seconds,
+            check=False,
+            **options,
+        )
+        lines = completed.stdout.splitlines()
+        if completed.returncode != 0 or len(lines) != 1:
+            raise ValueError("git commit resolution failed")
+        fields = lines[0].split("\t")
+        if len(fields) != 2 or fields[1] != ref:
+            raise ValueError("git commit response has invalid shape")
+        commit = fields[0].casefold()
+        if _COMMIT_PATTERN.fullmatch(commit) is None:
+            raise ValueError("git commit response is not immutable")
+        return commit
+
     def resolve_commit(self, repository: str, revision: str) -> str:
-        payload = self._get(f"https://api.github.com/repos/{repository}/commits/{revision}")
+        try:
+            payload = self._get(
+                f"https://api.github.com/repos/{repository}/commits/{revision}"
+            )
+        except HTTPError as error:
+            if error.code not in {403, 429}:
+                raise
+            return self._resolve_commit_with_git(repository, revision)
         value = json.loads(payload)
         if not isinstance(value, dict) or not isinstance(value.get("sha"), str):
             raise ValueError("GitHub commit response has invalid shape")
