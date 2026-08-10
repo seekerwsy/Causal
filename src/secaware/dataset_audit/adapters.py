@@ -18,6 +18,7 @@ from secaware.dataset_audit.schema import (
 _PROMPT_FIELDS = (
     "prompt",
     "Prompt",
+    "test_case_prompt",
     "instruction",
     "question",
     "text",

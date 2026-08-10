@@ -161,6 +161,41 @@ def _read_source_records(
     return records, failures, total
 
 
+def _read_json_array_records(
+    path: Path,
+    source_id: str,
+    maximum_records: int | None,
+) -> tuple[list[tuple[int, dict[str, Any]]], list[FailureRecord], int]:
+    payload = path.read_bytes()
+    if not payload or len(payload) > 256 * 1024 * 1024:
+        raise ValueError("JSON array source violates byte limits")
+    value = json.loads(payload)
+    if not isinstance(value, list):
+        raise ValueError("JSON array source has invalid top-level shape")
+    selected = value[:maximum_records] if maximum_records is not None else value
+    records: list[tuple[int, dict[str, Any]]] = []
+    failures: list[FailureRecord] = []
+    for index, item in enumerate(selected, start=1):
+        if isinstance(item, dict):
+            records.append((index, item))
+            continue
+        failures.append(
+            FailureRecord(
+                phase="strict_parsing",
+                code="MALFORMED_JSON_ARRAY_RECORD",
+                message="record is not a JSON object",
+                coordinate={
+                    "source_id": source_id,
+                    "relative_path": path.name,
+                    "line_number": index,
+                    "record_id": None,
+                },
+                fatal=False,
+            )
+        )
+    return records, failures, len(selected)
+
+
 def _count_record_audits(records: list[RecordAudit]) -> dict[str, dict[str, int]]:
     datasets = Counter(record.coordinate.source_id for record in records)
     languages = Counter(record.language or "UNRESOLVED" for record in records)
@@ -179,7 +214,7 @@ def _count_record_audits(records: list[RecordAudit]) -> dict[str, dict[str, int]
     }
 
 
-def _overlap(records: list[RecordAudit]) -> dict[str, Any]:
+def _overlap(records: list[RecordAudit], *, v2_included: bool) -> dict[str, Any]:
     by_source: dict[str, set[str]] = {}
     for record in records:
         if record.exact_prompt_sha256:
@@ -188,6 +223,19 @@ def _overlap(records: list[RecordAudit]) -> dict[str, Any]:
             )
     secure = by_source.get("cyberseceval_secure_code", set())
     discover = by_source.get("cyberseceval_discover_adv", set())
+    v2 = by_source.get("cyberseceval_instruct_v2", set())
+    if v2_included:
+        legacy_union = secure | discover
+        return {
+            "relationship": "legacy_and_v2_evaluated",
+            "secure_code_unique": len(secure),
+            "discover_adv_unique": len(discover),
+            "legacy_exact_overlap": len(secure & discover),
+            "v2_unique": len(v2),
+            "v2_secure_code_overlap": len(v2 & secure),
+            "v2_discover_adv_overlap": len(v2 & discover),
+            "v2_legacy_union_overlap": len(v2 & legacy_union),
+        }
     if not secure and not discover:
         return {"relationship": "not_evaluated"}
     return {
@@ -294,6 +342,7 @@ def execute_audit(
         migration = migrate_legacy_sources(request.source_root, snapshot, request.catalog)
         inventory: list[Any] = list(migration.files)
         phase("migration")
+        v2_acquisition = None
         if not request.skip_v2_download:
             acquisition = acquire_pinned_source(
                 source=cyberseceval_v2_source(),
@@ -308,6 +357,7 @@ def execute_audit(
                 transport=source_transport,
             )
             inventory.append(acquisition)
+            v2_acquisition = acquisition
             phase("v2_acquisition")
         _write_jsonl(staging / "file-inventory.jsonl", inventory)
 
@@ -322,6 +372,21 @@ def execute_audit(
             raw_records.extend((source, line, raw) for line, raw in parsed)
             failures.extend(parse_failures)
             total += source_total
+        audit_sources = list(request.catalog)
+        if v2_acquisition is not None:
+            v2_source = LegacySource(
+                source_id="cyberseceval_instruct_v2",
+                filename="instruct-v2.json",
+            )
+            parsed, parse_failures, source_total = _read_json_array_records(
+                v2_acquisition.path,
+                v2_source.source_id,
+                request.sample_records_per_dataset,
+            )
+            raw_records.extend((v2_source, line, raw) for line, raw in parsed)
+            failures.extend(parse_failures)
+            total += source_total
+            audit_sources.append(v2_source)
         phase("strict_parsing")
 
         adapted = [
@@ -398,7 +463,7 @@ def execute_audit(
         phase("split_simulation")
 
         role_decisions = []
-        for source in request.catalog:
+        for source in audit_sources:
             source_records = [
                 record for record in audits if record.coordinate.source_id == source.source_id
             ]
@@ -487,7 +552,7 @@ def execute_audit(
             status=status,
             progress=progress,
             counts=_count_record_audits(audits),
-            overlap=_overlap(audits),
+            overlap=_overlap(audits, v2_included=v2_acquisition is not None),
             gaps=gaps,
         )
         _write_json(staging / "report.json", report)

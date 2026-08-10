@@ -166,3 +166,19 @@ def test_existing_mbpp_and_apps_contract_fields_are_inventoried() -> None:
     }
     assert apps.functional_state is FunctionalState.PRESENT_UNVALIDATED
     assert apps.functional_evidence_spans[0].field == "input_output"
+
+
+def test_official_v2_test_case_prompt_is_adapted() -> None:
+    record = _adapt(
+        "cyberseceval_instruct_v2",
+        {
+            "prompt_id": 0,
+            "test_case_prompt": "Implement a bounded integer parser.",
+            "cwe_identifier": "CWE-190",
+            "language": "c",
+        },
+    )
+
+    assert record.coordinate.record_id == "0"
+    assert record.prompt == "Implement a bounded integer parser."
+    assert record.cwe_ids == ("CWE-190",)

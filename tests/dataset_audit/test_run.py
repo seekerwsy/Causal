@@ -162,7 +162,10 @@ def test_v2_enabled_run_acquires_pinned_official_source(tmp_path: Path) -> None:
             return "b" * 40
 
         def fetch_bytes(self, repository: str, commit: str, path: str) -> bytes:
-            return b'[{"prompt":"Implement a parser."}]\n'
+            return (
+                b'[{"prompt_id":0,"test_case_prompt":"Implement a parser.",'
+                b'"cwe_identifier":"CWE-20","language":"python"}]\n'
+            )
 
     result = execute_audit(request, source_transport=FakeTransport())
 
@@ -177,3 +180,6 @@ def test_v2_enabled_run_acquires_pinned_official_source(tmp_path: Path) -> None:
     assert source_lock.is_file()
     report = json.loads((result.run_dir / "report.json").read_text("utf-8"))
     assert "CyberSecEval v2 acquisition remains pending" not in report["gaps"]
+    assert report["progress"]["total"] == 4
+    assert report["counts"]["dataset"]["cyberseceval_instruct_v2"] == 1
+    assert report["overlap"]["relationship"] == "legacy_and_v2_evaluated"
