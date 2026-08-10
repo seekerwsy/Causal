@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from secaware.dataset_audit.report import build_gap_report
+from secaware.dataset_audit.schema import DatasetRole
 
 
 def test_gap_report_distinguishes_facts_prescreens_and_unresolved() -> None:
@@ -137,7 +138,7 @@ def test_gap_report_places_split_role_and_overlap_evidence_near_conclusions() ->
         dataset_roles=(
             {
                 "dataset_id": "cyberseceval_instruct_v2",
-                "roles": ["SECURITY_ONLY_SECONDARY_CANDIDATE"],
+                "roles": [DatasetRole.SECURITY_ONLY_SECONDARY_CANDIDATE],
                 "blocking_reasons": [
                     "no existing executable functional contract was validated"
                 ],

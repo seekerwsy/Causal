@@ -48,6 +48,12 @@ def _sentence(value: object) -> str:
     return text[0].upper() + text[1:]
 
 
+def _role_value(role: object) -> str:
+    value = getattr(role, "value", role)
+    text = str(value)
+    return text.removeprefix("DatasetRole.")
+
+
 def _evidence_rows(counts: dict[str, dict[str, int]]) -> str:
     rows: list[str] = []
     for dimension in ("language", "neutrality", "functional"):
@@ -84,7 +90,7 @@ def _role_rows(dataset_roles: tuple[dict[str, Any], ...]) -> str:
     rows: list[str] = []
     for item in sorted(dataset_roles, key=lambda value: str(value["dataset_id"])):
         roles = ", ".join(
-            _ROLE_LABELS.get(str(role), str(role).replace("_", " ").title())
+            _ROLE_LABELS.get(_role_value(role), _role_value(role).replace("_", " ").title())
             for role in item.get("roles", [])
         ) or "—"
         blockers = "; ".join(
