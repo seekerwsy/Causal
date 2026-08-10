@@ -59,3 +59,34 @@ def test_report_stable_digest_excludes_run_identity() -> None:
 
     assert first["run_id"] != second["run_id"]
     assert first["stable_digest"] == second["stable_digest"]
+
+
+def test_report_stable_digest_excludes_runtime_rate_and_eta() -> None:
+    progress = {
+        "total": 10,
+        "completed": 10,
+        "running": 0,
+        "failed": 0,
+        "unresolved": 1,
+        "pending": 0,
+        "records_per_second": 5.0,
+        "eta_seconds": 0.0,
+    }
+    first, _ = build_gap_report(
+        run_id="run-a",
+        status="COMPLETE",
+        progress=progress,
+        counts={"dataset": {"alpha": 10}},
+        overlap={"relationship": "not_evaluated"},
+        gaps=(),
+    )
+    second, _ = build_gap_report(
+        run_id="run-b",
+        status="COMPLETE",
+        progress={**progress, "records_per_second": 50.0, "eta_seconds": 3.0},
+        counts={"dataset": {"alpha": 10}},
+        overlap={"relationship": "not_evaluated"},
+        gaps=(),
+    )
+
+    assert first["stable_digest"] == second["stable_digest"]

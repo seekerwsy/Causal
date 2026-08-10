@@ -101,11 +101,14 @@ def test_successful_run_publishes_complete_immutable_artifact_set(tmp_path: Path
         "eta_seconds": 0.0,
         "failed": 1,
         "pending": 0,
-        "records_per_second": 0.0,
+        "records_per_second": report["progress"]["records_per_second"],
         "running": 0,
         "total": 3,
         "unresolved": 1,
     }
+    assert report["progress"]["records_per_second"] > 0
+    environment = json.loads((result.run_dir / "environment.json").read_text("utf-8"))
+    assert {"git_commit", "git_branch", "git_dirty_paths"} <= set(environment)
     with pytest.raises(AuditRunConflictError):
         execute_audit(request)
 

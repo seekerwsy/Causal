@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 import platform
 import re
+import subprocess
 import sys
+import time
 from typing import Any
 
 from pydantic import BaseModel
@@ -209,6 +211,34 @@ def _ensure_artifact_set(staging: Path) -> None:
             path.write_text("", encoding="utf-8")
 
 
+def _git_environment(workspace: Path) -> dict[str, Any]:
+    def invoke(*arguments: str) -> str | None:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(workspace), *arguments],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if completed.returncode != 0:
+            return None
+        return completed.stdout.strip()
+
+    status = invoke("status", "--short", "--untracked-files=all")
+    return {
+        "git_commit": invoke("rev-parse", "HEAD"),
+        "git_branch": invoke("branch", "--show-current"),
+        "git_dirty_paths": status.splitlines() if status else [],
+    }
+
+
 def execute_audit(
     request: AuditRequest,
     *,
@@ -229,6 +259,7 @@ def execute_audit(
     logs: list[dict[str, str]] = []
     status = "FAILED"
     stable_digest = ""
+    started = time.perf_counter()
 
     def phase(name: str) -> None:
         logs.append({"phase": name, "status": "completed"})
@@ -241,19 +272,21 @@ def execute_audit(
             staging / "commands.jsonl",
             [{"argv": list(request.command_argv), "cwd": str(workspace)}],
         )
+        environment = {
+            **_git_environment(workspace),
+            "python": sys.version,
+            "python_executable": sys.executable,
+            "platform": platform.platform(),
+            "machine": platform.node(),
+            "working_directory": str(workspace),
+            "source_root": str(Path(request.source_root).resolve()),
+            "run_directory": str(final),
+            "supersedes_run_id": request.supersedes_run_id,
+            "v2_download_skipped": request.skip_v2_download,
+        }
         _write_json(
             staging / "environment.json",
-            {
-                "python": sys.version,
-                "python_executable": sys.executable,
-                "platform": platform.platform(),
-                "machine": platform.node(),
-                "working_directory": str(workspace),
-                "source_root": str(Path(request.source_root).resolve()),
-                "run_directory": str(final),
-                "supersedes_run_id": request.supersedes_run_id,
-                "v2_download_skipped": request.skip_v2_download,
-            },
+            environment,
         )
         phase("preflight")
 
@@ -429,6 +462,7 @@ def execute_audit(
             for record in audits
         )
         status = "COMPLETE_WITH_RECORD_FAILURES" if failures else "COMPLETE"
+        elapsed_seconds = max(time.perf_counter() - started, 1e-9)
         progress: dict[str, int | float | None] = {
             "total": total,
             "completed": len(audits),
@@ -436,7 +470,7 @@ def execute_audit(
             "failed": len(failures),
             "unresolved": unresolved,
             "pending": 0,
-            "records_per_second": 0.0,
+            "records_per_second": total / elapsed_seconds,
             "eta_seconds": 0.0,
         }
         gaps = tuple(

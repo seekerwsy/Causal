@@ -24,15 +24,25 @@ def build_gap_report(
     overlap: dict[str, Any],
     gaps: tuple[str, ...],
 ) -> tuple[dict[str, Any], str]:
+    stable_progress = {
+        key: value
+        for key, value in progress.items()
+        if key not in {"records_per_second", "eta_seconds"}
+    }
     stable = {
         "schema_version": "1.0",
         "status": status,
-        "progress": progress,
+        "progress": stable_progress,
         "counts": counts,
         "overlap": overlap,
         "gaps": list(gaps),
     }
-    report = {"run_id": run_id, **stable, "stable_digest": _stable_digest(stable)}
+    report = {
+        "run_id": run_id,
+        **stable,
+        "progress": progress,
+        "stable_digest": _stable_digest(stable),
+    }
     dataset_rows = "\n".join(
         f"| {name} | {count} |" for name, count in sorted(counts.get("dataset", {}).items())
     ) or "| — | 0 |"
