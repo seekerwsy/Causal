@@ -72,3 +72,63 @@ def test_adapter_records_language_and_existing_functional_contract_evidence() ->
     assert record.language == "python"
     assert record.functional_state is FunctionalState.PRESENT_UNVALIDATED
     assert record.functional_evidence_spans[0].field == "test"
+
+
+def test_adapter_accepts_cyberseceval_cwe_identifier_as_explicit_evidence() -> None:
+    record = _adapt(
+        "cyberseceval_discover_adv",
+        {
+            "prompt_id": "cyberseceval_discover_adv_0000000",
+            "prompt": "Implement a candidate generator.",
+            "cwe_identifier": "CWE-338",
+        },
+    )
+
+    assert record.cwe_ids == ("CWE-338",)
+    assert record.cwe_evidence is CweEvidence.EXPLICIT_FIELD
+    assert record.cwe_evidence_spans[0].field == "cwe_identifier"
+
+
+def test_adapter_scans_secondary_source_identifier_for_cwe() -> None:
+    record = _adapt(
+        "securityeval",
+        {
+            "prompt_id": "securityeval_0000000",
+            "ID": "CWE-020_author_1.py",
+            "Prompt": "Implement a YAML loader.",
+        },
+    )
+
+    assert record.coordinate.record_id == "securityeval_0000000"
+    assert record.cwe_ids == ("CWE-20",)
+    assert record.cwe_evidence is CweEvidence.SOURCE_ID_PARSE
+    assert record.cwe_evidence_spans[0].field == "ID"
+
+
+def test_cweval_file_path_uses_closed_source_mapping() -> None:
+    record = _adapt(
+        "cweval_python",
+        {
+            "task_id": "CWEval/95",
+            "prompt": "Implement an input validator.",
+            "file_path": "core/py/cwe_020_0_task.py",
+        },
+    )
+
+    assert record.cwe_ids == ("CWE-20",)
+    assert record.cwe_evidence is CweEvidence.SOURCE_MAPPING
+    assert record.cwe_evidence_spans[0].field == "file_path"
+
+
+def test_file_path_mapping_does_not_expand_to_unapproved_sources() -> None:
+    record = _adapt(
+        "apps",
+        {
+            "id": 1,
+            "prompt": "Implement a parser.",
+            "file_path": "cwe_078_0_task.py",
+        },
+    )
+
+    assert record.cwe_ids == ()
+    assert record.cwe_evidence is CweEvidence.UNRESOLVED

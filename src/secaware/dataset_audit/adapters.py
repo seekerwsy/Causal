@@ -26,7 +26,14 @@ _PROMPT_FIELDS = (
 )
 _ID_FIELDS = ("prompt_id", "task_id", "sample_id", "ID", "id")
 _LANGUAGE_FIELDS = ("language", "lang", "programming_language")
-_CWE_FIELDS = ("cwe", "CWE", "cwe_id", "cwe_ids", "weakness")
+_CWE_FIELDS = (
+    "cwe",
+    "CWE",
+    "cwe_id",
+    "cwe_ids",
+    "cwe_identifier",
+    "weakness",
+)
 _FUNCTIONAL_EXECUTABLE_FIELDS = (
     "test",
     "tests",
@@ -43,6 +50,7 @@ _FUNCTIONAL_REFERENCE_FIELDS = (
     "reference_solution",
 )
 _CWE_PATTERN = re.compile(r"(?i)(?<![A-Z0-9])CWE[-_ ]?0*([0-9]+)(?![0-9])")
+_CWE_FILE_PATTERN = re.compile(r"(?i)(?:^|[/\\])cwe_0*([0-9]+)_")
 
 
 def _first_nonempty(raw: Mapping[str, Any], fields: tuple[str, ...]) -> tuple[str, str] | None:
@@ -80,7 +88,7 @@ def _span(field: str, text: str, evidence_id: str) -> EvidenceSpan:
     )
 
 
-def _cwe_evidence(raw: Mapping[str, Any], record_id: str | None) -> tuple[
+def _cwe_evidence(raw: Mapping[str, Any], source_id: str) -> tuple[
     tuple[str, ...], CweEvidence, tuple[EvidenceSpan, ...]
 ]:
     explicit: set[str] = set()
@@ -94,18 +102,38 @@ def _cwe_evidence(raw: Mapping[str, Any], record_id: str | None) -> tuple[
             text = str(raw[field])
             spans.append(_span(field, text, "explicit-cwe-field-v1"))
 
-    identifier = set(_cwe_values(record_id)) if record_id is not None else set()
-    all_values = tuple(sorted(explicit | identifier, key=lambda value: int(value[4:])))
-    if explicit and identifier and explicit != identifier:
-        if record_id is not None:
-            spans.append(_span("record_id", record_id, "source-id-cwe-v1"))
+    identifier: set[str] = set()
+    for field in _ID_FIELDS:
+        value = raw.get(field)
+        if not isinstance(value, (str, int)) or isinstance(value, bool):
+            continue
+        text = str(value)
+        values = _cwe_values(text)
+        if values:
+            identifier.update(values)
+            spans.append(_span(field, text, "source-id-cwe-v1"))
+
+    mapping: set[str] = set()
+    if source_id in {"cweval", "cweval_python"}:
+        file_path = raw.get("file_path")
+        if isinstance(file_path, str):
+            matched = _CWE_FILE_PATTERN.search(file_path)
+            if matched:
+                mapping.add(f"CWE-{int(matched.group(1))}")
+                spans.append(_span("file_path", file_path, "cweval-file-path-v1"))
+
+    all_sets = [values for values in (explicit, identifier, mapping) if values]
+    all_values = tuple(
+        sorted(explicit | identifier | mapping, key=lambda value: int(value[4:]))
+    )
+    if len(all_sets) > 1 and any(values != all_sets[0] for values in all_sets[1:]):
         return all_values, CweEvidence.CONFLICTING, tuple(spans)
     if explicit:
         return all_values, CweEvidence.EXPLICIT_FIELD, tuple(spans)
     if identifier:
-        if record_id is not None:
-            spans.append(_span("record_id", record_id, "source-id-cwe-v1"))
         return all_values, CweEvidence.SOURCE_ID_PARSE, tuple(spans)
+    if mapping:
+        return all_values, CweEvidence.SOURCE_MAPPING, tuple(spans)
     return (), CweEvidence.UNRESOLVED, ()
 
 
@@ -142,7 +170,7 @@ def adapt_record(
     prompt = prompt_value[1] if prompt_value is not None else None
     language_value = _first_nonempty(raw, _LANGUAGE_FIELDS)
     language = language_value[1].casefold() if language_value is not None else None
-    cwe_ids, cwe_evidence, cwe_spans = _cwe_evidence(raw, record_id)
+    cwe_ids, cwe_evidence, cwe_spans = _cwe_evidence(raw, source_id)
     functional_state, functional_spans = _functional_evidence(raw)
     return AdaptedRecord(
         coordinate=SourceCoordinate(
