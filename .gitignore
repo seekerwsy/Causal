@@ -30,5 +30,6 @@ runs/
 # Editor and OS files
 .idea/
 .vscode/
+.worktrees/
 .DS_Store
 Thumbs.db
