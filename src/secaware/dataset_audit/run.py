@@ -553,6 +553,16 @@ def execute_audit(
             progress=progress,
             counts=_count_record_audits(audits),
             overlap=_overlap(audits, v2_included=v2_acquisition is not None),
+            split_summaries=tuple(
+                {
+                    "discover_ratio": simulation.discover_ratio,
+                    "seed": simulation.seed,
+                    "version": simulation.version,
+                    "summary": simulation.summary,
+                }
+                for simulation in split_result.simulations
+            ),
+            dataset_roles=tuple(_jsonable(decision) for decision in role_decisions),
             gaps=gaps,
         )
         _write_json(staging / "report.json", report)
