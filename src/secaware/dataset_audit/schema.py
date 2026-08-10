@@ -59,6 +59,20 @@ class SourceCoordinate(_PersistedModel):
     record_id: str | None = None
 
 
+class AdaptedRecord(_PersistedModel):
+    schema_version: Literal["1.0"] = "1.0"
+    coordinate: SourceCoordinate
+    prompt: str | None
+    language: str | None
+    cwe_ids: tuple[str, ...]
+    cwe_evidence: CweEvidence
+    cwe_evidence_spans: tuple[EvidenceSpan, ...] = ()
+    exact_prompt_sha256: str | None
+    normalized_prompt_sha256: str | None
+    functional_state: FunctionalState
+    functional_evidence_spans: tuple[EvidenceSpan, ...] = ()
+
+
 class RecordAudit(_PersistedModel):
     schema_version: Literal["1.0"]
     coordinate: SourceCoordinate
