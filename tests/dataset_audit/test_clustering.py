@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from secaware.dataset_audit.clustering import ClusterItem, build_task_clusters
+import secaware.dataset_audit.clustering as clustering_module
 
 
 def _item(
@@ -91,3 +92,32 @@ def test_cluster_ids_are_stable_under_input_reordering() -> None:
     }
 
     assert forward == reverse
+
+
+def test_ambiguous_similarity_comparisons_are_bounded(
+    monkeypatch,
+) -> None:
+    original = clustering_module.SequenceMatcher
+    calls = 0
+
+    def counting_matcher(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(clustering_module, "SequenceMatcher", counting_matcher)
+    items = [
+        _item(
+            f"r{i + 1}",
+            prompt=(
+                "Implement a function that processes a user supplied value "
+                f"for independent task {i:04d}."
+            ),
+        )
+        for i in range(500)
+    ]
+
+    result = build_task_clusters(items)
+
+    assert len(result.assignments) == 500
+    assert calls <= 64 * 64

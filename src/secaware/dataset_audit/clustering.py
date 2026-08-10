@@ -6,6 +6,10 @@ import hashlib
 
 
 CLUSTER_VERSION = "task-cluster-v1"
+_AMBIGUOUS_PREFIX_CHARS = 24
+_AMBIGUOUS_LENGTH_BUCKET_CHARS = 128
+_MAX_AMBIGUOUS_BLOCK_ITEMS = 64
+_MAX_SIMILARITY_CHARS = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +91,13 @@ def _stable_cluster_id(members: list[ClusterItem]) -> str:
     return f"cluster-{digest[:20]}"
 
 
+def _ambiguous_block_key(prompt: str) -> tuple[str, int]:
+    normalized = " ".join(prompt.casefold().split())
+    prefix = normalized[:_AMBIGUOUS_PREFIX_CHARS]
+    length_bucket = len(normalized) // _AMBIGUOUS_LENGTH_BUCKET_CHARS
+    return prefix, length_bucket
+
+
 def build_task_clusters(items: list[ClusterItem]) -> ClusterResult:
     ordered = sorted(items, key=lambda item: item.item_key)
     if len({item.item_key for item in ordered}) != len(ordered):
@@ -113,28 +124,40 @@ def build_task_clusters(items: list[ClusterItem]) -> ClusterResult:
     _add_group_edges(exact, "EXACT_PROMPT_DIGEST", union_find, edges)
     _add_group_edges(normalized, "NORMALIZED_PROMPT_DIGEST", union_find, edges)
 
+    ambiguous_blocks: dict[tuple[str, int], list[ClusterItem]] = {}
+    for item in ordered:
+        if item.prompt:
+            ambiguous_blocks.setdefault(_ambiguous_block_key(item.prompt), []).append(item)
+
     unresolved: list[ClusterEdge] = []
     unresolved_keys: set[str] = set()
-    for index, left in enumerate(ordered):
-        if not left.prompt:
+    for block in ambiguous_blocks.values():
+        if len(block) > _MAX_AMBIGUOUS_BLOCK_ITEMS:
             continue
-        for right in ordered[index + 1 :]:
-            same_cluster = union_find.find(left.item_key) == union_find.find(
-                right.item_key
-            )
-            if not right.prompt or same_cluster:
-                continue
-            similarity = SequenceMatcher(None, left.prompt, right.prompt, autojunk=False).ratio()
-            if 0.88 <= similarity < 1.0:
-                unresolved.append(
-                    ClusterEdge(
-                        left.item_key,
-                        right.item_key,
-                        "AMBIGUOUS_TEXT_SIMILARITY",
-                        f"{similarity:.6f}",
-                    )
+        block = sorted(block, key=lambda item: item.item_key)
+        for index, left in enumerate(block):
+            for right in block[index + 1 :]:
+                same_cluster = union_find.find(left.item_key) == union_find.find(
+                    right.item_key
                 )
-                unresolved_keys.update((left.item_key, right.item_key))
+                if not left.prompt or not right.prompt or same_cluster:
+                    continue
+                similarity = SequenceMatcher(
+                    None,
+                    left.prompt[:_MAX_SIMILARITY_CHARS],
+                    right.prompt[:_MAX_SIMILARITY_CHARS],
+                    autojunk=False,
+                ).ratio()
+                if 0.88 <= similarity < 1.0:
+                    unresolved.append(
+                        ClusterEdge(
+                            left.item_key,
+                            right.item_key,
+                            "AMBIGUOUS_TEXT_SIMILARITY",
+                            f"{similarity:.6f}",
+                        )
+                    )
+                    unresolved_keys.update((left.item_key, right.item_key))
 
     groups: dict[str, list[ClusterItem]] = {}
     for item in ordered:
