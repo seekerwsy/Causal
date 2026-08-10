@@ -26,6 +26,7 @@ htmlcov/
 
 # Generated experiment outputs
 runs/
+datasets/
 
 # Editor and OS files
 .idea/
