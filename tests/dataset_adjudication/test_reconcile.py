@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from secaware.dataset_adjudication.packets import build_adjudication_packets
+from secaware.dataset_adjudication.packets import (
+    build_adjudication_packets,
+    subset_adjudication_packets,
+)
 from secaware.dataset_adjudication.reconcile import reconcile_codex_passes
 from secaware.dataset_adjudication.schema import (
     AdjudicationDimension,
@@ -71,12 +74,17 @@ def _records() -> list[RecordAudit]:
 def _decisions(packet_set, pass_id: str):
     decisions = []
     for packet in packet_set.pass_a if pass_id == "A" else packet_set.pass_b:
+        visible_quote = (
+            packet.prompt
+            if packet.dimension is AdjudicationDimension.NEUTRALITY
+            else packet.prompt_a
+        )
         common = {
             "packet_id": packet.packet_id,
             "pass_id": pass_id,
             "packet_digest": packet.packet_digest,
             "confidence": DecisionConfidence.HIGH,
-            "evidence_quotes": ("visible prompt evidence",),
+            "evidence_quotes": (visible_quote,),
             "rationale": "The frozen rubric supports this label.",
             "rubric_version": "adjudication-rubric-v1",
             "annotator_kind": "CODEX",
@@ -204,3 +212,42 @@ def test_reconciliation_rejects_missing_duplicate_and_stale_decisions() -> None:
             audit_fraction=0.2,
             seed=20260812,
         )
+    missing_quote = pass_a.copy()
+    missing_quote[0] = missing_quote[0].model_copy(
+        update={"evidence_quotes": ("not present in the blinded packet",)}
+    )
+    with pytest.raises(ValueError, match="exact visible quote"):
+        reconcile_codex_passes(
+            packet_set,
+            missing_quote,
+            pass_b,
+            audit_fraction=0.2,
+            seed=20260812,
+        )
+
+
+def test_pilot_subset_preserves_blinded_order_and_limits_decision_coverage() -> None:
+    packet_set = build_adjudication_packets(_records(), seed=20260812)
+    selected = {item.packet_id for item in packet_set.metadata[:2]}
+
+    pilot = subset_adjudication_packets(packet_set, selected)
+
+    assert {item.packet_id for item in pilot.metadata} == selected
+    assert [item.packet_id for item in pilot.pass_a] == [
+        item.packet_id for item in packet_set.pass_a if item.packet_id in selected
+    ]
+    assert [item.packet_id for item in pilot.pass_b] == [
+        item.packet_id for item in packet_set.pass_b if item.packet_id in selected
+    ]
+    result = reconcile_codex_passes(
+        pilot,
+        [item for item in _decisions(packet_set, "A") if item.packet_id in selected],
+        [item for item in _decisions(packet_set, "B") if item.packet_id in selected],
+        audit_fraction=0.2,
+        seed=20260812,
+    )
+    assert result.summary["packet_count"] == 2
+    assert result.summary["label_distributions"]
+
+    with pytest.raises(ValueError, match="unknown"):
+        subset_adjudication_packets(packet_set, {*selected, "neutrality-" + "0" * 20})

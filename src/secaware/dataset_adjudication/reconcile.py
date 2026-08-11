@@ -57,12 +57,24 @@ def _validate_decisions(
     }
     if len(manifest_digests) != 1:
         raise ValueError("Codex decisions do not share one input manifest digest")
+    visible_by_pass = {
+        "A": {item.packet_id: item for item in packet_set.pass_a},
+        "B": {item.packet_id: item for item in packet_set.pass_b},
+    }
     for packet_id, packet_metadata in metadata.items():
         for decision in (pass_a[packet_id], pass_b[packet_id]):
             if decision.dimension is not packet_metadata.dimension:
                 raise ValueError("Codex decision dimension does not match packet metadata")
             if decision.packet_digest != packet_metadata.packet_digest:
                 raise ValueError("Codex decision packet digest is stale")
+            packet = visible_by_pass[decision.pass_id][packet_id]
+            visible = "\n".join(
+                value
+                for field in ("prompt", "prompt_a", "prompt_b")
+                if isinstance((value := getattr(packet, field, None)), str)
+            )
+            if any(quote not in visible for quote in decision.evidence_quotes):
+                raise ValueError("Codex decision evidence is not an exact visible quote")
 
 
 def _audit_sample(
@@ -161,6 +173,15 @@ def reconcile_codex_passes(
     reason_counts = Counter(
         reason.value for item in human_review_queue for reason in item.review_reasons
     )
+    label_distributions: dict[str, dict[str, dict[str, int]]] = {}
+    for pass_id, decisions in (("pass_a", pass_a), ("pass_b", pass_b)):
+        by_dimension: dict[str, Counter[str]] = {}
+        for decision in decisions.values():
+            by_dimension.setdefault(decision.dimension.value, Counter())[decision.label.value] += 1
+        label_distributions[pass_id] = {
+            dimension: dict(sorted(counts.items()))
+            for dimension, counts in sorted(by_dimension.items())
+        }
     summary: dict[str, object] = {
         "status": "AWAITING_HUMAN_AUDIT",
         "metric_name": "codex_repeat_consistency",
@@ -169,6 +190,7 @@ def reconcile_codex_passes(
         "raw_agreement": agreement_count / len(consistency) if consistency else 0.0,
         "human_review_count": len(human_review_queue),
         "review_reason_counts": dict(sorted(reason_counts.items())),
+        "label_distributions": label_distributions,
         "audit_fraction": audit_fraction,
         "audit_seed": seed,
         "audit_version": "human-audit-sample-v1",

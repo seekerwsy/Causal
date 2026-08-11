@@ -9,7 +9,10 @@ import typer
 
 from secaware.commands.common import cli_action
 from secaware.commands.dataset_audit import audit_datasets_command
-from secaware.commands.dataset_adjudication import prepare_dataset_adjudication_command
+from secaware.commands.dataset_adjudication import (
+    prepare_dataset_adjudication_command,
+    reconcile_dataset_adjudication_command,
+)
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.providers import get_provider
@@ -81,6 +84,7 @@ from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
 app.command("audit-datasets")(audit_datasets_command)
 app.command("prepare-dataset-adjudication")(prepare_dataset_adjudication_command)
+app.command("reconcile-dataset-adjudication")(reconcile_dataset_adjudication_command)
 GenerationCondition = Literal["observed"]
 
 

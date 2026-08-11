@@ -46,6 +46,16 @@ def test_cli_registers_prepare_dataset_adjudication() -> None:
     assert "--run-id" in result.stdout
 
 
+def test_cli_registers_reconcile_dataset_adjudication() -> None:
+    result = runner.invoke(app, ["reconcile-dataset-adjudication", "--help"])
+
+    assert result.exit_code == 0
+    assert "--parent-run-id" in result.stdout
+    assert "--pass-a-decisions" in result.stdout
+    assert "--pass-b-decisions" in result.stdout
+    assert "--scope" in result.stdout
+
+
 def test_prepare_cli_uses_frozen_source_run_from_config(
     tmp_path: Path,
     monkeypatch,

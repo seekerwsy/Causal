@@ -216,4 +216,27 @@ def build_adjudication_packets(
     return AdjudicationPacketSet(tuple(metadata), pass_a, pass_b)
 
 
-__all__ = ["AdjudicationPacketSet", "build_adjudication_packets"]
+def subset_adjudication_packets(
+    packet_set: AdjudicationPacketSet,
+    packet_ids: set[str],
+) -> AdjudicationPacketSet:
+    available = {item.packet_id for item in packet_set.metadata}
+    unknown = packet_ids - available
+    if unknown:
+        raise ValueError("adjudication subset contains an unknown packet")
+    if not packet_ids:
+        raise ValueError("adjudication subset cannot be empty")
+    return AdjudicationPacketSet(
+        metadata=tuple(
+            item for item in packet_set.metadata if item.packet_id in packet_ids
+        ),
+        pass_a=tuple(item for item in packet_set.pass_a if item.packet_id in packet_ids),
+        pass_b=tuple(item for item in packet_set.pass_b if item.packet_id in packet_ids),
+    )
+
+
+__all__ = [
+    "AdjudicationPacketSet",
+    "build_adjudication_packets",
+    "subset_adjudication_packets",
+]
