@@ -132,6 +132,7 @@ The following incidents are retained so later stages do not repeat them:
 | Gate B micro v1 and v2 failed on the CWE-89 target arm | no candidate was admitted | the intervention model treated the embedded source prompt as an instruction to solve and returned code instead of an edited prompt | retained both failed runs and introduced the v3 inert-data boundary, exact-source-prefix requirement, and prompt-editing-only system contract |
 | Gate B micro v3 stopped on the fifth of eight planned variants | four CWE-89 variants validated; the remaining three CWE-78 variants were not sent | the source extractor labeled `task.process_launch` `ABSENT`, then labeled it `PRESENT` after a generic reminder was appended even though the source text was preserved byte-for-byte | classify this as extractor task-projection drift; future validation will keep append-only text and security-layer AllowedDelta as hard gates while reporting independently extracted task-layer drift as a diagnostic |
 | Three read-only inspection commands failed during v3 diagnosis and pre-commit checking | no artifact or project file was changed | one command used an invalid in-memory hashing overload, one contained an empty pipeline element, and one passed Windows wildcard paths directly to `rg` | replaced them with simpler metadata-only reads and `rg -g` path filtering; retained this note to avoid reusing those command forms |
+| First v4 offline replay failed before validation | no API call and no project mutation | the intervention request intentionally stores an AllowedDelta projection, not the complete `AllowedDeltaRecord` required by the validator | joined the request to the immutable Gate A variant by `exploratory_variant_id` and replayed with the complete frozen record |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
@@ -149,3 +150,9 @@ or transport errors, zero code-generation calls, one validation failure, and thr
 No automatic retry is permitted for this run. The next implementation revision must preserve v3 as
 historical evidence, emit task-projection drift explicitly, and be reviewed locally before any new
 paid micro run. This result does not authorize Gate C or a scaled experiment.
+
+The v4 implementation was then checked offline against two preserved v3 units without any provider
+call. The previously accepted CWE-89 target arm remained accepted with only
+`safety.sql_parameterization` changed. The stopped CWE-78 generic-reminder arm was accepted with
+only `safety.generic_security_reminder` counted as a validated non-task change, while
+`task.process_launch` was emitted separately as extractor drift. No v4 paid run has been started.

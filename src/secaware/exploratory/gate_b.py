@@ -165,31 +165,53 @@ def _validate_llm_delta(
     role: ArmRole,
     target_feature_id: str,
     allowed_delta: AllowedDeltaRecord,
-) -> tuple[str, ...]:
-    changed = tuple(
+) -> dict[str, object]:
+    raw_changed = tuple(
         sorted(feature_id for feature_id in source if source[feature_id] is not variant[feature_id])
     )
-    transitions = {
-        item.feature_id: (item.from_states, item.to_states)
-        for item in allowed_delta.allowed_transitions
-    }
-    for feature_id in changed:
-        expected = transitions.get(feature_id)
-        if expected != ((source[feature_id],), (variant[feature_id],)):
-            raise ValueError("exploratory Gate B AllowedDelta failed validation")
     task_ids = {
         item.feature_id
         for item in PROMPT_FEATURE_CATALOG
         if item.feature_family is FeatureFamily.TASK_FUNCTION
     }
-    if any(source[item] is not variant[item] for item in task_ids):
-        raise ValueError("exploratory Gate B task projection failed validation")
-    if any(variant[item] is not FeatureState.ABSENT for item in _SENTINELS):
-        raise ValueError("exploratory Gate B security neutrality failed validation")
+    task_projection_drift = tuple(item for item in raw_changed if item in task_ids)
+    validated_changed = tuple(item for item in raw_changed if item not in task_ids)
+    transitions = {
+        item.feature_id: (item.from_states, item.to_states)
+        for item in allowed_delta.allowed_transitions
+    }
+    allowed_delta_violations: list[str] = []
+    for feature_id in validated_changed:
+        expected = transitions.get(feature_id)
+        if expected != ((source[feature_id],), (variant[feature_id],)):
+            allowed_delta_violations.append(feature_id)
+    sentinel_violations = tuple(
+        item for item in _SENTINELS if variant[item] is not FeatureState.ABSENT
+    )
     expected_target = FeatureState.PRESENT if role is ArmRole.TARGET_PATCH else FeatureState.ABSENT
-    if variant[target_feature_id] is not expected_target:
-        raise ValueError("exploratory Gate B target variation failed validation")
-    return changed
+    target_variation_passed = variant[target_feature_id] is expected_target
+    failure_codes: list[str] = []
+    if allowed_delta_violations:
+        failure_codes.append("ALLOWED_DELTA_VIOLATION")
+    if sentinel_violations:
+        failure_codes.append("SECURITY_NEUTRALITY_VIOLATION")
+    if not target_variation_passed:
+        failure_codes.append("TARGET_VARIATION_VIOLATION")
+    return {
+        "schema_version": _SCHEMA_VERSION,
+        "status": "PASSED" if not failure_codes else "FAILED",
+        "failure_codes": failure_codes,
+        "raw_extractor_changed_feature_ids": list(raw_changed),
+        "validated_non_task_changed_feature_ids": list(validated_changed),
+        "extractor_task_projection_drift_feature_ids": list(task_projection_drift),
+        "task_projection_drift_is_diagnostic": True,
+        "allowed_delta_violation_feature_ids": allowed_delta_violations,
+        "sentinel_violation_feature_ids": list(sentinel_violations),
+        "target_feature_id": target_feature_id,
+        "expected_target_feature_state": expected_target.value,
+        "observed_target_feature_state": variant[target_feature_id].value,
+        "target_variation_passed": target_variation_passed,
+    }
 
 
 def _intervention_payload(
@@ -391,19 +413,46 @@ def run_exploratory_gate_b(
             raw_response = intervention_transport.complete(request_bytes, intervention_policy)
             text = _parse_response(raw_response, intervention_policy.max_response_bytes)
             if not text.startswith(source.prompt):
+                _write_json(
+                    output_dir / "validation" / f"{label}.json",
+                    {
+                        "schema_version": _SCHEMA_VERSION,
+                        "status": "FAILED",
+                        "failure_codes": ["SOURCE_PREFIX_VIOLATION"],
+                        "gate_a_variant_id": label,
+                        "task_id": source.task_id,
+                        "source_prefix_preserved": False,
+                    },
+                )
                 raise ValueError("exploratory Gate B source prefix failed validation")
+            suffix = text[len(source.prompt) :]
             blind_prompt = blind_variant_prompt_record_from_text(source, text, extractor_policy)
             extractor_transport.select(f"variant-{label}")
             proposal = extractor.extract(blind_prompt, extractor_policy)
             graph = build_prompt_tsg(proposal, blind_prompt)
             states = _state_map(graph)
-            changed = _validate_llm_delta(
+            validation = _validate_llm_delta(
                 source_states[source.task_id],
                 states,
                 role=role,
                 target_feature_id=str(item["target_feature_id"]),
                 allowed_delta=allowed_delta,
             )
+            validation = {
+                **validation,
+                "gate_a_variant_id": label,
+                "task_id": source.task_id,
+                "arm_role": role.value,
+                "source_prefix_preserved": True,
+                "append_only_suffix_length": len(suffix),
+                "append_only_suffix_sha256": hashlib.sha256(
+                    suffix.encode("utf-8")
+                ).hexdigest(),
+            }
+            _write_json(output_dir / "validation" / f"{label}.json", validation)
+            if validation["status"] != "PASSED":
+                codes = ",".join(str(item) for item in validation["failure_codes"])
+                raise ValueError(f"exploratory Gate B hard validation failed: {codes}")
             content = {
                 "schema_version": _SCHEMA_VERSION,
                 "gate_a_variant_id": item["variant_id"],
@@ -426,7 +475,16 @@ def run_exploratory_gate_b(
                 "extractor_policy_sha256": extractor_policy.policy_sha256,
                 "proposal_id": proposal.proposal_id,
                 "graph_sha256": graph.graph_sha256,
-                "realized_changed_feature_ids": list(changed),
+                "realized_changed_feature_ids": validation[
+                    "validated_non_task_changed_feature_ids"
+                ],
+                "raw_extractor_changed_feature_ids": validation[
+                    "raw_extractor_changed_feature_ids"
+                ],
+                "extractor_task_projection_drift_feature_ids": validation[
+                    "extractor_task_projection_drift_feature_ids"
+                ],
+                "task_projection_drift_is_diagnostic": True,
                 "target_feature_state": states[str(item["target_feature_id"])].value,
                 "generic_security_reminder_state": states[
                     "safety.generic_security_reminder"
@@ -472,6 +530,10 @@ def run_exploratory_gate_b(
             and item["generic_security_reminder_state"] == FeatureState.PRESENT.value
             for item in llm_variants
         )
+        variants_with_task_projection_drift = sum(
+            bool(item["extractor_task_projection_drift_feature_ids"])
+            for item in llm_variants
+        )
 
         write_jsonl(output_dir / "source-prompts.jsonl", selected_sources)
         write_jsonl(output_dir / "source-extraction-proposals.jsonl", source_proposals)
@@ -496,6 +558,9 @@ def run_exploratory_gate_b(
                 "assignments": len(assignments),
                 "generic_control_realized": generic_realized,
                 "generic_control_expected": len(selected_sources),
+                "variants_with_extractor_task_projection_drift": (
+                    variants_with_task_projection_drift
+                ),
                 "errors": 0,
                 "pending": 0,
             },

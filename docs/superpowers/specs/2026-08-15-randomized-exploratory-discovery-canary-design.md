@@ -159,7 +159,12 @@ family before exploratory outcomes are produced at scale.
 - render one locked LLM candidate per arm with no semantic retry;
 - preserve every raw response in a new run directory;
 - blindly re-extract all exact candidate texts with the run-locked Prompt extractor;
-- verify task projection invariance, allowed safety/presentation deltas, and target-state variation;
+- require the source prompt to remain byte-for-byte as the candidate prefix and permit append-only
+  intervention text;
+- verify allowed safety/presentation deltas and target-state variation as hard graph gates;
+- record task-projection differences between independent source and variant extractions as extractor
+  drift diagnostics rather than hard semantic failures, because the append-only boundary preserves
+  the original task text and the v3 micro run demonstrated a source-side false negative;
 - stop before generation if any hard invariant fails.
 
 ### Gate C: bounded real outcome canary
