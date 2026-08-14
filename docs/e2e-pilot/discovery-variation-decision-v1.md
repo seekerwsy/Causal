@@ -128,6 +128,24 @@ The following incidents are retained so later stages do not repeat them:
 | First eight-task stability run produced only 4/8 valid proposals | all eight diagnostic responses were preserved; no formal TSG publication | the LLM confused ABSENT with NOT_APPLICABLE across twenty catalog features | the deterministic FeatureSpec layer now projects only applicable features and fills NOT_APPLICABLE after validation; the next independent run passed 8/8 |
 | First v3 launcher invocation failed before execution | no API request and no run directory | a PowerShell expression supplied `-LiteralPath` twice without grouping | split the expression into two grouped `Test-Path` calls, parsed the script, and completed the formal run |
 | Ruff was unavailable in the fixed Python 3.12 environment | no runtime or test failure | the environment intentionally lacks that optional development command | did not mutate the environment mid-run; used `py_compile`, `git diff --check`, and targeted/adjacent pytest gates |
+| Gate B micro v1 rejected its first generic-reminder arm | the run stopped before target-arm feasibility could be measured | the validator incorrectly required the generic reminder to be recognized as `PRESENT`, although this control is a diagnostic rather than the target mechanism | retained the failed run and made generic-reminder realization diagnostic while preserving AllowedDelta and target-state hard gates |
+| Gate B micro v1 and v2 failed on the CWE-89 target arm | no candidate was admitted | the intervention model treated the embedded source prompt as an instruction to solve and returned code instead of an edited prompt | retained both failed runs and introduced the v3 inert-data boundary, exact-source-prefix requirement, and prompt-editing-only system contract |
+| Gate B micro v3 stopped on the fifth of eight planned variants | four CWE-89 variants validated; the remaining three CWE-78 variants were not sent | the source extractor labeled `task.process_launch` `ABSENT`, then labeled it `PRESENT` after a generic reminder was appended even though the source text was preserved byte-for-byte | classify this as extractor task-projection drift; future validation will keep append-only text and security-layer AllowedDelta as hard gates while reporting independently extracted task-layer drift as a diagnostic |
+| Three read-only inspection commands failed during v3 diagnosis and pre-commit checking | no artifact or project file was changed | one command used an invalid in-memory hashing overload, one contained an empty pipeline element, and one passed Windows wildcard paths directly to `rg` | replaced them with simpler metadata-only reads and `rg -g` path filtering; retained this note to avoid reusing those command forms |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
+
+## Gate B micro v3 status
+
+The preserved run is
+`runs/e2e-pilot/randomized-exploratory-gate-b-micro-v3-20260815-01`. It made twelve
+successful provider calls: two source extractions, five prompt interventions, and five blind variant
+extractions. Four complete CWE-89 arm units passed. The fifth unit, the CWE-78 generic-reminder
+control, passed the exact-source-prefix boundary and realized the generic security reminder, but was
+rejected because the independent extractor changed a task-feature state. There were zero provider
+or transport errors, zero code-generation calls, one validation failure, and three variants not run.
+
+No automatic retry is permitted for this run. The next implementation revision must preserve v3 as
+historical evidence, emit task-projection drift explicitly, and be reviewed locally before any new
+paid micro run. This result does not authorize Gate C or a scaled experiment.
