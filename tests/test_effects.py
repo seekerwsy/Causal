@@ -24,6 +24,7 @@ from secaware.schema.outcomes import (
     AssignmentOutcomeRecord,
     CWESecurityOutcome,
     EffectBootstrapDrawRecord,
+    FunctionalOutcomeStatus,
 )
 
 
@@ -71,6 +72,31 @@ def _row(protocol, task_id: str, arm: ArmRole) -> AssignmentOutcomeRecord:
         semantic_compliance=True,
         source_digests_sha256=_sha(assignment, "sources"),
     )
+
+
+def test_program_functional_unknown_expands_primary_itt_sensitivity_bounds() -> None:
+    protocol = request(FeatureFamily.SAFETY_CONTROL, FeatureOperation.ADD).protocol
+    rows = list(_rows(protocol, ("task-a", "task-b")))
+    target_index = next(
+        index for index, row in enumerate(rows) if row.arm_role is ArmRole.TARGET_PATCH
+    )
+    payload = rows[target_index].model_dump(mode="python", exclude={"outcome_id", "schema_version"})
+    payload.update(
+        secure_functional_success=0,
+        functional_ok=False,
+        functional_outcome_status=FunctionalOutcomeStatus.UNKNOWN,
+    )
+    rows[target_index] = AssignmentOutcomeRecord.from_content(**payload)
+
+    effect = next(
+        item
+        for item in calculate_itt(
+            rows, _config(samples=4, min_tasks=2), protocols=(protocol,)
+        ).effects
+        if item.contrast_id == "safety_add.target_minus_noop.y_secure_functional"
+    )
+
+    assert effect.sensitivity_low < effect.sensitivity_high
 
 
 def _rows(protocol, tasks: tuple[str, ...]) -> tuple[AssignmentOutcomeRecord, ...]:

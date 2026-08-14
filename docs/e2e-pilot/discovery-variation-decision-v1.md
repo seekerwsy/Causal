@@ -1,0 +1,133 @@
+# Discovery variation decision v1
+
+## Decision status
+
+As of 2026-08-14, scaling Prompt extraction over the existing natural Python pool is not
+approved. This is a design limitation in the available prompt distribution, not a shortage of raw
+records and not a reason to relax FCI, G-square, provenance, or hypothesis-freeze gates.
+
+## Evidence produced in this stage
+
+The initial CyberSecEval v2 discovery pool contained 48 independent candidates across CWE-78 and
+CWE-89. The deterministic catalog yielded no usable marginal variation. An eight-task,
+outcome-blind LLM-facts canary was then frozen and audited before scale-up.
+
+The LLM-facts protocol was revised only at the extraction trust boundary:
+
+1. the deterministic FeatureSpec catalog projects the feature IDs applicable to the prompt's CWE
+   and task family;
+2. the LLM returns one PRESENT/ABSENT fact for every projected feature and an exact unique quote
+   for every PRESENT fact;
+3. the validator derives offsets and SHA-256 digests locally and rejects missing, extra,
+   duplicated, fabricated, or non-unique evidence;
+4. the deterministic catalog adds NOT_APPLICABLE facts for the remaining closed-world features;
+5. the existing proposal validator and Prompt-TSG builder remain the publication boundary.
+
+The first protocol stability run produced 4/8 valid responses. After applicability projection, the
+second independent run produced 8/8 valid responses, with no provider errors and no retries. The
+formal atomic stage then committed eight proposals and eight Prompt-TSGs under one extractor-policy
+digest.
+
+Against a frozen outcome-blind semantic audit, target-task recall was 2/8 for the deterministic
+catalog and 7/8 for the LLM facts extractor. Both extractors correctly kept all eight scoped safety
+features ABSENT. One LLM false negative concerned a `ps` command task that still requires process
+launch. Therefore the apparent within-CWE target variation was not accepted as real variation.
+
+The natural-variation audit was then broadened to deduplicated, independent, Python,
+candidate-neutral records from CyberSecEval, CWEval, SALLM, and SecurityEval. The exact-duplicate
+`cyberseceval_secure_code` source was excluded. Results were:
+
+| Scope | Independent tasks | Safety-feature PRESENT | Broad phrase candidates |
+|---|---:|---:|---:|
+| CWE-78 / CWE-89 | 87 | 0 | 0 |
+| CWE-20 / CWE-22 / CWE-502 | 59 | 0 | 0 |
+| Total | 146 | 0 | 0 |
+
+The CWE-78/89 audit was replayed after the script was generalized; its feature-row artifact was
+byte-identical to the original. All audit runs saved their configuration, command, environment,
+selection, exclusion, proposal, TSG, feature-row, distribution, and report artifacts in separate
+directories.
+
+## Why the current observational discovery cannot simply proceed
+
+Within each CWE scope, the safety-control variable is constant ABSENT. Adding more records from the
+same distribution does not make a constant column identifiable. Laplace smoothing, a different CI
+test, FDR correction, or a larger bootstrap budget cannot manufacture treatment variation.
+Cross-CWE pooling would turn NOT_APPLICABLE states and task-family differences into structural
+confounding and is therefore not an acceptable shortcut.
+
+The existing JCI implementation is also not an escape hatch. It consumes the already frozen
+confirmation experiment and is explicitly secondary. It cannot select, alter, or replace frozen
+hypotheses or the primary randomized ITT analysis.
+
+## External dataset classification
+
+The following classification is based on public primary project documentation inspected on
+2026-08-14.
+
+| Dataset | Relevant asset | Recommended SecAware role | Main incompatibility with primary discovery |
+|---|---|---|---|
+| CyberSecEval Instruct v2 | cleaned natural secure-code-generation instructions | Python baseline, Oracle calibration, confirm task source | no prompt-side safety-control arms |
+| SecCodeBench | 98 project tasks, including 13 Python, in native/security-aware generation and fix modes | small external confirmation or replication; functional/PoC oracle reference | too few Python tasks per CWE; modes are designed interventions |
+| SecRepoBench | 318 C/C++ repository tasks and four prompt types | future C/C++ four-arm external replication | requires repository build, unit-test, and PoC execution infrastructure |
+| CodeGuard+ | 91 Python/C/C++ prompts with unit tests and CodeQL queries | functional-contract and Oracle calibration candidate | perturbed prompt set is publicly marked pending |
+| ICSE 2026 THEA evaluation | CyberSecEval over 30 vulnerability types | comparison of evaluation breadth and intervention reporting | model-execution intervention, not prompt-feature variation |
+
+Primary source URLs:
+
+- https://github.com/meta-llama/PurpleLlama/blob/main/CybersecurityBenchmarks/README.md
+- https://github.com/alibaba/sec-code-bench
+- https://github.com/ai-sec-lab/SecRepoBench
+- https://github.com/CodeGuardPlus/CodeGuardPlus
+- https://conf.researchr.org/details/icse-2026/icse-2026-research-track/168/Repairing-LLM-Executions-for-Secure-Automatic-Programming
+
+## Method decision
+
+On 2026-08-15 the randomized exploratory-discovery path was approved for a bounded engineering
+canary. This is not yet approval to replace the primary discovery design or run a scaled
+experiment. The frozen canary boundaries and ordered gates are specified in
+`docs/superpowers/specs/2026-08-15-randomized-exploratory-discovery-canary-design.md`.
+
+Two defensible paths remain.
+
+### Recommended: add a preregistered exploratory randomized-discovery phase
+
+Keep the existing observational FCI run as a baseline and availability diagnostic. On a dedicated
+discovery pool, randomize outcome-blind prompt variants that add or remove one finite FeatureSpec,
+plus the relevant controls. Represent randomized assignment as a discovery-context variable and run
+a separately labeled constrained structural analysis. Freeze candidates using only this discovery
+pool. Keep the held-out four-arm confirmation pool and task-clustered ITT unchanged.
+
+This requires an explicit specification change because the current JCI stage is confirm-only and
+must not select hypotheses. The new stage must have separate artifacts, assumptions, multiplicity
+budget, and train/discovery/confirmation boundaries. It must not reuse confirmation outcomes or
+silently call randomized discovery "observational FCI."
+
+### Conservative fallback: make discovery descriptive and confirmation preregistered
+
+Retain observational FCI as a diagnostic that may legitimately yield no hypotheses. Pre-register a
+small finite set of theory/catalog-driven FeatureSpecs and test them only in held-out randomized
+confirmation. This preserves the current pipeline boundary but weakens the paper's claim from
+data-driven causal discovery to graph-constrained hypothesis operationalization and randomized
+confirmation.
+
+The approval authorizes paid calls only for the bounded canary after its zero-provider gate passes.
+It does not authorize additional paid extraction over the full 146-task natural pool or a scaled
+randomized-discovery run.
+
+## Execution incident log
+
+The following incidents are retained so later stages do not repeat them:
+
+| Incident | Impact | Root cause | Resolution |
+|---|---|---|---|
+| Initial read-only commands were denied by the Windows sandbox | no project mutation and no API call | child-process launch permission | reran the same scoped read checks through the approved project path |
+| Two extractor-contract tests failed after `enable_thinking` was added | 67/69 tests passed on the first targeted run | exact-field assertions retained the old configuration contract | added `enable_thinking` to both contract assertions; the next targeted run passed 69/69 |
+| First LLM-facts production attempt failed on its first response | zero proposals published; seven requests were not sent | the prompt omitted exact evidence keys and prompt context, and incorrectly asked the LLM to compute SHA-256 | kept the failed v1 run; added an isolated raw-response diagnostic; made the validator derive the digest |
+| Second isolated response failed | no formal artifact published | the model miscounted Unicode character offsets | changed model evidence to a unique exact quote; the validator derives offsets and the digest |
+| First eight-task stability run produced only 4/8 valid proposals | all eight diagnostic responses were preserved; no formal TSG publication | the LLM confused ABSENT with NOT_APPLICABLE across twenty catalog features | the deterministic FeatureSpec layer now projects only applicable features and fills NOT_APPLICABLE after validation; the next independent run passed 8/8 |
+| First v3 launcher invocation failed before execution | no API request and no run directory | a PowerShell expression supplied `-LiteralPath` twice without grouping | split the expression into two grouped `Test-Path` calls, parsed the script, and completed the formal run |
+| Ruff was unavailable in the fixed Python 3.12 environment | no runtime or test failure | the environment intentionally lacks that optional development command | did not mutate the environment mid-run; used `py_compile`, `git diff --check`, and targeted/adjacent pytest gates |
+
+All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
+No historical artifact was forced, edited in place, or deleted.

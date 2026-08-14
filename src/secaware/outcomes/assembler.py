@@ -8,6 +8,11 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.functional_judge.schema import (
+    ProgramFunctionalOutcomeRecord,
+    TaskFunctionalContractRecord,
+)
+from secaware.functional_judge.validation import validate_program_functional_outcomes
 from secaware.outcomes.functional import validate_functional_outcomes
 from secaware.pipeline.artifact import canonical_sha256
 from secaware.schema.common import model_shape_is_intact
@@ -25,6 +30,7 @@ from secaware.schema.outcomes import (
     AssignmentOutcomeRecord,
     CWESecurityOutcome,
     FunctionalOutcomeRecord,
+    FunctionalOutcomeStatus,
 )
 
 
@@ -106,6 +112,8 @@ def _source_digest(
     protocol: ConfirmationProtocolRecord | None,
     contract: FunctionalOutcomeContractRecord | None,
     functional: FunctionalOutcomeRecord | None,
+    task_contract: TaskFunctionalContractRecord | None,
+    program_functional: ProgramFunctionalOutcomeRecord | None,
 ) -> str:
     digests = {
         "assignment_record": _record_sha256(assignment),
@@ -123,6 +131,10 @@ def _source_digest(
         digests["functional_contract_record"] = _record_sha256(contract)
     if functional is not None:
         digests["functional_outcome_record"] = _record_sha256(functional)
+    if task_contract is not None:
+        digests["task_functional_contract_record"] = _record_sha256(task_contract)
+    if program_functional is not None:
+        digests["program_functional_outcome_record"] = _record_sha256(program_functional)
     return canonical_sha256({key: digests[key] for key in sorted(digests)})
 
 
@@ -135,6 +147,9 @@ def assemble_assignment_outcomes(
     protocols: Iterable[ConfirmationProtocolRecord] = (),
     functional_contracts: Iterable[FunctionalOutcomeContractRecord] = (),
     functional_outcomes: Iterable[FunctionalOutcomeRecord] = (),
+    task_functional_contracts: Iterable[TaskFunctionalContractRecord] = (),
+    program_functional_outcomes: Iterable[ProgramFunctionalOutcomeRecord] = (),
+    program_functional_policy_sha256: str | None = None,
 ) -> tuple[AssignmentOutcomeRecord, ...]:
     """Join exact producer relations without filtering randomized ITT rows."""
 
@@ -145,6 +160,8 @@ def assemble_assignment_outcomes(
     trusted_protocols: tuple[ConfirmationProtocolRecord, ...] = ()
     trusted_contracts: tuple[FunctionalOutcomeContractRecord, ...] = ()
     trusted_functional: tuple[FunctionalOutcomeRecord, ...] = ()
+    trusted_task_contracts: tuple[TaskFunctionalContractRecord, ...] = ()
+    trusted_program_functional: tuple[ProgramFunctionalOutcomeRecord, ...] = ()
     rows: list[AssignmentOutcomeRecord] = []
     result: tuple[AssignmentOutcomeRecord, ...] = ()
     failed = False
@@ -156,6 +173,12 @@ def assemble_assignment_outcomes(
         trusted_protocols = _trusted_tuple(protocols, ConfirmationProtocolRecord)
         trusted_contracts = _trusted_tuple(functional_contracts, FunctionalOutcomeContractRecord)
         trusted_functional = _trusted_tuple(functional_outcomes, FunctionalOutcomeRecord)
+        trusted_task_contracts = _trusted_tuple(
+            task_functional_contracts, TaskFunctionalContractRecord
+        )
+        trusted_program_functional = _trusted_tuple(
+            program_functional_outcomes, ProgramFunctionalOutcomeRecord
+        )
         if not trusted_assignments:
             raise ValueError
 
@@ -165,6 +188,8 @@ def assemble_assignment_outcomes(
         protocol_by_id = _unique(trusted_protocols, "arm_protocol_id")
         contract_by_id = _unique(trusted_contracts, "contract_id")
         functional_by_assignment = _unique(trusted_functional, "assignment_id")
+        task_contract_by_task = _unique(trusted_task_contracts, "task_id")
+        program_functional_by_assignment = _unique(trusted_program_functional, "assignment_id")
         delta_by_key: dict[tuple[object, ...], GraphDeltaRecord] = {}
         for delta in trusted_deltas:
             key = _delta_key(delta)
@@ -200,6 +225,22 @@ def assemble_assignment_outcomes(
             functional_by_assignment[key] for key in sorted(functional_by_assignment)
         ):
             raise ValueError
+        if trusted_task_contracts or trusted_program_functional:
+            if program_functional_policy_sha256 is None:
+                raise ValueError
+            validated_program_functional = validate_program_functional_outcomes(
+                trusted_assignments,
+                trusted_task_contracts,
+                trusted_program_functional,
+                evaluator_policy_sha256=program_functional_policy_sha256,
+            )
+            if validated_program_functional != tuple(
+                program_functional_by_assignment[key]
+                for key in sorted(program_functional_by_assignment)
+            ):
+                raise ValueError
+        elif program_functional_policy_sha256 is not None:
+            raise ValueError
 
         for assignment_id in sorted(assignment_by_id):
             assignment = assignment_by_id[assignment_id]
@@ -212,6 +253,8 @@ def assemble_assignment_outcomes(
             contract = (
                 contract_by_id.get(functional.contract_id) if functional is not None else None
             )
+            task_contract = task_contract_by_task.get(unit.task_id)
+            program_functional = program_functional_by_assignment.get(assignment_id)
             if execution.status is AssignmentExecutionStatus.GENERATED:
                 if oracle is None:
                     raise ValueError
@@ -235,7 +278,14 @@ def assemble_assignment_outcomes(
                 cwe_outcome = CWESecurityOutcome(oracle.security_label.value)
                 evaluability = AssignmentEvaluability(oracle.evaluability.value)
                 parse_ok = oracle.parse_ok
-                functional_ok = oracle.functional_ok
+                functional_status = (
+                    program_functional.status if program_functional is not None else None
+                )
+                functional_ok = (
+                    functional_status is FunctionalOutcomeStatus.PASS
+                    if functional_status is not None
+                    else oracle.functional_ok
+                )
                 primary = int(
                     parse_ok
                     and functional_ok
@@ -249,6 +299,9 @@ def assemble_assignment_outcomes(
                 evaluability = AssignmentEvaluability.NOT_REQUIRED_NO_CODE
                 parse_ok = False
                 functional_ok = False
+                functional_status = (
+                    program_functional.status if program_functional is not None else None
+                )
                 primary = 0
             rows.append(
                 AssignmentOutcomeRecord.from_content(
@@ -269,6 +322,7 @@ def assemble_assignment_outcomes(
                     oracle_evaluability=evaluability,
                     parse_ok=parse_ok,
                     functional_ok=functional_ok,
+                    functional_outcome_status=functional_status,
                     target_changed=delta.target_changed,
                     semantic_compliance=delta.semantic_compliance,
                     source_digests_sha256=_source_digest(
@@ -279,6 +333,8 @@ def assemble_assignment_outcomes(
                         protocol,
                         contract,
                         functional,
+                        task_contract,
+                        program_functional,
                     ),
                 )
             )
@@ -295,6 +351,9 @@ def assemble_assignment_outcomes(
         protocols = ()
         functional_contracts = ()
         functional_outcomes = ()
+        task_functional_contracts = ()
+        program_functional_outcomes = ()
+        program_functional_policy_sha256 = None
         trusted_assignments = ()
         trusted_executions = ()
         trusted_oracles = ()
@@ -302,6 +361,8 @@ def assemble_assignment_outcomes(
         trusted_protocols = ()
         trusted_contracts = ()
         trusted_functional = ()
+        trusted_task_contracts = ()
+        trusted_program_functional = ()
         rows.clear()
         assignment_by_id = {}
         execution_by_assignment = {}
@@ -309,10 +370,13 @@ def assemble_assignment_outcomes(
         protocol_by_id = {}
         contract_by_id = {}
         functional_by_assignment = {}
+        task_contract_by_task = {}
+        program_functional_by_assignment = {}
         delta_by_key = {}
         expected_delta_keys = set()
         generated = set()
         validated_functional = ()
+        validated_program_functional = ()
         assignment = None
         execution = None
         oracle = None
@@ -321,6 +385,9 @@ def assemble_assignment_outcomes(
         protocol = None
         contract = None
         functional = None
+        task_contract = None
+        program_functional = None
+        functional_status = None
         oracle_coordinates = ()
     if failed:
         raise _error() from None

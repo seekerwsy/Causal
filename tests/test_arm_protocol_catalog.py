@@ -923,6 +923,7 @@ def test_arm_catalog_is_finite_and_exposes_no_runtime_registration_hook() -> Non
         "CONFIRMATION_TARGET_FEATURE_IDS",
         "is_confirmation_target_feature",
         "materialize_arm_protocol",
+        "materialize_safety_arm_specs",
         "revalidate_arm_protocol",
         "target_feature_from_protocol",
     }

@@ -7,6 +7,7 @@ data:
   prompts_path: data/examples/prompts_demo.jsonl
   prompt_attestations_path: data/examples/prompt_attestations_demo.jsonl
   functional_outcome_contracts_path: null
+  task_functional_contracts_path: null
 
 tsg:
   prompt_extractor: llm_facts_v1
@@ -94,6 +95,30 @@ oracle:
   timeout_seconds: 120.0
   max_stdout_bytes: 67108864
   max_stderr_bytes: 4194304
+
+# Frozen Ali Bailian functional evaluator. The credential is supplied only through
+# ALI_BAILIAN_API_KEY and must never be written to configuration or artifacts.
+functional_judge:
+  # Coordinates are frozen here, but execution is enabled only in a derived experiment
+  # config whose task contract bundle exactly covers its randomized assignments.
+  enabled: false
+  # One blind validated judgment is the primary functional analysis. A separately
+  # versioned two-pass config is retained for sensitivity analysis only.
+  mode: single_pass
+  llm:
+    provider: openai_compatible
+    model_id: qwen3.5-flash-2026-02-23
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: ALI_BAILIAN_API_KEY
+    timeout_seconds: 60.0
+    max_attempts: 3
+    max_response_bytes: 65536
+    temperature: 0.0
+    top_p: 1.0
+    seed: null
+    enable_thinking: false
+  pass_seeds:
+    - 73001
 
 analysis:
   bootstrap_samples: 1000

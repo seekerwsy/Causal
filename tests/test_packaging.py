@@ -21,6 +21,10 @@ from secaware.extractors.llm_facts import (
     LLM_FACTS_SYSTEM_TEMPLATE,
     LLM_FACTS_SYSTEM_TEMPLATE_SHA256,
 )
+from secaware.functional_judge.judge import (
+    FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE,
+    FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -132,10 +136,13 @@ import importlib.resources
 import json
 
 from secaware.extractors import llm_direct_graph, llm_facts
+from secaware.functional_judge import judge
 
 package = importlib.resources.files("secaware.extractors")
 facts = package.joinpath("prompts/llm_facts_v1.txt").read_bytes()
 direct = package.joinpath("prompts/llm_direct_graph_v1.txt").read_bytes()
+judge_package = importlib.resources.files("secaware.functional_judge")
+judge_prompt = judge_package.joinpath("prompts/functional_judge_v1.txt").read_bytes()
 print(json.dumps({
     "facts_digest": hashlib.sha256(facts).hexdigest(),
     "facts_constant": llm_facts.LLM_FACTS_SYSTEM_TEMPLATE_SHA256,
@@ -149,6 +156,12 @@ print(json.dumps({
         llm_direct_graph.LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE.encode("utf-8")
     ).hexdigest(),
     "direct_module": llm_direct_graph.__file__,
+    "judge_digest": hashlib.sha256(judge_prompt).hexdigest(),
+    "judge_constant": judge.FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256,
+    "judge_loader_digest": hashlib.sha256(
+        judge.FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE.encode("utf-8")
+    ).hexdigest(),
+    "judge_module": judge.__file__,
 }, sort_keys=True))
 """
     result = subprocess.run(
@@ -164,6 +177,7 @@ print(json.dumps({
     payload = json.loads(result.stdout)
     assert ".whl" in payload["facts_module"]
     assert ".whl" in payload["direct_module"]
+    assert ".whl" in payload["judge_module"]
     assert {
         payload["facts_digest"],
         payload["facts_constant"],
@@ -174,6 +188,11 @@ print(json.dumps({
         payload["direct_constant"],
         payload["direct_loader_digest"],
     } == {LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE_SHA256}
+    assert {
+        payload["judge_digest"],
+        payload["judge_constant"],
+        payload["judge_loader_digest"],
+    } == {FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256}
 
 
 _SECRET_ASSIGNMENT = re.compile(
@@ -382,6 +401,7 @@ def test_built_wheel_contains_templates_and_all_breaking_migrations(
             for member in (
                 "secaware/extractors/prompts/llm_facts_v1.txt",
                 "secaware/extractors/prompts/llm_direct_graph_v1.txt",
+                "secaware/functional_judge/prompts/functional_judge_v1.txt",
             )
         }
         packaged_migrations = {}
@@ -402,6 +422,10 @@ def test_built_wheel_contains_templates_and_all_breaking_migrations(
         "secaware/extractors/prompts/llm_direct_graph_v1.txt": (
             LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE.encode("utf-8"),
             LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE_SHA256,
+        ),
+        "secaware/functional_judge/prompts/functional_judge_v1.txt": (
+            FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE.encode("utf-8"),
+            FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256,
         ),
     }
     for member, payload in packaged.items():
@@ -424,6 +448,7 @@ def test_package_and_config_examples_contain_no_embedded_secrets() -> None:
         *(PROJECT_ROOT / migration for migration in MIGRATION_FILES),
         *(PROJECT_ROOT / "configs").glob("*.yaml"),
         *(PROJECT_ROOT / "src" / "secaware" / "extractors" / "prompts").glob("*.txt"),
+        *(PROJECT_ROOT / "src" / "secaware" / "functional_judge" / "prompts").glob("*.txt"),
     )
     violations = {
         path.relative_to(PROJECT_ROOT): tuple(_embedded_secret_violations(text))

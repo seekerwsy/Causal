@@ -19,6 +19,7 @@ from secaware.config import (
     AppConfig,
     AnalysisConfig,
     FCIDiscoveryConfig,
+    FunctionalJudgeConfig,
     GenerationConfig,
     InterventionConfig,
     OracleConfig,
@@ -57,6 +58,11 @@ from secaware.schema.outcomes import (
     RFCICapabilityRecord,
 )
 from secaware.schema.records import CanonicalGeneratedCodeRecord, PromptRecord
+from secaware.functional_judge.schema import (
+    FunctionalJudgePassRecord,
+    ProgramFunctionalOutcomeRecord,
+    TaskFunctionalContractRecord,
+)
 from secaware.schema.experiments import (
     AllowedDeltaRecord,
     AssignmentRecord,
@@ -88,6 +94,7 @@ _RANDOMIZATION_STAGE = "randomize-confirmation"
 _CONFIRMATION_GENERATION_STAGE = "generate-confirmation"
 _CONFIRMATION_ORACLE_STAGE = "run-oracle-confirmation"
 _FUNCTIONAL_OUTCOME_IMPORT_STAGE = "import-functional-outcomes"
+_FUNCTIONAL_JUDGE_STAGE = "judge-functionality"
 _EFFECT_STAGE = "estimate-confirmation-effects"
 _JCI_STAGE = "jci-confirmation"
 _RFCI_STAGE = "rfci-confirmation"
@@ -98,6 +105,7 @@ CONFIRMATION_STAGE_ORDER = (
     "randomize-confirmation",
     "generate-confirmation",
     "run-oracle-confirmation",
+    _FUNCTIONAL_JUDGE_STAGE,
     _FUNCTIONAL_OUTCOME_IMPORT_STAGE,
     _EFFECT_STAGE,
     "jci-confirmation",
@@ -110,6 +118,7 @@ _CONFIRMATION_STAGE_MANIFEST_FAMILIES = (
     ("randomize-confirmation",),
     ("generate-confirmation",),
     ("run-oracle-confirmation",),
+    (_FUNCTIONAL_JUDGE_STAGE,),
     (_FUNCTIONAL_OUTCOME_IMPORT_STAGE,),
     (_EFFECT_STAGE,),
     ("analyze-jci", "jci", "jci-analysis", "jci-confirmation"),
@@ -404,6 +413,8 @@ def functional_outcome_import_stage_contract_payload() -> dict[str, object]:
         "protocol_schema": _schema_sha256(ConfirmationProtocolRecord),
         "functional_contract_schema": _schema_sha256(FunctionalOutcomeContractRecord),
         "functional_outcome_schema": _schema_sha256(FunctionalOutcomeRecord),
+        "task_functional_contract_schema": _schema_sha256(TaskFunctionalContractRecord),
+        "program_functional_outcome_schema": _schema_sha256(ProgramFunctionalOutcomeRecord),
         "producer_manifest_schema": _schema_sha256(StageManifest),
         "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
         "confirmation_stage_manifest_families": [
@@ -417,6 +428,28 @@ def functional_outcome_import_stage_contract_sha256(stage: str) -> str | None:
     if stage != _FUNCTIONAL_OUTCOME_IMPORT_STAGE:
         return None
     return canonical_sha256(functional_outcome_import_stage_contract_payload())
+
+
+def functional_judge_stage_contract_payload() -> dict[str, object]:
+    return {
+        "stage": _FUNCTIONAL_JUDGE_STAGE,
+        "contract_version": "blind-program-functional-judge-v1",
+        "app_config_schema": _schema_sha256(AppConfig),
+        "functional_judge_config_schema": _schema_sha256(FunctionalJudgeConfig),
+        "assignment_schema": _schema_sha256(AssignmentRecord),
+        "execution_schema": _schema_sha256(AssignmentExecutionRecord),
+        "code_schema": _schema_sha256(CanonicalGeneratedCodeRecord),
+        "task_contract_schema": _schema_sha256(TaskFunctionalContractRecord),
+        "judge_pass_schema": _schema_sha256(FunctionalJudgePassRecord),
+        "program_outcome_schema": _schema_sha256(ProgramFunctionalOutcomeRecord),
+        "confirmation_stage_order": list(CONFIRMATION_STAGE_ORDER),
+    }
+
+
+def functional_judge_stage_contract_sha256(stage: str) -> str | None:
+    if stage != _FUNCTIONAL_JUDGE_STAGE:
+        return None
+    return canonical_sha256(functional_judge_stage_contract_payload())
 
 
 def effect_stage_contract_payload() -> dict[str, object]:
@@ -596,6 +629,8 @@ __all__ = [
     "confirmation_oracle_stage_contract_sha256",
     "functional_outcome_import_stage_contract_payload",
     "functional_outcome_import_stage_contract_sha256",
+    "functional_judge_stage_contract_payload",
+    "functional_judge_stage_contract_sha256",
     "jci_stage_contract_payload",
     "jci_stage_contract_sha256",
     "rfci_stage_contract_payload",

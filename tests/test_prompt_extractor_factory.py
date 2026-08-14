@@ -80,6 +80,7 @@ def test_prompt_extractor_llm_config_is_the_exact_strict_contract() -> None:
         "temperature",
         "top_p",
         "seed",
+        "enable_thinking",
     }
     config = PromptExtractorLLMConfig.model_validate(_llm_payload())
     assert config.provider == "openai_compatible"
@@ -217,6 +218,7 @@ def test_facts_and_direct_backends_select_distinct_template_and_schema_policies(
         "timeout_seconds",
         "max_attempts",
         "max_response_bytes",
+        "enable_thinking",
     }
 
 

@@ -182,6 +182,7 @@ def test_assignment_only_no_code_state_does_not_expand_oracle_evaluability() -> 
     assert {item.value for item in OracleEvaluability} == {
         "evaluable",
         "unknown_parse_failure",
+        "unknown_coverage",
     }
     payload = _canonical_oracle_payload(security_label="secure")
     payload.update(

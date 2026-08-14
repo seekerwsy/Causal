@@ -1414,12 +1414,14 @@ def validate_oracle_code_analyses(
                 if not analysis.parse_ok
                 else SecurityLabel.INSECURE
                 if findings
-                else SecurityLabel.SECURE
+                else SecurityLabel.UNKNOWN
             )
             expected_evaluability = (
                 OracleEvaluability.UNKNOWN_PARSE_FAILURE
                 if not analysis.parse_ok
                 else OracleEvaluability.EVALUABLE
+                if findings
+                else OracleEvaluability.UNKNOWN_COVERAGE
             )
             if (
                 (not analysis.parse_ok and findings)
@@ -1522,12 +1524,14 @@ def _aggregate(
                         if not code.parse_ok
                         else SecurityLabel.INSECURE
                         if canonical_findings
-                        else SecurityLabel.SECURE
+                        else SecurityLabel.UNKNOWN
                     ),
                     evaluability=(
                         OracleEvaluability.UNKNOWN_PARSE_FAILURE
                         if not code.parse_ok
                         else OracleEvaluability.EVALUABLE
+                        if canonical_findings
+                        else OracleEvaluability.UNKNOWN_COVERAGE
                     ),
                     severity=severity,
                     findings=canonical_findings,
@@ -1608,12 +1612,14 @@ def _aggregate_code_analyses(
                         if not validated.parse_ok
                         else SecurityLabel.INSECURE
                         if canonical_findings
-                        else SecurityLabel.SECURE
+                        else SecurityLabel.UNKNOWN
                     ),
                     evaluability=(
                         OracleEvaluability.UNKNOWN_PARSE_FAILURE
                         if not validated.parse_ok
                         else OracleEvaluability.EVALUABLE
+                        if canonical_findings
+                        else OracleEvaluability.UNKNOWN_COVERAGE
                     ),
                     severity=severity,
                     findings=canonical_findings,

@@ -37,6 +37,7 @@ class SecurityLabel(str, Enum):
 class OracleEvaluability(str, Enum):
     EVALUABLE = "evaluable"
     UNKNOWN_PARSE_FAILURE = "unknown_parse_failure"
+    UNKNOWN_COVERAGE = "unknown_coverage"
 
 
 class AnalyzerFindingRecord(SafeValidationMixin, VersionedModel):
@@ -131,16 +132,20 @@ def _snapshot_analyzers(value: object) -> tuple[AnalyzerProvenanceRecord, ...]:
     return tuple(snapshots)
 
 
-def _is_completed_parse_failure(record: "OracleRecord") -> bool:
-    """Keep assignment-only terminal states outside the M4B Oracle contract."""
+def _is_completed_unknown(record: "OracleRecord") -> bool:
+    """Authenticate conservative terminal states without inventing secure labels."""
 
     return (
-        record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
-        and not record.parse_ok
-        and not record.functional_ok
-        and record.severity == "none"
-        and not record.findings
-    )
+        (
+            record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+            and not record.parse_ok
+            and not record.functional_ok
+        )
+        or (
+            record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE
+            and record.parse_ok
+        )
+    ) and record.severity == "none" and not record.findings
 
 
 class OracleRecord(SafeValidationMixin, VersionedModel):
@@ -317,7 +322,7 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
             raise ValueError(_INVALID_ORACLE_MESSAGE)
 
         if self.security_label is SecurityLabel.UNKNOWN:
-            if not _is_completed_parse_failure(self):
+            if not _is_completed_unknown(self):
                 raise ValueError(_INVALID_ORACLE_MESSAGE)
             return self
         if self.evaluability is not OracleEvaluability.EVALUABLE or not self.parse_ok:

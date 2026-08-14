@@ -1,0 +1,9 @@
+#!/home/wsy/secaware-environments/server-smoke-py312-20260812-02/bin/python
+import sys
+
+from semgrep.console_scripts.entrypoint import main
+
+
+if __name__ == "__main__":
+    sys.argv[0] = "semgrep"
+    raise SystemExit(main())

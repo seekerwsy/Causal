@@ -23,7 +23,7 @@ from secaware.schema.generation import (
 
 _STAGE = "generation"
 _PRODUCER = "openai_compatible"
-_PRODUCER_VERSION = "chat_completions-v1"
+_PRODUCER_VERSION = "chat_completions-python-envelope-v1"
 _MISSING = object()
 _NO_DEFAULT = object()
 _MAX_TOKEN_PARAMETER_KEYS = frozenset({"max_tokens", "max_completion_tokens", "max_output_tokens"})
@@ -205,14 +205,48 @@ def _validate_usage(usage: object) -> ProviderUsageRecord:
         values = {}
 
 
+def _decode_python_source_envelope(content: str) -> tuple[str, str]:
+    """Accept raw source or one exact Python Markdown fence and nothing else."""
+
+    decoded = ""
+    lines: list[str] = []
+    try:
+        if type(content) is not str or not content.strip():
+            raise ValueError("invalid message content")
+        normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized.startswith("```"):
+            if "```" in normalized:
+                raise ValueError("invalid Python source envelope")
+            return content, "raw"
+        lines = normalized.split("\n")
+        if (
+            lines[0].lower() not in {"```python", "```py"}
+            or len(lines) < 3
+            or lines[-1] != "```"
+            or any(line.startswith("```") for line in lines[1:-1])
+        ):
+            raise ValueError("invalid Python source envelope")
+        decoded = "\n".join(lines[1:-1])
+        if not decoded.strip():
+            raise ValueError("invalid Python source envelope")
+        return decoded, "python_fence"
+    finally:
+        content = ""
+        decoded = ""
+        lines.clear()
+        lines = []
+
+
 def _response_code(
     response: object, *, expected_model: str
-) -> tuple[str | None, str, ProviderUsageRecord]:
+) -> tuple[str | None, str, ProviderUsageRecord, str | None, str]:
     choices: object = None
     choice: object = None
     finish_reason: object = None
     message: object = None
     content: object = None
+    raw_content_sha256: str | None = None
+    source_envelope = ""
     actual_model: object = None
     try:
         actual_model = _member(response, "model")
@@ -237,12 +271,21 @@ def _response_code(
             raise ValueError("invalid finish reason")
         message = _member(choice, "message")
         content = _member(message, "content")
-        if finish_reason == "stop" and (type(content) is not str or not content.strip()):
-            raise ValueError("invalid message content")
+        if finish_reason == "stop":
+            if type(content) is not str:
+                raise ValueError("invalid message content")
+            raw_content_sha256 = sha256_text(content)
+            content, source_envelope = _decode_python_source_envelope(content)
         if finish_reason == "content_filter" and content not in {None, ""}:
             raise ValueError("invalid filtered content")
         usage = _validate_usage(_member(response, "usage", default=_MISSING))
-        return (content if finish_reason == "stop" else None, finish_reason, usage)
+        return (
+            content if finish_reason == "stop" else None,
+            finish_reason,
+            usage,
+            raw_content_sha256,
+            source_envelope if finish_reason == "stop" else "content_filter",
+        )
     finally:
         response = None
         expected_model = ""
@@ -252,6 +295,8 @@ def _response_code(
         finish_reason = None
         message = None
         content = None
+        raw_content_sha256 = None
+        source_envelope = ""
         usage = None
 
 
@@ -411,6 +456,8 @@ class OpenAICompatibleProvider:
         code: str | None = None
         finish_reason = ""
         usage: ProviderUsageRecord | None = None
+        raw_content_sha256: str | None = None
+        source_envelope = ""
         try:
             trusted = self._request(request, system_template)
             if trusted is None:
@@ -492,9 +539,13 @@ class OpenAICompatibleProvider:
                 finish_reason = ""
                 response_invalid = False
                 try:
-                    code, finish_reason, usage = _response_code(
-                        response, expected_model=trusted.model_id
-                    )
+                    (
+                        code,
+                        finish_reason,
+                        usage,
+                        raw_content_sha256,
+                        source_envelope,
+                    ) = _response_code(response, expected_model=trusted.model_id)
                 except Exception:
                     response_invalid = True
                 if response_invalid or (code is None and finish_reason != "content_filter"):
@@ -529,6 +580,11 @@ class OpenAICompatibleProvider:
                     provenance=GenerationProvenance(
                         producer=_PRODUCER,
                         producer_version=_PRODUCER_VERSION,
+                        source_batch_id=(
+                            source_envelope
+                            if raw_content_sha256 is None
+                            else f"{source_envelope}:{raw_content_sha256}"
+                        ),
                     ),
                     attempts=tuple(attempts),
                     usage=usage,
@@ -550,6 +606,8 @@ class OpenAICompatibleProvider:
             code = None
             finish_reason = ""
             usage = None
+            raw_content_sha256 = None
+            source_envelope = ""
             request = None  # type: ignore[assignment]
             system_template = ""
             self = None  # type: ignore[assignment]

@@ -23,6 +23,9 @@ from secaware.schema.experiments import ArmRole, PromptRole
 _LOWERCASE_SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REQUEST_ID_PATTERN = r"^req_[0-9a-f]{64}$"
 _CANONICAL_CODE_ID_PATTERN = r"^code_[0-9a-f]{64}$"
+_ORACLE_PROFILE_ID_PATTERN = (
+    r"^python\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$"
+)
 _INVALID_GENERATED_CODE_MESSAGE = "generated code record validation failed"
 _INVALID_CANONICAL_CODE_MESSAGE = "canonical generated code record validation failed"
 
@@ -43,6 +46,7 @@ class PromptRecord(BaseModel):
     prompt: str = Field(min_length=1)
     prompt_role: PromptRole
     counterpart_prompt_id: str | None = None
+    oracle_profile_id: str | None = Field(default=None, pattern=_ORACLE_PROFILE_ID_PATTERN)
 
     @field_validator("task_id")
     @classmethod
@@ -51,7 +55,7 @@ class PromptRecord(BaseModel):
             raise ValueError("prompt record validation failed")
         return value
 
-    @field_validator("counterpart_prompt_id")
+    @field_validator("counterpart_prompt_id", "oracle_profile_id")
     @classmethod
     def validate_counterpart_prompt_id(cls, value: str | None) -> str | None:
         if value is not None and (not value or not value.strip() or value != value.strip()):

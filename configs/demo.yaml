@@ -7,6 +7,7 @@ data:
   prompts_path: data/examples/prompts_demo.jsonl
   prompt_attestations_path: data/examples/prompt_attestations_demo.jsonl
   functional_outcome_contracts_path: null
+  task_functional_contracts_path: null
 
 tsg:
   prompt_extractor: deterministic_catalog_v1
@@ -74,6 +75,13 @@ oracle:
   timeout_seconds: 120.0
   max_stdout_bytes: 67108864
   max_stderr_bytes: 4194304
+
+functional_judge:
+  enabled: false
+  llm: null
+  pass_seeds:
+    - 73001
+    - 73002
 
 analysis:
   bootstrap_samples: 200

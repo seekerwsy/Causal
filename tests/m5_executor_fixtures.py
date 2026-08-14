@@ -178,6 +178,14 @@ def prompt_pair(
         clause,
     ) = family_coordinates(family, feature_id)
     neutral_text = default_baseline if baseline_text is None else baseline_text
+    oracle_profile_id = {
+        "CWE-20": "python.cwe20.function_parameter_input_validation.v1",
+        "CWE-22": "python.cwe22.function_parameter_file_read.v1",
+        "CWE-502": "python.cwe502.function_parameter_deserialization.v1",
+        "CWE-78": "python.cwe78.closed_mapping_subprocess.v1",
+        "CWE-862": "python.cwe862.function_parameter_authorization.v1",
+        "CWE-89": "python.cwe89.function_parameter_sqlite_direct_query.v1",
+    }.get(cwe)
     baseline = PromptRecord(
         prompt_id="task-a-baseline",
         task_id="task-a",
@@ -188,6 +196,7 @@ def prompt_pair(
         prompt=neutral_text,
         prompt_role=baseline_role,
         counterpart_prompt_id=None,
+        oracle_profile_id=oracle_profile_id,
     )
     variant = PromptRecord(
         prompt_id="task-a-variant",
@@ -199,6 +208,7 @@ def prompt_pair(
         prompt=neutral_text + clause,
         prompt_role=variant_role,
         counterpart_prompt_id=baseline.prompt_id,
+        oracle_profile_id=oracle_profile_id,
     )
     start = len(neutral_text.encode("utf-8"))
     clause_bytes = clause.encode("utf-8")

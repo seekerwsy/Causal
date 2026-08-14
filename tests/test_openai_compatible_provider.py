@@ -26,6 +26,7 @@ from secaware.schema.generation import (
     GenerationParameters,
     GenerationProvenance,
     GenerationRequestRecord,
+    sha256_text,
 )
 from secaware.schema.records import PromptRecord
 
@@ -35,7 +36,8 @@ _ENV_NAME = "SECAWARE_TEST_OPENAI_KEY"
 _API_KEY = "provider-api-key-secret"
 _PROMPT = "Return a path helper and preserve this sensitive prompt exactly."
 _SYSTEM = "Return code only."
-_CODE = "```python\ndef helper(path):\n    return path\n```"
+_RAW_CODE = "def helper(path):\n    return path"
+_CODE = f"```python\n{_RAW_CODE}\n```"
 _DEFAULT_USAGE = object()
 
 
@@ -126,13 +128,14 @@ def _request(
     prompt = PromptRecord(
         prompt_id="prompt-api",
         task_id="task-prompt-api",
-        split="confirm",
+        split="discover",
         language="python",
         task_family="path_handling",
         cwe="CWE-22",
         prompt=_PROMPT,
         prompt_role="neutral_baseline",
         counterpart_prompt_id=None,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
     )
     parameter_values: dict[str, object] = {
         "temperature": 0.2,
@@ -463,6 +466,7 @@ def _write_prompt_config(
                 prompt="Write a safe path helper.",
                 prompt_role="neutral_baseline",
                 counterpart_prompt_id=None,
+                oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
             )
         ],
     )
@@ -549,6 +553,7 @@ def test_preflight_checks_credentials_before_retaining_prompt_inputs(
                 prompt=prompt_secret,
                 prompt_role="neutral_baseline",
                 counterpart_prompt_id=None,
+                oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
             )
         ],
     )
@@ -582,7 +587,7 @@ def test_preflight_does_not_require_openai_credentials_for_other_providers(
     assert report.model_count == 1
 
 
-def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_code() -> None:
+def test_provider_sends_only_canonical_chat_completion_payload_and_decodes_code() -> None:
     request = _request()
     usage = SimpleNamespace(prompt_tokens=11, completion_tokens=13, total_tokens=24)
     client = FakeClient([_response(usage=usage)])
@@ -604,10 +609,11 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_cod
         }
     ]
     assert isinstance(result, OpenAICompatibleGenerationResult)
-    assert result.code == _CODE
+    assert result.code == _RAW_CODE
     assert isinstance(result.provenance, GenerationProvenance)
     assert result.provenance.producer == "openai_compatible"
-    assert result.provenance.producer_version == "chat_completions-v1"
+    assert result.provenance.producer_version == "chat_completions-python-envelope-v1"
+    assert result.provenance.source_batch_id == f"python_fence:{sha256_text(_CODE)}"
     assert result.attempts == (
         GenerationAttemptRecord(
             schema_version=SCHEMA_VERSION,
@@ -623,6 +629,54 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_cod
     assert request.request_id not in repr(result)
     with pytest.raises(FrozenInstanceError):
         result.code = "mutated"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (_RAW_CODE, _RAW_CODE),
+        (f"```python\n{_RAW_CODE}\n```", _RAW_CODE),
+        (f"```py\n{_RAW_CODE}\n```", _RAW_CODE),
+    ],
+)
+def test_provider_accepts_only_raw_or_single_python_source_envelope(
+    content: str,
+    expected: str,
+) -> None:
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    result = provider.generate(_request(), system_template=_SYSTEM)
+
+    assert result.code == expected
+    envelope = "python_fence" if content.startswith("```") else "raw"
+    assert result.provenance.source_batch_id == f"{envelope}:{sha256_text(content)}"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        f"prose\n```python\n{_RAW_CODE}\n```",
+        f"```python\n{_RAW_CODE}\n```\nprose",
+        f"```javascript\n{_RAW_CODE}\n```",
+        f"```python\n{_RAW_CODE}",
+        f"```python\n{_RAW_CODE}\n```\n```python\npass\n```",
+    ],
+)
+def test_provider_rejects_ambiguous_or_non_python_source_envelopes(content: str) -> None:
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(_request(), system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
 
 
 def test_compatibility_parameters_use_extra_body_and_translate_max_output_tokens() -> None:
@@ -666,7 +720,7 @@ def test_compatibility_parameters_use_extra_body_and_translate_max_output_tokens
         system_template=_SYSTEM,
     )
 
-    assert result.code == _CODE
+    assert result.code == _RAW_CODE
     assert completions.call == {
         "model": "org/model-api",
         "messages": [
@@ -1580,13 +1634,14 @@ def test_provider_rejects_wrong_endpoint_system_hash_and_n_before_calling_client
                     PromptRecord(
                         prompt_id="wrong-endpoint",
                         task_id="task-wrong-endpoint",
-                        split="confirm",
+                        split="discover",
                         language="python",
                         task_family="path_handling",
                         cwe="CWE-22",
                         prompt=_PROMPT,
                         prompt_role="neutral_baseline",
                         counterpart_prompt_id=None,
+                        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
                     )
                 ],
                 ["org/model-api"],

@@ -96,6 +96,7 @@ def structured_policy_for_config(config: TSGConfig) -> StructuredLLMPolicy:
             timeout_seconds=llm.timeout_seconds,
             max_attempts=llm.max_attempts,
             max_response_bytes=llm.max_response_bytes,
+            enable_thinking=llm.enable_thinking,
         )
     except Exception:
         raise _config_error() from None

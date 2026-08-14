@@ -595,6 +595,8 @@ def _stage_store(
     rfci_enabled: bool = False,
     discovery_min_independent_tasks: int = 20,
     randomization_min_independent_tasks: int = 20,
+    task_functional_contracts_path: Path | None = None,
+    functional_judge: dict[str, object] | None = None,
 ) -> tuple[AppConfig, RunStore]:
     if task_count < 1 or (confirmation_feature_ids is not None and task_count != 1):
         raise ValueError("unsupported task count")
@@ -686,6 +688,11 @@ def _stage_store(
                 "prompts_path": str(prompts_path),
                 "prompt_attestations_path": str(attestations_path),
                 "functional_outcome_contracts_path": None,
+                "task_functional_contracts_path": (
+                    str(task_functional_contracts_path)
+                    if task_functional_contracts_path is not None
+                    else None
+                ),
             },
             "tsg": {"prompt_extractor": "deterministic_catalog_v1", "llm": None},
             "discovery": {
@@ -698,6 +705,7 @@ def _stage_store(
                 ),
             },
             "intervention": intervention,
+            "functional_judge": functional_judge or {"enabled": False, "llm": None},
         }
     )
     store = RunStore(config)

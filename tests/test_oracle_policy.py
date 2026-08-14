@@ -39,6 +39,14 @@ _BANDIT_METADATA_BYTES = (
     b'[{"test_id":"B603","cwe_ids":[78],"severities":["LOW"],'
     b'"confidences":["HIGH"]}]}\n'
 )
+_COVERAGE_BYTES = (
+    b'{"schema_version":"1.0","contract_name":"test-coverage-v1","profiles":['
+    b'{"schema_version":"1.0","profile_id":"python.cwe78.stdin_shell_execution.v1",'
+    b'"cwe":"CWE-78","task_families":["command_execution"],'
+    b'"zero_finding_supported":true,'
+    b'"analyzer_rule_ids":["B603"],'
+    b'"calibration_fixture_ids":["negative-v1","positive-v1"]}]}'
+)
 _CHECKED_IN_POLICY_DIRECTORY = (
     Path(__file__).resolve().parents[1] / "policies" / "oracle" / "python"
 )
@@ -61,6 +69,8 @@ def _lock_payload(**overrides: object) -> dict[str, object]:
         "bandit_sha256": _sha256(_BANDIT_BYTES),
         "bandit_metadata": "bandit-metadata.json",
         "bandit_metadata_sha256": _sha256(_BANDIT_METADATA_BYTES),
+        "coverage_contract": "coverage-contract.json",
+        "coverage_contract_sha256": _sha256(_COVERAGE_BYTES),
     }
     payload.update(overrides)
     return payload
@@ -75,6 +85,7 @@ def _write_locked_policy(
     directory.joinpath("semgrep.yml").write_bytes(_SEMGREP_BYTES)
     directory.joinpath("bandit.yml").write_bytes(_BANDIT_BYTES)
     directory.joinpath("bandit-metadata.json").write_bytes(_BANDIT_METADATA_BYTES)
+    directory.joinpath("coverage-contract.json").write_bytes(_COVERAGE_BYTES)
     payload = _lock_payload(**(lock_overrides or {}))
     lock_path = directory / "policy.lock.json"
     lock_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -169,9 +180,11 @@ def test_policy_bundle_requires_exact_hashes_versions_and_byte_snapshots(
     assert bundle.semgrep_rules_bytes == _SEMGREP_BYTES
     assert bundle.bandit_config_bytes == _BANDIT_BYTES
     assert bundle.bandit_metadata_bytes == _BANDIT_METADATA_BYTES
+    assert bundle.coverage_contract_bytes == _COVERAGE_BYTES
     assert bundle.semgrep_sha256 == _sha256(_SEMGREP_BYTES)
     assert bundle.bandit_sha256 == _sha256(_BANDIT_BYTES)
     assert bundle.bandit_metadata_sha256 == _sha256(_BANDIT_METADATA_BYTES)
+    assert bundle.coverage_contract_sha256 == _sha256(_COVERAGE_BYTES)
     assert bundle.bandit_constraints == (
         BanditFindingConstraint(
             test_id="B603",
@@ -253,7 +266,7 @@ def test_oracle_policy_lock_is_strict_frozen_and_repr_safe() -> None:
 
     lock = OraclePolicyLock.model_validate(payload)
 
-    assert lock.schema_version == "1.1"
+    assert lock.schema_version == "1.2"
     assert lock.language == "python"
     assert repr(lock) == "OraclePolicyLock()"
     assert all(
@@ -358,6 +371,7 @@ def test_loaded_policy_is_frozen_repr_safe_and_returns_isolated_lock_payload(
             str(tmp_path),
             loaded.semgrep_sha256,
             loaded.bandit_sha256,
+            loaded.coverage_contract_sha256,
             repr(_SEMGREP_BYTES),
             repr(_BANDIT_BYTES),
         )
@@ -458,6 +472,7 @@ def test_loader_resolves_valid_nested_policy_paths(tmp_path: Path) -> None:
     semgrep_path.write_bytes(_SEMGREP_BYTES)
     bandit_path.write_bytes(_BANDIT_BYTES)
     (tmp_path / "bandit-metadata.json").write_bytes(_BANDIT_METADATA_BYTES)
+    (tmp_path / "coverage-contract.json").write_bytes(_COVERAGE_BYTES)
     lock_path = _write_lock_document(
         tmp_path,
         _lock_payload(
@@ -759,6 +774,7 @@ def test_combined_digest_is_stable_across_json_key_order_and_formatting(
     second.joinpath("semgrep.yml").write_bytes(_SEMGREP_BYTES)
     second.joinpath("bandit.yml").write_bytes(_BANDIT_BYTES)
     second.joinpath("bandit-metadata.json").write_bytes(_BANDIT_METADATA_BYTES)
+    second.joinpath("coverage-contract.json").write_bytes(_COVERAGE_BYTES)
     reverse_order = dict(reversed(tuple(_lock_payload().items())))
     second_lock = second / "policy.lock.json"
     second_lock.write_text(
@@ -1045,6 +1061,7 @@ def test_loader_reads_policy_with_a_bounded_single_snapshot_call(
         MAX_POLICY_FILE_BYTES + 1,
         MAX_POLICY_FILE_BYTES + 1,
         MAX_POLICY_FILE_BYTES + 1,
+        MAX_POLICY_FILE_BYTES + 1,
     ]
 
 
@@ -1079,9 +1096,14 @@ def test_checked_in_policy_bundle_authenticates_exact_files_and_versions() -> No
         loaded.bandit_metadata_path
         == (_CHECKED_IN_POLICY_DIRECTORY / "bandit-metadata.json").resolve()
     )
+    assert (
+        loaded.coverage_contract_path
+        == (_CHECKED_IN_POLICY_DIRECTORY / "coverage-contract.json").resolve()
+    )
     assert loaded.semgrep_sha256 == _sha256(loaded.semgrep_rules_bytes)
     assert loaded.bandit_sha256 == _sha256(loaded.bandit_config_bytes)
     assert loaded.bandit_metadata_sha256 == _sha256(loaded.bandit_metadata_bytes)
+    assert loaded.coverage_contract_sha256 == _sha256(loaded.coverage_contract_bytes)
     assert loaded.combined_sha256 == canonical_sha256(loaded.lock_payload)
 
 

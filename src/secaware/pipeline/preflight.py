@@ -8,13 +8,19 @@ from typing import Protocol
 
 from pydantic import ConfigDict
 
-from secaware.config import AppConfig, OpenAICompatibleConfig, OracleConfig
+from secaware.config import (
+    AppConfig,
+    FunctionalJudgeLLMConfig,
+    OpenAICompatibleConfig,
+    OracleConfig,
+)
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.jsonl import read_jsonl
 from secaware.intervention.attestation import (
     PromptRoleAttestationRecord,
     validate_prompt_role_attestations,
 )
+from secaware.oracle.coverage import validate_prompt_coverage_profiles
 from secaware.oracle.policy import LoadedOraclePolicy, load_policy_bundle
 from secaware.oracle.runner import (
     AnalyzerProcessResult,
@@ -24,6 +30,7 @@ from secaware.oracle.runner import (
 from secaware.pipeline.artifact import sha256_file
 from secaware.schema.common import StrictModel
 from secaware.schema.experiments import FunctionalOutcomeContractRecord
+from secaware.functional_judge.schema import TaskFunctionalContractRecord
 from secaware.schema.records import PromptRecord
 
 
@@ -310,12 +317,40 @@ def run_preflight(config: AppConfig) -> PreflightReport:
                 "provider authentication is unavailable",
             )
 
+    if config.functional_judge.enabled:
+        judge_llm = config.functional_judge.llm
+        contract_path = config.data.task_functional_contracts_path
+        if type(judge_llm) is not FunctionalJudgeLLMConfig or contract_path is None:
+            raise _error(
+                ErrorCode.CONFIG,
+                "functional judge configuration is unavailable",
+            ) from None
+        try:
+            credential = os.environ.get(judge_llm.api_key_env)
+            credential_available = type(credential) is str and bool(credential.strip())
+        except Exception:
+            credential_available = False
+        credential = None
+        if not credential_available:
+            raise _error(
+                ErrorCode.API_AUTH,
+                "functional judge authentication is unavailable",
+            )
+        _read_stable_jsonl(
+            contract_path,
+            TaskFunctionalContractRecord,
+            required=True,
+            allow_empty=False,
+        )
+
     prompts = _read_stable_jsonl(
         config.data.prompts_path,
         PromptRecord,
         required=True,
         allow_empty=False,
     )
+    coverage_policy = load_policy_bundle(config.oracle.policy_lock_path)
+    validate_prompt_coverage_profiles(prompts, coverage_policy)
     prompt_ids = [prompt.prompt_id for prompt in prompts]
     if len(set(prompt_ids)) != len(prompt_ids):
         raise _error(ErrorCode.CONTRACT, "prompt_id values must be unique")

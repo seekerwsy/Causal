@@ -70,6 +70,7 @@ _MAX_NAME_CHARS = 255
 _FUTURE_STAGE_NAMES = frozenset(
     {
         "run-oracle-confirmation",
+        "judge-functionality",
         "import-functional-outcomes",
         "estimate-confirmation-effects",
         "analyze-jci",

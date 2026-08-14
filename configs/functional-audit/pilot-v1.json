@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "audit_version": "functional-audit-pilot-v1",
+  "source_audit_run_id": "stage0-combined-20260810-08",
+  "source_stable_digest": "2d5c16c613988dffd7f9a9299bcb7a43ef8fab6cc91ad45ae0b8e99c11cc38a8",
+  "dataset": "cyberseceval_instruct_v2",
+  "tasks_per_cwe": 3,
+  "seed": 20260812
+}

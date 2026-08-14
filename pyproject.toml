@@ -46,6 +46,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "secaware.extractors" = ["prompts/*.txt"]
 "secaware.intervention" = ["prompts/*.txt"]
+"secaware.functional_judge" = ["prompts/*.txt"]
 
 [tool.setuptools.data-files]
 "share/doc/secaware/migrations" = [

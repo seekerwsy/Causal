@@ -306,7 +306,7 @@ def supported_runtime(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return calls
 
 
-def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
+def test_both_clean_reports_produce_unknown_coverage_and_run_each_tool_once(
     policy: LoadedOraclePolicy,
     supported_runtime: list[str],
 ) -> None:
@@ -335,7 +335,10 @@ def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
     assert runner.calls[0][0][-1] == "."
     assert runner.calls[1][0][2] == "."
     assert [record.request_id for record in records] == sorted(code.request_id for code in codes)
-    assert all(record.security_label is SecurityLabel.SECURE for record in records)
+    assert all(record.security_label is SecurityLabel.UNKNOWN for record in records)
+    assert all(
+        record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE for record in records
+    )
     assert all(record.severity == "none" for record in records)
     assert all(record.findings == () for record in records)
     assert all(
@@ -502,7 +505,8 @@ def test_refusal_words_are_not_a_functionality_or_security_fallback(
 
     assert record.parse_ok is True
     assert record.functional_ok is True
-    assert record.security_label is SecurityLabel.SECURE
+    assert record.security_label is SecurityLabel.UNKNOWN
+    assert record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE
 
 
 def test_comment_only_source_is_structurally_nonfunctional_but_still_analyzed(
@@ -823,7 +827,8 @@ def test_bounded_rmtree_cleanup_retries_and_preserves_control_identity(
 
     if cleanup_control is None:
         records = run_oracle_batch([_code()], policy, runner=runner)
-        assert records[0].security_label is SecurityLabel.SECURE
+        assert records[0].security_label is SecurityLabel.UNKNOWN
+        assert records[0].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     else:
         with pytest.raises(type(cleanup_control)) as exc_info:
             run_oracle_batch([_code()], policy, runner=runner)
@@ -949,7 +954,8 @@ def test_analyzers_receive_independent_batches_with_identical_sources(
         runner=FakeRunner(inspect_batch=inspect),
     )
 
-    assert records[0].security_label is SecurityLabel.SECURE
+    assert records[0].security_label is SecurityLabel.UNKNOWN
+    assert records[0].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     assert len(batch_roots) == 2
     assert batch_roots[0] != batch_roots[1]
     assert all(not root.exists() for root in batch_roots)
@@ -1037,7 +1043,10 @@ def test_exact_analyzers_classify_one_real_batch(
     records = run_oracle_batch([secure, insecure], policy)
 
     by_id = {record.request_id: record for record in records}
-    assert by_id[secure.request_id].security_label is SecurityLabel.SECURE
+    assert by_id[secure.request_id].security_label is SecurityLabel.UNKNOWN
+    assert (
+        by_id[secure.request_id].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
+    )
     assert by_id[insecure.request_id].security_label is SecurityLabel.INSECURE
     assert {finding.analyzer for finding in by_id[insecure.request_id].findings} == {
         "semgrep",

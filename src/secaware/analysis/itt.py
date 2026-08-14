@@ -357,7 +357,10 @@ def _outcome_projection(
     if outcome_id == "y_secure_functional":
         return (
             lambda row: row.secure_functional_success,
-            lambda row: row.oracle_evaluability is AssignmentEvaluability.UNKNOWN_PARSE_FAILURE,
+            lambda row: (
+                row.oracle_evaluability is AssignmentEvaluability.UNKNOWN_PARSE_FAILURE
+                or row.functional_outcome_status is FunctionalOutcomeStatus.UNKNOWN
+            ),
             False,
         )
     if outcome_id == "y_cwe_secure":
@@ -387,7 +390,11 @@ def _outcome_projection(
     if outcome_id == "y_parse_ok":
         return lambda row: int(row.parse_ok), lambda _row: False, False
     if outcome_id == "y_functional_ok":
-        return lambda row: int(row.functional_ok), lambda _row: False, False
+        return (
+            lambda row: int(row.functional_ok),
+            lambda row: row.functional_outcome_status is FunctionalOutcomeStatus.UNKNOWN,
+            False,
+        )
 
     contract_id = protocol.functional_outcome_contract_id
     contract = contract_by_id.get(contract_id or "")
@@ -507,6 +514,11 @@ def _assignment_universe_payload(
                 "oracle_evaluability": row.oracle_evaluability.value,
                 "parse_ok": row.parse_ok,
                 "functional_ok": row.functional_ok,
+                **(
+                    {"functional_outcome_status": row.functional_outcome_status.value}
+                    if row.functional_outcome_status is not None
+                    else {}
+                ),
             }
             for row in rows
         ],

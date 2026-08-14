@@ -53,6 +53,7 @@ class DataConfig(StrictModel):
     prompts_path: str
     prompt_attestations_path: str = Field(min_length=1)
     functional_outcome_contracts_path: str | None = Field(default=None, min_length=1)
+    task_functional_contracts_path: str | None = Field(default=None, min_length=1)
 
 
 class PromptExtractorLLMConfig(SafeValidationMixin, StrictModel):
@@ -81,6 +82,7 @@ class PromptExtractorLLMConfig(SafeValidationMixin, StrictModel):
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, gt=0.0, le=1.0)
     seed: int | None = Field(default=0, ge=-(2**63), le=2**63 - 1)
+    enable_thinking: bool | None = None
 
     @field_validator("model_id")
     @classmethod
@@ -206,6 +208,7 @@ class InterventionLLMConfig(SafeValidationMixin, StrictModel):
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, gt=0.0, le=1.0)
     seed: int | None = Field(default=0, ge=-(2**63), le=2**63 - 1)
+    enable_thinking: bool | None = None
 
     @field_validator("model_id")
     @classmethod
@@ -330,6 +333,35 @@ class InterventionConfig(StrictModel):
     @property
     def allow_side_effects_for_directional(self) -> bool:
         return True
+
+
+class FunctionalJudgeLLMConfig(PromptExtractorLLMConfig):
+    """Independent provider coordinates for blind functional evaluation."""
+
+    _safe_validation_message = "functional judge LLM configuration failed validation"
+    seed: None = None
+
+
+class FunctionalJudgeConfig(StrictModel):
+    """Arm-blind functional evaluator with explicit primary or review mode."""
+
+    enabled: bool = False
+    llm: FunctionalJudgeLLMConfig | None = None
+    mode: Literal["single_pass", "two_pass_consensus"] = "two_pass_consensus"
+    pass_seeds: tuple[StrictInt, ...] = Field(
+        default=(73_001, 73_002), min_length=1, max_length=2
+    )
+
+    @model_validator(mode="after")
+    def validate_coordinates(self) -> "FunctionalJudgeConfig":
+        expected_passes = 1 if self.mode == "single_pass" else 2
+        if (
+            (self.enabled and self.llm is None)
+            or len(self.pass_seeds) != expected_passes
+            or len(set(self.pass_seeds)) != len(self.pass_seeds)
+        ):
+            raise ValueError("functional judge configuration failed validation")
+        return self
 
 
 class OpenAICompatibleConfig(SafeValidationMixin, StrictModel):
@@ -614,6 +646,7 @@ class AppConfig(StrictModel):
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     randomization: RandomizationConfig = Field(default_factory=RandomizationConfig)
     oracle: OracleConfig = Field(default_factory=OracleConfig)
+    functional_judge: FunctionalJudgeConfig = Field(default_factory=FunctionalJudgeConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
 
     @model_validator(mode="after")
@@ -627,15 +660,17 @@ class AppConfig(StrictModel):
         llm_executor = self.intervention.executor is InterventionExecutorKind.LLM
         if llm_executor != (self.intervention.llm is not None):
             raise ValueError("intervention executor configuration failed validation")
+        if self.functional_judge.enabled and self.data.task_functional_contracts_path is None:
+            raise ValueError("functional judge contract configuration failed validation")
         return self
 
 
-def _config_error(path: Path) -> SecAwareError:
+def _config_error() -> SecAwareError:
     return SecAwareError(
         code=ErrorCode.CONFIG,
         stage="config",
         message="configuration could not be loaded",
-        details={"path": str(path)},
+        details={},
         retryable=False,
     )
 
@@ -644,15 +679,25 @@ def load_config(path: str | Path, *, run_dir: str | Path | None = None) -> AppCo
     config_path = Path(path)
     raw: Any = None
     load_failed = False
+    handle: Any = None
     try:
         with config_path.open("r", encoding="utf-8") as handle:
             raw = yaml.safe_load(handle)
     except (OSError, UnicodeError, yaml.YAMLError):
         load_failed = True
     if load_failed:
-        raise _config_error(config_path) from None
+        path = ""
+        run_dir = None
+        config_path = None  # type: ignore[assignment]
+        handle = None
+        raise _config_error() from None
     if not isinstance(raw, Mapping):
-        raise _config_error(config_path) from None
+        path = ""
+        run_dir = None
+        config_path = None  # type: ignore[assignment]
+        raw = None
+        handle = None
+        raise _config_error() from None
     config: AppConfig | None = None
     try:
         config = AppConfig.model_validate(dict(raw))
@@ -663,8 +708,12 @@ def load_config(path: str | Path, *, run_dir: str | Path | None = None) -> AppCo
     except ValidationError:
         config = None
     if config is None:
+        path = ""
+        run_dir = None
+        config_path = None  # type: ignore[assignment]
         raw = None
-        raise _config_error(config_path) from None
+        handle = None
+        raise _config_error() from None
     return config
 
 
