@@ -63,3 +63,27 @@ confirms that the extension exercises semantic generalization instead of the ori
 The selectable-strategy runner change also passed a zero-provider compatibility plan using the
 original three-strategy CWE-78 configuration. It generated the same six planned LLM requests and the
 deterministic baseline again passed 18/18 decisions.
+
+## Approved live result
+
+The approved live run is preserved under
+`runs/e2e-pilot/extractor-facts-extension-cwe78-cwe89-v1-live-20260815-01`. All six
+planned provider calls were attempted exactly once and all six received responses. There were no
+retries, pending calls, failure artifacts, parse errors, or graph-validation errors. The manifest
+binds 20 effective-configuration, command, environment, raw request, raw response, proposal, graph,
+record, and report artifacts by SHA-256.
+
+`llm_facts_criteria_v2` passed all six independent Prompts and all 36 expected feature-state
+decisions. In both CWE scopes it correctly distinguished the task-only Prompt, the semantically
+paraphrased target mechanism, and the generic security reminder. All prohibited-request,
+vulnerability-disclosure, and expected-outcome-leakage sentinels remained absent.
+
+The deterministic catalog remained at 26/36 decisions, with ten false negatives and no execution
+errors: all six paraphrased task features, both target mechanisms, and both generic reminders were
+missed. No catalog term or extraction rule was changed. The contrast therefore supports the
+engineering decision that FeatureSpec-derived semantic criteria address the observed measurement
+failure without adding a new literal phrase rule.
+
+The frozen admission rule is satisfied. This authorizes production integration of the same facts
+request projection and a zero-provider request audit before the complete ten-Prompt Gate B
+re-extraction. It still does not authorize Gate C or a scientific performance claim.
