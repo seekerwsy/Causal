@@ -25,6 +25,7 @@ from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
+    FeatureSpec,
 )
 from secaware.tsg.proposal_validator import (
     _snapshot_prompt,
@@ -40,6 +41,7 @@ _FACT_KEYS = frozenset(
     {"evidence", "feature_id", "relation_feature_ids", "semantic_role", "state"}
 )
 _MODEL_EVIDENCE_KEYS = frozenset({"text"})
+LLM_FACTS_CRITERIA_PROJECTION_VERSION = "feature-spec-criteria-v1"
 _OUTPUT_SCHEMA = {
     "schema_version": "1.0",
     "top_level_keys": ["facts"],
@@ -79,6 +81,19 @@ def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
     )
 
 
+def _semantic_criteria(spec: FeatureSpec) -> dict[str, object]:
+    return {
+        "positive_indicators": list(spec.deterministic_terms),
+        "reviewed_requirement_clauses": [
+            item.strip() for item in spec.intervention_clauses
+        ],
+        "state_rule": (
+            "present only when prompt_text explicitly requests this feature or a "
+            "semantically equivalent requirement"
+        ),
+    }
+
+
 def catalog_prompt_view() -> list[dict[str, object]]:
     """Return the finite, outcome-blind catalog projection supplied to the model."""
     by_family = {
@@ -97,6 +112,7 @@ def catalog_prompt_view() -> list[dict[str, object]]:
             "applicable_task_families": list(spec.applicable_task_families),
             "allowed_states": [state.value for state in FeatureState],
             "allowed_relation_feature_ids": list(by_family[spec.feature_family]),
+            "semantic_criteria": _semantic_criteria(spec),
         }
         for spec in PROMPT_FEATURE_CATALOG
     ]
@@ -143,6 +159,7 @@ def llm_facts_policy_sha256(
     payload = {
         "backend": PromptExtractorBackend.LLM_FACTS_V1.value,
         "catalog_sha256": catalog_sha256,
+        "criteria_projection_version": LLM_FACTS_CRITERIA_PROJECTION_VERSION,
         "max_response_chars": max_response_chars,
         "structured_llm_policy": _structured_policy_payload(policy),
     }
@@ -205,6 +222,7 @@ def facts_request_payload(
             "task_family": source.task_family,
         },
         "catalog_sha256": trusted.catalog_sha256,
+        "criteria_projection_version": LLM_FACTS_CRITERIA_PROJECTION_VERSION,
         "allowed_features": _applicable_catalog_prompt_view(source),
         "output_kind": "semantic_facts",
     }
@@ -433,6 +451,7 @@ class LLMFactsExtractor:
 
 
 __all__ = [
+    "LLM_FACTS_CRITERIA_PROJECTION_VERSION",
     "LLM_FACTS_OUTPUT_SCHEMA_SHA256",
     "LLM_FACTS_SYSTEM_TEMPLATE",
     "LLM_FACTS_SYSTEM_TEMPLATE_SHA256",

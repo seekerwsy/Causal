@@ -9,6 +9,7 @@ import pytest
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.llm_facts import (
+    LLM_FACTS_CRITERIA_PROJECTION_VERSION,
     LLM_FACTS_OUTPUT_SCHEMA_SHA256,
     LLM_FACTS_SYSTEM_TEMPLATE_SHA256,
     LLMFactsExtractor,
@@ -142,6 +143,7 @@ def test_llm_facts_request_contains_only_inert_prompt_and_catalog() -> None:
         "prompt_text",
         "prompt_context",
         "catalog_sha256",
+        "criteria_projection_version",
         "allowed_features",
         "output_kind",
     }
@@ -152,6 +154,11 @@ def test_llm_facts_request_contains_only_inert_prompt_and_catalog() -> None:
         "cwe": prompt.cwe,
         "task_family": prompt.task_family,
     }
+    assert (
+        request["criteria_projection_version"]
+        == LLM_FACTS_CRITERIA_PROJECTION_VERSION
+    )
+    assert all("semantic_criteria" in item for item in request["allowed_features"])
     assert proposal.backend is PromptExtractorBackend.LLM_FACTS_V1
     assert proposal.raw_response == transport.response.decode("utf-8")
     assert proposal.response_sha256 == hashlib.sha256(transport.response).hexdigest()
@@ -170,6 +177,11 @@ def test_request_payload_is_exact_and_contains_only_catalog_prompt_view() -> Non
     }
     assert all(
         item["allowed_states"] == ["absent", "present"]
+        for item in payload["allowed_features"]
+    )
+    assert all(
+        set(item["semantic_criteria"])
+        == {"positive_indicators", "reviewed_requirement_clauses", "state_rule"}
         for item in payload["allowed_features"]
     )
     serialized = json.dumps(payload).casefold()

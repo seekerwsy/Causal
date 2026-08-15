@@ -87,3 +87,20 @@ failure without adding a new literal phrase rule.
 The frozen admission rule is satisfied. This authorizes production integration of the same facts
 request projection and a zero-provider request audit before the complete ten-Prompt Gate B
 re-extraction. It still does not authorize Gate C or a scientific performance claim.
+
+## Production integration
+
+The admitted projection is integrated into the existing `llm_facts_v1` backend rather than exposed
+as a second production extractor. Applicable catalog entries now carry FeatureSpec-derived positive
+indicators, reviewed requirement clauses, and an explicit-state rule. The system contract separates
+task operations, target-specific mechanisms, and generic reminders. The projection version is bound
+into the extractor policy digest, while the catalog digest already binds the underlying terms and
+clauses.
+
+The response boundary is unchanged: the model returns only complete feature-state facts and unique
+exact Prompt quotes; deterministic code derives offsets and SHA-256 values, validates the proposal,
+and builds the typed graph. Invalid structure, incomplete feature coverage, fabricated or non-unique
+evidence, and policy drift still fail closed without semantic retry.
+
+Targeted verification passed 12 facts-backend tests and 78 adjacent factory, Prompt TSG pipeline,
+and extraction-security tests. No full-suite or provider call was used for this integration check.
