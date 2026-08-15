@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "calibration_id": "extractor-facts-extension-cwe78-cwe89-v1",
+  "purpose": "Independent bounded engineering extension for the preferred semantic-facts extractor on new CWE-78 and CWE-89 minimal contrasts.",
+  "prompts_path": "data/e2e-pilot/extractor-facts-extension-cwe78-cwe89-v1/prompts.jsonl",
+  "expected_states_path": "data/e2e-pilot/extractor-facts-extension-cwe78-cwe89-v1/expected-states.jsonl",
+  "strategies": [
+    "llm_facts_criteria_v2",
+    "deterministic_catalog_v1"
+  ],
+  "provider_call_budget": 6,
+  "one_call_per_llm_strategy_prompt": true,
+  "semantic_retry_allowed": false,
+  "scientific_claim_allowed": false
+}

@@ -271,9 +271,14 @@ def run_calibration(
     ):
         raise ValueError("extractor calibration policy failed validation")
     strategies = tuple(calibration.get("strategies", ()))
-    expected_strategies = (*_LLM_STRATEGIES, _DETERMINISTIC_STRATEGY)
-    if strategies != expected_strategies:
+    if (
+        len(strategies) < 2
+        or strategies[-1] != _DETERMINISTIC_STRATEGY
+        or len(strategies) != len(set(strategies))
+        or any(strategy not in _LLM_STRATEGIES for strategy in strategies[:-1])
+    ):
         raise ValueError("extractor calibration strategies failed validation")
+    selected_llm_strategies = strategies[:-1]
     prompts_path = (repo_root / str(calibration["prompts_path"])).resolve()
     expected_path = (repo_root / str(calibration["expected_states_path"])).resolve()
     prompts_path.relative_to(repo_root)
@@ -291,7 +296,7 @@ def run_calibration(
     expected = {str(item["prompt_id"]): dict(item["expected_states"]) for item in expected_rows}
     if set(expected) != {item.prompt_id for item in prompts}:
         raise ValueError("extractor calibration expected states failed validation")
-    planned_calls = len(prompts) * len(_LLM_STRATEGIES)
+    planned_calls = len(prompts) * len(selected_llm_strategies)
     if planned_calls != calibration.get("provider_call_budget"):
         raise ValueError("extractor calibration call budget failed validation")
 
@@ -299,7 +304,7 @@ def run_calibration(
     if llm is None or llm.max_attempts != 1 or llm.temperature != 0.0:
         raise ValueError("extractor calibration LLM coordinates failed validation")
     template_root = repo_root / "src" / "secaware" / "extractors" / "prompts"
-    templates = {
+    available_templates = {
         "llm_facts_criteria_v2": (
             template_root / "llm_facts_criteria_v2_calibration.txt"
         ).read_text(encoding="utf-8"),
@@ -307,29 +312,32 @@ def run_calibration(
             template_root / "llm_direct_graph_criteria_v2_calibration.txt"
         ).read_text(encoding="utf-8"),
     }
+    templates = {
+        strategy: available_templates[strategy] for strategy in selected_llm_strategies
+    }
     structured = {
-        "llm_facts_criteria_v2": _structured_policy(
+        strategy: _structured_policy(
             llm,
-            templates["llm_facts_criteria_v2"],
-            LLM_FACTS_OUTPUT_SCHEMA_SHA256,
-        ),
-        "llm_direct_graph_criteria_v2": _structured_policy(
-            llm,
-            templates["llm_direct_graph_criteria_v2"],
-            LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256,
-        ),
+            templates[strategy],
+            (
+                LLM_FACTS_OUTPUT_SCHEMA_SHA256
+                if strategy == "llm_facts_criteria_v2"
+                else LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256
+            ),
+        )
+        for strategy in selected_llm_strategies
     }
     policies = {
-        "llm_facts_criteria_v2": _experimental_policy(
-            PromptExtractorBackend.LLM_FACTS_V1,
-            "llm_facts_criteria_v2",
-            structured["llm_facts_criteria_v2"],
-        ),
-        "llm_direct_graph_criteria_v2": _experimental_policy(
-            PromptExtractorBackend.LLM_DIRECT_GRAPH_V1,
-            "llm_direct_graph_criteria_v2",
-            structured["llm_direct_graph_criteria_v2"],
-        ),
+        strategy: _experimental_policy(
+            (
+                PromptExtractorBackend.LLM_FACTS_V1
+                if strategy == "llm_facts_criteria_v2"
+                else PromptExtractorBackend.LLM_DIRECT_GRAPH_V1
+            ),
+            strategy,
+            structured[strategy],
+        )
+        for strategy in selected_llm_strategies
     }
     deterministic_config = TSGConfig(
         prompt_extractor=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
@@ -362,7 +370,7 @@ def run_calibration(
             records.append(_error_record(_DETERMINISTIC_STRATEGY, prompt, error))
 
     if allow_provider:
-        for strategy in _LLM_STRATEGIES:
+        for strategy in selected_llm_strategies:
             transport = OpenAICompatibleStructuredTransport(
                 base_url=llm.base_url,
                 api_key_env=llm.api_key_env,
@@ -405,7 +413,7 @@ def run_calibration(
                     _write_json(strategy_root / f"{prompt.prompt_id}.failure.json", failure)
                     records.append(failure)
     else:
-        for strategy in _LLM_STRATEGIES:
+        for strategy in selected_llm_strategies:
             for prompt in prompts:
                 strategy_root = output_dir / "planned-requests" / strategy
                 strategy_root.mkdir(parents=True, exist_ok=True)
@@ -449,7 +457,8 @@ def run_calibration(
         },
         "strategy_summaries": summaries,
         "policy_digests": {
-            strategy: policies[strategy].policy_sha256 for strategy in _LLM_STRATEGIES
+            strategy: policies[strategy].policy_sha256
+            for strategy in selected_llm_strategies
         }
         | {_DETERMINISTIC_STRATEGY: deterministic_policy.policy_sha256},
         "input_digests": {
