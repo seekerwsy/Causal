@@ -70,3 +70,15 @@ hard failure.
 zero provider attempts. The reviewed-clause digest, request policy, system-template policy, target
 and no-op dependencies, and two-call budget are all distinct from v1. A v2 live run requires separate
 authorization and remains one attempt per placebo with no semantic retry.
+
+## Approved v2 live result
+
+`runs/e2e-pilot/gate-b-placebo-repair-v2-live-20260815-01` made exactly the two
+separately approved provider calls. Both responses copied the reviewed suffix exactly, preserved the
+source Prompt byte-for-byte as a prefix, differed from no-op, and measured 55 Unicode characters.
+The two records therefore passed their registered 51--63 and 49--61 ranges. There were two responses,
+two validation artifacts, zero failures, zero transport errors, and zero retries. No extractor or
+code-generation call was made.
+
+This result repairs only the intervention-protocol validity of the two placebo texts. Task- and
+safety-feature invariance is still decided by the separately planned blind extractor revalidation.

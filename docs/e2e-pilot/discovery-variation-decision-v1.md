@@ -142,6 +142,7 @@ The following incidents are retained so later stages do not repeat them:
 | The first complete re-extraction plan had ten arm records but only eight request artifacts | zero provider calls; the incomplete plan is preserved | two pairs of identical no-op/placebo Prompt IDs caused request filenames and arm metadata to collide | key artifacts and extraction state by source/variant identity rather than Prompt ID, and fail closed on any artifact-identity collision |
 | The corrected ten-arm plan contained only eight unique extractor request byte sequences | zero provider calls; re-extraction was not authorized | for both tasks, the LLM intervention returned a zero-length suffix for `length_matched_placebo`, exactly duplicating the `noop_rewrite`, while target suffixes were 57 and 55 characters | treat both placebo arms as intervention-protocol failures; do not spend extractor calls or let improved extraction mask the invalid control; freeze an explicit length-matching tolerance before regenerating only the two placebo variants |
 | The first approved placebo repair missed both frozen length ranges | two intervention responses were preserved; zero extractor and code-generation calls followed | range-guided LLM responses were natural, non-empty, and distinct from no-op, but their 43- and 47-character suffixes fell below the registered 51- and 49-character minima | retain the failed run without retry; freeze a reviewed exact 55-character presentation-only clause in a separately versioned repair request |
+| The reviewed-clause placebo repair passed both frozen length ranges | two new intervention responses were preserved; zero extractor and code-generation calls followed | exact-clause execution produced two 55-character, prefix-preserving, non-no-op suffixes | admit only the repaired placebo texts into a complete zero-provider Gate B re-extraction plan; keep task and safety invariance subject to blind extraction |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
@@ -191,3 +192,11 @@ validator checked task/safety feature invariants but did not operationalize the 
 requirement. The two zero-provider plans are preserved separately; no re-extraction provider call
 was made. The placebo variants must be regenerated under a preregistered quantitative length rule
 before the complete Gate B block can be admitted.
+
+That intervention-protocol defect is now resolved in a separately versioned v2 repair: both admitted
+placebo suffixes are the reviewed 55-character presentation-only clause and pass their frozen length
+ranges. The complete replacement re-extraction plan is preserved at
+`runs/e2e-pilot/gate-b-extractor-revalidation-v1-plan-20260815-03`. It has ten unique
+extractor request byte sequences for two sources and eight variants, two passing placebo validations,
+and zero provider attempts. This does not change the preserved failed runs and does not yet establish
+Gate B validity; the ten blind extraction calls still require separate approval.

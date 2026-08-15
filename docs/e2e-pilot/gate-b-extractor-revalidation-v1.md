@@ -32,6 +32,13 @@ when separately approved, sends exactly those two source and eight variant reque
 facts extractor. There is one attempt per Prompt and no semantic retry. The six valid historical
 interventions and two admitted placebo repairs are not repeated.
 
+The completed zero-provider plan is preserved at
+`runs/e2e-pilot/gate-b-extractor-revalidation-v1-plan-20260815-03`. It contains two
+source and eight variant records, ten request files with ten distinct byte hashes, and two passing
+placebo-length validations with 55-character suffixes. It recorded zero provider attempts, zero
+responses, zero extraction or validation failures, and did not generate outcomes or code. The
+artifact manifest covers all 22 other run files; the twenty-third file is the manifest itself.
+
 Every variant is evaluated with the existing Gate B AllowedDelta, target-state, sentinel, and task-
 projection-drift logic. Task-layer drift remains diagnostic; target-state, non-task AllowedDelta, and
 sentinel violations remain hard failures. The runner collects all ten extraction outcomes and all
@@ -43,3 +50,7 @@ The stage passes only when all ten Prompts extract successfully and all eight va
 existing Gate B validation. Passing authorizes consideration of the next bounded code-generation
 canary; it is not a scientific performance claim and does not itself authorize provider-based code
 generation.
+
+The plan result authorizes only a request for the bounded ten-call extractor execution. It does not
+authorize those calls automatically. Live execution requires separate approval and must use a new
+run directory, one attempt per request, and no semantic retry.
