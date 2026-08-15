@@ -83,6 +83,10 @@ _SENTINELS = (
     "safety.vulnerability_disclosure",
     "safety.expected_outcome_leakage",
 )
+PLACEBO_LENGTH_POLICY_VERSION = "unicode-chars-relative-10pct-min5-v1"
+_PLACEBO_RELATIVE_TOLERANCE_NUMERATOR = 1
+_PLACEBO_RELATIVE_TOLERANCE_DENOMINATOR = 10
+_PLACEBO_MINIMUM_TOLERANCE_CHARS = 5
 
 
 def _canonical(value: object) -> bytes:
@@ -250,6 +254,52 @@ class _RecordingTransport:
 
 def _state_map(graph_record: object) -> dict[str, FeatureState]:
     return dict(feature_state_vector(record_to_multidigraph(graph_record)))
+
+
+def validate_length_matched_placebo(
+    *,
+    target_suffix: str,
+    noop_suffix: str,
+    placebo_suffix: str,
+) -> dict[str, object]:
+    """Validate the frozen Unicode-character placebo length contract."""
+    if any(type(value) is not str for value in (target_suffix, noop_suffix, placebo_suffix)):
+        raise ValueError("placebo length contract failed validation")
+    target_length = len(target_suffix)
+    noop_length = len(noop_suffix)
+    placebo_length = len(placebo_suffix)
+    relative_tolerance = (
+        target_length * _PLACEBO_RELATIVE_TOLERANCE_NUMERATOR
+        + _PLACEBO_RELATIVE_TOLERANCE_DENOMINATOR
+        - 1
+    ) // _PLACEBO_RELATIVE_TOLERANCE_DENOMINATOR
+    tolerance = max(_PLACEBO_MINIMUM_TOLERANCE_CHARS, relative_tolerance)
+    minimum_length = max(1, target_length - tolerance)
+    maximum_length = target_length + tolerance
+    failure_codes: list[str] = []
+    if target_length == 0:
+        failure_codes.append("TARGET_SUFFIX_EMPTY")
+    if placebo_length == 0:
+        failure_codes.append("PLACEBO_SUFFIX_EMPTY")
+    if placebo_suffix == noop_suffix:
+        failure_codes.append("PLACEBO_NOOP_COLLISION")
+    if not minimum_length <= placebo_length <= maximum_length:
+        failure_codes.append("PLACEBO_LENGTH_MISMATCH")
+    return {
+        "schema_version": _SCHEMA_VERSION,
+        "policy_version": PLACEBO_LENGTH_POLICY_VERSION,
+        "status": "PASSED" if not failure_codes else "FAILED",
+        "failure_codes": failure_codes,
+        "length_unit": "unicode_characters",
+        "target_suffix_length": target_length,
+        "noop_suffix_length": noop_length,
+        "placebo_suffix_length": placebo_length,
+        "tolerance_chars": tolerance,
+        "minimum_placebo_length": minimum_length,
+        "maximum_placebo_length": maximum_length,
+        "placebo_nonempty": placebo_length > 0,
+        "placebo_distinct_from_noop": placebo_suffix != noop_suffix,
+    }
 
 
 def _validate_llm_delta(
@@ -501,6 +551,7 @@ def run_exploratory_gate_b(
                     role.value: objective for role, objective in _ARM_OBJECTIVES.items()
                 },
                 "feature_contract_projection": "safety-reviewed-clauses-only-v1",
+                "placebo_length_policy_version": PLACEBO_LENGTH_POLICY_VERSION,
                 "base_intervention_policy_sha256": intervention_policy_sha256,
             }
         )
@@ -520,6 +571,7 @@ def run_exploratory_gate_b(
         variant_proposals: list[object] = []
         variant_graphs: list[object] = []
         llm_variant_by_gate_a_id: dict[str, dict[str, object]] = {}
+        suffix_by_task_role: dict[tuple[str, ArmRole], str] = {}
         for item in selected_variants:
             source = source_by_task[str(item["task_id"])]
             role = ArmRole(str(item["arm_role"]))
@@ -544,6 +596,7 @@ def run_exploratory_gate_b(
                 )
                 raise ValueError("exploratory Gate B source prefix failed validation")
             suffix = text[len(source.prompt) :]
+            suffix_by_task_role[(source.task_id, role)] = suffix
             blind_prompt = blind_variant_prompt_record_from_text(source, text, extractor_policy)
             extractor_transport.select(f"variant-{label}")
             proposal = extractor.extract(blind_prompt, extractor_policy)
@@ -622,6 +675,31 @@ def run_exploratory_gate_b(
             variant_graphs.append(graph)
             llm_variant_by_gate_a_id[str(item["variant_id"])] = llm_variant
 
+        placebo_length_validations: list[dict[str, object]] = []
+        for source in selected_sources:
+            validation = {
+                **validate_length_matched_placebo(
+                    target_suffix=suffix_by_task_role[(source.task_id, ArmRole.TARGET_PATCH)],
+                    noop_suffix=suffix_by_task_role[(source.task_id, ArmRole.NOOP_REWRITE)],
+                    placebo_suffix=suffix_by_task_role[
+                        (source.task_id, ArmRole.LENGTH_MATCHED_PLACEBO)
+                    ],
+                ),
+                "task_id": source.task_id,
+            }
+            placebo_length_validations.append(validation)
+            _write_json(
+                output_dir
+                / "validation"
+                / f"placebo-length-{hashlib.sha256(source.task_id.encode()).hexdigest()[:24]}.json",
+                validation,
+            )
+        failed_placebo_lengths = sum(
+            item["status"] != "PASSED" for item in placebo_length_validations
+        )
+        if failed_placebo_lengths:
+            raise ValueError("exploratory Gate B placebo length validation failed")
+
         assignments: list[dict[str, object]] = []
         for item in gate_a_assignments:
             if item.get("task_id") not in selected_task_ids:
@@ -687,6 +765,8 @@ def run_exploratory_gate_b(
                 "assignments": len(assignments),
                 "generic_control_realized": generic_realized,
                 "generic_control_expected": len(selected_sources),
+                "placebo_length_controls_validated": len(placebo_length_validations),
+                "placebo_length_control_failures": failed_placebo_lengths,
                 "variants_with_extractor_task_projection_drift": (
                     variants_with_task_projection_drift
                 ),
@@ -698,6 +778,9 @@ def run_exploratory_gate_b(
                 "intervention_policy_sha256": intervention_policy_sha256,
                 "exploratory_request_policy_sha256": exploratory_request_policy_sha256,
                 "extractor_policy_sha256": extractor_policy.policy_sha256,
+                "placebo_length_policy_sha256": canonical_sha256(
+                    {"policy_version": PLACEBO_LENGTH_POLICY_VERSION}
+                ),
             },
             "input_digests": {
                 "gate_b_config_sha256": sha256_file(gate_b_config_path),
@@ -761,4 +844,8 @@ def run_exploratory_gate_b(
         raise
 
 
-__all__ = ["run_exploratory_gate_b"]
+__all__ = [
+    "PLACEBO_LENGTH_POLICY_VERSION",
+    "run_exploratory_gate_b",
+    "validate_length_matched_placebo",
+]
