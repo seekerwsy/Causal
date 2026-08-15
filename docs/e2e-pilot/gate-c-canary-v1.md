@@ -116,3 +116,17 @@ The local zero-call live preflight is preserved at
 with zero provider calls. The first remote readiness check on 2026-08-15 could not establish a TCP
 connection to the registered SSH endpoint, so no server state, model process, paid call, or Oracle
 execution was changed by that attempt.
+
+After connectivity was restored, the repository commit `6576de3` was deployed into the new directory
+`/home/wsy/secaware-deployments/gate-c-live-20260815-01`; the historical deployment remained
+unchanged. The authenticated plan was copied into the deployment, the protected environment file was
+copied with mode 0600, and the remote fixed Python 3.12 environment completed `validate` for all eight
+assignments with zero provider calls. The two Gate C test modules passed 4/4 in the same environment.
+
+The prior model-service record was no longer running and port 18101 was free. However, both A800 GPUs
+were occupied by another user's Ray/SGlang workload at 88% and 99% utilization, with approximately
+29 GiB free per card. `scripts/start_gate_c_live_service_v1.sh` therefore rejected the first start
+attempt with exit code 6 before creating a service directory or process. The service gate requires
+GPU 1 to expose at least 74 GiB free with utilization no greater than 20%. It performs only the
+non-generative `/v1/models` readiness check, so no experimental or warm-up completion is spent outside
+the registered eight generation requests.
