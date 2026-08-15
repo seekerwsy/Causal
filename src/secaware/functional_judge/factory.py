@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 
 from secaware.config import AppConfig, FunctionalJudgeLLMConfig
 from secaware.errors import ErrorCode, SecAwareError
@@ -43,14 +44,18 @@ def _policy(config: FunctionalJudgeLLMConfig, seed: int) -> StructuredLLMPolicy:
     )
 
 
-def create_functional_judge(config: AppConfig) -> LLMFunctionalJudge:
+def create_functional_judge(
+    config: AppConfig,
+    *,
+    transport_factory: Callable[..., object] = OpenAICompatibleStructuredTransport,
+) -> LLMFunctionalJudge:
     try:
         judge_config = config.functional_judge
         llm = judge_config.llm
         if not judge_config.enabled or type(llm) is not FunctionalJudgeLLMConfig:
             raise ValueError
         checked = FunctionalJudgeLLMConfig.model_validate(llm.model_dump(mode="python"))
-        transport = OpenAICompatibleStructuredTransport(
+        transport = transport_factory(
             base_url=checked.base_url,
             api_key_env=checked.api_key_env,
             system_template=FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE,

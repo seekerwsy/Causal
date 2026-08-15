@@ -315,6 +315,14 @@ def _provider_from_frozen_config(
     )
 
 
+def create_confirmation_provider(config: AppConfig) -> object:
+    """Create the production confirmation provider from one validated config."""
+
+    if type(config) is not AppConfig or not model_shape_is_intact(config):
+        raise _stage_error("confirmation provider configuration failed validation")
+    return _provider_from_frozen_config(config)
+
+
 def _stage_error(message: str, *, code: ErrorCode = ErrorCode.CONTRACT) -> SecAwareError:
     return SecAwareError(code=code, stage=_STAGE, message=message, retryable=False)
 
@@ -1294,6 +1302,7 @@ __all__ = [
     "CONFIRMATION_GENERATION_OUTPUTS",
     "CONFIRMATION_PROVIDER_POLICY_VERSION",
     "ConfirmationGenerationStageResult",
+    "create_confirmation_provider",
     "run_confirmation_generation_stage",
     "validate_confirmation_generation_bundle",
 ]

@@ -87,3 +87,32 @@ remote run directory, persist every request/response or terminal failure, run th
 generation, and retain all eight assigned units in coverage reporting. A transport failure receives
 no silent semantic retry; any incomplete unit must be diagnosed and repaired in a separately recorded
 resume attempt.
+
+## Approved live execution protocol
+
+The bounded live authorization is operationalized by
+`scripts/run_gate_c_live_canary.py` and
+`configs/e2e-pilot/gate-c-live-canary-v1.json`. The dedicated executor consumes the authenticated
+Gate C plan directly rather than fabricating the upstream M4 stage manifests required by the formal
+confirmation pipeline. It reuses the production confirmation provider, single-pass blind functional
+judge, and coordinate-blind Oracle primitives.
+
+Execution is deliberately split into three commands and distinct artifact directories:
+
+1. `validate` authenticates all eight assignments, requests, contracts, coverage records, and config
+   budgets with zero provider calls and zero Oracle executions;
+2. `pilot` executes the frozen CWE-89 target assignment only and persists its canonical generation
+   request/response, exact Judge request/response, functional outcome, blind Oracle result, and unit
+   manifest;
+3. `remaining` is admitted only after the pilot is complete and executes the other seven assignments.
+
+Every unit is written before moving to the next unit. The executor is fail-fast and never silently
+retries a failed generation or Judge request. Oracle findings are generated from `OracleCodeInput`,
+which excludes randomized assignment and arm coordinates; the assignment binding is written only
+after blind analysis. Zero findings retain `unknown_coverage`.
+
+The local zero-call live preflight is preserved at
+`runs/e2e-pilot/gate-c-live-preflight-local-20260815-01`. It validated all eight pending assignments
+with zero provider calls. The first remote readiness check on 2026-08-15 could not establish a TCP
+connection to the registered SSH endpoint, so no server state, model process, paid call, or Oracle
+execution was changed by that attempt.
