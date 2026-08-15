@@ -139,6 +139,8 @@ The following incidents are retained so later stages do not repeat them:
 | First six-call completion process was terminated during its first unavailable intervention | twelve prior calls were reused and one request was persisted, but no new response or terminal report was written; the provider may have observed one orphaned request | the execution-session handle was lost during an environment refresh and no matching Python process remained | preserve `runs/e2e-pilot/gate-b-v4-resume-live-20260815-01` as an incomplete attempt, do not treat it as reusable evidence, and restart once in a new directory while reporting the possible orphaned provider attempt separately |
 | The authorized six-call completion run failed its final target gate | seven of eight variants passed; Gate C remained blocked | the CWE-78 target candidate preserved the source exactly and appended the reviewed safe-subprocess clause, but the blind extractor still labeled `safety.safe_subprocess` `ABSENT` and also changed `task.process_launch` relative to the source extraction | classify the intervention as operationally correct and the current LLM-facts extractor as insufficiently sensitive for this mechanism; do not override the blind graph or silently admit the candidate |
 | One target-suffix diagnostic initially treated `source_prompt` as a string | no artifact or project mutation | the structured request stores the text under `source_prompt.content` | reran the metadata-only diagnostic with the correct field and recorded only the appended suffix |
+| The first complete re-extraction plan had ten arm records but only eight request artifacts | zero provider calls; the incomplete plan is preserved | two pairs of identical no-op/placebo Prompt IDs caused request filenames and arm metadata to collide | key artifacts and extraction state by source/variant identity rather than Prompt ID, and fail closed on any artifact-identity collision |
+| The corrected ten-arm plan contained only eight unique extractor request byte sequences | zero provider calls; re-extraction was not authorized | for both tasks, the LLM intervention returned a zero-length suffix for `length_matched_placebo`, exactly duplicating the `noop_rewrite`, while target suffixes were 57 and 55 characters | treat both placebo arms as intervention-protocol failures; do not spend extractor calls or let improved extraction mask the invalid control; freeze an explicit length-matching tolerance before regenerating only the two placebo variants |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
@@ -179,3 +181,12 @@ reviewed requirement to pass arguments as a list and run without a shell, while 
 reported `safety.safe_subprocess=ABSENT`. The run therefore remains `GATE_B_FAILED`, no code was
 generated, and Gate C is not authorized. The earlier interrupted attempt may add one orphaned
 provider request to the accounting upper bound.
+
+The admitted semantic-facts extractor subsequently passed an independent six-Prompt CWE-78/CWE-89
+extension, but a zero-provider audit blocked immediate re-extraction of the saved Gate B texts. Both
+`length_matched_placebo` variants are byte-identical to their corresponding no-op variants and add
+zero characters, whereas the target additions contain 57 and 55 characters. The current Gate B
+validator checked task/safety feature invariants but did not operationalize the placebo length
+requirement. The two zero-provider plans are preserved separately; no re-extraction provider call
+was made. The placebo variants must be regenerated under a preregistered quantitative length rule
+before the complete Gate B block can be admitted.
