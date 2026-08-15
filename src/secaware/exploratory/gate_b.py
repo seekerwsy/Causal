@@ -13,6 +13,8 @@ import socket
 import sys
 from typing import Any
 
+import yaml
+
 from secaware.config import load_config, write_resolved_config
 from secaware.extractors.factory import extraction_policy, extractor_for_config
 from secaware.extractors.llm_facts import LLM_FACTS_SYSTEM_TEMPLATE
@@ -105,6 +107,23 @@ def _write_json(path: Path, value: object) -> None:
     path.write_bytes(_canonical(value) + b"\n")
 
 
+def _reuse_policy_config_sha256(path: Path) -> str:
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if type(value) is not dict or type(value.get("run")) is not dict:
+        raise ValueError("exploratory Gate B reuse app config failed validation")
+    normalized = dict(value)
+    normalized_run = dict(normalized["run"])
+    normalized_run.pop("output_dir", None)
+    normalized["run"] = normalized_run
+    return canonical_sha256(normalized)
+
+
+def _artifact_stem(label: str) -> str:
+    if len(label) <= 48 and all(character.isalnum() or character in "-_" for character in label):
+        return label
+    return "record-" + hashlib.sha256(label.encode("utf-8")).hexdigest()[:32]
+
+
 def _environment() -> dict[str, object]:
     return {
         "captured_at_utc": datetime.now(UTC).isoformat(),
@@ -118,11 +137,31 @@ def _environment() -> dict[str, object]:
 class _RecordingTransport:
     """Persist the exact structured request/response around the shared transport."""
 
-    def __init__(self, delegate: StructuredJSONTransport, root: Path, channel: str) -> None:
+    def __init__(
+        self,
+        delegate: StructuredJSONTransport,
+        root: Path,
+        channel: str,
+        *,
+        reuse_root: Path | None = None,
+        allow_live: bool = True,
+    ) -> None:
         self._delegate = delegate
         self._root = root
         self._channel = channel
+        self._reuse_root = reuse_root
+        self._allow_live = allow_live
         self._label: str | None = None
+        self._reused_labels: list[str] = []
+        self._live_labels: list[str] = []
+
+    @property
+    def reused_labels(self) -> tuple[str, ...]:
+        return tuple(self._reused_labels)
+
+    @property
+    def live_labels(self) -> tuple[str, ...]:
+        return tuple(self._live_labels)
 
     def select(self, label: str) -> None:
         if self._label is not None or not label:
@@ -136,13 +175,68 @@ class _RecordingTransport:
             raise ValueError("exploratory Gate B recording label failed validation")
         root = self._root / "raw" / self._channel
         root.mkdir(parents=True, exist_ok=True)
-        request_path = root / f"{label}.request.json"
-        response_path = root / f"{label}.response.json"
-        failure_path = root / f"{label}.failure.json"
+        artifact_stem = _artifact_stem(label)
+        request_path = root / f"{artifact_stem}.request.json"
+        response_path = root / f"{artifact_stem}.response.json"
+        failure_path = root / f"{artifact_stem}.failure.json"
         request_path.write_bytes(request_bytes + b"\n")
         try:
+            if self._reuse_root is not None:
+                reuse_channel = self._reuse_root / "raw" / self._channel
+                reuse_stems = tuple(dict.fromkeys((label, artifact_stem)))
+                available_pairs: list[tuple[Path, Path]] = []
+                incomplete_pair = False
+                for reuse_stem in reuse_stems:
+                    candidate_request = reuse_channel / f"{reuse_stem}.request.json"
+                    candidate_response = reuse_channel / f"{reuse_stem}.response.json"
+                    request_exists = candidate_request.is_file()
+                    response_exists = candidate_response.is_file()
+                    incomplete_pair = incomplete_pair or request_exists != response_exists
+                    if request_exists and response_exists:
+                        available_pairs.append((candidate_request, candidate_response))
+                if incomplete_pair or len(available_pairs) > 1:
+                    raise ValueError(
+                        "exploratory Gate B reuse pair completeness failed validation"
+                    )
+                reuse_request_path: Path | None = None
+                reuse_response_path: Path | None = None
+                if available_pairs:
+                    reuse_request_path, reuse_response_path = available_pairs[0]
+                if reuse_request_path is not None and reuse_response_path is not None:
+                    reused_request = reuse_request_path.read_bytes()
+                    reused_response = reuse_response_path.read_bytes()
+                    if reused_request.endswith(b"\n"):
+                        reused_request = reused_request[:-1]
+                    if reused_response.endswith(b"\n"):
+                        reused_response = reused_response[:-1]
+                    if reused_request != request_bytes:
+                        raise ValueError(
+                            "exploratory Gate B reuse request bytes failed validation"
+                        )
+                    response_path.write_bytes(reused_response + b"\n")
+                    _write_json(
+                        root / f"{artifact_stem}.reuse.json",
+                        {
+                            "schema_version": _SCHEMA_VERSION,
+                            "channel": self._channel,
+                            "label": label,
+                            "artifact_stem": artifact_stem,
+                            "source_run_dir": self._reuse_root.as_posix(),
+                            "source_request_sha256": sha256_file(reuse_request_path),
+                            "source_response_sha256": sha256_file(reuse_response_path),
+                            "request_bytes_match": True,
+                            "provider_call_made": False,
+                        },
+                    )
+                    self._reused_labels.append(label)
+                    return reused_response
+            if not self._allow_live:
+                raise ValueError(
+                    "exploratory Gate B live call disabled and reusable response unavailable"
+                )
             response = self._delegate.complete(request_bytes, policy)
             response_path.write_bytes(response + b"\n")
+            self._live_labels.append(label)
             return response
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
@@ -291,6 +385,22 @@ def run_exploratory_gate_b(
             raise ValueError("exploratory Gate B policy failed validation")
         gate_a_dir = (repo_root / str(gate_b_config["gate_a_dir"])).resolve()
         gate_a_dir.relative_to(repo_root)
+        reuse_run_dir_value = gate_b_config.get("reuse_run_dir")
+        reuse_run_dir: Path | None = None
+        if reuse_run_dir_value is not None:
+            if type(reuse_run_dir_value) is not str or not reuse_run_dir_value:
+                raise ValueError("exploratory Gate B reuse path failed validation")
+            reuse_run_dir = (repo_root / reuse_run_dir_value).resolve()
+            reuse_run_dir.relative_to(repo_root)
+            if not reuse_run_dir.is_dir() or reuse_run_dir == output_dir:
+                raise ValueError("exploratory Gate B reuse path failed validation")
+            if _reuse_policy_config_sha256(
+                reuse_run_dir / "effective-app-config.yaml"
+            ) != _reuse_policy_config_sha256(output_dir / "effective-app-config.yaml"):
+                raise ValueError("exploratory Gate B reuse app config failed validation")
+        allow_live_calls = gate_b_config.get("allow_live_calls", True)
+        if type(allow_live_calls) is not bool:
+            raise ValueError("exploratory Gate B live-call policy failed validation")
         gate_a_report = _read_json(gate_a_dir / "report.json")
         if (
             gate_a_report.get("status") != "GATE_A_PASSED"
@@ -364,6 +474,8 @@ def run_exploratory_gate_b(
             intervention_delegate,
             output_dir,
             "intervention",
+            reuse_root=reuse_run_dir,
+            allow_live=allow_live_calls,
         )
         extractor_config = app_config.tsg.llm
         extractor_delegate = OpenAICompatibleStructuredTransport(
@@ -371,7 +483,13 @@ def run_exploratory_gate_b(
             api_key_env=extractor_config.api_key_env,
             system_template=LLM_FACTS_SYSTEM_TEMPLATE,
         )
-        extractor_transport = _RecordingTransport(extractor_delegate, output_dir, "extractor")
+        extractor_transport = _RecordingTransport(
+            extractor_delegate,
+            output_dir,
+            "extractor",
+            reuse_root=reuse_run_dir,
+            allow_live=allow_live_calls,
+        )
         extractor = extractor_for_config(app_config.tsg, transport=extractor_transport)
         extractor_policy = extraction_policy(app_config.tsg)
         intervention_policy_sha256 = intervention_executor_policy_sha256(intervention_policy)
@@ -414,7 +532,7 @@ def run_exploratory_gate_b(
             text = _parse_response(raw_response, intervention_policy.max_response_bytes)
             if not text.startswith(source.prompt):
                 _write_json(
-                    output_dir / "validation" / f"{label}.json",
+                    output_dir / "validation" / f"{_artifact_stem(label)}.json",
                     {
                         "schema_version": _SCHEMA_VERSION,
                         "status": "FAILED",
@@ -449,7 +567,10 @@ def run_exploratory_gate_b(
                     suffix.encode("utf-8")
                 ).hexdigest(),
             }
-            _write_json(output_dir / "validation" / f"{label}.json", validation)
+            _write_json(
+                output_dir / "validation" / f"{_artifact_stem(label)}.json",
+                validation,
+            )
             if validation["status"] != "PASSED":
                 codes = ",".join(str(item) for item in validation["failure_codes"])
                 raise ValueError(f"exploratory Gate B hard validation failed: {codes}")
@@ -554,6 +675,14 @@ def run_exploratory_gate_b(
                 "source_extractions": len(source_proposals),
                 "intervention_calls": len(llm_variants),
                 "variant_extractions": len(variant_proposals),
+                "provider_calls": len(intervention_transport.live_labels)
+                + len(extractor_transport.live_labels),
+                "provider_intervention_calls": len(intervention_transport.live_labels),
+                "provider_extractor_calls": len(extractor_transport.live_labels),
+                "reused_calls": len(intervention_transport.reused_labels)
+                + len(extractor_transport.reused_labels),
+                "reused_intervention_calls": len(intervention_transport.reused_labels),
+                "reused_extractor_calls": len(extractor_transport.reused_labels),
                 "validated_variants": len(llm_variants),
                 "assignments": len(assignments),
                 "generic_control_realized": generic_realized,
@@ -576,6 +705,28 @@ def run_exploratory_gate_b(
                 "gate_a_report_sha256": sha256_file(gate_a_dir / "report.json"),
                 "gate_a_variants_sha256": sha256_file(gate_a_dir / "variants.jsonl"),
                 "gate_a_assignments_sha256": sha256_file(gate_a_dir / "assignments.jsonl"),
+                "reuse_effective_app_config_sha256": (
+                    sha256_file(reuse_run_dir / "effective-app-config.yaml")
+                    if reuse_run_dir is not None
+                    else None
+                ),
+                "reuse_policy_config_sha256": (
+                    _reuse_policy_config_sha256(
+                        reuse_run_dir / "effective-app-config.yaml"
+                    )
+                    if reuse_run_dir is not None
+                    else None
+                ),
+            },
+            "reuse": {
+                "enabled": reuse_run_dir is not None,
+                "source_run_dir": (
+                    reuse_run_dir.relative_to(repo_root).as_posix()
+                    if reuse_run_dir is not None
+                    else None
+                ),
+                "request_match": "exact_bytes",
+                "allow_live_calls": allow_live_calls,
             },
             "next_gate": "bounded_real_outcome_canary",
         }

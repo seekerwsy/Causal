@@ -165,6 +165,13 @@ family before exploratory outcomes are produced at scale.
 - record task-projection differences between independent source and variant extractions as extractor
   drift diagnostics rather than hard semantic failures, because the append-only boundary preserves
   the original task text and the v3 micro run demonstrated a source-side false negative;
+- a resumed Gate B run may reuse a prior raw response only when the prior request/response pair is
+  complete, the effective application policy configuration digest is identical after excluding the
+  necessarily run-specific `run.output_dir`, and the newly constructed request matches the prior
+  request byte-for-byte; every reuse receives a separate provenance record and is re-parsed,
+  rebuilt, and revalidated under the current gate implementation;
+- content-addressed labels remain authoritative identities, while Windows-safe artifact stems may
+  shorten filenames only through a recorded SHA-256 mapping;
 - stop before generation if any hard invariant fails.
 
 ### Gate C: bounded real outcome canary

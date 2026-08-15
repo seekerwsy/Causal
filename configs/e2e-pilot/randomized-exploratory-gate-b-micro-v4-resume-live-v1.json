@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "gate_b_id": "randomized-exploratory-cwe78-cwe89-gate-b-micro-v4-resume-live-v1",
+  "purpose": "Strictly reuse five preserved v3 variants and call the provider only for three missing CWE-78 variants.",
+  "gate": "blind_llm_intervention_and_extraction",
+  "allow_outcome_generation": false,
+  "allow_live_calls": true,
+  "gate_a_dir": "runs/e2e-pilot/randomized-exploratory-discovery-canary-v1-20260815-01",
+  "reuse_run_dir": "runs/e2e-pilot/randomized-exploratory-gate-b-micro-v3-20260815-01",
+  "selected_task_ids": [
+    "cluster-22d97b466b5d2c737129",
+    "cluster-b80c034159e718b8bbc9"
+  ]
+}

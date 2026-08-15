@@ -133,6 +133,9 @@ The following incidents are retained so later stages do not repeat them:
 | Gate B micro v3 stopped on the fifth of eight planned variants | four CWE-89 variants validated; the remaining three CWE-78 variants were not sent | the source extractor labeled `task.process_launch` `ABSENT`, then labeled it `PRESENT` after a generic reminder was appended even though the source text was preserved byte-for-byte | classify this as extractor task-projection drift; future validation will keep append-only text and security-layer AllowedDelta as hard gates while reporting independently extracted task-layer drift as a diagnostic |
 | Three read-only inspection commands failed during v3 diagnosis and pre-commit checking | no artifact or project file was changed | one command used an invalid in-memory hashing overload, one contained an empty pipeline element, and one passed Windows wildcard paths directly to `rg` | replaced them with simpler metadata-only reads and `rg -g` path filtering; retained this note to avoid reusing those command forms |
 | First v4 offline replay failed before validation | no API call and no project mutation | the intervention request intentionally stores an AllowedDelta projection, not the complete `AllowedDeltaRecord` required by the validator | joined the request to the immutable Gate A variant by `exploratory_variant_id` and replayed with the complete frozen record |
+| First strict-reuse preflight stopped before replay | no API call; no response was imported | raw effective-configuration digests differed because `run.output_dir` is resolved to each distinct run directory | compare a canonical policy-configuration digest that excludes only `run.output_dir`, retain both raw file digests for provenance, and continue to require exact request-byte equality |
+| Second strict-reuse preflight stopped before the first variant extraction | no API call; two source responses and one intervention response were reused | the longer preflight directory plus a full content-addressed variant label exceeded the Windows path limit before the extractor request could be written | use a deterministic 32-hex SHA-256 artifact stem on disk, retain the full label in provenance, and support both the v3 long-name layout and the new short-name layout when reusing artifacts |
+| Two follow-up read-only diagnostics referenced files or directories that did not exist after the early stop | no artifact or project mutation | the inspection assumed a validation directory and a specific variant reuse filename had already been created | list actual run contents first and treat absent partial-run directories as zero-count diagnostics |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
@@ -156,3 +159,10 @@ call. The previously accepted CWE-89 target arm remained accepted with only
 `safety.sql_parameterization` changed. The stopped CWE-78 generic-reminder arm was accepted with
 only `safety.generic_security_reminder` counted as a validated non-task change, while
 `task.process_launch` was emitted separately as extractor drift. No v4 paid run has been started.
+
+The final zero-provider strict-reuse preflight is preserved at
+`runs/e2e-pilot/gate-b-v4-resume-preflight-20260815-03`. It reused twelve exact request/response
+pairs (two source extractions, five interventions, and five variant extractions), revalidated all
+five existing variants as `PASSED`, made zero provider calls, and then stopped at the first of the
+three unavailable CWE-78 interventions because live calls were disabled. This is the required
+precondition for the bounded six-call completion run.
