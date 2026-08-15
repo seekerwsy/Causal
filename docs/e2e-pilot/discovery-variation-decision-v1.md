@@ -143,6 +143,7 @@ The following incidents are retained so later stages do not repeat them:
 | The corrected ten-arm plan contained only eight unique extractor request byte sequences | zero provider calls; re-extraction was not authorized | for both tasks, the LLM intervention returned a zero-length suffix for `length_matched_placebo`, exactly duplicating the `noop_rewrite`, while target suffixes were 57 and 55 characters | treat both placebo arms as intervention-protocol failures; do not spend extractor calls or let improved extraction mask the invalid control; freeze an explicit length-matching tolerance before regenerating only the two placebo variants |
 | The first approved placebo repair missed both frozen length ranges | two intervention responses were preserved; zero extractor and code-generation calls followed | range-guided LLM responses were natural, non-empty, and distinct from no-op, but their 43- and 47-character suffixes fell below the registered 51- and 49-character minima | retain the failed run without retry; freeze a reviewed exact 55-character presentation-only clause in a separately versioned repair request |
 | The reviewed-clause placebo repair passed both frozen length ranges | two new intervention responses were preserved; zero extractor and code-generation calls followed | exact-clause execution produced two 55-character, prefix-preserving, non-no-op suffixes | admit only the repaired placebo texts into a complete zero-provider Gate B re-extraction plan; keep task and safety invariance subject to blind extraction |
+| The first post-run inspection used obsolete validation paths | no experiment artifact or provider call was affected | the check assumed `validations/` and `errors.jsonl`, while this runner writes `validation/` and represents zero errors only in the report | list the actual run structure first, then read the existing validation records; record the inspection error rather than treating it as a run failure |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
@@ -200,3 +201,13 @@ ranges. The complete replacement re-extraction plan is preserved at
 extractor request byte sequences for two sources and eight variants, two passing placebo validations,
 and zero provider attempts. This does not change the preserved failed runs and does not yet establish
 Gate B validity; the ten blind extraction calls still require separate approval.
+
+The separately approved live re-extraction is preserved at
+`runs/e2e-pilot/gate-b-extractor-revalidation-v1-live-20260815-01`. It completed the
+frozen ten-call budget with ten responses, ten valid extractions, eight passing variant validations,
+and no errors or retries. The CWE-89 and CWE-78 target arms changed only
+`safety.sql_parameterization` and `safety.safe_subprocess`, respectively; generic reminders changed
+only the generic-reminder feature; and no-op and placebo controls changed no registered non-task
+feature. No task-projection drift, AllowedDelta violation, or sentinel violation was observed. Gate B
+is therefore passed for this bounded engineering canary, while outcome generation, code generation,
+scientific claims, and scale-up remain unauthorized.

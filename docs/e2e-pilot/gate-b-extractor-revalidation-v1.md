@@ -54,3 +54,23 @@ generation.
 The plan result authorizes only a request for the bounded ten-call extractor execution. It does not
 authorize those calls automatically. Live execution requires separate approval and must use a new
 run directory, one attempt per request, and no semantic retry.
+
+## Approved live result
+
+The separately approved execution is preserved at
+`runs/e2e-pilot/gate-b-extractor-revalidation-v1-live-20260815-01`. It made exactly
+ten provider attempts and received ten valid responses: two source extractions and eight variant
+extractions. All ten Prompts produced proposals and Prompt-TSGs; all eight variants passed. There
+were zero provider errors, zero extraction errors, zero validation failures, zero retries, and zero
+pending records. Outcome and code generation remained disabled.
+
+The two target patches changed only their registered mechanisms:
+`safety.sql_parameterization` for CWE-89 and `safety.safe_subprocess` for CWE-78. The two generic
+reminders changed only `safety.generic_security_reminder`. Both no-op arms and both length-matched
+placebos left the target mechanisms absent and produced no validated non-task change. No arm produced
+an AllowedDelta violation, sentinel violation, or task-projection drift.
+
+This closes Gate B for the bounded two-task engineering canary and demonstrates that the admitted
+extractor can distinguish both registered target mechanisms from the three control arms in these
+saved Prompts. It remains an engineering-gate result rather than a scientific effect estimate. Gate C
+or any scaled run requires a separate design decision and authorization.
