@@ -83,3 +83,36 @@ Before an experimental assignment may run on the target host:
    assignment for one model at a time.
 
 No scale-up or scientific effect claim is authorized by this document.
+
+## Target-host serving result
+
+The isolated serving environment was subsequently created at
+`/home/ubuntu/secaware-envs/gate-c-vllm-0.16.0-py310-20260816-01`. Its readiness record is
+`/home/ubuntu/secaware-experiments/readiness/gate-c-vllm-env-20260816-01`. The authoritative status is
+`READY`; imports resolved to Python 3.10.12, vLLM 0.16.0, PyTorch 2.9.1+cu128, Transformers 4.57.6,
+NumPy 2.2.6, and idna 3.18. The historical base and `mmo` environments were not modified.
+
+The 7B service reached `READY`, passed one non-security `add_one` service-format canary, and was then
+stopped. Its response used one exact Python Markdown fence. This is a supported provider envelope:
+the production provider removes that exact envelope, records `source_envelope=python_fence` in
+provenance, and returns the decoded source. The authoritative canary correction is
+`status-v3.txt=PASS_WITH_SUPPORTED_PYTHON_FENCE`; the decoded program compiled successfully.
+
+Two earlier files in that same canary directory are intentionally retained but superseded. The first
+manual check compiled the raw fenced response instead of passing it through the production provider,
+then incorrectly wrote `PASS` because the interactive shell did not fail fast. The attempted v2
+correction embedded literal backticks in a shell command, which triggered command substitution and
+again wrote a status after the decoder failed. `adjudication-v3.txt` marks both statuses invalid. The
+v3 check represents the fence without literal shell backticks, gates status creation on both decoding
+and compilation, and is authoritative.
+
+The 14B BF16 service also reached `READY` without quantization. At readiness it used 30,938 MiB of the
+32,607 MiB GPU and left 1,172 MiB free, so it remains restricted to one sequence and a 4,096-token
+context. Its independently saved `add_one` canary passed strict production-envelope decoding and
+Python compilation on the first gated attempt. Both services were stopped after validation; a final
+GPU check reported 32,086 MiB free and 0% utilization.
+
+These checks establish serving and response-envelope feasibility only. Counts remain: two service
+profiles ready, two service-format canaries complete, zero services running, zero Gate C experimental
+assignments completed, sixteen model-specific Gate C assignments pending, and zero Bailian Judge or
+Oracle calls made for the new model strata.
