@@ -136,6 +136,9 @@ The following incidents are retained so later stages do not repeat them:
 | First strict-reuse preflight stopped before replay | no API call; no response was imported | raw effective-configuration digests differed because `run.output_dir` is resolved to each distinct run directory | compare a canonical policy-configuration digest that excludes only `run.output_dir`, retain both raw file digests for provenance, and continue to require exact request-byte equality |
 | Second strict-reuse preflight stopped before the first variant extraction | no API call; two source responses and one intervention response were reused | the longer preflight directory plus a full content-addressed variant label exceeded the Windows path limit before the extractor request could be written | use a deterministic 32-hex SHA-256 artifact stem on disk, retain the full label in provenance, and support both the v3 long-name layout and the new short-name layout when reusing artifacts |
 | Two follow-up read-only diagnostics referenced files or directories that did not exist after the early stop | no artifact or project mutation | the inspection assumed a validation directory and a specific variant reuse filename had already been created | list actual run contents first and treat absent partial-run directories as zero-count diagnostics |
+| First six-call completion process was terminated during its first unavailable intervention | twelve prior calls were reused and one request was persisted, but no new response or terminal report was written; the provider may have observed one orphaned request | the execution-session handle was lost during an environment refresh and no matching Python process remained | preserve `runs/e2e-pilot/gate-b-v4-resume-live-20260815-01` as an incomplete attempt, do not treat it as reusable evidence, and restart once in a new directory while reporting the possible orphaned provider attempt separately |
+| The authorized six-call completion run failed its final target gate | seven of eight variants passed; Gate C remained blocked | the CWE-78 target candidate preserved the source exactly and appended the reviewed safe-subprocess clause, but the blind extractor still labeled `safety.safe_subprocess` `ABSENT` and also changed `task.process_launch` relative to the source extraction | classify the intervention as operationally correct and the current LLM-facts extractor as insufficiently sensitive for this mechanism; do not override the blind graph or silently admit the candidate |
+| One target-suffix diagnostic initially treated `source_prompt` as a string | no artifact or project mutation | the structured request stores the text under `source_prompt.content` | reran the metadata-only diagnostic with the correct field and recorded only the appended suffix |
 
 All failed attempts, diagnostics, stability runs, and the final atomic run use distinct directories.
 No historical artifact was forced, edited in place, or deleted.
@@ -166,3 +169,13 @@ pairs (two source extractions, five interventions, and five variant extractions)
 five existing variants as `PASSED`, made zero provider calls, and then stopped at the first of the
 three unavailable CWE-78 interventions because live calls were disabled. This is the required
 precondition for the bounded six-call completion run.
+
+The authorized completion attempt is preserved at
+`runs/e2e-pilot/gate-b-v4-resume-live-20260815-02`. It reused the same twelve historical calls and
+completed six new provider calls: three interventions and three blind variant extractions. All eight
+variants received validation artifacts. Seven passed. The CWE-78 `target_patch` failed only
+`TARGET_VARIATION_VIOLATION`: its source prefix was exact and its 55-character suffix was the
+reviewed requirement to pass arguments as a list and run without a shell, while the blind extractor
+reported `safety.safe_subprocess=ABSENT`. The run therefore remains `GATE_B_FAILED`, no code was
+generated, and Gate C is not authorized. The earlier interrupted attempt may add one orphaned
+provider request to the accounting upper bound.
