@@ -49,6 +49,17 @@ _SYSTEM_TEMPLATE = (
 )
 
 
+def _repair_system_template(reviewed_suffix: str | None) -> str:
+    if reviewed_suffix is None:
+        return _SYSTEM_TEMPLATE
+    return (
+        _SYSTEM_TEMPLATE
+        + "\n\nFor this reviewed-clause repair, append exactly required_exact_suffix after the "
+        "unchanged source prefix. Copy it character-for-character; do not shorten, paraphrase, or "
+        "replace it."
+    )
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value,
@@ -144,6 +155,24 @@ def run_repair(
         or app_config.intervention.llm is None
     ):
         raise ValueError("Gate B placebo repair policy failed validation")
+    reviewed_suffix = config.get("reviewed_placebo_suffix")
+    if reviewed_suffix is not None and (
+        type(reviewed_suffix) is not str
+        or not reviewed_suffix.startswith(" ")
+        or reviewed_suffix != reviewed_suffix.rstrip()
+    ):
+        raise ValueError("Gate B reviewed placebo suffix failed validation")
+    request_policy_version = (
+        "gate-b-placebo-reviewed-clause-request-v2"
+        if reviewed_suffix is not None
+        else _REQUEST_POLICY_VERSION
+    )
+    system_template_version = (
+        "gate-b-placebo-reviewed-clause-executor-v2"
+        if reviewed_suffix is not None
+        else _SYSTEM_TEMPLATE_VERSION
+    )
+    system_template = _repair_system_template(reviewed_suffix)
 
     gate_a_dir = (repo_root / str(config["gate_a_dir"])).resolve()
     prior_dir = (repo_root / str(config["prior_attempt_dir"])).resolve()
@@ -176,7 +205,7 @@ def run_repair(
     structured_policy = StructuredLLMPolicy(
         endpoint_sha256=hashlib.sha256(intervention.base_url.encode("utf-8")).hexdigest(),
         model_id=intervention.model_id,
-        system_template_sha256=hashlib.sha256(_SYSTEM_TEMPLATE.encode("utf-8")).hexdigest(),
+        system_template_sha256=hashlib.sha256(system_template.encode("utf-8")).hexdigest(),
         output_schema_sha256=INTERVENTION_EXECUTOR_OUTPUT_SCHEMA_SHA256,
         temperature=intervention.temperature,
         top_p=intervention.top_p,
@@ -192,7 +221,7 @@ def run_repair(
         transport = OpenAICompatibleStructuredTransport(
             base_url=intervention.base_url,
             api_key_env=intervention.api_key_env,
-            system_template=_SYSTEM_TEMPLATE,
+            system_template=system_template,
         )
 
     records: list[dict[str, object]] = []
@@ -220,6 +249,14 @@ def run_repair(
             noop_suffix=noop_suffix,
             placebo_suffix="p" * len(target_suffix),
         )
+        if reviewed_suffix is not None:
+            reviewed_validation = validate_length_matched_placebo(
+                target_suffix=target_suffix,
+                noop_suffix=noop_suffix,
+                placebo_suffix=reviewed_suffix,
+            )
+            if reviewed_validation["status"] != "PASSED":
+                raise ValueError("reviewed placebo suffix length failed validation")
         request = _intervention_payload(
             source,
             placebo,
@@ -228,7 +265,7 @@ def run_repair(
         request = {
             **request,
             "request_kind": "bounded_length_matched_placebo_repair",
-            "request_policy_version": _REQUEST_POLICY_VERSION,
+            "request_policy_version": request_policy_version,
             "arm_objective": (
                 "Append exactly one natural presentation-only sentence. Preserve all task and "
                 "safety semantics. The appended suffix length must satisfy placebo_length_contract."
@@ -242,6 +279,7 @@ def run_repair(
                 "must_be_nonempty": True,
                 "must_differ_from_noop": True,
                 "noop_suffix_sha256": hashlib.sha256(noop_suffix.encode("utf-8")).hexdigest(),
+                "required_exact_suffix": reviewed_suffix,
             },
         }
         request_bytes = canonical_request_bytes(request)
@@ -285,6 +323,15 @@ def run_repair(
                 noop_suffix=noop_suffix,
                 placebo_suffix=suffix,
             )
+            if reviewed_suffix is not None and suffix != reviewed_suffix:
+                validation = {
+                    **validation,
+                    "status": "FAILED",
+                    "failure_codes": [
+                        *validation["failure_codes"],
+                        "PLACEBO_REVIEWED_CLAUSE_MISMATCH",
+                    ],
+                }
             validation = {
                 **validation,
                 "task_id": task_id,
@@ -306,9 +353,14 @@ def run_repair(
                     "executor_policy_sha256": executor_policy_sha256,
                     "request_policy_sha256": canonical_sha256(
                         {
-                            "request_policy_version": _REQUEST_POLICY_VERSION,
-                            "system_template_version": _SYSTEM_TEMPLATE_VERSION,
+                            "request_policy_version": request_policy_version,
+                            "system_template_version": system_template_version,
                             "placebo_length_policy_version": PLACEBO_LENGTH_POLICY_VERSION,
+                            "reviewed_placebo_suffix_sha256": (
+                                hashlib.sha256(reviewed_suffix.encode("utf-8")).hexdigest()
+                                if reviewed_suffix is not None
+                                else None
+                            ),
                             "executor_policy_sha256": executor_policy_sha256,
                         }
                     ),
@@ -359,6 +411,11 @@ def run_repair(
         "policy_digests": {
             "executor_policy_sha256": executor_policy_sha256,
             "placebo_length_policy_version": PLACEBO_LENGTH_POLICY_VERSION,
+            "reviewed_placebo_suffix_sha256": (
+                hashlib.sha256(reviewed_suffix.encode("utf-8")).hexdigest()
+                if reviewed_suffix is not None
+                else None
+            ),
         },
         "input_digests": {
             "repair_config_sha256": sha256_file(repair_config_path),

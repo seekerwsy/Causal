@@ -40,3 +40,33 @@ attempts. It froze exactly two distinct `length_matched_placebo` requests, recov
 57 and 55 from the preserved intervention pairs, and embedded the corresponding 51--63 and 49--61
 admission ranges. The ten boundary tests for accepted endpoints, rejected out-of-range lengths,
 empty/no-op collisions, and invalid input types all passed.
+
+## First approved live result
+
+`runs/e2e-pilot/gate-b-placebo-repair-v1-live-20260815-01` made exactly the two
+approved provider calls and received two structurally valid responses without retries or transport
+errors. Both responses preserved the source prefix, were non-empty, differed from no-op, and used
+natural presentation-only practice wording. They failed only the frozen length boundary: the
+57-character target received a 43-character placebo suffix, and the 55-character target received a
+47-character suffix. No extractor or code-generation call was made.
+
+The failure is retained and is not reclassified or repaired in place. Range guidance alone was
+insufficient for this executor.
+
+## Reviewed-clause v2 preflight
+
+The v2 repair freezes one reviewed presentation-only suffix for both tasks:
+
+```text
+ Keep the requested code concise and clearly organized.
+```
+
+The leading space is part of the suffix, giving exactly 55 Unicode characters. It lies inside both
+registered ranges and changes only response presentation. The v2 system and request contracts require
+the executor to copy this exact suffix after the unchanged source; shortening or paraphrasing is a
+hard failure.
+
+`runs/e2e-pilot/gate-b-placebo-repair-v2-plan-20260815-01` froze two new requests with
+zero provider attempts. The reviewed-clause digest, request policy, system-template policy, target
+and no-op dependencies, and two-call budget are all distinct from v1. A v2 live run requires separate
+authorization and remains one attempt per placebo with no semantic retry.
