@@ -4,10 +4,10 @@ set -euo pipefail
 umask 077
 
 readonly DEPLOY_DIR="/home/ubuntu/secaware-deployments/gate-c-model-scale-live-20260816-03"
-readonly ENV_DIR="/home/ubuntu/secaware-envs/secaware-gate-c-py312-20260816-01"
-readonly RECORD_DIR="/home/ubuntu/secaware-experiments/readiness/gate-c-runner-env-20260816-01"
+readonly ENV_DIR="/home/ubuntu/secaware-envs/secaware-gate-c-py312-20260816-02"
+readonly RECORD_DIR="/home/ubuntu/secaware-experiments/readiness/gate-c-runner-env-20260816-02"
 readonly UV="/home/ubuntu/.local/bin/uv"
-readonly PYTHON_VERSION="3.12.13"
+readonly PYTHON_VERSION="3.12.12"
 
 if [[ "$(pwd -P)" != "${DEPLOY_DIR}" ]]; then
   echo "deployment directory mismatch" >&2
