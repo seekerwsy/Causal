@@ -4,8 +4,8 @@ set -euo pipefail
 umask 077
 
 readonly DEPLOY_DIR="/home/ubuntu/secaware-deployments/gate-c-model-scale-live-20260816-03"
-readonly ENV_DIR="/home/ubuntu/secaware-envs/secaware-gate-c-conda-py312-20260816-03"
-readonly RECORD_DIR="/home/ubuntu/secaware-experiments/readiness/gate-c-runner-conda-env-20260816-03"
+readonly ENV_DIR="/home/ubuntu/secaware-envs/secaware-gate-c-conda-py312-20260816-04"
+readonly RECORD_DIR="/home/ubuntu/secaware-experiments/readiness/gate-c-runner-conda-env-20260816-04"
 readonly CONDA="/home/ubuntu/miniconda3/bin/conda"
 readonly PYTHON_VERSION="3.12.12"
 readonly PIP_VERSION="25.0.1"
@@ -39,7 +39,8 @@ finish() {
 trap finish EXIT
 
 cat >"${RECORD_DIR}/install-command.txt" <<EOF
-${CONDA} create --yes --prefix ${ENV_DIR} python=${PYTHON_VERSION} pip=${PIP_VERSION} setuptools=${SETUPTOOLS_VERSION} wheel=${WHEEL_VERSION}
+${CONDA} create --yes --prefix ${ENV_DIR} python=${PYTHON_VERSION} pip
+${ENV_DIR}/bin/python -m pip install pip==${PIP_VERSION} setuptools==${SETUPTOOLS_VERSION} wheel==${WHEEL_VERSION}
 ${ENV_DIR}/bin/python -m pip install --editable .[api,oracle]
 EOF
 
@@ -52,9 +53,7 @@ nvidia-smi --query-gpu=index,uuid,name,driver_version,memory.total,memory.used,m
 
 "${CONDA}" create --yes --prefix "${ENV_DIR}" \
   "python=${PYTHON_VERSION}" \
-  "pip=${PIP_VERSION}" \
-  "setuptools=${SETUPTOOLS_VERSION}" \
-  "wheel=${WHEEL_VERSION}" \
+  pip \
   >"${RECORD_DIR}/conda-create.stdout.log" \
   2>"${RECORD_DIR}/conda-create.stderr.log"
 
@@ -62,6 +61,12 @@ nvidia-smi --query-gpu=index,uuid,name,driver_version,memory.total,memory.used,m
   "import os,sys; assert hasattr(os,'memfd_create'); assert hasattr(os,'pidfd_open'); print(sys.version); print('linux-isolation-primitives-ready')" \
   >"${RECORD_DIR}/isolation-primitives.txt" \
   2>"${RECORD_DIR}/isolation-primitives.stderr.log"
+"${ENV_DIR}/bin/python" -m pip install \
+  "pip==${PIP_VERSION}" \
+  "setuptools==${SETUPTOOLS_VERSION}" \
+  "wheel==${WHEEL_VERSION}" \
+  >"${RECORD_DIR}/packaging-install.stdout.log" \
+  2>"${RECORD_DIR}/packaging-install.stderr.log"
 "${ENV_DIR}/bin/python" -m pip install --editable ".[api,oracle]" \
   >"${RECORD_DIR}/install.stdout.log" 2>"${RECORD_DIR}/install.stderr.log"
 
