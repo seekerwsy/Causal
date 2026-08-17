@@ -36,8 +36,18 @@ updated from 18 to 27, and the preserved final run is
 - compile validation passed;
 - diff validation passed.
 
-Real Semgrep 1.168.0 and Bandit 1.9.4 calibration on the fixed Linux runtime is still required before
-this profile can be used by an experiment.
+The real-tool calibration subsequently passed on the fixed Linux runtime:
+
+- deployment: `/home/ubuntu/secaware-deployments/oracle-v2-cwe502-20260818-11`;
+- output: `/home/ubuntu/secaware-experiments/oracle-profile-calibration/cwe502-extension-20260818-01`;
+- Python 3.12.13, Semgrep 1.168.0, and Bandit 1.9.4;
+- 27 completed, zero errors, zero mismatches;
+- CWE-502 holdout: four of four intended cases evaluable, zero false-secure and zero false-insecure,
+  with both expected unknown cases preserved.
+
+The authenticated policy SHA-256 is
+`ac97cad77b9caaa3480f3e46227c496433e31afdcc2dae1feb411f3d5fa730cc2`. The profile is approved for
+task-selection and model-generation pilots within its declared finite scope.
 
 ## Dataset implication
 
