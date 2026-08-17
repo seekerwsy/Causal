@@ -165,3 +165,34 @@ executor now uses the schema field. Oracle recovery also recognizes this exact a
 shape, validates the preserved analysis-to-code binding, and finalizes a copied run with zero new
 generation, Judge, or Oracle calls. It does not accept a partial Oracle pair or an unrelated
 post-analysis exception.
+
+## Completed model-specific pilots
+
+The 7B source run is retained at
+`/home/ubuntu/secaware-experiments/runs/gate-c-live-qwen25-coder-7b-pilot-20260816-01`.
+Generation and the one-pass functional Judge both completed, but its first Oracle execution failed
+because the initially selected Python runtime lacked the required Linux `memfd_create` capability.
+After the source-built Python runner and locked v2 analyzer compatibility directory passed the
+batch gate, the Oracle-only recovery copied the run to
+`/home/ubuntu/secaware-experiments/runs/gate-c-live-qwen25-coder-7b-pilot-oracle-recovered-20260817-01`.
+The recovered unit is complete with one inherited generation call, one inherited Judge call, and one
+new Oracle execution. The functional outcome is `pass`; Oracle reports `insecure`, with one Bandit
+CWE-89 finding. Post-validation confirmed byte-identical generated code, Judge request and response,
+functional outcome, old status, and old manifest, while the source run snapshot remained unchanged.
+
+The 14B source run is retained at
+`/home/ubuntu/secaware-experiments/runs/gate-c-live-phi4-14b-pilot-20260817-01`.
+Generation, the one-pass Judge, both analyzers, and blind Oracle binding completed before the
+post-analysis status-field bug raised. The finalizer copied the run to
+`/home/ubuntu/secaware-experiments/runs/gate-c-live-phi4-14b-pilot-oracle-finalized-20260817-01`
+and reused the authenticated Oracle analysis byte for byte. The recovered unit is complete with zero
+new generation, Judge, or Oracle calls. Its functional outcome is `pass`; Oracle also reports
+`insecure`, with one Bandit CWE-89 finding. Post-validation confirmed that the source snapshot,
+generated code, Judge response, Oracle analysis, Oracle binding, old status, and old manifest were
+unchanged.
+
+Both model services were stopped after their pilots; the final GPU snapshot reported 32,086 MiB free
+and 0% utilization. Each model-specific run now has one completed assignment, zero errors, and seven
+pending assignments. These two observations are engineering pilots, not effect estimates. The
+registered live configurations still set `scale_up_allowed=false`, so the remaining assignments have
+not been run and no scientific comparison between 7B and 14B is authorized.
