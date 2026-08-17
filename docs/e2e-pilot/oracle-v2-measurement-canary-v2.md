@@ -39,6 +39,10 @@ trace, the tri-state profile decision, and the post-analysis assignment binding 
   requests and all eight final variant validations, with zero failures and zero pending records.
   Gate C is bound only to the final re-extraction directory; it cannot consume the failed first
   attempt directly.
+- The zero-provider Gate C plan closes two blocks, eight unique generation requests, two functional
+  contracts, and two calibrated profile-scoped Oracle decisions. The first live unit is the CWE-89
+  target assignment `assignment_cd196338a28e219edb3e9b0e958b9edeb3b0a6f820d67318119f031c530aed78`;
+  the remaining seven units are not executed until this pilot completes without a terminal failure.
 
 ## Scale-up rule
 
