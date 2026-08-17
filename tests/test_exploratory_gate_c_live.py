@@ -38,6 +38,25 @@ def test_gate_c_live_plan_manifest_is_closed_and_authenticated(tmp_path: Path) -
         gate_c_live._verify_plan(plan)
 
 
+def test_gate_c_live_unit_manifest_requires_closed_file_set(tmp_path: Path) -> None:
+    unit = tmp_path / "unit"
+    unit.mkdir()
+    _write_json(unit / "status.json", {"status": "COMPLETE"})
+    digest = hashlib.sha256((unit / "status.json").read_bytes()).hexdigest()
+    _write_json(
+        unit / "artifact-manifest.json",
+        {
+            "schema_version": "1.0",
+            "files": [{"path": "status.json", "sha256": digest}],
+        },
+    )
+
+    gate_c_live._verify_unit_manifest(unit)
+    _write_json(unit / "unlisted.json", {"unexpected": True})
+    with pytest.raises(ValueError, match="closure"):
+        gate_c_live._verify_unit_manifest(unit)
+
+
 def test_functional_judge_transport_persists_exact_request_and_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

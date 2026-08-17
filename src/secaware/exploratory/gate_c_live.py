@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import socket
 import traceback
 from typing import Any, Literal
@@ -224,6 +225,43 @@ def _unit_manifest(unit_dir: Path) -> None:
     )
 
 
+def _verify_unit_manifest(unit_dir: Path) -> dict[str, object]:
+    manifest_path = unit_dir / "artifact-manifest.json"
+    manifest = _read_json(manifest_path)
+    entries = manifest.get("files")
+    if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
+        raise ValueError("Gate C live unit manifest failed validation")
+    expected: set[str] = set()
+    root = unit_dir.resolve()
+    for item in entries:
+        if type(item) is not dict or type(item.get("path")) is not str:
+            raise ValueError("Gate C live unit manifest failed validation")
+        relative = Path(str(item["path"]))
+        normalized = relative.as_posix()
+        path = (unit_dir / relative).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            raise ValueError("Gate C live unit manifest failed validation") from None
+        if (
+            relative.is_absolute()
+            or normalized != item["path"]
+            or normalized in expected
+            or not path.is_file()
+            or sha256_file(path) != item.get("sha256")
+        ):
+            raise ValueError("Gate C live unit manifest failed validation")
+        expected.add(normalized)
+    actual = {
+        path.relative_to(unit_dir).as_posix()
+        for path in unit_dir.rglob("*")
+        if path.is_file() and path.name != "artifact-manifest.json"
+    }
+    if expected != actual:
+        raise ValueError("Gate C live unit manifest closure failed validation")
+    return manifest
+
+
 def _completed_assignments(output_dir: Path) -> tuple[set[str], set[str]]:
     completed: set[str] = set()
     failed: set[str] = set()
@@ -231,17 +269,7 @@ def _completed_assignments(output_dir: Path) -> tuple[set[str], set[str]]:
     if not units.is_dir():
         return completed, failed
     for path in sorted(units.glob("*/status.json")):
-        manifest_path = path.parent / "artifact-manifest.json"
-        manifest = _read_json(manifest_path)
-        entries = manifest.get("files")
-        if type(entries) is not list or any(
-            type(item) is not dict
-            or type(item.get("path")) is not str
-            or not (path.parent / str(item["path"])).is_file()
-            or sha256_file(path.parent / str(item["path"])) != item.get("sha256")
-            for item in entries
-        ):
-            raise ValueError("Gate C live unit manifest failed validation")
+        _verify_unit_manifest(path.parent)
         status = _read_json(path)
         assignment_id = status.get("assignment_id")
         if type(assignment_id) is not str:
@@ -253,6 +281,20 @@ def _completed_assignments(output_dir: Path) -> tuple[set[str], set[str]]:
         else:
             raise ValueError("Gate C live unit status failed validation")
     return completed, failed
+
+
+def _tree_snapshot(root: Path) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            "path": path.relative_to(root).as_posix(),
+            "sha256": sha256_file(path),
+        }
+        for path in sorted(path for path in root.rglob("*") if path.is_file())
+    )
+
+
+def _snapshot_sha256(snapshot: tuple[dict[str, str], ...]) -> str:
+    return hashlib.sha256(_canonical(snapshot)).hexdigest()
 
 
 def _summary(output_dir: Path, expected: int, phase: str) -> dict[str, object]:
@@ -570,4 +612,208 @@ def run_gate_c_live_canary(
     return summary
 
 
-__all__ = ["run_gate_c_live_canary"]
+def recover_gate_c_live_oracle(
+    *,
+    repo_root: Path,
+    live_config_path: Path,
+    app_config_path: Path,
+    source_dir: Path,
+    output_dir: Path,
+    command_argv: tuple[str, ...],
+) -> dict[str, object]:
+    """Copy a failed pilot and rerun only its missing Oracle analysis."""
+
+    repo_root = repo_root.resolve()
+    live_config_path = live_config_path.resolve()
+    app_config_path = app_config_path.resolve()
+    source_dir = source_dir.resolve()
+    output_dir = output_dir.resolve()
+    if not source_dir.is_dir() or output_dir.exists() or source_dir == output_dir:
+        raise ValueError("Gate C Oracle repair path failed validation")
+    live = _read_json(live_config_path)
+    source_live = _read_json(source_dir / "live-config.json")
+    if live != source_live:
+        raise ValueError("Gate C Oracle repair live configuration failed validation")
+    plan_dir = (repo_root / str(live.get("source_plan_dir"))).resolve()
+    plan_dir.relative_to(repo_root)
+    plan_report = _verify_plan(plan_dir)
+    expected = int(live.get("expected_assignments", 0))
+    pilot_id = live.get("pilot_assignment_id")
+    if (
+        live.get("schema_version") != _SCHEMA_VERSION
+        or expected != 8
+        or type(pilot_id) is not str
+        or plan_report.get("counts", {}).get("generation_requests") != expected
+    ):
+        raise ValueError("Gate C Oracle repair policy failed validation")
+    provenance = _read_json(source_dir / "input-provenance.json")
+    if provenance != {
+        "schema_version": _SCHEMA_VERSION,
+        "live_config_sha256": sha256_file(live_config_path),
+        "app_config_sha256": sha256_file(app_config_path),
+        "source_plan_manifest_sha256": sha256_file(plan_dir / "artifact-manifest.json"),
+    }:
+        raise ValueError("Gate C Oracle repair input provenance failed validation")
+    completed, failed = _completed_assignments(source_dir)
+    if completed or failed != {pilot_id}:
+        raise ValueError("Gate C Oracle repair requires one failed pilot unit")
+    source_unit = source_dir / "units" / pilot_id
+    status = _read_json(source_unit / "status.json")
+    error = _read_json(source_unit / "error.json")
+    if (
+        status.get("status") != "ERROR"
+        or status.get("failed_stage") != "oracle"
+        or status.get("generated") != 1
+        or status.get("terminal_no_code") != 0
+        or status.get("generation_provider_attempts") != 1
+        or status.get("functional_judge_provider_attempts") != 1
+        or status.get("oracle_results") != 0
+        or error.get("stage") != "oracle"
+    ):
+        raise ValueError("Gate C Oracle repair source status failed validation")
+    forbidden = ("oracle-analysis.json", "oracle-binding.json", "recovery-provenance.json")
+    if any((source_unit / name).exists() for name in forbidden):
+        raise ValueError("Gate C Oracle repair source already contains Oracle output")
+    codes = tuple(
+        read_jsonl(
+            source_unit / "generated-code.jsonl",
+            CanonicalGeneratedCodeRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    executions = tuple(
+        read_jsonl(
+            source_unit / "assignment-execution.jsonl", required=True, allow_empty=False
+        )
+    )
+    outcomes = tuple(
+        read_jsonl(source_unit / "functional-outcome.jsonl", required=True, allow_empty=False)
+    )
+    judge_passes = tuple(
+        read_jsonl(
+            source_unit / "functional-judge-passes.jsonl", required=True, allow_empty=False
+        )
+    )
+    if (
+        len(codes) != 1
+        or codes[0].assignment_id != pilot_id
+        or len(executions) != 1
+        or executions[0].get("assignment_id") != pilot_id
+        or executions[0].get("status") != AssignmentExecutionStatus.GENERATED.value
+        or executions[0].get("request_id") != codes[0].request_id
+        or len(outcomes) != 1
+        or outcomes[0].get("assignment_id") != pilot_id
+        or len(judge_passes) != 1
+        or judge_passes[0].get("assignment_id") != pilot_id
+    ):
+        raise ValueError("Gate C Oracle repair preserved records failed validation")
+
+    source_snapshot = _tree_snapshot(source_dir)
+    shutil.copytree(source_dir, output_dir, copy_function=shutil.copy2)
+    if _tree_snapshot(output_dir) != source_snapshot:
+        raise ValueError("Gate C Oracle repair copy failed validation")
+    unit_dir = output_dir / "units" / pilot_id
+    (unit_dir / "status.json").replace(unit_dir / "status-before-recovery.json")
+    (unit_dir / "artifact-manifest.json").replace(
+        unit_dir / "artifact-manifest-before-recovery.json"
+    )
+    phase_dir = output_dir / "phases" / "phase-001b-oracle-repair"
+    phase_dir.mkdir(parents=True, exist_ok=False)
+    _write_json(
+        phase_dir / "selection.json",
+        {"schema_version": _SCHEMA_VERSION, "assignment_ids": [pilot_id]},
+    )
+    _write_json(output_dir / "command-repair-oracle.json", {"argv": list(command_argv)})
+    _write_json(output_dir / "environment-repair-oracle.json", _environment())
+    _write_json(
+        output_dir / "recovery-source-provenance.json",
+        {
+            "schema_version": _SCHEMA_VERSION,
+            "source_directory": str(source_dir),
+            "source_snapshot_sha256": _snapshot_sha256(source_snapshot),
+            "source_files": source_snapshot,
+            "new_generation_provider_attempts": 0,
+            "new_functional_judge_provider_attempts": 0,
+        },
+    )
+    app_config = load_config(app_config_path, run_dir=output_dir)
+    write_resolved_config(app_config, output_dir / "effective-app-config-repair.yaml")
+    policy = load_policy_bundle((repo_root / app_config.oracle.policy_lock_path).resolve())
+    failure: BaseException | None = None
+    analyses: list[OracleCodeAnalysis] = []
+    try:
+        analyses = run_oracle_code_batch(
+            (OracleCodeInput.from_canonical(codes[0]),),
+            policy,
+            semgrep_executable=app_config.oracle.semgrep_executable,
+            bandit_executable=app_config.oracle.bandit_executable,
+            timeout_seconds=app_config.oracle.timeout_seconds,
+            max_stdout_bytes=app_config.oracle.max_stdout_bytes,
+            max_stderr_bytes=app_config.oracle.max_stderr_bytes,
+            runner=run_analyzer_process,
+            runtime_validator=validate_analyzer_runtime,
+        )
+        if len(analyses) != 1:
+            raise RuntimeError("Gate C Oracle repair returned an invalid analysis count")
+        _write_json(unit_dir / "oracle-analysis.json", analyses[0])
+        _write_json(
+            unit_dir / "oracle-binding.json",
+            {
+                "schema_version": _SCHEMA_VERSION,
+                "assignment_id": pilot_id,
+                "request_id": analyses[0].request_id,
+                "code_id": analyses[0].code_id,
+                "binding_performed_after_blind_analysis": True,
+            },
+        )
+    except BaseException as repair_error:
+        failure = repair_error
+        _write_json(unit_dir / "recovery-error.json", _safe_error(repair_error, "oracle_repair"))
+    _write_json(
+        unit_dir / "recovery-provenance.json",
+        {
+            "schema_version": _SCHEMA_VERSION,
+            "source_unit_manifest_sha256": sha256_file(
+                unit_dir / "artifact-manifest-before-recovery.json"
+            ),
+            "generated_code_sha256": sha256_file(unit_dir / "generated-code.jsonl"),
+            "functional_outcome_sha256": sha256_file(unit_dir / "functional-outcome.jsonl"),
+            "new_generation_provider_attempts": 0,
+            "new_functional_judge_provider_attempts": 0,
+            "new_oracle_executions": 1,
+        },
+    )
+    _write_json(
+        unit_dir / "status.json",
+        {
+            "schema_version": _SCHEMA_VERSION,
+            "assignment_id": pilot_id,
+            "status": "ERROR" if failure is not None else "COMPLETE",
+            **({"failed_stage": "oracle_repair"} if failure is not None else {}),
+            "generated": 1,
+            "terminal_no_code": 0,
+            "generation_provider_attempts": 1,
+            "functional_judge_provider_attempts": 1,
+            "oracle_results": len(analyses),
+            "recovered_without_provider_calls": True,
+        },
+    )
+    _unit_manifest(unit_dir)
+    summary = _summary(output_dir, expected, "oracle-repair")
+    summary["status"] = (
+        "GATE_C_LIVE_ORACLE_REPAIR_ERROR"
+        if failure is not None
+        else "GATE_C_LIVE_ORACLE_REPAIR_COMPLETE"
+    )
+    summary["new_provider_calls"] = 0
+    summary["new_functional_judge_calls"] = 0
+    summary["new_oracle_executions"] = 1
+    _write_json(phase_dir / "report.json", summary)
+    _write_json(output_dir / "report-repair-oracle.json", summary)
+    if failure is not None:
+        raise RuntimeError("Gate C Oracle repair failed; closed recovery artifacts were saved") from failure
+    return summary
+
+
+__all__ = ["recover_gate_c_live_oracle", "run_gate_c_live_canary"]

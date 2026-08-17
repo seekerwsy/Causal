@@ -142,3 +142,18 @@ passed Semgrep and Bandit. This anomaly is not treated as model randomness. The 
 requires two consecutive complete batch passes before an Oracle-only repair or a new provider call.
 The repository checkpoint initially applied an executable bit to this Markdown file together with
 the shell script; commit `054a7d7` immediately restored the document mode and records that mistake.
+
+## Oracle-only pilot recovery
+
+`scripts/recover_gate_c_live_oracle.py` is the only approved recovery path for a pilot that already
+completed generation and the single-pass functional Judge but failed in Oracle execution. It refuses
+an in-place repair. The source run must have a closed unit manifest, exactly one failed pilot, an
+`oracle` failure stage, one generated-code record, one Judge pass, no Oracle output, and the same
+authenticated live configuration, application configuration, and Gate C plan.
+
+The recovery first hashes and copies the complete source run to a new directory. It preserves the old
+error, status, and unit manifest under their original bytes, then reruns only the blind Oracle batch.
+The new unit manifest covers both the preserved failure evidence and the recovery artifacts. Its
+provenance fixes new generation and Judge calls at zero. A second Oracle failure also produces a
+closed error unit and report rather than a partially updated run. Only a successful recovered copy
+may satisfy the existing pilot prerequisite for the remaining seven assignments.
