@@ -70,6 +70,19 @@ def _write_json(path: Path, value: object) -> None:
     path.write_bytes(_canonical(value) + b"\n")
 
 
+def _validate_prior_failure(
+    failure: dict[str, Any],
+    expected_failure_message: object,
+) -> None:
+    if (
+        type(expected_failure_message) is not str
+        or not expected_failure_message
+        or failure.get("status") != "GATE_B_FAILED"
+        or expected_failure_message not in str(failure.get("message"))
+    ):
+        raise ValueError("Gate B failed-attempt provenance failed validation")
+
+
 def _load_env_file(path: Path) -> None:
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -168,11 +181,11 @@ def run_revalidation(
     attempt_dir.relative_to(repo_root)
     placebo_repair_dir.relative_to(repo_root)
     failure = _read_json(attempt_dir / "failure.json")
-    if (
-        failure.get("status") != "GATE_B_FAILED"
-        or "TARGET_VARIATION_VIOLATION" not in str(failure.get("message"))
-    ):
-        raise ValueError("Gate B failed-attempt provenance failed validation")
+    expected_failure_message = config.get(
+        "expected_prior_failure_message",
+        "TARGET_VARIATION_VIOLATION",
+    )
+    _validate_prior_failure(failure, expected_failure_message)
     selected_task_ids = tuple(config.get("selected_task_ids", ()))
     if not selected_task_ids or len(selected_task_ids) != len(set(selected_task_ids)):
         raise ValueError("Gate B revalidation task selection failed validation")
@@ -242,8 +255,7 @@ def run_revalidation(
             saved_request.get("arm_role") != item.get("arm_role")
             or saved_request.get("operation") != item.get("operation")
             or saved_request.get("source_prompt", {}).get("content") != source.prompt
-            or saved_request.get("source_prompt", {}).get("content_sha256")
-            != source.prompt_sha256
+            or saved_request.get("source_prompt", {}).get("content_sha256") != source.prompt_sha256
         ):
             raise ValueError("Gate B intervention request provenance failed validation")
         raw = response_path.read_bytes()
@@ -297,16 +309,14 @@ def run_revalidation(
         raise ValueError("Gate B replacement placebo length failed validation")
 
     prompt_entries: list[tuple[str, str, PromptRecord, dict[str, object] | None]] = [
-        ("source", f"source:{prompt.prompt_id}", prompt, None)
-        for prompt in selected_sources
+        ("source", f"source:{prompt.prompt_id}", prompt, None) for prompt in selected_sources
     ] + [
         ("variant", f"variant:{meta['variant_id']}", prompt, meta)
         for prompt, meta in variant_entries
     ]
     entry_keys = [entry_key for _kind, entry_key, _prompt, _meta in prompt_entries]
-    if (
-        len(prompt_entries) != config.get("provider_call_budget")
-        or len(entry_keys) != len(set(entry_keys))
+    if len(prompt_entries) != config.get("provider_call_budget") or len(entry_keys) != len(
+        set(entry_keys)
     ):
         raise ValueError("Gate B revalidation provider budget failed validation")
 
@@ -332,10 +342,7 @@ def run_revalidation(
             request_payload.get("criteria_projection_version")
             != LLM_FACTS_CRITERIA_PROJECTION_VERSION
             or _recursive_keys(request_payload) & _FORBIDDEN_REQUEST_KEYS
-            or any(
-                "semantic_criteria" not in item
-                for item in request_payload["allowed_features"]
-            )
+            or any("semantic_criteria" not in item for item in request_payload["allowed_features"])
         ):
             raise ValueError("Gate B extractor request audit failed validation")
         request = canonical_request_bytes(request_payload)
@@ -436,9 +443,7 @@ def run_revalidation(
     write_jsonl(output_dir / "source-prompts.jsonl", selected_sources)
     write_jsonl(output_dir / "variant-prompts.jsonl", [item[0] for item in variant_entries])
     write_jsonl(output_dir / "frozen-variant-provenance.jsonl", frozen_variants)
-    write_jsonl(
-        output_dir / "placebo-length-validations.jsonl", placebo_length_validations
-    )
+    write_jsonl(output_dir / "placebo-length-validations.jsonl", placebo_length_validations)
     write_jsonl(output_dir / "records.jsonl", records)
     write_jsonl(output_dir / "extraction-proposals.jsonl", proposals)
     write_jsonl(output_dir / "prompt-tsg.jsonl", graphs)
@@ -485,9 +490,7 @@ def run_revalidation(
             "gate_a_variants_sha256": sha256_file(gate_a_dir / "variants.jsonl"),
             "failed_attempt_sha256": sha256_file(attempt_dir / "failure.json"),
             "intervention_pairs_sha256": canonical_sha256(intervention_pair_digests),
-            "placebo_repair_report_sha256": sha256_file(
-                placebo_repair_dir / "report.json"
-            ),
+            "placebo_repair_report_sha256": sha256_file(placebo_repair_dir / "report.json"),
         },
     }
     _write_json(output_dir / "report.json", report)
