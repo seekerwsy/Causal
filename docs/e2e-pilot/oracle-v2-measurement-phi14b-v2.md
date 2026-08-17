@@ -30,3 +30,11 @@ policy for this canary. Each Phi Gate A assignment must match exactly one accept
 task ID, arm role, and target feature. It then rechecks the Gate B validation status, Prompt hash,
 intervention provenance, graph record, and source task. The default planner policy remains exact
 variant-ID matching; semantic coordinate matching is enabled only in the Phi v2 configuration.
+
+The first two server plans are preserved as zero-call failures. `-01` exposed the exact-ID coupling;
+`-02` confirmed that a later repository deployment did not contain the historical CRLF source
+bytes. After the explicit cross-model mapping implementation passed its targeted tests, the `-03`
+plan completed with two blocks, eight assignments, eight generation requests, two functional
+contracts, two profile-scoped Oracle decisions, zero errors, and zero provider calls. The frozen
+pilot is the CWE-89 target assignment
+`assignment_af16c8bb735515892d83122453c4272eaedc6529c499431b85b32755392eb6d70`.
