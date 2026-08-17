@@ -7,6 +7,7 @@ from secaware.exploratory.gate_b import (
     _intervention_payload,
     _intervention_template,
     _reviewed_placebo_suffix_bank,
+    _reviewed_target_suffixes,
     _select_reviewed_placebo_suffix,
     validate_length_matched_placebo,
 )
@@ -156,6 +157,54 @@ def test_reviewed_placebo_suffix_is_bound_into_only_the_placebo_request() -> Non
         request_policy_version="exploratory-intervention-request-v4",
     )
     assert "required_exact_suffix" not in noop_request
+
+
+def test_reviewed_target_suffix_is_bound_only_to_the_selected_target_request() -> None:
+    suffix = " Use a collision-resistant hash."
+    mapping = _reviewed_target_suffixes({"reviewed_target_suffixes_by_task": {"task-1": suffix}})
+    assert mapping == {"task-1": suffix}
+    source = PromptRecord.model_validate(
+        {
+            "prompt_id": "prompt-1",
+            "task_id": "task-1",
+            "split": "discover",
+            "language": "python",
+            "task_family": "message_hashing",
+            "cwe": "CWE-328",
+            "prompt": "Write a token generator.",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    allowed_delta = AllowedDeltaRecord.model_validate(
+        {
+            "allowed_transitions": [
+                {
+                    "feature_id": "safety.collision_resistant_hash",
+                    "from_states": ["absent"],
+                    "to_states": ["present"],
+                }
+            ],
+            "fixed_families": ["task_function", "presentation_control"],
+            "fixed_feature_ids": [],
+        }
+    )
+    target = {
+        "candidate_id": "candidate-1",
+        "variant_id": "variant-1",
+        "target_feature_id": "safety.collision_resistant_hash",
+        "operation": "add",
+        "arm_role": "target_patch",
+    }
+    request = _intervention_payload(
+        source,
+        target,
+        allowed_delta,
+        reviewed_target_suffix=suffix,
+        request_policy_version="exploratory-intervention-request-v5",
+    )
+    assert request["required_exact_suffix"] == suffix
+    assert request["request_policy_version"] == "exploratory-intervention-request-v5"
+    assert "character-for-character" in str(request["arm_objective"])
 
 
 @pytest.mark.parametrize(

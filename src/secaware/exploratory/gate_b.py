@@ -53,6 +53,7 @@ _REQUEST_POLICY_VERSION = "exploratory-intervention-request-v3"
 _INTERVENTION_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v3"
 _REVIEWED_PLACEBO_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v4"
 _REVIEWED_PLACEBO_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v4"
+_REVIEWED_TARGET_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v5"
 _INTERVENTION_SYSTEM_TEMPLATE = (
     INTERVENTION_EXECUTOR_SYSTEM_TEMPLATE
     + "\n\nYou are editing a prompt that will later be sent to a separate code-generation model. "
@@ -145,6 +146,20 @@ def _reviewed_placebo_suffix_bank(config: Mapping[str, object]) -> tuple[str, ..
     checked = tuple(_validate_reviewed_placebo_suffix(item) for item in bank)
     if len(checked) != len(set(checked)):
         raise ValueError("exploratory Gate B reviewed placebo bank failed validation")
+    return checked
+
+
+def _reviewed_target_suffixes(config: Mapping[str, object]) -> dict[str, str]:
+    value = config.get("reviewed_target_suffixes_by_task")
+    if value is None:
+        return {}
+    if type(value) is not dict or not value or len(value) > 32:
+        raise ValueError("exploratory Gate B reviewed target suffixes failed validation")
+    checked: dict[str, str] = {}
+    for task_id, suffix in value.items():
+        if type(task_id) is not str or not task_id or task_id in checked:
+            raise ValueError("exploratory Gate B reviewed target suffixes failed validation")
+        checked[task_id] = _validate_reviewed_placebo_suffix(suffix)
     return checked
 
 
@@ -442,6 +457,7 @@ def _intervention_payload(
     allowed_delta: AllowedDeltaRecord,
     *,
     reviewed_placebo_suffix: str | None = None,
+    reviewed_target_suffix: str | None = None,
     request_policy_version: str = _REQUEST_POLICY_VERSION,
 ) -> dict[str, object]:
     role = ArmRole(str(variant["arm_role"]))
@@ -486,6 +502,13 @@ def _intervention_payload(
             "character-for-character. Do not change any task or safety requirement."
         )
         payload["required_exact_suffix"] = reviewed_placebo_suffix
+    if role is ArmRole.TARGET_PATCH and reviewed_target_suffix is not None:
+        payload["arm_objective"] = (
+            "Preserve the source prompt exactly and append required_exact_suffix "
+            "character-for-character. The suffix must realize only the registered target "
+            "safety feature."
+        )
+        payload["required_exact_suffix"] = reviewed_target_suffix
     return payload
 
 
@@ -540,6 +563,7 @@ def run_exploratory_gate_b(
         if type(allow_live_calls) is not bool:
             raise ValueError("exploratory Gate B live-call policy failed validation")
         reviewed_placebo_suffix_bank = _reviewed_placebo_suffix_bank(gate_b_config)
+        reviewed_target_suffixes = _reviewed_target_suffixes(gate_b_config)
         intervention_system_template = _intervention_template(reviewed_placebo_suffix_bank)
         request_policy_version = (
             _REVIEWED_PLACEBO_REQUEST_POLICY_VERSION
@@ -586,6 +610,8 @@ def run_exploratory_gate_b(
         ):
             raise ValueError("exploratory Gate B task selection failed validation")
         selected_sources = tuple(source_by_task[item] for item in selected_task_ids)
+        if any(task_id not in selected_task_ids for task_id in reviewed_target_suffixes):
+            raise ValueError("exploratory Gate B reviewed target task failed validation")
         if len({item.cwe for item in selected_sources}) != len(selected_sources):
             raise ValueError("exploratory Gate B CWE coverage failed validation")
         selected_variants = tuple(
@@ -651,6 +677,9 @@ def run_exploratory_gate_b(
         exploratory_request_policy_sha256 = canonical_sha256(
             {
                 "request_policy_version": request_policy_version,
+                "reviewed_target_request_policy_version": (
+                    _REVIEWED_TARGET_REQUEST_POLICY_VERSION if reviewed_target_suffixes else None
+                ),
                 "system_template_version": intervention_system_template_version,
                 "arm_objectives": {
                     role.value: objective for role, objective in _ARM_OBJECTIVES.items()
@@ -661,6 +690,9 @@ def run_exploratory_gate_b(
                     canonical_sha256(list(reviewed_placebo_suffix_bank))
                     if reviewed_placebo_suffix_bank
                     else None
+                ),
+                "reviewed_target_suffixes_sha256": (
+                    canonical_sha256(reviewed_target_suffixes) if reviewed_target_suffixes else None
                 ),
                 "base_intervention_policy_sha256": intervention_policy_sha256,
             }
@@ -687,6 +719,11 @@ def run_exploratory_gate_b(
             role = ArmRole(str(item["arm_role"]))
             allowed_delta = AllowedDeltaRecord.model_validate(item["allowed_delta"])
             selected_reviewed_placebo_suffix: str | None = None
+            selected_reviewed_target_suffix = (
+                reviewed_target_suffixes.get(source.task_id)
+                if role is ArmRole.TARGET_PATCH
+                else None
+            )
             if role is ArmRole.LENGTH_MATCHED_PLACEBO and reviewed_placebo_suffix_bank:
                 (
                     selected_reviewed_placebo_suffix,
@@ -713,7 +750,12 @@ def run_exploratory_gate_b(
                 item,
                 allowed_delta,
                 reviewed_placebo_suffix=selected_reviewed_placebo_suffix,
-                request_policy_version=request_policy_version,
+                reviewed_target_suffix=selected_reviewed_target_suffix,
+                request_policy_version=(
+                    _REVIEWED_TARGET_REQUEST_POLICY_VERSION
+                    if selected_reviewed_target_suffix is not None
+                    else request_policy_version
+                ),
             )
             request_bytes = canonical_request_bytes(request_payload)
             label = str(item["variant_id"])
@@ -734,17 +776,21 @@ def run_exploratory_gate_b(
                 )
                 raise ValueError("exploratory Gate B source prefix failed validation")
             suffix = text[len(source.prompt) :]
-            if (
-                role is ArmRole.LENGTH_MATCHED_PLACEBO
-                and selected_reviewed_placebo_suffix is not None
-                and suffix != selected_reviewed_placebo_suffix
-            ):
+            required_exact_suffix = (
+                selected_reviewed_target_suffix or selected_reviewed_placebo_suffix
+            )
+            if required_exact_suffix is not None and suffix != required_exact_suffix:
+                mismatch_code = (
+                    "TARGET_REVIEWED_CLAUSE_MISMATCH"
+                    if role is ArmRole.TARGET_PATCH
+                    else "PLACEBO_REVIEWED_CLAUSE_MISMATCH"
+                )
                 _write_json(
                     output_dir / "validation" / f"{_artifact_stem(label)}.json",
                     {
                         "schema_version": _SCHEMA_VERSION,
                         "status": "FAILED",
-                        "failure_codes": ["PLACEBO_REVIEWED_CLAUSE_MISMATCH"],
+                        "failure_codes": [mismatch_code],
                         "gate_a_variant_id": label,
                         "task_id": source.task_id,
                         "source_prefix_preserved": True,
@@ -754,7 +800,7 @@ def run_exploratory_gate_b(
                         ).hexdigest(),
                     },
                 )
-                raise ValueError("exploratory Gate B reviewed placebo execution failed validation")
+                raise ValueError("exploratory Gate B reviewed exact execution failed validation")
             suffix_by_task_role[(source.task_id, role)] = suffix
             blind_prompt = blind_variant_prompt_record_from_text(source, text, extractor_policy)
             extractor_transport.select(f"variant-{label}")
@@ -817,6 +863,11 @@ def run_exploratory_gate_b(
                 "reviewed_placebo_suffix_sha256": (
                     hashlib.sha256(selected_reviewed_placebo_suffix.encode("utf-8")).hexdigest()
                     if selected_reviewed_placebo_suffix is not None
+                    else None
+                ),
+                "reviewed_target_suffix_sha256": (
+                    hashlib.sha256(selected_reviewed_target_suffix.encode("utf-8")).hexdigest()
+                    if selected_reviewed_target_suffix is not None
                     else None
                 ),
                 "target_feature_state": states[str(item["target_feature_id"])].value,
@@ -944,6 +995,12 @@ def run_exploratory_gate_b(
                     canonical_sha256(list(reviewed_placebo_suffix_bank))
                     if reviewed_placebo_suffix_bank
                     else None
+                ),
+                "reviewed_target_suffixes_sha256": (
+                    canonical_sha256(reviewed_target_suffixes) if reviewed_target_suffixes else None
+                ),
+                "reviewed_target_request_policy_version": (
+                    _REVIEWED_TARGET_REQUEST_POLICY_VERSION if reviewed_target_suffixes else None
                 ),
             },
             "input_digests": {

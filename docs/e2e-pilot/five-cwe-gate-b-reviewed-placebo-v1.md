@@ -74,6 +74,21 @@ run is used only through exact request-byte matching. The five source responses 
 variant pairs must be reused; only the new CWE-78 placebo pair and four CWE-328 arm pairs may call
 the provider. The expected resume accounting is therefore 35 reused calls and 10 live calls.
 
+`five-cwe-gate-b-balanced-resume-20260818-02` passed the CWE-78 length preflight and exact placebo
+execution. It reused 35 calls, completed the new CWE-78 placebo intervention and extraction, and
+then stopped on the CWE-328 target arm. The target executor inserted “collision-resistant hash”
+inside the original task sentence instead of preserving the original Prompt as an exact prefix.
+The source-prefix gate rejected this response before blind extraction. This attempt contains 17
+intervention pairs and 21 extractor pairs; 16 intervention pairs and all 21 extractor pairs are
+valid for exact reuse. The one invalid CWE-328 target response is retained but excluded.
+
+The second resume registers ` Use a collision-resistant hash.` as the exact append-only target
+suffix only for the failed CWE-328 task. The request receives a separately versioned target-exact
+policy marker and differs byte-for-byte from the rejected request, so the invalid response cannot
+be reused accidentally. No system-template, feature catalog, AllowedDelta, extractor rule, or
+source-prefix requirement is weakened. The expected accounting is 37 reused calls and eight live
+calls: the corrected CWE-328 target pair plus its no-op, generic, and placebo pairs.
+
 ## Execution issues retained
 
 - The first local test command omitted the worktree `src` directory from `PYTHONPATH`; collection
