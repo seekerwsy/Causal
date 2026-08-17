@@ -13,6 +13,17 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
+@pytest.mark.parametrize((("assignments", "tasks")), ((8, 2), (20, 5)))
+def test_gate_c_live_bounded_assignment_count(assignments: int, tasks: int) -> None:
+    assert gate_c_live._bounded_task_count(assignments) == tasks
+
+
+@pytest.mark.parametrize("assignments", (0, 4, 9, 24))
+def test_gate_c_live_rejects_unregistered_assignment_count(assignments: int) -> None:
+    with pytest.raises(ValueError, match="assignment count"):
+        gate_c_live._bounded_task_count(assignments)
+
+
 def test_gate_c_live_plan_manifest_is_closed_and_authenticated(tmp_path: Path) -> None:
     plan = tmp_path / "plan"
     plan.mkdir()
@@ -136,6 +147,25 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
         gate_c_live._validate_scale_up_authorization(
             stored_base, mode="remaining", stored_base=stored_base
         )
+
+    five_cwe = {
+        **stored_base,
+        "expected_assignments": 20,
+        "scale_up_allowed": True,
+        "scale_up_authorization_id": "user-approved-five-cwe-outcome-pilot-20260818-v1",
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+    frozen_five_cwe = {
+        key: value
+        for key, value in five_cwe.items()
+        if key not in {"scale_up_authorization_id", "scale_up_authorization_scope"}
+    }
+    frozen_five_cwe["scale_up_allowed"] = False
+    gate_c_live._validate_scale_up_authorization(
+        five_cwe,
+        mode="remaining",
+        stored_base=frozen_five_cwe,
+    )
 
 
 def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(

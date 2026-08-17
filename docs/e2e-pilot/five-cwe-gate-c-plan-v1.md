@@ -41,3 +41,17 @@ requests, five audited functional contracts, and five profile-scoped Oracle prof
 remain pending and both provider and Oracle execution are disabled in the plan artifact. The next
 step is targeted code verification, a real nine-fixture CWE-338 profile recalibration under the new
 policy digest, and one live Gate C pilot unit before the remaining 19 units can be considered.
+
+## Live-run boundary
+
+The live executor now derives two through five tasks from a complete four-arm assignment ledger
+instead of hard-coding eight assignments and two contracts. Its generation and Judge budgets must
+equal the authenticated plan count, its contract and Oracle coverage task sets must close exactly,
+and all prior two-task configurations remain valid. The five-CWE base configuration selects the
+CWE-338 target arm as the single pilot because it exercises both the newly registered task-family
+alias and the cryptographic-randomness decision profile. It still sets `scale_up_allowed=false`.
+
+The local live preflight authenticated all 20 assignments, requests, contracts, coverage rows, and
+plan-manifest entries with zero provider calls and zero Oracle executions. The result is
+`GATE_C_LIVE_PREFLIGHT_COMPLETE`, with 20 pending units. The remaining 19 units require the existing
+pilot-first invariant and a separately saved authorization-only configuration delta.
