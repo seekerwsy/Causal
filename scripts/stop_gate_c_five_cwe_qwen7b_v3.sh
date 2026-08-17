@@ -5,7 +5,7 @@ umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DEPLOY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
-readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-five-cwe-v3-20260818-01"
+readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-five-cwe-v3-20260818-02"
 
 if [[ "$#" -ne 0 || "$(pwd -P)" != "${DEPLOY_DIR}" ]]; then
   echo "five-CWE service stop invocation failed validation" >&2
