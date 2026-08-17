@@ -35,6 +35,10 @@ trace, the tri-state profile decision, and the post-analysis assignment binding 
   `runs/e2e-pilot/gate-b-measurement-v2-live-20260818-01`. Repair is limited to the two placebo
   variants with the previously reviewed 55-character presentation-only suffix, followed by one
   coherent ten-record blind re-extraction. Accepted non-placebo interventions are not repeated.
+- The bounded two-call repair passed 2/2. The subsequent coherent blind re-extraction passed 10/10
+  requests and all eight final variant validations, with zero failures and zero pending records.
+  Gate C is bound only to the final re-extraction directory; it cannot consume the failed first
+  attempt directly.
 
 ## Scale-up rule
 

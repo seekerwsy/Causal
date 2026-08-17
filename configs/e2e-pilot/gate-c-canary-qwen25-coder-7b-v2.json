@@ -3,7 +3,7 @@
   "gate_c_id": "randomized-exploratory-gate-c-cwe78-cwe89-qwen25-coder-7b-v2",
   "purpose": "Bounded Oracle-v2 measurement canary only; no scientific effect or scale-up claim.",
   "gate_a_dir": "runs/e2e-pilot/randomized-exploratory-discovery-qwen7b-v2-20260818-01",
-  "gate_b_dir": "runs/e2e-pilot/gate-b-measurement-v2-live-20260818-01",
+  "gate_b_dir": "runs/e2e-pilot/gate-b-extractor-revalidation-measurement-v2-live-20260818-01",
   "functional_contracts_path": "data/e2e-pilot/cyberseceval-v2-measurement-canary-v2/task-functional-contracts.jsonl",
   "selected_task_ids": [
     "cluster-2ee6c126c7b6024731de",
