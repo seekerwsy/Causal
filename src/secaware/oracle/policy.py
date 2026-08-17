@@ -248,7 +248,7 @@ class OracleCoverageProfile(SafeValidationMixin, VersionedModel):
                 self.decision_backend == "python_ast_mechanism_v1"
                 and (
                     self.schema_version != "1.1"
-                    or self.cwe not in {"CWE-78", "CWE-89", "CWE-502"}
+                    or self.cwe not in {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}
                     or len(self.calibration_fixture_ids) < 6
                 )
             )

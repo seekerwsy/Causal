@@ -30,6 +30,46 @@
       "calibration_fixture_ids": []
     },
     {
+      "schema_version": "1.1",
+      "profile_id": "python.cwe328.message_hashing.v1",
+      "cwe": "CWE-328",
+      "task_families": ["message_hashing"],
+      "zero_finding_supported": true,
+      "analyzer_rule_ids": ["secaware.python.weak-hash"],
+      "calibration_fixture_ids": [
+        "sha256:05e6c60350707fca37f313f4d18b542a2b75b490aa4eec0d4ec7b24fc2624541",
+        "sha256:22fef5dd1e942a149ceeee31adf2d54a5448107fc7659ce5b7916367865d1cf6",
+        "sha256:28ee60095acad0ace078006c8359e9c859c6349ed0059c8d81e1da081e80efe4",
+        "sha256:41ed15869d605560bf1a6346fd620b4a47f48d9d635c894125959d2cac9b075b",
+        "sha256:a24507f0fa4ebea893ec869fbe1f80b3ea02956a6c5c7153ffdff0faea41248d",
+        "sha256:a3b283f27d83f25227a0958a1e8e036f73f76094731dbe755b1278ffb0a989c1",
+        "sha256:e1c7321ef5b3934917653bf416d1f7fea1527545e08c5728f3070f622a3864c5",
+        "sha256:e6aa674ba97639bce83fb648ced16ca66fc3f31b3a68cb6c2d867f795f7040c3",
+        "sha256:f5fa665ec3a28b8d2e46d6212a7e6526cc1f1573d4f7acbec81f3cfa703bf2e4"
+      ],
+      "decision_backend": "python_ast_mechanism_v1"
+    },
+    {
+      "schema_version": "1.1",
+      "profile_id": "python.cwe338.security_randomness.v1",
+      "cwe": "CWE-338",
+      "task_families": ["security_randomness"],
+      "zero_finding_supported": true,
+      "analyzer_rule_ids": ["secaware.python.weak-random"],
+      "calibration_fixture_ids": [
+        "sha256:059c51c52638b1928d2de3b2acdf67c545ce59c0bd35e00d8e89377c6115f295",
+        "sha256:1bcea4f18dede6aca969e2c5d67b69f49dc1a7caaa635edbd22a10b83fe18bdd",
+        "sha256:28131e3794242539113fccd61aa428c0c1b6a7f908371bc0e5ba9255eaa12b88",
+        "sha256:322f066382a0921327ddf0ea254f1fffd603aa891f748e35987a5fd96302be8f",
+        "sha256:45a4bd945a59c0761939641cb41e16ecb015fe8b93815864e2257a49e4e8a7a8",
+        "sha256:4d13a0bde3829700e4d0099ce67d3d1f4db69e0019d044f7c3f135e31d65f1dc",
+        "sha256:658effc1476ab75b5f4672970524573dd4c935e113523e35f3ef27f6aa9175f7",
+        "sha256:a8cee0fb3609d8ceb7dfbc0b9b3b55e8f790b5185018a8388415f2cf8e4c23e3",
+        "sha256:aa44492dab1f34660df761d2249106c5e6569f7e8eacb4ee522ed7a8284089c9"
+      ],
+      "decision_backend": "python_ast_mechanism_v1"
+    },
+    {
       "schema_version": "1.0",
       "profile_id": "python.cwe502.function_parameter_deserialization.v1",
       "cwe": "CWE-502",

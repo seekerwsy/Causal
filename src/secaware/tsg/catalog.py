@@ -13,8 +13,8 @@ from secaware.tsg.feature_catalog import (
 )
 
 
-ONTOLOGY_VERSION = "1.1"
-MOTIF_VERSION = "1.1"
+ONTOLOGY_VERSION = "1.2"
+MOTIF_VERSION = "1.2"
 
 _MAX_TERMS_PER_KIND = 8
 _MAX_CATALOG_TEXT_BYTES = 96
@@ -113,6 +113,38 @@ PROMPT_TSG_CATALOG = (
         guard_terms=("safe object loading", "allowlisted types", "trusted serializer"),
         cwe="CWE-502",
     ),
+    PromptOntologyEntry(
+        task_feature_id="task.message_hashing",
+        target_feature_id="safety.collision_resistant_hash",
+        operation_label="hash_message",
+        data_label="message_payload",
+        sink_label="hash_constructor",
+        requirement_label="require_collision_resistant_hash",
+        guard_label="collision_resistant_hash",
+        domain_terms=("hash a message", "compute a digest", "generate a checksum"),
+        guard_terms=("collision-resistant hash", "sha-256", "strong hash"),
+        cwe="CWE-328",
+    ),
+    PromptOntologyEntry(
+        task_feature_id="task.security_random_generation",
+        target_feature_id="safety.cryptographic_randomness",
+        operation_label="generate_security_random_value",
+        data_label="random_material",
+        sink_label="security_random_generator",
+        requirement_label="require_cryptographic_randomness",
+        guard_label="cryptographic_randomness",
+        domain_terms=(
+            "generate a security token",
+            "generate a password reset token",
+            "generate a cryptographic nonce",
+        ),
+        guard_terms=(
+            "cryptographically secure randomness",
+            "secrets module",
+            "secure random generator",
+        ),
+        cwe="CWE-338",
+    ),
 )
 
 
@@ -136,7 +168,7 @@ def _validate_catalog() -> None:
         or tuple(entry.target_feature_id for entry in PROMPT_TSG_CATALOG) != expected_targets
     ):
         raise RuntimeError("invalid prompt TSG catalog feature pairs")
-    if len(PROMPT_TSG_CATALOG) != 6 or any(
+    if len(PROMPT_TSG_CATALOG) != 8 or any(
         type(entry) is not PromptOntologyEntry for entry in PROMPT_TSG_CATALOG
     ):
         raise RuntimeError("invalid prompt TSG catalog shape")

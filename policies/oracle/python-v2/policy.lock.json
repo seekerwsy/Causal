@@ -5,11 +5,11 @@
   "semgrep_version": "1.168.0",
   "bandit_version": "1.9.4",
   "semgrep_rules": "semgrep.yml",
-  "semgrep_sha256": "3c0bb985a0585e43e630a0fe0da7bf73cfc6c7fabd59897f5ed0912696dd01fd",
+  "semgrep_sha256": "cb398714524d42d34807f3d2196341038b89ad1a824d44e44451d5f03b56379d",
   "bandit_config": "bandit.yml",
   "bandit_sha256": "488d3a94d711b4ff8add8fd4f2a8476a4228a118925cb9fb763d0096117c28db",
   "bandit_metadata": "bandit-metadata.json",
   "bandit_metadata_sha256": "99f4ad248398cc7b4ee01eafe120a069ab06c2815f1354c43ebe2cff771e37ff",
   "coverage_contract": "coverage-contract.json",
-  "coverage_contract_sha256": "e70125d42b1bcd686ec76949bba62c8f82cafd221eba54bbdcfc18db0ae01b79"
+  "coverage_contract_sha256": "1d3c4edee664733db18a76f6d94268a758dacfd5dae873e604acacb770c5c61f"
 }

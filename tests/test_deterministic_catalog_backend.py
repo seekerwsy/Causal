@@ -67,6 +67,8 @@ _SAFETY_PREREQUISITE = {
     "safety.safe_subprocess": "task.process_launch",
     "safety.authorization_check": "task.privileged_action",
     "safety.safe_deserialization": "task.object_deserialization",
+    "safety.collision_resistant_hash": "task.message_hashing",
+    "safety.cryptographic_randomness": "task.security_random_generation",
 }
 _INTERVENTION_CLAUSE_CASES = tuple(
     (spec.feature_id, clause)

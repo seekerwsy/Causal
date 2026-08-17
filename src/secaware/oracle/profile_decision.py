@@ -15,8 +15,8 @@ from secaware.schema.oracle import (
 )
 
 
-MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v2"
-PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v2"
+MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v3"
+PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v3"
 
 _MAX_SINK_FACTS = 10_000
 _MAX_TEXT_CHARS = 256
@@ -63,6 +63,47 @@ _UNSAFE_YAML_LOADERS = frozenset(
         "yaml.UnsafeLoader",
     }
 )
+_WEAK_HASH_SINKS = frozenset({"hashlib.md5", "hashlib.sha1"})
+_STRONG_HASH_SINKS = frozenset(
+    {
+        "hashlib.blake2b",
+        "hashlib.blake2s",
+        "hashlib.sha224",
+        "hashlib.sha256",
+        "hashlib.sha384",
+        "hashlib.sha3_224",
+        "hashlib.sha3_256",
+        "hashlib.sha3_384",
+        "hashlib.sha3_512",
+        "hashlib.sha512",
+    }
+)
+_WEAK_HASH_NAMES = frozenset({"md5", "sha1"})
+_STRONG_HASH_NAMES = frozenset(item.removeprefix("hashlib.") for item in _STRONG_HASH_SINKS)
+_WEAK_RANDOM_SINKS = frozenset(
+    {
+        "random.choice",
+        "random.choices",
+        "random.getrandbits",
+        "random.randint",
+        "random.randbytes",
+        "random.randrange",
+        "random.random",
+        "random.uniform",
+    }
+)
+_SECURE_RANDOM_SINKS = frozenset(
+    {
+        "os.urandom",
+        "secrets.choice",
+        "secrets.randbelow",
+        "secrets.randbits",
+        "secrets.token_bytes",
+        "secrets.token_hex",
+        "secrets.token_urlsafe",
+    }
+)
+_RANDOM_METHODS = frozenset(item.rsplit(".", 1)[-1] for item in _WEAK_RANDOM_SINKS)
 _TERMINAL_STATEMENTS = (ast.Raise, ast.Return)
 
 SinkState = Literal["safe", "unsafe", "unresolved"]
@@ -70,7 +111,7 @@ SinkState = Literal["safe", "unsafe", "unresolved"]
 
 @dataclass(frozen=True, slots=True)
 class OracleMechanismSinkFact:
-    cwe: Literal["CWE-78", "CWE-89", "CWE-502"]
+    cwe: Literal["CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"]
     function_name: str
     line: int
     sink_kind: str
@@ -83,7 +124,7 @@ class OracleMechanismSinkFact:
 @dataclass(frozen=True, slots=True)
 class OracleMechanismTrace:
     schema_version: Literal["1.0"]
-    extractor_version: Literal["python-function-local-mechanism-v2"]
+    extractor_version: Literal["python-function-local-mechanism-v3"]
     language: Literal["python"]
     analysis_scope: Literal["single_file_function_local"]
     code_sha256: str
@@ -94,7 +135,7 @@ class OracleMechanismTrace:
 @dataclass(frozen=True, slots=True)
 class OracleProfileDecision:
     schema_version: Literal["1.0"]
-    decision_version: Literal["profile-scoped-oracle-decision-v2"]
+    decision_version: Literal["profile-scoped-oracle-decision-v3"]
     profile_id: str
     cwe: str
     security_label: SecurityLabel
@@ -387,6 +428,11 @@ class _FunctionAnalyzer:
 
     def _call(self, node: ast.Call) -> _ExprState:
         name = _qualified_name(node.func, self.aliases)
+        nested_owner = (
+            self._expr(node.func.value)
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Call)
+            else None
+        )
         args = tuple(self._expr(item) for item in node.args)
         kwargs = {
             item.arg: self._expr(item.value) for item in node.keywords if item.arg is not None
@@ -401,6 +447,16 @@ class _FunctionAnalyzer:
             | _YAML_LOAD_SINKS
         ):
             self._deserialization_sink(node, name, args, kwargs)
+        elif name in _WEAK_HASH_SINKS | _STRONG_HASH_SINKS or name == "hashlib.new":
+            self._hash_sink(node, name, args, kwargs)
+        elif name in _WEAK_RANDOM_SINKS:
+            self._random_sink(node, name, secure=False)
+        elif name in _SECURE_RANDOM_SINKS:
+            self._random_sink(node, name, secure=True)
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in _RANDOM_METHODS:
+            owner = nested_owner or self._expr(node.func.value)
+            if owner.form == "cryptographic_rng":
+                self._random_sink(node, f"random.SystemRandom.{node.func.attr}", secure=True)
         if name in {"input", "builtins.input"}:
             return _ExprState(sources=frozenset({"stdin"}), form="source")
         if name in {"os.getenv", "os.environ.get"}:
@@ -411,7 +467,7 @@ class _FunctionAnalyzer:
             return _ExprState(sources=frozenset({"request"}), form="source")
         if name.endswith(".format"):
             owner = (
-                self._expr(node.func.value)
+                nested_owner or self._expr(node.func.value)
                 if isinstance(node.func, ast.Attribute)
                 else _ExprState()
             )
@@ -420,6 +476,8 @@ class _FunctionAnalyzer:
             return replace(args[0], form="converted")
         if name == "shlex.quote" and args:
             return replace(args[0], form="shell_quoted", unknown=True)
+        if name == "random.SystemRandom":
+            return _ExprState(form="cryptographic_rng")
         states = args + tuple(kwargs.values())
         return (
             _merge_states(*states, form="call_result", unknown=True)
@@ -599,6 +657,57 @@ class _FunctionAnalyzer:
             )
         )
 
+    def _hash_sink(
+        self,
+        node: ast.Call,
+        name: str,
+        args: tuple[_ExprState, ...],
+        kwargs: dict[str, _ExprState],
+    ) -> None:
+        algorithm = name.removeprefix("hashlib.")
+        if name == "hashlib.new":
+            algorithm_node = node.args[0] if node.args else None
+            if isinstance(algorithm_node, ast.Constant) and isinstance(algorithm_node.value, str):
+                algorithm = algorithm_node.value.casefold().replace("-", "")
+            else:
+                algorithm = "dynamic"
+        properties = (f"algorithm:{algorithm}",)
+        sources = frozenset().union(*(item.sources for item in (*args, *kwargs.values())))
+        if algorithm in _WEAK_HASH_NAMES:
+            state, reason = "unsafe", "weak_hash_algorithm"
+        elif algorithm in _STRONG_HASH_NAMES:
+            state, reason = "safe", "collision_resistant_hash_algorithm"
+        else:
+            state, reason = "unresolved", "hash_algorithm_unresolved"
+        self.facts.append(
+            OracleMechanismSinkFact(
+                cwe="CWE-328",
+                function_name=self.function_name,
+                line=node.lineno,
+                sink_kind=name,
+                state=state,
+                source_names=tuple(sorted(sources)),
+                properties=properties,
+                reason_code=reason,
+            )
+        )
+
+    def _random_sink(self, node: ast.Call, name: str, *, secure: bool) -> None:
+        self.facts.append(
+            OracleMechanismSinkFact(
+                cwe="CWE-338",
+                function_name=self.function_name,
+                line=node.lineno,
+                sink_kind=name,
+                state="safe" if secure else "unsafe",
+                source_names=(),
+                properties=(f"generator:{name}",),
+                reason_code=(
+                    "cryptographic_random_source" if secure else "noncryptographic_random_source"
+                ),
+            )
+        )
+
 
 def _aliases(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
@@ -679,7 +788,7 @@ def validate_python_mechanism_trace(
     for fact in trace.sink_facts:
         if (
             type(fact) is not OracleMechanismSinkFact
-            or fact.cwe not in {"CWE-78", "CWE-89", "CWE-502"}
+            or fact.cwe not in {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}
             or type(fact.function_name) is not str
             or not fact.function_name
             or len(fact.function_name) > _MAX_TEXT_CHARS
@@ -751,7 +860,7 @@ def decide_oracle_profile(
     raw = tuple(raw_findings)
     if profile.decision_backend != "python_ast_mechanism_v1":
         raise ValueError("Oracle profile decision backend is unsupported")
-    if profile.cwe not in {"CWE-78", "CWE-89", "CWE-502"}:
+    if profile.cwe not in {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}:
         raise ValueError("Oracle profile CWE is unsupported by the decision backend")
     if not trace.parse_ok:
         return OracleProfileDecision(

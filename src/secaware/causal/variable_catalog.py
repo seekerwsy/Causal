@@ -67,7 +67,9 @@ _TASK_METADATA_DECLARATIONS = (
             "deserialization",
             "file_access",
             "input_handling",
+            "message_hashing",
             "path_handling",
+            "security_randomness",
             "sql_query",
             "other",
         ),
@@ -98,6 +100,8 @@ _MOTIF_CWES = {
     MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD: ("CWE-78",),
     MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD: ("CWE-862",),
     MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK: ("CWE-502",),
+    MotifId.MESSAGE_HASH_WITHOUT_COLLISION_RESISTANCE: ("CWE-328",),
+    MotifId.SECURITY_RANDOM_WITHOUT_CRYPTO_SOURCE: ("CWE-338",),
     MotifId.UNTRUSTED_SOURCE_TO_SENSITIVE_SINK_WITHOUT_GUARD: ("*",),
 }
 

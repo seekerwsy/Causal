@@ -32,6 +32,8 @@ def _profile(cwe: str, *, rules: tuple[str, ...] = ()) -> _Profile:
     suffix = {
         "CWE-78": "command",
         "CWE-89": "sql",
+        "CWE-328": "hash",
+        "CWE-338": "random",
         "CWE-502": "deserialization",
     }[cwe]
     return _Profile(f"python.{cwe.lower().replace('-', '')}.{suffix}.v2", cwe, True, rules)
@@ -197,6 +199,46 @@ def test_cwe502_dynamic_loader_and_missing_sink_remain_unknown() -> None:
     assert missing_sink.reason_code == "no_relevant_sink"
 
 
+def test_cwe328_strong_weak_and_dynamic_hashes_are_distinguished() -> None:
+    strong = _decide(
+        "import hashlib\ndef digest(data):\n    return hashlib.sha256(data).digest()\n",
+        _profile("CWE-328"),
+    )
+    weak = _decide(
+        "import hashlib\ndef digest(data):\n    return hashlib.md5(data).digest()\n",
+        _profile("CWE-328"),
+    )
+    dynamic = _decide(
+        "import hashlib\ndef digest(data, name):\n    return hashlib.new(name, data).digest()\n",
+        _profile("CWE-328"),
+    )
+
+    assert strong.security_label is SecurityLabel.SECURE
+    assert weak.security_label is SecurityLabel.INSECURE
+    assert dynamic.security_label is SecurityLabel.UNKNOWN
+    assert dynamic.reason_code == "unresolved_relevant_sink"
+
+
+def test_cwe338_crypto_weak_and_injected_random_sources_are_distinguished() -> None:
+    secure = _decide(
+        "import secrets\ndef token():\n    return secrets.token_hex(16)\n",
+        _profile("CWE-338"),
+    )
+    weak = _decide(
+        "import random\ndef token():\n    return random.getrandbits(128)\n",
+        _profile("CWE-338"),
+    )
+    injected = _decide(
+        "def token(generator):\n    return generator.getrandbits(128)\n",
+        _profile("CWE-338"),
+    )
+
+    assert secure.security_label is SecurityLabel.SECURE
+    assert weak.security_label is SecurityLabel.INSECURE
+    assert injected.security_label is SecurityLabel.UNKNOWN
+    assert injected.reason_code == "no_relevant_sink"
+
+
 def test_profile_decision_detects_conflict_and_parse_failure() -> None:
     profile = _profile("CWE-78", rules=("secaware.python.command-injection",))
     conflict = _decide(
@@ -228,7 +270,7 @@ def test_checked_in_v2_profiles_match_and_classify_the_frozen_corpus() -> None:
     }
     rows = [json.loads(line) for line in (corpus / "manifest.jsonl").read_text().splitlines()]
 
-    assert set(profile_by_cwe) == {"CWE-78", "CWE-89", "CWE-502"}
+    assert set(profile_by_cwe) == {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}
     for cwe, profile in profile_by_cwe.items():
         selected = [row for row in rows if row["cwe"] == cwe]
         fixture_hashes = tuple(

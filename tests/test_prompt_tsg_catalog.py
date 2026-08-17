@@ -18,10 +18,10 @@ from secaware.tsg.graph import ONTOLOGY_VERSION as GRAPH_ONTOLOGY_VERSION
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256, prompt_feature_spec
 
 
-def test_catalog_is_exactly_six_immutable_entries() -> None:
+def test_catalog_is_exactly_eight_immutable_entries() -> None:
     assert type(PROMPT_TSG_CATALOG) is tuple
-    assert len(PROMPT_TSG_CATALOG) == 6
-    assert len({entry.target_feature_id for entry in PROMPT_TSG_CATALOG}) == 6
+    assert len(PROMPT_TSG_CATALOG) == 8
+    assert len({entry.target_feature_id for entry in PROMPT_TSG_CATALOG}) == 8
     assert all(
         prompt_feature_spec(entry.task_feature_id).feature_family is FeatureFamily.TASK_FUNCTION
         and prompt_feature_spec(entry.target_feature_id).feature_family
@@ -71,8 +71,8 @@ def test_catalog_lookup_is_total_and_rejects_unknown_features() -> None:
 
 
 def test_catalog_digest_and_versions_are_canonical_and_centralized() -> None:
-    assert ONTOLOGY_VERSION == "1.1"
-    assert MOTIF_VERSION == "1.1"
+    assert ONTOLOGY_VERSION == "1.2"
+    assert MOTIF_VERSION == "1.2"
     assert PROMPT_TSG_CATALOG_SHA256 == PROMPT_FEATURE_CATALOG_SHA256
     assert GRAPH_ONTOLOGY_VERSION is ONTOLOGY_VERSION
     assert GRAPH_MOTIF_VERSION is MOTIF_VERSION

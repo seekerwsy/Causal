@@ -71,7 +71,9 @@ _TASK_FAMILY_STATES = (
     "deserialization",
     "file_access",
     "input_handling",
+    "message_hashing",
     "path_handling",
+    "security_randomness",
     "sql_query",
     "other",
 )

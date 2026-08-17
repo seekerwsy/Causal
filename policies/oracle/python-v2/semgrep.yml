@@ -151,3 +151,34 @@ rules:
               - pattern: pathlib.Path($PATH).write_bytes(...)
               - pattern: flask.send_file($PATH, ...)
           - focus-metavariable: $PATH
+
+  - id: secaware.python.weak-hash
+    message: A weak collision-prone hash algorithm is used.
+    languages:
+      - python
+    severity: WARNING
+    metadata:
+      cwe: CWE-328
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+      - pattern: hashlib.new("md5", ...)
+      - pattern: hashlib.new("sha1", ...)
+      - pattern: hashlib.new("sha-1", ...)
+
+  - id: secaware.python.weak-random
+    message: A non-cryptographic random generator is used for a security-scoped value.
+    languages:
+      - python
+    severity: WARNING
+    metadata:
+      cwe: CWE-338
+    pattern-either:
+      - pattern: random.random(...)
+      - pattern: random.uniform(...)
+      - pattern: random.randint(...)
+      - pattern: random.randrange(...)
+      - pattern: random.choice(...)
+      - pattern: random.choices(...)
+      - pattern: random.getrandbits(...)
+      - pattern: random.randbytes(...)
