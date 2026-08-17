@@ -574,7 +574,7 @@ def run_gate_c_live_canary(
                     "status": "COMPLETE",
                     "generated": int(code is not None),
                     "terminal_no_code": int(code is None),
-                    "generation_provider_attempts": execution.provider_attempt_count,
+                    "generation_provider_attempts": execution.attempt_count,
                     "functional_judge_provider_attempts": judge_attempts,
                     "oracle_results": len(analyses),
                 },
@@ -671,9 +671,18 @@ def recover_gate_c_live_oracle(
         or error.get("stage") != "oracle"
     ):
         raise ValueError("Gate C Oracle repair source status failed validation")
-    forbidden = ("oracle-analysis.json", "oracle-binding.json", "recovery-provenance.json")
-    if any((source_unit / name).exists() for name in forbidden):
-        raise ValueError("Gate C Oracle repair source already contains Oracle output")
+    oracle_analysis_path = source_unit / "oracle-analysis.json"
+    oracle_binding_path = source_unit / "oracle-binding.json"
+    has_preserved_oracle = oracle_analysis_path.is_file() and oracle_binding_path.is_file()
+    if oracle_analysis_path.exists() != oracle_binding_path.exists() or (
+        source_unit / "recovery-provenance.json"
+    ).exists():
+        raise ValueError("Gate C Oracle repair source has partial recovery output")
+    if has_preserved_oracle and (
+        error.get("error_type") != "AttributeError"
+        or "provider_attempt_count" not in str(error.get("message"))
+    ):
+        raise ValueError("Gate C Oracle repair post-analysis failure is not recognized")
     codes = tuple(
         read_jsonl(
             source_unit / "generated-code.jsonl",
@@ -708,6 +717,24 @@ def recover_gate_c_live_oracle(
         or judge_passes[0].get("assignment_id") != pilot_id
     ):
         raise ValueError("Gate C Oracle repair preserved records failed validation")
+    preserved_analysis: dict[str, object] | None = None
+    if has_preserved_oracle:
+        preserved_analysis = _read_json(oracle_analysis_path)
+        preserved_binding = _read_json(oracle_binding_path)
+        if (
+            preserved_analysis.get("request_id") != codes[0].request_id
+            or preserved_analysis.get("code_id") != codes[0].code_id
+            or preserved_analysis.get("code_sha256") != codes[0].code_sha256
+            or preserved_binding
+            != {
+                "schema_version": _SCHEMA_VERSION,
+                "assignment_id": pilot_id,
+                "request_id": codes[0].request_id,
+                "code_id": codes[0].code_id,
+                "binding_performed_after_blind_analysis": True,
+            }
+        ):
+            raise ValueError("Gate C Oracle repair preserved analysis binding failed validation")
 
     source_snapshot = _tree_snapshot(source_dir)
     shutil.copytree(source_dir, output_dir, copy_function=shutil.copy2)
@@ -742,34 +769,39 @@ def recover_gate_c_live_oracle(
     policy = load_policy_bundle((repo_root / app_config.oracle.policy_lock_path).resolve())
     failure: BaseException | None = None
     analyses: list[OracleCodeAnalysis] = []
-    try:
-        analyses = run_oracle_code_batch(
-            (OracleCodeInput.from_canonical(codes[0]),),
-            policy,
-            semgrep_executable=app_config.oracle.semgrep_executable,
-            bandit_executable=app_config.oracle.bandit_executable,
-            timeout_seconds=app_config.oracle.timeout_seconds,
-            max_stdout_bytes=app_config.oracle.max_stdout_bytes,
-            max_stderr_bytes=app_config.oracle.max_stderr_bytes,
-            runner=run_analyzer_process,
-            runtime_validator=validate_analyzer_runtime,
-        )
-        if len(analyses) != 1:
-            raise RuntimeError("Gate C Oracle repair returned an invalid analysis count")
-        _write_json(unit_dir / "oracle-analysis.json", analyses[0])
-        _write_json(
-            unit_dir / "oracle-binding.json",
-            {
-                "schema_version": _SCHEMA_VERSION,
-                "assignment_id": pilot_id,
-                "request_id": analyses[0].request_id,
-                "code_id": analyses[0].code_id,
-                "binding_performed_after_blind_analysis": True,
-            },
-        )
-    except BaseException as repair_error:
-        failure = repair_error
-        _write_json(unit_dir / "recovery-error.json", _safe_error(repair_error, "oracle_repair"))
+    new_oracle_executions = 0 if preserved_analysis is not None else 1
+    if preserved_analysis is None:
+        try:
+            analyses = run_oracle_code_batch(
+                (OracleCodeInput.from_canonical(codes[0]),),
+                policy,
+                semgrep_executable=app_config.oracle.semgrep_executable,
+                bandit_executable=app_config.oracle.bandit_executable,
+                timeout_seconds=app_config.oracle.timeout_seconds,
+                max_stdout_bytes=app_config.oracle.max_stdout_bytes,
+                max_stderr_bytes=app_config.oracle.max_stderr_bytes,
+                runner=run_analyzer_process,
+                runtime_validator=validate_analyzer_runtime,
+            )
+            if len(analyses) != 1:
+                raise RuntimeError("Gate C Oracle repair returned an invalid analysis count")
+            _write_json(unit_dir / "oracle-analysis.json", analyses[0])
+            _write_json(
+                unit_dir / "oracle-binding.json",
+                {
+                    "schema_version": _SCHEMA_VERSION,
+                    "assignment_id": pilot_id,
+                    "request_id": analyses[0].request_id,
+                    "code_id": analyses[0].code_id,
+                    "binding_performed_after_blind_analysis": True,
+                },
+            )
+        except BaseException as repair_error:
+            failure = repair_error
+            _write_json(
+                unit_dir / "recovery-error.json", _safe_error(repair_error, "oracle_repair")
+            )
+    oracle_result_count = int(preserved_analysis is not None) + len(analyses)
     _write_json(
         unit_dir / "recovery-provenance.json",
         {
@@ -781,7 +813,8 @@ def recover_gate_c_live_oracle(
             "functional_outcome_sha256": sha256_file(unit_dir / "functional-outcome.jsonl"),
             "new_generation_provider_attempts": 0,
             "new_functional_judge_provider_attempts": 0,
-            "new_oracle_executions": 1,
+            "new_oracle_executions": new_oracle_executions,
+            "preserved_oracle_result_reused": preserved_analysis is not None,
         },
     )
     _write_json(
@@ -795,7 +828,7 @@ def recover_gate_c_live_oracle(
             "terminal_no_code": 0,
             "generation_provider_attempts": 1,
             "functional_judge_provider_attempts": 1,
-            "oracle_results": len(analyses),
+            "oracle_results": oracle_result_count,
             "recovered_without_provider_calls": True,
         },
     )
@@ -808,7 +841,7 @@ def recover_gate_c_live_oracle(
     )
     summary["new_provider_calls"] = 0
     summary["new_functional_judge_calls"] = 0
-    summary["new_oracle_executions"] = 1
+    summary["new_oracle_executions"] = new_oracle_executions
     _write_json(phase_dir / "report.json", summary)
     _write_json(output_dir / "report-repair-oracle.json", summary)
     if failure is not None:

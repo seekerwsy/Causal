@@ -157,3 +157,11 @@ The new unit manifest covers both the preserved failure evidence and the recover
 provenance fixes new generation and Judge calls at zero. A second Oracle failure also produces a
 closed error unit and report rather than a partially updated run. Only a successful recovered copy
 may satisfy the existing pilot prerequisite for the remaining seven assignments.
+
+The first 14B pilot exposed a separate post-analysis status bug: generation, one Judge call, Oracle
+analysis, and blind binding all completed, after which the executor read
+`AssignmentExecutionRecord.provider_attempt_count`. The schema field is `attempt_count`. The live
+executor now uses the schema field. Oracle recovery also recognizes this exact authenticated failure
+shape, validates the preserved analysis-to-code binding, and finalizes a copied run with zero new
+generation, Judge, or Oracle calls. It does not accept a partial Oracle pair or an unrelated
+post-analysis exception.
