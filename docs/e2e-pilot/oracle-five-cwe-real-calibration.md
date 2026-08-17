@@ -35,3 +35,31 @@ All 45 fixtures completed with zero execution errors and zero expected-label mis
 This gate authorizes the five bounded profiles for the small pilot. It does not authorize silently
 classifying code outside a profile: dynamic algorithms, application wrappers, and missing target
 operations continue to return `unknown`.
+
+## PBKDF2 coverage extension
+
+The Qwen2.5-Coder-7B outcome pilot exposed a bounded CWE-328 coverage gap: all four generated
+implementations used `hashlib.pbkdf2_hmac`, which the earlier mechanism extractor returned as
+`unknown`. The profile was extended only for statically named PBKDF2-HMAC algorithms. SHA-2,
+SHA-3, and BLAKE2 names are secure; MD5 and SHA-1 names are insecure; dynamic algorithm names
+remain `unknown`.
+
+The extension was recalibrated with the same fixed Linux toolchain. Immutable artifacts are:
+
+- deployment: `/home/ubuntu/secaware-deployments/five-cwe-gate-c-qwen7b-20260818-26`;
+- output: `/home/ubuntu/secaware-experiments/oracle-profile-calibration/five-cwe-pbkdf2-v4-20260818-01`;
+- repository copy: `data/e2e-pilot/five-cwe-pbkdf2-v4-20260818-01`;
+- deployment archive SHA-256: `b753270fb4cc035d81a5e6a32777d9db931e60935e0eab2bf10f69689a8c5fb0`;
+- downloaded result archive SHA-256: `40ee63a2a002b7a63f490db8852a0cd8a9586cde27b8095ac49800188926e2c3`;
+- policy SHA-256: `c0b2ce5546fe9f863925ecdfe50bda0ffd4cf48674857bbc92df79b715ad86e9`.
+
+All 50 fixtures completed with zero execution errors and zero expected-label mismatches: 17 secure,
+18 insecure, and 15 unknown. CWE-328 now has nine holdout fixtures: three intended-safe, three
+intended-unsafe, and three expected-unknown. All six intended-scope fixtures were evaluable, with
+zero false-secure and zero false-insecure decisions, and all expected-unknown cases were preserved.
+The other four profiles also passed unchanged.
+
+One operator diagnostic initially supplied the policy file as a path relative to the remote home
+directory and correctly received `POLICY_MISMATCH`. The recorded calibration used the absolute
+deployment path and passed. This is an invocation error, not an Oracle decision failure; subsequent
+remote commands must use absolute policy paths.
