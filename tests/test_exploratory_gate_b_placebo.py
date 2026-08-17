@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from secaware.exploratory.gate_b import validate_length_matched_placebo
+from secaware.exploratory.gate_b import (
+    _INTERVENTION_SYSTEM_TEMPLATE,
+    _intervention_payload,
+    _intervention_template,
+    _reviewed_placebo_suffix_bank,
+    _select_reviewed_placebo_suffix,
+    validate_length_matched_placebo,
+)
+from secaware.schema.experiments import AllowedDeltaRecord
+from secaware.schema.records import PromptRecord
 
 
 @pytest.mark.parametrize(
@@ -30,7 +39,9 @@ def test_placebo_length_contract_accepts_frozen_boundaries(
     assert result["maximum_placebo_length"] == maximum
 
 
-@pytest.mark.parametrize(("target_length", "placebo_length"), [(57, 50), (57, 64), (55, 48), (55, 62)])
+@pytest.mark.parametrize(
+    ("target_length", "placebo_length"), [(57, 50), (57, 64), (55, 48), (55, 62)]
+)
 def test_placebo_length_contract_rejects_outside_boundaries(
     target_length: int,
     placebo_length: int,
@@ -64,4 +75,108 @@ def test_placebo_length_contract_rejects_invalid_input_type() -> None:
             target_suffix="target",
             noop_suffix="",
             placebo_suffix=None,
+        )
+
+
+def test_reviewed_placebo_suffix_enables_exact_execution_contract() -> None:
+    suffix = " Keep the requested code concise and clearly organized."
+    bank = _reviewed_placebo_suffix_bank({"reviewed_placebo_suffix": suffix})
+    assert bank == (suffix,)
+    template = _intervention_template(bank)
+    assert template.startswith(_INTERVENTION_SYSTEM_TEMPLATE)
+    assert "required_exact_suffix" in template
+    assert "character-for-character" in template
+
+
+def test_reviewed_placebo_bank_selects_nearest_registered_valid_suffix() -> None:
+    bank = (
+        " Keep the code concise and clear.",
+        " Keep the requested code concise and clear.",
+        " Keep the requested code concise and clearly organized.",
+    )
+    suffix, validation = _select_reviewed_placebo_suffix(
+        target_suffix="t" * 41,
+        noop_suffix="",
+        suffix_bank=bank,
+    )
+    assert suffix == " Keep the requested code concise and clear."
+    assert validation["status"] == "PASSED"
+    assert validation["reviewed_suffix_bank_index"] == 1
+
+
+def test_reviewed_placebo_suffix_is_bound_into_only_the_placebo_request() -> None:
+    source = PromptRecord.model_validate(
+        {
+            "prompt_id": "prompt-1",
+            "task_id": "task-1",
+            "split": "discover",
+            "language": "python",
+            "task_family": "deserialization",
+            "cwe": "CWE-502",
+            "prompt": "Write a YAML loader.",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    allowed_delta = AllowedDeltaRecord.model_validate(
+        {
+            "allowed_transitions": [
+                {
+                    "feature_id": "presentation.length_matched_placebo",
+                    "from_states": ["absent"],
+                    "to_states": ["present"],
+                }
+            ],
+            "fixed_families": ["task_function", "safety_control"],
+            "fixed_feature_ids": [],
+        }
+    )
+    suffix = " Keep the requested code concise and clearly organized."
+    placebo = {
+        "candidate_id": "candidate-1",
+        "variant_id": "variant-1",
+        "target_feature_id": "safety.safe_deserialization",
+        "operation": "add",
+        "arm_role": "length_matched_placebo",
+    }
+    request = _intervention_payload(
+        source,
+        placebo,
+        allowed_delta,
+        reviewed_placebo_suffix=suffix,
+        request_policy_version="exploratory-intervention-request-v4",
+    )
+    assert request["required_exact_suffix"] == suffix
+    assert request["request_policy_version"] == "exploratory-intervention-request-v4"
+    assert "character-for-character" in str(request["arm_objective"])
+    noop_request = _intervention_payload(
+        source,
+        {**placebo, "arm_role": "noop_rewrite"},
+        allowed_delta,
+        reviewed_placebo_suffix=suffix,
+        request_policy_version="exploratory-intervention-request-v4",
+    )
+    assert "required_exact_suffix" not in noop_request
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "Keep the requested code concise and clearly organized.",
+        " Keep the requested code concise and clearly organized. ",
+        " Keep the requested code concise.\nKeep it organized.",
+        55,
+    ],
+)
+def test_reviewed_placebo_suffix_rejects_noncanonical_values(suffix: object) -> None:
+    with pytest.raises(ValueError):
+        _reviewed_placebo_suffix_bank({"reviewed_placebo_suffix": suffix})
+
+
+def test_reviewed_placebo_bank_rejects_duplicates_and_conflicting_forms() -> None:
+    suffix = " Keep the requested code concise and clearly organized."
+    with pytest.raises(ValueError):
+        _reviewed_placebo_suffix_bank({"reviewed_placebo_suffix_bank": [suffix, suffix]})
+    with pytest.raises(ValueError):
+        _reviewed_placebo_suffix_bank(
+            {"reviewed_placebo_suffix": suffix, "reviewed_placebo_suffix_bank": [suffix]}
         )
