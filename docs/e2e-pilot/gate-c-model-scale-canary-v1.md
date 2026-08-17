@@ -116,3 +116,19 @@ These checks establish serving and response-envelope feasibility only. Counts re
 profiles ready, two service-format canaries complete, zero services running, zero Gate C experimental
 assignments completed, sixteen model-specific Gate C assignments pending, and zero Bailian Judge or
 Oracle calls made for the new model strata.
+
+## Locked Oracle compatibility directory
+
+The Linux Oracle runner intentionally gives each analyzer a minimal `PATH` containing only the
+directory of the resolved analyzer executable. Semgrep 1.168.0 also invokes `uname -s` while
+constructing its system X.509 authenticator. A plain environment `bin` directory therefore makes
+Semgrep exit with code 2 even though the same policy scan succeeds outside the minimal environment.
+
+`scripts/setup_gate_c_oracle_compat_v1.sh` creates a versioned, read-only compatibility directory
+containing only fixed Semgrep and Bandit launchers plus a copied `/usr/bin/uname`. Live runs prepend
+this directory to the parent process `PATH`; resolving Semgrep from that directory causes the
+isolated child to retain the same bounded directory as its complete `PATH`. This preserves the
+minimal-environment boundary instead of adding general system directories to analyzer execution.
+The setup record includes tool versions, environment metadata, and SHA-256 digests. A generated-code
+batch must still pass both analyzers inside SecAware process isolation before an Oracle-only repair
+or a new provider call is allowed.
