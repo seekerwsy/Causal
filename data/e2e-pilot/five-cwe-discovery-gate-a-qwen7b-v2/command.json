@@ -1,0 +1,1 @@
+{"argv":["scripts/build_randomized_exploratory_canary.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2.json","--output-dir","data/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2"]}

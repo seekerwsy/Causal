@@ -1,0 +1,1 @@
+{"argv":["scripts/build_e2e_pilot_inputs.py","--source-audit","runs/dataset-audit/stage0-combined-20260810-08/record-audit.jsonl","--split-simulations","runs/dataset-audit/stage0-combined-20260810-08/split-simulations.jsonl","--selection","configs/e2e-pilot/five-cwe-engineering-pilot-v1.json","--output-dir","data/e2e-pilot/five-cwe-engineering-pilot-v3"]}

@@ -71,7 +71,7 @@ def test_catalog_lookup_is_total_and_rejects_unknown_features() -> None:
 
 
 def test_catalog_digest_and_versions_are_canonical_and_centralized() -> None:
-    assert ONTOLOGY_VERSION == "1.2"
+    assert ONTOLOGY_VERSION == "1.3"
     assert MOTIF_VERSION == "1.2"
     assert PROMPT_TSG_CATALOG_SHA256 == PROMPT_FEATURE_CATALOG_SHA256
     assert GRAPH_ONTOLOGY_VERSION is ONTOLOGY_VERSION

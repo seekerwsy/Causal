@@ -69,7 +69,7 @@ def test_catalog_is_exactly_the_finite_immutable_feature_set() -> None:
 
 
 def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> None:
-    assert FEATURE_CATALOG_VERSION == "1.6"
+    assert FEATURE_CATALOG_VERSION == "1.7"
     mapping = {
         item.feature_id: item.matched_control_feature_id
         for item in PROMPT_FEATURE_CATALOG

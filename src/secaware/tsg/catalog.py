@@ -13,7 +13,7 @@ from secaware.tsg.feature_catalog import (
 )
 
 
-ONTOLOGY_VERSION = "1.2"
+ONTOLOGY_VERSION = "1.3"
 MOTIF_VERSION = "1.2"
 
 _MAX_TERMS_PER_KIND = 8
@@ -110,7 +110,7 @@ PROMPT_TSG_CATALOG = (
         requirement_label="require_safe_deserialization",
         guard_label="safe_deserialization",
         domain_terms=("deserialize data", "load a pickle", "parse serialized object"),
-        guard_terms=("safe object loading", "allowlisted types", "trusted serializer"),
+        guard_terms=("data-only parser", "json or yaml safe_load", "safe object loading"),
         cwe="CWE-502",
     ),
     PromptOntologyEntry(

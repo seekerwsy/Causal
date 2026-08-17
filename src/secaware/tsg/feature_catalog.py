@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.6"
+FEATURE_CATALOG_VERSION = "1.7"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -196,7 +196,7 @@ PROMPT_FEATURE_CATALOG = (
         "task.security_random_generation",
         FeatureFamily.TASK_FUNCTION,
         cwes=("CWE-338",),
-        task_families=("security_randomness",),
+        task_families=("security_random_generation",),
         nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
         edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
         terms=(
@@ -265,8 +265,8 @@ PROMPT_FEATURE_CATALOG = (
         task_families=("deserialization",),
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
-        terms=("safe object loading", "allowlisted types", "trusted serializer"),
-        clauses=(" Use allowlisted types during deserialization.",),
+        terms=("data-only parser", "json or yaml safe_load", "safe object loading"),
+        clauses=(" Use a data-only parser such as JSON or YAML safe_load.",),
     ),
     _feature(
         "safety.collision_resistant_hash",
@@ -282,7 +282,7 @@ PROMPT_FEATURE_CATALOG = (
         "safety.cryptographic_randomness",
         FeatureFamily.SAFETY_CONTROL,
         cwes=("CWE-338",),
-        task_families=("security_randomness",),
+        task_families=("security_random_generation",),
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
         terms=("cryptographically secure randomness", "secrets module", "secure random generator"),

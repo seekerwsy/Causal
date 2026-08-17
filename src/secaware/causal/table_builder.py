@@ -41,7 +41,7 @@ _TASK_FAMILY_STATES = (
     "input_handling",
     "message_hashing",
     "path_handling",
-    "security_randomness",
+    "security_random_generation",
     "sql_query",
     "other",
 )

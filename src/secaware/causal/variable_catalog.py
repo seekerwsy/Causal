@@ -69,7 +69,7 @@ _TASK_METADATA_DECLARATIONS = (
             "input_handling",
             "message_hashing",
             "path_handling",
-            "security_randomness",
+            "security_random_generation",
             "sql_query",
             "other",
         ),

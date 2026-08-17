@@ -304,7 +304,13 @@ def build_randomized_exploratory_canary(
         selection_sha256 = sha256_file(selection_path)
         input_prompts_sha256 = sha256_file(prompts_path)
         candidate_config = config.get("candidates")
-        if type(candidate_config) is not list or len(candidate_config) != 2:
+        discover_cwes = {str(item["cwe"]) for item in discover_tasks.values()}
+        if (
+            type(candidate_config) is not list
+            or len(candidate_config) != len(discover_cwes)
+            or {str(item.get("cwe")) for item in candidate_config if type(item) is dict}
+            != discover_cwes
+        ):
             raise ValueError("exploratory canary candidate budget failed validation")
         candidates_by_cwe: dict[str, dict[str, Any]] = {}
         for task in discover_tasks.values():

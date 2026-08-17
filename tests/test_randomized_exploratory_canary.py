@@ -13,6 +13,7 @@ from secaware.schema.features import FeatureOperation
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = REPO_ROOT / "configs/e2e-pilot/randomized-exploratory-discovery-canary-v1.json"
+FIVE_CWE_CONFIG = REPO_ROOT / "configs/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2.json"
 
 
 def _rows(path: Path) -> list[dict[str, object]]:
@@ -114,3 +115,31 @@ def test_gate_a_rejects_non_discover_policy_and_preserves_failure(tmp_path: Path
 
     failure = json.loads((output / "failure.json").read_text(encoding="utf-8"))
     assert failure["status"] == "GATE_A_FAILED"
+
+
+def test_gate_a_accepts_one_candidate_per_discovery_cwe(tmp_path: Path) -> None:
+    report = build_randomized_exploratory_canary(
+        repo_root=REPO_ROOT,
+        config_path=FIVE_CWE_CONFIG,
+        output_dir=tmp_path / "five-cwe",
+        command_argv=("canary", "five-cwe"),
+    )
+
+    assert report["status"] == "GATE_A_PASSED"
+    assert report["counts"] == {
+        "independent_tasks": 10,
+        "confirm_task_ids_excluded": 10,
+        "candidates": 5,
+        "variants": 40,
+        "blocks": 10,
+        "assignments": 40,
+        "extraction_proposals": 40,
+        "prompt_tsgs": 40,
+        "deterministic_target_recognized": 1,
+        "deterministic_target_expected": 10,
+        "errors": 0,
+        "pending": 0,
+    }
+    assert {
+        row["cwe"] for row in _rows(tmp_path / "five-cwe" / "candidates.jsonl")
+    } == {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}

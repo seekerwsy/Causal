@@ -250,7 +250,17 @@ def _attestations_for_pair(
 
 
 def _feature_clause(cwe: str) -> str:
-    feature_id = "safety.safe_subprocess" if cwe == "CWE-78" else "safety.sql_parameterization"
+    feature_by_cwe = {
+        "CWE-78": "safety.safe_subprocess",
+        "CWE-89": "safety.sql_parameterization",
+        "CWE-328": "safety.collision_resistant_hash",
+        "CWE-338": "safety.cryptographic_randomness",
+        "CWE-502": "safety.safe_deserialization",
+    }
+    try:
+        feature_id = feature_by_cwe[cwe]
+    except KeyError as error:
+        raise ValueError(f"pilot target feature is unavailable: {cwe}") from error
     clauses = prompt_feature_spec(feature_id).intervention_clauses
     if len(clauses) != 1:
         raise ValueError("pilot requires exactly one reviewed intervention clause")
