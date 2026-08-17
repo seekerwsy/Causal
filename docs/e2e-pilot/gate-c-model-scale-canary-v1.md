@@ -124,11 +124,21 @@ directory of the resolved analyzer executable. Semgrep 1.168.0 also invokes `una
 constructing its system X.509 authenticator. A plain environment `bin` directory therefore makes
 Semgrep exit with code 2 even though the same policy scan succeeds outside the minimal environment.
 
-`scripts/setup_gate_c_oracle_compat_v1.sh` creates a versioned, read-only compatibility directory
-containing only fixed Semgrep and Bandit launchers plus a copied `/usr/bin/uname`. Live runs prepend
-this directory to the parent process `PATH`; resolving Semgrep from that directory causes the
-isolated child to retain the same bounded directory as its complete `PATH`. This preserves the
-minimal-environment boundary instead of adding general system directories to analyzer execution.
-The setup record includes tool versions, environment metadata, and SHA-256 digests. A generated-code
-batch must still pass both analyzers inside SecAware process isolation before an Oracle-only repair
-or a new provider call is allowed.
+The first compatibility attempt, `scripts/setup_gate_c_oracle_compat_v1.sh`, recreated the two Python
+entry points. Version probes passed, but complete isolated batches were not reliable, so that v1
+directory is retained as rejected evidence and is not approved for a live run.
+
+`scripts/setup_gate_c_oracle_compat_v2.sh` instead copies the exact pip-generated Semgrep and Bandit
+entry points from the locked source-built Python environment and adds a copied `/usr/bin/uname`.
+Live runs prepend this versioned, read-only directory to the parent process `PATH`; resolving Semgrep
+from that directory causes the isolated child to retain the same bounded directory as its complete
+`PATH`. This preserves the minimal-environment boundary instead of adding general system directories
+to analyzer execution. The setup record includes tool versions, source and destination SHA-256
+digests, and environment metadata.
+
+The first complete v2 batch passed Semgrep but reported a runner-level Bandit failure. A Bandit-only
+reproduction then passed with one expected CWE-89 finding, and two subsequent complete batches both
+passed Semgrep and Bandit. This anomaly is not treated as model randomness. The operational gate now
+requires two consecutive complete batch passes before an Oracle-only repair or a new provider call.
+The repository checkpoint initially applied an executable bit to this Markdown file together with
+the shell script; commit `054a7d7` immediately restored the document mode and records that mistake.
