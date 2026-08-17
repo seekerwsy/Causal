@@ -249,6 +249,34 @@ def test_judge_rejects_out_of_range_evidence_line() -> None:
         judge.evaluate(assignment, _execution_for(assignment, code), code, _contract())
 
 
+def test_judge_ignores_blank_evidence_lines_and_retains_nonblank_evidence() -> None:
+    from secaware.generation.result_importer import canonical_generated_code_from_request
+
+    assignment, _variant, code = _confirmation_code()
+    code_with_blank_line = canonical_generated_code_from_request(
+        code.generation_request,
+        "def answer():\n\n    return 42\n",
+        code.generation_provenance,
+        provider_result_sha256=code.provider_result_sha256,
+        provider_usage_sha256=code.provider_usage_sha256,
+        provider_runtime_sha256=code.provider_runtime_sha256,
+        provider_policy_sha256=code.provider_policy_sha256,
+        provider_attempt_count=code.provider_attempt_count,
+    )
+    transport = FakeTransport((_response("pass", "met", evidence_lines=[2, 3]),))
+    judge = LLMFunctionalJudge(transport, _policy(32), mode="single_pass")
+
+    passes, outcome = judge.evaluate(
+        assignment,
+        _execution_for(assignment, code_with_blank_line),
+        code_with_blank_line,
+        _contract(),
+    )
+
+    assert outcome.status is FunctionalOutcomeStatus.PASS
+    assert passes[0].requirements[0].code_evidence == ("    return 42",)
+
+
 def test_judge_rejects_non_integer_evidence_line() -> None:
     assignment, _variant, code = _confirmation_code()
     transport = FakeTransport(

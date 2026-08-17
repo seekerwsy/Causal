@@ -177,7 +177,7 @@ def _parse_response(
             for line_number in raw_line_numbers:
                 line = program_lines[line_number - 1]
                 if not line.strip():
-                    raise ValueError
+                    continue
                 if line not in evidence:
                     evidence.append(line)
             decision = FunctionalRequirementDecision.model_validate(
@@ -281,8 +281,7 @@ class LLMFunctionalJudge:
             elif mode == "two_pass_consensus":
                 if (
                     checked_b is None
-                    or checked_b.system_template_sha256
-                    != FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256
+                    or checked_b.system_template_sha256 != FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256
                     or checked_b.output_schema_sha256 != FUNCTIONAL_JUDGE_OUTPUT_SCHEMA_SHA256
                     or checked_a.model_id != checked_b.model_id
                     or checked_a.endpoint_sha256 != checked_b.endpoint_sha256
