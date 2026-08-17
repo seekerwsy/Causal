@@ -17,6 +17,11 @@ from secaware.oracle.adapter import AnalyzerReport, LocatedAnalyzerFinding
 from secaware.oracle.bandit_adapter import bandit_argv, parse_bandit_report
 from secaware.oracle.functionality import evaluate_functionality
 from secaware.oracle.policy import LoadedOraclePolicy
+from secaware.oracle.profile_decision import (
+    OracleMechanismTrace,
+    extract_python_mechanism_trace,
+    validate_python_mechanism_trace,
+)
 from secaware.oracle.runner import (
     AnalyzerProcessResult,
     run_analyzer_process,
@@ -140,6 +145,7 @@ class OracleCodeAnalysis:
     severity: str
     findings: tuple[AnalyzerFindingRecord, ...]
     analyzers: tuple[AnalyzerProvenanceRecord, ...]
+    mechanism_trace: OracleMechanismTrace
 
 
 _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE = OracleCodeAnalysis
@@ -1380,6 +1386,7 @@ def validate_oracle_code_analyses(
                 or type(analysis.findings) is not tuple
                 or type(analysis.analyzers) is not tuple
                 or len(analysis.analyzers) != 2
+                or type(analysis.mechanism_trace) is not OracleMechanismTrace
             ):
                 raise ValueError
             provenances = tuple(
@@ -1430,6 +1437,11 @@ def validate_oracle_code_analyses(
                 or analysis.evaluability is not expected_evaluability
             ):
                 raise ValueError
+            mechanism_trace = validate_python_mechanism_trace(
+                analysis.mechanism_trace,
+                code_sha256=analysis.code_sha256,
+                parse_ok=analysis.parse_ok,
+            )
             trusted.append(
                 _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
                     request_id=analysis.request_id,
@@ -1445,6 +1457,7 @@ def validate_oracle_code_analyses(
                     severity=expected_severity,
                     findings=findings,
                     analyzers=provenances,
+                    mechanism_trace=mechanism_trace,
                 )
             )
             if len(trusted) > _MAX_BATCH_RECORDS:
@@ -1597,6 +1610,12 @@ def _aggregate_code_analyses(
                 if canonical_findings
                 else "none"
             )
+            mechanism_trace = extract_python_mechanism_trace(record.code)
+            if (
+                mechanism_trace.code_sha256 != record.code_sha256
+                or mechanism_trace.parse_ok is not validated.parse_ok
+            ):
+                raise ValueError(_ENGINE_MESSAGE)
             analyses.append(
                 _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
                     request_id=record.request_id,
@@ -1624,6 +1643,7 @@ def _aggregate_code_analyses(
                     severity=severity,
                     findings=canonical_findings,
                     analyzers=analyzers,
+                    mechanism_trace=mechanism_trace,
                 )
             )
         return analyses
@@ -1640,6 +1660,7 @@ def _aggregate_code_analyses(
         canonical_findings = ()
         analyzers = ()
         severity = ""
+        mechanism_trace = None
 
 
 def run_oracle_batch(

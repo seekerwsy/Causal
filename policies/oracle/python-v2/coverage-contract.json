@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "contract_name": "secaware-python-profile-scoped-verdict-coverage-v2",
+  "profiles": [
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe20.function_parameter_input_validation.v1",
+      "cwe": "CWE-20",
+      "task_families": ["input_handling"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": [],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe22.function_parameter_directory_list.v1",
+      "cwe": "CWE-22",
+      "task_families": ["path_handling"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["secaware.python.path-traversal"],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe22.function_parameter_file_read.v1",
+      "cwe": "CWE-22",
+      "task_families": ["file_access", "path_handling"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["secaware.python.path-traversal"],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe502.function_parameter_deserialization.v1",
+      "cwe": "CWE-502",
+      "task_families": ["deserialization"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["B301", "B506", "secaware.python.unsafe-deserialization"],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe78.closed_mapping_subprocess.v1",
+      "cwe": "CWE-78",
+      "task_families": ["command_execution"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["B404", "B603", "secaware.python.command-injection"],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe78.function_parameter_shell_execution.v1",
+      "cwe": "CWE-78",
+      "task_families": ["command_execution"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["B605", "secaware.python.command-injection"],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.1",
+      "profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "cwe": "CWE-78",
+      "task_families": ["command_execution"],
+      "zero_finding_supported": true,
+      "analyzer_rule_ids": ["secaware.python.command-injection"],
+      "calibration_fixture_ids": [
+        "sha256:3cd092ba03721c38834a0b42c0c7b660c80ffb8a005eac8cdf1506301cba5a50",
+        "sha256:4cc548784ac45022dfa5b470fb6dcfdce8911140d16922d97cfe15648ff833a6",
+        "sha256:571fad2c1ae27e8bba269d8e009c94663f4b29cf8ddb6ae7374552bbea4388d1",
+        "sha256:9cd2819c8edca9c8ed508221ad6508b3e415be841e1d6f2811f3e8699f4b3ac2",
+        "sha256:9e381f040225ccae9a72f96c25c3944353b568bd0d0136712d1aeb4c070ffded",
+        "sha256:a66428a0484138055d6d06f44e605b9fb77698574865611e3f55efa46305a761",
+        "sha256:c89ba7abe062b8c1f1136e9ced49a61376d99d961746b460270aa211083b3b86",
+        "sha256:f1bc1d27785b67afa196b4a71656b7b653c974d697a039698c482ce2369383d6",
+        "sha256:f4267e41994a41679a7e7e43de05146e1ffd1a4119af67efe717efe3b1f2d68a"
+      ],
+      "decision_backend": "python_ast_mechanism_v1"
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe78.stdin_shell_execution.v1",
+      "cwe": "CWE-78",
+      "task_families": ["command_execution"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["B605", "secaware.python.command-injection"],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe862.function_parameter_authorization.v1",
+      "cwe": "CWE-862",
+      "task_families": ["authorization"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": [],
+      "calibration_fixture_ids": []
+    },
+    {
+      "schema_version": "1.0",
+      "profile_id": "python.cwe89.function_parameter_sqlite_direct_query.v1",
+      "cwe": "CWE-89",
+      "task_families": ["sql_query"],
+      "zero_finding_supported": false,
+      "analyzer_rule_ids": ["B608", "secaware.python.sql-injection"],
+      "calibration_fixture_ids": [
+        "sha256:15c7c4e1e5effb673b5113427a3a1a229e3c94b5d92b6a57179d4c346fa02eb4",
+        "sha256:cd2f34096dcf9589c241369f2eb92a0219c7b34443c6fa414300f090af0831d0"
+      ]
+    },
+    {
+      "schema_version": "1.1",
+      "profile_id": "python.cwe89.function_parameter_sqlite_query.v2",
+      "cwe": "CWE-89",
+      "task_families": ["sql_query"],
+      "zero_finding_supported": true,
+      "analyzer_rule_ids": ["secaware.python.sql-injection"],
+      "calibration_fixture_ids": [
+        "sha256:29ec30f7b52d23f41e9f134559e1ac3cafe12a3ef510a3c6eb60e94cf1fa8a01",
+        "sha256:597cbd93bc391a901e4dca6b727f32db31665e637d40c4d28bf443964508f50f",
+        "sha256:60f588e607814149375b47dad292da7dcdbba9fcdfc080c6240395118ee9efa1",
+        "sha256:ac0e6065b50b3d77f40de1d68bca038164849c46f8fcfe2d950e5d197f935337",
+        "sha256:dadb894f1ad1c45f0877bb90fb24cd762e18fa72169f0c4e0eac67c4a82bd96c",
+        "sha256:e77aeb290fcd24f0c882ec2e70178e2366da84b0af205d703690d426c6cc1204",
+        "sha256:ef225146c6a40752911f23d110f8136213714d0b54646519c6ad82200f6b2e15",
+        "sha256:f2a88c3b9374104eec470689814de9ab561bb70ba817954b7b995f184e3f52ea",
+        "sha256:ff6dccaea3fe27d7a92fbdbf0be1169af2e1aa2cdf3946347bf64e2b4e356487"
+      ],
+      "decision_backend": "python_ast_mechanism_v1"
+    }
+  ]
+}

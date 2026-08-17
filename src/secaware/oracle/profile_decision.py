@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import hashlib
+import json
 from typing import Literal, Protocol, Sequence
 
 from secaware.schema.oracle import (
@@ -16,6 +17,9 @@ from secaware.schema.oracle import (
 
 MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v1"
 PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v1"
+
+_MAX_SINK_FACTS = 10_000
+_MAX_TEXT_CHARS = 256
 
 _COMMAND_SINKS = frozenset(
     {
@@ -569,6 +573,93 @@ def extract_python_mechanism_trace(code: str) -> OracleMechanismTrace:
     )
 
 
+def validate_python_mechanism_trace(
+    trace: OracleMechanismTrace,
+    *,
+    code_sha256: str,
+    parse_ok: bool,
+) -> OracleMechanismTrace:
+    """Rebuild one bounded trace before it crosses the blind-analysis boundary."""
+
+    if (
+        type(trace) is not OracleMechanismTrace
+        or trace.schema_version != "1.0"
+        or trace.extractor_version != MECHANISM_EXTRACTOR_VERSION
+        or trace.language != "python"
+        or trace.analysis_scope != "single_file_function_local"
+        or trace.code_sha256 != code_sha256
+        or trace.parse_ok is not parse_ok
+        or type(trace.sink_facts) is not tuple
+        or len(trace.sink_facts) > _MAX_SINK_FACTS
+        or (not parse_ok and trace.sink_facts)
+    ):
+        raise ValueError("Oracle mechanism trace failed validation")
+    facts: list[OracleMechanismSinkFact] = []
+    for fact in trace.sink_facts:
+        if (
+            type(fact) is not OracleMechanismSinkFact
+            or fact.cwe not in {"CWE-78", "CWE-89"}
+            or type(fact.function_name) is not str
+            or not fact.function_name
+            or len(fact.function_name) > _MAX_TEXT_CHARS
+            or type(fact.line) is not int
+            or fact.line < 1
+            or type(fact.sink_kind) is not str
+            or not fact.sink_kind
+            or len(fact.sink_kind) > _MAX_TEXT_CHARS
+            or fact.state not in {"safe", "unsafe", "unresolved"}
+            or type(fact.source_names) is not tuple
+            or type(fact.properties) is not tuple
+            or type(fact.reason_code) is not str
+            or not fact.reason_code
+            or len(fact.reason_code) > _MAX_TEXT_CHARS
+            or any(
+                type(value) is not str or not value or len(value) > _MAX_TEXT_CHARS
+                for value in fact.source_names + fact.properties
+            )
+            or fact.source_names != tuple(sorted(set(fact.source_names)))
+            or fact.properties != tuple(sorted(set(fact.properties)))
+        ):
+            raise ValueError("Oracle mechanism trace failed validation")
+        facts.append(
+            OracleMechanismSinkFact(
+                cwe=fact.cwe,
+                function_name=fact.function_name,
+                line=fact.line,
+                sink_kind=fact.sink_kind,
+                state=fact.state,
+                source_names=tuple(fact.source_names),
+                properties=tuple(fact.properties),
+                reason_code=fact.reason_code,
+            )
+        )
+    expected = tuple(
+        sorted(facts, key=lambda item: (item.line, item.function_name, item.cwe, item.sink_kind))
+    )
+    if tuple(facts) != expected:
+        raise ValueError("Oracle mechanism trace failed validation")
+    return OracleMechanismTrace(
+        schema_version="1.0",
+        extractor_version=MECHANISM_EXTRACTOR_VERSION,
+        language="python",
+        analysis_scope="single_file_function_local",
+        code_sha256=code_sha256,
+        parse_ok=parse_ok,
+        sink_facts=expected,
+    )
+
+
+def mechanism_trace_sha256(trace: OracleMechanismTrace) -> str:
+    payload = json.dumps(
+        asdict(trace),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def decide_oracle_profile(
     trace: OracleMechanismTrace,
     raw_findings: Sequence[AnalyzerFindingRecord],
@@ -666,4 +757,6 @@ __all__ = [
     "OracleProfileDecision",
     "decide_oracle_profile",
     "extract_python_mechanism_trace",
+    "mechanism_trace_sha256",
+    "validate_python_mechanism_trace",
 ]

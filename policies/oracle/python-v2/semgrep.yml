@@ -1,0 +1,145 @@
+rules:
+  - id: secaware.python.command-injection
+    message: Untrusted input reaches an operating-system command execution sink.
+    languages:
+      - python
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  def $FUNCTION(..., $PARAMETER, ...):
+                    ...
+              - pattern: $PARAMETER
+          - patterns:
+              - pattern-inside: |
+                  async def $FUNCTION(..., $PARAMETER, ...):
+                    ...
+              - pattern: $PARAMETER
+          - pattern: input(...)
+          - pattern: sys.argv[$INDEX]
+          - pattern: os.environ[$KEY]
+          - pattern: os.getenv(...)
+          - pattern: $REQUEST.args.get(...)
+          - pattern: $REQUEST.form.get(...)
+          - pattern: $REQUEST.get_json(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: os.system($COMMAND)
+              - pattern: os.popen($COMMAND, ...)
+              - pattern: subprocess.call($COMMAND, ..., shell=True, ...)
+              - pattern: subprocess.check_call($COMMAND, ..., shell=True, ...)
+              - pattern: subprocess.check_output($COMMAND, ..., shell=True, ...)
+              - pattern: subprocess.run($COMMAND, ..., shell=True, ...)
+              - pattern: subprocess.Popen($COMMAND, ..., shell=True, ...)
+          - focus-metavariable: $COMMAND
+
+  - id: secaware.python.sql-injection
+    message: Untrusted input reaches the SQL statement argument of a database execution sink.
+    languages:
+      - python
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  def $FUNCTION(..., $PARAMETER, ...):
+                    ...
+              - pattern: $PARAMETER
+          - patterns:
+              - pattern-inside: |
+                  async def $FUNCTION(..., $PARAMETER, ...):
+                    ...
+              - pattern: $PARAMETER
+          - pattern: input(...)
+          - pattern: sys.argv[$INDEX]
+          - pattern: os.environ[$KEY]
+          - pattern: os.getenv(...)
+          - pattern: $REQUEST.args.get(...)
+          - pattern: $REQUEST.form.get(...)
+          - pattern: $REQUEST.get_json(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $CURSOR.execute($QUERY, ...)
+              - pattern: $CURSOR.executemany($QUERY, ...)
+              - pattern: $CONNECTION.executescript($QUERY)
+          - focus-metavariable: $QUERY
+
+  - id: secaware.python.unsafe-deserialization
+    message: Untrusted input reaches a native object deserialization sink.
+    languages:
+      - python
+    severity: ERROR
+    metadata:
+      cwe: CWE-502
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - pattern: input(...)
+          - pattern: sys.argv[$INDEX]
+          - pattern: os.environ[$KEY]
+          - pattern: os.getenv(...)
+          - pattern: $REQUEST.args.get(...)
+          - pattern: $REQUEST.form.get(...)
+          - pattern: $REQUEST.get_data(...)
+          - pattern: $REQUEST.get_json(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: pickle.loads($DATA, ...)
+              - pattern: cloudpickle.loads($DATA, ...)
+              - pattern: dill.loads($DATA, ...)
+              - pattern: marshal.loads($DATA)
+              - pattern: yaml.load($DATA)
+              - pattern: yaml.load($DATA, Loader=yaml.Loader)
+              - pattern: yaml.load($DATA, Loader=yaml.CLoader)
+              - pattern: yaml.load($DATA, Loader=yaml.FullLoader)
+              - pattern: yaml.load($DATA, Loader=yaml.CFullLoader)
+              - pattern: yaml.load($DATA, Loader=yaml.UnsafeLoader)
+              - pattern: yaml.load($DATA, Loader=yaml.CUnsafeLoader)
+              - pattern: yaml.load($DATA, yaml.Loader)
+              - pattern: yaml.load($DATA, yaml.CLoader)
+              - pattern: yaml.load($DATA, yaml.FullLoader)
+              - pattern: yaml.load($DATA, yaml.CFullLoader)
+              - pattern: yaml.load($DATA, yaml.UnsafeLoader)
+              - pattern: yaml.load($DATA, yaml.CUnsafeLoader)
+              - pattern: yaml.unsafe_load($DATA)
+          - focus-metavariable: $DATA
+
+  - id: secaware.python.path-traversal
+    message: Untrusted input reaches a filesystem path sink without a containment decision.
+    languages:
+      - python
+    severity: WARNING
+    metadata:
+      cwe: CWE-22
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - pattern: input(...)
+          - pattern: sys.argv[$INDEX]
+          - pattern: os.environ[$KEY]
+          - pattern: os.getenv(...)
+          - pattern: $REQUEST.args.get(...)
+          - pattern: $REQUEST.form.get(...)
+          - pattern: $REQUEST.get_json(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: open($PATH, ...)
+              - pattern: os.open($PATH, ...)
+              - pattern: pathlib.Path($PATH).open(...)
+              - pattern: pathlib.Path($PATH).read_text(...)
+              - pattern: pathlib.Path($PATH).read_bytes(...)
+              - pattern: pathlib.Path($PATH).write_text(...)
+              - pattern: pathlib.Path($PATH).write_bytes(...)
+              - pattern: flask.send_file($PATH, ...)
+          - focus-metavariable: $PATH

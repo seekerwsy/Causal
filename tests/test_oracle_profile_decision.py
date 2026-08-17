@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
 
 from secaware.oracle.profile_decision import (
     decide_oracle_profile,
     extract_python_mechanism_trace,
 )
-from secaware.schema.oracle import AnalyzerFindingRecord, OracleEvaluability, SecurityLabel
+from secaware.oracle.policy import load_policy_bundle
+from secaware.schema.oracle import (
+    AnalyzerFindingRecord,
+    AnalyzerProvenanceRecord,
+    OracleEvaluability,
+    OracleRecord,
+    SecurityLabel,
+)
 
 
 @dataclass(frozen=True)
@@ -151,3 +161,86 @@ def test_profile_decision_detects_conflict_and_parse_failure() -> None:
 def test_trace_is_deterministic() -> None:
     code = "import os\ndef run(value):\n    return os.system('echo ' + value)\n"
     assert extract_python_mechanism_trace(code) == extract_python_mechanism_trace(code)
+
+
+def test_checked_in_v2_profiles_match_and_classify_the_frozen_corpus() -> None:
+    root = Path(__file__).parents[1]
+    corpus = root / "tests" / "oracle_profile_corpus"
+    policy = load_policy_bundle(root / "policies" / "oracle" / "python-v2" / "policy.lock.json")
+    profile_by_cwe = {
+        profile.cwe: profile
+        for profile in policy.coverage_profiles
+        if profile.decision_backend == "python_ast_mechanism_v1"
+    }
+    rows = [json.loads(line) for line in (corpus / "manifest.jsonl").read_text().splitlines()]
+
+    assert set(profile_by_cwe) == {"CWE-78", "CWE-89"}
+    for cwe, profile in profile_by_cwe.items():
+        selected = [row for row in rows if row["cwe"] == cwe]
+        fixture_hashes = tuple(
+            sorted(
+                "sha256:" + hashlib.sha256((corpus / row["path"]).read_bytes()).hexdigest()
+                for row in selected
+            )
+        )
+        assert profile.calibration_fixture_ids == fixture_hashes
+        for row in selected:
+            code = (corpus / row["path"]).read_text(encoding="utf-8")
+            decision = decide_oracle_profile(extract_python_mechanism_trace(code), (), profile)
+            assert decision.security_label.value == row["expected_label"], row["fixture_id"]
+
+
+def test_v13_oracle_record_preserves_raw_warnings_and_mechanism_only_insecurity() -> None:
+    analyzers = (
+        AnalyzerProvenanceRecord(
+            schema_version="1.0",
+            analyzer="semgrep",
+            version="1.168.0",
+            policy_sha256="a" * 64,
+        ),
+        AnalyzerProvenanceRecord(
+            schema_version="1.0",
+            analyzer="bandit",
+            version="1.9.4",
+            policy_sha256="a" * 64,
+        ),
+    )
+    common = {
+        "schema_version": "1.3",
+        "request_id": "req_" + "1" * 64,
+        "code_id": "code_" + "2" * 64,
+        "code_sha256": "3" * 64,
+        "prompt_id": "prompt-calibration",
+        "condition": "observed",
+        "model_id": "model-a",
+        "seed_id": 1,
+        "parse_ok": True,
+        "functional_ok": True,
+        "analyzers": analyzers,
+        "decision_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+        "decision_engine_version": "profile-scoped-oracle-decision-v1",
+        "mechanism_evidence_sha256": "4" * 64,
+    }
+    raw_warning = _finding("B603", "CWE-78")
+    secure = OracleRecord(
+        **common,
+        security_label="secure",
+        evaluability="evaluable",
+        severity="none",
+        findings=(),
+        raw_findings=(raw_warning,),
+        decision_reason_code="all_relevant_sinks_proved_safe",
+    )
+    insecure = OracleRecord(
+        **common,
+        security_label="insecure",
+        evaluability="evaluable",
+        severity="high",
+        findings=(),
+        raw_findings=(),
+        decision_reason_code="proved_unsafe_sink",
+    )
+
+    assert secure.raw_findings == (raw_warning,)
+    assert secure.findings == ()
+    assert insecure.security_label is SecurityLabel.INSECURE
