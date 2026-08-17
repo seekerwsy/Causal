@@ -67,13 +67,13 @@ def test_profile_calibration_writes_complete_passing_artifacts(tmp_path: Path, m
 
     assert report["status"] == "ORACLE_PROFILE_CALIBRATION_PASSED"
     assert report["counts"] == {
-        "fixtures": 45,
-        "completed": 45,
+        "fixtures": 50,
+        "completed": 50,
         "errors": 0,
         "mismatches": 0,
-        "secure": 15,
-        "insecure": 16,
-        "unknown": 14,
+        "secure": 17,
+        "insecure": 18,
+        "unknown": 15,
     }
     assert {item["cwe"] for item in report["profile_metrics"]} == {
         "CWE-78",
@@ -85,6 +85,6 @@ def test_profile_calibration_writes_complete_passing_artifacts(tmp_path: Path, m
     assert all(item["passed"] for item in report["profile_metrics"])
     assert not json.loads((output / "errors.json").read_text())["errors"]
     records = [json.loads(line) for line in (output / "records.jsonl").read_text().splitlines()]
-    assert len(records) == 45
+    assert len(records) == 50
     assert all(record["matches_expected"] for record in records)
     assert (output / "output-files.jsonl").is_file()

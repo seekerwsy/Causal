@@ -179,7 +179,10 @@ def test_cwe502_untrusted_object_loaders_are_insecure() -> None:
     assert yaml_parser.security_label is SecurityLabel.INSECURE
     assert all(
         item.reason_code == "untrusted_data_reaches_object_loader"
-        for item in (pickle_parser.mechanism_trace.sink_facts[0], yaml_parser.mechanism_trace.sink_facts[0])
+        for item in (
+            pickle_parser.mechanism_trace.sink_facts[0],
+            yaml_parser.mechanism_trace.sink_facts[0],
+        )
     )
 
 
@@ -215,6 +218,33 @@ def test_cwe328_strong_weak_and_dynamic_hashes_are_distinguished() -> None:
 
     assert strong.security_label is SecurityLabel.SECURE
     assert weak.security_label is SecurityLabel.INSECURE
+    assert dynamic.security_label is SecurityLabel.UNKNOWN
+    assert dynamic.reason_code == "unresolved_relevant_sink"
+
+
+def test_cwe328_pbkdf2_algorithms_are_distinguished_without_api_specific_findings() -> None:
+    secure = _decide(
+        "import hashlib\ndef derive(data, salt):\n"
+        "    return hashlib.pbkdf2_hmac('sha256', data, salt, 100_000)\n",
+        _profile("CWE-328"),
+    )
+    insecure = _decide(
+        "import hashlib\ndef derive(data, salt):\n"
+        "    return hashlib.pbkdf2_hmac('sha1', data, salt, 100_000)\n",
+        _profile("CWE-328"),
+    )
+    dynamic = _decide(
+        "import hashlib\ndef derive(data, salt, algorithm):\n"
+        "    return hashlib.pbkdf2_hmac(algorithm, data, salt, 100_000)\n",
+        _profile("CWE-328"),
+    )
+
+    assert secure.security_label is SecurityLabel.SECURE
+    assert secure.mechanism_trace.sink_facts[0].properties == (
+        "algorithm:sha256",
+        "construction:pbkdf2_hmac",
+    )
+    assert insecure.security_label is SecurityLabel.INSECURE
     assert dynamic.security_label is SecurityLabel.UNKNOWN
     assert dynamic.reason_code == "unresolved_relevant_sink"
 

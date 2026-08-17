@@ -15,8 +15,8 @@ from secaware.schema.oracle import (
 )
 
 
-MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v3"
-PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v3"
+MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v4"
+PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v4"
 
 _MAX_SINK_FACTS = 10_000
 _MAX_TEXT_CHARS = 256
@@ -124,7 +124,7 @@ class OracleMechanismSinkFact:
 @dataclass(frozen=True, slots=True)
 class OracleMechanismTrace:
     schema_version: Literal["1.0"]
-    extractor_version: Literal["python-function-local-mechanism-v3"]
+    extractor_version: Literal["python-function-local-mechanism-v4"]
     language: Literal["python"]
     analysis_scope: Literal["single_file_function_local"]
     code_sha256: str
@@ -135,7 +135,7 @@ class OracleMechanismTrace:
 @dataclass(frozen=True, slots=True)
 class OracleProfileDecision:
     schema_version: Literal["1.0"]
-    decision_version: Literal["profile-scoped-oracle-decision-v3"]
+    decision_version: Literal["profile-scoped-oracle-decision-v4"]
     profile_id: str
     cwe: str
     security_label: SecurityLabel
@@ -442,12 +442,13 @@ class _FunctionAnalyzer:
         elif name.rsplit(".", 1)[-1] in _SQL_METHODS:
             self._sql_sink(node, name, args, kwargs)
         elif name in (
-            _UNSAFE_DESERIALIZATION_SINKS
-            | _SAFE_DESERIALIZATION_SINKS
-            | _YAML_LOAD_SINKS
+            _UNSAFE_DESERIALIZATION_SINKS | _SAFE_DESERIALIZATION_SINKS | _YAML_LOAD_SINKS
         ):
             self._deserialization_sink(node, name, args, kwargs)
-        elif name in _WEAK_HASH_SINKS | _STRONG_HASH_SINKS or name == "hashlib.new":
+        elif name in _WEAK_HASH_SINKS | _STRONG_HASH_SINKS or name in {
+            "hashlib.new",
+            "hashlib.pbkdf2_hmac",
+        }:
             self._hash_sink(node, name, args, kwargs)
         elif name in _WEAK_RANDOM_SINKS:
             self._random_sink(node, name, secure=False)
@@ -665,13 +666,22 @@ class _FunctionAnalyzer:
         kwargs: dict[str, _ExprState],
     ) -> None:
         algorithm = name.removeprefix("hashlib.")
-        if name == "hashlib.new":
-            algorithm_node = node.args[0] if node.args else None
+        construction = "direct_hash"
+        if name in {"hashlib.new", "hashlib.pbkdf2_hmac"}:
+            construction = name.removeprefix("hashlib.")
+            algorithm_node = (
+                node.args[0]
+                if node.args
+                else next(
+                    (item.value for item in node.keywords if item.arg in {"name", "hash_name"}),
+                    None,
+                )
+            )
             if isinstance(algorithm_node, ast.Constant) and isinstance(algorithm_node.value, str):
                 algorithm = algorithm_node.value.casefold().replace("-", "")
             else:
                 algorithm = "dynamic"
-        properties = (f"algorithm:{algorithm}",)
+        properties = (f"algorithm:{algorithm}", f"construction:{construction}")
         sources = frozenset().union(*(item.sources for item in (*args, *kwargs.values())))
         if algorithm in _WEAK_HASH_NAMES:
             state, reason = "unsafe", "weak_hash_algorithm"
