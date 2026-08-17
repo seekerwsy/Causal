@@ -65,6 +65,14 @@ rules:
           - pattern: $REQUEST.args.get(...)
           - pattern: $REQUEST.form.get(...)
           - pattern: $REQUEST.get_json(...)
+    pattern-sanitizers:
+      - patterns:
+          - pattern-inside: |
+              if $VALUE not in $ALLOWED:
+                raise ...
+              ...
+          - pattern: $VALUE
+      - pattern: $MAPPING[$KEY]
     pattern-sinks:
       - patterns:
           - pattern-either:
