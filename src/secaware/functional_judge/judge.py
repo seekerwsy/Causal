@@ -87,6 +87,7 @@ _RESPONSE_KEYS = frozenset({"status", "requirements", "rationale"})
 _REQUIREMENT_KEYS = frozenset(
     {"requirement_id", "verdict", "code_evidence_lines", "counterexample"}
 )
+_EVIDENCE_RESOLUTION_VERSION = "valid-range-nonblank-lines-v2"
 
 
 def _error(code: ErrorCode = ErrorCode.CONTRACT) -> SecAwareError:
@@ -115,9 +116,10 @@ def functional_judge_policy_sha256(
         return canonical_sha256(
             {
                 "schema_version": "1.0",
-                "evaluator": "blind-single-pass-functional-judge-v1",
+                "evaluator": "blind-single-pass-functional-judge-v2",
                 "pass_a": _policy_payload(pass_a),
                 "consensus": "single-validated-status-v1",
+                "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
             }
         )
     if pass_b is None:
@@ -125,10 +127,11 @@ def functional_judge_policy_sha256(
     return canonical_sha256(
         {
             "schema_version": "1.0",
-            "evaluator": "blind-two-pass-functional-judge-v1",
+            "evaluator": "blind-two-pass-functional-judge-v2",
             "pass_a": _policy_payload(pass_a),
             "pass_b": _policy_payload(pass_b),
             "consensus": "exact-status-agreement-else-unknown-v1",
+            "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
         }
     )
 
