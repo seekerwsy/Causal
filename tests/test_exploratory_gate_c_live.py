@@ -82,3 +82,33 @@ def test_functional_judge_transport_persists_exact_request_and_response(
     assert (destination / "response.json").read_bytes() == b'{"response":1}\n'
     metadata = json.loads((destination / "transport.json").read_text(encoding="utf-8"))
     assert metadata["attempts"] == 1
+
+
+def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
+    stored_base = {
+        "schema_version": "1.0",
+        "gate_c_live_id": "frozen-pilot",
+        "scale_up_allowed": False,
+        "expected_assignments": 8,
+    }
+    authorized = {
+        **stored_base,
+        "scale_up_allowed": True,
+        "scale_up_authorization_id": "user-approved-remaining-20260817-v1",
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+
+    gate_c_live._validate_scale_up_authorization(
+        authorized, mode="remaining", stored_base=stored_base
+    )
+
+    changed = {**authorized, "expected_assignments": 9}
+    with pytest.raises(ValueError, match="changed the frozen pilot config"):
+        gate_c_live._validate_scale_up_authorization(
+            changed, mode="remaining", stored_base=stored_base
+        )
+
+    with pytest.raises(ValueError, match="authorization failed"):
+        gate_c_live._validate_scale_up_authorization(
+            stored_base, mode="remaining", stored_base=stored_base
+        )

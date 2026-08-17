@@ -196,3 +196,26 @@ and 0% utilization. Each model-specific run now has one completed assignment, ze
 pending assignments. These two observations are engineering pilots, not effect estimates. The
 registered live configurations still set `scale_up_allowed=false`, so the remaining assignments have
 not been run and no scientific comparison between 7B and 14B is authorized.
+
+## Bounded remaining-assignment authorization
+
+On 2026-08-17 the user approved completing only the seven pending assignments in each of the two
+model-specific canaries. This authorization does not add a model, task, arm, seed, provider attempt,
+or scientific claim. The original pilot configurations remain unchanged with
+`scale_up_allowed=false`. Two new authorization configurations set `scale_up_allowed=true` and bind
+the approval to `user-approved-remaining-20260817-v1` with scope
+`remaining_assignments_only`.
+
+The executor accepts those configurations only in `remaining` mode and only when replacing the two
+authorization fields and flipping `scale_up_allowed` back to false produces the exact live
+configuration stored by the completed pilot. It also re-authenticates the application configuration
+and source-plan manifest before making a provider call. The authorized configuration, frozen base
+configuration digest, selected pending assignment IDs, command, environment, and input digests are
+saved separately in the existing recovered run. Existing pilot and recovery evidence is not
+overwritten.
+
+Execution remains sequential: start a new versioned 7B service record, complete and validate its
+seven pending assignments, stop the service, and only then repeat for 14B. Any failed unit triggers
+fail-fast and blocks the second model until the failure has been diagnosed and repaired. Completion
+of these engineering canaries still does not by itself authorize a pooled comparison or a formal
+main-experiment claim.

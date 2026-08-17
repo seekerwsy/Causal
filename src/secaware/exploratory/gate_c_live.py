@@ -36,6 +36,11 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 _SCHEMA_VERSION = "1.0"
 _Mode = Literal["validate", "pilot", "remaining"]
+_SCALE_UP_AUTHORIZATION_ID = "user-approved-remaining-20260817-v1"
+_SCALE_UP_AUTHORIZATION_SCOPE = "remaining_assignments_only"
+_SCALE_UP_AUTHORIZATION_KEYS = frozenset(
+    {"scale_up_authorization_id", "scale_up_authorization_scope"}
+)
 
 
 def _canonical(value: object) -> bytes:
@@ -297,6 +302,35 @@ def _snapshot_sha256(snapshot: tuple[dict[str, str], ...]) -> str:
     return hashlib.sha256(_canonical(snapshot)).hexdigest()
 
 
+def _validate_scale_up_authorization(
+    live: dict[str, Any],
+    *,
+    mode: _Mode,
+    stored_base: dict[str, Any] | None = None,
+) -> None:
+    if mode != "remaining":
+        if live.get("scale_up_allowed") is not False or any(
+            key in live for key in _SCALE_UP_AUTHORIZATION_KEYS
+        ):
+            raise ValueError("Gate C live scale-up authorization failed validation")
+        return
+    if (
+        stored_base is None
+        or stored_base.get("scale_up_allowed") is not False
+        or any(key in stored_base for key in _SCALE_UP_AUTHORIZATION_KEYS)
+        or live.get("scale_up_allowed") is not True
+        or live.get("scale_up_authorization_id") != _SCALE_UP_AUTHORIZATION_ID
+        or live.get("scale_up_authorization_scope") != _SCALE_UP_AUTHORIZATION_SCOPE
+    ):
+        raise ValueError("Gate C live scale-up authorization failed validation")
+    normalized = dict(live)
+    for key in _SCALE_UP_AUTHORIZATION_KEYS:
+        normalized.pop(key, None)
+    normalized["scale_up_allowed"] = False
+    if normalized != stored_base:
+        raise ValueError("Gate C live scale-up authorization changed the frozen pilot config")
+
+
 def _summary(output_dir: Path, expected: int, phase: str) -> dict[str, object]:
     completed, failed = _completed_assignments(output_dir)
     judge_calls = 0
@@ -358,6 +392,10 @@ def run_gate_c_live_canary(
         output_dir.mkdir(parents=True, exist_ok=False)
     elif not output_dir.is_dir():
         raise FileNotFoundError(output_dir)
+    stored_base: dict[str, Any] | None = None
+    if mode == "remaining":
+        stored_base = _read_json(output_dir / "live-config.json")
+    _validate_scale_up_authorization(live, mode=mode, stored_base=stored_base)
     plan_dir = (repo_root / str(live.get("source_plan_dir"))).resolve()
     plan_dir.relative_to(repo_root)
     plan_report = _verify_plan(plan_dir)
@@ -372,7 +410,6 @@ def run_gate_c_live_canary(
         or live.get("oracle_coordinate_blinding") is not True
         or live.get("zero_finding_interpretation") != "unknown_coverage"
         or live.get("scientific_claim_allowed") is not False
-        or live.get("scale_up_allowed") is not False
         or plan_report.get("counts", {}).get("generation_requests") != expected
     ):
         raise ValueError("Gate C live policy failed validation")
@@ -483,11 +520,36 @@ def run_gate_c_live_canary(
     else:
         if pilot_id not in completed:
             raise ValueError("Gate C live pilot has not completed")
+        input_provenance = _read_json(output_dir / "input-provenance.json")
+        if (
+            input_provenance.get("app_config_sha256") != sha256_file(app_config_path)
+            or input_provenance.get("source_plan_manifest_sha256")
+            != sha256_file(plan_dir / "artifact-manifest.json")
+        ):
+            raise ValueError("Gate C live remaining input provenance failed validation")
         selected = tuple(sorted(set(assignment_by_id) - completed))
         if not selected:
             raise ValueError("Gate C live has no pending assignments")
+        _write_json(output_dir / "live-config-remaining.json", live)
         _write_json(output_dir / "command-remaining.json", {"argv": list(command_argv)})
         _write_json(output_dir / "environment-remaining.json", _environment())
+        _write_json(
+            output_dir / "input-provenance-remaining.json",
+            {
+                "schema_version": _SCHEMA_VERSION,
+                "live_config_sha256": sha256_file(live_config_path),
+                "stored_base_live_config_sha256": sha256_file(
+                    output_dir / "live-config.json"
+                ),
+                "app_config_sha256": sha256_file(app_config_path),
+                "source_plan_manifest_sha256": sha256_file(
+                    plan_dir / "artifact-manifest.json"
+                ),
+                "scale_up_authorization_id": _SCALE_UP_AUTHORIZATION_ID,
+                "scale_up_authorization_scope": _SCALE_UP_AUTHORIZATION_SCOPE,
+                "authorized_assignment_ids": list(selected),
+            },
+        )
     phase_dir = output_dir / "phases" / (
         "phase-001-pilot" if mode == "pilot" else "phase-002-remaining"
     )
