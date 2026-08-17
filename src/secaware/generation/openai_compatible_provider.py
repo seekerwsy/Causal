@@ -23,11 +23,15 @@ from secaware.schema.generation import (
 
 _STAGE = "generation"
 _PRODUCER = "openai_compatible"
-_PRODUCER_VERSION = "chat_completions-python-envelope-v1"
+_PRODUCER_VERSION = "chat_completions-python-envelope-v2"
 _MISSING = object()
 _NO_DEFAULT = object()
 _MAX_TOKEN_PARAMETER_KEYS = frozenset({"max_tokens", "max_completion_tokens", "max_output_tokens"})
 _EXTRA_BODY_PARAMETER_KEYS = frozenset({"max_completion_tokens", "reasoning_effort", "verbosity"})
+GenerationAttemptRecorder = Callable[
+    [str, int, dict[str, Any], object | None, BaseException | None],
+    None,
+]
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -206,10 +210,12 @@ def _validate_usage(usage: object) -> ProviderUsageRecord:
 
 
 def _decode_python_source_envelope(content: str) -> tuple[str, str]:
-    """Accept raw source or one exact Python Markdown fence and nothing else."""
+    """Accept raw source or the first and only fenced Python source block."""
 
+    closing_indexes: list[int] = []
     decoded = ""
     lines: list[str] = []
+    trailing = ""
     try:
         if type(content) is not str or not content.strip():
             raise ValueError("invalid message content")
@@ -219,22 +225,31 @@ def _decode_python_source_envelope(content: str) -> tuple[str, str]:
                 raise ValueError("invalid Python source envelope")
             return content, "raw"
         lines = normalized.split("\n")
-        if (
-            lines[0].lower() not in {"```python", "```py"}
-            or len(lines) < 3
-            or lines[-1] != "```"
-            or any(line.startswith("```") for line in lines[1:-1])
+        if lines[0].lower() not in {"```python", "```py"} or len(lines) < 3:
+            raise ValueError("invalid Python source envelope")
+        closing_indexes = [
+            index for index, line in enumerate(lines[1:], start=1) if line == "```"
+        ]
+        if len(closing_indexes) != 1 or any(
+            line.startswith("```")
+            for index, line in enumerate(lines[1:], start=1)
+            if index != closing_indexes[0]
         ):
             raise ValueError("invalid Python source envelope")
-        decoded = "\n".join(lines[1:-1])
+        decoded = "\n".join(lines[1 : closing_indexes[0]])
         if not decoded.strip():
             raise ValueError("invalid Python source envelope")
-        return decoded, "python_fence"
+        trailing = "\n".join(lines[closing_indexes[0] + 1 :])
+        envelope = "python_fence_trailing_text" if trailing.strip() else "python_fence"
+        return decoded, envelope
     finally:
         content = ""
+        closing_indexes.clear()
+        closing_indexes = []
         decoded = ""
         lines.clear()
         lines = []
+        trailing = ""
 
 
 def _response_code(
@@ -324,6 +339,7 @@ class OpenAICompatibleProvider:
         "_initial_backoff_seconds",
         "_max_attempts",
         "_max_backoff_seconds",
+        "_attempt_recorder",
         "_sleeper",
         "_runtime_fingerprint_sha256",
     )
@@ -335,6 +351,7 @@ class OpenAICompatibleProvider:
         client: object,
         sleeper: Callable[[float], None] = time.sleep,
         runtime_fingerprint_sha256: str | None = None,
+        attempt_recorder: GenerationAttemptRecorder | None = None,
     ) -> None:
         trusted: OpenAICompatibleConfig | None = None
         initialization_error: SecAwareError | None = None
@@ -363,11 +380,17 @@ class OpenAICompatibleProvider:
             client = None
             sleeper = None  # type: ignore[assignment]
             raise initialization_error
+        if attempt_recorder is not None and not callable(attempt_recorder):
+            raise _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider configuration is unavailable",
+            )
         self._client = client
         self._endpoint_sha256 = sha256_text(trusted.base_url)
         self._max_attempts = trusted.max_attempts
         self._initial_backoff_seconds = trusted.initial_backoff_seconds
         self._max_backoff_seconds = trusted.max_backoff_seconds
+        self._attempt_recorder = attempt_recorder
         self._sleeper = sleeper
         self._runtime_fingerprint_sha256 = (
             openai_provider_runtime_fingerprint()
@@ -452,6 +475,7 @@ class OpenAICompatibleProvider:
         attempts: list[GenerationAttemptRecord] = []
         payload: dict[str, Any] = {}
         response: object = None
+        transport_error: BaseException | None = None
         classification: _FailureClassification | None = None
         code: str | None = None
         finish_reason = ""
@@ -470,10 +494,42 @@ class OpenAICompatibleProvider:
                 payload = self._payload(trusted, system_template)
                 response = _MISSING
                 classification = None
+                transport_error = None
                 try:
                     response = self._client.chat.completions.create(**payload)  # type: ignore[attr-defined]
                 except Exception as error:
+                    transport_error = error
                     classification = _classify_failure(error)
+                if self._attempt_recorder is not None:
+                    recording_failed = False
+                    try:
+                        self._attempt_recorder(
+                            trusted.request_id,
+                            attempt_number,
+                            dict(payload),
+                            None if response is _MISSING else response,
+                            transport_error,
+                        )
+                    except Exception:
+                        recording_failed = True
+                    finally:
+                        transport_error = None
+                    if recording_failed:
+                        attempts.append(
+                            self._attempt(
+                                trusted.request_id,
+                                attempt_number,
+                                "failure",
+                                error_code=ErrorCode.API_INVALID_RESPONSE,
+                                retryable=False,
+                                backoff_seconds=0.0,
+                            )
+                        )
+                        return _provider_error(
+                            ErrorCode.API_INVALID_RESPONSE,
+                            "provider attempt recording failed",
+                            attempts=attempts,
+                        )
                 if classification is not None:
                     if not classification.retryable:
                         attempts.append(
@@ -602,6 +658,7 @@ class OpenAICompatibleProvider:
             attempts = []
             payload = {}
             response = None
+            transport_error = None
             classification = None
             code = None
             finish_reason = ""
@@ -648,7 +705,7 @@ def openai_provider_runtime_payload() -> dict[str, str]:
         "factory_source_sha256": hashlib.sha256(factory_source.encode("utf-8")).hexdigest(),
         "response_source_sha256": hashlib.sha256(response_source.encode("utf-8")).hexdigest(),
         "usage_source_sha256": hashlib.sha256(usage_source.encode("utf-8")).hexdigest(),
-        "response_policy": "strict-provider-result-envelope-v1",
+        "response_policy": "bounded-python-source-envelope-v2",
     }
 
 
@@ -666,6 +723,7 @@ def create_openai_compatible_provider(
     *,
     environ: Mapping[str, str] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
+    attempt_recorder: GenerationAttemptRecorder | None = None,
 ) -> OpenAICompatibleProvider:
     trusted: OpenAICompatibleConfig | None = None
     config_error: SecAwareError | None = None
@@ -746,6 +804,7 @@ def create_openai_compatible_provider(
                 client=client,
                 sleeper=sleeper,
                 runtime_fingerprint_sha256=runtime_fingerprint_sha256,
+                attempt_recorder=attempt_recorder,
             )
         except SecAwareError as error:
             provider_error = error
@@ -778,6 +837,7 @@ def create_openai_compatible_provider(
         factory_error = None
         provider_error = None
         runtime_fingerprint_sha256 = None
+        attempt_recorder = None
 
 
 __all__ = [

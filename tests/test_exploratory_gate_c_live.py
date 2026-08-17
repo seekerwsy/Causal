@@ -84,6 +84,30 @@ def test_functional_judge_transport_persists_exact_request_and_response(
     assert metadata["attempts"] == 1
 
 
+def test_generation_transport_persists_exact_request_and_response(tmp_path: Path) -> None:
+    recorder = gate_c_live._RecordingGenerationTransport()
+    destination = tmp_path / "generation"
+    recorder.bind(destination)
+    payload = {
+        "model": "local-model",
+        "messages": [{"role": "user", "content": "return code"}],
+        "seed": 7,
+    }
+    response = {
+        "model": "local-model",
+        "choices": [{"message": {"content": "print(1)"}, "finish_reason": "stop"}],
+    }
+
+    recorder("request_1", 1, payload, response, None)
+
+    assert json.loads((destination / "request.json").read_text(encoding="utf-8")) == payload
+    assert json.loads((destination / "response.json").read_text(encoding="utf-8")) == response
+    metadata = json.loads((destination / "transport.json").read_text(encoding="utf-8"))
+    assert metadata["request_id"] == "request_1"
+    assert metadata["attempt"] == 1
+    assert metadata["transport_error"] is False
+
+
 def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
     stored_base = {
         "schema_version": "1.0",

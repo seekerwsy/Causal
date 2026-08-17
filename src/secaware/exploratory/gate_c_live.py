@@ -196,6 +196,77 @@ class _RecordingStructuredTransport:
             self._destination = None
 
 
+class _RecordingGenerationTransport:
+    """Persist the exact secret-free Chat Completions exchange before parsing."""
+
+    def __init__(self) -> None:
+        self._destination: Path | None = None
+
+    def bind(self, destination: Path) -> None:
+        if self._destination is not None:
+            raise RuntimeError("generation recorder is already bound")
+        destination.mkdir(parents=True, exist_ok=False)
+        self._destination = destination
+
+    def release_if_unused(self) -> None:
+        destination = self._destination
+        if destination is None:
+            return
+        if any(destination.iterdir()):
+            raise RuntimeError("generation recorder contains an incomplete call")
+        _write_json(
+            destination / "not-invoked.json",
+            {
+                "schema_version": _SCHEMA_VERSION,
+                "reason": "provider_rejected_before_transport",
+                "attempts": 0,
+            },
+        )
+        self._destination = None
+
+    def __call__(
+        self,
+        request_id: str,
+        attempt: int,
+        payload: dict[str, Any],
+        response: object | None,
+        error: BaseException | None,
+    ) -> None:
+        destination = self._destination
+        if destination is None:
+            raise RuntimeError("generation recorder is not bound")
+        try:
+            request_bytes = _canonical(payload)
+            (destination / "request.json").write_bytes(request_bytes + b"\n")
+            response_sha256: str | None = None
+            if response is not None:
+                response_bytes = _canonical(_json_value(response))
+                (destination / "response.json").write_bytes(response_bytes + b"\n")
+                response_sha256 = hashlib.sha256(response_bytes).hexdigest()
+            if error is not None:
+                _write_json(
+                    destination / "transport-error.json",
+                    {
+                        "schema_version": _SCHEMA_VERSION,
+                        "error_type": type(error).__name__,
+                        "response_persisted": response is not None,
+                    },
+                )
+            _write_json(
+                destination / "transport.json",
+                {
+                    "schema_version": _SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "attempt": attempt,
+                    "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
+                    "response_sha256": response_sha256,
+                    "transport_error": error is not None,
+                },
+            )
+        finally:
+            self._destination = None
+
+
 def _safe_error(error: BaseException, stage: str) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
@@ -586,7 +657,10 @@ def run_gate_c_live_canary(
         phase_dir / "selection.json",
         {"schema_version": _SCHEMA_VERSION, "mode": mode, "assignment_ids": list(selected)},
     )
-    provider = create_confirmation_provider(app_config)
+    generation_recorder = _RecordingGenerationTransport()
+    provider = create_confirmation_provider(
+        app_config, attempt_recorder=generation_recorder
+    )
     recorder: _RecordingStructuredTransport | None = None
 
     def transport_factory(**kwargs: object) -> object:
@@ -618,9 +692,13 @@ def run_gate_c_live_canary(
         _write_json(unit_dir / "oracle-coverage.json", coverage_by_task[task_id])
         stage = "generation"
         try:
-            executions, codes = execute_confirmation_requests(
-                (request,), provider, app_config.generation
-            )
+            generation_recorder.bind(unit_dir / "generation-provider-transport")
+            try:
+                executions, codes = execute_confirmation_requests(
+                    (request,), provider, app_config.generation
+                )
+            finally:
+                generation_recorder.release_if_unused()
             execution = executions[0]
             code: CanonicalGeneratedCodeRecord | None = codes[0] if codes else None
             write_jsonl(unit_dir / "assignment-execution.jsonl", executions)

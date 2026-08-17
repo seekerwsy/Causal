@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import Sequence
+from typing import Any, Callable, Sequence
 
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
@@ -293,6 +293,10 @@ def _provider_from_frozen_config(
     mock_factory=_LockedMockProvider,
     envelope_factory=_PROVIDER_RESULT_ENVELOPE_FACTORY,
     result_type=OpenAICompatibleGenerationResult,
+    attempt_recorder: Callable[
+        [str, int, dict[str, Any], object | None, BaseException | None], None
+    ]
+    | None = None,
 ) -> object:
     """Construct the only production provider path from the validated frozen config."""
 
@@ -303,8 +307,13 @@ def _provider_from_frozen_config(
         provider_config = generation.openai_compatible
         if provider_config is None:
             raise _stage_error("confirmation provider is unavailable", code=ErrorCode.CONFIG)
+        provider = (
+            openai_factory(provider_config)
+            if attempt_recorder is None
+            else openai_factory(provider_config, attempt_recorder=attempt_recorder)
+        )
         return adapter_factory(
-            openai_factory(provider_config),
+            provider,
             provider_config.system_template,
             envelope_factory,
             result_type,
@@ -315,12 +324,19 @@ def _provider_from_frozen_config(
     )
 
 
-def create_confirmation_provider(config: AppConfig) -> object:
+def create_confirmation_provider(
+    config: AppConfig,
+    *,
+    attempt_recorder: Callable[
+        [str, int, dict[str, Any], object | None, BaseException | None], None
+    ]
+    | None = None,
+) -> object:
     """Create the production confirmation provider from one validated config."""
 
     if type(config) is not AppConfig or not model_shape_is_intact(config):
         raise _stage_error("confirmation provider configuration failed validation")
-    return _provider_from_frozen_config(config)
+    return _provider_from_frozen_config(config, attempt_recorder=attempt_recorder)
 
 
 def _stage_error(message: str, *, code: ErrorCode = ErrorCode.CONTRACT) -> SecAwareError:

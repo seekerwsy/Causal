@@ -612,7 +612,7 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_decodes_code(
     assert result.code == _RAW_CODE
     assert isinstance(result.provenance, GenerationProvenance)
     assert result.provenance.producer == "openai_compatible"
-    assert result.provenance.producer_version == "chat_completions-python-envelope-v1"
+    assert result.provenance.producer_version == "chat_completions-python-envelope-v2"
     assert result.provenance.source_batch_id == f"python_fence:{sha256_text(_CODE)}"
     assert result.attempts == (
         GenerationAttemptRecord(
@@ -637,6 +637,7 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_decodes_code(
         (_RAW_CODE, _RAW_CODE),
         (f"```python\n{_RAW_CODE}\n```", _RAW_CODE),
         (f"```py\n{_RAW_CODE}\n```", _RAW_CODE),
+        (f"```python\n{_RAW_CODE}\n```\nGenerated implementation.", _RAW_CODE),
     ],
 )
 def test_provider_accepts_only_raw_or_single_python_source_envelope(
@@ -652,7 +653,13 @@ def test_provider_accepts_only_raw_or_single_python_source_envelope(
     result = provider.generate(_request(), system_template=_SYSTEM)
 
     assert result.code == expected
-    envelope = "python_fence" if content.startswith("```") else "raw"
+    envelope = (
+        "python_fence_trailing_text"
+        if content.startswith("```") and not content.endswith("```")
+        else "python_fence"
+        if content.startswith("```")
+        else "raw"
+    )
     assert result.provenance.source_batch_id == f"{envelope}:{sha256_text(content)}"
 
 
@@ -660,7 +667,6 @@ def test_provider_accepts_only_raw_or_single_python_source_envelope(
     "content",
     [
         f"prose\n```python\n{_RAW_CODE}\n```",
-        f"```python\n{_RAW_CODE}\n```\nprose",
         f"```javascript\n{_RAW_CODE}\n```",
         f"```python\n{_RAW_CODE}",
         f"```python\n{_RAW_CODE}\n```\n```python\npass\n```",
@@ -677,6 +683,40 @@ def test_provider_rejects_ambiguous_or_non_python_source_envelopes(content: str)
         provider.generate(_request(), system_template=_SYSTEM)
 
     assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+
+
+def test_provider_records_exact_request_and_raw_response_before_validation() -> None:
+    response = _response(code=f"```javascript\n{_RAW_CODE}\n```")
+    calls: list[tuple[str, int, dict[str, object], object | None, BaseException | None]] = []
+
+    def recorder(
+        request_id: str,
+        attempt: int,
+        payload: dict[str, object],
+        raw_response: object | None,
+        error: BaseException | None,
+    ) -> None:
+        calls.append((request_id, attempt, payload, raw_response, error))
+
+    request = _request()
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([response]),
+        sleeper=lambda _: None,
+        attempt_recorder=recorder,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(request, system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+    assert len(calls) == 1
+    request_id, attempt, payload, raw_response, error = calls[0]
+    assert request_id == request.request_id
+    assert attempt == 1
+    assert payload["messages"][-1] == {"role": "user", "content": _PROMPT}
+    assert raw_response is response
+    assert error is None
 
 
 def test_compatibility_parameters_use_extra_body_and_translate_max_output_tokens() -> None:

@@ -43,6 +43,15 @@ trace, the tri-state profile decision, and the post-analysis assignment binding 
   contracts, and two calibrated profile-scoped Oracle decisions. The first live unit is the CWE-89
   target assignment `assignment_cd196338a28e219edb3e9b0e958b9edeb3b0a6f820d67318119f031c530aed78`;
   the remaining seven units are not executed until this pilot completes without a terminal failure.
+- The first Gate C live pilot made one successful model-service call but rejected the response as an
+  invalid source envelope. The saved diagnostic proves that the response started with one complete,
+  AST-valid Python fence and then added explanatory prose. A stronger code-only system instruction
+  reproduced the same structure, so prompt wording alone is not a scalable correction. The protocol
+  repair deterministically extracts only a first and unique Python fence, records the complete SDK
+  request and response before parsing, rejects preamble/non-Python/multiple/unclosed fences, and
+  identifies extracted responses as `python_fence_trailing_text`. The failed pilot and both
+  non-experiment-eligible diagnostics remain immutable; the repair uses a new live-run ID and output
+  directory.
 
 ## Scale-up rule
 
