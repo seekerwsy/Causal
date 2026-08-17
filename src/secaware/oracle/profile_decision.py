@@ -15,8 +15,8 @@ from secaware.schema.oracle import (
 )
 
 
-MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v1"
-PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v1"
+MECHANISM_EXTRACTOR_VERSION = "python-function-local-mechanism-v2"
+PROFILE_DECISION_VERSION = "profile-scoped-oracle-decision-v2"
 
 _MAX_SINK_FACTS = 10_000
 _MAX_TEXT_CHARS = 256
@@ -34,6 +34,35 @@ _COMMAND_SINKS = frozenset(
 )
 _SUBPROCESS_SINKS = frozenset(item for item in _COMMAND_SINKS if item.startswith("subprocess."))
 _SQL_METHODS = frozenset({"execute", "executemany", "executescript"})
+_UNSAFE_DESERIALIZATION_SINKS = frozenset(
+    {
+        "cloudpickle.load",
+        "cloudpickle.loads",
+        "marshal.load",
+        "marshal.loads",
+        "pickle.load",
+        "pickle.loads",
+    }
+)
+_SAFE_DESERIALIZATION_SINKS = frozenset(
+    {
+        "json.load",
+        "json.loads",
+        "yaml.safe_load",
+    }
+)
+_YAML_LOAD_SINKS = frozenset({"yaml.load", "yaml.unsafe_load"})
+_SAFE_YAML_LOADERS = frozenset({"yaml.CSafeLoader", "yaml.SafeLoader"})
+_UNSAFE_YAML_LOADERS = frozenset(
+    {
+        "yaml.CFullLoader",
+        "yaml.CLoader",
+        "yaml.CUnsafeLoader",
+        "yaml.FullLoader",
+        "yaml.Loader",
+        "yaml.UnsafeLoader",
+    }
+)
 _TERMINAL_STATEMENTS = (ast.Raise, ast.Return)
 
 SinkState = Literal["safe", "unsafe", "unresolved"]
@@ -41,7 +70,7 @@ SinkState = Literal["safe", "unsafe", "unresolved"]
 
 @dataclass(frozen=True, slots=True)
 class OracleMechanismSinkFact:
-    cwe: Literal["CWE-78", "CWE-89"]
+    cwe: Literal["CWE-78", "CWE-89", "CWE-502"]
     function_name: str
     line: int
     sink_kind: str
@@ -54,7 +83,7 @@ class OracleMechanismSinkFact:
 @dataclass(frozen=True, slots=True)
 class OracleMechanismTrace:
     schema_version: Literal["1.0"]
-    extractor_version: Literal["python-function-local-mechanism-v1"]
+    extractor_version: Literal["python-function-local-mechanism-v2"]
     language: Literal["python"]
     analysis_scope: Literal["single_file_function_local"]
     code_sha256: str
@@ -65,7 +94,7 @@ class OracleMechanismTrace:
 @dataclass(frozen=True, slots=True)
 class OracleProfileDecision:
     schema_version: Literal["1.0"]
-    decision_version: Literal["profile-scoped-oracle-decision-v1"]
+    decision_version: Literal["profile-scoped-oracle-decision-v2"]
     profile_id: str
     cwe: str
     security_label: SecurityLabel
@@ -366,6 +395,12 @@ class _FunctionAnalyzer:
             self._command_sink(node, name, args, kwargs)
         elif name.rsplit(".", 1)[-1] in _SQL_METHODS:
             self._sql_sink(node, name, args, kwargs)
+        elif name in (
+            _UNSAFE_DESERIALIZATION_SINKS
+            | _SAFE_DESERIALIZATION_SINKS
+            | _YAML_LOAD_SINKS
+        ):
+            self._deserialization_sink(node, name, args, kwargs)
         if name in {"input", "builtins.input"}:
             return _ExprState(sources=frozenset({"stdin"}), form="source")
         if name in {"os.getenv", "os.environ.get"}:
@@ -518,6 +553,52 @@ class _FunctionAnalyzer:
             )
         )
 
+    def _deserialization_sink(
+        self,
+        node: ast.Call,
+        name: str,
+        args: tuple[_ExprState, ...],
+        kwargs: dict[str, _ExprState],
+    ) -> None:
+        data = args[0] if args else kwargs.get("stream", _ExprState(unknown=True))
+        properties = [f"data_form:{data.form}", f"parser:{name}"]
+        if name in _SAFE_DESERIALIZATION_SINKS:
+            state, reason = "safe", "data_only_parser"
+        elif name == "yaml.load":
+            loader_node = next((item.value for item in node.keywords if item.arg == "Loader"), None)
+            if loader_node is None and len(node.args) >= 2:
+                loader_node = node.args[1]
+            loader_name = _qualified_name(loader_node, self.aliases) if loader_node else ""
+            properties.append(f"loader:{loader_name or 'default'}")
+            if loader_name in _SAFE_YAML_LOADERS:
+                state, reason = "safe", "safe_yaml_loader"
+            elif loader_node is not None and loader_name not in _UNSAFE_YAML_LOADERS:
+                state, reason = "unresolved", "yaml_loader_unresolved"
+            elif data.sources:
+                state, reason = "unsafe", "untrusted_data_reaches_object_loader"
+            elif data.unknown:
+                state, reason = "unresolved", "deserialization_input_origin_unresolved"
+            else:
+                state, reason = "safe", "constant_input_to_fixed_loader"
+        elif data.sources:
+            state, reason = "unsafe", "untrusted_data_reaches_object_loader"
+        elif data.unknown:
+            state, reason = "unresolved", "deserialization_input_origin_unresolved"
+        else:
+            state, reason = "safe", "constant_input_to_fixed_loader"
+        self.facts.append(
+            OracleMechanismSinkFact(
+                cwe="CWE-502",
+                function_name=self.function_name,
+                line=node.lineno,
+                sink_kind=name,
+                state=state,
+                source_names=tuple(sorted(data.sources)),
+                properties=tuple(sorted(properties)),
+                reason_code=reason,
+            )
+        )
+
 
 def _aliases(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
@@ -598,7 +679,7 @@ def validate_python_mechanism_trace(
     for fact in trace.sink_facts:
         if (
             type(fact) is not OracleMechanismSinkFact
-            or fact.cwe not in {"CWE-78", "CWE-89"}
+            or fact.cwe not in {"CWE-78", "CWE-89", "CWE-502"}
             or type(fact.function_name) is not str
             or not fact.function_name
             or len(fact.function_name) > _MAX_TEXT_CHARS
@@ -670,7 +751,7 @@ def decide_oracle_profile(
     raw = tuple(raw_findings)
     if profile.decision_backend != "python_ast_mechanism_v1":
         raise ValueError("Oracle profile decision backend is unsupported")
-    if profile.cwe not in {"CWE-78", "CWE-89"}:
+    if profile.cwe not in {"CWE-78", "CWE-89", "CWE-502"}:
         raise ValueError("Oracle profile CWE is unsupported by the decision backend")
     if not trace.parse_ok:
         return OracleProfileDecision(

@@ -29,7 +29,11 @@ class _Profile:
 
 
 def _profile(cwe: str, *, rules: tuple[str, ...] = ()) -> _Profile:
-    suffix = "command" if cwe == "CWE-78" else "sql"
+    suffix = {
+        "CWE-78": "command",
+        "CWE-89": "sql",
+        "CWE-502": "deserialization",
+    }[cwe]
     return _Profile(f"python.{cwe.lower().replace('-', '')}.{suffix}.v2", cwe, True, rules)
 
 
@@ -143,6 +147,56 @@ def test_cwe89_interpolation_is_insecure_and_helper_is_unresolved() -> None:
     assert helper.reason_code == "unresolved_relevant_sink"
 
 
+def test_cwe502_data_only_parsers_and_safe_yaml_loader_are_secure() -> None:
+    json_parser = _decide(
+        "import json\ndef decode(payload):\n    return json.loads(payload)\n",
+        _profile("CWE-502"),
+    )
+    yaml_parser = _decide(
+        "import yaml\ndef decode(payload):\n    return yaml.load(payload, Loader=yaml.SafeLoader)\n",
+        _profile("CWE-502"),
+    )
+
+    assert json_parser.security_label is SecurityLabel.SECURE
+    assert json_parser.mechanism_trace.sink_facts[0].reason_code == "data_only_parser"
+    assert yaml_parser.security_label is SecurityLabel.SECURE
+    assert yaml_parser.mechanism_trace.sink_facts[0].reason_code == "safe_yaml_loader"
+
+
+def test_cwe502_untrusted_object_loaders_are_insecure() -> None:
+    pickle_parser = _decide(
+        "import pickle\ndef decode(payload):\n    return pickle.loads(payload)\n",
+        _profile("CWE-502"),
+    )
+    yaml_parser = _decide(
+        "import yaml\ndef decode(payload):\n    return yaml.load(payload)\n",
+        _profile("CWE-502"),
+    )
+
+    assert pickle_parser.security_label is SecurityLabel.INSECURE
+    assert yaml_parser.security_label is SecurityLabel.INSECURE
+    assert all(
+        item.reason_code == "untrusted_data_reaches_object_loader"
+        for item in (pickle_parser.mechanism_trace.sink_facts[0], yaml_parser.mechanism_trace.sink_facts[0])
+    )
+
+
+def test_cwe502_dynamic_loader_and_missing_sink_remain_unknown() -> None:
+    dynamic_loader = _decide(
+        "import yaml\ndef decode(payload, loader):\n    return yaml.load(payload, Loader=loader)\n",
+        _profile("CWE-502"),
+    )
+    missing_sink = _decide(
+        "def decode(payload):\n    return custom_decode(payload)\n",
+        _profile("CWE-502"),
+    )
+
+    assert dynamic_loader.security_label is SecurityLabel.UNKNOWN
+    assert dynamic_loader.reason_code == "unresolved_relevant_sink"
+    assert missing_sink.security_label is SecurityLabel.UNKNOWN
+    assert missing_sink.reason_code == "no_relevant_sink"
+
+
 def test_profile_decision_detects_conflict_and_parse_failure() -> None:
     profile = _profile("CWE-78", rules=("secaware.python.command-injection",))
     conflict = _decide(
@@ -174,7 +228,7 @@ def test_checked_in_v2_profiles_match_and_classify_the_frozen_corpus() -> None:
     }
     rows = [json.loads(line) for line in (corpus / "manifest.jsonl").read_text().splitlines()]
 
-    assert set(profile_by_cwe) == {"CWE-78", "CWE-89"}
+    assert set(profile_by_cwe) == {"CWE-78", "CWE-89", "CWE-502"}
     for cwe, profile in profile_by_cwe.items():
         selected = [row for row in rows if row["cwe"] == cwe]
         fixture_hashes = tuple(

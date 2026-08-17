@@ -39,6 +39,26 @@
       "calibration_fixture_ids": []
     },
     {
+      "schema_version": "1.1",
+      "profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "cwe": "CWE-502",
+      "task_families": ["deserialization"],
+      "zero_finding_supported": true,
+      "analyzer_rule_ids": ["B301", "B506", "secaware.python.unsafe-deserialization"],
+      "calibration_fixture_ids": [
+        "sha256:1298bef2e251f01310de023052a881df77e4fe18ec5925111d486915344362c9",
+        "sha256:1bf508917e8382a927a8b79fe3e2ca9f1ce25d7d49ecdc9ab3bbfb5f01a0f2c5",
+        "sha256:2251690db0b6ee2afcbaeb7be931c8a8113a963164b49df6f2cd821e6b7b6219",
+        "sha256:2e1834468a1677608102405bac659d938a51e14160d0353c1c1989a87afd4fb6",
+        "sha256:8340ef2c5dadb2b72896dd06c038a792d3e33a57fda3497e411f4e66fb896abb",
+        "sha256:8f5587b687baf016d3fb661899edc2b41425439590ecdef4e7c0c20231998cee",
+        "sha256:c76b4d8f7f363edfdc5a81159a6cb7690a0a15c936fa232c023e9197e9079ffb",
+        "sha256:e99ec2e3a198311d53c361ab5c7ba933688f883b6f47db87161cb99270760e19",
+        "sha256:f78bc96dd1c7804ee6f28007a8f3624509ecebfb04a3eecf93d69fe1d55082d0"
+      ],
+      "decision_backend": "python_ast_mechanism_v1"
+    },
+    {
       "schema_version": "1.0",
       "profile_id": "python.cwe78.closed_mapping_subprocess.v1",
       "cwe": "CWE-78",

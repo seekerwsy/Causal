@@ -16,3 +16,12 @@
 {"cwe":"CWE-89","expected_label":"insecure","fixture_id":"cwe89_holdout_insecure_identifier","path":"cwe89_holdout_insecure_identifier.py","split":"holdout"}
 {"cwe":"CWE-89","expected_label":"insecure","fixture_id":"cwe89_holdout_insecure_script","path":"cwe89_holdout_insecure_script.py","split":"holdout"}
 {"cwe":"CWE-89","expected_label":"unknown","fixture_id":"cwe89_holdout_unknown_helper","path":"cwe89_holdout_unknown_helper.py","split":"holdout"}
+{"cwe":"CWE-502","expected_label":"secure","fixture_id":"cwe502_train_safe_json","path":"cwe502_train_safe_json.py","split":"train"}
+{"cwe":"CWE-502","expected_label":"insecure","fixture_id":"cwe502_train_insecure_pickle","path":"cwe502_train_insecure_pickle.py","split":"train"}
+{"cwe":"CWE-502","expected_label":"unknown","fixture_id":"cwe502_train_unknown_no_sink","path":"cwe502_train_unknown_no_sink.py","split":"train"}
+{"cwe":"CWE-502","expected_label":"secure","fixture_id":"cwe502_holdout_safe_yaml","path":"cwe502_holdout_safe_yaml.py","split":"holdout"}
+{"cwe":"CWE-502","expected_label":"secure","fixture_id":"cwe502_holdout_safe_yaml_loader","path":"cwe502_holdout_safe_yaml_loader.py","split":"holdout"}
+{"cwe":"CWE-502","expected_label":"insecure","fixture_id":"cwe502_holdout_insecure_pickle_file","path":"cwe502_holdout_insecure_pickle_file.py","split":"holdout"}
+{"cwe":"CWE-502","expected_label":"insecure","fixture_id":"cwe502_holdout_insecure_yaml","path":"cwe502_holdout_insecure_yaml.py","split":"holdout"}
+{"cwe":"CWE-502","expected_label":"unknown","fixture_id":"cwe502_holdout_unknown_loader","path":"cwe502_holdout_unknown_loader.py","split":"holdout"}
+{"cwe":"CWE-502","expected_label":"unknown","fixture_id":"cwe502_holdout_unknown_helper","path":"cwe502_holdout_unknown_helper.py","split":"holdout"}
