@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,12 @@ from secaware.generation.request_planner import plan_confirmation_requests
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.oracle.policy import load_policy_bundle
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
-from secaware.schema.experiments import ArmRole, AssignmentRecord, ExperimentalUnit, PromptVariantRecord
+from secaware.schema.experiments import (
+    ArmRole,
+    AssignmentRecord,
+    ExperimentalUnit,
+    PromptVariantRecord,
+)
 from secaware.schema.records import PromptRecord
 
 
@@ -32,6 +38,15 @@ _ORACLE_UNKNOWN_MODE = "preserve_unknown_coverage"
 _ORACLE_PROFILE_MODE = "profile_scoped_decision"
 _GATE_B_EXACT_MAPPING = "exact_variant_id_v1"
 _GATE_B_SEMANTIC_MAPPING = "task_arm_target_feature_v1"
+_GATE_B_REVALIDATION_SCHEMA = "revalidation_v1"
+_GATE_B_DIRECT_SCHEMA = "direct_exploratory_v1"
+
+
+def _gate_b_artifact_schema(config: dict[str, Any]) -> str:
+    value = config.get("gate_b_artifact_schema", _GATE_B_REVALIDATION_SCHEMA)
+    if value not in {_GATE_B_REVALIDATION_SCHEMA, _GATE_B_DIRECT_SCHEMA}:
+        raise ValueError("Gate C Gate B artifact schema failed validation")
+    return str(value)
 
 
 def _gate_b_mapping_policy(config: dict[str, Any]) -> str:
@@ -87,15 +102,155 @@ def _id(prefix: str, value: object) -> str:
     return prefix + canonical_sha256(value)
 
 
-def _validations(gate_b_dir: Path) -> dict[str, dict[str, Any]]:
+def _verify_closed_manifest(root: Path) -> None:
+    manifest = _read_json(root / "artifact-manifest.json")
+    entries = manifest.get("files")
+    if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
+        raise ValueError("Gate C upstream manifest failed validation")
+    expected: set[str] = set()
+    for item in entries:
+        if type(item) is not dict or type(item.get("path")) is not str:
+            raise ValueError("Gate C upstream manifest failed validation")
+        relative = Path(str(item["path"]))
+        normalized = relative.as_posix()
+        path = (root / relative).resolve()
+        try:
+            path.relative_to(root.resolve())
+        except ValueError:
+            raise ValueError("Gate C upstream manifest failed validation") from None
+        if (
+            relative.is_absolute()
+            or normalized != item["path"]
+            or normalized in expected
+            or not path.is_file()
+            or sha256_file(path) != item.get("sha256")
+        ):
+            raise ValueError("Gate C upstream manifest failed validation")
+        expected.add(normalized)
+    actual = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.name != "artifact-manifest.json"
+    }
+    if expected != actual:
+        raise ValueError("Gate C upstream manifest closure failed validation")
+
+
+def _validations(
+    gate_b_dir: Path,
+    *,
+    identity_field: str = "variant_id",
+    pattern: str = "*.json",
+) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
-    for path in sorted((gate_b_dir / "validation").glob("*.json")):
+    for path in sorted((gate_b_dir / "validation").glob(pattern)):
         item = _read_json(path)
-        variant_id = item.get("variant_id")
+        variant_id = item.get(identity_field)
         if type(variant_id) is not str or variant_id in records:
             raise ValueError("Gate C Gate B validation identity failed validation")
         records[variant_id] = item
     return records
+
+
+def _direct_gate_b_records(
+    gate_b_dir: Path,
+    *,
+    source_by_task: dict[str, PromptRecord],
+) -> tuple[
+    tuple[PromptRecord, ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    dict[str, dict[str, Any]],
+]:
+    _verify_closed_manifest(gate_b_dir)
+    direct = tuple(read_jsonl(gate_b_dir / "llm-variants.jsonl", required=True, allow_empty=False))
+    direct_by_variant: dict[str, dict[str, Any]] = {}
+    for item in direct:
+        variant_id = item.get("gate_a_variant_id")
+        if type(variant_id) is not str or not variant_id or variant_id in direct_by_variant:
+            raise ValueError("Gate C direct Gate B variant identity failed validation")
+        direct_by_variant[variant_id] = item
+
+    pairs: dict[str, tuple[Path, Path, dict[str, Any], dict[str, Any]]] = {}
+    for request_path in sorted((gate_b_dir / "raw" / "intervention").glob("*.request.json")):
+        response_path = request_path.with_name(
+            request_path.name.removesuffix(".request.json") + ".response.json"
+        )
+        if not response_path.is_file():
+            raise ValueError("Gate C direct Gate B intervention pair failed validation")
+        request = _read_json(request_path)
+        response = _read_json(response_path)
+        variant_id = request.get("exploratory_variant_id")
+        if type(variant_id) is not str or not variant_id or variant_id in pairs:
+            raise ValueError("Gate C direct Gate B intervention pair failed validation")
+        pairs[variant_id] = (request_path, response_path, request, response)
+    if set(pairs) != set(direct_by_variant):
+        raise ValueError("Gate C direct Gate B intervention coverage failed validation")
+
+    validations = _validations(
+        gate_b_dir,
+        identity_field="gate_a_variant_id",
+        pattern="record-*.json",
+    )
+    if set(validations) != set(direct_by_variant) or any(
+        item.get("status") != "PASSED" for item in validations.values()
+    ):
+        raise ValueError("Gate C direct Gate B validation coverage failed validation")
+
+    prompts: list[PromptRecord] = []
+    provenance: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+    for variant_id, item in sorted(direct_by_variant.items()):
+        task_id = str(item.get("task_id", ""))
+        source = source_by_task.get(task_id)
+        request_path, response_path, request, response = pairs[variant_id]
+        candidate_text = response.get("candidate_text")
+        if (
+            source is None
+            or type(candidate_text) is not str
+            or candidate_text != item.get("prompt")
+            or source.prompt_id != item.get("source_prompt_id")
+            or source.prompt_sha256 != item.get("source_prompt_sha256")
+            or request.get("source_prompt", {}).get("content") != source.prompt
+            or request.get("source_prompt", {}).get("content_sha256") != source.prompt_sha256
+            or request.get("arm_role") != item.get("arm_role")
+            or request.get("exploratory_variant_id") != variant_id
+            or hashlib.sha256(candidate_text.encode("utf-8")).hexdigest()
+            != item.get("prompt_sha256")
+        ):
+            raise ValueError("Gate C direct Gate B Prompt provenance failed validation")
+        prompt = PromptRecord.model_validate(
+            {
+                "prompt_id": item["blind_prompt_id"],
+                "task_id": task_id,
+                "split": "confirm",
+                "language": source.language,
+                "task_family": source.task_family,
+                "cwe": source.cwe,
+                "prompt": candidate_text,
+                "prompt_role": "neutral_baseline",
+                "counterpart_prompt_id": None,
+            }
+        )
+        prompts.append(prompt)
+        provenance.append(
+            {
+                **item,
+                "variant_id": variant_id,
+                "prompt_id": prompt.prompt_id,
+                "intervention_request_sha256": sha256_file(request_path),
+                "intervention_response_sha256": sha256_file(response_path),
+            }
+        )
+        records.append(
+            {
+                "kind": "variant",
+                "variant_id": variant_id,
+                "proposal_id": item["proposal_id"],
+                "graph_sha256": item["graph_sha256"],
+            }
+        )
+    return tuple(prompts), tuple(provenance), tuple(records), validations
 
 
 def _build_standard_records(
@@ -112,7 +267,10 @@ def _build_standard_records(
     extractor_policy_sha256: str,
     gate_b_mapping_policy: str,
     target_feature_by_candidate: dict[str, str],
-) -> tuple[tuple[AssignmentRecord, ...], tuple[PromptVariantRecord, ...], tuple[dict[str, object], ...]]:
+) -> tuple[
+    tuple[AssignmentRecord, ...], tuple[PromptVariantRecord, ...], tuple[dict[str, object], ...]
+]:
+    expected_assignments = len(selected_task_ids) * len(_ARMS)
     prompt_by_id = {item.prompt_id: item for item in gate_b_prompts}
     provenance_by_variant = {str(item["variant_id"]): item for item in gate_b_provenance}
     provenance_by_coordinate: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -126,14 +284,15 @@ def _build_standard_records(
             raise ValueError("Gate C Gate B semantic coordinate is not unique")
         provenance_by_coordinate[coordinate] = item
     record_by_variant = {
-        str(item["variant_id"]): item
-        for item in gate_b_records
-        if item.get("kind") == "variant"
+        str(item["variant_id"]): item for item in gate_b_records if item.get("kind") == "variant"
     }
     selected = tuple(
         item for item in gate_a_assignments if item.get("task_id") in selected_task_ids
     )
-    if len(selected) != 8 or len({str(item["assignment_id"]) for item in selected}) != 8:
+    if (
+        len(selected) != expected_assignments
+        or len({str(item["assignment_id"]) for item in selected}) != expected_assignments
+    ):
         raise ValueError("Gate C inherited assignment coverage failed validation")
     variants: list[PromptVariantRecord] = []
     assignments: list[AssignmentRecord] = []
@@ -154,9 +313,7 @@ def _build_standard_records(
             )
         else:  # pragma: no cover - validated by the public planner
             raise ValueError("Gate C Gate A/B mapping policy failed validation")
-        exploratory_variant_id = (
-            "" if provenance is None else str(provenance.get("variant_id", ""))
-        )
+        exploratory_variant_id = "" if provenance is None else str(provenance.get("variant_id", ""))
         validation = gate_b_validations.get(exploratory_variant_id)
         record = record_by_variant.get(exploratory_variant_id)
         if (
@@ -214,9 +371,7 @@ def _build_standard_records(
         )
         role = ArmRole(str(inherited["arm_role"]))
         length_match_id = (
-            _id("length_match_", validation)
-            if role is ArmRole.LENGTH_MATCHED_PLACEBO
-            else None
+            _id("length_match_", validation) if role is ArmRole.LENGTH_MATCHED_PLACEBO else None
         )
         standard_variant = PromptVariantRecord.from_content(
             task_id=task_id,
@@ -286,10 +441,10 @@ def _build_standard_records(
             }
         )
     if (
-        len(assignments) != 8
-        or len(variants) != 8
-        or len({item.assignment_id for item in assignments}) != 8
-        or len({item.variant_id for item in variants}) != 8
+        len(assignments) != expected_assignments
+        or len(variants) != expected_assignments
+        or len({item.assignment_id for item in assignments}) != expected_assignments
+        or len({item.variant_id for item in variants}) != expected_assignments
         or any(
             {item.arm_role for item in assignments if item.experimental_unit.task_id == task_id}
             != set(_ARMS)
@@ -298,7 +453,12 @@ def _build_standard_records(
     ):
         raise ValueError("Gate C standard assignment block failed validation")
     return (
-        tuple(sorted(assignments, key=lambda item: (item.experimental_unit.task_id, item.experimental_unit.seed_slot))),
+        tuple(
+            sorted(
+                assignments,
+                key=lambda item: (item.experimental_unit.task_id, item.experimental_unit.seed_slot),
+            )
+        ),
         tuple(sorted(variants, key=lambda item: (item.task_id, item.arm_role.value))),
         tuple(sorted(mappings, key=lambda item: (str(item["task_id"]), int(item["seed_slot"])))),
     )
@@ -325,6 +485,7 @@ def plan_gate_c_canary(
     _write_json(output_dir / "environment.json", _environment())
     oracle_decision_mode = _oracle_decision_mode(config)
     gate_b_mapping_policy = _gate_b_mapping_policy(config)
+    gate_b_artifact_schema = _gate_b_artifact_schema(config)
     if (
         config.get("schema_version") != _SCHEMA_VERSION
         or config.get("inherit_gate_a_seed_slots") is not True
@@ -342,8 +503,21 @@ def plan_gate_c_canary(
     ):
         raise ValueError("Gate C policy failed validation")
     selected_task_ids = tuple(config.get("selected_task_ids", ()))
-    if len(selected_task_ids) != 2 or len(set(selected_task_ids)) != 2:
+    if not 2 <= len(selected_task_ids) <= 5 or len(set(selected_task_ids)) != len(
+        selected_task_ids
+    ):
         raise ValueError("Gate C task selection failed validation")
+    expected_assignments = len(selected_task_ids) * len(_ARMS)
+    if any(
+        config.get(key) != expected_assignments
+        for key in (
+            "expected_assignments",
+            "expected_generation_requests",
+            "maximum_generation_provider_attempts",
+            "maximum_functional_judge_provider_attempts",
+        )
+    ) or config.get("expected_blocks") != len(selected_task_ids):
+        raise ValueError("Gate C configured assignment coverage failed validation")
     gate_a_dir = (repo_root / str(config["gate_a_dir"])).resolve()
     gate_b_dir = (repo_root / str(config["gate_b_dir"])).resolve()
     contracts_path = (repo_root / str(config["functional_contracts_path"])).resolve()
@@ -351,26 +525,58 @@ def plan_gate_c_canary(
         path.relative_to(repo_root)
     gate_a_report = _read_json(gate_a_dir / "report.json")
     gate_b_report = _read_json(gate_b_dir / "report.json")
-    if gate_a_report.get("status") != "GATE_A_PASSED" or gate_b_report.get("status") != "GATE_B_REEXTRACTION_PASSED":
+    expected_gate_b_status = (
+        "GATE_B_PASSED"
+        if gate_b_artifact_schema == _GATE_B_DIRECT_SCHEMA
+        else "GATE_B_REEXTRACTION_PASSED"
+    )
+    if (
+        gate_a_report.get("status") != "GATE_A_PASSED"
+        or gate_b_report.get("status") != expected_gate_b_status
+    ):
         raise ValueError("Gate C upstream gate dependency failed validation")
-    gate_a_assignments = tuple(read_jsonl(gate_a_dir / "assignments.jsonl", required=True, allow_empty=False))
+    gate_a_assignments = tuple(
+        read_jsonl(gate_a_dir / "assignments.jsonl", required=True, allow_empty=False)
+    )
     gate_a_candidates = tuple(
         read_jsonl(gate_a_dir / "candidates.jsonl", required=True, allow_empty=False)
     )
-    prompts = tuple(read_jsonl(gate_b_dir / "variant-prompts.jsonl", PromptRecord, required=True, allow_empty=False))
-    provenance = tuple(read_jsonl(gate_b_dir / "frozen-variant-provenance.jsonl", required=True, allow_empty=False))
-    records = tuple(read_jsonl(gate_b_dir / "records.jsonl", required=True, allow_empty=False))
-    validations = _validations(gate_b_dir)
-    contracts = tuple(read_jsonl(contracts_path, TaskFunctionalContractRecord, required=True, allow_empty=False))
-    source_by_task = {
-        item.task_id: item
-        for item in read_jsonl(
+    sources = tuple(
+        read_jsonl(
             gate_b_dir / "source-prompts.jsonl",
             PromptRecord,
             required=True,
             allow_empty=False,
         )
-    }
+    )
+    source_by_task = {item.task_id: item for item in sources}
+    if len(source_by_task) != len(sources):
+        raise ValueError("Gate C source Prompt identity failed validation")
+    if gate_b_artifact_schema == _GATE_B_DIRECT_SCHEMA:
+        prompts, provenance, records, validations = _direct_gate_b_records(
+            gate_b_dir,
+            source_by_task=source_by_task,
+        )
+        gate_b_variants_path = gate_b_dir / "llm-variants.jsonl"
+    else:
+        prompts = tuple(
+            read_jsonl(
+                gate_b_dir / "variant-prompts.jsonl",
+                PromptRecord,
+                required=True,
+                allow_empty=False,
+            )
+        )
+        provenance = tuple(
+            read_jsonl(
+                gate_b_dir / "frozen-variant-provenance.jsonl",
+                required=True,
+                allow_empty=False,
+            )
+        )
+        records = tuple(read_jsonl(gate_b_dir / "records.jsonl", required=True, allow_empty=False))
+        validations = _validations(gate_b_dir)
+        gate_b_variants_path = gate_b_dir / "variant-prompts.jsonl"
     target_feature_by_candidate: dict[str, str] = {}
     for item in gate_a_candidates:
         candidate_id = item.get("candidate_id")
@@ -384,6 +590,20 @@ def plan_gate_c_canary(
         ):
             raise ValueError("Gate C Gate A candidate mapping failed validation")
         target_feature_by_candidate[candidate_id] = target_feature_id
+    all_contracts = tuple(
+        read_jsonl(
+            contracts_path,
+            TaskFunctionalContractRecord,
+            required=True,
+            allow_empty=False,
+        )
+    )
+    all_contract_by_task = {item.task_id: item for item in all_contracts}
+    if len(all_contract_by_task) != len(all_contracts) or any(
+        task_id not in all_contract_by_task for task_id in selected_task_ids
+    ):
+        raise ValueError("Gate C functional contract identity failed validation")
+    contracts = tuple(all_contract_by_task[task_id] for task_id in selected_task_ids)
     contract_by_task = {item.task_id: item for item in contracts}
     if set(contract_by_task) != set(selected_task_ids) or any(
         contract_by_task[task_id].source_prompt_sha256 != source_by_task[task_id].prompt_sha256
@@ -421,7 +641,11 @@ def plan_gate_c_canary(
     for task_id in selected_task_ids:
         source = source_by_task[task_id]
         profile = profile_by_id.get(str(source.oracle_profile_id))
-        if profile is None or profile.cwe != source.cwe or source.task_family not in profile.task_families:
+        if (
+            profile is None
+            or profile.cwe != source.cwe
+            or source.task_family not in profile.task_families
+        ):
             raise ValueError("Gate C Oracle profile scope failed validation")
         coverage_rows.append(
             {
@@ -466,6 +690,7 @@ def plan_gate_c_canary(
         "oracle_execution_allowed": False,
         "oracle_decision_policy": oracle_decision_mode,
         "gate_b_variant_mapping_policy": gate_b_mapping_policy,
+        "gate_b_artifact_schema": gate_b_artifact_schema,
         "scientific_claim_allowed": False,
         "scale_up_allowed": False,
         "counts": {
@@ -474,13 +699,16 @@ def plan_gate_c_canary(
             "assignments": len(assignments),
             "prompt_variants": len(variants),
             "generation_requests": len(requests),
-            "maximum_generation_provider_attempts": int(config["maximum_generation_provider_attempts"]),
-            "maximum_functional_judge_provider_attempts": int(config["maximum_functional_judge_provider_attempts"]),
+            "maximum_generation_provider_attempts": int(
+                config["maximum_generation_provider_attempts"]
+            ),
+            "maximum_functional_judge_provider_attempts": int(
+                config["maximum_functional_judge_provider_attempts"]
+            ),
             "functional_contracts": len(contracts),
             "oracle_profiles": len(coverage_rows),
             "zero_finding_unknown_profiles": sum(
-                item["zero_finding_interpretation"] == "unknown_coverage"
-                for item in coverage_rows
+                item["zero_finding_interpretation"] == "unknown_coverage" for item in coverage_rows
             ),
             "profile_scoped_decision_profiles": sum(
                 item["zero_finding_interpretation"] == _ORACLE_PROFILE_MODE
@@ -498,7 +726,7 @@ def plan_gate_c_canary(
             "app_config_sha256": sha256_file(app_config_path),
             "gate_a_assignments_sha256": sha256_file(gate_a_dir / "assignments.jsonl"),
             "gate_b_report_sha256": sha256_file(gate_b_dir / "report.json"),
-            "gate_b_variants_sha256": sha256_file(gate_b_dir / "variant-prompts.jsonl"),
+            "gate_b_variants_sha256": sha256_file(gate_b_variants_path),
             "functional_contracts_sha256": sha256_file(contracts_path),
             "oracle_policy_sha256": policy.combined_sha256,
         },

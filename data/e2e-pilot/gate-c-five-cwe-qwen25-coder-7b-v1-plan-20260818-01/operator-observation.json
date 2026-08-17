@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "status": "PLAN_FAILED_BEFORE_PROVIDER_OR_ORACLE",
+  "provider_calls_made": 0,
+  "oracle_executions": 0,
+  "failure_stage": "oracle_profile_scope_validation",
+  "failed_task_id": "cluster-1c795d856db01823cca9",
+  "cwe": "CWE-338",
+  "source_task_family": "security_random_generation",
+  "profile_id": "python.cwe338.security_randomness.v1",
+  "profile_task_families_before_repair": [
+    "security_randomness"
+  ],
+  "resolution": "Register the existing feature-catalog task-family spelling as an alias without changing the calibrated decision backend, rules, or fixtures."
+}

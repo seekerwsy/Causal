@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "gate_c_id": "randomized-exploratory-gate-c-five-cwe-qwen25-coder-7b-v1",
+  "purpose": "Five-CWE bounded outcome pilot; validate generation, one-pass functional judgment, and profile-scoped Oracle decisions before any main-effect scale-up.",
+  "gate_a_dir": "data/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2",
+  "gate_b_dir": "data/e2e-pilot/five-cwe-gate-b-balanced-target-format-20260818-05",
+  "gate_b_artifact_schema": "direct_exploratory_v1",
+  "gate_b_variant_mapping_policy": "exact_variant_id_v1",
+  "functional_contracts_path": "data/e2e-pilot/five-cwe-engineering-pilot-v3/task-functional-contracts.jsonl",
+  "selected_task_ids": [
+    "cluster-7dfad77191063efeb621",
+    "cluster-22d97b466b5d2c737129",
+    "cluster-1e2a17897e23902efef4",
+    "cluster-edc9dda96031bb65c80e",
+    "cluster-1c795d856db01823cca9"
+  ],
+  "expected_blocks": 5,
+  "expected_assignments": 20,
+  "expected_generation_requests": 20,
+  "maximum_generation_provider_attempts": 20,
+  "maximum_functional_judge_provider_attempts": 20,
+  "inherit_gate_a_seed_slots": true,
+  "require_gate_b_pass": true,
+  "oracle_decision_policy": "profile_scoped_decision",
+  "scientific_claim_allowed": false,
+  "scale_up_allowed": false
+}

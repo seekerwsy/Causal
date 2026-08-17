@@ -11,5 +11,5 @@
   "bandit_metadata": "bandit-metadata.json",
   "bandit_metadata_sha256": "99f4ad248398cc7b4ee01eafe120a069ab06c2815f1354c43ebe2cff771e37ff",
   "coverage_contract": "coverage-contract.json",
-  "coverage_contract_sha256": "1d3c4edee664733db18a76f6d94268a758dacfd5dae873e604acacb770c5c61f"
+  "coverage_contract_sha256": "57f94b59109e0187efc98a5098f6574482b8a7fc3299e0ef3f958cca2919ba00"
 }
