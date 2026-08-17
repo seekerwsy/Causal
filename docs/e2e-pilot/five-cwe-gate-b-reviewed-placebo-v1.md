@@ -54,9 +54,25 @@ gates. If no registered suffix fits, or the LLM does not execute it exactly, Gat
 error before outcome generation. No additional handwritten security-recognition rules are added.
 
 The zero-provider five-CWE check selected suffix lengths 33, 43, 55, 55, and 55 for the five frozen
-target additions; every selection passed its task-specific interval. The implementation and
+Gate A target additions; every selection passed its task-specific interval. The implementation and
 adjacent intervention checks passed 115 targeted tests. Ruff 0.12.12 formatting and static checks,
 Python compilation, configuration loading, and `git diff --check` also passed.
+
+## First five-CWE live attempt
+
+`five-cwe-gate-b-balanced-20260818-01` is retained as a failed scale-up attempt. It completed 15
+intervention calls and 20 extractor calls: all five source extractions, all four arms for CWE-338,
+CWE-502, and CWE-89, plus the target, no-op, and generic arms for CWE-78. All completed arm-level
+validations passed. The run stopped before sending the CWE-78 placebo because the live target suffix
+was 78 characters, including the model's natural newline and indentation, while the longest
+registered placebo suffix was 60 characters. The frozen interval was 70--86 characters. CWE-328
+was not yet processed. Thus 35 responses are reusable and 10 calls remain.
+
+The resume configuration adds one reviewed 73-character presentation-only sentence and otherwise
+keeps the same task set, app configuration, arm contracts, and request-policy version. The previous
+run is used only through exact request-byte matching. The five source responses and 15 accepted
+variant pairs must be reused; only the new CWE-78 placebo pair and four CWE-328 arm pairs may call
+the provider. The expected resume accounting is therefore 35 reused calls and 10 live calls.
 
 ## Execution issues retained
 
@@ -70,6 +86,13 @@ Python compilation, configuration loading, and `git diff --check` also passed.
   piped to the fixed Python interpreter.
 - A broad file search passed shell wildcards that PowerShell did not expand for `rg`; the search was
   repeated with explicit repository paths. This did not affect code or experiment outputs.
+- The fixed server Python runtime does not contain `pytest`. Server configuration loading passed,
+  but the optional duplicate server-side unit test did not start. The deployment was not mutated;
+  the same commit had already passed the local fixed-environment targeted tests.
+- The first five-CWE wrapper attempted to create sidecar logs inside a parent directory that did not
+  yet exist. The Python runner still created and preserved its own command, environment, failure,
+  raw request/response, and validation artifacts, but the three wrapper sidecars were absent. The
+  operator observation records this packaging error and the exact 35/10 completed/pending counts.
 
 These issues are environment-command errors, not accepted test or experiment results, and are
 recorded here to prevent repetition.
