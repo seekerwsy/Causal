@@ -52,6 +52,12 @@ trace, the tri-state profile decision, and the post-analysis assignment binding 
   identifies extracted responses as `python_fence_trailing_text`. The failed pilot and both
   non-experiment-eligible diagnostics remain immutable; the repair uses a new live-run ID and output
   directory.
+- The protocol-repair pilot completed all three measurement stages. Its one generated program passed
+  the frozen single-pass functional judgment. Oracle v2 parsed the program, found one `cur.execute`
+  sink with constant query text, and returned an evaluable secure decision; the joint
+  secure-and-functional outcome is therefore one. The complete model request and pre-normalization
+  response are present in the unit manifest. This result authorizes only the seven remaining canary
+  assignments and is not a causal-effect claim.
 
 ## Scale-up rule
 
