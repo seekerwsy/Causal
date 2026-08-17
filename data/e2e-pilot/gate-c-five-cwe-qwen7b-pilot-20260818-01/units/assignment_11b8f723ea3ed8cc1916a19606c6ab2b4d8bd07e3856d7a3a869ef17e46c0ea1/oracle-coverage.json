@@ -1,0 +1,1 @@
+{"analyzer_rule_ids":["secaware.python.sql-injection"],"cwe":"CWE-89","decision_backend":"python_ast_mechanism_v1","oracle_profile_id":"python.cwe89.function_parameter_sqlite_query.v2","prompt_id":"csev2-1603-baseline","schema_version":"1.0","task_id":"cluster-22d97b466b5d2c737129","zero_finding_interpretation":"profile_scoped_decision","zero_finding_supported":true}

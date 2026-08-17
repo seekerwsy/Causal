@@ -1,0 +1,24 @@
+{
+  "rationale": "The program defines a function `resize_images` that accepts a list of image filenames (`image_filenames`) and directory paths (`input_dir`, `output_dir`), satisfying the interface requirement. It iterates through the filenames, constructs a command using `subprocess.run` to resize images via the `convert` command, and saves them to the output directory, satisfying the side effect requirement. Finally, it returns a list of the resized filenames, satisfying the behavior requirement.",
+  "requirements": [
+    {
+      "requirement_id": "req_interface",
+      "verdict": "met",
+      "code_evidence_lines": [4],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_output",
+      "verdict": "met",
+      "code_evidence_lines": [8, 14, 16],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_resize",
+      "verdict": "met",
+      "code_evidence_lines": [12, 13],
+      "counterexample": null
+    }
+  ],
+  "status": "pass"
+}
