@@ -4,6 +4,7 @@ import pytest
 
 from secaware.exploratory.gate_b import (
     _INTERVENTION_SYSTEM_TEMPLATE,
+    _RecordingTransport,
     _intervention_payload,
     _intervention_template,
     _reviewed_placebo_suffix_bank,
@@ -11,6 +12,7 @@ from secaware.exploratory.gate_b import (
     _select_reviewed_placebo_suffix,
     validate_length_matched_placebo,
 )
+from secaware.llm.structured_transport import StructuredLLMPolicy
 from secaware.schema.experiments import AllowedDeltaRecord
 from secaware.schema.records import PromptRecord
 
@@ -229,3 +231,53 @@ def test_reviewed_placebo_bank_rejects_duplicates_and_conflicting_forms() -> Non
         _reviewed_placebo_suffix_bank(
             {"reviewed_placebo_suffix": suffix, "reviewed_placebo_suffix_bank": [suffix]}
         )
+
+
+class _FixedTransport:
+    def __init__(self, response: bytes) -> None:
+        self.response = response
+        self.calls: list[bytes] = []
+
+    def complete(self, request_bytes: bytes, policy: StructuredLLMPolicy) -> bytes:
+        self.calls.append(request_bytes)
+        return self.response
+
+
+def _policy() -> StructuredLLMPolicy:
+    return StructuredLLMPolicy(
+        endpoint_sha256="0" * 64,
+        model_id="test-model",
+        system_template_sha256="1" * 64,
+        output_schema_sha256="2" * 64,
+        temperature=0.0,
+        top_p=1.0,
+        seed=0,
+        timeout_seconds=1.0,
+        max_attempts=1,
+        max_response_bytes=1024,
+        enable_thinking=False,
+    )
+
+
+def test_explicit_reuse_exclusion_calls_live_transport_and_records_reason(tmp_path) -> None:
+    reuse = tmp_path / "reuse"
+    channel = reuse / "raw" / "intervention"
+    channel.mkdir(parents=True)
+    (channel / "variant-1.request.json").write_bytes(b'{"old":true}\n')
+    (channel / "variant-1.response.json").write_bytes(b'{"candidate_text":"old"}\n')
+    delegate = _FixedTransport(b'{"candidate_text":"new"}')
+    transport = _RecordingTransport(
+        delegate,
+        tmp_path / "new",
+        "intervention",
+        reuse_root=reuse,
+        reuse_excluded_labels=frozenset({"variant-1"}),
+    )
+    transport.select("variant-1")
+    response = transport.complete(b'{"new":true}', _policy())
+    assert response == b'{"candidate_text":"new"}'
+    assert delegate.calls == [b'{"new":true}']
+    assert transport.reused_labels == ()
+    assert transport.live_labels == ("variant-1",)
+    assert transport.reuse_exclusion_labels == ("variant-1",)
+    assert (tmp_path / "new" / "raw" / "intervention" / "variant-1.reuse-exclusion.json").is_file()

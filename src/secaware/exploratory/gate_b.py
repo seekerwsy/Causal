@@ -245,16 +245,19 @@ class _RecordingTransport:
         channel: str,
         *,
         reuse_root: Path | None = None,
+        reuse_excluded_labels: frozenset[str] = frozenset(),
         allow_live: bool = True,
     ) -> None:
         self._delegate = delegate
         self._root = root
         self._channel = channel
         self._reuse_root = reuse_root
+        self._reuse_excluded_labels = reuse_excluded_labels
         self._allow_live = allow_live
         self._label: str | None = None
         self._reused_labels: list[str] = []
         self._live_labels: list[str] = []
+        self._reuse_exclusion_labels: list[str] = []
 
     @property
     def reused_labels(self) -> tuple[str, ...]:
@@ -263,6 +266,10 @@ class _RecordingTransport:
     @property
     def live_labels(self) -> tuple[str, ...]:
         return tuple(self._live_labels)
+
+    @property
+    def reuse_exclusion_labels(self) -> tuple[str, ...]:
+        return tuple(self._reuse_exclusion_labels)
 
     def select(self, label: str) -> None:
         if self._label is not None or not label:
@@ -282,7 +289,7 @@ class _RecordingTransport:
         failure_path = root / f"{artifact_stem}.failure.json"
         request_path.write_bytes(request_bytes + b"\n")
         try:
-            if self._reuse_root is not None:
+            if self._reuse_root is not None and label not in self._reuse_excluded_labels:
                 reuse_channel = self._reuse_root / "raw" / self._channel
                 reuse_stems = tuple(dict.fromkeys((label, artifact_stem)))
                 available_pairs: list[tuple[Path, Path]] = []
@@ -327,6 +334,16 @@ class _RecordingTransport:
                     )
                     self._reused_labels.append(label)
                     return reused_response
+            elif self._reuse_root is not None:
+                _write_json(
+                    root / f"{artifact_stem}.reuse-exclusion.json",
+                    {
+                        "schema_version": _SCHEMA_VERSION,
+                        "label": label,
+                        "reason": "explicit_invalid_pair_exclusion",
+                    },
+                )
+                self._reuse_exclusion_labels.append(label)
             if not self._allow_live:
                 raise ValueError(
                     "exploratory Gate B live call disabled and reusable response unavailable"
@@ -559,6 +576,23 @@ def run_exploratory_gate_b(
                 reuse_run_dir / "effective-app-config.yaml"
             ) != _reuse_policy_config_sha256(output_dir / "effective-app-config.yaml"):
                 raise ValueError("exploratory Gate B reuse app config failed validation")
+        reuse_excluded_intervention_variant_ids_value = gate_b_config.get(
+            "reuse_excluded_intervention_variant_ids", []
+        )
+        if (
+            type(reuse_excluded_intervention_variant_ids_value) is not list
+            or any(
+                type(item) is not str or not item
+                for item in reuse_excluded_intervention_variant_ids_value
+            )
+            or len(reuse_excluded_intervention_variant_ids_value)
+            != len(set(reuse_excluded_intervention_variant_ids_value))
+            or (reuse_excluded_intervention_variant_ids_value and reuse_run_dir is None)
+        ):
+            raise ValueError("exploratory Gate B reuse exclusion failed validation")
+        reuse_excluded_intervention_variant_ids = frozenset(
+            reuse_excluded_intervention_variant_ids_value
+        )
         allow_live_calls = gate_b_config.get("allow_live_calls", True)
         if type(allow_live_calls) is not bool:
             raise ValueError("exploratory Gate B live-call policy failed validation")
@@ -625,6 +659,9 @@ def run_exploratory_gate_b(
         )
         if len(selected_variants) != len(selected_task_ids) * 4:
             raise ValueError("exploratory Gate B arm coverage failed validation")
+        selected_variant_ids = {str(item["variant_id"]) for item in selected_variants}
+        if not reuse_excluded_intervention_variant_ids <= selected_variant_ids:
+            raise ValueError("exploratory Gate B reuse exclusion scope failed validation")
         if any(item.get("outcome_generation_allowed") is not False for item in selected_variants):
             raise ValueError("exploratory Gate B generation boundary failed validation")
 
@@ -656,6 +693,7 @@ def run_exploratory_gate_b(
             output_dir,
             "intervention",
             reuse_root=reuse_run_dir,
+            reuse_excluded_labels=reuse_excluded_intervention_variant_ids,
             allow_live=allow_live_calls,
         )
         extractor_config = app_config.tsg.llm
@@ -971,6 +1009,9 @@ def run_exploratory_gate_b(
                 + len(extractor_transport.reused_labels),
                 "reused_intervention_calls": len(intervention_transport.reused_labels),
                 "reused_extractor_calls": len(extractor_transport.reused_labels),
+                "reuse_excluded_intervention_calls": len(
+                    intervention_transport.reuse_exclusion_labels
+                ),
                 "validated_variants": len(llm_variants),
                 "assignments": len(assignments),
                 "generic_control_realized": generic_realized,
@@ -1014,6 +1055,11 @@ def run_exploratory_gate_b(
                     if reuse_run_dir is not None
                     else None
                 ),
+                "reuse_excluded_intervention_variant_ids_sha256": (
+                    canonical_sha256(sorted(reuse_excluded_intervention_variant_ids))
+                    if reuse_excluded_intervention_variant_ids
+                    else None
+                ),
                 "reuse_policy_config_sha256": (
                     _reuse_policy_config_sha256(reuse_run_dir / "effective-app-config.yaml")
                     if reuse_run_dir is not None
@@ -1029,6 +1075,10 @@ def run_exploratory_gate_b(
                 ),
                 "request_match": "exact_bytes",
                 "allow_live_calls": allow_live_calls,
+                "excluded_intervention_variant_ids": sorted(
+                    reuse_excluded_intervention_variant_ids
+                ),
+                "observed_exclusion_labels": list(intervention_transport.reuse_exclusion_labels),
             },
             "next_gate": "bounded_real_outcome_canary",
         }

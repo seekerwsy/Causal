@@ -89,6 +89,15 @@ be reused accidentally. No system-template, feature catalog, AllowedDelta, extra
 source-prefix requirement is weakened. The expected accounting is 37 reused calls and eight live
 calls: the corrected CWE-328 target pair plus its no-op, generic, and placebo pairs.
 
+The first exact-target resume preflighted correctly but made zero provider calls. The reuse layer
+found the retained invalid request under the same variant identity and correctly rejected the new
+request-byte mismatch instead of silently falling through to a live call. The next configuration
+therefore carries a single explicit reuse exclusion for that exact invalid intervention variant.
+The exclusion list is validated against the selected Gate A variants, content-addressed in the
+report, and recorded beside the new raw request. All original files remain present in the retained
+failed run. This preserves fail-closed collision handling while authorizing the one intended live
+replacement.
+
 ## Execution issues retained
 
 - The first local test command omitted the worktree `src` directory from `PYTHONPATH`; collection
