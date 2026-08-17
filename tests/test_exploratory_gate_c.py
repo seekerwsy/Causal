@@ -6,9 +6,32 @@ import pytest
 from secaware.config import load_config
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
 from secaware.io.jsonl import read_jsonl
+from secaware.exploratory import gate_c
 
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_gate_c_oracle_decision_modes_are_explicit_and_mutually_exclusive() -> None:
+    assert (
+        gate_c._oracle_decision_mode(
+            {"oracle_zero_finding_policy": "preserve_unknown_coverage"}
+        )
+        == "preserve_unknown_coverage"
+    )
+    assert (
+        gate_c._oracle_decision_mode(
+            {"oracle_decision_policy": "profile_scoped_decision"}
+        )
+        == "profile_scoped_decision"
+    )
+    with pytest.raises(ValueError, match="Oracle decision policy"):
+        gate_c._oracle_decision_mode(
+            {
+                "oracle_zero_finding_policy": "preserve_unknown_coverage",
+                "oracle_decision_policy": "profile_scoped_decision",
+            }
+        )
 
 
 def test_gate_c_functional_contracts_are_frozen_before_generation() -> None:

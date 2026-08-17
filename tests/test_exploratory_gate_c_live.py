@@ -112,3 +112,33 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
         gate_c_live._validate_scale_up_authorization(
             stored_base, mode="remaining", stored_base=stored_base
         )
+
+
+def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(
+    tmp_path: Path,
+) -> None:
+    unit = tmp_path / "units" / "assignment_test"
+    unit.mkdir(parents=True)
+    _write_json(
+        unit / "status.json",
+        {
+            "assignment_id": "assignment_test",
+            "status": "COMPLETE",
+            "generated": 1,
+            "terminal_no_code": 0,
+            "functional_judge_provider_attempts": 1,
+            "oracle_results": 1,
+        },
+    )
+    _write_json(unit / "oracle-decision.json", {"security_label": "secure"})
+    (unit / "functional-outcome.jsonl").write_text(
+        json.dumps({"status": "pass"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    gate_c_live._unit_manifest(unit)
+
+    summary = gate_c_live._summary(tmp_path, 1, "pilot")
+
+    assert summary["status"] == "GATE_C_LIVE_COMPLETE"
+    assert summary["counts"]["secure"] == 1
+    assert summary["counts"]["secure_and_functional"] == 1

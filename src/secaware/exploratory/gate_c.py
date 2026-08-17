@@ -18,7 +18,6 @@ from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.oracle.policy import load_policy_bundle
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
 from secaware.schema.experiments import ArmRole, AssignmentRecord, ExperimentalUnit, PromptVariantRecord
-from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.records import PromptRecord
 
 
@@ -29,6 +28,18 @@ _ARMS = (
     ArmRole.LENGTH_MATCHED_PLACEBO,
     ArmRole.GENERIC_SECURITY_REMINDER,
 )
+_ORACLE_UNKNOWN_MODE = "preserve_unknown_coverage"
+_ORACLE_PROFILE_MODE = "profile_scoped_decision"
+
+
+def _oracle_decision_mode(config: dict[str, Any]) -> str:
+    profile_mode = config.get("oracle_decision_policy")
+    legacy_mode = config.get("oracle_zero_finding_policy")
+    if profile_mode is None and legacy_mode == _ORACLE_UNKNOWN_MODE:
+        return _ORACLE_UNKNOWN_MODE
+    if profile_mode == _ORACLE_PROFILE_MODE and legacy_mode is None:
+        return _ORACLE_PROFILE_MODE
+    raise ValueError("Gate C Oracle decision policy failed validation")
 
 
 def _canonical(value: object) -> bytes:
@@ -276,11 +287,11 @@ def plan_gate_c_canary(
     write_resolved_config(app_config, output_dir / "effective-app-config.yaml")
     _write_json(output_dir / "command.json", {"argv": list(command_argv)})
     _write_json(output_dir / "environment.json", _environment())
+    oracle_decision_mode = _oracle_decision_mode(config)
     if (
         config.get("schema_version") != _SCHEMA_VERSION
         or config.get("inherit_gate_a_seed_slots") is not True
         or config.get("require_gate_b_pass") is not True
-        or config.get("oracle_zero_finding_policy") != "preserve_unknown_coverage"
         or config.get("scientific_claim_allowed") is not False
         or config.get("scale_up_allowed") is not False
         or app_config.generation.provider != "openai_compatible"
@@ -366,13 +377,26 @@ def plan_gate_c_canary(
                 "cwe": profile.cwe,
                 "zero_finding_supported": profile.zero_finding_supported,
                 "zero_finding_interpretation": (
-                    "secure" if profile.zero_finding_supported else "unknown_coverage"
+                    _ORACLE_PROFILE_MODE
+                    if oracle_decision_mode == _ORACLE_PROFILE_MODE
+                    else "secure"
+                    if profile.zero_finding_supported
+                    else "unknown_coverage"
                 ),
+                "decision_backend": profile.decision_backend,
                 "analyzer_rule_ids": list(profile.analyzer_rule_ids),
             }
         )
-    if any(item["zero_finding_interpretation"] != "unknown_coverage" for item in coverage_rows):
-        raise ValueError("Gate C zero-finding policy failed validation")
+    if oracle_decision_mode == _ORACLE_UNKNOWN_MODE:
+        if any(item["zero_finding_interpretation"] != "unknown_coverage" for item in coverage_rows):
+            raise ValueError("Gate C zero-finding policy failed validation")
+    elif any(
+        item["zero_finding_interpretation"] != _ORACLE_PROFILE_MODE
+        or item["zero_finding_supported"] is not True
+        or item["decision_backend"] != "python_ast_mechanism_v1"
+        for item in coverage_rows
+    ):
+        raise ValueError("Gate C profile-scoped Oracle policy failed validation")
     write_jsonl(output_dir / "assignments.jsonl", assignments)
     write_jsonl(output_dir / "prompt-variants.jsonl", variants)
     write_jsonl(output_dir / "generation-requests.jsonl", requests)
@@ -385,6 +409,7 @@ def plan_gate_c_canary(
         "status": "GATE_C_PLAN_COMPLETE",
         "provider_calls_allowed": False,
         "oracle_execution_allowed": False,
+        "oracle_decision_policy": oracle_decision_mode,
         "scientific_claim_allowed": False,
         "scale_up_allowed": False,
         "counts": {
@@ -399,6 +424,10 @@ def plan_gate_c_canary(
             "oracle_profiles": len(coverage_rows),
             "zero_finding_unknown_profiles": sum(
                 item["zero_finding_interpretation"] == "unknown_coverage"
+                for item in coverage_rows
+            ),
+            "profile_scoped_decision_profiles": sum(
+                item["zero_finding_interpretation"] == _ORACLE_PROFILE_MODE
                 for item in coverage_rows
             ),
             "errors": 0,

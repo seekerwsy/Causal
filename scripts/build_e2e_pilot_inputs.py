@@ -29,7 +29,6 @@ from secaware.tsg.feature_catalog import (
     prompt_feature_spec,
 )
 
-_SELECTION_ID = "cyberseceval-v2-cwe78-cwe89-engineering-pilot-v1"
 _SOURCE_ID = "cyberseceval_instruct_v2"
 _AUDIT_RATIONALE = (
     "The prompt states finite observable task behavior. Security properties are excluded "
@@ -78,7 +77,11 @@ def _requirement(
     )
 
 
-def _functional_spec(record_id: str) -> tuple[tuple[FunctionalRequirementRecord, ...], tuple[str, ...]]:
+def _functional_spec(
+    task: dict[str, Any],
+    source_prompt: str,
+) -> tuple[tuple[FunctionalRequirementRecord, ...], tuple[str, ...]]:
+    record_id = str(task["record_id"])
     specs: dict[str, tuple[tuple[FunctionalRequirementRecord, ...], tuple[str, ...]]] = {
         "1616": (
             (
@@ -173,7 +176,39 @@ def _functional_spec(record_id: str) -> tuple[tuple[FunctionalRequirementRecord,
             ("bam-file", "bam-view-command"),
         ),
     }
-    requirements, dependencies = specs[record_id]
+    embedded = task.get("functional_contract")
+    if embedded is not None:
+        if type(embedded) is not dict:
+            raise ValueError(f"functional contract failed validation: {record_id}")
+        raw_requirements = embedded.get("requirements")
+        raw_dependencies = embedded.get("environment_dependencies", [])
+        if (
+            type(raw_requirements) is not list
+            or not raw_requirements
+            or type(raw_dependencies) is not list
+            or any(type(item) is not str or not item for item in raw_dependencies)
+        ):
+            raise ValueError(f"functional contract failed validation: {record_id}")
+        requirements = tuple(
+            _requirement(
+                str(item["requirement_id"]),
+                str(item["kind"]),
+                str(item["criterion"]),
+                str(item["prompt_evidence_quote"]),
+            )
+            for item in raw_requirements
+            if type(item) is dict
+        )
+        if len(requirements) != len(raw_requirements) or any(
+            item.prompt_evidence_quote not in source_prompt for item in requirements
+        ):
+            raise ValueError(f"functional contract evidence failed validation: {record_id}")
+        dependencies = tuple(raw_dependencies)
+    else:
+        try:
+            requirements, dependencies = specs[record_id]
+        except KeyError as error:
+            raise ValueError(f"functional contract is unavailable: {record_id}") from error
     return tuple(sorted(requirements, key=lambda item: item.requirement_id)), dependencies
 
 
@@ -233,7 +268,12 @@ def build(
     if output_dir.exists():
         raise FileExistsError(output_dir)
     selection = _read_json(selection_path)
-    if selection.get("selection_id") != _SELECTION_ID or selection.get("source_id") != _SOURCE_ID:
+    selection_id = selection.get("selection_id")
+    if (
+        type(selection_id) is not str
+        or not selection_id
+        or selection.get("source_id") != _SOURCE_ID
+    ):
         raise ValueError("unexpected selection manifest")
     source_rows = _read_jsonl(source_audit)
     split_rows = _read_jsonl(split_simulations)
@@ -297,28 +337,29 @@ def build(
                 "prompt_id": baseline_id,
             }
         )
-        if task["split"] != "confirm":
+        if task["split"] == "confirm":
+            clause = _feature_clause(task["cwe"])
+            variant = PromptRecord(
+                prompt_id=f"csev2-{record_id}-positive",
+                task_id=cluster_id,
+                split="confirm",
+                language="python",
+                task_family=task["task_family"],
+                cwe=task["cwe"],
+                prompt=source["prompt"] + clause,
+                prompt_role=PromptRole.POSITIVE_SAFETY_CONTROL,
+                counterpart_prompt_id=baseline.prompt_id,
+                oracle_profile_id=task["oracle_profile_id"],
+            )
+            prompts.append(variant)
+            attestations.extend(_attestations_for_pair(baseline, variant, clause))
+        if task["split"] != "confirm" and task.get("include_functional_contract") is not True:
             continue
-        clause = _feature_clause(task["cwe"])
-        variant = PromptRecord(
-            prompt_id=f"csev2-{record_id}-positive",
-            task_id=cluster_id,
-            split="confirm",
-            language="python",
-            task_family=task["task_family"],
-            cwe=task["cwe"],
-            prompt=source["prompt"] + clause,
-            prompt_role=PromptRole.POSITIVE_SAFETY_CONTROL,
-            counterpart_prompt_id=baseline.prompt_id,
-            oracle_profile_id=task["oracle_profile_id"],
-        )
-        prompts.append(variant)
-        attestations.extend(_attestations_for_pair(baseline, variant, clause))
 
-        requirements, dependencies = _functional_spec(record_id)
+        requirements, dependencies = _functional_spec(task, str(source["prompt"]))
         packet_content = {
             "schema_version": "1.0",
-            "selection_id": _SELECTION_ID,
+            "selection_id": selection_id,
             "task_id": cluster_id,
             "source_prompt_id": baseline.prompt_id,
             "source_prompt_sha256": baseline.prompt_sha256,
@@ -387,12 +428,12 @@ def build(
     )
     report: dict[str, object] = {
         "schema_version": "1.0",
-        "selection_id": _SELECTION_ID,
+        "selection_id": selection_id,
         "status": "INPUTS_READY",
         "counts": {
             "independent_tasks": len(seen_clusters),
             "discover_tasks": sum(item["split"] == "discover" for item in selection["tasks"]),
-            "confirm_tasks": len(contracts),
+            "confirm_tasks": sum(item["split"] == "confirm" for item in selection["tasks"]),
             "prompt_records": len(prompts),
             "prompt_attestations": len(attestations),
             "functional_contracts": len(contracts),

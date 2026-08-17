@@ -26,6 +26,7 @@ from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.llm.structured_transport import OpenAICompatibleStructuredTransport
 from secaware.oracle.aggregator import OracleCodeAnalysis, OracleCodeInput, run_oracle_code_batch
 from secaware.oracle.policy import load_policy_bundle
+from secaware.oracle.profile_decision import decide_oracle_profile, mechanism_trace_sha256
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.pipeline.artifact import sha256_file
 from secaware.pipeline.stages.confirmation_generation import create_confirmation_provider
@@ -41,6 +42,8 @@ _SCALE_UP_AUTHORIZATION_SCOPE = "remaining_assignments_only"
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
     {"scale_up_authorization_id", "scale_up_authorization_scope"}
 )
+_ORACLE_UNKNOWN_MODE = "unknown_coverage"
+_ORACLE_PROFILE_MODE = "profile_scoped_decision"
 
 
 def _canonical(value: object) -> bytes:
@@ -337,12 +340,29 @@ def _summary(output_dir: Path, expected: int, phase: str) -> dict[str, object]:
     oracle_results = 0
     generated = 0
     terminal_no_code = 0
+    security_labels = {"secure": 0, "insecure": 0, "unknown": 0}
+    secure_and_functional = 0
     for status_path in sorted((output_dir / "units").glob("*/status.json")):
         status = _read_json(status_path)
         judge_calls += int(status.get("functional_judge_provider_attempts", 0))
         oracle_results += int(status.get("oracle_results", 0))
         generated += int(status.get("generated", 0))
         terminal_no_code += int(status.get("terminal_no_code", 0))
+        unit_dir = status_path.parent
+        decision_path = unit_dir / "oracle-decision.json"
+        if decision_path.is_file():
+            decision = _read_json(decision_path)
+            label = decision.get("security_label")
+            if label not in security_labels:
+                raise ValueError("Gate C live Oracle decision label failed validation")
+            security_labels[str(label)] += 1
+            functional_path = unit_dir / "functional-outcome.jsonl"
+            outcomes = read_jsonl(functional_path, required=True, allow_empty=False)
+            if len(outcomes) != 1:
+                raise ValueError("Gate C live functional outcome coverage failed validation")
+            secure_and_functional += int(
+                label == "secure" and outcomes[0].get("status") == "pass"
+            )
     return {
         "schema_version": _SCHEMA_VERSION,
         "phase": phase,
@@ -364,6 +384,10 @@ def _summary(output_dir: Path, expected: int, phase: str) -> dict[str, object]:
             "generated": generated,
             "terminal_no_code": terminal_no_code,
             "oracle_results": oracle_results,
+            "secure": security_labels["secure"],
+            "insecure": security_labels["insecure"],
+            "unknown": security_labels["unknown"],
+            "secure_and_functional": secure_and_functional,
         },
         "completed_assignment_ids": sorted(completed),
         "failed_assignment_ids": sorted(failed),
@@ -400,6 +424,7 @@ def run_gate_c_live_canary(
     plan_dir.relative_to(repo_root)
     plan_report = _verify_plan(plan_dir)
     expected = int(live.get("expected_assignments", 0))
+    oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
         live.get("schema_version") != _SCHEMA_VERSION
         or expected != 8
@@ -408,7 +433,7 @@ def run_gate_c_live_canary(
         or live.get("require_pilot_before_remaining") is not True
         or live.get("fail_fast") is not True
         or live.get("oracle_coordinate_blinding") is not True
-        or live.get("zero_finding_interpretation") != "unknown_coverage"
+        or oracle_decision_mode not in {_ORACLE_UNKNOWN_MODE, _ORACLE_PROFILE_MODE}
         or live.get("scientific_claim_allowed") is not False
         or plan_report.get("counts", {}).get("generation_requests") != expected
     ):
@@ -455,7 +480,10 @@ def run_gate_c_live_canary(
         or set(request_by_assignment) != set(assignment_by_id)
         or len(contract_by_task) != 2
         or len(coverage_by_task) != 2
-        or any(item.get("zero_finding_interpretation") != "unknown_coverage" for item in coverage)
+        or any(
+            item.get("zero_finding_interpretation") != oracle_decision_mode
+            for item in coverage
+        )
     ):
         raise ValueError("Gate C live ledger closure failed validation")
     pilot_id = live.get("pilot_assignment_id")
@@ -568,6 +596,14 @@ def run_gate_c_live_canary(
 
     judge = create_functional_judge(app_config, transport_factory=transport_factory)
     policy = load_policy_bundle((repo_root / app_config.oracle.policy_lock_path).resolve())
+    profile_by_id = {item.profile_id: item for item in policy.coverage_profiles}
+    if oracle_decision_mode == _ORACLE_PROFILE_MODE and any(
+        item.get("decision_backend") != "python_ast_mechanism_v1"
+        or item.get("zero_finding_supported") is not True
+        or item.get("oracle_profile_id") not in profile_by_id
+        for item in coverage
+    ):
+        raise ValueError("Gate C live profile-scoped Oracle policy failed validation")
     failure: BaseException | None = None
     for assignment_id in selected:
         assignment = assignment_by_id[assignment_id]
@@ -617,6 +653,34 @@ def run_gate_c_live_canary(
                     runtime_validator=validate_analyzer_runtime,
                 )
                 _write_json(unit_dir / "oracle-analysis.json", analyses[0])
+                if oracle_decision_mode == _ORACLE_PROFILE_MODE:
+                    coverage_row = coverage_by_task[task_id]
+                    profile = profile_by_id[str(coverage_row["oracle_profile_id"])]
+                    if profile.cwe != coverage_row.get("cwe"):
+                        raise ValueError("Gate C live Oracle profile scope failed validation")
+                    decision = decide_oracle_profile(
+                        analyses[0].mechanism_trace,
+                        analyses[0].findings,
+                        profile,
+                    )
+                    _write_json(
+                        unit_dir / "oracle-decision.json",
+                        {
+                            "schema_version": _SCHEMA_VERSION,
+                            "security_label": decision.security_label.value,
+                            "evaluability": decision.evaluability.value,
+                            "severity": decision.severity,
+                            "decision_reason_code": decision.reason_code,
+                            "decision_profile_id": decision.profile_id,
+                            "decision_engine_version": decision.decision_version,
+                            "mechanism_evidence_sha256": mechanism_trace_sha256(
+                                decision.mechanism_trace
+                            ),
+                            "raw_findings": decision.raw_findings,
+                            "decisive_findings": decision.findings,
+                            "mechanism_trace": decision.mechanism_trace,
+                        },
+                    )
                 _write_json(
                     unit_dir / "oracle-binding.json",
                     {
@@ -639,6 +703,9 @@ def run_gate_c_live_canary(
                     "generation_provider_attempts": execution.attempt_count,
                     "functional_judge_provider_attempts": judge_attempts,
                     "oracle_results": len(analyses),
+                    "oracle_decisions": int(
+                        bool(analyses) and oracle_decision_mode == _ORACLE_PROFILE_MODE
+                    ),
                 },
             )
             _unit_manifest(unit_dir)
