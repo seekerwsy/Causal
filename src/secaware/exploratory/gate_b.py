@@ -54,6 +54,7 @@ _INTERVENTION_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v3"
 _REVIEWED_PLACEBO_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v4"
 _REVIEWED_PLACEBO_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v4"
 _REVIEWED_TARGET_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v5"
+_REVIEWED_TARGET_SUFFIX_MATCH_POLICY_VERSION = "leading-ascii-whitespace-max8-v1"
 _INTERVENTION_SYSTEM_TEMPLATE = (
     INTERVENTION_EXECUTOR_SYSTEM_TEMPLATE
     + "\n\nYou are editing a prompt that will later be sent to a separate code-generation model. "
@@ -195,6 +196,20 @@ def _select_reviewed_placebo_suffix(
         "reviewed_suffix_bank_size": len(suffix_bank),
         "reviewed_suffix_sha256": hashlib.sha256(suffix.encode("utf-8")).hexdigest(),
     }
+
+
+def _reviewed_target_suffix_matches(actual: str, required: str) -> bool:
+    if type(actual) is not str or type(required) is not str:
+        return False
+    if actual == required:
+        return True
+    stripped_actual = actual.lstrip(" \t\r\n")
+    leading_length = len(actual) - len(stripped_actual)
+    return (
+        0 < leading_length <= 8
+        and stripped_actual == required.lstrip(" ")
+        and actual.endswith(stripped_actual)
+    )
 
 
 def _intervention_template(reviewed_placebo_suffix_bank: tuple[str, ...]) -> str:
@@ -817,7 +832,14 @@ def run_exploratory_gate_b(
             required_exact_suffix = (
                 selected_reviewed_target_suffix or selected_reviewed_placebo_suffix
             )
-            if required_exact_suffix is not None and suffix != required_exact_suffix:
+            exact_execution_matches = True
+            if selected_reviewed_target_suffix is not None:
+                exact_execution_matches = _reviewed_target_suffix_matches(
+                    suffix, selected_reviewed_target_suffix
+                )
+            elif selected_reviewed_placebo_suffix is not None:
+                exact_execution_matches = suffix == selected_reviewed_placebo_suffix
+            if required_exact_suffix is not None and not exact_execution_matches:
                 mismatch_code = (
                     "TARGET_REVIEWED_CLAUSE_MISMATCH"
                     if role is ArmRole.TARGET_PATCH
@@ -905,6 +927,11 @@ def run_exploratory_gate_b(
                 ),
                 "reviewed_target_suffix_sha256": (
                     hashlib.sha256(selected_reviewed_target_suffix.encode("utf-8")).hexdigest()
+                    if selected_reviewed_target_suffix is not None
+                    else None
+                ),
+                "reviewed_target_suffix_match_policy_version": (
+                    _REVIEWED_TARGET_SUFFIX_MATCH_POLICY_VERSION
                     if selected_reviewed_target_suffix is not None
                     else None
                 ),
@@ -1042,6 +1069,11 @@ def run_exploratory_gate_b(
                 ),
                 "reviewed_target_request_policy_version": (
                     _REVIEWED_TARGET_REQUEST_POLICY_VERSION if reviewed_target_suffixes else None
+                ),
+                "reviewed_target_suffix_match_policy_version": (
+                    _REVIEWED_TARGET_SUFFIX_MATCH_POLICY_VERSION
+                    if reviewed_target_suffixes
+                    else None
                 ),
             },
             "input_digests": {

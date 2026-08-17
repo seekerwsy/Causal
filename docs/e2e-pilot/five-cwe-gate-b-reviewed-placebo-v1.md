@@ -98,6 +98,23 @@ report, and recorded beside the new raw request. All original files remain prese
 failed run. This preserves fail-closed collision handling while authorizing the one intended live
 replacement.
 
+The excluded live request preserved the full source prefix but returned one leading newline before
+the exact registered target clause. It added no other text. The byte-exact check therefore rejected
+a presentation-only formatting difference before blind extraction. The next policy keeps placebo
+matching byte-exact, but target matching accepts at most eight leading ASCII whitespace characters
+followed by the exact registered target body. Trailing text, a changed target body, more than eight
+leading characters, source-prefix changes, AllowedDelta violations, and blind extractor failures
+remain hard failures. The formatting policy is versioned and recorded in each affected variant and
+the run report. This resume should reuse 17 intervention and 21 extractor responses and make seven
+live calls.
+
+The local zero-provider preflight reused all 17 intervention responses and all 21 extractor
+responses. In particular, the retained CWE-328 target response matched the new bounded-formatting
+policy and passed the source-prefix and reviewed-clause checks. Execution then stopped at the first
+missing CWE-328 target extractor response because live calls were disabled. Thus the live resume has
+exactly seven remaining calls out of 45 total, while the preflight itself made zero provider calls.
+The 171 targeted Gate B and adjacent intervention tests passed before this preflight.
+
 ## Execution issues retained
 
 - The first local test command omitted the worktree `src` directory from `PYTHONPATH`; collection
@@ -117,6 +134,10 @@ replacement.
   yet exist. The Python runner still created and preserved its own command, environment, failure,
   raw request/response, and validation artifacts, but the three wrapper sidecars were absent. The
   operator observation records this packaging error and the exact 35/10 completed/pending counts.
+- The first zero-provider preflight wrapper expected the transport's disabled-live `ValueError`, but
+  the LLM facts extractor correctly wrapped that boundary as its public `TSG_INVALID` error. Artifact
+  counts and the unmatched request confirm the same intended stop point: 38 exact reuses, seven
+  remaining calls, and no provider call. The operator observation records both error layers.
 
 These issues are environment-command errors, not accepted test or experiment results, and are
 recorded here to prevent repetition.

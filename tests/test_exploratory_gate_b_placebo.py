@@ -8,6 +8,7 @@ from secaware.exploratory.gate_b import (
     _intervention_payload,
     _intervention_template,
     _reviewed_placebo_suffix_bank,
+    _reviewed_target_suffix_matches,
     _reviewed_target_suffixes,
     _select_reviewed_placebo_suffix,
     validate_length_matched_placebo,
@@ -207,6 +208,30 @@ def test_reviewed_target_suffix_is_bound_only_to_the_selected_target_request() -
     assert request["required_exact_suffix"] == suffix
     assert request["request_policy_version"] == "exploratory-intervention-request-v5"
     assert "character-for-character" in str(request["arm_objective"])
+
+
+@pytest.mark.parametrize(
+    "actual",
+    [
+        " Use a collision-resistant hash.",
+        "\n Use a collision-resistant hash.",
+        "\n\n    Use a collision-resistant hash.",
+    ],
+)
+def test_reviewed_target_suffix_accepts_only_bounded_leading_formatting(actual: str) -> None:
+    assert _reviewed_target_suffix_matches(actual, " Use a collision-resistant hash.")
+
+
+@pytest.mark.parametrize(
+    "actual",
+    [
+        "\n\n\n\n\n\n\n\n\nUse a collision-resistant hash.",
+        "\n Use a collision-resistant hash. Add another rule.",
+        "\n Use a different hash.",
+    ],
+)
+def test_reviewed_target_suffix_rejects_unbounded_or_semantic_changes(actual: str) -> None:
+    assert not _reviewed_target_suffix_matches(actual, " Use a collision-resistant hash.")
 
 
 @pytest.mark.parametrize(
