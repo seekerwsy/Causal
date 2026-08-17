@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "gate_c_live_id": "randomized-exploratory-gate-c-live-cwe78-cwe89-phi4-14b-v2-protocol-repair",
   "source_plan_dir": "runs/e2e-pilot/gate-c-canary-phi14b-v2-plan-20260818-03",
-  "pilot_assignment_id": "assignment_af16c8bb735515892d83122453c4272eaedc6529c499431b85b32755392eb6d70",
+  "pilot_assignment_id": "assignment_af16c8bb735515892d83122453c4272eaedc6529c499431b85b3275392eb6d70",
   "expected_assignments": 8,
   "maximum_generation_provider_attempts": 8,
   "maximum_functional_judge_provider_attempts": 8,

@@ -37,4 +37,10 @@ bytes. After the explicit cross-model mapping implementation passed its targeted
 plan completed with two blocks, eight assignments, eight generation requests, two functional
 contracts, two profile-scoped Oracle decisions, zero errors, and zero provider calls. The frozen
 pilot is the CWE-89 target assignment
-`assignment_af16c8bb735515892d83122453c4272eaedc6529c499431b85b32755392eb6d70`.
+`assignment_af16c8bb735515892d83122453c4272eaedc6529c499431b85b3275392eb6d70`.
+
+The first live preflight rejected a manually transcribed pilot ID containing one extra `5`; no
+provider call was possible. The surrounding shell also started the already prepared model service
+without conditioning that step on the preflight exit code. The service reached `READY`, but no
+experimental request was issued. The corrected configuration copies the assignment ID directly from
+the authenticated plan, and subsequent execution gates the pilot on a successful new preflight.
