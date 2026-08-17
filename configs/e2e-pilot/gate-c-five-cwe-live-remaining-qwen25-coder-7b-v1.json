@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "gate_c_live_id": "randomized-exploratory-gate-c-live-five-cwe-qwen25-coder-7b-v1",
+  "source_plan_dir": "data/e2e-pilot/gate-c-five-cwe-qwen25-coder-7b-v1-plan-20260818-02",
+  "pilot_assignment_id": "assignment_3e856cae69bff17e0fde2aee4f5f35a959c4a7f3b91ef8d8beaef340717a9d62",
+  "expected_assignments": 20,
+  "maximum_generation_provider_attempts": 20,
+  "maximum_functional_judge_provider_attempts": 20,
+  "require_pilot_before_remaining": true,
+  "fail_fast": true,
+  "oracle_coordinate_blinding": true,
+  "zero_finding_interpretation": "profile_scoped_decision",
+  "scientific_claim_allowed": false,
+  "scale_up_allowed": true,
+  "scale_up_authorization_id": "user-approved-five-cwe-outcome-pilot-20260818-v1",
+  "scale_up_authorization_scope": "remaining_assignments_only"
+}
