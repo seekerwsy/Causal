@@ -44,3 +44,10 @@ provider call was possible. The surrounding shell also started the already prepa
 without conditioning that step on the preflight exit code. The service reached `READY`, but no
 experimental request was issued. The corrected configuration copies the assignment ID directly from
 the authenticated plan, and subsequent execution gates the pilot on a successful new preflight.
+
+The corrected preflight validated all eight units with zero provider calls. Its conditionally gated
+CWE-89 target pilot then completed one generation, one single-pass functional judgment, and one
+profile-scoped Oracle decision. Functionality passed; Oracle parsed the program, identified one SQL
+execution sink with constant query text, and returned an evaluable secure label. The exact model
+request and pre-normalization response are closed by the unit manifest. This authorizes only the
+seven pending 14B canary assignments and remains outside any causal-effect claim.
