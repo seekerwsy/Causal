@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "repair_id": "gate-b-placebo-repair-cwe78-cwe89-measurement-v2",
+  "purpose": "Regenerate only the two invalid measurement-canary placebo variants using the frozen reviewed presentation-only suffix.",
+  "gate_a_dir": "runs/e2e-pilot/randomized-exploratory-discovery-qwen7b-v2-20260818-01",
+  "prior_attempt_dir": "runs/e2e-pilot/gate-b-measurement-v2-live-20260818-01",
+  "selected_task_ids": [
+    "cluster-2ee6c126c7b6024731de",
+    "cluster-7dfad77191063efeb621"
+  ],
+  "placebo_length_policy_version": "unicode-chars-relative-10pct-min5-v1",
+  "reviewed_placebo_suffix": " Keep the requested code concise and clearly organized.",
+  "expected_placebo_variants": 2,
+  "provider_call_budget": 2,
+  "semantic_retry_allowed": false,
+  "allow_outcome_generation": false,
+  "scientific_claim_allowed": false
+}

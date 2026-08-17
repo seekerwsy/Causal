@@ -29,6 +29,12 @@ trace, the tri-state profile decision, and the post-analysis assignment binding 
   `runs/e2e-pilot/input-build-measurement-canary-v2-diagnostic-20260818-01`; no prompt, contract, or
   split was wrong. The corrected immutable input bundle reports two discover tasks, zero confirm
   tasks, and two pre-treatment functional contracts.
+- The first live Gate B attempt completed eight intervention calls and ten blind extraction calls.
+  Both placebo arms copied the source Prompt without adding a suffix, so the frozen length gate
+  rejected them; all eight per-record hard validations passed. The failed run is preserved as
+  `runs/e2e-pilot/gate-b-measurement-v2-live-20260818-01`. Repair is limited to the two placebo
+  variants with the previously reviewed 55-character presentation-only suffix, followed by one
+  coherent ten-record blind re-extraction. Accepted non-placebo interventions are not repeated.
 
 ## Scale-up rule
 
