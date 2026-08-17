@@ -34,6 +34,20 @@ def test_gate_c_oracle_decision_modes_are_explicit_and_mutually_exclusive() -> N
         )
 
 
+def test_gate_c_cross_model_mapping_policy_is_explicit_and_bounded() -> None:
+    assert gate_c._gate_b_mapping_policy({}) == "exact_variant_id_v1"
+    assert (
+        gate_c._gate_b_mapping_policy(
+            {"gate_b_variant_mapping_policy": "task_arm_target_feature_v1"}
+        )
+        == "task_arm_target_feature_v1"
+    )
+    with pytest.raises(ValueError, match="mapping policy"):
+        gate_c._gate_b_mapping_policy(
+            {"gate_b_variant_mapping_policy": "task_arm_only"}
+        )
+
+
 def test_gate_c_functional_contracts_are_frozen_before_generation() -> None:
     bundle = _ROOT / "data/e2e-pilot/gate-c-cwe78-cwe89-v1"
     contracts = tuple(

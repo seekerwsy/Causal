@@ -24,3 +24,9 @@ directories remain intact. The replacement `-02` Gate A reads the exact authenti
 from the Qwen measurement deployment, records their hashes, and uses the Phi model ID only for its
 randomization coordinate. Future main-experiment inputs must be normalized and pinned to LF before
 Gate A/B freeze rather than repaired after either gate.
+
+Because Gate B is generator-independent, the cross-model planner uses an explicit bounded mapping
+policy for this canary. Each Phi Gate A assignment must match exactly one accepted Gate B record on
+task ID, arm role, and target feature. It then rechecks the Gate B validation status, Prompt hash,
+intervention provenance, graph record, and source task. The default planner policy remains exact
+variant-ID matching; semantic coordinate matching is enabled only in the Phi v2 configuration.

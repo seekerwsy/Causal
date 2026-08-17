@@ -30,6 +30,15 @@ _ARMS = (
 )
 _ORACLE_UNKNOWN_MODE = "preserve_unknown_coverage"
 _ORACLE_PROFILE_MODE = "profile_scoped_decision"
+_GATE_B_EXACT_MAPPING = "exact_variant_id_v1"
+_GATE_B_SEMANTIC_MAPPING = "task_arm_target_feature_v1"
+
+
+def _gate_b_mapping_policy(config: dict[str, Any]) -> str:
+    value = config.get("gate_b_variant_mapping_policy", _GATE_B_EXACT_MAPPING)
+    if value not in {_GATE_B_EXACT_MAPPING, _GATE_B_SEMANTIC_MAPPING}:
+        raise ValueError("Gate C Gate A/B mapping policy failed validation")
+    return str(value)
 
 
 def _oracle_decision_mode(config: dict[str, Any]) -> str:
@@ -101,9 +110,21 @@ def _build_standard_records(
     model_id: str,
     randomization_plan_sha256: str,
     extractor_policy_sha256: str,
+    gate_b_mapping_policy: str,
+    target_feature_by_candidate: dict[str, str],
 ) -> tuple[tuple[AssignmentRecord, ...], tuple[PromptVariantRecord, ...], tuple[dict[str, object], ...]]:
     prompt_by_id = {item.prompt_id: item for item in gate_b_prompts}
     provenance_by_variant = {str(item["variant_id"]): item for item in gate_b_provenance}
+    provenance_by_coordinate: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in gate_b_provenance:
+        coordinate = (
+            str(item.get("task_id")),
+            str(item.get("arm_role")),
+            str(item.get("target_feature_id")),
+        )
+        if coordinate in provenance_by_coordinate:
+            raise ValueError("Gate C Gate B semantic coordinate is not unique")
+        provenance_by_coordinate[coordinate] = item
     record_by_variant = {
         str(item["variant_id"]): item
         for item in gate_b_records
@@ -120,8 +141,22 @@ def _build_standard_records(
     coordinate_by_task: dict[str, dict[str, str]] = {}
     for inherited in selected:
         task_id = str(inherited["task_id"])
-        exploratory_variant_id = str(inherited["variant_id"])
-        provenance = provenance_by_variant.get(exploratory_variant_id)
+        gate_a_variant_id = str(inherited["variant_id"])
+        candidate_id = str(inherited["candidate_id"])
+        target_feature_id = target_feature_by_candidate.get(candidate_id)
+        if target_feature_id is None:
+            raise ValueError("Gate C Gate A candidate mapping failed validation")
+        if gate_b_mapping_policy == _GATE_B_EXACT_MAPPING:
+            provenance = provenance_by_variant.get(gate_a_variant_id)
+        elif gate_b_mapping_policy == _GATE_B_SEMANTIC_MAPPING:
+            provenance = provenance_by_coordinate.get(
+                (task_id, str(inherited.get("arm_role")), target_feature_id)
+            )
+        else:  # pragma: no cover - validated by the public planner
+            raise ValueError("Gate C Gate A/B mapping policy failed validation")
+        exploratory_variant_id = (
+            "" if provenance is None else str(provenance.get("variant_id", ""))
+        )
         validation = gate_b_validations.get(exploratory_variant_id)
         record = record_by_variant.get(exploratory_variant_id)
         if (
@@ -132,6 +167,7 @@ def _build_standard_records(
             or inherited.get("model_id") != model_id
             or provenance.get("task_id") != task_id
             or provenance.get("arm_role") != inherited.get("arm_role")
+            or provenance.get("target_feature_id") != target_feature_id
         ):
             raise ValueError("Gate C Gate A/B mapping failed validation")
         prompt = prompt_by_id.get(str(provenance["prompt_id"]))
@@ -142,7 +178,6 @@ def _build_standard_records(
             or prompt.prompt_sha256 != provenance.get("prompt_sha256")
         ):
             raise ValueError("Gate C variant Prompt provenance failed validation")
-        candidate_id = str(inherited["candidate_id"])
         coordinates = coordinate_by_task.setdefault(
             task_id,
             {
@@ -242,6 +277,7 @@ def _build_standard_records(
                 "task_id": task_id,
                 "arm_role": role.value,
                 "gate_a_assignment_id": inherited["assignment_id"],
+                "gate_a_variant_id": gate_a_variant_id,
                 "gate_b_variant_id": exploratory_variant_id,
                 "assignment_id": assignment.assignment_id,
                 "variant_id": standard_variant.variant_id,
@@ -288,6 +324,7 @@ def plan_gate_c_canary(
     _write_json(output_dir / "command.json", {"argv": list(command_argv)})
     _write_json(output_dir / "environment.json", _environment())
     oracle_decision_mode = _oracle_decision_mode(config)
+    gate_b_mapping_policy = _gate_b_mapping_policy(config)
     if (
         config.get("schema_version") != _SCHEMA_VERSION
         or config.get("inherit_gate_a_seed_slots") is not True
@@ -317,6 +354,9 @@ def plan_gate_c_canary(
     if gate_a_report.get("status") != "GATE_A_PASSED" or gate_b_report.get("status") != "GATE_B_REEXTRACTION_PASSED":
         raise ValueError("Gate C upstream gate dependency failed validation")
     gate_a_assignments = tuple(read_jsonl(gate_a_dir / "assignments.jsonl", required=True, allow_empty=False))
+    gate_a_candidates = tuple(
+        read_jsonl(gate_a_dir / "candidates.jsonl", required=True, allow_empty=False)
+    )
     prompts = tuple(read_jsonl(gate_b_dir / "variant-prompts.jsonl", PromptRecord, required=True, allow_empty=False))
     provenance = tuple(read_jsonl(gate_b_dir / "frozen-variant-provenance.jsonl", required=True, allow_empty=False))
     records = tuple(read_jsonl(gate_b_dir / "records.jsonl", required=True, allow_empty=False))
@@ -331,6 +371,19 @@ def plan_gate_c_canary(
             allow_empty=False,
         )
     }
+    target_feature_by_candidate: dict[str, str] = {}
+    for item in gate_a_candidates:
+        candidate_id = item.get("candidate_id")
+        target_feature_id = item.get("target_feature_id")
+        if (
+            type(candidate_id) is not str
+            or not candidate_id
+            or type(target_feature_id) is not str
+            or not target_feature_id
+            or candidate_id in target_feature_by_candidate
+        ):
+            raise ValueError("Gate C Gate A candidate mapping failed validation")
+        target_feature_by_candidate[candidate_id] = target_feature_id
     contract_by_task = {item.task_id: item for item in contracts}
     if set(contract_by_task) != set(selected_task_ids) or any(
         contract_by_task[task_id].source_prompt_sha256 != source_by_task[task_id].prompt_sha256
@@ -349,6 +402,8 @@ def plan_gate_c_canary(
         model_id=model_id,
         randomization_plan_sha256=sha256_file(gate_a_dir / "assignments.jsonl"),
         extractor_policy_sha256=str(gate_b_report["policy_digests"]["extractor_policy_sha256"]),
+        gate_b_mapping_policy=gate_b_mapping_policy,
+        target_feature_by_candidate=target_feature_by_candidate,
     )
     requests = tuple(plan_confirmation_requests(assignments, variants, app_config.generation))
     if (
@@ -410,6 +465,7 @@ def plan_gate_c_canary(
         "provider_calls_allowed": False,
         "oracle_execution_allowed": False,
         "oracle_decision_policy": oracle_decision_mode,
+        "gate_b_variant_mapping_policy": gate_b_mapping_policy,
         "scientific_claim_allowed": False,
         "scale_up_allowed": False,
         "counts": {
