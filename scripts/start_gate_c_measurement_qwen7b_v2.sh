@@ -3,7 +3,8 @@ set -euo pipefail
 
 umask 077
 
-readonly DEPLOY_DIR="/home/ubuntu/secaware-deployments/oracle-v2-measurement-canary-20260818-06"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly DEPLOY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 readonly ENV_FILE="${DEPLOY_DIR}/.env"
 readonly ENV_DIR="/home/ubuntu/secaware-envs/gate-c-vllm-0.16.0-py310-20260816-01"
 readonly VLLM="${ENV_DIR}/bin/vllm"
@@ -39,14 +40,17 @@ read -r gpu_free gpu_utilization < <(
     --format=csv,noheader,nounits \
     | tr -d ' ' | tr ',' ' '
 )
-if [[ ! "${gpu_free}" =~ ^[0-9]+$ || ! "${gpu_utilization}" =~ ^[0-9]+$ \
-  || "${gpu_free}" -lt "${MIN_FREE_MIB}" \
-  || "${gpu_utilization}" -gt "${MAX_UTILIZATION}" ]]; then
+if [[ ! "${gpu_free}" =~ ^[0-9]+$ ]] || [[ ! "${gpu_utilization}" =~ ^[0-9]+$ ]]; then
+  echo "GPU readiness values failed validation" >&2
+  exit 6
+fi
+if (( gpu_free < MIN_FREE_MIB || gpu_utilization > MAX_UTILIZATION )); then
   echo "GPU readiness gate failed" >&2
   exit 6
 fi
 
 mkdir -p "${SERVICE_DIR}"
+printf '%s\n' "${DEPLOY_DIR}" >"${SERVICE_DIR}/deployment-dir.txt"
 set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}"

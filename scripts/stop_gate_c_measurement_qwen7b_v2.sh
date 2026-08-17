@@ -3,7 +3,8 @@ set -euo pipefail
 
 umask 077
 
-readonly DEPLOY_DIR="/home/ubuntu/secaware-deployments/oracle-v2-measurement-canary-20260818-06"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly DEPLOY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-measurement-v2-20260818-01"
 
 if [[ "$#" -ne 0 || "$(pwd -P)" != "${DEPLOY_DIR}" ]]; then

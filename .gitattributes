@@ -12,5 +12,7 @@ scripts/start_gate_c_rtx5090_model_service_v1.sh text eol=lf
 scripts/stop_gate_c_rtx5090_model_service_v1.sh text eol=lf
 scripts/start_gate_c_rtx5090_pilot_service_v1.sh text eol=lf
 scripts/stop_gate_c_rtx5090_pilot_service_v1.sh text eol=lf
+scripts/start_gate_c_measurement_qwen7b_v2.sh text eol=lf
+scripts/stop_gate_c_measurement_qwen7b_v2.sh text eol=lf
 scripts/setup_gate_c_rtx5090_runner_conda_v1.sh text eol=lf
 scripts/setup_gate_c_cpython_source_runner_v1.sh text eol=lf
