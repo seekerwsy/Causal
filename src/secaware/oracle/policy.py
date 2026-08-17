@@ -216,7 +216,7 @@ class OracleCoverageProfile(SafeValidationMixin, VersionedModel):
         strict=True,
     )
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.0"
     profile_id: str = Field(
         pattern=r"^python\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$"
     )
@@ -225,6 +225,7 @@ class OracleCoverageProfile(SafeValidationMixin, VersionedModel):
     zero_finding_supported: bool
     analyzer_rule_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=64)
     calibration_fixture_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=256)
+    decision_backend: Literal["finding_union_v1", "python_ast_mechanism_v1"] = "finding_union_v1"
 
     @model_validator(mode="after")
     def validate_profile(self) -> "OracleCoverageProfile":
@@ -243,6 +244,15 @@ class OracleCoverageProfile(SafeValidationMixin, VersionedModel):
                 self.zero_finding_supported
                 and (not self.analyzer_rule_ids or len(self.calibration_fixture_ids) < 2)
             )
+            or (
+                self.decision_backend == "python_ast_mechanism_v1"
+                and (
+                    self.schema_version != "1.1"
+                    or self.cwe not in {"CWE-78", "CWE-89"}
+                    or len(self.calibration_fixture_ids) < 6
+                )
+            )
+            or (self.schema_version == "1.1" and self.decision_backend != "python_ast_mechanism_v1")
         ):
             raise ValueError(_INVALID_COVERAGE_PROFILE_MESSAGE)
         return self
@@ -290,9 +300,8 @@ class OracleCoverageContract(SafeValidationMixin, VersionedModel):
     @model_validator(mode="after")
     def validate_contract(self) -> "OracleCoverageContract":
         identifiers = tuple(item.profile_id for item in self.profiles)
-        if (
-            self.contract_name != self.contract_name.strip()
-            or identifiers != tuple(sorted(set(identifiers)))
+        if self.contract_name != self.contract_name.strip() or identifiers != tuple(
+            sorted(set(identifiers))
         ):
             raise ValueError(_INVALID_COVERAGE_CONTRACT_MESSAGE)
         return self
@@ -434,7 +443,10 @@ class LoadedOraclePolicy(SafeValidationMixin, VersionedModel):
             != self.bandit_constraints
         ):
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
-        if _parse_coverage_contract(self.coverage_contract_bytes).profiles != self.coverage_profiles:
+        if (
+            _parse_coverage_contract(self.coverage_contract_bytes).profiles
+            != self.coverage_profiles
+        ):
             raise ValueError(_INVALID_LOADED_POLICY_MESSAGE)
         return self
 
