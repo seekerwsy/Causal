@@ -6,6 +6,7 @@ from pathlib import Path
 
 from secaware.functional_audit.main_pool import (
     MAIN_CWE_ORDER,
+    MAIN_POOL_AUDIT_OUTPUT_SCHEMA,
     MainPoolAuditResponse,
     prepare_main_pool_audit,
     run_main_pool_audit,
@@ -277,4 +278,18 @@ def test_audit_response_accepts_semantically_valid_noncanonical_order() -> None:
     assert [item.requirement_id for item in response.requirements] == [
         "req_z_output",
         "req_a_interface",
+    ]
+
+
+def test_provider_contract_exposes_nested_requirement_enums() -> None:
+    requirement = MAIN_POOL_AUDIT_OUTPUT_SCHEMA["properties"]["requirements"]["items"]
+
+    assert requirement["properties"]["requirement_id"]["pattern"].startswith("^req_")
+    assert requirement["properties"]["kind"]["enum"] == [
+        "interface",
+        "behavior",
+        "input_output",
+        "side_effect",
+        "error_handling",
+        "environment",
     ]

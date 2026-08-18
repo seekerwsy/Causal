@@ -91,7 +91,9 @@ Decide whether the prompt is eligible for the stated finite profile. Eligibility
 Functional requirements must describe only requested interfaces, behavior, inputs/outputs, side effects,
 error handling, and necessary environment assumptions. Do not add security requirements or preferred
 implementations. Every prompt_evidence_quote must be a non-empty verbatim substring of the original
-prompt. Use one to six non-overlapping requirements and stable req_<lowercase_words> identifiers.
+prompt. Use one to six non-overlapping requirements. Every requirement_id must begin with req_ and use
+only lowercase letters, digits, and underscores. The kind must be exactly one of: interface, behavior,
+input_output, side_effect, error_handling, environment. Do not invent synonyms for these values.
 
 Return exactly one JSON object matching response_contract. Do not include markdown or commentary."""
 
@@ -127,6 +129,24 @@ MAIN_POOL_AUDIT_OUTPUT_SCHEMA: dict[str, object] = {
                     "criterion",
                     "prompt_evidence_quote",
                 ],
+                "properties": {
+                    "requirement_id": {
+                        "type": "string",
+                        "pattern": "^req_[a-z0-9_]{1,64}$",
+                    },
+                    "kind": {
+                        "enum": [
+                            "interface",
+                            "behavior",
+                            "input_output",
+                            "side_effect",
+                            "error_handling",
+                            "environment",
+                        ]
+                    },
+                    "criterion": {"type": "string", "minLength": 1},
+                    "prompt_evidence_quote": {"type": "string", "minLength": 1},
+                },
             },
         },
         "environment_dependencies": {"type": "array", "maxItems": 16},
