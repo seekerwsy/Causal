@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "stage": "five_cwe_randomized_discovery_gate_b",
+  "status": "GATE_B_PASSED",
+  "deployment": {
+    "commit": "3c1bd8f06405b093e5ff1647cceb0f1322fe2461",
+    "archive_sha256": "b7f188bcdc57faa4a36e38b71e2a451686a2029e15d786ca083594a23e56530b",
+    "python": "3.12.12",
+    "platform": "Linux-6.8.0-87-generic-x86_64-with-glibc2.35",
+    "captured_at_utc": "2026-08-18T15:36:02.150840+00:00"
+  },
+  "archives": [
+    {
+      "name": "five-cwe-randomized-discovery-gate-b-pilot-20260818-02.tar.gz",
+      "role": "nine_call_scale_path_pilot",
+      "bytes": 23579,
+      "sha256": "2e95f131643b7a179281171b7e6e4632207b610a2c9ddd314703bbca0950b402"
+    },
+    {
+      "name": "five-cwe-randomized-discovery-gate-b-full-20260818-01-failed.tar.gz",
+      "role": "preserved_original_parse_failure",
+      "bytes": 223898,
+      "sha256": "6aaeb102ed8f9cddac4e2eff67633af9435d69bb104f237844a58915e33f02c3"
+    },
+    {
+      "name": "five-cwe-randomized-discovery-gate-b-replay-20260818-03-request-mismatch.tar.gz",
+      "role": "preserved_zero_call_request_identity_failure",
+      "bytes": 45625,
+      "sha256": "4d6634d853ae89fe921767f1e3f735fd074f3afd589c0c2ba67955e92bc9647f"
+    },
+    {
+      "name": "five-cwe-randomized-discovery-gate-b-replay-20260818-04.tar.gz",
+      "role": "successful_zero_live_call_replay_preflight",
+      "bytes": 308111,
+      "sha256": "394984c07d4bc2cf93e5ffcb769f341056bc0d85e09800f3bdbb7f0d68bf0e72"
+    },
+    {
+      "name": "five-cwe-randomized-discovery-gate-b-resume-20260818-05.tar.gz",
+      "role": "complete_gate_b_result",
+      "bytes": 781694,
+      "sha256": "2fdcdd50cae753df9b1f0c5c81fe3f896a46718066ef3e24f353b331fc77cbbc"
+    }
+  ],
+  "zero_live_call_replay": {
+    "reused_calls": 365,
+    "reused_intervention_calls": 157,
+    "reused_extractor_calls": 208,
+    "live_calls": 0,
+    "expected_stop": "first_unavailable_intervention_response"
+  },
+  "completed_run": {
+    "independent_tasks": 51,
+    "cwes": 5,
+    "source_extractions": 51,
+    "intervention_variants": 204,
+    "variant_extractions": 204,
+    "assignments": 204,
+    "reused_calls": 365,
+    "new_provider_calls": 94,
+    "new_intervention_calls": 47,
+    "new_extractor_calls": 47,
+    "errors": 0,
+    "pending": 0
+  },
+  "validation": {
+    "passed_variants": 204,
+    "failed_variants": 0,
+    "variants_per_arm": {
+      "target_patch": 51,
+      "noop_rewrite": 51,
+      "length_matched_placebo": 51,
+      "generic_security_reminder": 51
+    },
+    "generic_control_realized": 51,
+    "placebo_length_controls_validated": 51,
+    "placebo_length_control_failures": 0,
+    "target_variation_passed": 204,
+    "task_projection_drift_diagnostic": {
+      "variants": 22,
+      "by_arm": {
+        "target_patch": 9,
+        "noop_rewrite": 4,
+        "length_matched_placebo": 6,
+        "generic_security_reminder": 3
+      },
+      "by_feature": {
+        "task.process_launch": 13,
+        "task.message_hashing": 5,
+        "task.security_random_generation": 4
+      },
+      "primary_filter": false,
+      "interpretation": "The source Prompt remained an exact prefix and all registered non-task deltas passed. These are arm-blind extractor task-feature measurement changes and remain diagnostics; the frozen dataset task/CWE scope supplies W in analysis."
+    }
+  },
+  "policy": {
+    "extractor_policy_sha256": "24fd577593be4ceada26ae21a29cc1419c2c958fdcb5835f8cdf9c26c2700c2b",
+    "extractor_response_normalization_version": "absent-empty-relations-default-v1",
+    "extractor_response_normalization_sha256": "f88a9ae7ef3c5436c9c8e7039587ae6d86a4092b2bc6e51eb4bdd6fdfc4500b8",
+    "request_match": "exact_bytes",
+    "post_randomization_filtering": false
+  },
+  "archive_integrity": {
+    "complete_run_manifest_files": 1601,
+    "complete_run_archive_files": 1602,
+    "missing_manifest_files": 0,
+    "digest_mismatches": 0,
+    "contains_env_file": false
+  },
+  "next_gate": "bounded_real_outcome_canary"
+}

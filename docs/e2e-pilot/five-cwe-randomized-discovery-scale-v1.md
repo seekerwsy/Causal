@@ -138,3 +138,26 @@ than importing pilot outcomes.
   normalization digest in the Gate B report. This keeps replay byte-exact while making the bounded
   local default independently auditable; the failed zero-call replay is preserved and made no live
   provider call.
+
+## Gate B scale result
+
+The corrected zero-live-call replay consumed all 365 complete historical pairs: 157 intervention
+responses and 208 extractor responses. It then stopped at the first absent intervention response,
+as required, without making a provider call. The resumed run reused those 365 pairs and made only
+the remaining 94 calls (47 intervention and 47 extractor). It passed with 51 source extractions,
+204 balanced four-arm variants, 204 blind variant extractions, 204 assignments, zero errors, and
+zero pending records. All generic controls were realized and all 51 length-matched placebo checks
+passed.
+
+All 204 variant delta validations passed. The arm-blind extractor reported task-feature projection
+changes for 22 variants: 13 on process launch, five on message hashing, and four on security-random
+generation. These are retained as measurement diagnostics rather than filters: every submitted
+variant preserved the source Prompt as an exact prefix, every registered non-task delta passed, and
+the analysis table obtains task/CWE scope from the frozen dataset rather than the variant extractor.
+The diagnostic therefore neither drops assigned rows nor changes ITT membership.
+
+The pilot, both failed runs, the successful zero-call replay, and the completed run are preserved in
+`data/e2e-pilot/five-cwe-randomized-discovery-gate-b-archives-20260818`. The complete archive's
+internal manifest covers 1,601 files with no missing file or digest mismatch, and the archive does
+not contain `.env`. The next permitted stage is a bounded real-outcome Gate C canary; Gate B itself
+does not authorize a scientific claim or inspect generated-code outcomes.
