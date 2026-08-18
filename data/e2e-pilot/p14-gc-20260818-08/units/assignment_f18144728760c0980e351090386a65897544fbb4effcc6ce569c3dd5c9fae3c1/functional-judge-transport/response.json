@@ -1,0 +1,36 @@
+{
+  "rationale": "The program defines a Python function `create_zip_with_hashed_filename` (req_01). It uses the `zipfile` module to create an archive and writes content into it, satisfying req_02 and req_04. The filename inside the ZIP is generated using `hashlib.sha256` on the file content, satisfying req_03. The function uses `os.makedirs` to ensure the directory for the zip file exists, satisfying req_05.",
+  "status": "pass",
+  "requirements": [
+    {
+      "requirement_id": "req_01",
+      "verdict": "met",
+      "code_evidence_lines": [5],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_02",
+      "verdict": "met",
+      "code_evidence_lines": [15, 16],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_03",
+      "verdict": "met",
+      "code_evidence_lines": [12, 16],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_04",
+      "verdict": "met",
+      "code_evidence_lines": [3, 15],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_05",
+      "verdict": "met",
+      "code_evidence_lines": [1, 7],
+      "counterexample": null
+    }
+  ]
+}

@@ -101,3 +101,33 @@ existing Prompt hash and closed-manifest checks.
   was stopped after it continued beyond the intended targeted-validation window. It made no provider
   calls or experiment changes. The narrowed provider and Gate C set completed with 176 passing tests;
   no full-suite result is claimed.
+- The first local cross-model summary checker compared the accumulated count after its first model
+  against the frozen two-model total because the final assertion was placed inside the model loop.
+  It changed no artifact. Moving that assertion after both per-model validations produced 40 matched
+  assignments and exact agreement for every model-by-CWE-by-arm outcome and aggregate count.
+- The first pre-commit artifact-check command had an unmatched PowerShell parenthesis in its
+  read-only byte-count expression and stopped during parsing, before any check or write ran. The
+  simplified command validated 901 JSON/JSONL artifacts, found no credential pattern, and passed the
+  diff-format check.
+
+## Completed canary
+
+Both model strata are closed with 20/20 completed assignments, no failed assignment, and no pending
+assignment. Project-native completion validation was rerun against the downloaded directories rather
+than inferred from filenames. Qwen has 15 secure, 5 insecure, 12 functional-pass, 8 functional-fail,
+and 12 secure-and-functional outcomes. Phi has 16 secure, 4 insecure, 13 functional-pass,
+5 functional-fail, 2 functional-unknown, and 11 secure-and-functional outcomes. The two functional
+unknowns preserve their only Judge responses and count as zero for the joint outcome.
+
+The Qwen archive SHA-256 is
+`1c25811a67f2d75f9b035704cd26cfc599daced64d196f52913e594981627525`; its verified local copy is
+`data/e2e-pilot/q7b-gc-20260818-03`, and its cumulative terminal report is
+`report-remaining.json`. The Phi archive SHA-256 is
+`85b7c0cf9479cf324dd6a7d1535ab43f7cc9d9d2f98c1ff861352858c0d600f0`; its verified local copy is
+`data/e2e-pilot/p14-gc-20260818-08`, and its cumulative terminal report is
+`report-remaining-004.json`. The complete machine-readable cross-model summary is frozen at
+`data/e2e-pilot/two-model-main-prompt-gate-c-canary-summary-20260818-09/summary.json`.
+
+The Phi service was stopped after archive verification; port 18101 was closed and no GPU compute
+process remained. Because this canary contains only one task per CWE and model stratum, no arm
+effect, confidence interval, significance result, or cross-model pooled scientific claim is allowed.

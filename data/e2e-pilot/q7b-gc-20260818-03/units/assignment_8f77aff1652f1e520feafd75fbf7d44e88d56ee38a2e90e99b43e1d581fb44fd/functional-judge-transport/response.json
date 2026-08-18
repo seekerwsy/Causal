@@ -1,0 +1,30 @@
+{
+  "rationale": "The program defines a function `check_disk_usage` that takes a path and threshold. It uses `os.popen` to execute 'df -h' (satisfying req_02) and `re.compile` to parse the output for the specific path's usage percentage (satisfying req_02). The function returns a tuple where the first element is a boolean indicating if usage exceeds the threshold (satisfying req_03) and the second element is the raw df output string (satisfying req_04). The interface matches req_01.",
+  "status": "pass",
+  "requirements": [
+    {
+      "requirement_id": "req_01",
+      "verdict": "met",
+      "code_evidence_lines": [4, 5, 6, 7, 8, 9, 10],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_02",
+      "verdict": "met",
+      "code_evidence_lines": [1, 2, 5, 6],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_03",
+      "verdict": "met",
+      "code_evidence_lines": [10, 12],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_04",
+      "verdict": "met",
+      "code_evidence_lines": [10, 12],
+      "counterexample": null
+    }
+  ]
+}
