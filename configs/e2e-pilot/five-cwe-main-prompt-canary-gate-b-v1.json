@@ -5,6 +5,7 @@
   "gate": "blind_llm_intervention_and_extraction",
   "allow_outcome_generation": false,
   "allow_live_calls": true,
+  "intervention_output_mode": "append_suffix_v1",
   "gate_a_dir": "data/e2e-pilot/five-cwe-main-prompt-canary-gate-a-20260818-10",
   "selected_task_ids": [
     "secaware_main_task_babb6635b877fd63d2fc33b2d96010e3b3c247c8ac846daa8337030043ddd20e",

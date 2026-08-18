@@ -3,10 +3,13 @@ from __future__ import annotations
 import pytest
 
 from secaware.exploratory.gate_b import (
+    _APPEND_SUFFIX_OUTPUT_MODE,
     _INTERVENTION_SYSTEM_TEMPLATE,
-    _RecordingTransport,
     _intervention_payload,
     _intervention_template,
+    _materialize_intervention_text,
+    _parse_append_suffix_response,
+    _RecordingTransport,
     _reviewed_placebo_suffix_bank,
     _reviewed_target_suffix_matches,
     _reviewed_target_suffixes,
@@ -90,6 +93,52 @@ def test_reviewed_placebo_suffix_enables_exact_execution_contract() -> None:
     assert template.startswith(_INTERVENTION_SYSTEM_TEMPLATE)
     assert "required_exact_suffix" in template
     assert "character-for-character" in template
+
+
+def test_append_suffix_mode_uses_a_nonconflicting_single_field_contract() -> None:
+    template = _intervention_template((), _APPEND_SUFFIX_OUTPUT_MODE)
+    assert 'single top-level key "append_suffix"' in template
+    assert "candidate_text" not in template
+    assert "Do not return the complete candidate prompt" in template
+
+
+def test_append_suffix_response_is_strict_and_materializes_exact_prefix() -> None:
+    raw = b'{"append_suffix":" Use parameterized queries."}'
+    assert _parse_append_suffix_response(raw, 1024) == " Use parameterized queries."
+    text, suffix = _materialize_intervention_text(
+        source_prompt="Write a query function.",
+        raw_response=raw,
+        output_mode=_APPEND_SUFFIX_OUTPUT_MODE,
+        maximum=1024,
+    )
+    assert text == "Write a query function. Use parameterized queries."
+    assert suffix == " Use parameterized queries."
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"candidate_text":"wrong key"}',
+        b'{"append_suffix":""}',
+        b'{"append_suffix":"   "}',
+        b'{"append_suffix":"one","append_suffix":"two"}',
+        b'{"append_suffix":"ok","extra":true}',
+        b"not-json",
+    ],
+)
+def test_append_suffix_response_rejects_noncanonical_payloads(raw: bytes) -> None:
+    with pytest.raises(ValueError):
+        _parse_append_suffix_response(raw, 1024)
+
+
+def test_append_suffix_mode_rejects_accidental_full_prompt_repetition() -> None:
+    with pytest.raises(ValueError, match="repeated the source prompt"):
+        _materialize_intervention_text(
+            source_prompt="Write a query function.",
+            raw_response=b'{"append_suffix":"Write a query function. Use parameters."}',
+            output_mode=_APPEND_SUFFIX_OUTPUT_MODE,
+            maximum=1024,
+        )
 
 
 def test_reviewed_placebo_bank_selects_nearest_registered_valid_suffix() -> None:
