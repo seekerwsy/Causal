@@ -282,3 +282,12 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   or experiment artifact was produced by either failed probe. A later read-only line-length helper
   also used an ambiguous PowerShell variable followed by a colon and failed at parse time; its
   corrected form uses the format operator.
+- The first Phi archive transfer repeated the known interactive PowerShell-launcher failure and was
+  rejected before `scp` started. The destination was then created non-interactively and the exact
+  OpenSSH command ran under `cmd.exe`; both downloaded archives matched their server SHA-256.
+- The first Phi result assembly authenticated all unit inputs but failed before creating its output
+  directory because the aggregate run report counts Oracle `unknown` only among generated programs,
+  whereas the ITT table correctly maps all three terminal-no-code rows to unknown security and then
+  to outcome zero. The assembly invariant now compares its ITT unknown total with the sum of the
+  report's Oracle-unknown and terminal-no-code counts. No row is filtered, and the report's original
+  counting semantics are preserved rather than rewritten.

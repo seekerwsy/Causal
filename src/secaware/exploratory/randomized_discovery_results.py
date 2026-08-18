@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime
-import hashlib
 import json
 import os
 import platform
@@ -141,6 +140,14 @@ def _arm_values(arm: ArmRole) -> tuple[int, int, int, int]:
         int(arm is ArmRole.GENERIC_SECURITY_REMINDER),
         int(arm is ArmRole.LENGTH_MATCHED_PLACEBO),
     )
+
+
+def _reported_itt_unknown_count(report_counts: dict[str, Any]) -> int:
+    oracle_unknown = report_counts.get("unknown")
+    terminal_no_code = report_counts.get("terminal_no_code")
+    if type(oracle_unknown) is not int or type(terminal_no_code) is not int:
+        raise ValueError("randomized discovery report counts failed validation")
+    return oracle_unknown + terminal_no_code
 
 
 def _environment() -> dict[str, object]:
@@ -369,7 +376,7 @@ def assemble_randomized_discovery_results(
         or report_counts.get("terminal_no_code") != status_counts["terminal_no_code"]
         or report_counts.get("secure") != security_counts["secure"]
         or report_counts.get("insecure") != security_counts["insecure"]
-        or report_counts.get("unknown") != security_counts["unknown"]
+        or _reported_itt_unknown_count(report_counts) != security_counts["unknown"]
         or report_counts.get("secure_and_functional")
         != sum(int(row["values"]["y_secure_functional"]) for row in rows)  # type: ignore[index]
     ):
