@@ -10,7 +10,8 @@ readonly ENV_DIR="/home/ubuntu/secaware-envs/gate-c-vllm-0.16.0-py310-20260816-0
 readonly VLLM="${ENV_DIR}/bin/vllm"
 readonly MODEL_DIR="/home/ubuntu/model-zoo/Qwen2.5-Coder-7B-Instruct"
 readonly SERVED_MODEL="qwen2.5-coder-7b-instruct"
-readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-measurement-v2-20260818-01"
+readonly DEFAULT_SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-measurement-v2-20260818-01"
+readonly SERVICE_DIR="${SECAWARE_MODEL_SERVICE_DIR:-${DEFAULT_SERVICE_DIR}}"
 readonly GPU_INDEX="0"
 readonly MIN_FREE_MIB="31500"
 readonly MAX_UTILIZATION="10"
@@ -19,6 +20,10 @@ readonly MAX_MODEL_LEN="4096"
 
 if [[ "$#" -ne 0 || "$(pwd -P)" != "${DEPLOY_DIR}" ]]; then
   echo "measurement service invocation failed validation" >&2
+  exit 2
+fi
+if [[ ! "${SERVICE_DIR}" =~ ^/home/ubuntu/secaware-model-services/[A-Za-z0-9._-]+$ ]]; then
+  echo "measurement service record path failed validation" >&2
   exit 2
 fi
 if [[ ! -x "${VLLM}" || ! -f "${MODEL_DIR}/config.json" || ! -f "${ENV_FILE}" ]]; then
@@ -51,6 +56,7 @@ fi
 
 mkdir -p "${SERVICE_DIR}"
 printf '%s\n' "${DEPLOY_DIR}" >"${SERVICE_DIR}/deployment-dir.txt"
+printf '%s\n' "${SERVICE_DIR}" >"${SERVICE_DIR}/service-record-dir.txt"
 set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}"

@@ -5,10 +5,15 @@ umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DEPLOY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
-readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-measurement-v2-20260818-01"
+readonly DEFAULT_SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-measurement-v2-20260818-01"
+readonly SERVICE_DIR="${SECAWARE_MODEL_SERVICE_DIR:-${DEFAULT_SERVICE_DIR}}"
 
 if [[ "$#" -ne 0 || "$(pwd -P)" != "${DEPLOY_DIR}" ]]; then
   echo "measurement service stop invocation failed validation" >&2
+  exit 2
+fi
+if [[ ! "${SERVICE_DIR}" =~ ^/home/ubuntu/secaware-model-services/[A-Za-z0-9._-]+$ ]]; then
+  echo "measurement service record path failed validation" >&2
   exit 2
 fi
 if [[ ! -f "${SERVICE_DIR}/server.pid" || ! -f "${SERVICE_DIR}/status.txt" ]]; then
