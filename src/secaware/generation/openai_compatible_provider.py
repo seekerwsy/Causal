@@ -211,7 +211,7 @@ def _validate_usage(usage: object) -> ProviderUsageRecord:
 def _decode_python_source_envelope(content: str) -> tuple[str, str]:
     """Accept raw source or the first and only fenced Python source block."""
 
-    closing_indexes: list[int] = []
+    closing_index: int | None = None
     decoded = ""
     lines: list[str] = []
     trailing = ""
@@ -226,29 +226,29 @@ def _decode_python_source_envelope(content: str) -> tuple[str, str]:
         lines = normalized.split("\n")
         if lines[0].lower() not in {"```python", "```py"} or len(lines) < 3:
             raise ValueError("invalid Python source envelope")
-        closing_indexes = [
-            index for index, line in enumerate(lines[1:], start=1) if line.rstrip(" \t") == "```"
-        ]
-        if len(closing_indexes) != 1 or any(
-            line.startswith("```")
-            for index, line in enumerate(lines[1:], start=1)
-            if index != closing_indexes[0]
-        ):
+        closing_index = next(
+            (index for index, line in enumerate(lines[1:], start=1) if line.rstrip(" \t") == "```"),
+            None,
+        )
+        if closing_index is None or any(line.startswith("```") for line in lines[1:closing_index]):
             raise ValueError("invalid Python source envelope")
-        decoded = "\n".join(lines[1 : closing_indexes[0]])
+        decoded = "\n".join(lines[1:closing_index])
         if not decoded.strip():
             raise ValueError("invalid Python source envelope")
-        trailing = "\n".join(lines[closing_indexes[0] + 1 :])
+        trailing_lines = lines[closing_index + 1 :]
+        if any(line.strip().lower() in {"```python", "```py"} for line in trailing_lines):
+            raise ValueError("invalid Python source envelope")
+        trailing = "\n".join(trailing_lines)
         envelope = "python_fence_trailing_text" if trailing.strip() else "python_fence"
         return decoded, envelope
     finally:
         content = ""
-        closing_indexes.clear()
-        closing_indexes = []
+        closing_index = None
         decoded = ""
         lines.clear()
         lines = []
         trailing = ""
+        trailing_lines = []
 
 
 def _response_code(

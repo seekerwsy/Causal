@@ -360,3 +360,12 @@ Additional execution notes:
   this exact closed failure state, reuses the preserved generation and functional outcome, makes no
   generation or Judge call, and records a zero-call analyzer recovery session. The original failed
   run remains immutable.
+- After the parse-failure recovery, Qwen completed another 106 assignments before a `stop` response
+  containing one complete fenced Python implementation followed by prose and a fenced command-line
+  example was rejected. This exposed a contradiction in the existing envelope-v2 implementation:
+  it named and accepted `python_fence_trailing_text`, but counted every trailing closing fence as a
+  second Python implementation. The decoder now closes on the first complete Python fence, ignores
+  trailing prose and non-Python fenced commands, and still rejects a second `python` or `py` fence.
+  The preserved response can therefore be deterministically replayed without another generation
+  call. The failed run remains immutable and the recovery records the one required functional-Judge
+  call separately.

@@ -639,6 +639,10 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_decodes_code(
         (f"```py\n{_RAW_CODE}\n```", _RAW_CODE),
         (f"```python\n{_RAW_CODE}\n```\nGenerated implementation.", _RAW_CODE),
         (f"```python\n{_RAW_CODE}\n``` \nGenerated implementation.", _RAW_CODE),
+        (
+            f"```python\n{_RAW_CODE}\n```\nRun it with:\n```\npython generated.py\n```",
+            _RAW_CODE,
+        ),
     ],
 )
 def test_provider_accepts_only_raw_or_single_python_source_envelope(
@@ -654,13 +658,17 @@ def test_provider_accepts_only_raw_or_single_python_source_envelope(
     result = provider.generate(_request(), system_template=_SYSTEM)
 
     assert result.code == expected
-    envelope = (
-        "python_fence_trailing_text"
-        if content.startswith("```") and not content.endswith("```")
-        else "python_fence"
-        if content.startswith("```")
-        else "raw"
-    )
+    envelope = "raw"
+    if content.startswith("```"):
+        lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        closing_index = next(
+            index for index, line in enumerate(lines[1:], start=1) if line.rstrip(" \t") == "```"
+        )
+        envelope = (
+            "python_fence_trailing_text"
+            if "\n".join(lines[closing_index + 1 :]).strip()
+            else "python_fence"
+        )
     assert result.provenance.source_batch_id == f"{envelope}:{sha256_text(content)}"
 
 
