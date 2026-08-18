@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import socket
 import sys
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from secaware.config import AppConfig, load_config, write_resolved_config
@@ -25,7 +26,6 @@ from secaware.schema.experiments import (
     PromptVariantRecord,
 )
 from secaware.schema.records import PromptRecord
-
 
 _SCHEMA_VERSION = "1.0"
 _ARMS = (
@@ -204,10 +204,14 @@ def _direct_gate_b_records(
         task_id = str(item.get("task_id", ""))
         source = source_by_task.get(task_id)
         request_path, response_path, request, response = pairs[variant_id]
-        candidate_text = response.get("candidate_text")
+        candidate_text = _direct_candidate_text(
+            source=source,
+            variant=item,
+            request=request,
+            response=response,
+        )
         if (
             source is None
-            or type(candidate_text) is not str
             or candidate_text != item.get("prompt")
             or source.prompt_id != item.get("source_prompt_id")
             or source.prompt_sha256 != item.get("source_prompt_sha256")
@@ -251,6 +255,33 @@ def _direct_gate_b_records(
             }
         )
     return tuple(prompts), tuple(provenance), tuple(records), validations
+
+
+def _direct_candidate_text(
+    *,
+    source: PromptRecord | None,
+    variant: Mapping[str, object],
+    request: Mapping[str, object],
+    response: Mapping[str, object],
+) -> str | None:
+    """Authenticate old full-candidate and new append-suffix Gate B envelopes."""
+
+    output_mode = variant.get("intervention_output_mode", "full_candidate_text_v1")
+    if output_mode == "full_candidate_text_v1":
+        if frozenset(response) != {"candidate_text"}:
+            return None
+        candidate_text = response.get("candidate_text")
+        return candidate_text if type(candidate_text) is str else None
+    if output_mode != "append_suffix_v1" or source is None:
+        return None
+    if request.get("intervention_output_mode") != "append_suffix_v1" or frozenset(response) != {
+        "append_suffix"
+    }:
+        return None
+    suffix = response.get("append_suffix")
+    if type(suffix) is not str or not suffix.strip() or suffix.startswith(source.prompt):
+        return None
+    return source.prompt + suffix
 
 
 def _build_standard_records(

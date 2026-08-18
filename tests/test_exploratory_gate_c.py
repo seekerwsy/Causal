@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 
 from secaware.config import load_config
+from secaware.exploratory import gate_c
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
 from secaware.io.jsonl import read_jsonl
-from secaware.exploratory import gate_c
-
+from secaware.schema.records import PromptRecord
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,6 +51,71 @@ def test_gate_c_direct_gate_b_schema_is_explicit_and_bounded() -> None:
     )
     with pytest.raises(ValueError, match="artifact schema"):
         gate_c._gate_b_artifact_schema({"gate_b_artifact_schema": "auto_detect"})
+
+
+def test_gate_c_direct_adapter_authenticates_append_suffix_envelope() -> None:
+    source = PromptRecord.model_validate(
+        {
+            "prompt_id": "prompt-1",
+            "task_id": "task-1",
+            "split": "discover",
+            "language": "python",
+            "task_family": "sql_query",
+            "cwe": "CWE-89",
+            "prompt": "Write a query function.",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    assert (
+        gate_c._direct_candidate_text(
+            source=source,
+            variant={"intervention_output_mode": "append_suffix_v1"},
+            request={"intervention_output_mode": "append_suffix_v1"},
+            response={"append_suffix": " Use parameterized queries."},
+        )
+        == "Write a query function. Use parameterized queries."
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_payload", "response_payload"),
+    (
+        ({}, {"append_suffix": " Use parameters."}),
+        (
+            {"intervention_output_mode": "append_suffix_v1"},
+            {"append_suffix": " Use parameters.", "candidate_text": "unexpected"},
+        ),
+        (
+            {"intervention_output_mode": "append_suffix_v1"},
+            {"append_suffix": "Write a query function. Use parameters."},
+        ),
+    ),
+)
+def test_gate_c_direct_adapter_rejects_unbound_append_suffix_envelopes(
+    request_payload: dict[str, object],
+    response_payload: dict[str, object],
+) -> None:
+    source = PromptRecord.model_validate(
+        {
+            "prompt_id": "prompt-1",
+            "task_id": "task-1",
+            "split": "discover",
+            "language": "python",
+            "task_family": "sql_query",
+            "cwe": "CWE-89",
+            "prompt": "Write a query function.",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    assert (
+        gate_c._direct_candidate_text(
+            source=source,
+            variant={"intervention_output_mode": "append_suffix_v1"},
+            request=request_payload,
+            response=response_payload,
+        )
+        is None
+    )
 
 
 def test_gate_c_direct_upstream_manifest_requires_closed_file_set(tmp_path: Path) -> None:
@@ -135,6 +200,45 @@ def test_gate_c_five_cwe_plan_freezes_twenty_single_attempt_units() -> None:
     assert config.generation.confirmation_max_requests == 20
     assert config.generation.confirmation_max_total_provider_attempts == 20
     assert config.functional_judge.mode == "single_pass"
+    assert config.functional_judge.llm is not None
+    assert config.functional_judge.llm.max_attempts == 1
+
+
+@pytest.mark.parametrize(
+    ("config_name", "gate_name", "model_id"),
+    (
+        (
+            "gate-c-main-prompt-canary-qwen25-coder-7b-bailian-v1.yaml",
+            "gate-c-main-prompt-canary-qwen25-coder-7b-v1.json",
+            "qwen2.5-coder-7b-instruct",
+        ),
+        (
+            "gate-c-main-prompt-canary-phi4-14b-bailian-v1.yaml",
+            "gate-c-main-prompt-canary-phi4-14b-v1.json",
+            "phi-4-14b",
+        ),
+    ),
+)
+def test_gate_c_main_prompt_canaries_freeze_separate_twenty_unit_strata(
+    config_name: str,
+    gate_name: str,
+    model_id: str,
+) -> None:
+    config = load_config(_ROOT / "configs/e2e-pilot" / config_name)
+    gate = json.loads((_ROOT / "configs/e2e-pilot" / gate_name).read_text(encoding="utf-8"))
+    assert gate["gate_b_artifact_schema"] == "direct_exploratory_v1"
+    assert gate["expected_assignments"] == 20
+    assert gate["scientific_claim_allowed"] is False
+    assert gate["scale_up_allowed"] is False
+    assert config.generation.models == [model_id]
+    assert config.generation.confirmation_seeds == [
+        2026081831,
+        2026081832,
+        2026081833,
+        2026081834,
+    ]
+    assert config.generation.confirmation_max_requests == 20
+    assert config.generation.confirmation_max_total_provider_attempts == 20
     assert config.functional_judge.llm is not None
     assert config.functional_judge.llm.max_attempts == 1
 

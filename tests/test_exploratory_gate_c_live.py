@@ -167,6 +167,25 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
         stored_base=frozen_five_cwe,
     )
 
+    main_prompt = {
+        **stored_base,
+        "expected_assignments": 20,
+        "scale_up_allowed": True,
+        "scale_up_authorization_id": ("user-approved-main-prompt-outcome-canary-20260818-v1"),
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+    frozen_main_prompt = {
+        key: value
+        for key, value in main_prompt.items()
+        if key not in {"scale_up_authorization_id", "scale_up_authorization_scope"}
+    }
+    frozen_main_prompt["scale_up_allowed"] = False
+    gate_c_live._validate_scale_up_authorization(
+        main_prompt,
+        mode="remaining",
+        stored_base=frozen_main_prompt,
+    )
+
 
 def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(
     tmp_path: Path,

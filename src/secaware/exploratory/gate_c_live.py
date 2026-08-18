@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
-from datetime import UTC, datetime
-from enum import Enum
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import shutil
 import socket
 import traceback
+from dataclasses import fields, is_dataclass
+from datetime import UTC, datetime
+from enum import Enum
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -34,7 +34,6 @@ from secaware.schema.experiments import AssignmentExecutionStatus, AssignmentRec
 from secaware.schema.generation import GenerationRequestRecord
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
-
 _SCHEMA_VERSION = "1.0"
 _Mode = Literal["validate", "pilot", "remaining"]
 _SCALE_UP_AUTHORIZATION_SCOPE = "remaining_assignments_only"
@@ -42,6 +41,7 @@ _SCALE_UP_AUTHORIZATION_IDS = frozenset(
     {
         "user-approved-remaining-20260817-v1",
         "user-approved-five-cwe-outcome-pilot-20260818-v1",
+        "user-approved-main-prompt-outcome-canary-20260818-v1",
     }
 )
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
