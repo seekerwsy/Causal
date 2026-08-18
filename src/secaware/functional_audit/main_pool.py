@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import socket
 import sys
 from pathlib import Path
@@ -98,8 +99,11 @@ return executable or semantic_only and extract the contract.
 
 Functional requirements must describe only requested interfaces, behavior, inputs/outputs, side effects,
 error handling, and necessary environment assumptions. Do not add security requirements or preferred
-implementations. Every prompt_evidence_quote must be a non-empty verbatim substring of the original
-prompt. Use one to six non-overlapping requirements. Every requirement_id must begin with req_ and use
+implementations. A requirement criterion must be a direct paraphrase of its evidence segment. For a hash
+task, record the requested hashing behavior but do not add algorithm-strength requirements. For a random
+task, record the requested generated values but do not add unpredictability or random-source requirements.
+Every prompt_evidence_quote must exactly equal one complete string from prompt_evidence_segments; do not
+shorten, join, or rewrite segments. Use one to six non-overlapping requirements. Every requirement_id must begin with req_ and use
 only lowercase letters, digits, and underscores. The kind must be exactly one of: interface, behavior,
 input_output, side_effect, error_handling, environment. Do not invent synonyms for these values.
 
@@ -467,12 +471,46 @@ def prepare_main_pool_audit(
     return report
 
 
-def _response_for_prompt(raw: bytes, prompt: str) -> MainPoolAuditResponse:
+def _response_for_prompt(
+    raw: bytes,
+    prompt: str,
+    evidence_segments: tuple[str, ...],
+) -> MainPoolAuditResponse:
     payload = json.loads(raw)
     response = MainPoolAuditResponse.model_validate(payload)
-    if any(item.prompt_evidence_quote not in prompt for item in response.requirements):
+    if any(
+        item.prompt_evidence_quote not in prompt
+        or item.prompt_evidence_quote not in evidence_segments
+        for item in response.requirements
+    ):
         raise ValueError("main-pool audit evidence is not verbatim")
     return response
+
+
+def _prompt_evidence_segments(prompt: str) -> tuple[str, ...]:
+    segments: list[str] = []
+    for line in prompt.splitlines():
+        stripped = line.strip()
+        if (
+            not stripped
+            or stripped.startswith("Only return the code")
+            or stripped.startswith("such as a preamble or suffix")
+        ):
+            continue
+        for candidate in re.split(r"(?<=[.!?])\s+", stripped):
+            segment = candidate.strip()
+            if segment and segment not in segments:
+                segments.append(segment)
+    if not segments:
+        raise ValueError("prompt evidence segmentation failed")
+    return tuple(segments)
+
+
+def _response_contract(segments: tuple[str, ...]) -> dict[str, object]:
+    contract = json.loads(_canonical(MAIN_POOL_AUDIT_OUTPUT_SCHEMA))
+    quote = contract["properties"]["requirements"]["items"]["properties"]["prompt_evidence_quote"]
+    quote["enum"] = list(segments)
+    return contract
 
 
 def _policy(config: Mapping[str, Any]) -> StructuredLLMPolicy:
@@ -593,10 +631,15 @@ def run_main_pool_audit(
     decisions: list[dict[str, object]] = []
     errors: list[dict[str, object]] = []
     for packet in selected:
+        evidence_segments = _prompt_evidence_segments(packet["prompt"])
         request_payload = {
             "schema_version": "1.0",
             "packet": packet,
-            "response_contract": MAIN_POOL_AUDIT_OUTPUT_SCHEMA,
+            "prompt_evidence_segments": [
+                {"segment_id": index, "text": segment}
+                for index, segment in enumerate(evidence_segments, 1)
+            ],
+            "response_contract": _response_contract(evidence_segments),
         }
         request_bytes = canonical_request_bytes(request_payload)
         request_sha256 = hashlib.sha256(request_bytes).hexdigest()
@@ -619,7 +662,7 @@ def run_main_pool_audit(
                     "response_text": raw.decode("utf-8"),
                 }
             )
-            response = _response_for_prompt(raw, packet["prompt"])
+            response = _response_for_prompt(raw, packet["prompt"], evidence_segments)
             decision_content = {
                 "schema_version": "1.0",
                 "packet_id": packet["packet_id"],

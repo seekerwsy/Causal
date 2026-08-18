@@ -75,10 +75,16 @@ class FakeTransport:
 
     def complete(self, request_bytes: bytes, policy: StructuredLLMPolicy) -> bytes:
         self.calls.append((request_bytes, policy))
-        return self.response
+        payload = json.loads(self.response)
+        if payload["requirements"][0]["prompt_evidence_quote"] == "__EVIDENCE_SEGMENT__":
+            request = json.loads(request_bytes)
+            payload["requirements"][0]["prompt_evidence_quote"] = request[
+                "prompt_evidence_segments"
+            ][0]["text"]
+        return json.dumps(payload, separators=(",", ":")).encode()
 
 
-def _accepted_response(quote: str = "Write") -> bytes:
+def _accepted_response(quote: str = "__EVIDENCE_SEGMENT__") -> bytes:
     return json.dumps(
         {
             "eligible": True,
@@ -194,6 +200,13 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
         "oracle_label_withheld": True,
         "outcomes_withheld": True,
     }
+    segments = [item["text"] for item in request["prompt_evidence_segments"]]
+    assert (
+        request["response_contract"]["properties"]["requirements"]["items"]["properties"][
+            "prompt_evidence_quote"
+        ]["enum"]
+        == segments
+    )
 
 
 def test_main_pool_audit_records_non_verbatim_response_as_error(tmp_path: Path) -> None:
