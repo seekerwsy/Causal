@@ -67,6 +67,12 @@ calls plus 255 blind extraction calls (51 sources and 204 variants), for a hard 
 external calls. The application limits are 51 protocol instances, 204 arm executions, and 51 task
 blocks. No call was made during this preflight.
 
+Before that budget is released, `five-cwe-randomized-discovery-gate-b-pilot-v1` runs one held-in
+CWE-78 task through the identical scale Gate B implementation. Its hard budget is four intervention
+calls and five blind extraction calls. The pilot output is engineering evidence only and is excluded
+from the main discovery table; the main 51-task run starts from its separately frozen inputs rather
+than importing pilot outcomes.
+
 ## Incident log
 
 - The first targeted test launch reused a repository-local pytest base path without first creating
