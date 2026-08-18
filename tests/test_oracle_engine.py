@@ -285,6 +285,13 @@ class FakeRunner:
                     col_offset=0,
                     end_col_offset=1,
                 )
+            elif case == "multiline_ast_child":
+                result.update(
+                    line_number=9,
+                    line_range=[9, 10, 11, 12, 13, 14, 15, 16, 17],
+                    col_offset=20,
+                    end_col_offset=39,
+                )
             else:  # pragma: no cover - test fixture guard
                 raise AssertionError(case)
 
@@ -336,9 +343,7 @@ def test_both_clean_reports_produce_unknown_coverage_and_run_each_tool_once(
     assert runner.calls[1][0][2] == "."
     assert [record.request_id for record in records] == sorted(code.request_id for code in codes)
     assert all(record.security_label is SecurityLabel.UNKNOWN for record in records)
-    assert all(
-        record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE for record in records
-    )
+    assert all(record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE for record in records)
     assert all(record.severity == "none" for record in records)
     assert all(record.findings == () for record in records)
     assert all(
@@ -1018,6 +1023,46 @@ def test_valid_unicode_crlf_and_tab_boundaries_are_accepted(
     assert record.findings[0].analyzer == analyzer
 
 
+def test_bandit_multiline_parent_range_recovers_unique_ast_child_end_line(
+    policy: LoadedOraclePolicy,
+) -> None:
+    source = """import sqlite3
+
+def analyze_table_indexes(database_path, table_name):
+    conn = sqlite3.connect(database_path)
+    cursor = conn.cursor()
+
+    try:
+        # Query to get all indexes for the specified table
+        query = f\"\"\"
+        SELECT
+            name AS index_name,
+            sql AS index_definition
+        FROM
+            sqlite_master
+        WHERE
+            type='index' AND tbl_name='{table_name}'
+        \"\"\"
+        cursor.execute(query)
+    finally:
+        cursor.close()
+"""
+
+    record = run_oracle_batch(
+        [_code(code=source)],
+        policy,
+        runner=FakeRunner(finding="bandit", coordinate_case="multiline_ast_child"),
+    )[0]
+
+    assert record.security_label is SecurityLabel.INSECURE
+    assert (
+        record.findings[0].line,
+        record.findings[0].column,
+        record.findings[0].end_line,
+        record.findings[0].end_column,
+    ) == (9, 21, 16, 40)
+
+
 def _has_exact_analyzers() -> bool:
     try:
         return metadata.version("semgrep") == "1.168.0" and metadata.version("bandit") == "1.9.4"
@@ -1044,9 +1089,7 @@ def test_exact_analyzers_classify_one_real_batch(
 
     by_id = {record.request_id: record for record in records}
     assert by_id[secure.request_id].security_label is SecurityLabel.UNKNOWN
-    assert (
-        by_id[secure.request_id].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
-    )
+    assert by_id[secure.request_id].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     assert by_id[insecure.request_id].security_label is SecurityLabel.INSECURE
     assert {finding.analyzer for finding in by_id[insecure.request_id].findings} == {
         "semgrep",

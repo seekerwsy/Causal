@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
@@ -1277,6 +1278,133 @@ def _validate_report_coordinates(
         ) from None
 
 
+def _normalize_bandit_end_lines(
+    codes: tuple[_ValidatedCode, ...],
+    report: AnalyzerReport,
+) -> AnalyzerReport:
+    """Recover Bandit's AST end line only when its mixed coordinate tuple proves it.
+
+    Bandit 1.9.4 can report a parent ``line_range`` together with the start/end
+    columns of the child AST node that triggered a plugin. The JSON format does
+    not expose that child's ``end_lineno``. A multiline finding can therefore
+    place a valid child ``end_col_offset`` on the final parent line, where the
+    column is out of bounds. Keep every already valid coordinate unchanged and
+    repair only an invalid Bandit endpoint that maps to one unique AST endpoint
+    inside the reported line envelope.
+    """
+
+    by_file: dict[str, _ValidatedCode] = {item.opaque_file: item for item in codes}
+    source_lines: dict[str, tuple[_SourceLine, ...]] = {}
+    normalized: list[LocatedAnalyzerFinding] = []
+    try:
+        if report.analyzer != "bandit" or len(by_file) != len(codes):
+            raise ValueError(_ENGINE_MESSAGE)
+        for opaque_file, code in by_file.items():
+            lines = _source_lines(code.record.code)
+            if lines is None:
+                raise ValueError(_COORDINATE_MESSAGE)
+            source_lines[opaque_file] = lines
+
+        for finding in report.findings:
+            lines = source_lines.get(finding.opaque_file)
+            code = by_file.get(finding.opaque_file)
+            if lines is None or code is None:
+                raise ValueError(_COORDINATE_MESSAGE)
+            if _finding_matches_source(finding, lines):
+                normalized.append(finding)
+                continue
+
+            record = finding.record
+            start_index = record.column - 1
+            end_index = record.end_column - 1
+            if (
+                not 1 <= record.line <= len(lines)
+                or not record.line <= record.end_line <= len(lines)
+                or start_index < 0
+                or start_index > lines[record.line - 1].byte_length
+                or start_index not in lines[record.line - 1].boundaries
+                or end_index < 0
+            ):
+                normalized.append(finding)
+                continue
+
+            tree = ast.parse(code.record.code, mode="exec")
+            endpoint_lines: set[int] = set()
+            for node in ast.walk(tree):
+                node_line = getattr(node, "lineno", None)
+                node_column = getattr(node, "col_offset", None)
+                node_end_line = getattr(node, "end_lineno", None)
+                node_end_column = getattr(node, "end_col_offset", None)
+                if (
+                    type(node_line) is int
+                    and type(node_column) is int
+                    and type(node_end_line) is int
+                    and type(node_end_column) is int
+                    and node_line == record.line
+                    and node_column == start_index
+                    and node_end_column == end_index
+                    and record.line <= node_end_line <= record.end_line
+                    and node_end_line <= len(lines)
+                    and end_index <= lines[node_end_line - 1].byte_length
+                    and end_index in lines[node_end_line - 1].boundaries
+                ):
+                    endpoint_lines.add(node_end_line)
+
+            if len(endpoint_lines) != 1:
+                normalized.append(finding)
+                continue
+            resolved_end_line = endpoint_lines.pop()
+            payload = record.model_dump(mode="python", round_trip=True, warnings=False)
+            payload["end_line"] = resolved_end_line
+            normalized_record = _TRUSTED_ANALYZER_FINDING_TYPE.model_validate(payload)
+            normalized.append(
+                _TRUSTED_LOCATED_FINDING_TYPE(
+                    opaque_file=finding.opaque_file,
+                    record=normalized_record,
+                )
+            )
+
+        return _TRUSTED_ANALYZER_REPORT_TYPE(
+            analyzer="bandit",
+            provenance=report.provenance,
+            covered_files=report.covered_files,
+            findings=tuple(normalized),
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _safe_error(
+            ErrorCode.ANALYZER_INVALID_OUTPUT,
+            _COORDINATE_MESSAGE,
+        ) from None
+    finally:
+        codes = ()
+        report = None  # type: ignore[assignment]
+        by_file.clear()
+        by_file = {}
+        source_lines.clear()
+        source_lines = {}
+        normalized.clear()
+        normalized = []
+        opaque_file = ""
+        code = None
+        lines = None
+        finding = None
+        record = None
+        start_index = -1
+        end_index = -1
+        tree = None
+        endpoint_lines = set()
+        node = None
+        node_line = None
+        node_column = None
+        node_end_line = None
+        node_end_column = None
+        resolved_end_line = -1
+        payload = {}
+        normalized_record = None
+
+
 def _snapshot_analyzer_report(
     report: AnalyzerReport,
     *,
@@ -1492,6 +1620,7 @@ def _aggregate(
             or bandit_report.covered_files != tuple(sorted(by_file))
         ):
             raise ValueError(_ENGINE_MESSAGE)
+        bandit_report = _normalize_bandit_end_lines(codes, bandit_report)
         _validate_report_coordinates(codes, (semgrep_report, bandit_report))
         located.extend(semgrep_report.findings)
         located.extend(bandit_report.findings)
@@ -1588,6 +1717,7 @@ def _aggregate_code_analyses(
             or bandit_report.covered_files != tuple(sorted(by_file))
         ):
             raise ValueError(_ENGINE_MESSAGE)
+        bandit_report = _normalize_bandit_end_lines(codes, bandit_report)
         _validate_report_coordinates(codes, (semgrep_report, bandit_report))
         located.extend(semgrep_report.findings)
         located.extend(bandit_report.findings)

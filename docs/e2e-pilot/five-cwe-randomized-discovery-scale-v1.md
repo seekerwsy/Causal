@@ -195,3 +195,22 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   config basename and exited after the 90 tests had passed. It did not read secrets or mutate an
   artifact. The corrected scan passes the config directory literally and applies the basename with
   `rg -g`; literal source, script, test, and document paths are scanned separately.
+- The first Qwen main-population Gate C pilot inherited the earlier Gate B CPython 3.12.12
+  environment. Its generation and functional-Judge calls completed, but the Oracle runtime gate
+  rejected the process before either analyzer call. The failed directory is preserved with a
+  zero-call Oracle session; recovery reused both provider responses and ran the Oracle under the
+  already calibrated CPython 3.12.13 runtime and compatibility-tool directory. A later readback
+  mistyped the repair-report basename and changed nothing; listing the output directory located the
+  authenticated report.
+- The first Qwen remaining-phase run completed 51 assignments and failed closed on assignment
+  `assignment_3108799fd624e7403e6521a082a3bb31657ac35cd00d7996822d1ad456e59c67`.
+  Bandit 1.9.4 B608 had emitted the parent f-string line range 9--17 together with a child AST
+  Constant endpoint at line 16, column 39. The adapter had placed that child column on parent line
+  17, where it was out of bounds. The bounded repair changes no rule or label: already valid
+  coordinates remain byte-identical; an invalid Bandit endpoint is recovered only when CPython
+  3.12 AST yields one unique endpoint matching the reported start line, start column, end column,
+  and enclosing line range. Missing or ambiguous matches still fail closed. While diagnosing the
+  preserved unit, one manual path copied from wrapped terminal output omitted one hexadecimal
+  character and one neighboring-regression command named two nonexistent test files; both commands
+  stopped before product execution or artifact mutation. The corrected path was discovered from
+  the error-status relation, and the corrected targeted test set is selected from `rg --files`.
