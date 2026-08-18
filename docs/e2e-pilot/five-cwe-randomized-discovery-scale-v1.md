@@ -303,3 +303,20 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   matrix-commitment, PAG, support, and report artifacts. Every draw sampled 51 task clusters with
   replacement and retained all four arms, yielding exactly 204 rows per replicate; all six real FCI
   runs succeeded.
+
+## Randomized discovery result
+
+Both fixed model strata completed the full 200-replicate task-block bootstrap with zero backend
+failure. Every replicate sampled 51 tasks with replacement and imported all four assigned arms for
+each sampled task occurrence, so every FCI matrix contained 204 rows. Qwen and Phi were estimated
+separately and no row was filtered after assignment.
+
+The Qwen raw/JCI PAG pair contains five edges; the Phi pair contains six. In both strata, the three
+JCI-only changes are the assumption-based orientations from randomized arm context to the three arm
+feature indicators. Neither raw reference PAG contains a possible path from
+`x.operation_specific_security_requirement` to either registered outcome when paths through
+`c.arm` are excluded. Consequently, the frozen top-k set is empty for both models and each stratum
+emits an authenticated `no_stable_hypothesis` record. This is a valid zero-yield discovery result,
+not a bootstrap or G-square execution failure. Under the pre-outcome confirmation boundary, it
+cannot be rescued using confirmation outcomes; the separately preregistered held-out policy ITT
+must still run.
