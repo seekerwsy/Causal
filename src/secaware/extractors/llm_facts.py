@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import hashlib
-from importlib import resources
 import json
 import re
+from collections.abc import Mapping
+from importlib import resources
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
@@ -33,15 +33,13 @@ from secaware.tsg.proposal_validator import (
     validate_proposal,
 )
 
-
 _STAGE = "tsg.extract_prompt.llm_facts"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FACT_RESPONSE_KEYS = frozenset({"facts"})
-_FACT_KEYS = frozenset(
-    {"evidence", "feature_id", "relation_feature_ids", "semantic_role", "state"}
-)
+_FACT_KEYS = frozenset({"evidence", "feature_id", "relation_feature_ids", "semantic_role", "state"})
 _MODEL_EVIDENCE_KEYS = frozenset({"text"})
 LLM_FACTS_CRITERIA_PROJECTION_VERSION = "feature-spec-criteria-v1"
+LLM_FACTS_RESPONSE_NORMALIZATION_VERSION = "absent-empty-relations-default-v1"
 _OUTPUT_SCHEMA = {
     "schema_version": "1.0",
     "top_level_keys": ["facts"],
@@ -84,9 +82,7 @@ def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
 def _semantic_criteria(spec: FeatureSpec) -> dict[str, object]:
     return {
         "positive_indicators": list(spec.deterministic_terms),
-        "reviewed_requirement_clauses": [
-            item.strip() for item in spec.intervention_clauses
-        ],
+        "reviewed_requirement_clauses": [item.strip() for item in spec.intervention_clauses],
         "state_rule": (
             "present only when prompt_text explicitly requests this feature or a "
             "semantically equivalent requirement"
@@ -160,6 +156,7 @@ def llm_facts_policy_sha256(
         "backend": PromptExtractorBackend.LLM_FACTS_V1.value,
         "catalog_sha256": catalog_sha256,
         "criteria_projection_version": LLM_FACTS_CRITERIA_PROJECTION_VERSION,
+        "response_normalization_version": LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
         "max_response_chars": max_response_chars,
         "structured_llm_policy": _structured_policy_payload(policy),
     }
@@ -264,7 +261,17 @@ def _normalized_facts(
     result: list[dict[str, object]] = []
     returned_ids: list[object] = []
     for fact in value:
-        if type(fact) is not dict or frozenset(fact) != _FACT_KEYS:
+        if type(fact) is not dict:
+            raise ValueError("invalid fact response")
+        fact_keys = frozenset(fact)
+        if (
+            fact_keys == _FACT_KEYS - {"relation_feature_ids"}
+            and fact.get("state") == FeatureState.ABSENT.value
+            and fact.get("evidence") == []
+        ):
+            fact = {**fact, "relation_feature_ids": []}
+            fact_keys = frozenset(fact)
+        if fact_keys != _FACT_KEYS:
             raise ValueError("invalid fact response")
         feature_id = fact["feature_id"]
         returned_ids.append(feature_id)
@@ -453,6 +460,7 @@ class LLMFactsExtractor:
 __all__ = [
     "LLM_FACTS_CRITERIA_PROJECTION_VERSION",
     "LLM_FACTS_OUTPUT_SCHEMA_SHA256",
+    "LLM_FACTS_RESPONSE_NORMALIZATION_VERSION",
     "LLM_FACTS_SYSTEM_TEMPLATE",
     "LLM_FACTS_SYSTEM_TEMPLATE_SHA256",
     "LLMFactsExtractor",

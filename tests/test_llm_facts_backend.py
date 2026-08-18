@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
+import secaware.extractors.llm_facts as llm_facts_module
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.llm_facts import (
     LLM_FACTS_CRITERIA_PROJECTION_VERSION,
     LLM_FACTS_OUTPUT_SCHEMA_SHA256,
+    LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
     LLM_FACTS_SYSTEM_TEMPLATE_SHA256,
     LLMFactsExtractor,
     facts_request_payload,
@@ -89,11 +91,7 @@ def _facts(prompt: PromptRecord) -> list[dict[str, object]]:
         facts.append(
             {
                 "feature_id": spec.feature_id,
-                "state": (
-                    FeatureState.PRESENT.value
-                    if present
-                    else FeatureState.ABSENT.value
-                ),
+                "state": (FeatureState.PRESENT.value if present else FeatureState.ABSENT.value),
                 "semantic_role": "feature_state",
                 "evidence": evidence,
                 "relation_feature_ids": [],
@@ -154,18 +152,16 @@ def test_llm_facts_request_contains_only_inert_prompt_and_catalog() -> None:
         "cwe": prompt.cwe,
         "task_family": prompt.task_family,
     }
-    assert (
-        request["criteria_projection_version"]
-        == LLM_FACTS_CRITERIA_PROJECTION_VERSION
-    )
+    assert request["criteria_projection_version"] == LLM_FACTS_CRITERIA_PROJECTION_VERSION
     assert all("semantic_criteria" in item for item in request["allowed_features"])
     assert proposal.backend is PromptExtractorBackend.LLM_FACTS_V1
     assert proposal.raw_response == transport.response.decode("utf-8")
     assert proposal.response_sha256 == hashlib.sha256(transport.response).hexdigest()
     present = next(item for item in proposal.facts if item.state is FeatureState.PRESENT)
-    assert present.evidence[0].text_sha256 == hashlib.sha256(
-        present.evidence[0].text.encode("utf-8")
-    ).hexdigest()
+    assert (
+        present.evidence[0].text_sha256
+        == hashlib.sha256(present.evidence[0].text.encode("utf-8")).hexdigest()
+    )
 
 
 def test_request_payload_is_exact_and_contains_only_catalog_prompt_view() -> None:
@@ -176,8 +172,7 @@ def test_request_payload_is_exact_and_contains_only_catalog_prompt_view() -> Non
         spec.feature_id for spec in PROMPT_FEATURE_CATALOG if feature_is_applicable(spec, prompt)
     }
     assert all(
-        item["allowed_states"] == ["absent", "present"]
-        for item in payload["allowed_features"]
+        item["allowed_states"] == ["absent", "present"] for item in payload["allowed_features"]
     )
     assert all(
         set(item["semantic_criteria"])
@@ -210,6 +205,74 @@ def test_applicable_feature_coverage_and_states_fail_closed() -> None:
     transport = CapturingTransport(json.dumps(wrong_state).encode())
     with pytest.raises(SecAwareError):
         _extractor(transport).extract(prompt, _policy())
+
+
+def test_absent_fact_may_omit_only_an_empty_relation_collection() -> None:
+    prompt = _prompt()
+    response = json.loads(_response(prompt))
+    absent = next(item for item in response["facts"] if item["state"] == "absent")
+    absent.pop("relation_feature_ids")
+
+    proposal = _extractor(CapturingTransport(json.dumps(response).encode())).extract(
+        prompt,
+        _policy(),
+    )
+
+    normalized = next(item for item in proposal.facts if item.feature_id == absent["feature_id"])
+    assert normalized.state is FeatureState.ABSENT
+    assert normalized.evidence == ()
+    assert normalized.relation_feature_ids == ()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["present", "absent_with_evidence", "other_key", "extra_key"],
+)
+def test_missing_empty_relation_default_does_not_relax_other_schema_errors(case: str) -> None:
+    prompt = _prompt()
+    response = json.loads(_response(prompt))
+    absent = next(item for item in response["facts"] if item["state"] == "absent")
+    present = next(item for item in response["facts"] if item["state"] == "present")
+    if case == "present":
+        present.pop("relation_feature_ids")
+    elif case == "absent_with_evidence":
+        absent.pop("relation_feature_ids")
+        absent["evidence"] = [{"text": "user path"}]
+    elif case == "other_key":
+        absent.pop("evidence")
+    else:
+        absent["unexpected"] = []
+
+    with pytest.raises(SecAwareError):
+        _extractor(CapturingTransport(json.dumps(response).encode())).extract(
+            prompt,
+            _policy(),
+        )
+
+
+def test_response_normalization_version_is_bound_to_policy_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert LLM_FACTS_RESPONSE_NORMALIZATION_VERSION == "absent-empty-relations-default-v1"
+    prompt = _prompt()
+    baseline_request = facts_request_payload(prompt, _policy())
+    baseline = llm_facts_policy_sha256(
+        _structured(),
+        PROMPT_FEATURE_CATALOG_SHA256,
+        262_144,
+    )
+    monkeypatch.setattr(
+        llm_facts_module,
+        "LLM_FACTS_RESPONSE_NORMALIZATION_VERSION",
+        "absent-empty-relations-default-v2",
+    )
+    changed = llm_facts_policy_sha256(
+        _structured(),
+        PROMPT_FEATURE_CATALOG_SHA256,
+        262_144,
+    )
+    assert changed != baseline
+    assert facts_request_payload(prompt, _policy()) == baseline_request
 
 
 def test_model_evidence_mechanics_or_non_unique_quote_are_rejected_without_retry() -> None:

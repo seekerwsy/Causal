@@ -17,7 +17,10 @@ import yaml
 
 from secaware.config import load_config, write_resolved_config
 from secaware.extractors.factory import extraction_policy, extractor_for_config
-from secaware.extractors.llm_facts import LLM_FACTS_SYSTEM_TEMPLATE
+from secaware.extractors.llm_facts import (
+    LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
+    LLM_FACTS_SYSTEM_TEMPLATE,
+)
 from secaware.intervention.executors import (
     _OUTPUT_SCHEMA as INTERVENTION_OUTPUT_SCHEMA,
 )
@@ -1256,6 +1259,9 @@ def run_exploratory_gate_b(
                 "intervention_output_schema_sha256": (intervention_policy.output_schema_sha256),
                 "exploratory_request_policy_sha256": exploratory_request_policy_sha256,
                 "extractor_policy_sha256": extractor_policy.policy_sha256,
+                "extractor_response_normalization_version": (
+                    LLM_FACTS_RESPONSE_NORMALIZATION_VERSION
+                ),
                 "placebo_length_policy_sha256": canonical_sha256(
                     {"policy_version": PLACEBO_LENGTH_POLICY_VERSION}
                 ),

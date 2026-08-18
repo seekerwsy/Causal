@@ -101,3 +101,31 @@ than importing pilot outcomes.
   unrelated historical source, tests, and generated-code text containing test or random lookalike
   sequences. It printed paths only and changed nothing. The final gate passes a literal array of
   only this checkpoint's files and directories, without shell wildcards.
+- The first server Gate B pilot command inherited the target machine's base Python 3.14 rather than
+  the frozen project environment and failed while importing YAML before the runner created its
+  output directory. It made zero provider calls. The corrected command pins the existing Python
+  3.12.12 environment, deployment `PYTHONPATH`, working directory, and output path; the nine-call
+  pilot then passed without validation failures.
+- The first full Gate B run preserved 51 source responses and 157 intervention plus 157 variant
+  extractor responses before failing closed on the latest extractor response. That response was
+  semantically complete and used unique verbatim evidence, but omitted `relation_feature_ids` only
+  from eight `absent` facts whose evidence lists were empty. The strict parser formerly required
+  the key even when its only valid value was an empty list. Response normalization v1 now inserts
+  only that one structurally implied empty list; it still rejects the omission for `present` facts,
+  any nonempty evidence, every other missing key, and every extra key. The parser version is bound
+  into the extractor policy digest while the provider request bytes remain unchanged. Recovery must
+  first replay every saved pair with live calls disabled, then may call the provider only for pairs
+  absent from the preserved run.
+- The first local verification command resolved the Windows Store Python shim and returned no test
+  output; the next command used the repository environment but initially imported the main checkout
+  because its editable path preceded the worktree. Setting `PYTHONPATH` explicitly to this
+  worktree's `src` produced the intended bounded result. A readback also caught one test assertion
+  accidentally nested under the new digest test before the successful test run; no experiment or
+  provider path was entered.
+- The first expanded local check assumed Ruff was installed inside the repository environment and
+  referenced a removed `test_exploratory_gate_b.py` name. Ruff was instead available from the
+  offline tool cache, and the active tests are split across scale, placebo, and extractor
+  revalidation files. The corrected bounded run formatted the changed files, passed import/error
+  checks, and passed all 86 selected tests. Ruff's unrestricted rule set also reported four existing
+  broad exception boundaries in the extractor; they are intentional fail-closed translations and
+  were not changed as part of this response-schema repair.
