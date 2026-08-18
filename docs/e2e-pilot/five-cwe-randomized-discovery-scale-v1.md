@@ -248,3 +248,14 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   regression passed 431 tests; formatting and fatal import/error checks passed. Ruff's unrestricted
   current rule set reports existing broad-exception and import-order findings outside this patch,
   so it is recorded as a diagnostic rather than misreported as a clean project-wide lint gate.
+- The first policy-v2 deployment transfer reused the default PowerShell launcher, which the host
+  denied before starting `scp`. The explicit Windows OpenSSH command under `cmd.exe` reached the
+  target but first found that the named transfer directory did not yet exist. After creating that
+  mode-0700 directory, the same 9,392-KiB archive transferred and matched SHA-256
+  `ac2e2d0de39096dc50730e659c2c4137215c10e25aba1d60ffbd02d424f58861`. The first import probe
+  still inherited the prior deployment's `PYTHONPATH`; it exposed the old source path and did not
+  run an experiment. Pinning the new deployment path then loaded commit `55c4552` as intended.
+- A read-only local Qwen sample inspection passed a wildcard to PowerShell's `-LiteralPath`, so no
+  unit was selected and the subsequent null-path reads failed. Enumerating the archive root first
+  located the short-path `units` directory. The completed 204-row assembly then authenticated every
+  unit manifest and reproduced the archived aggregate counts without dropping a row.
