@@ -123,6 +123,58 @@ def test_generation_transport_persists_exact_request_and_response(tmp_path: Path
     assert metadata["transport_error"] is False
 
 
+def test_oracle_analyzer_runner_persists_output_before_adapter_parsing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = (b'{"semgrep":true}', b'{"bandit":true}')
+
+    def run(
+        _argv: object,
+        **_kwargs: object,
+    ) -> gate_c_live.AnalyzerProcessResult:
+        payload = outputs[run.calls]
+        run.calls += 1
+        return gate_c_live.AnalyzerProcessResult(
+            returncode=0,
+            stdout=payload,
+            argv_sha256=str(run.calls) * 64,
+        )
+
+    run.calls = 0
+    monkeypatch.setattr(gate_c_live, "run_analyzer_process", run)
+    recorder = gate_c_live._RecordingAnalyzerRunner()
+    recorder.bind(tmp_path / "oracle")
+
+    recorder(
+        ("semgrep",), cwd=tmp_path, timeout_seconds=1, max_stdout_bytes=100, max_stderr_bytes=100
+    )
+    recorder(
+        ("bandit",), cwd=tmp_path, timeout_seconds=1, max_stdout_bytes=100, max_stderr_bytes=100
+    )
+    recorder.finish()
+
+    assert (tmp_path / "oracle" / "call-001-semgrep" / "stdout.bin").read_bytes() == outputs[0]
+    assert (tmp_path / "oracle" / "call-002-bandit" / "stdout.bin").read_bytes() == outputs[1]
+    assert json.loads((tmp_path / "oracle" / "session.json").read_text())["calls"] == 2
+
+
+def test_oracle_repair_selects_a_failed_remaining_unit_after_completed_pilot() -> None:
+    assert (
+        gate_c_live._repair_assignment_id(
+            {"pilot", "completed"},
+            {"failed_remaining"},
+            "pilot",
+        )
+        == "failed_remaining"
+    )
+
+    with pytest.raises(ValueError, match="completed or failed pilot"):
+        gate_c_live._repair_assignment_id(set(), {"failed_remaining"}, "pilot")
+    with pytest.raises(ValueError, match="exactly one failed"):
+        gate_c_live._repair_assignment_id({"pilot"}, {"failed_a", "failed_b"}, "pilot")
+
+
 def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
     stored_base = {
         "schema_version": "1.0",

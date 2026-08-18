@@ -62,3 +62,16 @@ existing Prompt hash and closed-manifest checks.
   prerequisite. Live and recovery execution now share one profile-decision serializer; preserved
   analyses are strictly reconstructed and validated before reuse. A new immutable recovery must
   produce one decision and exactly one counted security label before the remaining 19 units run.
+- The corrected Qwen recovery produced one secure CWE-338 decision with zero new provider calls;
+  its remaining phase then closed all 20 units with zero errors. Counts are 15 secure, 5 insecure,
+  0 unknown, 12 functional passes, and 12 secure-and-functional outcomes. With one task per CWE,
+  these values validate measurement variation but are not an effect estimate. The complete server
+  run is archived under its original long name and the manifest-verified local copy uses the shorter
+  Windows-safe path `data/e2e-pilot/q7b-gc-20260818-03`.
+- Phi completed its pilot and three remaining units before one CWE-89 placebo unit failed closed on
+  `ANALYZER_INVALID_OUTPUT` from the Bandit adapter. Generation and the one-pass Judge for that unit
+  are preserved. The live Oracle runner previously retained neither analyzer stdout nor a recovery
+  route for a failure after the pilot. Analyzer output is now persisted before parsing with a digest,
+  and Oracle-only recovery accepts exactly one failed unit when the pilot is already complete. This
+  permits diagnosis and repair without regenerating successful or failed code and without repeating
+  Judge calls.

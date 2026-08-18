@@ -9,6 +9,7 @@ import platform
 import shutil
 import socket
 import traceback
+from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -33,7 +34,11 @@ from secaware.oracle.profile_decision import (
     mechanism_trace_sha256,
     validate_python_mechanism_trace,
 )
-from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
+from secaware.oracle.runner import (
+    AnalyzerProcessResult,
+    run_analyzer_process,
+    validate_analyzer_runtime,
+)
 from secaware.pipeline.artifact import sha256_file
 from secaware.pipeline.stages.confirmation_generation import create_confirmation_provider
 from secaware.schema.experiments import AssignmentExecutionStatus, AssignmentRecord
@@ -441,6 +446,90 @@ class _RecordingGenerationTransport:
             self._destination = None
 
 
+class _RecordingAnalyzerRunner:
+    """Persist exact arm-blind analyzer output before adapter parsing."""
+
+    def __init__(self) -> None:
+        self._destination: Path | None = None
+        self._calls = 0
+
+    def bind(self, destination: Path) -> None:
+        if self._destination is not None or self._calls != 0:
+            raise RuntimeError("Oracle analyzer recorder is already bound")
+        destination.mkdir(parents=True, exist_ok=False)
+        self._destination = destination
+
+    def finish(self) -> None:
+        destination = self._destination
+        if destination is None:
+            raise RuntimeError("Oracle analyzer recorder is not bound")
+        _write_json(
+            destination / "session.json",
+            {
+                "schema_version": _SCHEMA_VERSION,
+                "calls": self._calls,
+                "coordinate_blind": True,
+            },
+        )
+        self._destination = None
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        timeout_seconds: float,
+        max_stdout_bytes: int,
+        max_stderr_bytes: int,
+    ) -> AnalyzerProcessResult:
+        destination = self._destination
+        if destination is None:
+            raise RuntimeError("Oracle analyzer recorder is not bound")
+        self._calls += 1
+        executable = Path(argv[0]).name.lower() if argv else ""
+        analyzer = (
+            "semgrep"
+            if "semgrep" in executable
+            else "bandit"
+            if "bandit" in executable
+            else "unknown"
+        )
+        call_dir = destination / f"call-{self._calls:03d}-{analyzer}"
+        call_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            result = run_analyzer_process(
+                argv,
+                cwd=cwd,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+            )
+            stdout_path = call_dir / "stdout.bin"
+            stdout_path.write_bytes(result.stdout)
+            _write_json(
+                call_dir / "result.json",
+                {
+                    "schema_version": _SCHEMA_VERSION,
+                    "analyzer": analyzer,
+                    "returncode": result.returncode,
+                    "argv_sha256": result.argv_sha256,
+                    "stdout_sha256": hashlib.sha256(result.stdout).hexdigest(),
+                    "stdout_bytes": len(result.stdout),
+                },
+            )
+            return result
+        except BaseException as error:
+            _write_json(
+                call_dir / "runner-error.json",
+                {
+                    "schema_version": _SCHEMA_VERSION,
+                    "analyzer": analyzer,
+                    "error_type": type(error).__name__,
+                },
+            )
+            raise
+
+
 def _safe_error(error: BaseException, stage: str) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
@@ -534,6 +623,15 @@ def _completed_assignments(output_dir: Path) -> tuple[set[str], set[str]]:
         else:
             raise ValueError("Gate C live unit status failed validation")
     return completed, failed
+
+
+def _repair_assignment_id(completed: set[str], failed: set[str], pilot_id: str) -> str:
+    if len(failed) != 1:
+        raise ValueError("Gate C Oracle repair requires exactly one failed unit")
+    repair_id = next(iter(failed))
+    if repair_id != pilot_id and pilot_id not in completed:
+        raise ValueError("Gate C Oracle repair requires a completed or failed pilot")
+    return repair_id
 
 
 def _tree_snapshot(root: Path) -> tuple[dict[str, str], ...]:
@@ -887,17 +985,22 @@ def run_gate_c_live_canary(
             analyses: list[OracleCodeAnalysis] = []
             stage = "oracle"
             if code is not None:
-                analyses = run_oracle_code_batch(
-                    (OracleCodeInput.from_canonical(code),),
-                    policy,
-                    semgrep_executable=app_config.oracle.semgrep_executable,
-                    bandit_executable=app_config.oracle.bandit_executable,
-                    timeout_seconds=app_config.oracle.timeout_seconds,
-                    max_stdout_bytes=app_config.oracle.max_stdout_bytes,
-                    max_stderr_bytes=app_config.oracle.max_stderr_bytes,
-                    runner=run_analyzer_process,
-                    runtime_validator=validate_analyzer_runtime,
-                )
+                analyzer_recorder = _RecordingAnalyzerRunner()
+                analyzer_recorder.bind(unit_dir / "oracle-analyzer-transport")
+                try:
+                    analyses = run_oracle_code_batch(
+                        (OracleCodeInput.from_canonical(code),),
+                        policy,
+                        semgrep_executable=app_config.oracle.semgrep_executable,
+                        bandit_executable=app_config.oracle.bandit_executable,
+                        timeout_seconds=app_config.oracle.timeout_seconds,
+                        max_stdout_bytes=app_config.oracle.max_stdout_bytes,
+                        max_stderr_bytes=app_config.oracle.max_stderr_bytes,
+                        runner=analyzer_recorder,
+                        runtime_validator=validate_analyzer_runtime,
+                    )
+                finally:
+                    analyzer_recorder.finish()
                 _write_json(unit_dir / "oracle-analysis.json", analyses[0])
                 if oracle_decision_mode == _ORACLE_PROFILE_MODE:
                     coverage_row = coverage_by_task[task_id]
@@ -979,7 +1082,7 @@ def recover_gate_c_live_oracle(
     output_dir: Path,
     command_argv: tuple[str, ...],
 ) -> dict[str, object]:
-    """Copy a failed pilot and rerun only its missing Oracle analysis."""
+    """Copy one failed live unit and rerun only its missing Oracle analysis."""
 
     repo_root = repo_root.resolve()
     live_config_path = live_config_path.resolve()
@@ -1015,9 +1118,8 @@ def recover_gate_c_live_oracle(
     }:
         raise ValueError("Gate C Oracle repair input provenance failed validation")
     completed, failed = _completed_assignments(source_dir)
-    if completed or failed != {pilot_id}:
-        raise ValueError("Gate C Oracle repair requires one failed pilot unit")
-    source_unit = source_dir / "units" / pilot_id
+    repair_id = _repair_assignment_id(completed, failed, pilot_id)
+    source_unit = source_dir / "units" / repair_id
     status = _read_json(source_unit / "status.json")
     error = _read_json(source_unit / "error.json")
     if (
@@ -1064,15 +1166,15 @@ def recover_gate_c_live_oracle(
     )
     if (
         len(codes) != 1
-        or codes[0].assignment_id != pilot_id
+        or codes[0].assignment_id != repair_id
         or len(executions) != 1
-        or executions[0].get("assignment_id") != pilot_id
+        or executions[0].get("assignment_id") != repair_id
         or executions[0].get("status") != AssignmentExecutionStatus.GENERATED.value
         or executions[0].get("request_id") != codes[0].request_id
         or len(outcomes) != 1
-        or outcomes[0].get("assignment_id") != pilot_id
+        or outcomes[0].get("assignment_id") != repair_id
         or len(judge_passes) != 1
-        or judge_passes[0].get("assignment_id") != pilot_id
+        or judge_passes[0].get("assignment_id") != repair_id
     ):
         raise ValueError("Gate C Oracle repair preserved records failed validation")
     preserved_analysis: OracleCodeAnalysis | None = None
@@ -1089,7 +1191,7 @@ def recover_gate_c_live_oracle(
             or preserved_binding
             != {
                 "schema_version": _SCHEMA_VERSION,
-                "assignment_id": pilot_id,
+                "assignment_id": repair_id,
                 "request_id": codes[0].request_id,
                 "code_id": codes[0].code_id,
                 "binding_performed_after_blind_analysis": True,
@@ -1112,21 +1214,25 @@ def recover_gate_c_live_oracle(
     shutil.copytree(source_dir, output_dir, copy_function=shutil.copy2)
     if _tree_snapshot(output_dir) != source_snapshot:
         raise ValueError("Gate C Oracle repair copy failed validation")
-    unit_dir = output_dir / "units" / pilot_id
+    unit_dir = output_dir / "units" / repair_id
     (unit_dir / "status.json").replace(unit_dir / "status-before-recovery.json")
     (unit_dir / "artifact-manifest.json").replace(
         unit_dir / "artifact-manifest-before-recovery.json"
     )
-    phase_dir = output_dir / "phases" / "phase-001b-oracle-repair"
+    repair_tag = repair_id.removeprefix("assignment_")[:12]
+    phase_dir = output_dir / "phases" / f"phase-oracle-repair-{repair_tag}"
     phase_dir.mkdir(parents=True, exist_ok=False)
     _write_json(
         phase_dir / "selection.json",
-        {"schema_version": _SCHEMA_VERSION, "assignment_ids": [pilot_id]},
+        {"schema_version": _SCHEMA_VERSION, "assignment_ids": [repair_id]},
     )
-    _write_json(output_dir / "command-repair-oracle.json", {"argv": list(command_argv)})
-    _write_json(output_dir / "environment-repair-oracle.json", _environment())
     _write_json(
-        output_dir / "recovery-source-provenance.json",
+        output_dir / f"command-repair-oracle-{repair_tag}.json",
+        {"argv": list(command_argv)},
+    )
+    _write_json(output_dir / f"environment-repair-oracle-{repair_tag}.json", _environment())
+    _write_json(
+        output_dir / f"recovery-source-provenance-{repair_tag}.json",
         {
             "schema_version": _SCHEMA_VERSION,
             "source_directory": str(source_dir),
@@ -1136,23 +1242,31 @@ def recover_gate_c_live_oracle(
             "new_functional_judge_provider_attempts": 0,
         },
     )
-    write_resolved_config(app_config, output_dir / "effective-app-config-repair.yaml")
+    write_resolved_config(
+        app_config,
+        output_dir / f"effective-app-config-repair-{repair_tag}.yaml",
+    )
     failure: BaseException | None = None
     analysis = preserved_analysis
     new_oracle_executions = 0 if preserved_analysis is not None else 1
     try:
         if analysis is None:
-            analyses = run_oracle_code_batch(
-                (OracleCodeInput.from_canonical(codes[0]),),
-                policy,
-                semgrep_executable=app_config.oracle.semgrep_executable,
-                bandit_executable=app_config.oracle.bandit_executable,
-                timeout_seconds=app_config.oracle.timeout_seconds,
-                max_stdout_bytes=app_config.oracle.max_stdout_bytes,
-                max_stderr_bytes=app_config.oracle.max_stderr_bytes,
-                runner=run_analyzer_process,
-                runtime_validator=validate_analyzer_runtime,
-            )
+            analyzer_recorder = _RecordingAnalyzerRunner()
+            analyzer_recorder.bind(unit_dir / "oracle-analyzer-transport-recovery")
+            try:
+                analyses = run_oracle_code_batch(
+                    (OracleCodeInput.from_canonical(codes[0]),),
+                    policy,
+                    semgrep_executable=app_config.oracle.semgrep_executable,
+                    bandit_executable=app_config.oracle.bandit_executable,
+                    timeout_seconds=app_config.oracle.timeout_seconds,
+                    max_stdout_bytes=app_config.oracle.max_stdout_bytes,
+                    max_stderr_bytes=app_config.oracle.max_stderr_bytes,
+                    runner=analyzer_recorder,
+                    runtime_validator=validate_analyzer_runtime,
+                )
+            finally:
+                analyzer_recorder.finish()
             if len(analyses) != 1:
                 raise RuntimeError("Gate C Oracle repair returned an invalid analysis count")
             analysis = analyses[0]
@@ -1169,7 +1283,7 @@ def recover_gate_c_live_oracle(
                 unit_dir / "oracle-binding.json",
                 {
                     "schema_version": _SCHEMA_VERSION,
-                    "assignment_id": pilot_id,
+                    "assignment_id": repair_id,
                     "request_id": analysis.request_id,
                     "code_id": analysis.code_id,
                     "binding_performed_after_blind_analysis": True,
@@ -1199,7 +1313,7 @@ def recover_gate_c_live_oracle(
         unit_dir / "status.json",
         {
             "schema_version": _SCHEMA_VERSION,
-            "assignment_id": pilot_id,
+            "assignment_id": repair_id,
             "status": "ERROR" if failure is not None else "COMPLETE",
             **({"failed_stage": "oracle_repair"} if failure is not None else {}),
             "generated": 1,
@@ -1222,7 +1336,7 @@ def recover_gate_c_live_oracle(
     summary["new_functional_judge_calls"] = 0
     summary["new_oracle_executions"] = new_oracle_executions
     _write_json(phase_dir / "report.json", summary)
-    _write_json(output_dir / "report-repair-oracle.json", summary)
+    _write_json(output_dir / f"report-repair-oracle-{repair_tag}.json", summary)
     if failure is not None:
         raise RuntimeError(
             "Gate C Oracle repair failed; closed recovery artifacts were saved"
