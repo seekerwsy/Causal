@@ -1,11 +1,11 @@
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 import hashlib
 import importlib.metadata
 import inspect
 import json
 import os
 import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from secaware.config import OpenAICompatibleConfig
@@ -19,7 +19,6 @@ from secaware.schema.generation import (
     revalidate_generation_request_envelope,
     sha256_text,
 )
-
 
 _STAGE = "generation"
 _PRODUCER = "openai_compatible"
@@ -228,7 +227,7 @@ def _decode_python_source_envelope(content: str) -> tuple[str, str]:
         if lines[0].lower() not in {"```python", "```py"} or len(lines) < 3:
             raise ValueError("invalid Python source envelope")
         closing_indexes = [
-            index for index, line in enumerate(lines[1:], start=1) if line == "```"
+            index for index, line in enumerate(lines[1:], start=1) if line.rstrip(" \t") == "```"
         ]
         if len(closing_indexes) != 1 or any(
             line.startswith("```")
@@ -334,14 +333,14 @@ def _wire_parameters(parameters: Mapping[str, JSONValue]) -> dict[str, Any]:
 
 class OpenAICompatibleProvider:
     __slots__ = (
+        "_attempt_recorder",
         "_client",
         "_endpoint_sha256",
         "_initial_backoff_seconds",
         "_max_attempts",
         "_max_backoff_seconds",
-        "_attempt_recorder",
-        "_sleeper",
         "_runtime_fingerprint_sha256",
+        "_sleeper",
     )
 
     def __init__(
@@ -687,6 +686,44 @@ class OpenAICompatibleProvider:
             system_template = ""
 
 
+class _ReplayCompletions:
+    def __init__(self, response: dict[str, Any]) -> None:
+        self._response = response
+        self._used = False
+
+    def create(self, **_payload: object) -> dict[str, Any]:
+        if self._used:
+            raise RuntimeError("persisted generation response was replayed more than once")
+        self._used = True
+        return self._response
+
+
+class _ReplayClient:
+    def __init__(self, response: dict[str, Any]) -> None:
+        completions = _ReplayCompletions(response)
+        self.chat = type("ReplayChat", (), {"completions": completions})()
+
+
+def create_replay_openai_compatible_provider(
+    config: OpenAICompatibleConfig,
+    response: dict[str, Any],
+) -> OpenAICompatibleProvider:
+    """Create a no-network provider over one persisted raw Chat Completions response."""
+
+    trusted = _trusted_config(config)
+    if type(response) is not dict:
+        raise _provider_error(ErrorCode.CONTRACT, "persisted provider response is unavailable")
+    snapshot = json.loads(json.dumps(response, ensure_ascii=False, allow_nan=False))
+    if type(snapshot) is not dict:
+        raise _provider_error(ErrorCode.CONTRACT, "persisted provider response is unavailable")
+    return OpenAICompatibleProvider(
+        trusted,
+        client=_ReplayClient(snapshot),
+        sleeper=lambda _seconds: None,
+        runtime_fingerprint_sha256=openai_provider_runtime_fingerprint(),
+    )
+
+
 def openai_provider_runtime_payload() -> dict[str, str]:
     try:
         sdk_version = importlib.metadata.version("openai")
@@ -844,6 +881,7 @@ __all__ = [
     "OpenAICompatibleGenerationResult",
     "OpenAICompatibleProvider",
     "create_openai_compatible_provider",
+    "create_replay_openai_compatible_provider",
     "openai_provider_runtime_fingerprint",
     "openai_provider_runtime_payload",
 ]

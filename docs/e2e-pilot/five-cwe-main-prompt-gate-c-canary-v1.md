@@ -91,3 +91,13 @@ existing Prompt hash and closed-manifest checks.
   records the functional outcome as `unknown`, then permits blind Oracle execution. This conservative
   outcome contributes zero to secure-and-functional ITT while remaining separately countable as a
   Judge protocol failure.
+- One Phi response contained a complete Python fence whose closing marker had a trailing space,
+  followed by explanatory text. The provider already permits one fenced Python block plus trailing
+  prose, but rejected harmless trailing whitespace on the closing marker. The bounded decoder now
+  strips only trailing spaces and tabs from that marker. Recovery replays the exact persisted Chat
+  Completions object through the same provider and confirmation adapters, performs no new generation
+  call, and then executes the still-pending single Judge pass and Oracle stages.
+- A local regression command initially included the broad confirmation-generation stage file and
+  was stopped after it continued beyond the intended targeted-validation window. It made no provider
+  calls or experiment changes. The narrowed provider and Gate C set completed with 176 passing tests;
+  no full-suite result is claimed.

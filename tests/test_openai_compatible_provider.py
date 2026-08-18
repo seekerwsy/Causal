@@ -1,10 +1,10 @@
-from dataclasses import FrozenInstanceError
 import inspect
 import json
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
 import sys
 import traceback
+from dataclasses import FrozenInstanceError
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +16,7 @@ from secaware.generation.openai_compatible_provider import (
     OpenAICompatibleGenerationResult,
     OpenAICompatibleProvider,
     create_openai_compatible_provider,
+    create_replay_openai_compatible_provider,
 )
 from secaware.generation.request_planner import plan_observed_requests
 from secaware.io.jsonl import write_jsonl
@@ -29,7 +30,6 @@ from secaware.schema.generation import (
     sha256_text,
 )
 from secaware.schema.records import PromptRecord
-
 
 _BASE_URL = "https://provider.invalid/v1"
 _ENV_NAME = "SECAWARE_TEST_OPENAI_KEY"
@@ -638,6 +638,7 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_decodes_code(
         (f"```python\n{_RAW_CODE}\n```", _RAW_CODE),
         (f"```py\n{_RAW_CODE}\n```", _RAW_CODE),
         (f"```python\n{_RAW_CODE}\n```\nGenerated implementation.", _RAW_CODE),
+        (f"```python\n{_RAW_CODE}\n``` \nGenerated implementation.", _RAW_CODE),
     ],
 )
 def test_provider_accepts_only_raw_or_single_python_source_envelope(
@@ -661,6 +662,26 @@ def test_provider_accepts_only_raw_or_single_python_source_envelope(
         else "raw"
     )
     assert result.provenance.source_batch_id == f"{envelope}:{sha256_text(content)}"
+
+
+def test_replay_provider_parses_one_persisted_response_without_network() -> None:
+    response = {
+        "model": "org/model-api",
+        "choices": [
+            {
+                "message": {"content": f"```python\n{_RAW_CODE}\n``` "},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 13, "total_tokens": 24},
+    }
+    provider = create_replay_openai_compatible_provider(_config(), response)
+
+    result = provider.generate(_request(), system_template=_SYSTEM)
+
+    assert result.code == _RAW_CODE
+    assert len(result.attempts) == 1
+    assert result.attempts[0].outcome == "success"
 
 
 @pytest.mark.parametrize(
