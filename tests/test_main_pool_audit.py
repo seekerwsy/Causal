@@ -197,6 +197,12 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
         for line in (tmp_path / "live" / "decisions.jsonl").read_text().splitlines()
     ]
     assert all(item["evidence_quote_expansions"] == 1 for item in decisions)
+    progress = [
+        json.loads(line)
+        for line in (tmp_path / "live" / "progress.jsonl").read_text().splitlines()
+    ]
+    assert len(progress) == 5
+    assert progress[-1]["remaining"] == 0
     request = json.loads(transport.calls[0][0])
     assert request["packet"]["blindness"] == {
         "generated_code_withheld": True,

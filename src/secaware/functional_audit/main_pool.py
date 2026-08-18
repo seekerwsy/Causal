@@ -215,6 +215,11 @@ def _write_jsonl(path: Path, values: Sequence[object]) -> None:
             handle.write(_canonical(value).decode("utf-8") + "\n")
 
 
+def _append_jsonl(handle: Any, value: object) -> None:
+    handle.write(_canonical(value).decode("utf-8") + "\n")
+    handle.flush()
+
+
 def _environment() -> dict[str, object]:
     return {
         "captured_at_utc": datetime.now(UTC).isoformat(),
@@ -643,66 +648,77 @@ def run_main_pool_audit(
     responses: list[dict[str, object]] = []
     decisions: list[dict[str, object]] = []
     errors: list[dict[str, object]] = []
-    for packet in selected:
-        evidence_segments = _prompt_evidence_segments(packet["prompt"])
-        request_payload = {
-            "schema_version": "1.0",
-            "packet": packet,
-            "prompt_evidence_segments": [
-                {"segment_id": index, "text": segment}
-                for index, segment in enumerate(evidence_segments, 1)
-            ],
-            "response_contract": _response_contract(evidence_segments),
-        }
-        request_bytes = canonical_request_bytes(request_payload)
-        request_sha256 = hashlib.sha256(request_bytes).hexdigest()
-        requests.append(
-            {
+    output_handles = {
+        name: (run_dir / name).open("x", encoding="utf-8", newline="\n")
+        for name in (
+            "requests.jsonl",
+            "responses.jsonl",
+            "decisions.jsonl",
+            "errors.jsonl",
+            "progress.jsonl",
+        )
+    }
+    try:
+        for sequence, packet in enumerate(selected, 1):
+            evidence_segments = _prompt_evidence_segments(packet["prompt"])
+            request_payload = {
+                "schema_version": "1.0",
+                "packet": packet,
+                "prompt_evidence_segments": [
+                    {"segment_id": index, "text": segment}
+                    for index, segment in enumerate(evidence_segments, 1)
+                ],
+                "response_contract": _response_contract(evidence_segments),
+            }
+            request_bytes = canonical_request_bytes(request_payload)
+            request_sha256 = hashlib.sha256(request_bytes).hexdigest()
+            request_record = {
                 "packet_id": packet["packet_id"],
                 "request_sha256": request_sha256,
                 "request": request_payload,
             }
-        )
-        raw: bytes | None = None
-        response_sha256: str | None = None
-        try:
-            raw = transport.complete(request_bytes, policy)
-            response_sha256 = hashlib.sha256(raw).hexdigest()
-            responses.append(
-                {
+            requests.append(request_record)
+            _append_jsonl(output_handles["requests.jsonl"], request_record)
+            raw: bytes | None = None
+            response_sha256: str | None = None
+            try:
+                raw = transport.complete(request_bytes, policy)
+                response_sha256 = hashlib.sha256(raw).hexdigest()
+                response_record = {
                     "packet_id": packet["packet_id"],
                     "response_sha256": response_sha256,
                     "response_text": raw.decode("utf-8"),
                 }
-            )
-            response, evidence_quote_expansions = _response_for_prompt(
-                raw,
-                packet["prompt"],
-                evidence_segments,
-            )
-            decision_content = {
-                "schema_version": "1.0",
-                "packet_id": packet["packet_id"],
-                "record_id": packet["record_id"],
-                "task_cluster_id": packet["task_cluster_id"],
-                "cwe": packet["cwe"],
-                "split": packet["split"],
-                "rank_within_cwe_split": packet["rank_within_cwe_split"],
-                "request_sha256": request_sha256,
-                "response_sha256": response_sha256,
-                "provider_policy_sha256": policy_sha256,
-                "evidence_quote_expansions": evidence_quote_expansions,
-                "audit": response.model_dump(mode="json"),
-            }
-            decisions.append(
-                {
+                responses.append(response_record)
+                _append_jsonl(output_handles["responses.jsonl"], response_record)
+                response, evidence_quote_expansions = _response_for_prompt(
+                    raw,
+                    packet["prompt"],
+                    evidence_segments,
+                )
+                decision_content = {
+                    "schema_version": "1.0",
+                    "packet_id": packet["packet_id"],
+                    "record_id": packet["record_id"],
+                    "task_cluster_id": packet["task_cluster_id"],
+                    "cwe": packet["cwe"],
+                    "split": packet["split"],
+                    "rank_within_cwe_split": packet["rank_within_cwe_split"],
+                    "request_sha256": request_sha256,
+                    "response_sha256": response_sha256,
+                    "provider_policy_sha256": policy_sha256,
+                    "evidence_quote_expansions": evidence_quote_expansions,
+                    "audit": response.model_dump(mode="json"),
+                }
+                decision_record = {
                     **decision_content,
                     "decision_id": "main_pool_audit_decision_" + _sha(decision_content),
                 }
-            )
-        except Exception as error:
-            errors.append(
-                {
+                decisions.append(decision_record)
+                _append_jsonl(output_handles["decisions.jsonl"], decision_record)
+                unit_status = "completed"
+            except Exception as error:
+                error_record = {
                     "schema_version": "1.0",
                     "packet_id": packet["packet_id"],
                     "record_id": packet["record_id"],
@@ -712,11 +728,27 @@ def run_main_pool_audit(
                     "error_detail": str(error)[:4000],
                     "response_sha256": response_sha256,
                 }
+                errors.append(error_record)
+                _append_jsonl(output_handles["errors.jsonl"], error_record)
+                unit_status = "error"
+            _append_jsonl(
+                output_handles["progress.jsonl"],
+                {
+                    "schema_version": "1.0",
+                    "sequence": sequence,
+                    "packet_id": packet["packet_id"],
+                    "record_id": packet["record_id"],
+                    "cwe": packet["cwe"],
+                    "split": packet["split"],
+                    "status": unit_status,
+                    "completed": len(decisions),
+                    "errors": len(errors),
+                    "remaining": len(selected) - sequence,
+                },
             )
-    _write_jsonl(run_dir / "requests.jsonl", requests)
-    _write_jsonl(run_dir / "responses.jsonl", responses)
-    _write_jsonl(run_dir / "decisions.jsonl", decisions)
-    _write_jsonl(run_dir / "errors.jsonl", errors)
+    finally:
+        for handle in output_handles.values():
+            handle.close()
     eligible_counts: defaultdict[str, Counter[str]] = defaultdict(Counter)
     for decision in decisions:
         if decision["audit"]["eligible"]:
