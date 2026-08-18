@@ -8,6 +8,7 @@ from secaware.functional_audit.main_pool import (
     MAIN_CWE_ORDER,
     MAIN_POOL_AUDIT_OUTPUT_SCHEMA,
     MainPoolAuditResponse,
+    _response_for_prompt,
     prepare_main_pool_audit,
     run_main_pool_audit,
 )
@@ -211,6 +212,7 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
         for line in (tmp_path / "live" / "decisions.jsonl").read_text().splitlines()
     ]
     assert all(item["evidence_quote_expansions"] == 1 for item in decisions)
+    assert all(item["semantic_field_normalizations"] == 0 for item in decisions)
     progress = [
         json.loads(line) for line in (tmp_path / "live" / "progress.jsonl").read_text().splitlines()
     ]
@@ -290,6 +292,23 @@ def test_audit_response_rejects_inconsistent_eligibility() -> None:
         pass
     else:
         raise AssertionError("inconsistent eligibility was accepted")
+
+
+def test_response_parser_deterministically_recomputes_eligibility_fields() -> None:
+    payload = json.loads(_accepted_response("Write."))
+    payload["eligible"] = False
+    payload["reason_code"] = "outside_profile"
+
+    response, expansions, normalizations = _response_for_prompt(
+        json.dumps(payload).encode(),
+        "Write.",
+        ("Write.",),
+    )
+
+    assert response.eligible is True
+    assert response.reason_code.value == "accepted"
+    assert expansions == 0
+    assert normalizations == 2
 
 
 def test_audit_response_accepts_semantically_valid_noncanonical_order() -> None:

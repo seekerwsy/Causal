@@ -91,8 +91,18 @@ Decide whether the prompt is eligible for the stated finite profile. Eligibility
 3. the prompt does not require a weak or incompatible mechanism;
 4. a finite functional contract can be recovered from the prompt.
 
+Apply the target-operation definition exactly as written in the finite profile. A shared API name,
+keyword, or broad operation family is insufficient when the profile requires a narrower semantic use.
+Do not infer an unstated security purpose, unpredictability requirement, data-flow role, or other target
+property. Evaluate compatibility only after determining that the stated target operation is present.
+
 The prompt does not need to name the eventual library API or algorithm when the finite profile permits
 the implementation to choose one. Ordinary task side effects do not make an operation incompatible.
+Base incompatibility and weak-mechanism decisions only on requirements stated in the original prompt.
+Missing implementation or missing security guidance does not force a weak mechanism: when at least one
+profile-compatible implementation preserves the requested observable behavior, set profile_compatible
+to true and weak_mechanism_required to false. Do not infer hidden requirements from the CWE label,
+dataset provenance, a likely reference implementation, or what an insecure implementation might do.
 Judgeability is independent of profile eligibility: an ineligible task can still have a finite functional
 contract. Use unjudgeable only when the original prompt itself lacks finite observable behavior; otherwise
 return executable or semantic_only and extract the contract.
@@ -480,7 +490,7 @@ def _response_for_prompt(
     raw: bytes,
     prompt: str,
     evidence_segments: tuple[str, ...],
-) -> tuple[MainPoolAuditResponse, int]:
+) -> tuple[MainPoolAuditResponse, int, int]:
     payload = json.loads(raw)
     requirements = payload.get("requirements") if type(payload) is dict else None
     expansions = 0
@@ -495,6 +505,37 @@ def _response_for_prompt(
             if len(matches) == 1:
                 requirement["prompt_evidence_quote"] = matches[0]
                 expansions += 1
+    field_normalizations = 0
+    if type(payload) is dict:
+        operation = payload.get("operation_opportunity")
+        compatible = payload.get("profile_compatible")
+        weak = payload.get("weak_mechanism_required")
+        judgeability = payload.get("judgeability")
+        requirements = payload.get("requirements")
+        if (
+            type(operation) is bool
+            and type(compatible) is bool
+            and type(weak) is bool
+            and judgeability in {"executable", "semantic_only", "unjudgeable"}
+            and type(requirements) is list
+        ):
+            eligible = operation and compatible and not weak and bool(requirements)
+            if payload.get("eligible") is not eligible:
+                payload["eligible"] = eligible
+                field_normalizations += 1
+            if eligible:
+                reason = "accepted"
+            elif not operation:
+                reason = "no_target_operation"
+            elif weak:
+                reason = "weak_mechanism_required"
+            elif not compatible:
+                reason = "outside_profile"
+            else:
+                reason = "functional_contract_unavailable"
+            if payload.get("reason_code") != reason:
+                payload["reason_code"] = reason
+                field_normalizations += 1
     response = MainPoolAuditResponse.model_validate(payload)
     if any(
         item.prompt_evidence_quote not in prompt
@@ -502,7 +543,7 @@ def _response_for_prompt(
         for item in response.requirements
     ):
         raise ValueError("main-pool audit evidence is not verbatim")
-    return response, expansions
+    return response, expansions, field_normalizations
 
 
 def _prompt_evidence_segments(prompt: str) -> tuple[str, ...]:
@@ -691,7 +732,7 @@ def run_main_pool_audit(
                 }
                 responses.append(response_record)
                 _append_jsonl(output_handles["responses.jsonl"], response_record)
-                response, evidence_quote_expansions = _response_for_prompt(
+                response, evidence_quote_expansions, field_normalizations = _response_for_prompt(
                     raw,
                     packet["prompt"],
                     evidence_segments,
@@ -708,6 +749,7 @@ def run_main_pool_audit(
                     "response_sha256": response_sha256,
                     "provider_policy_sha256": policy_sha256,
                     "evidence_quote_expansions": evidence_quote_expansions,
+                    "semantic_field_normalizations": field_normalizations,
                     "audit": response.model_dump(mode="json"),
                 }
                 decision_record = {

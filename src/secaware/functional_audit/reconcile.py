@@ -139,11 +139,12 @@ def reconcile_main_pool_audit(
         raw = response_row["response_text"].encode("utf-8")
         response: MainPoolAuditResponse | None = None
         expansions = 0
+        field_normalizations = 0
         adjudication = "retained_response_revalidated"
         override_sha256: str | None = None
         error_type: str | None = None
         try:
-            response, expansions = _response_for_prompt(
+            response, expansions, field_normalizations = _response_for_prompt(
                 raw,
                 packet["prompt"],
                 _prompt_evidence_segments(packet["prompt"]),
@@ -195,6 +196,7 @@ def reconcile_main_pool_audit(
             "source_run_dir": str(run_dir),
             "adjudication": adjudication,
             "evidence_quote_expansions": expansions,
+            "semantic_field_normalizations": field_normalizations,
             "override_sha256": override_sha256,
             "audit": response.model_dump(mode="json"),
         }
