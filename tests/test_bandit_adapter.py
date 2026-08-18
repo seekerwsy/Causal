@@ -8,7 +8,6 @@ from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.bandit_adapter import bandit_argv, parse_bandit_report
 from secaware.oracle.policy import BanditFindingConstraint
 
-
 _POLICY_SHA256 = "b" * 64
 _CONSTRAINTS = (
     BanditFindingConstraint(
@@ -177,6 +176,26 @@ def test_bandit_exit_one_with_findings_is_success() -> None:
     rendered = repr(report) + repr(located) + repr(located.record)
     assert "private source snippet" not in rendered
     assert "subprocess call uses untrusted input" not in located.message
+
+
+def test_bandit_accepts_issue_line_inside_a_multiline_call_range() -> None:
+    result = _bandit_result()
+    result.update(
+        line_number=10,
+        line_range=[7, 8, 9, 10, 11],
+        col_offset=11,
+        end_col_offset=5,
+    )
+
+    report = _parse(_bandit_json(results=[result]))
+
+    located = report.findings[0]
+    assert (located.line, located.column, located.end_line, located.end_column) == (
+        10,
+        12,
+        11,
+        6,
+    )
 
 
 def test_bandit_discards_private_b105_literal_and_report_message() -> None:
@@ -387,6 +406,7 @@ def test_bandit_rejects_finding_for_foreign_file() -> None:
         ("line_number", True),
         ("line_range", []),
         ("line_range", [8, 7]),
+        ("line_range", [6, 8]),
         ("col_offset", -1),
         ("end_col_offset", -1),
         ("issue_text", "m" * 4097),

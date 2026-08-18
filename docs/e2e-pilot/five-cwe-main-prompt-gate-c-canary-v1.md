@@ -75,3 +75,9 @@ existing Prompt hash and closed-manifest checks.
   and Oracle-only recovery accepts exactly one failed unit when the pilot is already complete. This
   permits diagnosis and repair without regenerating successful or failed code and without repeating
   Judge calls.
+- The recorded Bandit 1.9.4 output made the rejection deterministic: B106 reported the password
+  argument on line 10 while its legitimate multi-line call range was `[7, 8, 9, 10, 11]`. The
+  adapter had incorrectly required the reported issue line to be the first range element. It now
+  requires the issue line to occur inside a strictly increasing range, retains that issue line as
+  the start coordinate, and retains the final range line as the end coordinate. All authenticated
+  rule, CWE, severity, confidence, filename, return-code, and source-boundary checks remain active.
