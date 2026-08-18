@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import numpy as np
 import pytest
@@ -11,7 +12,9 @@ from secaware.exploratory.randomized_discovery_fci import (
     _base_background,
     _table_and_matrix,
     _variables,
+    _verify_closed_dir,
 )
+from secaware.pipeline.artifact import sha256_file
 from secaware.schema.causal import VariableRole
 
 
@@ -111,3 +114,47 @@ def test_four_arm_rows_build_one_translatable_pooled_jci_table() -> None:
     assert background.required_directions == ()
     assert background.forbidden_adjacencies == ()
     to_causal_learn_background(background)
+
+
+def test_closed_directory_authenticates_nested_manifests(tmp_path) -> None:
+    nested = tmp_path / "replicate-0000"
+    nested.mkdir()
+    (nested / "payload.json").write_text("{}\n", encoding="utf-8")
+    (nested / "artifact-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "files": [
+                    {
+                        "path": "payload.json",
+                        "sha256": sha256_file(nested / "payload.json"),
+                    }
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    files = sorted(path for path in tmp_path.rglob("*") if path.is_file())
+    (tmp_path / "artifact-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "files": [
+                    {
+                        "path": path.relative_to(tmp_path).as_posix(),
+                        "sha256": sha256_file(path),
+                    }
+                    for path in files
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert len(_verify_closed_dir(tmp_path)) == 64

@@ -291,3 +291,15 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   to outcome zero. The assembly invariant now compares its ITT unknown total with the sum of the
   report's Oracle-unknown and terminal-no-code counts. No row is filtered, and the report's original
   counting semantics are preserved rather than rewritten.
+- The first three-replicate bootstrap pilot completed all FCI runs, but a subsequent top-level
+  closure replay exposed that the shared manifest verifier excluded every nested file named
+  `artifact-manifest.json` rather than only the root manifest being verified. Each nested manifest
+  was present and correctly hashed in the top-level manifest; only the replay set was wrong. The
+  verifier now excludes the exact root manifest path and continues to authenticate nested replicate
+  manifests as ordinary covered files.
+- The first bootstrap formatting/static probe found one unused `Any` import and stopped before any
+  test or experiment run. Removing that import allowed the bounded static check and 31 targeted
+  tests to pass. Two independent three-replicate Qwen pilots then produced byte-identical draw,
+  matrix-commitment, PAG, support, and report artifacts. Every draw sampled 51 task clusters with
+  replacement and retained all four arms, yielding exactly 204 rows per replicate; all six real FCI
+  runs succeeded.
