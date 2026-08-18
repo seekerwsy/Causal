@@ -31,8 +31,9 @@ _BOOTSTRAP_PAG_ID_PATTERN = r"^bootstrap_pag_[0-9a-f]{64}$"
 _PATH_ID_PATTERN = r"^path_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
-_VARIABLE_ID_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
+_VARIABLE_ID_PATTERN = re.compile(r"^[pwxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_PATTERN = re.compile(r"^CWE-[1-9][0-9]*$")
+_CAUSAL_TABLE_CWE_PATTERN = re.compile(r"^(?:CWE-[1-9][0-9]*|CWE-POOLED)$")
 _MAX_VARIABLES = 64
 _MAX_ROWS = 100_000
 _MAX_PAG_EDGES = _MAX_VARIABLES * (_MAX_VARIABLES - 1) // 2
@@ -152,6 +153,7 @@ class _CausalVersionedContract(_CausalContract):
 
 
 class VariableRole(str, Enum):
+    P = "p"
     W = "w"
     X = "x"
     Y = "y"
@@ -509,7 +511,7 @@ class CausalTableRecord(_CausalVersionedContract):
         variable_ids = tuple(item.variable_id for item in self.variables)
         if (
             not _valid_identifier(self.scope_id)
-            or not _CWE_PATTERN.fullmatch(self.cwe)
+            or not _CAUSAL_TABLE_CWE_PATTERN.fullmatch(self.cwe)
             or not _valid_identifier(self.model_id)
             or not 2 <= len(self.variables) <= _MAX_VARIABLES
             or variable_ids != tuple(sorted(variable_ids))

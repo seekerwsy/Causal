@@ -259,3 +259,6 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   unit was selected and the subsequent null-path reads failed. Enumerating the archive root first
   located the short-path `units` directory. The completed 204-row assembly then authenticated every
   unit manifest and reproduced the archived aggregate counts without dropping a row.
+- A later test search again passed Windows wildcard path arguments directly to `rg`; it failed
+  before reading tests. The corrected query passes the `tests` directory and uses three `-g`
+  filters. The pooled-table schema check then passed all 58 causal-schema tests.

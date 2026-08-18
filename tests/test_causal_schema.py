@@ -31,6 +31,7 @@ from secaware.schema.causal import (
     PathPatternRecord,
     PathSupportRecord,
     VariableRole,
+    jci_row_id_from_content,
 )
 
 
@@ -50,6 +51,42 @@ def _variable(variable_id: str, role: VariableRole, tier: int) -> CausalVariable
         adjacency_type="prompt_feature" if role is not VariableRole.Y else "outcome",
         producer_sha256=SHA_A,
     )
+
+
+def test_pooled_randomized_discovery_table_accepts_presentation_role() -> None:
+    variables = (
+        _variable("c.arm", VariableRole.C, 0),
+        _variable("p.length_matched_placebo", VariableRole.P, 1),
+        _variable("y.secure_functional", VariableRole.Y, 2),
+    )
+    observations = []
+    for index, values in enumerate(((0, 0, 0), (1, 1, 1)), start=1):
+        coordinates = {
+            "assignment_id": f"assignment_{index:064x}",
+            "task_id": f"task-{index}",
+            "target_spec_id": f"target_{index:064x}",
+            "target_instance_id": f"target_instance_{index:064x}",
+            "arm_protocol_id": f"arm_protocol_{index:064x}",
+            "protocol_instance_id": f"protocol_instance_{index:064x}",
+        }
+        row_id = jci_row_id_from_content(**coordinates, values=values)
+        observations.append((row_id, *coordinates.values(), values))
+
+    table = CausalTableRecord.from_jci_content(
+        scope_id="scope.five_cwe_policy",
+        cwe="CWE-POOLED",
+        model_id="model-a",
+        variables=variables,
+        independent_task_count=2,
+        observation_payload=observations,
+    )
+
+    assert table.cwe == "CWE-POOLED"
+    assert {item.role for item in table.variables} == {
+        VariableRole.C,
+        VariableRole.P,
+        VariableRole.Y,
+    }
 
 
 def _variables() -> tuple[CausalVariableSpec, ...]:
