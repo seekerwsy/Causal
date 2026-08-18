@@ -7,6 +7,7 @@ import tarfile
 
 import pytest
 
+from secaware.experiments import held_out_policy_analysis as analysis_module
 from secaware.experiments.held_out_policy_analysis import (
     _archive_files,
     _estimate_contrast,
@@ -114,6 +115,21 @@ def test_frozen_policy_effect_uses_all_task_blocks_and_is_deterministic() -> Non
     assert all(len(draw["sampled_task_ids"]) == 42 for draw in draws)
     assert flip["improved"] == 42
     assert flip["harmed"] == flip["unchanged"] == 0
+
+
+def test_persisted_profile_decision_normalizes_typed_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assignment = _assignments()[0]
+    monkeypatch.setattr(
+        analysis_module,
+        "_profile_decision_payload",
+        lambda _analysis, _profile: {"typed_evidence": (assignment,)},
+    )
+
+    projected = analysis_module._persisted_profile_decision(object(), object())
+
+    assert projected == {"typed_evidence": [assignment.model_dump(mode="json", warnings=False)]}
 
 
 def _tar_member(archive: tarfile.TarFile, name: str, payload: bytes) -> None:

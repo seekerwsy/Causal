@@ -20,6 +20,7 @@ from secaware.analysis.cluster_bootstrap import linear_percentile, task_cluster_
 from secaware.analysis.itt import risk_difference
 from secaware.analysis.multiple_testing import bonferroni_percentile_quantiles
 from secaware.exploratory.gate_c_live import (
+    _json_value,
     _oracle_analysis_from_payload,
     _profile_decision_payload,
     _profile_for_coverage,
@@ -361,6 +362,15 @@ def _source_digest(parts: Mapping[str, object]) -> str:
     )
 
 
+def _persisted_profile_decision(analysis: object, profile: object) -> dict[str, Any]:
+    """Project a recomputed decision through the exact Gate C JSON boundary."""
+
+    projected = _json_value(_profile_decision_payload(analysis, profile))
+    if type(projected) is not dict:
+        raise ValueError("held-out policy Oracle decision projection failed validation")
+    return projected
+
+
 def _load_model_rows(
     *,
     repo_root: Path,
@@ -473,27 +483,44 @@ def _load_model_rows(
             decision = _read_json_bytes(files[f"{prefix}/oracle-decision.json"])
             binding = _read_json_bytes(files[f"{prefix}/oracle-binding.json"])
             profile = _profile_for_coverage(coverage, policy)
-            expected_decision = _profile_decision_payload(analysis, profile)
-            if (
-                code.get("assignment_id") != assignment.assignment_id
-                or code.get("request_id") != execution.get("request_id")
-                or code.get("code_id") != execution.get("code_id")
-                or code.get("code_sha256") != execution.get("code_sha256")
-                or functional.get("assignment_id") != assignment.assignment_id
-                or binding
-                != {
-                    "schema_version": _SCHEMA_VERSION,
-                    "assignment_id": assignment.assignment_id,
-                    "request_id": analysis.request_id,
-                    "code_id": analysis.code_id,
-                    "binding_performed_after_blind_analysis": True,
-                }
-                or analysis.request_id != code.get("request_id")
-                or analysis.code_id != code.get("code_id")
-                or analysis.code_sha256 != code.get("code_sha256")
-                or decision != expected_decision
-            ):
-                raise ValueError("held-out policy Oracle binding failed validation")
+            expected_decision = _persisted_profile_decision(analysis, profile)
+            expected_binding = {
+                "schema_version": _SCHEMA_VERSION,
+                "assignment_id": assignment.assignment_id,
+                "request_id": analysis.request_id,
+                "code_id": analysis.code_id,
+                "binding_performed_after_blind_analysis": True,
+            }
+            binding_checks = {
+                "code_assignment": code.get("assignment_id") == assignment.assignment_id,
+                "code_request": code.get("request_id") == execution.get("request_id"),
+                "code_id": code.get("code_id") == execution.get("code_id"),
+                "code_sha256": code.get("code_sha256") == execution.get("code_sha256"),
+                "functional_assignment": (
+                    functional.get("assignment_id") == assignment.assignment_id
+                ),
+                "blind_binding": binding == expected_binding,
+                "analysis_request": analysis.request_id == code.get("request_id"),
+                "analysis_code_id": analysis.code_id == code.get("code_id"),
+                "analysis_code_sha256": analysis.code_sha256 == code.get("code_sha256"),
+                "profile_decision": decision == expected_decision,
+            }
+            failed_binding_checks = sorted(
+                name for name, passed in binding_checks.items() if not passed
+            )
+            if "profile_decision" in failed_binding_checks:
+                failed_binding_checks.remove("profile_decision")
+                decision_keys = sorted(set(decision) | set(expected_decision))
+                failed_binding_checks.extend(
+                    f"profile_decision.{key}"
+                    for key in decision_keys
+                    if decision.get(key) != expected_decision.get(key)
+                )
+            if failed_binding_checks:
+                raise ValueError(
+                    "held-out policy Oracle binding failed validation for "
+                    f"{assignment.assignment_id}: {','.join(failed_binding_checks)}"
+                )
             evaluator_policy = functional.get("evaluator_policy_sha256")
             if type(evaluator_policy) is not str:
                 raise ValueError("held-out policy functional provenance failed validation")

@@ -369,3 +369,47 @@ Additional execution notes:
   The preserved response can therefore be deterministically replayed without another generation
   call. The failed run remains immutable and the recovery records the one required functional-Judge
   call separately.
+- A read-only completion probe guessed `report.json` although the immutable recovery run retained
+  numbered `report-remaining-*.json` reports. The strict remote shell closed after the missing-path
+  read; reconnecting and using the existing summary reader reproduced the final 168/168 count and
+  did not change any experiment artifact.
+- The first Phi service command invoked the frozen launcher directly, but its copied mode did not
+  include the executable bit. It failed before service or experiment state was created. Invoking
+  the same frozen launcher through `bash` started the recorded service without changing any model,
+  seed, precision, sequence, or context-length setting.
+- Qwen and Phi each completed all 168 held-out assignments with zero error and zero pending row.
+  The source archives and model-service records were transferred through the jump host, matched the
+  server SHA-256 manifest exactly, and were scanned before tracking. They contain no `.env` member
+  or credential value; the repeated 23-character `sk-*` value is the documented local inference
+  endpoint placeholder. The temporary target HTTP service and jump-host transfer directory were
+  removed after verification.
+- The first real held-out analysis failed before output creation because its exact decision check
+  compared JSON dictionaries from disk with semantically identical typed finding objects returned
+  by the decision engine. This was an analysis-adapter representation bug, not an Oracle provenance
+  failure. The check now applies the exact Gate C JSON projection before equality comparison and
+  reports the assignment plus failed binding component if validation fails. A bounded regression
+  test covers typed evidence. The corrected analysis included all 336 assignments; a second output
+  directory reproduced all eight core result files byte-for-byte.
+
+## Held-out policy-ITT result
+
+The frozen primary contrast is target patch versus no-op rewrite on secure-and-functional success,
+estimated separately for each model with 42 task clusters and no post-randomization filtering. The
+two model-specific intervals form one Bonferroni-adjusted primary family. Qwen's risk difference is
+`+0.0714` (adjusted interval `[-0.0714, 0.2503]`); Phi's is `-0.0238` (adjusted interval
+`[-0.1905, 0.1074]`). Both primary intervals are inconclusive. This is a measured main result, not a
+failed experiment and not evidence that the true effects are zero.
+
+The predeclared secondary CWE-security contrast separates the safety mechanism from functionality.
+Both models have 29/42 secure target outputs. Their no-op baselines are 22/42 for Qwen and 23/42 for
+Phi, corresponding to risk differences `+0.1667` and `+0.1429`. The unadjusted task-bootstrap
+interval is `[0.0476, 0.2857]` for Qwen and `[0.0000, 0.2381]` for Phi. Functional-pass counts move in
+the opposite direction: Qwen target/no-op is 25/42 versus 30/42, and Phi is 27/42 versus 34/42.
+Thus the operation-specific patch shows a repeatable security signal while the joint primary
+outcome exposes a functionality trade-off that differs by model. Mechanism, flip, and per-CWE rows
+remain diagnostic; the smallest CWE strata are not promoted to confirmatory claims.
+
+The authenticated run archives, 336-row outcome table, 2,800 bootstrap draws, effects, flip rows,
+CWE diagnostics, commands, environments, and two deterministic analysis executions are preserved
+under `data/e2e-pilot`. Exact paths and checksums are summarized in
+`docs/e2e-pilot/five-cwe-held-out-policy-itt-results-20260819.md`.
