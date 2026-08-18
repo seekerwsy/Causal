@@ -634,6 +634,17 @@ def _repair_assignment_id(completed: set[str], failed: set[str], pilot_id: str) 
     return repair_id
 
 
+def _next_remaining_attempt(output_dir: Path) -> int:
+    observed = {path.name for path in output_dir.glob("command-remaining*.json")}
+    expected: set[str] = set()
+    for attempt in range(1, len(observed) + 1):
+        suffix = "" if attempt == 1 else f"-{attempt:03d}"
+        expected.add(f"command-remaining{suffix}.json")
+    if observed != expected:
+        raise ValueError("Gate C live remaining phase history failed validation")
+    return len(observed) + 1
+
+
 def _tree_snapshot(root: Path) -> tuple[dict[str, str], ...]:
     return tuple(
         {
@@ -888,6 +899,8 @@ def run_gate_c_live_canary(
                 "source_plan_manifest_sha256": sha256_file(plan_dir / "artifact-manifest.json"),
             },
         )
+        phase_name = "phase-001-pilot"
+        root_report_name = "report-pilot.json"
     else:
         if pilot_id not in completed:
             raise ValueError("Gate C live pilot has not completed")
@@ -901,11 +914,19 @@ def run_gate_c_live_canary(
         selected = tuple(sorted(set(assignment_by_id) - completed))
         if not selected:
             raise ValueError("Gate C live has no pending assignments")
-        _write_json(output_dir / "live-config-remaining.json", live)
-        _write_json(output_dir / "command-remaining.json", {"argv": list(command_argv)})
-        _write_json(output_dir / "environment-remaining.json", _environment())
+        remaining_attempt = _next_remaining_attempt(output_dir)
+        remaining_suffix = "" if remaining_attempt == 1 else f"-{remaining_attempt:03d}"
+        _write_json(output_dir / f"live-config-remaining{remaining_suffix}.json", live)
         _write_json(
-            output_dir / "input-provenance-remaining.json",
+            output_dir / f"command-remaining{remaining_suffix}.json",
+            {"argv": list(command_argv)},
+        )
+        _write_json(
+            output_dir / f"environment-remaining{remaining_suffix}.json",
+            _environment(),
+        )
+        _write_json(
+            output_dir / f"input-provenance-remaining{remaining_suffix}.json",
             {
                 "schema_version": _SCHEMA_VERSION,
                 "live_config_sha256": sha256_file(live_config_path),
@@ -917,9 +938,13 @@ def run_gate_c_live_canary(
                 "authorized_assignment_ids": list(selected),
             },
         )
-    phase_dir = (
-        output_dir / "phases" / ("phase-001-pilot" if mode == "pilot" else "phase-002-remaining")
-    )
+        phase_name = (
+            "phase-002-remaining"
+            if remaining_attempt == 1
+            else f"phase-remaining-{remaining_attempt:03d}"
+        )
+        root_report_name = f"report-remaining{remaining_suffix}.json"
+    phase_dir = output_dir / "phases" / phase_name
     phase_dir.mkdir(parents=True, exist_ok=False)
     _write_json(
         phase_dir / "selection.json",
@@ -1065,7 +1090,7 @@ def run_gate_c_live_canary(
             break
     summary = _summary(output_dir, expected, mode)
     _write_json(phase_dir / "report.json", summary)
-    _write_json(output_dir / f"report-{mode}.json", summary)
+    _write_json(output_dir / root_report_name, summary)
     if failure is not None:
         raise RuntimeError(
             "Gate C live phase failed; preserved unit artifacts require diagnosis"

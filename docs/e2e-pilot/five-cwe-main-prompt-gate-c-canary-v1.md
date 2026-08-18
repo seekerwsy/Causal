@@ -81,3 +81,7 @@ existing Prompt hash and closed-manifest checks.
   requires the issue line to occur inside a strictly increasing range, retains that issue line as
   the start coordinate, and retains the final range line as the end coordinate. All authenticated
   rule, CWE, severity, confidence, filename, return-code, and source-boundary checks remain active.
+- Resuming after an intermediate-unit Oracle repair also preserves the first failed remaining-phase
+  metadata. Continuations allocate monotonically numbered command, configuration, provenance,
+  phase, and report artifacts; gaps or unexpected historical names fail validation instead of being
+  overwritten.

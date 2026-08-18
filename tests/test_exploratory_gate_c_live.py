@@ -175,6 +175,18 @@ def test_oracle_repair_selects_a_failed_remaining_unit_after_completed_pilot() -
         gate_c_live._repair_assignment_id({"pilot"}, {"failed_a", "failed_b"}, "pilot")
 
 
+def test_remaining_phase_history_allocates_non_overwriting_attempts(tmp_path: Path) -> None:
+    assert gate_c_live._next_remaining_attempt(tmp_path) == 1
+    _write_json(tmp_path / "command-remaining.json", {"argv": []})
+    assert gate_c_live._next_remaining_attempt(tmp_path) == 2
+    _write_json(tmp_path / "command-remaining-002.json", {"argv": []})
+    assert gate_c_live._next_remaining_attempt(tmp_path) == 3
+
+    (tmp_path / "command-remaining-002.json").rename(tmp_path / "command-remaining-003.json")
+    with pytest.raises(ValueError, match="phase history"):
+        gate_c_live._next_remaining_attempt(tmp_path)
+
+
 def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
     stored_base = {
         "schema_version": "1.0",
