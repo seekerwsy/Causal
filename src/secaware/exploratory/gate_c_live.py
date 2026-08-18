@@ -25,13 +25,25 @@ from secaware.generation.confirmation import execute_confirmation_requests
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.llm.structured_transport import OpenAICompatibleStructuredTransport
 from secaware.oracle.aggregator import OracleCodeAnalysis, OracleCodeInput, run_oracle_code_batch
-from secaware.oracle.policy import load_policy_bundle
-from secaware.oracle.profile_decision import decide_oracle_profile, mechanism_trace_sha256
+from secaware.oracle.policy import LoadedOraclePolicy, OracleCoverageProfile, load_policy_bundle
+from secaware.oracle.profile_decision import (
+    OracleMechanismSinkFact,
+    OracleMechanismTrace,
+    decide_oracle_profile,
+    mechanism_trace_sha256,
+    validate_python_mechanism_trace,
+)
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.pipeline.artifact import sha256_file
 from secaware.pipeline.stages.confirmation_generation import create_confirmation_provider
 from secaware.schema.experiments import AssignmentExecutionStatus, AssignmentRecord
 from secaware.schema.generation import GenerationRequestRecord
+from secaware.schema.oracle import (
+    AnalyzerFindingRecord,
+    AnalyzerProvenanceRecord,
+    OracleEvaluability,
+    SecurityLabel,
+)
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 _SCHEMA_VERSION = "1.0"
@@ -96,6 +108,154 @@ def _write_json(path: Path, value: object) -> None:
         raise FileExistsError(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_canonical(_json_value(value)) + b"\n")
+
+
+def _profile_decision_payload(
+    analysis: OracleCodeAnalysis,
+    profile: OracleCoverageProfile,
+) -> dict[str, object]:
+    """Apply the one shared profile decision path used by live and recovery runs."""
+
+    if type(analysis) is not OracleCodeAnalysis or type(profile) is not OracleCoverageProfile:
+        raise ValueError("Gate C live Oracle decision input failed validation")
+    decision = decide_oracle_profile(
+        analysis.mechanism_trace,
+        analysis.findings,
+        profile,
+    )
+    return {
+        "schema_version": _SCHEMA_VERSION,
+        "security_label": decision.security_label.value,
+        "evaluability": decision.evaluability.value,
+        "severity": decision.severity,
+        "decision_reason_code": decision.reason_code,
+        "decision_profile_id": decision.profile_id,
+        "decision_engine_version": decision.decision_version,
+        "mechanism_evidence_sha256": mechanism_trace_sha256(decision.mechanism_trace),
+        "raw_findings": decision.raw_findings,
+        "decisive_findings": decision.findings,
+        "mechanism_trace": decision.mechanism_trace,
+    }
+
+
+def _profile_for_coverage(
+    coverage: dict[str, Any],
+    policy: LoadedOraclePolicy,
+) -> OracleCoverageProfile:
+    profile_by_id = {item.profile_id: item for item in policy.coverage_profiles}
+    profile_id = coverage.get("oracle_profile_id")
+    if (
+        coverage.get("zero_finding_interpretation") != _ORACLE_PROFILE_MODE
+        or coverage.get("decision_backend") != "python_ast_mechanism_v1"
+        or coverage.get("zero_finding_supported") is not True
+        or type(profile_id) is not str
+        or profile_id not in profile_by_id
+    ):
+        raise ValueError("Gate C live profile-scoped Oracle policy failed validation")
+    profile = profile_by_id[profile_id]
+    if profile.cwe != coverage.get("cwe"):
+        raise ValueError("Gate C live Oracle profile scope failed validation")
+    return profile
+
+
+def _oracle_analysis_from_payload(payload: dict[str, Any]) -> OracleCodeAnalysis:
+    """Strictly reconstruct a previously persisted arm-blind Oracle analysis."""
+
+    expected_fields = {item.name for item in fields(OracleCodeAnalysis)}
+    string_fields = ("request_id", "code_id", "code_sha256", "prompt_id", "model_id", "severity")
+    if (
+        set(payload) != expected_fields
+        or any(type(payload.get(name)) is not str for name in string_fields)
+        or type(payload.get("seed_id")) is not int
+        or type(payload.get("parse_ok")) is not bool
+        or type(payload.get("functional_ok")) is not bool
+        or type(payload.get("findings")) is not list
+        or type(payload.get("analyzers")) is not list
+        or type(payload.get("mechanism_trace")) is not dict
+    ):
+        raise ValueError("Gate C preserved Oracle analysis failed validation")
+    findings = tuple(AnalyzerFindingRecord.model_validate(item) for item in payload["findings"])
+    analyzers = tuple(
+        AnalyzerProvenanceRecord.model_validate(item) for item in payload["analyzers"]
+    )
+    trace_payload = payload["mechanism_trace"]
+    trace_fields = {
+        "schema_version",
+        "extractor_version",
+        "language",
+        "analysis_scope",
+        "code_sha256",
+        "parse_ok",
+        "sink_facts",
+    }
+    if set(trace_payload) != trace_fields or type(trace_payload.get("sink_facts")) is not list:
+        raise ValueError("Gate C preserved Oracle analysis failed validation")
+    sink_fields = {
+        "cwe",
+        "function_name",
+        "line",
+        "sink_kind",
+        "state",
+        "source_names",
+        "properties",
+        "reason_code",
+    }
+    sink_facts: list[OracleMechanismSinkFact] = []
+    for raw in trace_payload["sink_facts"]:
+        if (
+            type(raw) is not dict
+            or set(raw) != sink_fields
+            or type(raw.get("source_names")) is not list
+            or type(raw.get("properties")) is not list
+        ):
+            raise ValueError("Gate C preserved Oracle analysis failed validation")
+        sink_facts.append(
+            OracleMechanismSinkFact(
+                cwe=raw["cwe"],
+                function_name=raw["function_name"],
+                line=raw["line"],
+                sink_kind=raw["sink_kind"],
+                state=raw["state"],
+                source_names=tuple(raw["source_names"]),
+                properties=tuple(raw["properties"]),
+                reason_code=raw["reason_code"],
+            )
+        )
+    trace = validate_python_mechanism_trace(
+        OracleMechanismTrace(
+            schema_version=trace_payload["schema_version"],
+            extractor_version=trace_payload["extractor_version"],
+            language=trace_payload["language"],
+            analysis_scope=trace_payload["analysis_scope"],
+            code_sha256=trace_payload["code_sha256"],
+            parse_ok=trace_payload["parse_ok"],
+            sink_facts=tuple(sink_facts),
+        ),
+        code_sha256=str(payload["code_sha256"]),
+        parse_ok=bool(payload["parse_ok"]),
+    )
+    try:
+        analysis = OracleCodeAnalysis(
+            request_id=payload["request_id"],
+            code_id=payload["code_id"],
+            code_sha256=payload["code_sha256"],
+            prompt_id=payload["prompt_id"],
+            model_id=payload["model_id"],
+            seed_id=payload["seed_id"],
+            parse_ok=payload["parse_ok"],
+            functional_ok=payload["functional_ok"],
+            security_label=SecurityLabel(payload["security_label"]),
+            evaluability=OracleEvaluability(payload["evaluability"]),
+            severity=payload["severity"],
+            findings=findings,
+            analyzers=analyzers,
+            mechanism_trace=trace,
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("Gate C preserved Oracle analysis failed validation") from error
+    if _json_value(analysis) != payload:
+        raise ValueError("Gate C preserved Oracle analysis failed validation")
+    return analysis
 
 
 def _environment() -> dict[str, object]:
@@ -744,28 +904,9 @@ def run_gate_c_live_canary(
                     profile = profile_by_id[str(coverage_row["oracle_profile_id"])]
                     if profile.cwe != coverage_row.get("cwe"):
                         raise ValueError("Gate C live Oracle profile scope failed validation")
-                    decision = decide_oracle_profile(
-                        analyses[0].mechanism_trace,
-                        analyses[0].findings,
-                        profile,
-                    )
                     _write_json(
                         unit_dir / "oracle-decision.json",
-                        {
-                            "schema_version": _SCHEMA_VERSION,
-                            "security_label": decision.security_label.value,
-                            "evaluability": decision.evaluability.value,
-                            "severity": decision.severity,
-                            "decision_reason_code": decision.reason_code,
-                            "decision_profile_id": decision.profile_id,
-                            "decision_engine_version": decision.decision_version,
-                            "mechanism_evidence_sha256": mechanism_trace_sha256(
-                                decision.mechanism_trace
-                            ),
-                            "raw_findings": decision.raw_findings,
-                            "decisive_findings": decision.findings,
-                            "mechanism_trace": decision.mechanism_trace,
-                        },
+                        _profile_decision_payload(analyses[0], profile),
                     )
                 _write_json(
                     unit_dir / "oracle-binding.json",
@@ -857,9 +998,11 @@ def recover_gate_c_live_oracle(
     expected = int(live.get("expected_assignments", 0))
     _bounded_task_count(expected)
     pilot_id = live.get("pilot_assignment_id")
+    oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
         live.get("schema_version") != _SCHEMA_VERSION
         or type(pilot_id) is not str
+        or oracle_decision_mode not in {_ORACLE_UNKNOWN_MODE, _ORACLE_PROFILE_MODE}
         or plan_report.get("counts", {}).get("generation_requests") != expected
     ):
         raise ValueError("Gate C Oracle repair policy failed validation")
@@ -893,6 +1036,7 @@ def recover_gate_c_live_oracle(
     has_preserved_oracle = oracle_analysis_path.is_file() and oracle_binding_path.is_file()
     if (
         oracle_analysis_path.exists() != oracle_binding_path.exists()
+        or (source_unit / "oracle-decision.json").exists()
         or (source_unit / "recovery-provenance.json").exists()
     ):
         raise ValueError("Gate C Oracle repair source has partial recovery output")
@@ -931,14 +1075,17 @@ def recover_gate_c_live_oracle(
         or judge_passes[0].get("assignment_id") != pilot_id
     ):
         raise ValueError("Gate C Oracle repair preserved records failed validation")
-    preserved_analysis: dict[str, object] | None = None
+    preserved_analysis: OracleCodeAnalysis | None = None
     if has_preserved_oracle:
-        preserved_analysis = _read_json(oracle_analysis_path)
+        preserved_analysis = _oracle_analysis_from_payload(_read_json(oracle_analysis_path))
         preserved_binding = _read_json(oracle_binding_path)
         if (
-            preserved_analysis.get("request_id") != codes[0].request_id
-            or preserved_analysis.get("code_id") != codes[0].code_id
-            or preserved_analysis.get("code_sha256") != codes[0].code_sha256
+            preserved_analysis.request_id != codes[0].request_id
+            or preserved_analysis.code_id != codes[0].code_id
+            or preserved_analysis.code_sha256 != codes[0].code_sha256
+            or preserved_analysis.prompt_id != codes[0].prompt_id
+            or preserved_analysis.model_id != codes[0].model_id
+            or preserved_analysis.seed_id != codes[0].seed_id
             or preserved_binding
             != {
                 "schema_version": _SCHEMA_VERSION,
@@ -949,6 +1096,17 @@ def recover_gate_c_live_oracle(
             }
         ):
             raise ValueError("Gate C Oracle repair preserved analysis binding failed validation")
+
+    app_config = load_config(app_config_path, run_dir=output_dir)
+    policy = load_policy_bundle((repo_root / app_config.oracle.policy_lock_path).resolve())
+    source_coverage = _read_json(source_unit / "oracle-coverage.json")
+    if source_coverage.get("zero_finding_interpretation") != oracle_decision_mode:
+        raise ValueError("Gate C Oracle repair coverage mode failed validation")
+    profile = (
+        _profile_for_coverage(source_coverage, policy)
+        if oracle_decision_mode == _ORACLE_PROFILE_MODE
+        else None
+    )
 
     source_snapshot = _tree_snapshot(source_dir)
     shutil.copytree(source_dir, output_dir, copy_function=shutil.copy2)
@@ -978,14 +1136,12 @@ def recover_gate_c_live_oracle(
             "new_functional_judge_provider_attempts": 0,
         },
     )
-    app_config = load_config(app_config_path, run_dir=output_dir)
     write_resolved_config(app_config, output_dir / "effective-app-config-repair.yaml")
-    policy = load_policy_bundle((repo_root / app_config.oracle.policy_lock_path).resolve())
     failure: BaseException | None = None
-    analyses: list[OracleCodeAnalysis] = []
+    analysis = preserved_analysis
     new_oracle_executions = 0 if preserved_analysis is not None else 1
-    if preserved_analysis is None:
-        try:
+    try:
+        if analysis is None:
             analyses = run_oracle_code_batch(
                 (OracleCodeInput.from_canonical(codes[0]),),
                 policy,
@@ -999,23 +1155,31 @@ def recover_gate_c_live_oracle(
             )
             if len(analyses) != 1:
                 raise RuntimeError("Gate C Oracle repair returned an invalid analysis count")
-            _write_json(unit_dir / "oracle-analysis.json", analyses[0])
+            analysis = analyses[0]
+            _write_json(unit_dir / "oracle-analysis.json", analysis)
+        if analysis is None:
+            raise RuntimeError("Gate C Oracle repair did not produce an analysis")
+        if profile is not None:
+            _write_json(
+                unit_dir / "oracle-decision.json",
+                _profile_decision_payload(analysis, profile),
+            )
+        if preserved_analysis is None:
             _write_json(
                 unit_dir / "oracle-binding.json",
                 {
                     "schema_version": _SCHEMA_VERSION,
                     "assignment_id": pilot_id,
-                    "request_id": analyses[0].request_id,
-                    "code_id": analyses[0].code_id,
+                    "request_id": analysis.request_id,
+                    "code_id": analysis.code_id,
                     "binding_performed_after_blind_analysis": True,
                 },
             )
-        except BaseException as repair_error:
-            failure = repair_error
-            _write_json(
-                unit_dir / "recovery-error.json", _safe_error(repair_error, "oracle_repair")
-            )
-    oracle_result_count = int(preserved_analysis is not None) + len(analyses)
+    except BaseException as repair_error:
+        failure = repair_error
+        _write_json(unit_dir / "recovery-error.json", _safe_error(repair_error, "oracle_repair"))
+    oracle_result_count = int((unit_dir / "oracle-analysis.json").is_file())
+    oracle_decision_count = int((unit_dir / "oracle-decision.json").is_file())
     _write_json(
         unit_dir / "recovery-provenance.json",
         {
@@ -1043,6 +1207,7 @@ def recover_gate_c_live_oracle(
             "generation_provider_attempts": 1,
             "functional_judge_provider_attempts": 1,
             "oracle_results": oracle_result_count,
+            "oracle_decisions": oracle_decision_count,
             "recovered_without_provider_calls": True,
         },
     )

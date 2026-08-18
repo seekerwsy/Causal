@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 
 from secaware.exploratory import gate_c_live
+from secaware.oracle.aggregator import OracleCodeAnalysis
+from secaware.oracle.policy import load_policy_bundle
+from secaware.oracle.profile_decision import extract_python_mechanism_trace
+from secaware.schema.oracle import OracleEvaluability, SecurityLabel
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -215,3 +219,46 @@ def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(
     assert summary["status"] == "GATE_C_LIVE_COMPLETE"
     assert summary["counts"]["secure"] == 1
     assert summary["counts"]["secure_and_functional"] == 1
+
+
+def _profile_analysis() -> OracleCodeAnalysis:
+    code = "import secrets\n\ndef token():\n    return secrets.token_urlsafe(24)\n"
+    return OracleCodeAnalysis(
+        request_id="req_" + "1" * 64,
+        code_id="code_" + "2" * 64,
+        code_sha256=hashlib.sha256(code.encode("utf-8")).hexdigest(),
+        prompt_id="prompt_test",
+        model_id="test/model",
+        seed_id=7,
+        parse_ok=True,
+        functional_ok=True,
+        security_label=SecurityLabel.UNKNOWN,
+        evaluability=OracleEvaluability.UNKNOWN_COVERAGE,
+        severity="none",
+        findings=(),
+        analyzers=(),
+        mechanism_trace=extract_python_mechanism_trace(code),
+    )
+
+
+def test_gate_c_live_profile_decision_is_shared_with_reconstructed_analysis() -> None:
+    root = Path(__file__).resolve().parents[1]
+    policy = load_policy_bundle(root / "policies" / "oracle" / "python-v2" / "policy.lock.json")
+    profile = next(item for item in policy.coverage_profiles if item.cwe == "CWE-338")
+    original = _profile_analysis()
+    reconstructed = gate_c_live._oracle_analysis_from_payload(gate_c_live._json_value(original))
+
+    normal_payload = gate_c_live._profile_decision_payload(original, profile)
+    recovery_payload = gate_c_live._profile_decision_payload(reconstructed, profile)
+
+    assert recovery_payload == normal_payload
+    assert recovery_payload["security_label"] == "secure"
+    assert recovery_payload["decision_reason_code"] == "all_relevant_sinks_proved_safe"
+
+
+def test_gate_c_live_rejects_tampered_preserved_mechanism_trace() -> None:
+    payload = gate_c_live._json_value(_profile_analysis())
+    payload["mechanism_trace"]["sink_facts"][0]["line"] = "4"
+
+    with pytest.raises(ValueError, match="mechanism trace"):
+        gate_c_live._oracle_analysis_from_payload(payload)

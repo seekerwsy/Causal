@@ -49,3 +49,16 @@ existing Prompt hash and closed-manifest checks.
   pipeline placement and stopped at parse time. It created or changed no file. The corrected command
   reported 181 frozen files across the two plans, two preflights, Phi Gate A, and Gate B bundle;
   133 of those files belong to the downloaded Gate B bundle.
+- The first Qwen pilot generated code and obtained a one-pass functional judgment, but the integrated
+  Oracle invocation reported `ANALYZER_FAILED`. The failed run is preserved at
+  `gate-c-main-prompt-canary-qwen7b-live-20260818-01`. Running the same frozen Semgrep and Bandit
+  versions directly on the preserved code returned exit status zero, so this was diagnosed as an
+  execution-path failure rather than an unsafe/unknown scientific outcome.
+- An Oracle-only recovery proved that the analyzer batch could complete without another generation
+  or Judge call, but exposed a recovery-path defect: it persisted `oracle-analysis.json` without
+  applying the profile-scoped decision, so all three security-label counts remained zero. That
+  incomplete recovery is preserved at
+  `gate-c-main-prompt-canary-qwen7b-live-oracle-recovered-20260818-02` and is not an approved pilot
+  prerequisite. Live and recovery execution now share one profile-decision serializer; preserved
+  analyses are strictly reconstructed and validated before reuse. A new immutable recovery must
+  produce one decision and exactly one counted security label before the remaining 19 units run.
