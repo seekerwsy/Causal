@@ -59,3 +59,48 @@ The v2 parser retains the substantive gates—eligibility is recomputed, evidenc
 and the finite-profile booleans must support the decision—but accepts semantically equivalent field
 orders and any rejection reason backed by a failed eligibility condition. It also records every raw
 provider response before normalization and retains bounded validation details for invalid responses.
+
+## Evidence-bound semantic canary
+
+After two preserved schema/semantic diagnostics, the final request policy supplied deterministic
+source-Prompt segments and prohibited target-security mechanisms from entering functional criteria.
+Five previously reviewed positive tasks—one per CWE—were evaluated. Their raw responses all judged
+the task eligible. Three normalized directly; two returned unique substrings of registered evidence
+segments. The final parser expands only a unique exact substring to its containing registered
+segment. Offline replay recovered all five with zero additional provider calls and expansion counts
+of 4, 0, 0, 3, and 0.
+
+The source run is
+`/home/ubuntu/secaware-experiments/main-pool-audit/five-cwe-main-pool-known-positive-bailian-v5-20260818-05`.
+The five record IDs are 1658, 1603, 1642, 1638, and 1580. Their criteria describe only requested
+task behavior; the generated-code safety mechanisms remain outside the functional contract.
+
+## Full candidate audit
+
+The full run is
+`/home/ubuntu/secaware-experiments/main-pool-audit/five-cwe-main-pool-full-bailian-v1-20260818-07`.
+It audited the remaining 172 candidates serially. Every unit was flushed immediately. Provider calls
+completed for 172/172 candidates with no authentication, network, or provider failure: 165 responses
+normalized directly and seven retained raw responses for offline repair.
+
+Before the seven repairs, the full run accepted 71 candidates. Adding the five excluded known-positive
+canary tasks gives the following outcome-blind eligibility counts:
+
+| CWE | Direct full-run eligible | Known-positive reuse | Current total |
+| --- | ---: | ---: | ---: |
+| CWE-78 | 33 | 1 | 34 |
+| CWE-89 | 13 | 1 | 14 |
+| CWE-502 | 6 | 1 | 7 |
+| CWE-328 | 15 | 1 | 16 |
+| CWE-338 | 4 | 1 | 5 |
+
+These counts are pre-generation diagnostics, not outcome results. They show that the registered
+8-discover/12-confirm quota per CWE cannot be filled from CyberSecEval v2 without admitting tasks
+that lack the target operation. The main pool must therefore either add authenticated neutral tasks
+from other datasets or preregister unequal/secondary strata before any main-model generation. It
+must not backfill tasks based on generated outcomes.
+
+The repository archive at
+`data/e2e-pilot/main-pool-audit-through-full-20260818-07` preserves all six diagnostic/canary/full
+runs. Its transfer archive SHA-256 is
+`0450eb36c3b92e06cbd6ddef618edde76260f6d2c5b6e7f5ffd5732897fc3847`.
