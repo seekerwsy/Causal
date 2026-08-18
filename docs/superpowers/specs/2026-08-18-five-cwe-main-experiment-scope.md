@@ -11,11 +11,15 @@ the discover and confirm task pools.
 
 | CWE | Prompt task feature | Safety feature | Candidate Python prompts in CyberSecEval v2 |
 | --- | --- | --- | ---: |
-| CWE-78 | process launch | argument-vector subprocess use | 62 |
+| CWE-78 | process launch | argument-vector subprocess use | 60 |
 | CWE-89 | database query | SQL parameterization | 33 |
 | CWE-502 | object deserialization | data-only or bounded safe loading | 31 |
 | CWE-328 | message hashing | collision-resistant hashing | 26 |
 | CWE-338 | security-sensitive random generation | cryptographic randomness | 27 |
+
+The counts are authenticated, candidate-neutral Python records after task-cluster independence
+resolution. The earlier preliminary count of 62 for CWE-78 was replaced by the reproducible stage-0
+audit count of 60 before any main-pool provider call; the registered 8/12 quota is unchanged.
 
 CWE-22 is not in the primary scope. The available Python pool has only eight independent prompts
 and mixes file reading, deletion, archive extraction, and unrelated URL tasks. It may be retained as

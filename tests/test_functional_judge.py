@@ -66,6 +66,50 @@ def _contract(task_id: str = "task-confirmation") -> TaskFunctionalContractRecor
     )
 
 
+def test_pre_treatment_contract_supports_one_reviewed_audit_pass() -> None:
+    prompt = "Write a Python function answer() that returns 42."
+    contract = TaskFunctionalContractRecord.from_content(
+        task_id="task-single-audit",
+        source_prompt_id="prompt-source-single-audit",
+        source_prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+        language="python",
+        judgeability=FunctionalJudgeability.SEMANTIC_ONLY,
+        requirements=(
+            FunctionalRequirementRecord(
+                requirement_id="req_return_42",
+                kind="behavior",
+                criterion="Return the integer 42.",
+                prompt_evidence_quote="returns 42",
+            ),
+        ),
+        environment_dependencies=(),
+        audit_pass_ids=("A",),
+        audit_status=FunctionalAuditStatus.RESOLVED,
+        auditor_kind="CODEX",
+        audit_evidence_sha256="b" * 64,
+    )
+
+    assert contract.audit_pass_ids == ("A",)
+    assert contract.audit_status is FunctionalAuditStatus.RESOLVED
+
+
+def test_single_audit_pass_must_be_marked_resolved() -> None:
+    with pytest.raises(Exception):
+        TaskFunctionalContractRecord.from_content(
+            task_id="task-single-audit",
+            source_prompt_id="prompt-source-single-audit",
+            source_prompt_sha256="c" * 64,
+            language="python",
+            judgeability=FunctionalJudgeability.UNJUDGEABLE,
+            requirements=(),
+            environment_dependencies=(),
+            audit_pass_ids=("A",),
+            audit_status=FunctionalAuditStatus.CONSISTENT,
+            auditor_kind="CODEX",
+            audit_evidence_sha256="b" * 64,
+        )
+
+
 def _policy(seed: int) -> StructuredLLMPolicy:
     return StructuredLLMPolicy(
         endpoint_sha256="e" * 64,

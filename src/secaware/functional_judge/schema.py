@@ -194,7 +194,7 @@ class TaskFunctionalContractRecord(_Contract):
     judgeability: FunctionalJudgeability
     requirements: tuple[FunctionalRequirementRecord, ...] = Field(max_length=32)
     environment_dependencies: tuple[str, ...] = Field(default=(), max_length=32)
-    audit_pass_ids: tuple[Literal["A", "B"], Literal["A", "B"]]
+    audit_pass_ids: tuple[Literal["A", "B"], ...] = Field(min_length=1, max_length=2)
     audit_status: FunctionalAuditStatus
     auditor_kind: Literal["CODEX"]
     audit_evidence_sha256: str = Field(pattern=_SHA256)
@@ -233,7 +233,11 @@ class TaskFunctionalContractRecord(_Contract):
             _IDENTIFIER.fullmatch(self.task_id) is None
             or _IDENTIFIER.fullmatch(self.source_prompt_id) is None
             or self.language != self.language.strip()
-            or self.audit_pass_ids != ("A", "B")
+            or self.audit_pass_ids not in {("A",), ("A", "B")}
+            or (
+                self.audit_pass_ids == ("A",)
+                and self.audit_status is not FunctionalAuditStatus.RESOLVED
+            )
             or requirement_ids != tuple(sorted(requirement_ids))
             or len(requirement_ids) != len(set(requirement_ids))
             or self.environment_dependencies != tuple(sorted(self.environment_dependencies))
