@@ -323,6 +323,34 @@ def test_stdout_grammar_accepts_a_future_explicitly_required_orientation() -> No
     _validate_pinned_backend_stdout(output, table, required)
 
 
+def test_stdout_grammar_accepts_only_library_bound_visible_edge_echo() -> None:
+    from secaware.discovery.causal_learn_backend import _validate_pinned_backend_stdout
+
+    table = _table()
+    knowledge = build_background_knowledge(table)
+    edge = Edge(
+        GraphNode("x.safety.sql_parameterization"),
+        GraphNode("y.secure_functional"),
+        Endpoint.TAIL,
+        Endpoint.ARROW,
+    )
+    edge.properties.extend((Edge.Property.dd, Edge.Property.nl))
+    output = (
+        "".join(
+            (
+                "Starting BK Orientation.\n",
+                "Finishing BK Orientation.\n",
+            )
+            * 2
+        )
+        + f"{edge}\n"
+    )
+
+    _validate_pinned_backend_stdout(output, table, knowledge, (edge,))
+    with pytest.raises(ValueError):
+        _validate_pinned_backend_stdout(output + "unexpected\n", table, knowledge, (edge,))
+
+
 def test_fci_adapter_rejects_library_version_drift_before_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

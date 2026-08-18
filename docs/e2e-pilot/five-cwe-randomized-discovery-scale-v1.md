@@ -262,3 +262,23 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
 - A later test search again passed Windows wildcard path arguments directly to `rg`; it failed
   before reading tests. The corrected query passes the `tests` directory and uses three `-g`
   filters. The pooled-table schema check then passed all 58 causal-schema tests.
+- The first policy-v2 Phi progress probe looked for the obsolete name
+  `unit-closed-manifest.json` and therefore reported zero complete units even though 131 unit
+  `status.json` files were already closed. It did not affect execution. Progress monitoring now
+  counts exact `COMPLETE` and `ERROR` status values and reports independently created unit
+  directories only as the currently running diagnostic.
+- The first pooled reference-FCI attempt added the presentation role to the schema but had not yet
+  registered its finite causal declaration, so the background translator failed closed before
+  invoking causal-learn. The pooled W/X/P/Y declarations now live in a separate reviewed catalog;
+  the existing Prompt-table catalog remains unchanged, and every pooled variable binds its exact
+  declaration digest. A second reference attempt reached causal-learn but rejected the pinned
+  library's unconditional visible-edge echo from `get_color_edges`. The adapter now accepts only
+  the exact ordered text of returned directed edges carrying the library's `nl` property; missing,
+  mismatched, or additional output remains invalid. The next immutable Qwen reference run completed
+  with 204 rows and both raw and JCI-constrained PAGs.
+- Two local formatting probes repeated known environment assumptions: the Windows Store `python`
+  shim produced no useful interpreter output, and the repository Python did not contain Black.
+  The corrected commands explicitly bind CPython 3.12.13 and the worktree `PYTHONPATH`; no source
+  or experiment artifact was produced by either failed probe. A later read-only line-length helper
+  also used an ambiguous PowerShell variable followed by a colon and failed at parse time; its
+  corrected form uses the format operator.

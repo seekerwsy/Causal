@@ -12,7 +12,7 @@ from secaware.schema.tsg import MotifId
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG
 
 
-_VARIABLE_RE = re.compile(r"^[wxy]\.[a-z0-9][a-z0-9_.-]{0,126}$")
+_VARIABLE_RE = re.compile(r"^[pwxy]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]*$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 
@@ -80,6 +80,54 @@ _TASK_METADATA_DECLARATIONS = (
     ),
 )
 
+_POOLED_RANDOMIZED_DISCOVERY_DECLARATIONS = (
+    VariableDeclaration(
+        variable_id="p.length_matched_placebo",
+        role=VariableRole.P,
+        states=("absent", "present"),
+        query_id="prompt.presentation.length_matched_placebo.v1",
+        applicable_cwes=("*",),
+        tier=1,
+        adjacency_type="presentation_control",
+    ),
+    VariableDeclaration(
+        variable_id="w.cwe_scope",
+        role=VariableRole.W,
+        states=("CWE-78", "CWE-89", "CWE-502", "CWE-328", "CWE-338"),
+        query_id="task.cwe_scope.v1",
+        applicable_cwes=("*",),
+        tier=0,
+        adjacency_type="task_security_scope",
+    ),
+    VariableDeclaration(
+        variable_id="x.generic_security_reminder",
+        role=VariableRole.X,
+        states=("absent", "present"),
+        query_id="prompt.feature_state.generic_security_reminder.v1",
+        applicable_cwes=("*",),
+        tier=1,
+        adjacency_type="prompt_safety_control",
+    ),
+    VariableDeclaration(
+        variable_id="x.operation_specific_security_requirement",
+        role=VariableRole.X,
+        states=("absent", "present"),
+        query_id="prompt.feature_state.operation_specific_security_requirement.v1",
+        applicable_cwes=("*",),
+        tier=1,
+        adjacency_type="prompt_safety_control",
+    ),
+    VariableDeclaration(
+        variable_id="y.cwe_secure",
+        role=VariableRole.Y,
+        states=("not_secure", "secure"),
+        query_id="outcome.cwe_secure_itt.v1",
+        applicable_cwes=("*",),
+        tier=2,
+        adjacency_type="security_outcome",
+    ),
+)
+
 _FEATURE_DECLARATIONS = tuple(
     VariableDeclaration(
         variable_id=f"x.{spec.feature_id}",
@@ -131,6 +179,20 @@ PROMPT_CAUSAL_VARIABLES = tuple(
     )
 )
 
+POOLED_RANDOMIZED_DISCOVERY_VARIABLES = tuple(
+    sorted(
+        (*_POOLED_RANDOMIZED_DISCOVERY_DECLARATIONS, PRIMARY_OUTCOME),
+        key=lambda item: item.variable_id,
+    )
+)
+
+_ALL_CAUSAL_VARIABLES = tuple(
+    sorted(
+        (*PROMPT_CAUSAL_VARIABLES, *_POOLED_RANDOMIZED_DISCOVERY_DECLARATIONS),
+        key=lambda item: item.variable_id,
+    )
+)
+
 
 def _validate_declaration(item: VariableDeclaration) -> None:
     if (
@@ -146,15 +208,21 @@ def _validate_declaration(item: VariableDeclaration) -> None:
         or not item.applicable_cwes
         or ("*" in item.applicable_cwes and item.applicable_cwes != ("*",))
         or any(value != "*" and _CWE_RE.fullmatch(value) is None for value in item.applicable_cwes)
-        or item.tier != {VariableRole.W: 0, VariableRole.X: 1, VariableRole.Y: 2}[item.role]
+        or item.tier
+        != {
+            VariableRole.P: 1,
+            VariableRole.W: 0,
+            VariableRole.X: 1,
+            VariableRole.Y: 2,
+        }[item.role]
         or _IDENTIFIER_RE.fullmatch(item.adjacency_type) is None
     ):
         raise RuntimeError("invalid causal variable declaration")
 
 
-for _item in PROMPT_CAUSAL_VARIABLES:
+for _item in _ALL_CAUSAL_VARIABLES:
     _validate_declaration(_item)
-if len({item.variable_id for item in PROMPT_CAUSAL_VARIABLES}) != len(PROMPT_CAUSAL_VARIABLES):
+if len({item.variable_id for item in _ALL_CAUSAL_VARIABLES}) != len(_ALL_CAUSAL_VARIABLES):
     raise RuntimeError("duplicate causal variable declaration")
 if {item.variable_id.removeprefix("x.") for item in _FEATURE_DECLARATIONS} != {
     item.feature_id for item in PROMPT_FEATURE_CATALOG if item.intervenable
@@ -183,7 +251,7 @@ def declaration_by_id(variable_id: str) -> VariableDeclaration:
     """Return one exact reviewed declaration; arbitrary IDs fail closed."""
     if type(variable_id) is not str:
         raise KeyError("unknown causal variable")
-    for item in PROMPT_CAUSAL_VARIABLES:
+    for item in _ALL_CAUSAL_VARIABLES:
         if item.variable_id == variable_id:
             return item
     raise KeyError("unknown causal variable")
@@ -207,6 +275,7 @@ def declaration_sha256(item: VariableDeclaration) -> str:
 __all__ = [
     "CWE_SECURITY_OUTCOME",
     "PRIMARY_OUTCOME",
+    "POOLED_RANDOMIZED_DISCOVERY_VARIABLES",
     "PROMPT_CAUSAL_VARIABLES",
     "VARIABLE_CATALOG_SHA256",
     "VariableDeclaration",

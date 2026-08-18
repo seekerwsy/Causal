@@ -23,6 +23,7 @@ from secaware.schema.causal import (
 
 _MAX_VARIABLES = 64
 _TEMPORAL_TIER_BY_ROLE = {
+    VariableRole.P: 1,
     VariableRole.W: 0,
     VariableRole.X: 1,
     VariableRole.Y: 2,
