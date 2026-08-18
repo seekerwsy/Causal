@@ -1,0 +1,1 @@
+{"argv":["scripts/run_five_cwe_main_pool_audit.py","run","--prepared-dir","data/e2e-pilot/five-cwe-cross-source-audit-preflight-20260818-01","--config","configs/e2e-pilot/five-cwe-cross-source-audit-canary-bailian-v2.json","--run-dir","/home/ubuntu/secaware-experiments/cross-source-audit/five-cwe-cross-source-audit-canary-bailian-v2-20260818-02"]}

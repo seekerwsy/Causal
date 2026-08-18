@@ -73,6 +73,8 @@ def _overrides(path: Path | None) -> dict[str, dict[str, Any]]:
             or type(record_id) is not str
             or record_id in by_record
             or row.get("reviewer") != "codex-primary"
+            or row.get("override_mode", "parse_repair")
+            not in {"parse_repair", "semantic_adjudication"}
             or type(row.get("review_rationale")) is not str
             or not row["review_rationale"].strip()
         ):
@@ -149,6 +151,18 @@ def reconcile_main_pool_audit(
                 packet["prompt"],
                 _prompt_evidence_segments(packet["prompt"]),
             )
+            override = overrides.get(record_id)
+            if override is not None and override.get("override_mode") == "semantic_adjudication":
+                response = MainPoolAuditResponse.model_validate(override["audit"])
+                segments = _prompt_evidence_segments(packet["prompt"])
+                if any(
+                    requirement.prompt_evidence_quote not in segments
+                    for requirement in response.requirements
+                ):
+                    raise ValueError("override evidence is not a registered prompt segment")
+                adjudication = "codex_primary_semantic_override"
+                override_sha256 = _sha(override)
+                used_overrides.add(record_id)
         except Exception as error:
             error_type = type(error).__name__
             override = overrides.get(record_id)

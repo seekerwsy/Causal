@@ -397,6 +397,7 @@ def test_reconciliation_revalidates_retained_responses_and_applies_explicit_over
     assert source_report["counts"]["errors"] == 1
 
     first_response = json.loads((source_run / "responses.jsonl").read_text().splitlines()[0])
+    second_response = json.loads((source_run / "responses.jsonl").read_text().splitlines()[1])
     packets = {
         row["packet_id"]: row
         for row in (
@@ -405,7 +406,17 @@ def test_reconciliation_revalidates_retained_responses_and_applies_explicit_over
         )
     }
     first_packet = packets[first_response["packet_id"]]
+    second_packet = packets[second_response["packet_id"]]
     override_payload = json.loads(_accepted_response(first_packet["prompt"]))
+    semantic_override_payload = json.loads(_accepted_response(second_packet["prompt"]))
+    semantic_override_payload.update(
+        {
+            "eligible": False,
+            "operation_opportunity": False,
+            "reason_code": "no_target_operation",
+            "rationale": "Manual review found no target operation in the source prompt.",
+        }
+    )
     overrides = tmp_path / "overrides.jsonl"
     _write_jsonl(
         overrides,
@@ -416,7 +427,15 @@ def test_reconciliation_revalidates_retained_responses_and_applies_explicit_over
                 "reviewer": "codex-primary",
                 "review_rationale": "The retained response used a non-verbatim evidence quote.",
                 "audit": override_payload,
-            }
+            },
+            {
+                "schema_version": "1.0",
+                "record_id": second_packet["record_id"],
+                "reviewer": "codex-primary",
+                "override_mode": "semantic_adjudication",
+                "review_rationale": "The parsed proposal requires a semantic correction.",
+                "audit": semantic_override_payload,
+            },
         ],
     )
 
@@ -433,8 +452,8 @@ def test_reconciliation_revalidates_retained_responses_and_applies_explicit_over
         "prepared_packets": 10,
         "source_responses": 10,
         "decisions": 10,
-        "eligible": 10,
+        "eligible": 9,
         "unresolved": 0,
-        "overrides": 1,
+        "overrides": 2,
         "provider_calls": 0,
     }
