@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "analysis_id": "five_cwe_randomized_discovery_analysis_v1",
+  "status": "FROZEN_BEFORE_DISCOVERY_OUTCOMES",
+  "task_population": {
+    "input_bundle_id": "five_cwe_randomized_discovery_inputs_v1",
+    "discover_tasks": 51,
+    "held_out_confirm_tasks": 42,
+    "task_weighting": "equal_independent_task",
+    "model_pooling": "forbidden"
+  },
+  "model_strata": ["qwen2.5-coder-7b-instruct", "phi-4-14b"],
+  "arm_roles": ["target_patch", "noop_rewrite", "length_matched_placebo", "generic_security_reminder"],
+  "table": {
+    "primary_scope": "pooled_five_cwe_policy_per_model",
+    "cluster_id": "task_id",
+    "variables": [
+      "w_cwe_scope",
+      "c_discovery_arm",
+      "x_operation_specific_security_requirement",
+      "x_generic_security_reminder",
+      "p_length_matched_placebo",
+      "y_cwe_secure",
+      "y_secure_functional"
+    ],
+    "cwe_specific_tables": "heterogeneity_diagnostic_only",
+    "unknown_security_itt_value": 0,
+    "unknown_functional_joint_itt_value": 0,
+    "post_randomization_filtering": "forbidden"
+  },
+  "background_knowledge": {
+    "temporal_tiers": [
+      ["w_cwe_scope"],
+      ["x_operation_specific_security_requirement", "x_generic_security_reminder", "p_length_matched_placebo"],
+      ["y_cwe_secure", "y_secure_functional"]
+    ],
+    "raw_context_incident_restrictions": "none",
+    "jci_context_variable": "c_discovery_arm",
+    "jci_assumptions": ["jci.randomized_context_exogeneity.v1"],
+    "required_test_edges": []
+  },
+  "fci": {
+    "minimum_backend": "causal_learn_fci_v1",
+    "backend_version": "0.1.4.7",
+    "ci_test": "gsq",
+    "alpha": 0.05,
+    "depth": 3,
+    "max_path_length": 6,
+    "bootstrap_samples": 200,
+    "bootstrap_unit": "task_cluster",
+    "max_failed_bootstrap_fraction": 0.1,
+    "stability_threshold": 0.8,
+    "preserve_raw_pag": true,
+    "preserve_assumption_oriented_jci_pag": true
+  },
+  "candidate_freeze": {
+    "source_variable": "x_operation_specific_security_requirement",
+    "outcome_priority": ["y_secure_functional", "y_cwe_secure"],
+    "path_kind": "stable_possible_causal_path",
+    "max_path_length": 6,
+    "minimum_stability": 0.8,
+    "top_k_per_model": 3,
+    "ranking": ["stability_desc", "outcome_priority", "path_length_asc", "canonical_path_id"],
+    "freeze_without_confirm_outcomes": true,
+    "no_stable_path_policy": "freeze_zero_native_hypotheses"
+  },
+  "confirmation_boundary": {
+    "run_preregistered_policy_itt_regardless_of_native_candidate_yield": true,
+    "native_hypothesis_confirmation_label_requires_frozen_discovery_path": true,
+    "confirmation_outcomes_may_select_or_rescue_candidates": false
+  }
+}

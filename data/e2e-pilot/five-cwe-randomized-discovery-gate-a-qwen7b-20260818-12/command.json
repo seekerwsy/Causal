@@ -1,0 +1,1 @@
+{"argv":["scripts\\build_randomized_exploratory_canary.py","--repo-root","D:\\MyCode\\Causal\\.worktrees\\dataset-availability-audit","--config","configs\\e2e-pilot\\five-cwe-randomized-discovery-gate-a-qwen7b-v1.json","--output-dir","data\\e2e-pilot\\five-cwe-randomized-discovery-gate-a-qwen7b-20260818-12"]}

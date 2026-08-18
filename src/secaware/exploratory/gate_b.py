@@ -655,6 +655,46 @@ def _intervention_payload(
     return payload
 
 
+def _selected_gate_b_task_ids(
+    gate_b_config: Mapping[str, object],
+    source_by_task: Mapping[str, object],
+) -> tuple[str, ...]:
+    policy = gate_b_config.get("task_selection_policy", "explicit_task_ids")
+    explicit = gate_b_config.get("selected_task_ids")
+    if policy == "all_gate_a_tasks":
+        if explicit is not None or not source_by_task:
+            raise ValueError("exploratory Gate B task selection failed validation")
+        return tuple(sorted(source_by_task))
+    if policy != "explicit_task_ids" or type(explicit) is not list:
+        raise ValueError("exploratory Gate B task selection failed validation")
+    selected = tuple(explicit)
+    if (
+        not selected
+        or len(selected) != len(set(selected))
+        or any(type(item) is not str or item not in source_by_task for item in selected)
+    ):
+        raise ValueError("exploratory Gate B task selection failed validation")
+    return selected
+
+
+def _validated_provider_call_budget(
+    gate_b_config: Mapping[str, object],
+    *,
+    independent_tasks: int,
+) -> dict[str, int]:
+    expected = {
+        "intervention_calls": independent_tasks * 4,
+        "extractor_calls": independent_tasks * 5,
+        "total_provider_calls": independent_tasks * 9,
+    }
+    configured = gate_b_config.get("provider_call_budget")
+    if configured is None:
+        return expected
+    if type(configured) is not dict or configured != expected:
+        raise ValueError("exploratory Gate B provider budget failed validation")
+    return expected
+
+
 def run_exploratory_gate_b(
     *,
     repo_root: Path,
@@ -774,19 +814,17 @@ def run_exploratory_gate_b(
             required=True,
             allow_empty=False,
         )
-        selected_task_ids = tuple(gate_b_config.get("selected_task_ids", ()))
-        if (
-            not selected_task_ids
-            or len(selected_task_ids) != len(set(selected_task_ids))
-            or any(
-                type(item) is not str or item not in source_by_task for item in selected_task_ids
-            )
-        ):
-            raise ValueError("exploratory Gate B task selection failed validation")
+        selected_task_ids = _selected_gate_b_task_ids(gate_b_config, source_by_task)
         selected_sources = tuple(source_by_task[item] for item in selected_task_ids)
         if any(task_id not in selected_task_ids for task_id in reviewed_target_suffixes):
             raise ValueError("exploratory Gate B reviewed target task failed validation")
-        if len({item.cwe for item in selected_sources}) != len(selected_sources):
+        task_selection_policy = gate_b_config.get("task_selection_policy", "explicit_task_ids")
+        if task_selection_policy == "all_gate_a_tasks":
+            if set(selected_task_ids) != set(source_by_task) or len(
+                {item.cwe for item in selected_sources}
+            ) != gate_a_report.get("counts", {}).get("candidates"):
+                raise ValueError("exploratory Gate B CWE coverage failed validation")
+        elif len({item.cwe for item in selected_sources}) != len(selected_sources):
             raise ValueError("exploratory Gate B CWE coverage failed validation")
         selected_variants = tuple(
             sorted(
@@ -799,6 +837,17 @@ def run_exploratory_gate_b(
         )
         if len(selected_variants) != len(selected_task_ids) * 4:
             raise ValueError("exploratory Gate B arm coverage failed validation")
+        provider_call_budget = _validated_provider_call_budget(
+            gate_b_config,
+            independent_tasks=len(selected_sources),
+        )
+        if (
+            app_config.intervention.max_protocols < len({item.cwe for item in selected_sources})
+            or app_config.intervention.max_protocol_instances < len(selected_sources)
+            or app_config.intervention.max_arm_executions < len(selected_variants)
+            or app_config.randomization.max_blocks < len(selected_sources)
+        ):
+            raise ValueError("exploratory Gate B application budget failed validation")
         selected_variant_ids = {str(item["variant_id"]) for item in selected_variants}
         if not reuse_excluded_intervention_variant_ids <= selected_variant_ids:
             raise ValueError("exploratory Gate B reuse exclusion scope failed validation")
@@ -1199,6 +1248,7 @@ def run_exploratory_gate_b(
                 "errors": 0,
                 "pending": 0,
             },
+            "provider_call_budget": provider_call_budget,
             "policy_digests": {
                 "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
                 "intervention_policy_sha256": intervention_policy_sha256,

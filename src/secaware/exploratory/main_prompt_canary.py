@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from datetime import UTC, datetime
 import hashlib
 import json
 import os
 import platform
 import socket
 import sys
+from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,6 @@ from secaware.io.jsonl import write_jsonl
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
 from secaware.schema.experiments import PromptRole
 from secaware.schema.records import PromptRecord
-
 
 _SCHEMA_VERSION = "1.0"
 
@@ -74,34 +73,66 @@ def _environment() -> dict[str, object]:
     }
 
 
-def _validate_config(config: dict[str, Any]) -> None:
-    if (
-        set(config)
-        != {
-            "schema_version",
-            "bundle_id",
-            "estimand_id",
-            "selection_seed",
-            "discover_tasks_per_cwe",
-            "expected_discover_pool_tasks",
-            "expected_confirm_pool_tasks",
-            "include_all_confirm_as_forbidden",
-            "generated_code_allowed",
-            "outcomes_allowed",
-        }
-        or config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("bundle_id") != "five_cwe_main_prompt_canary_inputs_v1"
-        or config.get("estimand_id")
-        != "five_cwe_operation_specific_security_requirement_policy_itt_v1"
-        or type(config.get("selection_seed")) is not int
-        or config.get("discover_tasks_per_cwe") != 1
-        or config.get("expected_discover_pool_tasks") != 51
-        or config.get("expected_confirm_pool_tasks") != 42
-        or config.get("include_all_confirm_as_forbidden") is not True
-        or config.get("generated_code_allowed") is not False
-        or config.get("outcomes_allowed") is not False
-    ):
-        raise ValueError("main Prompt canary config failed validation")
+def _validate_config(config: dict[str, Any]) -> str:
+    common = (
+        config.get("schema_version") == _SCHEMA_VERSION
+        and config.get("estimand_id")
+        == "five_cwe_operation_specific_security_requirement_policy_itt_v1"
+        and config.get("generated_code_allowed") is False
+        and config.get("outcomes_allowed") is False
+    )
+    if config.get("bundle_id") == "five_cwe_main_prompt_canary_inputs_v1":
+        valid = (
+            set(config)
+            == {
+                "schema_version",
+                "bundle_id",
+                "estimand_id",
+                "selection_seed",
+                "discover_tasks_per_cwe",
+                "expected_discover_pool_tasks",
+                "expected_confirm_pool_tasks",
+                "include_all_confirm_as_forbidden",
+                "generated_code_allowed",
+                "outcomes_allowed",
+            }
+            and common
+            and type(config.get("selection_seed")) is int
+            and config.get("discover_tasks_per_cwe") == 1
+            and config.get("expected_discover_pool_tasks") == 51
+            and config.get("expected_confirm_pool_tasks") == 42
+            and config.get("include_all_confirm_as_forbidden") is True
+        )
+        mode = "one_per_cwe_canary"
+    elif config.get("bundle_id") == "five_cwe_randomized_discovery_inputs_v1":
+        valid = (
+            set(config)
+            == {
+                "schema_version",
+                "bundle_id",
+                "estimand_id",
+                "selected_split",
+                "selection_policy",
+                "expected_selected_tasks",
+                "expected_forbidden_tasks",
+                "include_all_opposite_split_as_forbidden",
+                "generated_code_allowed",
+                "outcomes_allowed",
+            }
+            and common
+            and config.get("selected_split") == "discover"
+            and config.get("selection_policy") == "all_outcome_blind_eligible_tasks"
+            and config.get("expected_selected_tasks") == 51
+            and config.get("expected_forbidden_tasks") == 42
+            and config.get("include_all_opposite_split_as_forbidden") is True
+        )
+        mode = "all_discovery_tasks"
+    else:
+        valid = False
+        mode = ""
+    if not valid:
+        raise ValueError("main Prompt input config failed validation")
+    return mode
 
 
 def _selected_discover_tasks(
@@ -109,9 +140,7 @@ def _selected_discover_tasks(
     *,
     selection_seed: int,
 ) -> tuple[dict[str, Any], ...]:
-    by_cwe: dict[str, list[tuple[str, dict[str, Any]]]] = {
-        cwe: [] for cwe in MAIN_CWE_ORDER
-    }
+    by_cwe: dict[str, list[tuple[str, dict[str, Any]]]] = {cwe: [] for cwe in MAIN_CWE_ORDER}
     for task in tasks:
         if task.get("split") != "discover":
             continue
@@ -130,7 +159,11 @@ def _selected_discover_tasks(
     return tuple(selected)
 
 
-def _prompt(task: dict[str, Any]) -> PromptRecord:
+def _prompt(
+    task: dict[str, Any],
+    *,
+    prompt_id_namespace: str = "main-canary",
+) -> PromptRecord:
     prompt = task.get("prompt")
     task_id = task.get("task_id")
     if type(prompt) is not str or type(task_id) is not str:
@@ -138,11 +171,11 @@ def _prompt(task: dict[str, Any]) -> PromptRecord:
     source_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     if source_sha256 != task.get("source_prompt_sha256"):
         raise ValueError("main Prompt canary source Prompt digest failed validation")
-    prompt_id = "main-canary-" + hashlib.sha256(task_id.encode()).hexdigest()[:32]
+    prompt_id = prompt_id_namespace + "-" + hashlib.sha256(task_id.encode()).hexdigest()[:32]
     return PromptRecord(
         prompt_id=prompt_id,
         task_id=task_id,
-        split="discover",
+        split=str(task["split"]),
         language="python",
         task_family=str(task["task_family"]),
         cwe=str(task["cwe"]),
@@ -163,7 +196,11 @@ def _functional_contract(
         raise ValueError("main Prompt canary functional provenance failed validation")
     raw_requirements = source.get("requirements")
     raw_dependencies = source.get("environment_dependencies")
-    if type(raw_requirements) is not list or not raw_requirements or type(raw_dependencies) is not list:
+    if (
+        type(raw_requirements) is not list
+        or not raw_requirements
+        or type(raw_dependencies) is not list
+    ):
         raise ValueError("main Prompt canary functional contract failed validation")
     requirements = tuple(
         sorted(
@@ -173,7 +210,7 @@ def _functional_contract(
     )
     if any(item.prompt_evidence_quote not in prompt.prompt for item in requirements):
         raise ValueError("main Prompt canary functional evidence failed validation")
-    dependencies = tuple(sorted(set(str(item) for item in raw_dependencies)))
+    dependencies = tuple(sorted({str(item) for item in raw_dependencies}))
     judgeability = FunctionalJudgeability(str(source.get("judgeability")))
     evidence = {
         "schema_version": _SCHEMA_VERSION,
@@ -224,7 +261,7 @@ def prepare_main_prompt_canary(
     if output_dir.exists():
         raise FileExistsError(output_dir)
     config = _read_json(config_path)
-    _validate_config(config)
+    selection_mode = _validate_config(config)
     task_report = _read_json(task_pool_dir / "report.json")
     estimand_report = _read_json(estimand_dir / "report.json")
     tasks_path = task_pool_dir / "tasks.jsonl"
@@ -268,17 +305,33 @@ def prepare_main_prompt_canary(
     split_counts = Counter(str(item["split"]) for item in tasks)
     if split_counts != Counter({"discover": 51, "confirm": 42}):
         raise ValueError("main Prompt canary split support failed validation")
-    selected = _selected_discover_tasks(tasks, selection_seed=config["selection_seed"])
+    if selection_mode == "one_per_cwe_canary":
+        selected = _selected_discover_tasks(tasks, selection_seed=config["selection_seed"])
+        prompt_id_namespace = "main-canary"
+        selection_id = "five_cwe_main_prompt_canary_selection_v1"
+        selection_rule = "minimum_sha256_rank_within_cwe_discovery_pool_v1"
+        selected_role = "selected_discovery"
+    else:
+        selected = tuple(
+            sorted(
+                (item for item in tasks if item["split"] == "discover"),
+                key=lambda item: item["task_id"],
+            )
+        )
+        prompt_id_namespace = "main-discovery"
+        selection_id = "five_cwe_randomized_discovery_selection_v1"
+        selection_rule = "all_outcome_blind_eligible_discovery_tasks_v1"
+        selected_role = "selected_randomized_discovery"
     selected_ids = {item["task_id"] for item in selected}
     confirm = tuple(item for item in tasks if item["split"] == "confirm")
     confirm_ids = {item["task_id"] for item in confirm}
-    if selected_ids & confirm_ids or len(selected_ids) != len(MAIN_CWE_ORDER):
+    expected_selected = 5 if selection_mode == "one_per_cwe_canary" else 51
+    if selected_ids & confirm_ids or len(selected_ids) != expected_selected:
         raise ValueError("main Prompt canary split isolation failed validation")
 
-    prompts = tuple(_prompt(item) for item in selected)
+    prompts = tuple(_prompt(item, prompt_id_namespace=prompt_id_namespace) for item in selected)
     contract_pairs = tuple(
-        _functional_contract(task, prompt)
-        for task, prompt in zip(selected, prompts, strict=True)
+        _functional_contract(task, prompt) for task, prompt in zip(selected, prompts, strict=True)
     )
     contracts = tuple(item[0] for item in contract_pairs)
     contract_provenance = tuple(item[1] for item in contract_pairs)
@@ -290,11 +343,9 @@ def prepare_main_prompt_canary(
             "cwe": task["cwe"],
             "task_family": task["task_family"],
             "oracle_profile_id": task["oracle_profile_id"],
-            "target_feature_id": applicability_by_task[task["task_id"]][
-                "target_feature_id"
-            ],
+            "target_feature_id": applicability_by_task[task["task_id"]]["target_feature_id"],
             "source_prompt_sha256": task["source_prompt_sha256"],
-            "canary_role": "selected_discovery",
+            "canary_role": selected_role,
         }
         for task in selected
     ]
@@ -306,9 +357,7 @@ def prepare_main_prompt_canary(
             "cwe": task["cwe"],
             "task_family": task["task_family"],
             "oracle_profile_id": task["oracle_profile_id"],
-            "target_feature_id": applicability_by_task[task["task_id"]][
-                "target_feature_id"
-            ],
+            "target_feature_id": applicability_by_task[task["task_id"]]["target_feature_id"],
             "source_prompt_sha256": task["source_prompt_sha256"],
             "canary_role": "forbidden_confirmation",
         }
@@ -316,15 +365,24 @@ def prepare_main_prompt_canary(
     )
     selection = {
         "schema_version": _SCHEMA_VERSION,
-        "selection_id": "five_cwe_main_prompt_canary_selection_v1",
+        "selection_id": selection_id,
         "estimand_id": config["estimand_id"],
-        "selection_seed": config["selection_seed"],
-        "selection_rule": "minimum_sha256_rank_within_cwe_discovery_pool_v1",
+        "selection_seed": config.get("selection_seed"),
+        "selection_rule": selection_rule,
         "confirmation_exclusion_scope": "all_frozen_confirmation_tasks",
         "generated_code_allowed": False,
         "outcomes_allowed": False,
         "tasks": selection_rows,
     }
+    if selection_mode == "one_per_cwe_canary":
+        selected_task_ids_by_cwe: dict[str, object] = {
+            task["cwe"]: task["task_id"] for task in selected
+        }
+    else:
+        selected_task_ids_by_cwe = {
+            cwe: sorted(task["task_id"] for task in selected if task["cwe"] == cwe)
+            for cwe in MAIN_CWE_ORDER
+        }
 
     output_dir.mkdir(parents=True, exist_ok=False)
     _write_json(output_dir / "effective-config.json", config)
@@ -341,7 +399,11 @@ def prepare_main_prompt_canary(
     report: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "bundle_id": config["bundle_id"],
-        "status": "MAIN_PROMPT_CANARY_INPUTS_FROZEN",
+        "status": (
+            "MAIN_PROMPT_CANARY_INPUTS_FROZEN"
+            if selection_mode == "one_per_cwe_canary"
+            else "RANDOMIZED_DISCOVERY_INPUTS_FROZEN"
+        ),
         "counts": {
             "discover_pool_tasks": split_counts["discover"],
             "confirm_pool_tasks": split_counts["confirm"],
@@ -357,15 +419,18 @@ def prepare_main_prompt_canary(
             "errors": 0,
             "pending": 0,
         },
-        "selected_task_ids_by_cwe": {
-            task["cwe"]: task["task_id"] for task in selected
-        },
+        "selected_task_ids_by_cwe": selected_task_ids_by_cwe,
         "input_digests": {
             "config_sha256": sha256_file(config_path),
             "task_pool_report_sha256": sha256_file(task_pool_dir / "report.json"),
             "task_bundle_sha256": sha256_file(tasks_path),
             "estimand_report_sha256": sha256_file(estimand_dir / "report.json"),
             "applicability_sha256": sha256_file(applicability_path),
+            **(
+                {"adapter_source_sha256": sha256_file(Path(__file__))}
+                if selection_mode == "all_discovery_tasks"
+                else {}
+            ),
         },
         "next_gate": "zero_provider_four_arm_prompt_contract",
     }
