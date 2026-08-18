@@ -10,10 +10,12 @@ from secaware.intervention.arm_catalog import materialize_safety_arm_specs
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = REPO_ROOT / "configs/e2e-pilot/randomized-exploratory-discovery-canary-v1.json"
 FIVE_CWE_CONFIG = REPO_ROOT / "configs/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2.json"
+CONFIRMATION_CONFIG = (
+    REPO_ROOT / "configs/e2e-pilot/five-cwe-held-out-policy-itt-gate-a-qwen7b-v1.json"
+)
 
 
 def _rows(path: Path) -> list[dict[str, object]]:
@@ -98,9 +100,9 @@ def test_gate_a_builds_balanced_disjoint_reproducible_variation(tmp_path: Path) 
         assert sum(row["intended_target_feature_state"] == "present" for row in local) == 2
 
 
-def test_gate_a_rejects_non_discover_policy_and_preserves_failure(tmp_path: Path) -> None:
+def test_gate_a_rejects_unknown_split_policy_and_preserves_failure(tmp_path: Path) -> None:
     payload = json.loads(CONFIG.read_text(encoding="utf-8"))
-    payload["allowed_source_split"] = "confirm"
+    payload["allowed_source_split"] = "future"
     invalid = tmp_path / "invalid.json"
     invalid.write_text(json.dumps(payload), encoding="utf-8")
     output = tmp_path / "failed"
@@ -140,9 +142,43 @@ def test_gate_a_accepts_one_candidate_per_discovery_cwe(tmp_path: Path) -> None:
         "errors": 0,
         "pending": 0,
     }
-    assert {
-        row["cwe"] for row in _rows(tmp_path / "five-cwe" / "candidates.jsonl")
-    } == {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}
+    assert {row["cwe"] for row in _rows(tmp_path / "five-cwe" / "candidates.jsonl")} == {
+        "CWE-78",
+        "CWE-89",
+        "CWE-328",
+        "CWE-338",
+        "CWE-502",
+    }
+
+
+def test_gate_a_freezes_held_out_confirmation_blocks_without_discovery_tasks(
+    tmp_path: Path,
+) -> None:
+    report = build_randomized_exploratory_canary(
+        repo_root=REPO_ROOT,
+        config_path=CONFIRMATION_CONFIG,
+        output_dir=tmp_path / "confirmation",
+        command_argv=("canary", "confirmation"),
+    )
+
+    assert report["status"] == "GATE_A_PASSED"
+    assert report["counts"] == {
+        "independent_tasks": 42,
+        "discover_task_ids_excluded": 51,
+        "candidates": 5,
+        "variants": 168,
+        "blocks": 42,
+        "assignments": 168,
+        "extraction_proposals": 168,
+        "prompt_tsgs": 168,
+        "deterministic_target_recognized": 2,
+        "deterministic_target_expected": 42,
+        "errors": 0,
+        "pending": 0,
+    }
+    source_rows = _rows(tmp_path / "confirmation" / "source-prompts.jsonl")
+    assert len(source_rows) == 42
+    assert all(row["split"] == "confirm" for row in source_rows)
 
 
 def test_gate_a_selection_accepts_explicit_task_ids_and_checks_cluster_isolation() -> None:

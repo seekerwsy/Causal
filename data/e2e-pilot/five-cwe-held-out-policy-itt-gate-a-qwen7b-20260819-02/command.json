@@ -1,0 +1,1 @@
+{"argv":["scripts/build_randomized_exploratory_canary.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-held-out-policy-itt-gate-a-qwen7b-v1.json","--output-dir","data/e2e-pilot/five-cwe-held-out-policy-itt-gate-a-qwen7b-20260819-02"]}

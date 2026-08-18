@@ -1,4 +1,4 @@
-"""Prepare a zero-outcome five-CWE Prompt canary from the frozen main task pool."""
+"""Prepare zero-outcome five-CWE Prompt inputs from the frozen main task pool."""
 
 from __future__ import annotations
 
@@ -127,6 +127,29 @@ def _validate_config(config: dict[str, Any]) -> str:
             and config.get("include_all_opposite_split_as_forbidden") is True
         )
         mode = "all_discovery_tasks"
+    elif config.get("bundle_id") == "five_cwe_held_out_policy_itt_inputs_v1":
+        valid = (
+            set(config)
+            == {
+                "schema_version",
+                "bundle_id",
+                "estimand_id",
+                "selected_split",
+                "selection_policy",
+                "expected_selected_tasks",
+                "expected_forbidden_tasks",
+                "include_all_opposite_split_as_forbidden",
+                "generated_code_allowed",
+                "outcomes_allowed",
+            }
+            and common
+            and config.get("selected_split") == "confirm"
+            and config.get("selection_policy") == "all_outcome_blind_eligible_tasks"
+            and config.get("expected_selected_tasks") == 42
+            and config.get("expected_forbidden_tasks") == 51
+            and config.get("include_all_opposite_split_as_forbidden") is True
+        )
+        mode = "all_confirmation_tasks"
     else:
         valid = False
         mode = ""
@@ -256,7 +279,7 @@ def prepare_main_prompt_canary(
     output_dir: Path,
     command_argv: tuple[str, ...],
 ) -> dict[str, object]:
-    """Freeze one discovery task per CWE and all held-out confirmation exclusions."""
+    """Freeze one outcome-blind split and every opposite-split exclusion."""
 
     if output_dir.exists():
         raise FileExistsError(output_dir)
@@ -311,7 +334,10 @@ def prepare_main_prompt_canary(
         selection_id = "five_cwe_main_prompt_canary_selection_v1"
         selection_rule = "minimum_sha256_rank_within_cwe_discovery_pool_v1"
         selected_role = "selected_discovery"
-    else:
+        selected_split = "discover"
+        forbidden_split = "confirm"
+        forbidden_role = "forbidden_confirmation"
+    elif selection_mode == "all_discovery_tasks":
         selected = tuple(
             sorted(
                 (item for item in tasks if item["split"] == "discover"),
@@ -322,11 +348,32 @@ def prepare_main_prompt_canary(
         selection_id = "five_cwe_randomized_discovery_selection_v1"
         selection_rule = "all_outcome_blind_eligible_discovery_tasks_v1"
         selected_role = "selected_randomized_discovery"
+        selected_split = "discover"
+        forbidden_split = "confirm"
+        forbidden_role = "forbidden_confirmation"
+    else:
+        selected = tuple(
+            sorted(
+                (item for item in tasks if item["split"] == "confirm"),
+                key=lambda item: item["task_id"],
+            )
+        )
+        prompt_id_namespace = "main-confirmation"
+        selection_id = "five_cwe_held_out_policy_itt_selection_v1"
+        selection_rule = "all_outcome_blind_eligible_confirmation_tasks_v1"
+        selected_role = "selected_held_out_confirmation"
+        selected_split = "confirm"
+        forbidden_split = "discover"
+        forbidden_role = "forbidden_discovery"
     selected_ids = {item["task_id"] for item in selected}
-    confirm = tuple(item for item in tasks if item["split"] == "confirm")
-    confirm_ids = {item["task_id"] for item in confirm}
-    expected_selected = 5 if selection_mode == "one_per_cwe_canary" else 51
-    if selected_ids & confirm_ids or len(selected_ids) != expected_selected:
+    forbidden = tuple(item for item in tasks if item["split"] == forbidden_split)
+    forbidden_ids = {item["task_id"] for item in forbidden}
+    expected_selected = {
+        "one_per_cwe_canary": 5,
+        "all_discovery_tasks": 51,
+        "all_confirmation_tasks": 42,
+    }[selection_mode]
+    if selected_ids & forbidden_ids or len(selected_ids) != expected_selected:
         raise ValueError("main Prompt canary split isolation failed validation")
 
     prompts = tuple(_prompt(item, prompt_id_namespace=prompt_id_namespace) for item in selected)
@@ -339,7 +386,7 @@ def prepare_main_prompt_canary(
         {
             "task_id": task["task_id"],
             "task_cluster_id": task["task_cluster_id"],
-            "split": "discover",
+            "split": selected_split,
             "cwe": task["cwe"],
             "task_family": task["task_family"],
             "oracle_profile_id": task["oracle_profile_id"],
@@ -353,15 +400,15 @@ def prepare_main_prompt_canary(
         {
             "task_id": task["task_id"],
             "task_cluster_id": task["task_cluster_id"],
-            "split": "confirm",
+            "split": forbidden_split,
             "cwe": task["cwe"],
             "task_family": task["task_family"],
             "oracle_profile_id": task["oracle_profile_id"],
             "target_feature_id": applicability_by_task[task["task_id"]]["target_feature_id"],
             "source_prompt_sha256": task["source_prompt_sha256"],
-            "canary_role": "forbidden_confirmation",
+            "canary_role": forbidden_role,
         }
-        for task in confirm
+        for task in forbidden
     )
     selection = {
         "schema_version": _SCHEMA_VERSION,
@@ -369,7 +416,7 @@ def prepare_main_prompt_canary(
         "estimand_id": config["estimand_id"],
         "selection_seed": config.get("selection_seed"),
         "selection_rule": selection_rule,
-        "confirmation_exclusion_scope": "all_frozen_confirmation_tasks",
+        "opposite_split_exclusion_scope": f"all_frozen_{forbidden_split}_tasks",
         "generated_code_allowed": False,
         "outcomes_allowed": False,
         "tasks": selection_rows,
@@ -399,16 +446,24 @@ def prepare_main_prompt_canary(
     report: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "bundle_id": config["bundle_id"],
-        "status": (
-            "MAIN_PROMPT_CANARY_INPUTS_FROZEN"
-            if selection_mode == "one_per_cwe_canary"
-            else "RANDOMIZED_DISCOVERY_INPUTS_FROZEN"
-        ),
+        "status": {
+            "one_per_cwe_canary": "MAIN_PROMPT_CANARY_INPUTS_FROZEN",
+            "all_discovery_tasks": "RANDOMIZED_DISCOVERY_INPUTS_FROZEN",
+            "all_confirmation_tasks": "HELD_OUT_POLICY_ITT_INPUTS_FROZEN",
+        }[selection_mode],
         "counts": {
             "discover_pool_tasks": split_counts["discover"],
             "confirm_pool_tasks": split_counts["confirm"],
-            "selected_discover_tasks": len(selected),
-            "forbidden_confirm_tasks": len(confirm),
+            (
+                "selected_confirm_tasks"
+                if selection_mode == "all_confirmation_tasks"
+                else "selected_discover_tasks"
+            ): len(selected),
+            (
+                "forbidden_discover_tasks"
+                if selection_mode == "all_confirmation_tasks"
+                else "forbidden_confirm_tasks"
+            ): len(forbidden),
             "cwes": len({item["cwe"] for item in selected}),
             "prompts": len(prompts),
             "functional_contracts": len(contracts),
@@ -428,7 +483,7 @@ def prepare_main_prompt_canary(
             "applicability_sha256": sha256_file(applicability_path),
             **(
                 {"adapter_source_sha256": sha256_file(Path(__file__))}
-                if selection_mode == "all_discovery_tasks"
+                if selection_mode in {"all_discovery_tasks", "all_confirmation_tasks"}
                 else {}
             ),
         },

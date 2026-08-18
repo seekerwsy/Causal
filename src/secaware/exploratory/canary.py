@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
 import json
 import math
 import os
 import platform
-from pathlib import Path
 import socket
 import sys
+from collections import Counter
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from secaware.config import TSGConfig
@@ -22,7 +22,7 @@ from secaware.intervention.executors import DETERMINISTIC_INTERVENTION_POLICY_SH
 from secaware.intervention.variant_validation import blind_variant_prompt_record_from_text
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
-from secaware.randomness import DeterministicRNG, RNG_VERSION
+from secaware.randomness import RNG_VERSION, DeterministicRNG
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import (
     FeatureFamily,
@@ -39,7 +39,6 @@ from secaware.tsg.feature_catalog import (
 )
 from secaware.tsg.graph import record_to_multidigraph
 from secaware.tsg.queries import feature_state_vector
-
 
 _SCHEMA_VERSION = "1.0"
 _RENDERER_ID = "exploratory-deterministic-catalog-adapter-v1"
@@ -186,7 +185,13 @@ def _validate_delta(
     return changed, target_recognized
 
 
-def _selection_maps(selection: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], set[str]]:
+def _selection_maps_for_split(
+    selection: dict[str, Any],
+    *,
+    selected_split: str,
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    if selected_split not in {"discover", "confirm"}:
+        raise ValueError("exploratory canary selected split failed validation")
     tasks = selection.get("tasks")
     if type(tasks) is not list or not tasks:
         raise ValueError("exploratory canary selection failed validation")
@@ -218,13 +223,18 @@ def _selection_maps(selection: dict[str, Any]) -> tuple[dict[str, dict[str, Any]
                 raise ValueError("exploratory canary selection failed validation")
             confirm_ids.add(task_id)
             confirm_clusters.add(cluster_id)
-    if (
-        not discover
-        or set(discover) & confirm_ids
-        or discover_clusters & confirm_clusters
-    ):
+    if not discover or set(discover) & confirm_ids or discover_clusters & confirm_clusters:
         raise ValueError("exploratory canary split isolation failed validation")
-    return discover, confirm_ids
+    if selected_split == "discover":
+        return discover, confirm_ids
+    confirm = {str(task["task_id"]): task for task in tasks if task.get("split") == "confirm"}
+    return confirm, set(discover)
+
+
+def _selection_maps(selection: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """Preserve the original discovery-selection helper for existing callers."""
+
+    return _selection_maps_for_split(selection, selected_split="discover")
 
 
 def _candidate_for_task(
@@ -297,7 +307,7 @@ def build_randomized_exploratory_canary(
         if (
             config.get("schema_version") != _SCHEMA_VERSION
             or config.get("gate") != "zero_provider_contract"
-            or config.get("allowed_source_split") != "discover"
+            or config.get("allowed_source_split") not in {"discover", "confirm"}
             or config.get("allow_outcome_generation") is not False
             or config.get("rng_version") != RNG_VERSION
         ):
@@ -307,30 +317,37 @@ def build_randomized_exploratory_canary(
         selection_path.relative_to(repo_root)
         prompts_path.relative_to(repo_root)
         selection = _read_json(selection_path)
-        discover_tasks, confirm_task_ids = _selection_maps(selection)
-        if len(discover_tasks) != int(config.get("expected_discover_tasks", -1)):
+        selected_split = str(config["allowed_source_split"])
+        selected_tasks, forbidden_task_ids = _selection_maps_for_split(
+            selection,
+            selected_split=selected_split,
+        )
+        expected_count_key = (
+            "expected_discover_tasks" if selected_split == "discover" else "expected_confirm_tasks"
+        )
+        if len(selected_tasks) != int(config.get(expected_count_key, -1)):
             raise ValueError("exploratory canary task count failed validation")
         prompts = tuple(read_jsonl(prompts_path, PromptRecord, required=True, allow_empty=False))
         source_by_task = {
             item.task_id: item
             for item in prompts
-            if item.split == "discover" and item.prompt_role.value == "neutral_baseline"
+            if item.split == selected_split and item.prompt_role.value == "neutral_baseline"
         }
-        if set(source_by_task) != set(discover_tasks) or set(source_by_task) & confirm_task_ids:
+        if set(source_by_task) != set(selected_tasks) or set(source_by_task) & forbidden_task_ids:
             raise ValueError("exploratory canary Prompt split failed validation")
         selection_sha256 = sha256_file(selection_path)
         input_prompts_sha256 = sha256_file(prompts_path)
         candidate_config = config.get("candidates")
-        discover_cwes = {str(item["cwe"]) for item in discover_tasks.values()}
+        selected_cwes = {str(item["cwe"]) for item in selected_tasks.values()}
         if (
             type(candidate_config) is not list
-            or len(candidate_config) != len(discover_cwes)
+            or len(candidate_config) != len(selected_cwes)
             or {str(item.get("cwe")) for item in candidate_config if type(item) is dict}
-            != discover_cwes
+            != selected_cwes
         ):
             raise ValueError("exploratory canary candidate budget failed validation")
         candidates_by_cwe: dict[str, dict[str, Any]] = {}
-        for task in discover_tasks.values():
+        for task in selected_tasks.values():
             candidate = _candidate_for_task(
                 task,
                 candidate_config,
@@ -367,8 +384,8 @@ def build_randomized_exploratory_canary(
         variants: list[dict[str, Any]] = []
         variant_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         state_rows: list[dict[str, object]] = []
-        for task_id in sorted(discover_tasks):
-            task = discover_tasks[task_id]
+        for task_id in sorted(selected_tasks):
+            task = selected_tasks[task_id]
             source = source_by_task[task_id]
             source_prompts.append(source)
             candidate = candidates_by_cwe[str(task["cwe"])]
@@ -454,15 +471,15 @@ def build_randomized_exploratory_canary(
                         },
                     }
                 )
-        expected_variants = len(discover_tasks) * len(_ARMS)
+        expected_variants = len(selected_tasks) * len(_ARMS)
         if len(variants) != expected_variants or len(variant_by_key) != expected_variants:
             raise ValueError("exploratory canary variant coverage failed validation")
         assignments: list[dict[str, object]] = []
         global_seed = config.get("global_seed")
         if type(global_seed) is not int:
             raise ValueError("exploratory canary global seed failed validation")
-        for task_id in sorted(discover_tasks):
-            candidate = candidates_by_cwe[str(discover_tasks[task_id]["cwe"])]
+        for task_id in sorted(selected_tasks):
+            candidate = candidates_by_cwe[str(selected_tasks[task_id]["cwe"])]
             seed_material = {
                 "schema_version": _SCHEMA_VERSION,
                 "rng_version": RNG_VERSION,
@@ -504,9 +521,7 @@ def build_randomized_exploratory_canary(
         if set(block_counts.values()) != {len(_ARMS)}:
             raise ValueError("exploratory canary block balance failed validation")
         for block_id in block_counts:
-            roles = {
-                item["arm_role"] for item in assignments if item["block_id"] == block_id
-            }
+            roles = {item["arm_role"] for item in assignments if item["block_id"] == block_id}
             if roles != {item.value for item in _ARMS}:
                 raise ValueError("exploratory canary arm balance failed validation")
         write_jsonl(output_dir / "source-prompts.jsonl", source_prompts)
@@ -549,8 +564,12 @@ def build_randomized_exploratory_canary(
             "scientific_claim_allowed": False,
             "outcome_generation_allowed": False,
             "counts": {
-                "independent_tasks": len(discover_tasks),
-                "confirm_task_ids_excluded": len(confirm_task_ids),
+                "independent_tasks": len(selected_tasks),
+                (
+                    "confirm_task_ids_excluded"
+                    if selected_split == "discover"
+                    else "discover_task_ids_excluded"
+                ): len(forbidden_task_ids),
                 "candidates": len(candidates),
                 "variants": len(variants),
                 "blocks": len(block_counts),
@@ -558,7 +577,7 @@ def build_randomized_exploratory_canary(
                 "extraction_proposals": len(proposals),
                 "prompt_tsgs": len(graphs),
                 "deterministic_target_recognized": deterministic_target_recognized,
-                "deterministic_target_expected": len(discover_tasks),
+                "deterministic_target_expected": len(selected_tasks),
                 "errors": 0,
                 "pending": 0,
             },
@@ -575,14 +594,11 @@ def build_randomized_exploratory_canary(
             "next_gate": "blind_llm_intervention_and_extraction",
         }
         _write_json(output_dir / "report.json", report)
-        artifact_names = tuple(
-            sorted(path.name for path in output_dir.iterdir() if path.is_file())
-        )
+        artifact_names = tuple(sorted(path.name for path in output_dir.iterdir() if path.is_file()))
         artifact_manifest = {
             "schema_version": _SCHEMA_VERSION,
             "files": [
-                {"path": name, "sha256": sha256_file(output_dir / name)}
-                for name in artifact_names
+                {"path": name, "sha256": sha256_file(output_dir / name)} for name in artifact_names
             ],
         }
         _write_json(output_dir / "artifact-manifest.json", artifact_manifest)
