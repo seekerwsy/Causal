@@ -214,3 +214,17 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   character and one neighboring-regression command named two nonexistent test files; both commands
   stopped before product execution or artifact mutation. The corrected path was discovered from
   the error-status relation, and the corrected targeted test set is selected from `rg --files`.
+- The recovered Qwen run then completed all 204 assignments with zero error and zero pending unit.
+  Its aggregate result contains 103 secure, 47 insecure, and 54 Oracle-unknown decisions; 143
+  functional passes, 51 functional failures, and 10 functional unknowns; and 81
+  secure-and-functional outcomes. The final run assignment set is byte-for-byte identical to the
+  204-ID frozen plan set. The complete archive has SHA-256
+  `561b797639c7669bb3745a2e73b79543733635caaf86c1cac3ff3759439cced1`; a local replay
+  revalidated all 204 unit manifests. The first local extraction used a worktree path whose run and
+  assignment components exceeded the Windows legacy path limit, so enumeration returned no unit
+  rows and a recursive inspection produced path errors. The archive was not modified; extracting
+  the same bytes under `D:\MyCode\Causal\.tmp\q1` yielded 204 complete and zero failed units.
+- Two preparatory source inspections guessed obsolete filenames (`variants.jsonl` and
+  `discovery/_fci_worker.py`) instead of listing the active files first. Both were read-only and
+  changed no artifact. The corrected reads use `prompt-variants.jsonl` and the actual supervised
+  FCI module locations; future analysis preparation starts from `rg --files`.
