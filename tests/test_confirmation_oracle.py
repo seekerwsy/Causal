@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import json
 import shutil
 import threading
@@ -500,6 +501,34 @@ def test_oracle_runner_observes_only_code_language_and_policy_coordinates() -> N
     assert assignment.variant_id not in rendered
     assert assignment.arm_role.value not in rendered
     assert code.generation_request.prompt not in rendered
+
+
+def test_blind_oracle_parse_failure_skips_analyzers_with_policy_provenance() -> None:
+    _assignment, _code, template = _blind_code_input()
+    invalid_source = "def broken(:\n    pass\n"
+    code_input = OracleCodeInput(
+        request_id=template.request_id,
+        code_id=template.code_id,
+        code_sha256=hashlib.sha256(invalid_source.encode("utf-8")).hexdigest(),
+        prompt_id=template.prompt_id,
+        model_id=template.model_id,
+        seed_id=template.seed_id,
+        language="python",
+        code=invalid_source,
+    )
+
+    def unexpected_runner(*_args, **_kwargs):
+        raise AssertionError("parse-invalid code must not reach an analyzer")
+
+    analysis = _run_blind_batch(code_input, unexpected_runner)[0]
+
+    assert analysis.parse_ok is False
+    assert analysis.functional_ok is False
+    assert analysis.security_label is SecurityLabel.UNKNOWN
+    assert analysis.evaluability.value == "unknown_parse_failure"
+    assert analysis.findings == ()
+    assert tuple(item.analyzer for item in analysis.analyzers) == ("semgrep", "bandit")
+    assert analysis.mechanism_trace.parse_ok is False
 
 
 def test_blind_oracle_ordinary_failure_releases_sensitive_frame_locals() -> None:

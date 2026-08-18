@@ -351,3 +351,12 @@ Additional execution notes:
   in the fail-fast/recovery executor. Targeted Gate C tests still passed; later static validation
   remains limited to formatting and fatal import/syntax rules unless those existing handlers are
   intentionally redesigned.
+- The held-out Qwen run completed 24 assignments before one parse-invalid generated program caused
+  Semgrep 1.168.0 to emit a `PartialParsing` warning. The strict adapter correctly rejected that
+  report, but the Oracle should not have submitted syntax-invalid code to either analyzer after the
+  local syntax gate had already classified it. The corrected Oracle now excludes parse failures
+  from analyzer batches, emits provenance-bound `unknown_parse_failure`, preserves the assigned row
+  with joint outcome zero, and keeps valid members of a mixed batch analyzable. Recovery recognizes
+  this exact closed failure state, reuses the preserved generation and functional outcome, makes no
+  generation or Judge call, and records a zero-call analyzer recovery session. The original failed
+  run remains immutable.

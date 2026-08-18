@@ -1601,6 +1601,89 @@ def validate_oracle_code_analyses(
         analyses = ()
 
 
+def _policy_analyzer_provenance(
+    policy: LoadedOraclePolicy,
+) -> tuple[AnalyzerProvenanceRecord, AnalyzerProvenanceRecord]:
+    """Bind terminal non-analyzed states to the authenticated analyzer policy."""
+
+    return (
+        _TRUSTED_ANALYZER_PROVENANCE_TYPE(
+            schema_version="1.0",
+            analyzer="semgrep",
+            version=policy.semgrep_version,
+            policy_sha256=policy.combined_sha256,
+        ),
+        _TRUSTED_ANALYZER_PROVENANCE_TYPE(
+            schema_version="1.0",
+            analyzer="bandit",
+            version=policy.bandit_version,
+            policy_sha256=policy.combined_sha256,
+        ),
+    )
+
+
+def _parse_failure_record(
+    validated: _ValidatedCode,
+    analyzers: tuple[AnalyzerProvenanceRecord, AnalyzerProvenanceRecord],
+) -> OracleRecord:
+    record = validated.record
+    if type(record) is not CanonicalGeneratedCodeRecord or validated.parse_ok:
+        raise ValueError(_ENGINE_MESSAGE)
+    return OracleRecord(
+        schema_version="1.2",
+        request_id=record.request_id,
+        code_id=record.code_id,
+        code_sha256=record.code_sha256,
+        prompt_id=record.prompt_id,
+        condition=record.condition,
+        model_id=record.model_id,
+        seed_id=record.seed_id,
+        hypothesis_id=record.hypothesis_id,
+        assignment_id=record.assignment_id,
+        target_spec_id=record.target_spec_id,
+        target_instance_id=record.target_instance_id,
+        arm_protocol_id=record.arm_protocol_id,
+        protocol_instance_id=record.protocol_instance_id,
+        variant_id=record.variant_id,
+        arm_role=record.arm_role,
+        parse_ok=False,
+        functional_ok=False,
+        security_label=SecurityLabel.UNKNOWN,
+        evaluability=OracleEvaluability.UNKNOWN_PARSE_FAILURE,
+        severity="none",
+        findings=(),
+        analyzers=analyzers,
+    )
+
+
+def _parse_failure_analysis(
+    validated: _ValidatedCode,
+    analyzers: tuple[AnalyzerProvenanceRecord, AnalyzerProvenanceRecord],
+) -> OracleCodeAnalysis:
+    record = validated.record
+    if type(record) is not OracleCodeInput or validated.parse_ok:
+        raise ValueError(_ENGINE_MESSAGE)
+    mechanism_trace = extract_python_mechanism_trace(record.code)
+    if mechanism_trace.code_sha256 != record.code_sha256 or mechanism_trace.parse_ok:
+        raise ValueError(_ENGINE_MESSAGE)
+    return _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
+        request_id=record.request_id,
+        code_id=record.code_id,
+        code_sha256=record.code_sha256,
+        prompt_id=record.prompt_id,
+        model_id=record.model_id,
+        seed_id=record.seed_id,
+        parse_ok=False,
+        functional_ok=False,
+        security_label=SecurityLabel.UNKNOWN,
+        evaluability=OracleEvaluability.UNKNOWN_PARSE_FAILURE,
+        severity="none",
+        findings=(),
+        analyzers=analyzers,
+        mechanism_trace=mechanism_trace,
+    )
+
+
 def _aggregate(
     codes: tuple[_ValidatedCode, ...],
     semgrep_report: AnalyzerReport,
@@ -1807,6 +1890,7 @@ def run_oracle_batch(
     """Run the two required analyzers over one authenticated canonical batch."""
 
     validated: tuple[_ValidatedCode, ...] = ()
+    parseable: tuple[_ValidatedCode, ...] = ()
     trusted_policy: LoadedOraclePolicy | None = None
     expected_files: frozenset[str] = frozenset()
     semgrep_process: AnalyzerProcessResult | None = None
@@ -1833,47 +1917,58 @@ def run_oracle_batch(
             max_stderr_bytes,
         )
         validate_analyzer_runtime()
-        expected_files = frozenset(item.opaque_file for item in validated)
-        semgrep_process = _run_private_analyzer_batch(
-            "semgrep",
-            validated,
-            trusted_policy,
-            semgrep_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
+        parseable = tuple(item for item in validated if item.parse_ok)
+        records = []
+        if parseable:
+            expected_files = frozenset(item.opaque_file for item in parseable)
+            semgrep_process = _run_private_analyzer_batch(
+                "semgrep",
+                parseable,
+                trusted_policy,
+                semgrep_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            semgrep_report = parse_semgrep_report(
+                semgrep_process.stdout,
+                returncode=semgrep_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.semgrep_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                max_output_bytes=max_stdout_bytes,
+            )
+            semgrep_process = None
+            bandit_process = _run_private_analyzer_batch(
+                "bandit",
+                parseable,
+                trusted_policy,
+                bandit_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            bandit_report = parse_bandit_report(
+                bandit_process.stdout,
+                returncode=bandit_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.bandit_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                constraints=trusted_policy.bandit_constraints,
+                max_output_bytes=max_stdout_bytes,
+            )
+            bandit_process = None
+            records.extend(_aggregate(parseable, semgrep_report, bandit_report))
+        analyzers = _policy_analyzer_provenance(trusted_policy)
+        records.extend(
+            _parse_failure_record(item, analyzers) for item in validated if not item.parse_ok
         )
-        semgrep_report = parse_semgrep_report(
-            semgrep_process.stdout,
-            returncode=semgrep_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.semgrep_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            max_output_bytes=max_stdout_bytes,
-        )
-        semgrep_process = None
-        bandit_process = _run_private_analyzer_batch(
-            "bandit",
-            validated,
-            trusted_policy,
-            bandit_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
-        )
-        bandit_report = parse_bandit_report(
-            bandit_process.stdout,
-            returncode=bandit_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.bandit_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            constraints=trusted_policy.bandit_constraints,
-            max_output_bytes=max_stdout_bytes,
-        )
-        bandit_process = None
-        records = _aggregate(validated, semgrep_report, bandit_report)
+        by_request_id = {record.request_id: record for record in records}
+        if len(by_request_id) != len(validated):
+            raise ValueError(_ENGINE_MESSAGE)
+        records = [by_request_id[item.record.request_id] for item in validated]
     except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
@@ -1887,12 +1982,15 @@ def run_oracle_batch(
         bandit_executable = ""
         runner = None  # type: ignore[assignment]
         validated = ()
+        parseable = ()
         trusted_policy = None
         expected_files = frozenset()
         semgrep_process = None
         bandit_process = None
         semgrep_report = None
         bandit_report = None
+        analyzers = ()
+        by_request_id = {}
     if control is not None:
         records = None
         failure = None
@@ -1923,6 +2021,7 @@ def run_oracle_code_batch(
     """Analyze a randomized-coordinate-blind canonical code batch."""
 
     validated: tuple[_ValidatedCode, ...] = ()
+    parseable: tuple[_ValidatedCode, ...] = ()
     trusted_policy: LoadedOraclePolicy | None = None
     analyses: list[OracleCodeAnalysis] | None = None
     failure: SecAwareError | None = None
@@ -1944,57 +2043,68 @@ def run_oracle_code_batch(
             max_stderr_bytes,
         )
         runtime_validator()
-        expected_files = frozenset(item.opaque_file for item in validated)
-        semgrep_process = _run_private_analyzer_batch(
-            "semgrep",
-            validated,
-            trusted_policy,
-            semgrep_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
+        parseable = tuple(item for item in validated if item.parse_ok)
+        analyses = []
+        if parseable:
+            expected_files = frozenset(item.opaque_file for item in parseable)
+            semgrep_process = _run_private_analyzer_batch(
+                "semgrep",
+                parseable,
+                trusted_policy,
+                semgrep_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            semgrep_report = parse_semgrep_report(
+                semgrep_process.stdout,
+                returncode=semgrep_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.semgrep_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                max_output_bytes=max_stdout_bytes,
+            )
+            semgrep_process = None
+            bandit_process = _run_private_analyzer_batch(
+                "bandit",
+                parseable,
+                trusted_policy,
+                bandit_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            bandit_report = parse_bandit_report(
+                bandit_process.stdout,
+                returncode=bandit_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.bandit_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                constraints=trusted_policy.bandit_constraints,
+                max_output_bytes=max_stdout_bytes,
+            )
+            bandit_process = None
+            semgrep_report = _snapshot_analyzer_report(
+                semgrep_report,
+                analyzer="semgrep",
+                expected_files=expected_files,
+            )
+            bandit_report = _snapshot_analyzer_report(
+                bandit_report,
+                analyzer="bandit",
+                expected_files=expected_files,
+            )
+            analyses.extend(_aggregate_code_analyses(parseable, semgrep_report, bandit_report))
+        analyzers = _policy_analyzer_provenance(trusted_policy)
+        analyses.extend(
+            _parse_failure_analysis(item, analyzers) for item in validated if not item.parse_ok
         )
-        semgrep_report = parse_semgrep_report(
-            semgrep_process.stdout,
-            returncode=semgrep_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.semgrep_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            max_output_bytes=max_stdout_bytes,
-        )
-        semgrep_process = None
-        bandit_process = _run_private_analyzer_batch(
-            "bandit",
-            validated,
-            trusted_policy,
-            bandit_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
-        )
-        bandit_report = parse_bandit_report(
-            bandit_process.stdout,
-            returncode=bandit_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.bandit_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            constraints=trusted_policy.bandit_constraints,
-            max_output_bytes=max_stdout_bytes,
-        )
-        bandit_process = None
-        semgrep_report = _snapshot_analyzer_report(
-            semgrep_report,
-            analyzer="semgrep",
-            expected_files=expected_files,
-        )
-        bandit_report = _snapshot_analyzer_report(
-            bandit_report,
-            analyzer="bandit",
-            expected_files=expected_files,
-        )
-        analyses = _aggregate_code_analyses(validated, semgrep_report, bandit_report)
+        by_request_id = {analysis.request_id: analysis for analysis in analyses}
+        if len(by_request_id) != len(validated):
+            raise ValueError(_ENGINE_MESSAGE)
+        analyses = [by_request_id[item.record.request_id] for item in validated]
         analyses = list(validate_oracle_code_analyses(analyses))
     except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
@@ -2013,12 +2123,15 @@ def run_oracle_code_batch(
         runner = None  # type: ignore[assignment]
         runtime_validator = None  # type: ignore[assignment]
         validated = ()
+        parseable = ()
         trusted_policy = None
         expected_files = frozenset()
         semgrep_process = None
         bandit_process = None
         semgrep_report = None
         bandit_report = None
+        analyzers = ()
+        by_request_id = {}
     if control is not None:
         analyses = None
         failure = None

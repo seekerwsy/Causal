@@ -29,6 +29,7 @@ from secaware.generation.confirmation import execute_confirmation_requests
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.llm.structured_transport import OpenAICompatibleStructuredTransport
 from secaware.oracle.aggregator import OracleCodeAnalysis, OracleCodeInput, run_oracle_code_batch
+from secaware.oracle.functionality import evaluate_functionality
 from secaware.oracle.policy import LoadedOraclePolicy, OracleCoverageProfile, load_policy_bundle
 from secaware.oracle.profile_decision import (
     OracleMechanismSinkFact,
@@ -1261,6 +1262,13 @@ def recover_gate_c_live_oracle(
         and error.get("error_code") == int(ErrorCode.API_INVALID_RESPONSE)
         and (source_unit / "generation-provider-transport" / "response.json").is_file()
     )
+    syntax_gated_oracle_failure = (
+        failed_stage == "oracle"
+        and error.get("stage") == "oracle"
+        and error.get("error_code") == int(ErrorCode.ANALYZER_INVALID_OUTPUT)
+        and status.get("functional_judge_provider_attempts") == 0
+        and (source_unit / "functional-judge-transport" / "not-invoked.json").is_file()
+    )
     if (
         status.get("status") != "ERROR"
         or failed_stage not in {"oracle", "functional_judge", "generation"}
@@ -1268,7 +1276,7 @@ def recover_gate_c_live_oracle(
         or status.get("terminal_no_code") != 0
         or status.get("generation_provider_attempts") != 1
         or status.get("functional_judge_provider_attempts")
-        != (0 if invalid_generation_response else 1)
+        != (0 if invalid_generation_response or syntax_gated_oracle_failure else 1)
         or status.get("oracle_results") != 0
         or (failed_stage == "oracle" and error.get("stage") != "oracle")
         or (failed_stage == "functional_judge" and not invalid_judge_response)
@@ -1354,9 +1362,14 @@ def recover_gate_c_live_oracle(
             read_jsonl(
                 source_unit / "functional-judge-passes.jsonl",
                 required=True,
-                allow_empty=False,
+                allow_empty=syntax_gated_oracle_failure,
             )
         )
+    )
+    judge_passes_valid = (
+        not judge_passes
+        if syntax_gated_oracle_failure
+        else len(judge_passes) == 1 and judge_passes[0].get("assignment_id") == repair_id
     )
     if (
         len(assignments) != 1
@@ -1381,8 +1394,7 @@ def recover_gate_c_live_oracle(
             and (
                 len(outcomes) != 1
                 or outcomes[0].get("assignment_id") != repair_id
-                or len(judge_passes) != 1
-                or judge_passes[0].get("assignment_id") != repair_id
+                or not judge_passes_valid
             )
         )
         or (
@@ -1401,6 +1413,13 @@ def recover_gate_c_live_oracle(
         )
     ):
         raise ValueError("Gate C Oracle repair preserved records failed validation")
+    if syntax_gated_oracle_failure and (
+        len(codes) != 1
+        or evaluate_functionality(codes[0].code)["syntax_ok"]
+        or len(outcomes) != 1
+        or outcomes[0].get("status") != FunctionalOutcomeStatus.FAIL.value
+    ):
+        raise ValueError("Gate C syntax-gated Oracle repair evidence failed validation")
     preserved_analysis: OracleCodeAnalysis | None = None
     if has_preserved_oracle:
         preserved_analysis = _oracle_analysis_from_payload(_read_json(oracle_analysis_path))
@@ -1647,6 +1666,7 @@ def recover_gate_c_live_oracle(
             "preserved_oracle_result_reused": preserved_analysis is not None,
             "invalid_functional_response_reclassified": invalid_judge_response,
             "persisted_generation_response_replayed": invalid_generation_response,
+            "syntax_parse_failure_reclassified": syntax_gated_oracle_failure,
         },
     )
     _write_json(
@@ -1659,7 +1679,7 @@ def recover_gate_c_live_oracle(
             "generated": 1,
             "terminal_no_code": 0,
             "generation_provider_attempts": 1,
-            "functional_judge_provider_attempts": 1,
+            "functional_judge_provider_attempts": (0 if syntax_gated_oracle_failure else 1),
             "oracle_results": oracle_result_count,
             "oracle_decisions": oracle_decision_count,
             "recovered_without_provider_calls": True,

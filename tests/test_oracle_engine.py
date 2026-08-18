@@ -492,11 +492,42 @@ def test_completed_syntax_error_is_typed_unknown_without_source_leak(
         runner=runner,
     )[0]
 
-    assert len(runner.calls) == 2
+    assert runner.calls == []
     assert record.parse_ok is False
     assert record.functional_ok is False
     assert record.security_label is SecurityLabel.UNKNOWN
     assert record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+
+
+def test_mixed_batch_analyzes_only_parseable_code_and_preserves_request_order(
+    policy: LoadedOraclePolicy,
+) -> None:
+    invalid = _code(prompt_id="prompt-invalid", code="def broken(:\n    pass\n")
+    valid = _code(prompt_id="prompt-valid", code="def valid():\n    return 1\n")
+    observed_sources: list[tuple[str, ...]] = []
+
+    def inspect_batch(_argv: Sequence[str], cwd: Path) -> None:
+        observed_sources.append(
+            tuple(
+                path.read_text(encoding="utf-8")
+                for path in sorted(cwd.iterdir())
+                if path.suffix == ".py"
+            )
+        )
+
+    runner = FakeRunner(inspect_batch=inspect_batch)
+    records = run_oracle_batch((valid, invalid), policy, runner=runner)
+
+    assert len(runner.calls) == 2
+    assert observed_sources == [(valid.code,), (valid.code,)]
+    assert [record.request_id for record in records] == sorted(
+        (valid.request_id, invalid.request_id)
+    )
+    by_request_id = {record.request_id: record for record in records}
+    assert by_request_id[invalid.request_id].evaluability is (
+        OracleEvaluability.UNKNOWN_PARSE_FAILURE
+    )
+    assert by_request_id[valid.request_id].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
 
 
 def test_refusal_words_are_not_a_functionality_or_security_fallback(
