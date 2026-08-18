@@ -192,20 +192,37 @@ def _selection_maps(selection: dict[str, Any]) -> tuple[dict[str, dict[str, Any]
         raise ValueError("exploratory canary selection failed validation")
     discover: dict[str, dict[str, Any]] = {}
     confirm_ids: set[str] = set()
+    discover_clusters: set[str] = set()
+    confirm_clusters: set[str] = set()
     for task in tasks:
         if type(task) is not dict:
             raise ValueError("exploratory canary selection failed validation")
-        task_id = task.get("task_cluster_id")
+        task_id = task.get("task_id", task.get("task_cluster_id"))
+        cluster_id = task.get("task_cluster_id")
         split = task.get("split")
-        if type(task_id) is not str or split not in {"discover", "confirm"}:
+        if (
+            type(task_id) is not str
+            or not task_id
+            or type(cluster_id) is not str
+            or not cluster_id
+            or split not in {"discover", "confirm"}
+        ):
             raise ValueError("exploratory canary selection failed validation")
         if split == "discover":
-            if task_id in discover:
+            if task_id in discover or cluster_id in discover_clusters:
                 raise ValueError("exploratory canary selection failed validation")
             discover[task_id] = task
+            discover_clusters.add(cluster_id)
         else:
+            if task_id in confirm_ids or cluster_id in confirm_clusters:
+                raise ValueError("exploratory canary selection failed validation")
             confirm_ids.add(task_id)
-    if not discover or set(discover) & confirm_ids:
+            confirm_clusters.add(cluster_id)
+    if (
+        not discover
+        or set(discover) & confirm_ids
+        or discover_clusters & confirm_clusters
+    ):
         raise ValueError("exploratory canary split isolation failed validation")
     return discover, confirm_ids
 

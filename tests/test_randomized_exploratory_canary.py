@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from secaware.exploratory.canary import build_randomized_exploratory_canary
+from secaware.exploratory.canary import _selection_maps, build_randomized_exploratory_canary
 from secaware.intervention.arm_catalog import materialize_safety_arm_specs
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
@@ -143,3 +143,21 @@ def test_gate_a_accepts_one_candidate_per_discovery_cwe(tmp_path: Path) -> None:
     assert {
         row["cwe"] for row in _rows(tmp_path / "five-cwe" / "candidates.jsonl")
     } == {"CWE-78", "CWE-89", "CWE-328", "CWE-338", "CWE-502"}
+
+
+def test_gate_a_selection_accepts_explicit_task_ids_and_checks_cluster_isolation() -> None:
+    selection = {
+        "tasks": [
+            {"task_id": "task-discover", "task_cluster_id": "cluster-a", "split": "discover"},
+            {"task_id": "task-confirm", "task_cluster_id": "cluster-b", "split": "confirm"},
+        ]
+    }
+
+    discover, confirm = _selection_maps(selection)
+
+    assert set(discover) == {"task-discover"}
+    assert confirm == {"task-confirm"}
+
+    selection["tasks"][1]["task_cluster_id"] = "cluster-a"
+    with pytest.raises(ValueError, match="split isolation"):
+        _selection_maps(selection)
