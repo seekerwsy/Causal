@@ -252,3 +252,29 @@ def test_audit_response_rejects_inconsistent_eligibility() -> None:
         pass
     else:
         raise AssertionError("inconsistent eligibility was accepted")
+
+
+def test_audit_response_accepts_semantically_valid_noncanonical_order() -> None:
+    payload = json.loads(_accepted_response())
+    payload["requirements"] = [
+        {
+            "requirement_id": "req_z_output",
+            "kind": "behavior",
+            "criterion": "Return the requested result.",
+            "prompt_evidence_quote": "Write",
+        },
+        {
+            "requirement_id": "req_a_interface",
+            "kind": "interface",
+            "criterion": "Define the requested function.",
+            "prompt_evidence_quote": "Write",
+        },
+    ]
+    payload["environment_dependencies"] = ["z-runtime", "a-filesystem"]
+
+    response = MainPoolAuditResponse.model_validate(payload)
+
+    assert [item.requirement_id for item in response.requirements] == [
+        "req_z_output",
+        "req_a_interface",
+    ]

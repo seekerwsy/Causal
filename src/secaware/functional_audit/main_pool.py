@@ -261,29 +261,25 @@ class MainPoolAuditResponse(StrictModel):
             and bool(self.requirements)
         )
         identifiers = tuple(item.requirement_id for item in self.requirements)
-        expected_reason = (
-            MainPoolAuditReason.ACCEPTED
-            if derived
-            else (
-                MainPoolAuditReason.NO_TARGET_OPERATION
-                if not self.operation_opportunity
-                else (
-                    MainPoolAuditReason.WEAK_MECHANISM_REQUIRED
-                    if self.weak_mechanism_required
-                    else (
-                        MainPoolAuditReason.OUTSIDE_PROFILE
-                        if not self.profile_compatible
-                        else MainPoolAuditReason.FUNCTIONAL_CONTRACT_UNAVAILABLE
-                    )
-                )
-            )
-        )
+        valid_rejection_reasons = {
+            *((MainPoolAuditReason.NO_TARGET_OPERATION,) if not self.operation_opportunity else ()),
+            *(
+                (MainPoolAuditReason.WEAK_MECHANISM_REQUIRED,)
+                if self.weak_mechanism_required
+                else ()
+            ),
+            *((MainPoolAuditReason.OUTSIDE_PROFILE,) if not self.profile_compatible else ()),
+            *(
+                (MainPoolAuditReason.FUNCTIONAL_CONTRACT_UNAVAILABLE,)
+                if self.judgeability == "unjudgeable" or not self.requirements
+                else ()
+            ),
+        }
         if (
             self.eligible is not derived
-            or self.reason_code is not expected_reason
-            or identifiers != tuple(sorted(identifiers))
+            or (derived and self.reason_code is not MainPoolAuditReason.ACCEPTED)
+            or (not derived and self.reason_code not in valid_rejection_reasons)
             or len(identifiers) != len(set(identifiers))
-            or self.environment_dependencies != tuple(sorted(self.environment_dependencies))
             or len(self.environment_dependencies) != len(set(self.environment_dependencies))
             or any(
                 not item.strip() or item != item.strip() for item in self.environment_dependencies
@@ -551,9 +547,10 @@ def run_main_pool_audit(
                 "request": request_payload,
             }
         )
+        raw: bytes | None = None
+        response_sha256: str | None = None
         try:
             raw = transport.complete(request_bytes, policy)
-            response = _response_for_prompt(raw, packet["prompt"])
             response_sha256 = hashlib.sha256(raw).hexdigest()
             responses.append(
                 {
@@ -562,6 +559,7 @@ def run_main_pool_audit(
                     "response_text": raw.decode("utf-8"),
                 }
             )
+            response = _response_for_prompt(raw, packet["prompt"])
             decision_content = {
                 "schema_version": "1.0",
                 "packet_id": packet["packet_id"],
@@ -590,6 +588,8 @@ def run_main_pool_audit(
                     "cwe": packet["cwe"],
                     "split": packet["split"],
                     "error_type": type(error).__name__,
+                    "error_detail": str(error)[:4000],
+                    "response_sha256": response_sha256,
                 }
             )
     _write_jsonl(run_dir / "requests.jsonl", requests)

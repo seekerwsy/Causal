@@ -45,3 +45,17 @@ now records 60; all five strata still exceed the registered discover and confirm
 4. Select the lowest preassigned rank keys that satisfy 8 discover and 12 confirm tasks per CWE.
 5. Review the resulting 100-task bundle without generated outcomes, then freeze prompts and
    functional contracts before any main-model generation.
+
+## Canary v1 diagnostic
+
+The first five-call canary reached Bailian for all five candidates but normalized zero decisions.
+All five responses failed the local response model because it unnecessarily required alphabetic
+requirement/dependency order and one fixed priority among multiple valid rejection reasons. The
+run is preserved at
+`/home/ubuntu/secaware-experiments/main-pool-audit/five-cwe-main-pool-canary-bailian-20260818-01`.
+It generated no code and observed no outcomes.
+
+The v2 parser retains the substantive gates—eligibility is recomputed, evidence must be verbatim,
+and the finite-profile booleans must support the decision—but accepts semantically equivalent field
+orders and any rejection reason backed by a failed eligibility condition. It also records every raw
+provider response before normalization and retains bounded validation details for invalid responses.
