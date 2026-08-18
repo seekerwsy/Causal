@@ -1,5 +1,13 @@
 # Five-CWE Main Experiment Scope
 
+> **Supersession notice (2026-08-18):** the five CWE definitions, finite Oracle profiles, and
+> outcome-blind selection rules in this document remain active. The equal `8 discover / 12 confirm`
+> per-CWE scale-up assumption is superseded by
+> [Five-CWE Pooled Policy Estimand](2026-08-18-five-cwe-pooled-policy-estimand.md), which uses all
+> 93 eligible tasks in their pre-existing 51/42 split and treats sub-threshold CWE estimates as
+> heterogeneity diagnostics. This notice records the approved change without rewriting the earlier
+> design history.
+
 ## Goal
 
 Run the existing TSG-constrained discovery and randomized confirmation method on a broad but
