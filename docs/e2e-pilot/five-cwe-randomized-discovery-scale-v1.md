@@ -161,3 +161,37 @@ The pilot, both failed runs, the successful zero-call replay, and the completed 
 internal manifest covers 1,601 files with no missing file or digest mismatch, and the archive does
 not contain `.env`. The next permitted stage is a bounded real-outcome Gate C canary; Gate B itself
 does not authorize a scientific claim or inspect generated-code outcomes.
+
+## Gate C frozen plans
+
+Gate C retains the original bounded-canary path and adds one explicit full-population path. The
+former accepts two through five named tasks; the latter accepts only the exact 51-task Gate B
+population and therefore exactly 204 four-arm assignments. Qwen2.5-Coder-7B and Phi-4-14B plans
+inherit their own Gate A assignments and seeds, while their 204 Prompt variant IDs and task set are
+identical. Their generated-code assignments are model-specific and disjoint.
+
+The two five-CWE structural pilot plans each contain five tasks and 20 balanced assignments. The two
+main plans each contain 51 tasks, 204 generation requests, 51 frozen functional contracts, and 51
+profile-scoped Oracle coverage records; none has unknown coverage. Every plan is closed by an
+11-file manifest, and the pilot assignment IDs are proper subsets of their corresponding main
+plans. The live preflight validated all 204 assignments in each model stratum with zero generation,
+Judge, or Oracle calls.
+
+The earlier two-model main-Prompt canary already exercised real generation, one-pass functional
+judgment, and Oracle v2 for all five CWE families. To avoid creating deterministic duplicate outputs,
+the new balanced five-CWE plans serve as zero-call mapping checks. Each 51-task main run next executes
+one selected target-patch assignment as an in-population pilot; only a complete pilot authorizes its
+remaining 203 assignments. Qwen and Phi services run sequentially on the same GPU.
+
+Additional execution incidents were non-experimental. A source search again passed a Windows
+wildcard directly to `rg` while locating service paths and failed without reading or changing a
+file; the corrected search uses explicit directories. The first expanded Gate C test edit inserted
+five pre-existing scale-canary assertions below the new parametrized test, so 2 of 90 tests compared
+the 204-unit configuration with the old eight-unit expectation. Later zero-call preflight commands
+still ran because PowerShell returned the final command status. The assertions were restored to
+their original test, subsequent native commands now check `$LASTEXITCODE` immediately, and the same
+90-test set passed. Both preflights made zero provider calls.
+- The first final Gate C credential scan repeated the Windows wildcard error for the newly added
+  config basename and exited after the 90 tests had passed. It did not read secrets or mutate an
+  artifact. The corrected scan passes the config directory literally and applies the basename with
+  `rg -g`; literal source, script, test, and document paths are scanned separately.

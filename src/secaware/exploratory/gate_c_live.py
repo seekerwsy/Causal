@@ -66,6 +66,7 @@ _SCALE_UP_AUTHORIZATION_IDS = frozenset(
         "user-approved-remaining-20260817-v1",
         "user-approved-five-cwe-outcome-pilot-20260818-v1",
         "user-approved-main-prompt-outcome-canary-20260818-v1",
+        "user-approved-five-cwe-randomized-discovery-main-20260818-v1",
     }
 )
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
@@ -73,13 +74,24 @@ _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
 )
 _ORACLE_UNKNOWN_MODE = "unknown_coverage"
 _ORACLE_PROFILE_MODE = "profile_scoped_decision"
+_TASK_SELECTION_BOUNDED_CANARY = "explicit_bounded_canary"
+_TASK_SELECTION_ALL_GATE_B = "all_gate_b_tasks"
 
 
-def _bounded_task_count(expected_assignments: int) -> int:
+def _bounded_task_count(
+    expected_assignments: int,
+    task_selection_policy: str = _TASK_SELECTION_BOUNDED_CANARY,
+) -> int:
     if expected_assignments % 4 != 0:
         raise ValueError("Gate C live assignment count failed validation")
     task_count = expected_assignments // 4
-    if not 2 <= task_count <= 5:
+    if task_selection_policy == _TASK_SELECTION_BOUNDED_CANARY:
+        valid_size = 2 <= task_count <= 5
+    elif task_selection_policy == _TASK_SELECTION_ALL_GATE_B:
+        valid_size = task_count == 51
+    else:
+        valid_size = False
+    if not valid_size:
         raise ValueError("Gate C live assignment count failed validation")
     return task_count
 
@@ -838,7 +850,8 @@ def run_gate_c_live_canary(
     plan_dir.relative_to(repo_root)
     plan_report = _verify_plan(plan_dir)
     expected = int(live.get("expected_assignments", 0))
-    task_count = _bounded_task_count(expected)
+    task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
+    task_count = _bounded_task_count(expected, task_selection_policy)
     oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
         live.get("schema_version") != _SCHEMA_VERSION
@@ -851,6 +864,8 @@ def run_gate_c_live_canary(
         or live.get("scientific_claim_allowed") is not False
         or plan_report.get("counts", {}).get("generation_requests") != expected
         or plan_report.get("counts", {}).get("independent_tasks") != task_count
+        or plan_report.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY)
+        != task_selection_policy
     ):
         raise ValueError("Gate C live policy failed validation")
     app_config: AppConfig = load_config(app_config_path, run_dir=output_dir)
@@ -1206,7 +1221,8 @@ def recover_gate_c_live_oracle(
     plan_dir.relative_to(repo_root)
     plan_report = _verify_plan(plan_dir)
     expected = int(live.get("expected_assignments", 0))
-    _bounded_task_count(expected)
+    task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
+    _bounded_task_count(expected, task_selection_policy)
     pilot_id = live.get("pilot_assignment_id")
     oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
@@ -1214,6 +1230,8 @@ def recover_gate_c_live_oracle(
         or type(pilot_id) is not str
         or oracle_decision_mode not in {_ORACLE_UNKNOWN_MODE, _ORACLE_PROFILE_MODE}
         or plan_report.get("counts", {}).get("generation_requests") != expected
+        or plan_report.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY)
+        != task_selection_policy
     ):
         raise ValueError("Gate C Oracle repair policy failed validation")
     provenance = _read_json(source_dir / "input-provenance.json")

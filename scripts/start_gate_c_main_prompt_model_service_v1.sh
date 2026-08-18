@@ -30,6 +30,16 @@ case "$1" in
     readonly SERVED_MODEL="phi-4-14b"
     readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/phi4-14b-main-prompt-v1-20260818-01"
     ;;
+  qwen25-coder-7b-randomized-main)
+    readonly MODEL_DIR="/home/ubuntu/model-zoo/Qwen2.5-Coder-7B-Instruct"
+    readonly SERVED_MODEL="qwen2.5-coder-7b-instruct"
+    readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-randomized-discovery-main-v1-20260818-01"
+    ;;
+  phi4-14b-randomized-main)
+    readonly MODEL_DIR="/home/ubuntu/model-zoo/phi4-14b"
+    readonly SERVED_MODEL="phi-4-14b"
+    readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/phi4-14b-randomized-discovery-main-v1-20260818-01"
+    ;;
   *)
     echo "unregistered main-Prompt model service" >&2
     exit 2

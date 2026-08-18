@@ -22,6 +22,14 @@ def test_gate_c_live_bounded_assignment_count(assignments: int, tasks: int) -> N
     assert gate_c_live._bounded_task_count(assignments) == tasks
 
 
+def test_gate_c_live_accepts_only_the_frozen_full_population_at_scale() -> None:
+    assert gate_c_live._bounded_task_count(204, "all_gate_b_tasks") == 51
+    with pytest.raises(ValueError, match="assignment count"):
+        gate_c_live._bounded_task_count(200, "all_gate_b_tasks")
+    with pytest.raises(ValueError, match="assignment count"):
+        gate_c_live._bounded_task_count(204)
+
+
 @pytest.mark.parametrize("assignments", (0, 4, 9, 24))
 def test_gate_c_live_rejects_unregistered_assignment_count(assignments: int) -> None:
     with pytest.raises(ValueError, match="assignment count"):
@@ -283,6 +291,28 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
         main_prompt,
         mode="remaining",
         stored_base=frozen_main_prompt,
+    )
+
+    randomized_main = {
+        **stored_base,
+        "expected_assignments": 204,
+        "task_selection_policy": "all_gate_b_tasks",
+        "scale_up_allowed": True,
+        "scale_up_authorization_id": (
+            "user-approved-five-cwe-randomized-discovery-main-20260818-v1"
+        ),
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+    frozen_randomized_main = {
+        key: value
+        for key, value in randomized_main.items()
+        if key not in {"scale_up_authorization_id", "scale_up_authorization_scope"}
+    }
+    frozen_randomized_main["scale_up_allowed"] = False
+    gate_c_live._validate_scale_up_authorization(
+        randomized_main,
+        mode="remaining",
+        stored_base=frozen_randomized_main,
     )
 
 

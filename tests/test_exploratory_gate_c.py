@@ -53,6 +53,29 @@ def test_gate_c_direct_gate_b_schema_is_explicit_and_bounded() -> None:
         gate_c._gate_b_artifact_schema({"gate_b_artifact_schema": "auto_detect"})
 
 
+def test_gate_c_task_selection_distinguishes_canary_from_frozen_full_population() -> None:
+    canary = ["task-a", "task-b"]
+    assert gate_c._selected_task_ids({"selected_task_ids": canary}) == (
+        "explicit_bounded_canary",
+        tuple(canary),
+    )
+    full = [f"task-{index:02d}" for index in range(51)]
+    assert gate_c._selected_task_ids(
+        {
+            "task_selection_policy": "all_gate_b_tasks",
+            "selected_task_ids": full,
+        }
+    ) == ("all_gate_b_tasks", tuple(full))
+
+    with pytest.raises(ValueError, match="task selection"):
+        gate_c._selected_task_ids(
+            {
+                "task_selection_policy": "all_gate_b_tasks",
+                "selected_task_ids": full[:-1],
+            }
+        )
+
+
 def test_gate_c_direct_adapter_authenticates_append_suffix_envelope() -> None:
     source = PromptRecord.model_validate(
         {
@@ -261,6 +284,63 @@ def test_gate_c_scale_canaries_freeze_separate_model_strata(
     assert config.generation.openai_compatible.max_attempts == 1
     assert config.generation.confirmation_max_requests == 8
     assert config.generation.confirmation_max_total_provider_attempts == 8
+    assert config.functional_judge.llm is not None
+    assert config.functional_judge.llm.max_attempts == 1
+
+
+@pytest.mark.parametrize(
+    ("model_suffix", "model_id"),
+    (
+        ("qwen7b", "qwen2.5-coder-7b-instruct"),
+        ("phi14b", "phi-4-14b"),
+    ),
+)
+def test_randomized_discovery_main_gate_c_freezes_full_separate_model_strata(
+    model_suffix: str,
+    model_id: str,
+) -> None:
+    gate = json.loads(
+        (
+            _ROOT / "configs/e2e-pilot" / f"randomized-discovery-gate-c-main-{model_suffix}-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    config = load_config(
+        _ROOT
+        / "configs/e2e-pilot"
+        / f"randomized-discovery-gate-c-main-{model_suffix}-bailian-v1.yaml"
+    )
+    live = json.loads(
+        (
+            _ROOT
+            / "configs/e2e-pilot"
+            / f"randomized-discovery-gate-c-main-live-{model_suffix}-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    remaining = json.loads(
+        (
+            _ROOT
+            / "configs/e2e-pilot"
+            / f"randomized-discovery-gate-c-main-live-{model_suffix}-remaining-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert gate["task_selection_policy"] == "all_gate_b_tasks"
+    assert len(gate["selected_task_ids"]) == 51
+    assert gate["expected_assignments"] == 204
+    assert config.generation.models == [model_id]
+    assert config.generation.confirmation_seeds == [
+        2026081841,
+        2026081842,
+        2026081843,
+        2026081844,
+    ]
+    assert config.generation.confirmation_max_requests == 204
+    assert config.generation.confirmation_max_total_provider_attempts == 204
+    assert config.randomization.max_blocks == 51
+    assert live["task_selection_policy"] == "all_gate_b_tasks"
+    assert live["scale_up_allowed"] is False
+    assert remaining["scale_up_allowed"] is True
+    assert remaining["scale_up_authorization_scope"] == "remaining_assignments_only"
     assert config.functional_judge.llm is not None
     assert config.functional_judge.llm.max_attempts == 1
 

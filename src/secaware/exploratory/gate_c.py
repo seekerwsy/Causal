@@ -40,6 +40,8 @@ _GATE_B_EXACT_MAPPING = "exact_variant_id_v1"
 _GATE_B_SEMANTIC_MAPPING = "task_arm_target_feature_v1"
 _GATE_B_REVALIDATION_SCHEMA = "revalidation_v1"
 _GATE_B_DIRECT_SCHEMA = "direct_exploratory_v1"
+_TASK_SELECTION_BOUNDED_CANARY = "explicit_bounded_canary"
+_TASK_SELECTION_ALL_GATE_B = "all_gate_b_tasks"
 
 
 def _gate_b_artifact_schema(config: dict[str, Any]) -> str:
@@ -64,6 +66,24 @@ def _oracle_decision_mode(config: dict[str, Any]) -> str:
     if profile_mode == _ORACLE_PROFILE_MODE and legacy_mode is None:
         return _ORACLE_PROFILE_MODE
     raise ValueError("Gate C Oracle decision policy failed validation")
+
+
+def _selected_task_ids(config: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    policy = config.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY)
+    raw = config.get("selected_task_ids")
+    if (
+        policy not in {_TASK_SELECTION_BOUNDED_CANARY, _TASK_SELECTION_ALL_GATE_B}
+        or type(raw) is not list
+        or any(type(item) is not str or not item for item in raw)
+    ):
+        raise ValueError("Gate C task selection failed validation")
+    selected = tuple(raw)
+    valid_size = (
+        2 <= len(selected) <= 5 if policy == _TASK_SELECTION_BOUNDED_CANARY else len(selected) == 51
+    )
+    if not valid_size or len(set(selected)) != len(selected):
+        raise ValueError("Gate C task selection failed validation")
+    return str(policy), selected
 
 
 def _canonical(value: object) -> bytes:
@@ -533,11 +553,7 @@ def plan_gate_c_canary(
         or app_config.functional_judge.llm.max_attempts != 1
     ):
         raise ValueError("Gate C policy failed validation")
-    selected_task_ids = tuple(config.get("selected_task_ids", ()))
-    if not 2 <= len(selected_task_ids) <= 5 or len(set(selected_task_ids)) != len(
-        selected_task_ids
-    ):
-        raise ValueError("Gate C task selection failed validation")
+    task_selection_policy, selected_task_ids = _selected_task_ids(config)
     expected_assignments = len(selected_task_ids) * len(_ARMS)
     if any(
         config.get(key) != expected_assignments
@@ -583,6 +599,14 @@ def plan_gate_c_canary(
     source_by_task = {item.task_id: item for item in sources}
     if len(source_by_task) != len(sources):
         raise ValueError("Gate C source Prompt identity failed validation")
+    if any(task_id not in source_by_task for task_id in selected_task_ids) or (
+        task_selection_policy == _TASK_SELECTION_ALL_GATE_B
+        and (
+            set(selected_task_ids) != set(source_by_task)
+            or len({item.cwe for item in sources}) != 5
+        )
+    ):
+        raise ValueError("Gate C task selection failed validation")
     if gate_b_artifact_schema == _GATE_B_DIRECT_SCHEMA:
         prompts, provenance, records, validations = _direct_gate_b_records(
             gate_b_dir,
@@ -722,6 +746,7 @@ def plan_gate_c_canary(
         "oracle_decision_policy": oracle_decision_mode,
         "gate_b_variant_mapping_policy": gate_b_mapping_policy,
         "gate_b_artifact_schema": gate_b_artifact_schema,
+        "task_selection_policy": task_selection_policy,
         "scientific_claim_allowed": False,
         "scale_up_allowed": False,
         "counts": {

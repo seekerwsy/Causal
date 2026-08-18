@@ -18,6 +18,12 @@ case "$1" in
   phi4-14b)
     readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/phi4-14b-main-prompt-v1-20260818-01"
     ;;
+  qwen25-coder-7b-randomized-main)
+    readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/qwen25-coder-7b-randomized-discovery-main-v1-20260818-01"
+    ;;
+  phi4-14b-randomized-main)
+    readonly SERVICE_DIR="/home/ubuntu/secaware-model-services/phi4-14b-randomized-discovery-main-v1-20260818-01"
+    ;;
   *)
     echo "unregistered main-Prompt model service" >&2
     exit 2
