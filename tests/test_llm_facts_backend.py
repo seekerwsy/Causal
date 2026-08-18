@@ -17,6 +17,7 @@ from secaware.extractors.llm_facts import (
     LLMFactsExtractor,
     facts_request_payload,
     llm_facts_policy_sha256,
+    llm_facts_response_normalization_sha256,
 )
 from secaware.llm.structured_transport import StructuredLLMPolicy
 from secaware.schema.features import FeatureState, PromptExtractorBackend
@@ -250,7 +251,7 @@ def test_missing_empty_relation_default_does_not_relax_other_schema_errors(case:
         )
 
 
-def test_response_normalization_version_is_bound_to_policy_digest(
+def test_response_normalization_has_separate_provenance_without_request_identity_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert LLM_FACTS_RESPONSE_NORMALIZATION_VERSION == "absent-empty-relations-default-v1"
@@ -261,6 +262,7 @@ def test_response_normalization_version_is_bound_to_policy_digest(
         PROMPT_FEATURE_CATALOG_SHA256,
         262_144,
     )
+    baseline_normalization = llm_facts_response_normalization_sha256()
     monkeypatch.setattr(
         llm_facts_module,
         "LLM_FACTS_RESPONSE_NORMALIZATION_VERSION",
@@ -271,7 +273,9 @@ def test_response_normalization_version_is_bound_to_policy_digest(
         PROMPT_FEATURE_CATALOG_SHA256,
         262_144,
     )
-    assert changed != baseline
+    changed_normalization = llm_facts_response_normalization_sha256()
+    assert changed == baseline
+    assert changed_normalization != baseline_normalization
     assert facts_request_payload(prompt, _policy()) == baseline_request
 
 

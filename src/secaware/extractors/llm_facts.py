@@ -156,9 +156,21 @@ def llm_facts_policy_sha256(
         "backend": PromptExtractorBackend.LLM_FACTS_V1.value,
         "catalog_sha256": catalog_sha256,
         "criteria_projection_version": LLM_FACTS_CRITERIA_PROJECTION_VERSION,
-        "response_normalization_version": LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
         "max_response_chars": max_response_chars,
         "structured_llm_policy": _structured_policy_payload(policy),
+    }
+    return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
+
+
+def llm_facts_response_normalization_sha256() -> str:
+    """Identify the bounded local response default separately from request identity."""
+
+    payload = {
+        "policy_version": LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
+        "defaulted_field": "relation_feature_ids",
+        "eligible_state": FeatureState.ABSENT.value,
+        "required_evidence": [],
+        "default_value": [],
     }
     return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
 
@@ -467,5 +479,6 @@ __all__ = [
     "catalog_prompt_view",
     "facts_request_payload",
     "llm_facts_policy_sha256",
+    "llm_facts_response_normalization_sha256",
     "parse_facts_response",
 ]

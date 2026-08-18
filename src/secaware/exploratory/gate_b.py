@@ -20,6 +20,7 @@ from secaware.extractors.factory import extraction_policy, extractor_for_config
 from secaware.extractors.llm_facts import (
     LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
     LLM_FACTS_SYSTEM_TEMPLATE,
+    llm_facts_response_normalization_sha256,
 )
 from secaware.intervention.executors import (
     _OUTPUT_SCHEMA as INTERVENTION_OUTPUT_SCHEMA,
@@ -1261,6 +1262,9 @@ def run_exploratory_gate_b(
                 "extractor_policy_sha256": extractor_policy.policy_sha256,
                 "extractor_response_normalization_version": (
                     LLM_FACTS_RESPONSE_NORMALIZATION_VERSION
+                ),
+                "extractor_response_normalization_sha256": (
+                    llm_facts_response_normalization_sha256()
                 ),
                 "placebo_length_policy_sha256": canonical_sha256(
                     {"policy_version": PLACEBO_LENGTH_POLICY_VERSION}

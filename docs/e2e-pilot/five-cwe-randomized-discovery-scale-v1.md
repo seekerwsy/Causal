@@ -129,3 +129,12 @@ than importing pilot outcomes.
   checks, and passed all 86 selected tests. Ruff's unrestricted rule set also reported four existing
   broad exception boundaries in the extractor; they are intentional fail-closed translations and
   were not changed as part of this response-schema repair.
+- The first zero-live-call server replay matched all 51 source extraction requests, then failed
+  before parsing the first variant response because its reconstructed request bytes differed from
+  the preserved request. The initial repair had included the response-normalization version in the
+  extractor policy digest, but that digest also authenticates blind variant prompt and task IDs.
+  Consequently, a local parsing policy accidentally changed provider request identity. The repair
+  now preserves the original extractor/request digest and records a separate versioned response-
+  normalization digest in the Gate B report. This keeps replay byte-exact while making the bounded
+  local default independently auditable; the failed zero-call replay is preserved and made no live
+  provider call.
