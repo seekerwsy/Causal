@@ -475,8 +475,21 @@ def _response_for_prompt(
     raw: bytes,
     prompt: str,
     evidence_segments: tuple[str, ...],
-) -> MainPoolAuditResponse:
+) -> tuple[MainPoolAuditResponse, int]:
     payload = json.loads(raw)
+    requirements = payload.get("requirements") if type(payload) is dict else None
+    expansions = 0
+    if type(requirements) is list:
+        for requirement in requirements:
+            if type(requirement) is not dict:
+                continue
+            quote = requirement.get("prompt_evidence_quote")
+            if type(quote) is not str or quote in evidence_segments:
+                continue
+            matches = tuple(segment for segment in evidence_segments if quote in segment)
+            if len(matches) == 1:
+                requirement["prompt_evidence_quote"] = matches[0]
+                expansions += 1
     response = MainPoolAuditResponse.model_validate(payload)
     if any(
         item.prompt_evidence_quote not in prompt
@@ -484,7 +497,7 @@ def _response_for_prompt(
         for item in response.requirements
     ):
         raise ValueError("main-pool audit evidence is not verbatim")
-    return response
+    return response, expansions
 
 
 def _prompt_evidence_segments(prompt: str) -> tuple[str, ...]:
@@ -662,7 +675,11 @@ def run_main_pool_audit(
                     "response_text": raw.decode("utf-8"),
                 }
             )
-            response = _response_for_prompt(raw, packet["prompt"], evidence_segments)
+            response, evidence_quote_expansions = _response_for_prompt(
+                raw,
+                packet["prompt"],
+                evidence_segments,
+            )
             decision_content = {
                 "schema_version": "1.0",
                 "packet_id": packet["packet_id"],
@@ -674,6 +691,7 @@ def run_main_pool_audit(
                 "request_sha256": request_sha256,
                 "response_sha256": response_sha256,
                 "provider_policy_sha256": policy_sha256,
+                "evidence_quote_expansions": evidence_quote_expansions,
                 "audit": response.model_dump(mode="json"),
             }
             decisions.append(

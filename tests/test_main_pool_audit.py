@@ -172,7 +172,7 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
             },
         },
     )
-    transport = FakeTransport(_accepted_response())
+    transport = FakeTransport(_accepted_response("Write"))
 
     report = run_main_pool_audit(
         prepared_dir=prepared,
@@ -192,6 +192,11 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
         "eligible": 5,
     }
     assert len(transport.calls) == 5
+    decisions = [
+        json.loads(line)
+        for line in (tmp_path / "live" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert all(item["evidence_quote_expansions"] == 1 for item in decisions)
     request = json.loads(transport.calls[0][0])
     assert request["packet"]["blindness"] == {
         "generated_code_withheld": True,
