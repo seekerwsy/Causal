@@ -53,6 +53,14 @@ canonical code record. Terminal-no-code handling keeps a failed or otherwise ter
 in the committed experiment with no fabricated code and no Oracle row. Later ITT analysis retains
 that assignment according to the preregistered outcome policy; it is not silently removed.
 
+Provider-result policy v2 recognizes two authenticated terminal-no-code reasons. `content_filter`
+requires an empty provider content field. `token_limit` requires the standard
+`finish_reason=length`, a configured single token-limit parameter, and reported completion-token
+usage exactly equal to that frozen limit. The partial response is retained only in the protected
+transport artifact and bound by digest; it is not imported as code, retried until favorable, sent
+to the functional judge, or evaluated by the Oracle. Any other finish reason or a mismatched usage
+count remains an invalid provider response and fails closed.
+
 The M5 CLI sequence is:
 
 ```text

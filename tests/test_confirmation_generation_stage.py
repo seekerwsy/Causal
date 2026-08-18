@@ -864,6 +864,21 @@ def test_valid_terminal_generation_failure_keeps_assignment_coverage() -> None:
     assert terminal.attempt_count == 1
 
 
+def test_token_limit_terminal_keeps_assignment_in_the_itt_universe() -> None:
+    request = _requests()[0]
+
+    class Provider:
+        def generate_many(self, _requests):
+            return ((request.request_id, _envelope(request, None, "length")),)
+
+    records, codes = execute_confirmation_requests((request,), Provider())
+
+    assert codes == ()
+    assert len(records) == 1
+    assert records[0].status is AssignmentExecutionStatus.TERMINAL_NO_CODE
+    assert records[0].terminal_reason == "token_limit"
+
+
 def test_provider_execution_order_does_not_change_canonical_outputs() -> None:
     requests = _requests()
     assert execute_confirmation_requests(requests, _Provider()) == execute_confirmation_requests(

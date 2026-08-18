@@ -228,3 +228,23 @@ their original test, subsequent native commands now check `$LASTEXITCODE` immedi
   `discovery/_fci_worker.py`) instead of listing the active files first. Both were read-only and
   changed no artifact. The corrected reads use `prompt-variants.jsonl` and the actual supervised
   FCI module locations; future analysis preparation starts from `rg --files`.
+- The first Phi remaining-phase execution completed 41 assignments and preserved one generation
+  error before stopping. The local service returned a well-formed response with
+  `finish_reason=length`, exactly 1,024 completion tokens, and a truncated response containing a
+  deterministic repeated branch. This is neither an API outage nor an Oracle failure. Provider-
+  result policy v2 classifies `length` as `token_limit` terminal-no-code only when completion usage
+  exactly equals the one frozen request limit. The partial text remains transport evidence and is
+  never imported as code; the assigned row remains in ITT with joint outcome zero. The stopped run
+  is historical and will not be merged with a policy-v2 Phi run.
+- During that diagnosis, a manually copied wrapped assignment path omitted one hexadecimal
+  character; the read-only lookup failed, and the exact directory was then derived from the error
+  status file. Two later read-only searches guessed a nonexistent `provider_protocol.py` path and
+  supplied one malformed regular expression. Neither changed a source or experiment artifact; the
+  corrected inspection first enumerated the actual schema and adapter files.
+- The first local verification assumed a worktree-local virtual environment that does not exist.
+  A second command used the main checkout's editable environment without a worktree `PYTHONPATH`
+  and also assumed Ruff was installed there. The corrected command pins this worktree's `src`, uses
+  the repository Python only for pytest, and obtains Ruff from the existing tool cache. The bounded
+  regression passed 431 tests; formatting and fatal import/error checks passed. Ruff's unrestricted
+  current rule set reports existing broad-exception and import-order findings outside this patch,
+  so it is recorded as a diagnostic rather than misreported as a clean project-wide lint gate.

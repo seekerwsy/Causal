@@ -384,7 +384,7 @@ class AssignmentExecutionRecord(_ExperimentVersionedContract):
     attempt_count: StrictInt = Field(ge=1, le=10)
     code_id: str | None = Field(default=None, pattern=_CODE_ID_PATTERN)
     code_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
-    terminal_reason: Literal["content_filter"] | None = None
+    terminal_reason: Literal["content_filter", "token_limit"] | None = None
 
     @field_validator("status", mode="before")
     @classmethod

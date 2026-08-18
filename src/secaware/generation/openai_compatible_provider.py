@@ -44,12 +44,12 @@ class OpenAICompatibleGenerationResult:
 
     def __post_init__(self) -> None:
         if (
-            self.finish_reason not in {"stop", "content_filter"}
+            self.finish_reason not in {"stop", "content_filter", "length"}
             or (
                 self.finish_reason == "stop"
                 and (type(self.code) is not str or not self.code.strip())
             )
-            or (self.finish_reason == "content_filter" and self.code is not None)
+            or (self.finish_reason in {"content_filter", "length"} and self.code is not None)
         ):
             raise ValueError("provider result code failed validation")
         metadata_failed = False
@@ -281,7 +281,11 @@ def _response_code(
             raise ValueError("invalid choices")
         choice = choices[0]
         finish_reason = _member(choice, "finish_reason")
-        if type(finish_reason) is not str or finish_reason not in {"stop", "content_filter"}:
+        if type(finish_reason) is not str or finish_reason not in {
+            "stop",
+            "content_filter",
+            "length",
+        }:
             raise ValueError("invalid finish reason")
         message = _member(choice, "message")
         content = _member(message, "content")
@@ -292,13 +296,23 @@ def _response_code(
             content, source_envelope = _decode_python_source_envelope(content)
         if finish_reason == "content_filter" and content not in {None, ""}:
             raise ValueError("invalid filtered content")
+        if finish_reason == "length":
+            if type(content) is not str:
+                raise ValueError("invalid length-limited content")
+            raw_content_sha256 = sha256_text(content)
         usage = _validate_usage(_member(response, "usage", default=_MISSING))
         return (
             content if finish_reason == "stop" else None,
             finish_reason,
             usage,
             raw_content_sha256,
-            source_envelope if finish_reason == "stop" else "content_filter",
+            (
+                source_envelope
+                if finish_reason == "stop"
+                else "content_filter"
+                if finish_reason == "content_filter"
+                else "token_limit"
+            ),
         )
     finally:
         response = None
@@ -603,7 +617,22 @@ class OpenAICompatibleProvider:
                     ) = _response_code(response, expected_model=trusted.model_id)
                 except Exception:
                     response_invalid = True
-                if response_invalid or (code is None and finish_reason != "content_filter"):
+                if not response_invalid and finish_reason == "length":
+                    token_limits = [
+                        value
+                        for key, value in trusted.parameters.values.items()
+                        if key in _MAX_TOKEN_PARAMETER_KEYS
+                    ]
+                    if (
+                        len(token_limits) != 1
+                        or type(token_limits[0]) is not int
+                        or usage is None
+                        or usage.completion_tokens != token_limits[0]
+                    ):
+                        response_invalid = True
+                if response_invalid or (
+                    code is None and finish_reason not in {"content_filter", "length"}
+                ):
                     attempts.append(
                         self._attempt(
                             trusted.request_id,
