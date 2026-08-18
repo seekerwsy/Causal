@@ -211,6 +211,63 @@ def test_reviewed_placebo_suffix_is_bound_into_only_the_placebo_request() -> Non
     assert "required_exact_suffix" not in noop_request
 
 
+def test_append_suffix_control_request_withholds_target_semantics() -> None:
+    source = PromptRecord.model_validate(
+        {
+            "prompt_id": "prompt-1",
+            "task_id": "task-1",
+            "split": "discover",
+            "language": "python",
+            "task_family": "deserialization",
+            "cwe": "CWE-502",
+            "prompt": "Write a JSON loader.",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    allowed_delta = AllowedDeltaRecord.model_validate(
+        {
+            "allowed_transitions": [],
+            "fixed_families": [
+                "task_function",
+                "safety_control",
+                "presentation_control",
+            ],
+            "fixed_feature_ids": [],
+        }
+    )
+    variant = {
+        "candidate_id": "candidate-1",
+        "variant_id": "variant-1",
+        "target_feature_id": "safety.safe_deserialization",
+        "operation": "add",
+        "arm_role": "noop_rewrite",
+    }
+    request = _intervention_payload(
+        source,
+        variant,
+        allowed_delta,
+        output_mode=_APPEND_SUFFIX_OUTPUT_MODE,
+        request_policy_version="exploratory-intervention-request-v7",
+    )
+    assert "target" not in request
+    assert "operation" not in request
+    assert request["control_target_visibility"] == "withheld"
+    assert "Do not mention security" in str(request["arm_objective"])
+
+    target_request = _intervention_payload(
+        source,
+        {**variant, "arm_role": "target_patch"},
+        allowed_delta,
+        output_mode=_APPEND_SUFFIX_OUTPUT_MODE,
+        request_policy_version="exploratory-intervention-request-v6",
+    )
+    assert target_request["target"] == {
+        "feature_id": "safety.safe_deserialization",
+        "feature_family": "safety_control",
+    }
+    assert target_request["operation"] == "add"
+
+
 def test_reviewed_target_suffix_is_bound_only_to_the_selected_target_request() -> None:
     suffix = " Use a collision-resistant hash."
     mapping = _reviewed_target_suffixes({"reviewed_target_suffixes_by_task": {"task-1": suffix}})

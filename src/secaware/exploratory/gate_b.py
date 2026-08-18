@@ -58,6 +58,7 @@ _REVIEWED_PLACEBO_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v
 _REVIEWED_TARGET_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v5"
 _REVIEWED_TARGET_SUFFIX_MATCH_POLICY_VERSION = "leading-ascii-whitespace-max8-v1"
 _APPEND_SUFFIX_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v6"
+_CONTROL_BLINDED_APPEND_SUFFIX_REQUEST_POLICY_VERSION = "exploratory-intervention-request-v7"
 _APPEND_SUFFIX_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v6"
 _FULL_CANDIDATE_OUTPUT_MODE = "full_candidate_text_v1"
 _APPEND_SUFFIX_OUTPUT_MODE = "append_suffix_v1"
@@ -610,11 +611,6 @@ def _intervention_payload(
         },
         "exploratory_candidate_id": variant["candidate_id"],
         "exploratory_variant_id": variant["variant_id"],
-        "target": {
-            "feature_id": variant["target_feature_id"],
-            "feature_family": FeatureFamily.SAFETY_CONTROL.value,
-        },
-        "operation": variant["operation"],
         "arm_role": variant["arm_role"],
         "arm_objective": _ARM_OBJECTIVES[role],
         "mode": "text_native",
@@ -627,8 +623,22 @@ def _intervention_payload(
             else INTERVENTION_OUTPUT_SCHEMA
         ),
     }
+    if output_mode != _APPEND_SUFFIX_OUTPUT_MODE or role is ArmRole.TARGET_PATCH:
+        payload["target"] = {
+            "feature_id": variant["target_feature_id"],
+            "feature_family": FeatureFamily.SAFETY_CONTROL.value,
+        }
+        payload["operation"] = variant["operation"]
     if output_mode == _APPEND_SUFFIX_OUTPUT_MODE:
         payload["intervention_output_mode"] = output_mode
+        if role is not ArmRole.TARGET_PATCH:
+            payload["control_target_visibility"] = "withheld"
+        if role is ArmRole.NOOP_REWRITE:
+            payload["arm_objective"] = (
+                "Append one short, semantically redundant presentation phrase. Do not mention "
+                "security, safety, validation, trust, attacks, vulnerabilities, mechanisms, "
+                "or any task behavior."
+            )
     if role is ArmRole.LENGTH_MATCHED_PLACEBO and reviewed_placebo_suffix is not None:
         payload["arm_objective"] = (
             "Preserve the source prompt exactly and append required_exact_suffix "
@@ -850,6 +860,11 @@ def run_exploratory_gate_b(
             {
                 "request_policy_version": request_policy_version,
                 "intervention_output_mode": intervention_output_mode,
+                "control_target_visibility": (
+                    "withheld-for-non-target-arms-v1"
+                    if intervention_output_mode == _APPEND_SUFFIX_OUTPUT_MODE
+                    else None
+                ),
                 "reviewed_target_request_policy_version": (
                     _REVIEWED_TARGET_REQUEST_POLICY_VERSION if reviewed_target_suffixes else None
                 ),
@@ -926,6 +941,11 @@ def run_exploratory_gate_b(
                 reviewed_target_suffix=selected_reviewed_target_suffix,
                 request_policy_version=(
                     request_policy_version
+                    if (
+                        intervention_output_mode == _APPEND_SUFFIX_OUTPUT_MODE
+                        and role is ArmRole.TARGET_PATCH
+                    )
+                    else _CONTROL_BLINDED_APPEND_SUFFIX_REQUEST_POLICY_VERSION
                     if intervention_output_mode == _APPEND_SUFFIX_OUTPUT_MODE
                     else _REVIEWED_TARGET_REQUEST_POLICY_VERSION
                     if selected_reviewed_target_suffix is not None
