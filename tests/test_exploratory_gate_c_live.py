@@ -24,6 +24,7 @@ def test_gate_c_live_bounded_assignment_count(assignments: int, tasks: int) -> N
 
 def test_gate_c_live_accepts_only_the_frozen_full_population_at_scale() -> None:
     assert gate_c_live._bounded_task_count(204, "all_gate_b_tasks") == 51
+    assert gate_c_live._bounded_task_count(168, "all_gate_b_tasks") == 42
     with pytest.raises(ValueError, match="assignment count"):
         gate_c_live._bounded_task_count(200, "all_gate_b_tasks")
     with pytest.raises(ValueError, match="assignment count"):

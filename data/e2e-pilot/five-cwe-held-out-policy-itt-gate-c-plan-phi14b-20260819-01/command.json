@@ -1,0 +1,1 @@
+{"argv":["scripts/plan_gate_c_canary.py","--repo-root",".","--gate-c-config","configs/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-phi14b-v1.json","--app-config","configs/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-phi14b-bailian-v1.yaml","--output-dir","data/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-plan-phi14b-20260819-01"]}

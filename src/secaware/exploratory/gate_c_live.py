@@ -67,6 +67,7 @@ _SCALE_UP_AUTHORIZATION_IDS = frozenset(
         "user-approved-five-cwe-outcome-pilot-20260818-v1",
         "user-approved-main-prompt-outcome-canary-20260818-v1",
         "user-approved-five-cwe-randomized-discovery-main-20260818-v1",
+        "user-approved-five-cwe-held-out-policy-itt-main-20260819-v1",
     }
 )
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
@@ -88,7 +89,7 @@ def _bounded_task_count(
     if task_selection_policy == _TASK_SELECTION_BOUNDED_CANARY:
         valid_size = 2 <= task_count <= 5
     elif task_selection_policy == _TASK_SELECTION_ALL_GATE_B:
-        valid_size = task_count == 51
+        valid_size = task_count in {42, 51}
     else:
         valid_size = False
     if not valid_size:

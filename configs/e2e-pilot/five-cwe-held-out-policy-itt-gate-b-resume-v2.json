@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "gate_b_id": "five-cwe-held-out-policy-itt-gate-b-resume-v2",
+  "purpose": "Resume the held-out Prompt freeze from the preserved length-gate failure with one reviewed 97-character neutral placebo added for the observed 95-character target suffix.",
+  "gate": "blind_llm_intervention_and_extraction",
+  "allow_outcome_generation": false,
+  "allow_live_calls": true,
+  "intervention_output_mode": "append_suffix_v1",
+  "gate_a_dir": "data/e2e-pilot/five-cwe-held-out-policy-itt-gate-a-qwen7b-20260819-02",
+  "task_selection_policy": "all_gate_a_tasks",
+  "reuse_run_dir": "runs/e2e-pilot/five-cwe-held-out-policy-itt-gate-b-main-20260819-01",
+  "provider_call_budget": {
+    "intervention_calls": 168,
+    "extractor_calls": 210,
+    "total_provider_calls": 378
+  },
+  "reviewed_placebo_suffix_bank": [
+    " Keep the code concise and clear.",
+    " Keep the requested code concise and clear.",
+    " Keep the requested code concise and clearly organized.",
+    " Keep the requested code concise, clear, and well organized.",
+    " Keep the requested code concise, clearly structured, and easy to review.",
+    " Keep the requested code concise, clearly structured, consistently formatted, and easy to review."
+  ]
+}

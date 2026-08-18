@@ -320,3 +320,34 @@ emits an authenticated `no_stable_hypothesis` record. This is a valid zero-yield
 not a bootstrap or G-square execution failure. Under the pre-outcome confirmation boundary, it
 cannot be rescued using confirmation outcomes; the separately preregistered held-out policy ITT
 must still run.
+
+## Held-out policy-ITT Prompt freeze
+
+The held-out input adapter selected all 42 frozen confirmation tasks and marked all 51 discovery
+tasks as forbidden. Gate A created 42 randomized four-arm blocks for each model stratum, with 168
+assignments per model and no provider or outcome call. The model-independent Gate B pilot then ran
+one task per CWE and passed all 45 intervention/extraction calls before scale-up.
+
+The first full Gate B run stopped after preserving 299 nominal completed or reused calls because a
+95-character target suffix had no reviewed neutral placebo inside its allowed 85--105 character
+interval. This was a genuine pre-generation gate failure rather than an API failure. A single
+97-character presentation-only suffix was added, the failed run remained immutable, and the next
+run reused 256 exact request/response pairs while making 122 live calls. The completed run passed
+all 42 tasks and 168 variants: every target arm exposed the intended target feature, every control
+arm withheld it, every generic reminder and length control passed, and every variant retained the
+source Prompt as an exact prefix.
+
+The blind extractor reported task-feature projection drift in 21 variants across 14 tasks. The
+drift is retained as a diagnostic because exact-prefix preservation proves that no source task text
+was edited, and the Gate B semantic validation independently excludes task features from the
+allowed causal delta. It is not used to filter the randomized ITT population.
+
+Additional execution notes:
+
+- One read-only `rg` inspection passed PowerShell wildcard path arguments directly and failed
+  before reading any artifact. The corrected inspection used structured JSON parsing and changed
+  no run output.
+- The first unrestricted Ruff probe reported two pre-existing broad-`BaseException` diagnostics
+  in the fail-fast/recovery executor. Targeted Gate C tests still passed; later static validation
+  remains limited to formatting and fatal import/syntax rules unless those existing handlers are
+  intentionally redesigned.

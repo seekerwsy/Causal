@@ -67,6 +67,14 @@ def test_gate_c_task_selection_distinguishes_canary_from_frozen_full_population(
         }
     ) == ("all_gate_b_tasks", tuple(full))
 
+    held_out = [f"confirm-task-{index:02d}" for index in range(42)]
+    assert gate_c._selected_task_ids(
+        {
+            "task_selection_policy": "all_gate_b_tasks",
+            "selected_task_ids": held_out,
+        }
+    ) == ("all_gate_b_tasks", tuple(held_out))
+
     with pytest.raises(ValueError, match="task selection"):
         gate_c._selected_task_ids(
             {

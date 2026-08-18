@@ -79,7 +79,9 @@ def _selected_task_ids(config: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
         raise ValueError("Gate C task selection failed validation")
     selected = tuple(raw)
     valid_size = (
-        2 <= len(selected) <= 5 if policy == _TASK_SELECTION_BOUNDED_CANARY else len(selected) == 51
+        2 <= len(selected) <= 5
+        if policy == _TASK_SELECTION_BOUNDED_CANARY
+        else len(selected) in {42, 51}
     )
     if not valid_size or len(set(selected)) != len(selected):
         raise ValueError("Gate C task selection failed validation")
