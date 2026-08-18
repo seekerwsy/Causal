@@ -1,0 +1,1 @@
+{"argv":["scripts\\audit_five_cwe_cross_source_coverage.py","--record-audit","runs\\dataset-audit\\stage0-combined-20260810-08\\record-audit.jsonl","--config","configs\\e2e-pilot\\five-cwe-cross-source-coverage-v1.json","--run-dir","data\\e2e-pilot\\five-cwe-cross-source-coverage-20260818-01"],"provider_calls":0,"schema_version":"1.0"}
