@@ -85,3 +85,9 @@ existing Prompt hash and closed-manifest checks.
   metadata. Continuations allocate monotonically numbered command, configuration, provenance,
   phase, and report artifacts; gaps or unexpected historical names fail validation instead of being
   overwritten.
+- A later Phi response was valid JSON but violated the frozen Judge schema by returning more than
+  eight evidence lines for two requirements. The original request and sole response remain the
+  measurement evidence; no second Judge call is allowed. A provenance-bound invalid-response path
+  records the functional outcome as `unknown`, then permits blind Oracle execution. This conservative
+  outcome contributes zero to secure-and-functional ITT while remaining separately countable as a
+  Judge protocol failure.

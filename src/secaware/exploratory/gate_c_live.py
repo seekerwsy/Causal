@@ -19,9 +19,12 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from secaware.config import AppConfig, load_config, write_resolved_config
-from secaware.errors import SecAwareError
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.functional_judge.factory import create_functional_judge
-from secaware.functional_judge.schema import TaskFunctionalContractRecord
+from secaware.functional_judge.schema import (
+    ProgramFunctionalOutcomeRecord,
+    TaskFunctionalContractRecord,
+)
 from secaware.generation.confirmation import execute_confirmation_requests
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.llm.structured_transport import OpenAICompatibleStructuredTransport
@@ -39,7 +42,7 @@ from secaware.oracle.runner import (
     run_analyzer_process,
     validate_analyzer_runtime,
 )
-from secaware.pipeline.artifact import sha256_file
+from secaware.pipeline.artifact import canonical_sha256, sha256_file
 from secaware.pipeline.stages.confirmation_generation import create_confirmation_provider
 from secaware.schema.experiments import AssignmentExecutionStatus, AssignmentRecord
 from secaware.schema.generation import GenerationRequestRecord
@@ -49,6 +52,7 @@ from secaware.schema.oracle import (
     OracleEvaluability,
     SecurityLabel,
 )
+from secaware.schema.outcomes import FunctionalOutcomeStatus
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 _SCHEMA_VERSION = "1.0"
@@ -261,6 +265,56 @@ def _oracle_analysis_from_payload(payload: dict[str, Any]) -> OracleCodeAnalysis
     if _json_value(analysis) != payload:
         raise ValueError("Gate C preserved Oracle analysis failed validation")
     return analysis
+
+
+def _invalid_judge_unknown_outcome(
+    *,
+    unit_dir: Path,
+    assignment_id: str,
+    contract_id: str,
+    evaluator_policy_sha256: str,
+) -> tuple[ProgramFunctionalOutcomeRecord, dict[str, object]]:
+    transport_dir = unit_dir / "functional-judge-transport"
+    transport = _read_json(transport_dir / "transport.json")
+    request = (transport_dir / "request.json").read_bytes()
+    response = (transport_dir / "response.json").read_bytes()
+    if request.endswith(b"\n"):
+        request = request[:-1]
+    if response.endswith(b"\n"):
+        response = response[:-1]
+    request_sha256 = hashlib.sha256(request).hexdigest()
+    response_sha256 = hashlib.sha256(response).hexdigest()
+    if (
+        transport.get("attempts") != 1
+        or transport.get("request_sha256") != request_sha256
+        or transport.get("response_sha256") != response_sha256
+    ):
+        raise ValueError("Gate C invalid Judge response provenance failed validation")
+    evidence_sha256 = canonical_sha256(
+        {
+            "schema_version": _SCHEMA_VERSION,
+            "reason": "invalid_single_pass_response",
+            "request_sha256": request_sha256,
+            "response_sha256": response_sha256,
+        }
+    )
+    outcome = ProgramFunctionalOutcomeRecord.from_content(
+        assignment_id=assignment_id,
+        contract_id=contract_id,
+        evaluator_policy_sha256=evaluator_policy_sha256,
+        status=FunctionalOutcomeStatus.UNKNOWN,
+        evidence_sha256=evidence_sha256,
+    )
+    return outcome, {
+        "schema_version": _SCHEMA_VERSION,
+        "reason": "invalid_single_pass_response",
+        "functional_status": FunctionalOutcomeStatus.UNKNOWN.value,
+        "provider_attempts": 1,
+        "additional_provider_attempts": 0,
+        "request_sha256": request_sha256,
+        "response_sha256": response_sha256,
+        "evidence_sha256": evidence_sha256,
+    }
 
 
 def _environment() -> dict[str, object]:
@@ -528,6 +582,11 @@ class _RecordingAnalyzerRunner:
                 },
             )
             raise
+
+
+class _ReplayOnlyStructuredTransport:
+    def complete(self, _request: bytes, _policy: object) -> bytes:
+        raise RuntimeError("replay-only functional transport must not be invoked")
 
 
 def _safe_error(error: BaseException, stage: str) -> dict[str, object]:
@@ -1000,9 +1059,27 @@ def run_gate_c_live_canary(
             if execution.status is AssignmentExecutionStatus.GENERATED:
                 recorder.bind(unit_dir / "functional-judge-transport")
             try:
-                judge_passes, functional_outcome = judge.evaluate(
-                    assignment, execution, code, contract
-                )
+                try:
+                    judge_passes, functional_outcome = judge.evaluate(
+                        assignment, execution, code, contract
+                    )
+                except SecAwareError as judge_error:
+                    if (
+                        judge_error.code is not ErrorCode.API_INVALID_RESPONSE
+                        or not (unit_dir / "functional-judge-transport" / "response.json").is_file()
+                    ):
+                        raise
+                    functional_outcome, invalid_response = _invalid_judge_unknown_outcome(
+                        unit_dir=unit_dir,
+                        assignment_id=assignment_id,
+                        contract_id=contract.contract_id,
+                        evaluator_policy_sha256=judge.policy_sha256,
+                    )
+                    judge_passes = ()
+                    _write_json(
+                        unit_dir / "functional-judge-invalid-response.json",
+                        invalid_response,
+                    )
             finally:
                 recorder.release_if_unused()
             write_jsonl(unit_dir / "functional-judge-passes.jsonl", judge_passes)
@@ -1046,7 +1123,9 @@ def run_gate_c_live_canary(
                         "binding_performed_after_blind_analysis": True,
                     },
                 )
-            judge_attempts = 1 if judge_passes else 0
+            judge_attempts = int(
+                (unit_dir / "functional-judge-transport" / "transport.json").is_file()
+            )
             _write_json(
                 unit_dir / "status.json",
                 {
@@ -1147,15 +1226,23 @@ def recover_gate_c_live_oracle(
     source_unit = source_dir / "units" / repair_id
     status = _read_json(source_unit / "status.json")
     error = _read_json(source_unit / "error.json")
+    failed_stage = status.get("failed_stage")
+    invalid_judge_response = (
+        failed_stage == "functional_judge"
+        and error.get("stage") == "functional_judge"
+        and error.get("error_code") == int(ErrorCode.API_INVALID_RESPONSE)
+        and (source_unit / "functional-judge-transport" / "response.json").is_file()
+    )
     if (
         status.get("status") != "ERROR"
-        or status.get("failed_stage") != "oracle"
+        or failed_stage not in {"oracle", "functional_judge"}
         or status.get("generated") != 1
         or status.get("terminal_no_code") != 0
         or status.get("generation_provider_attempts") != 1
         or status.get("functional_judge_provider_attempts") != 1
         or status.get("oracle_results") != 0
-        or error.get("stage") != "oracle"
+        or (failed_stage == "oracle" and error.get("stage") != "oracle")
+        or (failed_stage == "functional_judge" and not invalid_judge_response)
     ):
         raise ValueError("Gate C Oracle repair source status failed validation")
     oracle_analysis_path = source_unit / "oracle-analysis.json"
@@ -1183,11 +1270,35 @@ def recover_gate_c_live_oracle(
     executions = tuple(
         read_jsonl(source_unit / "assignment-execution.jsonl", required=True, allow_empty=False)
     )
-    outcomes = tuple(
-        read_jsonl(source_unit / "functional-outcome.jsonl", required=True, allow_empty=False)
+    contracts = tuple(
+        read_jsonl(
+            source_unit / "functional-contract.jsonl",
+            TaskFunctionalContractRecord,
+            required=True,
+            allow_empty=False,
+        )
     )
-    judge_passes = tuple(
-        read_jsonl(source_unit / "functional-judge-passes.jsonl", required=True, allow_empty=False)
+    outcomes = (
+        ()
+        if invalid_judge_response
+        else tuple(
+            read_jsonl(
+                source_unit / "functional-outcome.jsonl",
+                required=True,
+                allow_empty=False,
+            )
+        )
+    )
+    judge_passes = (
+        ()
+        if invalid_judge_response
+        else tuple(
+            read_jsonl(
+                source_unit / "functional-judge-passes.jsonl",
+                required=True,
+                allow_empty=False,
+            )
+        )
     )
     if (
         len(codes) != 1
@@ -1196,10 +1307,23 @@ def recover_gate_c_live_oracle(
         or executions[0].get("assignment_id") != repair_id
         or executions[0].get("status") != AssignmentExecutionStatus.GENERATED.value
         or executions[0].get("request_id") != codes[0].request_id
-        or len(outcomes) != 1
-        or outcomes[0].get("assignment_id") != repair_id
-        or len(judge_passes) != 1
-        or judge_passes[0].get("assignment_id") != repair_id
+        or len(contracts) != 1
+        or (
+            not invalid_judge_response
+            and (
+                len(outcomes) != 1
+                or outcomes[0].get("assignment_id") != repair_id
+                or len(judge_passes) != 1
+                or judge_passes[0].get("assignment_id") != repair_id
+            )
+        )
+        or (
+            invalid_judge_response
+            and (
+                (source_unit / "functional-outcome.jsonl").exists()
+                or (source_unit / "functional-judge-passes.jsonl").exists()
+            )
+        )
     ):
         raise ValueError("Gate C Oracle repair preserved records failed validation")
     preserved_analysis: OracleCodeAnalysis | None = None
@@ -1226,6 +1350,14 @@ def recover_gate_c_live_oracle(
 
     app_config = load_config(app_config_path, run_dir=output_dir)
     policy = load_policy_bundle((repo_root / app_config.oracle.policy_lock_path).resolve())
+    replay_judge = (
+        create_functional_judge(
+            app_config,
+            transport_factory=lambda **_kwargs: _ReplayOnlyStructuredTransport(),
+        )
+        if invalid_judge_response
+        else None
+    )
     source_coverage = _read_json(source_unit / "oracle-coverage.json")
     if source_coverage.get("zero_finding_interpretation") != oracle_decision_mode:
         raise ValueError("Gate C Oracle repair coverage mode failed validation")
@@ -1275,6 +1407,21 @@ def recover_gate_c_live_oracle(
     analysis = preserved_analysis
     new_oracle_executions = 0 if preserved_analysis is not None else 1
     try:
+        if invalid_judge_response:
+            if replay_judge is None:
+                raise RuntimeError("Gate C functional recovery policy is unavailable")
+            functional_outcome, invalid_response = _invalid_judge_unknown_outcome(
+                unit_dir=unit_dir,
+                assignment_id=repair_id,
+                contract_id=contracts[0].contract_id,
+                evaluator_policy_sha256=replay_judge.policy_sha256,
+            )
+            write_jsonl(unit_dir / "functional-judge-passes.jsonl", ())
+            write_jsonl(unit_dir / "functional-outcome.jsonl", (functional_outcome,))
+            _write_json(
+                unit_dir / "functional-judge-invalid-response.json",
+                invalid_response,
+            )
         if analysis is None:
             analyzer_recorder = _RecordingAnalyzerRunner()
             analyzer_recorder.bind(unit_dir / "oracle-analyzer-transport-recovery")
@@ -1327,11 +1474,16 @@ def recover_gate_c_live_oracle(
                 unit_dir / "artifact-manifest-before-recovery.json"
             ),
             "generated_code_sha256": sha256_file(unit_dir / "generated-code.jsonl"),
-            "functional_outcome_sha256": sha256_file(unit_dir / "functional-outcome.jsonl"),
+            "functional_outcome_sha256": (
+                sha256_file(unit_dir / "functional-outcome.jsonl")
+                if (unit_dir / "functional-outcome.jsonl").is_file()
+                else None
+            ),
             "new_generation_provider_attempts": 0,
             "new_functional_judge_provider_attempts": 0,
             "new_oracle_executions": new_oracle_executions,
             "preserved_oracle_result_reused": preserved_analysis is not None,
+            "invalid_functional_response_reclassified": invalid_judge_response,
         },
     )
     _write_json(

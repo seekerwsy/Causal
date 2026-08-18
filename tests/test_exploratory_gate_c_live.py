@@ -187,6 +187,37 @@ def test_remaining_phase_history_allocates_non_overwriting_attempts(tmp_path: Pa
         gate_c_live._next_remaining_attempt(tmp_path)
 
 
+def test_invalid_single_pass_judge_response_becomes_provenance_bound_unknown(
+    tmp_path: Path,
+) -> None:
+    transport = tmp_path / "functional-judge-transport"
+    transport.mkdir()
+    request = b'{"request":1}'
+    response = b'{"schema_invalid_but_preserved":true}'
+    (transport / "request.json").write_bytes(request + b"\n")
+    (transport / "response.json").write_bytes(response + b"\n")
+    _write_json(
+        transport / "transport.json",
+        {
+            "attempts": 1,
+            "request_sha256": hashlib.sha256(request).hexdigest(),
+            "response_sha256": hashlib.sha256(response).hexdigest(),
+        },
+    )
+
+    outcome, diagnostic = gate_c_live._invalid_judge_unknown_outcome(
+        unit_dir=tmp_path,
+        assignment_id="assignment_" + "1" * 64,
+        contract_id="functional_contract_" + "2" * 64,
+        evaluator_policy_sha256="3" * 64,
+    )
+
+    assert outcome.status.value == "unknown"
+    assert diagnostic["functional_status"] == "unknown"
+    assert diagnostic["provider_attempts"] == 1
+    assert diagnostic["additional_provider_attempts"] == 0
+
+
 def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
     stored_base = {
         "schema_version": "1.0",
