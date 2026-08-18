@@ -11,6 +11,7 @@ from secaware.functional_audit.main_pool import (
     prepare_main_pool_audit,
     run_main_pool_audit,
 )
+from secaware.functional_audit.reconcile import reconcile_main_pool_audit
 from secaware.llm.structured_transport import StructuredLLMPolicy
 
 
@@ -81,6 +82,19 @@ class FakeTransport:
             payload["requirements"][0]["prompt_evidence_quote"] = request[
                 "prompt_evidence_segments"
             ][0]["text"]
+        return json.dumps(payload, separators=(",", ":")).encode()
+
+
+class FirstResponseInvalidTransport(FakeTransport):
+    def complete(self, request_bytes: bytes, policy: StructuredLLMPolicy) -> bytes:
+        self.calls.append((request_bytes, policy))
+        payload = json.loads(self.response)
+        request = json.loads(request_bytes)
+        payload["requirements"][0]["prompt_evidence_quote"] = (
+            "not in the registered prompt"
+            if len(self.calls) == 1
+            else request["prompt_evidence_segments"][0]["text"]
+        )
         return json.dumps(payload, separators=(",", ":")).encode()
 
 
@@ -198,8 +212,7 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
     ]
     assert all(item["evidence_quote_expansions"] == 1 for item in decisions)
     progress = [
-        json.loads(line)
-        for line in (tmp_path / "live" / "progress.jsonl").read_text().splitlines()
+        json.loads(line) for line in (tmp_path / "live" / "progress.jsonl").read_text().splitlines()
     ]
     assert len(progress) == 5
     assert progress[-1]["remaining"] == 0
@@ -317,3 +330,92 @@ def test_provider_contract_exposes_nested_requirement_enums() -> None:
         "error_handling",
         "environment",
     ]
+
+
+def test_reconciliation_revalidates_retained_responses_and_applies_explicit_override(
+    tmp_path: Path,
+) -> None:
+    source, splits, prepare_config = _inputs(tmp_path)
+    prepared = tmp_path / "prepared"
+    prepare_main_pool_audit(
+        source_record_audit=source,
+        split_simulations=splits,
+        config_path=prepare_config,
+        run_dir=prepared,
+        command_argv=("prepare",),
+    )
+    live_config = tmp_path / "live-config.json"
+    _write_json(
+        live_config,
+        {
+            "schema_version": "1.0",
+            "allow_provider_calls": True,
+            "authorization_id": "test-authorization",
+            "maximum_provider_calls": 10,
+            "llm": {
+                "model_id": "judge-model",
+                "base_url": "https://example.invalid/v1",
+                "api_key_env": "TEST_KEY",
+                "timeout_seconds": 30.0,
+                "max_attempts": 1,
+                "max_response_bytes": 4096,
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "seed": 19,
+                "enable_thinking": False,
+            },
+        },
+    )
+    source_run = tmp_path / "source-run"
+    source_report = run_main_pool_audit(
+        prepared_dir=prepared,
+        live_config_path=live_config,
+        run_dir=source_run,
+        command_argv=("run",),
+        transport=FirstResponseInvalidTransport(_accepted_response()),
+    )
+    assert source_report["counts"]["completed"] == 9
+    assert source_report["counts"]["errors"] == 1
+
+    first_response = json.loads((source_run / "responses.jsonl").read_text().splitlines()[0])
+    packets = {
+        row["packet_id"]: row
+        for row in (
+            json.loads(line)
+            for line in (prepared / "candidate-packets.jsonl").read_text().splitlines()
+        )
+    }
+    first_packet = packets[first_response["packet_id"]]
+    override_payload = json.loads(_accepted_response(first_packet["prompt"]))
+    overrides = tmp_path / "overrides.jsonl"
+    _write_jsonl(
+        overrides,
+        [
+            {
+                "schema_version": "1.0",
+                "record_id": first_packet["record_id"],
+                "reviewer": "codex-primary",
+                "review_rationale": "The retained response used a non-verbatim evidence quote.",
+                "audit": override_payload,
+            }
+        ],
+    )
+
+    report = reconcile_main_pool_audit(
+        prepared_dir=prepared,
+        source_run_dirs=(source_run,),
+        output_dir=tmp_path / "reconciled",
+        command_argv=("reconcile",),
+        overrides_path=overrides,
+    )
+
+    assert report["status"] == "MAIN_POOL_AUDIT_RECONCILED"
+    assert report["counts"] == {
+        "prepared_packets": 10,
+        "source_responses": 10,
+        "decisions": 10,
+        "eligible": 10,
+        "unresolved": 0,
+        "overrides": 1,
+        "provider_calls": 0,
+    }

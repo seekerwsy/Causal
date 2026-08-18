@@ -104,3 +104,29 @@ The repository archive at
 `data/e2e-pilot/main-pool-audit-through-full-20260818-07` preserves all six diagnostic/canary/full
 runs. Its transfer archive SHA-256 is
 `0450eb36c3b92e06cbd6ddef618edde76260f6d2c5b6e7f5ffd5732897fc3847`.
+
+## Outcome-blind reconciliation
+
+The offline reconciliation at
+`data/e2e-pilot/five-cwe-main-pool-reconciliation-reviewed-20260818-02` verifies the retained
+response-bundle hashes, replays the final parser, and combines the known-positive and full runs.
+Seven malformed responses received explicit Codex-primary overrides recorded in
+`configs/e2e-pilot/five-cwe-main-pool-audit-overrides-v1.jsonl`. The review used only each source
+Prompt, its registered evidence segments, target CWE, finite profile, and retained audit response;
+generated code, intervention arms, generator identity, Oracle results, and outcomes remained
+unavailable.
+
+The reconciliation produced 177/177 decisions, zero unresolved records, and zero provider calls.
+The reviewed eligible pool is:
+
+| CWE | Discover | Confirm | Total |
+| --- | ---: | ---: | ---: |
+| CWE-78 | 19 | 18 | 37 |
+| CWE-89 | 9 | 6 | 15 |
+| CWE-502 | 5 | 2 | 7 |
+| CWE-328 | 10 | 7 | 17 |
+| CWE-338 | 2 | 3 | 5 |
+
+This resolves response-format uncertainty but does not solve source coverage. CWE-502 and CWE-338
+remain far below the registered split quotas, while CWE-89 and CWE-328 lack enough confirm tasks.
+Cross-source supplementation must therefore be assessed before freezing the main experimental pool.

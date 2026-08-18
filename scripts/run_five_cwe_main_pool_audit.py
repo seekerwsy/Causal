@@ -11,6 +11,7 @@ from secaware.functional_audit.main_pool import (
     prepare_main_pool_audit,
     run_main_pool_audit,
 )
+from secaware.functional_audit.reconcile import reconcile_main_pool_audit
 
 
 def main() -> None:
@@ -28,6 +29,12 @@ def main() -> None:
     live.add_argument("--config", type=Path, required=True)
     live.add_argument("--run-dir", type=Path, required=True)
 
+    reconcile = subparsers.add_parser("reconcile")
+    reconcile.add_argument("--prepared-dir", type=Path, required=True)
+    reconcile.add_argument("--source-run-dir", type=Path, action="append", required=True)
+    reconcile.add_argument("--overrides", type=Path)
+    reconcile.add_argument("--run-dir", type=Path, required=True)
+
     args = parser.parse_args()
     if args.action == "prepare":
         report = prepare_main_pool_audit(
@@ -37,11 +44,19 @@ def main() -> None:
             run_dir=args.run_dir,
             command_argv=tuple(sys.argv),
         )
-    else:
+    elif args.action == "run":
         report = run_main_pool_audit(
             prepared_dir=args.prepared_dir,
             live_config_path=args.config,
             run_dir=args.run_dir,
+            command_argv=tuple(sys.argv),
+        )
+    else:
+        report = reconcile_main_pool_audit(
+            prepared_dir=args.prepared_dir,
+            source_run_dirs=tuple(args.source_run_dir),
+            overrides_path=args.overrides,
+            output_dir=args.run_dir,
             command_argv=tuple(sys.argv),
         )
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))

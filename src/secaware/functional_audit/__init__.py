@@ -6,10 +6,12 @@ from secaware.functional_audit.main_pool import (
     prepare_main_pool_audit,
     run_main_pool_audit,
 )
+from secaware.functional_audit.reconcile import reconcile_main_pool_audit
 
 __all__ = [
     "MainPoolAuditResponse",
     "prepare_functional_audit_pilot",
     "prepare_main_pool_audit",
+    "reconcile_main_pool_audit",
     "run_main_pool_audit",
 ]
