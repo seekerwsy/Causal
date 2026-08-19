@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "bootstrap_id": "five_cwe_independent_validation_mechanism_function_bootstrap_v1",
+  "status": "FROZEN_EDGE_REPLICATION_NO_HYPOTHESIS_SELECTION",
+  "model_id": "phi-4-14b",
+  "view_id": "full_jci_functional",
+  "source_variable": "z.target_mechanism_realized",
+  "target_variable": "y.discovery_functional",
+  "reference_marks": ["tail", "arrow"],
+  "global_seed": 2026081922,
+  "bootstrap_samples": 200,
+  "bootstrap_unit": "complete_task_block",
+  "stability_threshold": 0.8,
+  "max_failed_bootstrap_fraction": 0.1,
+  "analysis_config": {
+    "path": "configs/e2e-pilot/five-cwe-independent-validation-analysis-fci-v1.json",
+    "sha256": "a494277b29e9cea0520fe66b35e6e5cc23ef97e2469b56c19b29ef52d2aa94c3"
+  }
+}

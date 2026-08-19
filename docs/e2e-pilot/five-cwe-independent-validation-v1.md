@@ -185,3 +185,36 @@ batch execution failures.
 The production Python environment does not include pytest; the updated recovery and resume code was
 therefore checked in the local fixed environment with 43 focused tests rather than installing new
 packages on the experiment server. No full repository suite was run.
+
+## Completed 220-assignment execution and frozen analysis entry
+
+The resume run completed the remaining 162 assignments in 1,459.64 seconds (9.00 seconds per
+assignment), with zero execution errors and zero pending assignments. Across the pilot, canary,
+first full attempt, recovery, and resume directories, the authenticated completion union contains
+exactly the 220 assignments in the frozen 55-task plan: 55 assignments in each of the four arms.
+Generation, the single-pass functional Judge, and the code-mechanism extractor each made exactly
+220 calls in total; the Oracle made no call. Functional status is 185 pass, 31 fail, and 4 unknown.
+The code-mechanism state is 148 `proved_safe`, 62 `proved_unsafe`, 4 `no_relevant_sink`, and 6
+`unresolved`. The original ERROR unit is retained and is covered by its separate COMPLETE recovery
+unit; it is not silently replaced in place.
+
+The complete server archive is retained as
+`five-cwe-independent-validation-phi14b-complete-20260819-01.tar.gz` with SHA-256
+`eac45598fd5f8fb30ec3239072a6c8fd820e38d1132454fb9af11f6f729bb0dc`. The analysis table binds
+that archive, all five recursive run manifests, the execution-plan manifest, and runtime-freeze v3.
+It maps functional `pass` to one and both `fail` and `unknown` to zero, exactly matching the frozen
+v3 method-development projection; the original three-valued functional status remains in a
+diagnostic field. This step makes no provider or Oracle call.
+
+On Windows, verifying the archive under its original deeply nested extraction path initially failed
+because Python could not open paths beyond the local path-length limit. Independent PowerShell
+hashing showed that every listed file digest and manifest closure matched. The same authenticated
+archive was therefore materialized under short aliases in `runs/iv`; the configuration records the
+alias-to-archive-member mapping and the original manifest digest. No digest check was weakened, and
+the original extraction remains preserved.
+
+The independent full-sample raw PAG and JCI-constrained PAG both contain zero edges, so neither
+contains the frozen tail-arrow `z.target_mechanism_realized -> y.discovery_functional` relation.
+This is an interim reference result, not the preregistered replication decision. A three-replicate
+engineering bootstrap completed with 3 successes, 0 failures, and 0/3 support, validating complete
+task-block resampling and artifact recovery before the configured 200-replicate run.

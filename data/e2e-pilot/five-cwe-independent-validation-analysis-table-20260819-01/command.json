@@ -1,0 +1,1 @@
+{"argv":["scripts/build_independent_validation_analysis_table.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-independent-validation-analysis-table-v1.json","--output-dir","data/e2e-pilot/five-cwe-independent-validation-analysis-table-20260819-01"]}

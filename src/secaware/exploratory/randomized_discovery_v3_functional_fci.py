@@ -98,7 +98,11 @@ def _validated_analysis(path: Path) -> dict[str, Any]:
     return analysis
 
 
-def _variables(producer_sha256: str) -> tuple[CausalVariableSpec, ...]:
+def _variables(
+    producer_sha256: str,
+    *,
+    scope_id: str = "scope.five_cwe_mechanism_function_v3",
+) -> tuple[CausalVariableSpec, ...]:
     context = CausalVariableSpec(
         schema_version=_SCHEMA_VERSION,
         variable_id=_SOURCE,
@@ -110,7 +114,7 @@ def _variables(producer_sha256: str) -> tuple[CausalVariableSpec, ...]:
             "generic_security_reminder",
         ),
         source_query_id="assignment.arm_role.v1",
-        scope_id="scope.five_cwe_mechanism_function_v3",
+        scope_id=scope_id,
         temporal_tier=0,
         adjacency_type="jci_context",
         producer_sha256=producer_sha256,
@@ -125,7 +129,7 @@ def _variables(producer_sha256: str) -> tuple[CausalVariableSpec, ...]:
                 role=declaration.role,
                 states=declaration.states,
                 source_query_id=declaration.query_id,
-                scope_id="scope.five_cwe_mechanism_function_v3",
+                scope_id=scope_id,
                 temporal_tier=declaration.tier,
                 adjacency_type=declaration.adjacency_type,
                 producer_sha256=declaration_sha256(declaration),
@@ -139,21 +143,37 @@ def _table_and_matrix(
     *,
     producer_sha256: str,
 ) -> tuple[CausalTableRecord, np.ndarray, tuple[dict[str, object], ...]]:
+    return _table_and_matrix_for_population(
+        payload,
+        producer_sha256=producer_sha256,
+        expected_tasks=93,
+        scope_id="scope.five_cwe_mechanism_function_v3",
+    )
+
+
+def _table_and_matrix_for_population(
+    payload: dict[str, Any],
+    *,
+    producer_sha256: str,
+    expected_tasks: int,
+    scope_id: str,
+) -> tuple[CausalTableRecord, np.ndarray, tuple[dict[str, object], ...]]:
     view_id = str(payload.get("view_id"))
     rows = payload.get("rows")
     input_ids = payload.get("internal_variable_ids")
-    expected_rows = 186 if view_id == "target_noop_functional" else 372
+    arms_per_task = 2 if view_id == "target_noop_functional" else 4
+    expected_rows = expected_tasks * arms_per_task
     if (
         view_id not in _VIEWS
         or payload.get("model_id") not in _MODELS
         or input_ids != list(_VARIABLE_IDS)
         or type(rows) is not list
-        or payload.get("independent_tasks") != 93
+        or payload.get("independent_tasks") != expected_tasks
         or payload.get("row_count") != expected_rows
         or len(rows) != expected_rows
     ):
         raise ValueError("discovery-v3 functional matrix payload failed validation")
-    variables = _variables(producer_sha256)
+    variables = _variables(producer_sha256, scope_id=scope_id)
     variable_ids = tuple(item.variable_id for item in variables)
     index = {variable_id: position for position, variable_id in enumerate(input_ids)}
     observations = []
@@ -191,14 +211,14 @@ def _table_and_matrix(
             }
         )
         task_ids.add(coordinates[1])
-    if len(task_ids) != 93:
+    if len(task_ids) != expected_tasks:
         raise ValueError("discovery-v3 functional task count failed validation")
     table = CausalTableRecord.from_jci_content(
-        scope_id="scope.five_cwe_mechanism_function_v3",
+        scope_id=scope_id,
         cwe="CWE-POOLED",
         model_id=str(payload["model_id"]),
         variables=variables,
-        independent_task_count=93,
+        independent_task_count=expected_tasks,
         observation_payload=observations,
     )
     bindings.sort(key=lambda item: str(item["assignment_id"]))

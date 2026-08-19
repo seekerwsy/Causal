@@ -124,7 +124,8 @@ def _draw(
                 }
             )
     matrix = np.asarray(matrix_rows, dtype=np.int64)
-    if matrix.shape != (372, 3):
+    expected_shape = (len(blocks) * 4, 3)
+    if matrix.shape != expected_shape:
         raise ValueError("discovery-v3 functional bootstrap draw failed validation")
     matrix = np.array(matrix, dtype=np.int64, order="C", copy=True)
     matrix.flags.writeable = False
