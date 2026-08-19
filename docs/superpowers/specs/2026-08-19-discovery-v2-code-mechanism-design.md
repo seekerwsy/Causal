@@ -168,3 +168,13 @@ failure and supported the edge in 6/10 replicates. Inspection confirmed that the
 truly omitted the edge; the 0.6 result is not caused by endpoint-matching policy. The frozen
 200-replicate run, rather than any relaxed edge definition, determines whether this partial
 association is stable.
+
+The frozen full run completed 200/200 task-block replicates with zero backend failure. The directed
+`z.target_mechanism_realized -> y.discovery_functional` edge appeared in 167/200 replicates
+(0.835), above the preregistered 0.8 threshold, and produced one frozen hypothesis. This is the
+first stable, semantically non-definitional discovery in the method-development ladder. Its scope
+is deliberately narrow: it identifies Phi's four-arm mechanism/function coupling, not target-patch
+mediation, because the same reference PAG contains no context-to-mechanism adjacency. Qwen provides
+the complementary model boundary: its target/no-op context changes mechanism realization, but no
+mechanism/function edge appears. The hypothesis remains ineligible for a scientific claim until it
+is evaluated on a newly allocated independent task set under the frozen protocol.
