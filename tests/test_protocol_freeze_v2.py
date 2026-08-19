@@ -6,32 +6,30 @@ from dataclasses import dataclass
 import pytest
 from pydantic import ValidationError
 
+from secaware.extractors.base import ExtractionPolicy
+from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
 from secaware.phased_exploration.pools import (
     ContractStatus,
     EvidencePool,
     PoolPartitionManifest,
     PoolTaskRecord,
 )
-from secaware.schema.experiments import ArmRole
-from secaware.schema.features import FeatureOperation
+from secaware.schema.experiments import ArmRole, PromptRole
+from secaware.schema.features import FeatureOperation, PromptExtractorBackend
 from secaware.schema.intervention_v2 import (
     ArmProtocolV2,
     InterventionBridgeRecordV2,
     TargetSpecV2,
 )
 from secaware.schema.policy_v2 import (
-    ActionableFeatureQueryResultRecord,
     ActionableFeatureSpec,
     BridgeStatus,
     CandidateSkeleton,
     CandidateUniverseManifest,
-    ContextQueryResultRecord,
     ContextQuerySpec,
     ExpectedDirection,
     GlobalArmExecutionSpec,
     PolicySplit,
-    PreOutcomeEligibilityRecord,
-    QueryState,
     RealizationPolicySpec,
     RealizationSpecRecord,
     SelectionFreezeManifest,
@@ -56,6 +54,12 @@ from secaware.schema.protocol_freeze_v2 import (
     SourceInventoryManifestV2,
     SourceInventoryTaskRecordV2,
 )
+from secaware.schema.query_evidence_v2 import (
+    QueryEvidenceManifestV2,
+    QueryEvidenceTaskRecordV2,
+)
+from secaware.schema.records import PromptRecord
+from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.context_queries_v2 import CWE89_SQL_FLOW_QUERY, context_query_spec
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
@@ -231,7 +235,7 @@ def _source_task(task_id: str) -> SourceInventoryTaskRecordV2:
         task_instance_id=task_id,
         source_id="synthetic.registry",
         source_record_id=f"source.{task_id}",
-        prompt_sha256=_sha(f"prompt:{task_id}"),
+        prompt_sha256=_sha(_prompt_text(task_id)),
         cwe_id="CWE-89",
         archetype_id="value-parameterization",
         template_family_id="sql.lookup",
@@ -251,47 +255,75 @@ def _inventory(
     )
 
 
-def _query_evidence(state: QueryState) -> dict[str, object]:
-    return {
-        "applicable": True,
-        "required_roles_resolved": True,
-        "bounded_matching_complete": True,
-        "match_evidence_ids": ("evidence.present",) if state is QueryState.PRESENT else (),
-    }
+def _prompt_text(task_id: str, *, target_present: bool = False) -> str:
+    suffix = " Use parameterized queries." if target_present else ""
+    return f"Implement a database query for user-supplied value {task_id}.{suffix}"
 
 
-def _eligibility(task_id: str) -> PreOutcomeEligibilityRecord:
-    context = _context_spec()
-    feature = _feature_spec()
-    coordinates = {
-        "regime_id": "natural_prompt_discovery",
-        "task_instance_id": task_id,
-        "natural_prompt_id": f"natural.{task_id}",
-        "prompt_tsg_sha256": _sha(f"prompt-tsg:{task_id}"),
-        "context_query_catalog_sha256": context.context_query_catalog_sha256,
-        "query_semantics_version": context.query_semantics_version,
-    }
-    context_result = ContextQueryResultRecord.from_content(
-        **coordinates,
-        context_query_id=context.context_query_id,
-        state=QueryState.PRESENT,
-        **_query_evidence(QueryState.PRESENT),
-        evaluation_evidence_sha256=_sha(f"context-evidence:{task_id}"),
+def _natural_prompt(task_id: str, *, target_present: bool = False) -> PromptRecord:
+    return PromptRecord(
+        prompt_id=f"source-prompt.{task_id}",
+        task_id=task_id,
+        split="confirm",
+        language="python",
+        task_family="sql_query",
+        cwe="CWE-89",
+        prompt=_prompt_text(task_id, target_present=target_present),
+        prompt_role=PromptRole.NEUTRAL_BASELINE,
+        counterpart_prompt_id=None,
     )
-    feature_result = ActionableFeatureQueryResultRecord.from_content(
-        **coordinates,
-        actionable_feature_spec_id=feature.actionable_feature_spec_id,
-        feature_id=feature.feature_id,
-        feature_catalog_sha256=feature.feature_catalog_sha256,
-        state=QueryState.ABSENT,
-        **_query_evidence(QueryState.ABSENT),
-        evaluation_evidence_sha256=_sha(f"feature-evidence:{task_id}"),
+
+
+def _query_evidence_task(
+    *,
+    bridge: InterventionBridgeRecordV2,
+    membership: SemanticTaskClusterMembershipRecord,
+) -> QueryEvidenceTaskRecordV2:
+    prompt = _natural_prompt(
+        membership.task_instance_id,
+        target_present=bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE,
     )
-    return PreOutcomeEligibilityRecord.from_query_results(
-        context_result=context_result,
-        feature_result=feature_result,
-        operation=FeatureOperation.ADD,
-        eligibility_function_sha256=SHA_D,
+    extraction_policy = ExtractionPolicy(
+        backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        policy_sha256=bridge.realization_policy.extractor_policy_sha256,
+        catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+        max_response_chars=262_144,
+    )
+    proposal = DeterministicCatalogExtractor().extract(prompt, extraction_policy)
+    graph = build_prompt_tsg(proposal, prompt)
+    remove = bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE
+    return QueryEvidenceTaskRecordV2.from_natural_prompt(
+        membership=membership,
+        natural_prompt=prompt,
+        extraction_proposal=proposal,
+        prompt_tsg=graph,
+        context_query=bridge.context_query,
+        actionable_feature=bridge.actionable_feature,
+        operation=bridge.frozen_hypothesis.operation,
+        eligibility_function_sha256=(bridge.candidate_skeleton.eligibility_function_sha256),
+        neutral_counterpart_attested=True if remove else None,
+        neutral_counterpart_attestation_sha256=(
+            _sha(f"neutral-counterpart:{membership.task_instance_id}") if remove else None
+        ),
+    )
+
+
+def _query_evidence_manifest(
+    *,
+    bridge: InterventionBridgeRecordV2,
+    memberships: tuple[SemanticTaskClusterMembershipRecord, ...],
+) -> QueryEvidenceManifestV2:
+    tasks = tuple(
+        _query_evidence_task(bridge=bridge, membership=membership) for membership in memberships
+    )
+    return QueryEvidenceManifestV2.from_tasks(
+        context_query=bridge.context_query,
+        actionable_feature=bridge.actionable_feature,
+        operation=bridge.frozen_hypothesis.operation,
+        extractor_backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        extractor_policy_sha256=bridge.realization_policy.extractor_policy_sha256,
+        eligibility_function_sha256=(bridge.candidate_skeleton.eligibility_function_sha256),
+        tasks=tasks,
     )
 
 
@@ -318,7 +350,12 @@ def _bundle(
         semantic_task_cluster_id=cluster_id,
         task_instance_id=task_id,
         source_prompt_id=f"source-prompt.{task_id}",
-        source_prompt_sha256=_sha(f"prompt:{task_id}"),
+        source_prompt_sha256=_sha(
+            _prompt_text(
+                task_id,
+                target_present=(bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE),
+            )
+        ),
         arms=bindings,
     )
 
@@ -348,6 +385,7 @@ class PopulationParts:
     partition: PoolPartitionManifest
     clusters: SemanticTaskClusterManifest
     population: PopulationFreezeManifestV2
+    query_evidence: QueryEvidenceManifestV2
 
 
 def _population_parts(
@@ -413,6 +451,13 @@ def _population_parts(
         construction_digest_sha256=SHA_C,
         frozen_before_discovery=True,
     )
+    query_evidence = _query_evidence_manifest(
+        bridge=bridge,
+        memberships=tuple(memberships.values()),
+    )
+    query_evidence_by_task = {
+        item.membership.task_instance_id: item for item in query_evidence.tasks
+    }
     cluster_counts = {
         cluster_id: sum(1 for _, candidate in coordinates if candidate == cluster_id)
         for cluster_id in {candidate for _, candidate in coordinates}
@@ -422,7 +467,7 @@ def _population_parts(
             pool_task=pool_tasks[task_id],
             cluster_membership=memberships[task_id],
             hypothesis=bridge.frozen_hypothesis,
-            eligibility=_eligibility(task_id),
+            eligibility=query_evidence_by_task[task_id].eligibility,
             task_policy_support=_support(
                 task_id=task_id,
                 cluster_id=cluster_id,
@@ -461,7 +506,12 @@ def _population_parts(
         weighting_policy_sha256=SHA_B,
         stratification_policy_sha256=SHA_C,
     )
-    return PopulationParts(partition=partition, clusters=clusters, population=population)
+    return PopulationParts(
+        partition=partition,
+        clusters=clusters,
+        population=population,
+        query_evidence=query_evidence,
+    )
 
 
 @dataclass(frozen=True)
@@ -500,6 +550,7 @@ def _fixture(
         pool_partition=parts.partition,
         semantic_cluster_manifest=parts.clusters,
         population=parts.population,
+        query_evidence=parts.query_evidence,
         preregistered_minimum_gate_pass_tasks=minimum_tasks,
         preregistered_minimum_gate_pass_clusters=minimum_clusters,
     )
@@ -522,6 +573,7 @@ def _root_components(fixture: ProtocolFixture) -> dict[str, object]:
         "pool_partition": fixture.parts.partition,
         "semantic_cluster_manifest": fixture.parts.clusters,
         "population": fixture.parts.population,
+        "query_evidence": fixture.parts.query_evidence,
         "preregistered_minimum_gate_pass_tasks": 3,
         "preregistered_minimum_gate_pass_clusters": 2,
     }
@@ -572,6 +624,7 @@ def test_protocol_root_rejects_synchronized_task_or_cluster_deletion_and_lowered
             pool_partition=attacked_parts.partition,
             semantic_cluster_manifest=attacked_parts.clusters,
             population=attacked_parts.population,
+            query_evidence=attacked_parts.query_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )
@@ -634,6 +687,7 @@ def test_protocol_root_rejects_cluster_policy_mismatch_accepted_by_population_co
             pool_partition=attacked_parts.partition,
             semantic_cluster_manifest=attacked_parts.clusters,
             population=attacked_parts.population,
+            query_evidence=attacked_parts.query_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )
@@ -660,6 +714,7 @@ def test_protocol_root_rejects_source_inventory_digest_drift() -> None:
             pool_partition=attacked_parts.partition,
             semantic_cluster_manifest=attacked_parts.clusters,
             population=attacked_parts.population,
+            query_evidence=attacked_parts.query_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )

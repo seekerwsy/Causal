@@ -568,7 +568,7 @@ def evaluate_context_query(
     *,
     semantic_membership: SemanticTaskClusterMembershipRecord,
 ) -> ContextQueryEvaluation:
-    """Evaluate one natural-Prompt context query and freeze its provenance."""
+    """Evaluate one pre-outcome natural-Prompt query in a frozen data split."""
     trusted = PromptTSGRecord.model_validate(record, strict=True)
     membership = SemanticTaskClusterMembershipRecord.model_validate(
         semantic_membership, strict=True
@@ -576,7 +576,8 @@ def evaluate_context_query(
     if (
         membership.task_instance_id != trusted.task_id
         or membership.cwe != trusted.cwe
-        or membership.split is not PolicySplit.DISCOVER
+        or membership.split
+        not in {PolicySplit.DISCOVER, PolicySplit.CONFIRM, PolicySplit.REPLICATION}
         or (
             membership.task_archetype in _ARCHETYPE_CWES
             and trusted.cwe not in _ARCHETYPE_CWES[membership.task_archetype]

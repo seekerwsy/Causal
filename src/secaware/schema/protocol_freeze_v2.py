@@ -2,8 +2,9 @@
 
 The protocol root is the pre-randomization trust anchor for one frozen policy
 hypothesis.  It deliberately points only upstream: selection, intervention,
-source inventory, pool/cluster allocation, and the common-support population.
-Generated code, assignments, outcomes, and analyses cannot appear in this DAG.
+source inventory, replayable natural-Prompt query evidence, pool/cluster
+allocation, and the common-support population.  Generated code, assignments,
+outcomes, and analyses cannot appear in this DAG.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from secaware.schema.policy_v2 import (
     SemanticTaskClusterManifest,
 )
 from secaware.schema.population_v2 import PopulationFreezeManifestV2
+from secaware.schema.query_evidence_v2 import QueryEvidenceManifestV2
 
 PROTOCOL_FREEZE_V2_SCHEMA_VERSION = "2.0"
 
@@ -301,6 +303,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
     pool_partition: PoolPartitionManifest
     semantic_cluster_manifest: SemanticTaskClusterManifest
     population: PopulationFreezeManifestV2
+    query_evidence: QueryEvidenceManifestV2
     preregistered_minimum_gate_pass_tasks: StrictInt = Field(ge=1)
     preregistered_minimum_gate_pass_clusters: StrictInt = Field(ge=1)
     outcome_blind: Literal[True]
@@ -318,6 +321,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
         pool_partition: PoolPartitionManifest,
         semantic_cluster_manifest: SemanticTaskClusterManifest,
         population: PopulationFreezeManifestV2,
+        query_evidence: QueryEvidenceManifestV2,
         preregistered_minimum_gate_pass_tasks: int,
         preregistered_minimum_gate_pass_clusters: int,
     ) -> Self:
@@ -340,6 +344,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
                     semantic_cluster_manifest, strict=True
                 ),
                 population=PopulationFreezeManifestV2.model_validate(population, strict=True),
+                query_evidence=QueryEvidenceManifestV2.model_validate(query_evidence, strict=True),
                 preregistered_minimum_gate_pass_tasks=(preregistered_minimum_gate_pass_tasks),
                 preregistered_minimum_gate_pass_clusters=(preregistered_minimum_gate_pass_clusters),
                 outcome_blind=True,
@@ -364,6 +369,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
         partition = self.pool_partition
         clusters = self.semantic_cluster_manifest
         population = self.population
+        query_evidence = self.query_evidence
         hypothesis = bridge.frozen_hypothesis
 
         universe_by_id = {item.candidate_skeleton_id: item for item in universe.skeletons}
@@ -407,6 +413,17 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
             or population.gate_pass_task_count < self.preregistered_minimum_gate_pass_tasks
             or population.gate_pass_cluster_count < self.preregistered_minimum_gate_pass_clusters
             or population.confirmation_pool not in OUTCOME_BLIND_POOLS
+            or query_evidence.context_query != bridge.context_query
+            or query_evidence.actionable_feature != bridge.actionable_feature
+            or query_evidence.operation is not hypothesis.operation
+            or query_evidence.extractor_policy_sha256
+            != bridge.realization_policy.extractor_policy_sha256
+            or query_evidence.context_query_catalog_sha256
+            != bridge.candidate_skeleton.context_query_catalog_sha256
+            or query_evidence.feature_catalog_sha256
+            != bridge.candidate_skeleton.feature_catalog_sha256
+            or query_evidence.eligibility_function_sha256
+            != bridge.candidate_skeleton.eligibility_function_sha256
         ):
             raise ValueError(self._safe_validation_message)
 
@@ -455,6 +472,10 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
         }
         scope_ids = set(scope_pool_tasks)
         gate_entry_ids = set(population.gate_entry_task_ids)
+        query_evidence_by_task = {
+            item.membership.task_instance_id: item for item in query_evidence.tasks
+        }
+        population_gate_by_task = {item.task_instance_id: item for item in population.task_gates}
         expected_split = (
             PolicySplit.REPLICATION
             if population.confirmation_pool is EvidencePool.REPLICATION
@@ -463,6 +484,9 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
         if (
             not scope_ids
             or scope_ids != gate_entry_ids
+            or set(query_evidence_by_task) != gate_entry_ids
+            or len(query_evidence_by_task) != len(query_evidence.tasks)
+            or set(population_gate_by_task) != gate_entry_ids
             or scope_ids
             != {
                 task_id
@@ -474,6 +498,34 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
             }
         ):
             raise ValueError(self._safe_validation_message)
+
+        for task_id in sorted(gate_entry_ids):
+            evidence = query_evidence_by_task[task_id]
+            source = inventory_by_task[task_id]
+            pool_task = pool_by_task[task_id]
+            membership = membership_by_task[task_id]
+            gate = population_gate_by_task[task_id]
+            support = gate.task_policy_support
+            if (
+                evidence.membership != membership
+                or evidence.natural_prompt.task_id != task_id
+                or evidence.natural_prompt.prompt_sha256 != source.prompt_sha256
+                or evidence.natural_prompt.prompt_sha256 != pool_task.prompt_sha256
+                or evidence.natural_prompt.cwe != source.cwe_id
+                or evidence.natural_prompt.language != source.language
+                or evidence.eligibility != gate.eligibility
+                or evidence.eligibility.natural_prompt_id != evidence.natural_prompt.prompt_id
+                or evidence.eligibility.prompt_tsg_sha256 != evidence.prompt_tsg.graph_sha256
+                or (
+                    support is not None
+                    and any(
+                        bundle.source_prompt_id != evidence.natural_prompt.prompt_id
+                        or bundle.source_prompt_sha256 != evidence.natural_prompt.prompt_sha256
+                        for bundle in support.task_realization_bundles
+                    )
+                )
+            ):
+                raise ValueError(self._safe_validation_message)
         return self
 
 

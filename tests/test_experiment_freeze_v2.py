@@ -275,6 +275,7 @@ def _experiment_components(
             pool_partition=parts.partition,
             semantic_cluster_manifest=parts.clusters,
             population=parts.population,
+            query_evidence=parts.query_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )
@@ -364,6 +365,7 @@ def test_duplicate_selector_slots_for_same_hypotheses_are_preserved_without_dupl
             pool_partition=root.pool_partition,
             semantic_cluster_manifest=root.semantic_cluster_manifest,
             population=root.population,
+            query_evidence=root.query_evidence,
             preregistered_minimum_gate_pass_tasks=(root.preregistered_minimum_gate_pass_tasks),
             preregistered_minimum_gate_pass_clusters=(
                 root.preregistered_minimum_gate_pass_clusters

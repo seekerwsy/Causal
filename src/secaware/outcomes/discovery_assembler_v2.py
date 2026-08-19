@@ -16,11 +16,13 @@ from secaware.schema.discovery_v2 import (
     DiscoveryVariableRoleV2,
     DiscoveryVariableSourceV2,
 )
-from secaware.schema.features import FeatureState
 from secaware.schema.policy_v2 import (
     ActionableFeatureQueryResultRecord,
     ContextQueryResultRecord,
     QueryState,
+)
+from secaware.schema.query_evidence_v2 import (
+    evaluate_actionable_feature_query_v2 as _evaluate_actionable_feature_query_v2,
 )
 from secaware.schema.runtime_v2 import (
     FunctionalResultRecordV2,
@@ -33,8 +35,6 @@ from secaware.schema.runtime_v2 import (
     RuntimeProducerChainRecordV2,
     validate_runtime_producer_chain_v2,
 )
-from secaware.tsg.graph import record_to_multidigraph
-from secaware.tsg.queries import feature_state
 
 ASSEMBLY_RECEIPT_V2_SCHEMA_VERSION = "2.0"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -45,12 +45,6 @@ _QUERY_STATE_CODE = {
     QueryState.ABSENT: 1,
     QueryState.NOT_APPLICABLE: 2,
     QueryState.UNRESOLVED: 3,
-}
-_FEATURE_TO_QUERY_STATE = {
-    FeatureState.PRESENT: QueryState.PRESENT,
-    FeatureState.ABSENT: QueryState.ABSENT,
-    FeatureState.NOT_APPLICABLE: QueryState.NOT_APPLICABLE,
-    FeatureState.UNRESOLVED: QueryState.UNRESOLVED,
 }
 
 
@@ -117,35 +111,12 @@ def _outcome_projection(
     }
 
 
-def _evidence_tuple(attributes: object) -> tuple[int, int, str] | None:
-    try:
-        values = dict(attributes)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    start = values.get("evidence_start")
-    end = values.get("evidence_end")
-    digest = values.get("evidence_sha256")
-    if type(start) is int and type(end) is int and type(digest) is str:
-        return start, end, digest
-    return None
-
-
 def _canonical_actionable_result(
     scope: AuthenticatedNaturalDiscoveryScopeV2,
     *,
     task_instance_id: str,
     actionable_feature_spec_id: str,
 ) -> ActionableFeatureQueryResultRecord:
-    from secaware.tsg.context_queries_v2 import (
-        CONTEXT_QUERY_CATALOG_SHA256,
-        CONTEXT_QUERY_SEMANTICS_VERSION,
-    )
-    from secaware.tsg.feature_catalog import (
-        prompt_feature_edge_slots,
-        prompt_feature_node_slots,
-        prompt_feature_spec,
-    )
-
     binding = next(
         (
             item
@@ -164,113 +135,10 @@ def _canonical_actionable_result(
     )
     if binding is None or actionable is None:
         raise ValueError("actionable query is outside the authenticated scope")
-    catalog_feature = prompt_feature_spec(actionable.feature_id)
-    graph = record_to_multidigraph(binding.prompt_tsg)
-    extracted_state = feature_state(graph, actionable.feature_id)
-    applicable = (
-        binding.membership.cwe in catalog_feature.applicable_cwes
-        and binding.prompt_tsg.task_family in catalog_feature.applicable_task_families
-    )
-    state = _FEATURE_TO_QUERY_STATE[extracted_state]
-    match_ids: tuple[str, ...] = ()
-    roles_resolved: bool | None
-    bounded_complete: bool
-    evidence_content: dict[str, object] = {
-        "schema_version": "actionable-query-evaluation-v2.1",
-        "task_binding_id": binding.task_binding_id,
-        "prompt_tsg_sha256": binding.prompt_tsg_sha256,
-        "actionable_feature_spec_id": actionable.actionable_feature_spec_id,
-        "feature_id": actionable.feature_id,
-        "feature_catalog_sha256": actionable.feature_catalog_sha256,
-        "context_query_catalog_sha256": CONTEXT_QUERY_CATALOG_SHA256,
-        "query_semantics_version": CONTEXT_QUERY_SEMANTICS_VERSION,
-    }
-    if not applicable or extracted_state is FeatureState.NOT_APPLICABLE:
-        state = QueryState.NOT_APPLICABLE
-        roles_resolved = None
-        bounded_complete = False
-    elif extracted_state is FeatureState.ABSENT:
-        state = QueryState.ABSENT
-        roles_resolved = True
-        bounded_complete = True
-    elif extracted_state is FeatureState.PRESENT:
-        node_slots = prompt_feature_node_slots(actionable.feature_id)
-        edge_slots = prompt_feature_edge_slots(actionable.feature_id)
-        matched_nodes = []
-        for slot in node_slots:
-            matches = tuple(
-                (node_id, _evidence_tuple(node["attributes"]))
-                for node_id, node in graph.nodes(data=True)
-                if node["node_type"] is slot.node_type and node["label"] == slot.canonical_label
-            )
-            if len(matches) != 1 or matches[0][1] is None:
-                state = QueryState.UNRESOLVED
-                break
-            matched_nodes.append(matches[0])
-        matched_edges = []
-        if state is QueryState.PRESENT:
-            matched_node_ids_by_type = {
-                slot.node_type: {
-                    node_id
-                    for node_id, _ in matched_nodes
-                    if graph.nodes[node_id]["node_type"] is slot.node_type
-                }
-                for slot in node_slots
-            }
-            for slot in edge_slots:
-                matches = tuple(
-                    (edge_id, _evidence_tuple(edge["attributes"]))
-                    for src, dst, edge_id, edge in graph.edges(keys=True, data=True)
-                    if edge["edge_type"] is slot.edge_type
-                    and src in matched_node_ids_by_type.get(slot.src_node_type, set())
-                    and dst in matched_node_ids_by_type.get(slot.dst_node_type, set())
-                )
-                if len(matches) != 1 or matches[0][1] is None:
-                    state = QueryState.UNRESOLVED
-                    break
-                matched_edges.append(matches[0])
-        if state is QueryState.PRESENT:
-            match_content = {
-                "nodes": matched_nodes,
-                "edges": matched_edges,
-                **evidence_content,
-            }
-            match_ids = ("actionable_match_" + _digest(match_content),)
-            roles_resolved = True
-            bounded_complete = True
-            evidence_content["match"] = match_content
-        else:
-            roles_resolved = False
-            bounded_complete = False
-    else:
-        state = QueryState.UNRESOLVED
-        roles_resolved = False
-        bounded_complete = False
-    evidence_content.update(
-        {
-            "state": state.value,
-            "applicable": applicable,
-            "required_roles_resolved": roles_resolved,
-            "bounded_matching_complete": bounded_complete,
-            "match_evidence_ids": match_ids,
-        }
-    )
-    return ActionableFeatureQueryResultRecord.from_content(
-        regime_id="natural_prompt_discovery",
-        task_instance_id=binding.membership.task_instance_id,
-        natural_prompt_id=binding.natural_prompt_id,
-        prompt_tsg_sha256=binding.prompt_tsg_sha256,
-        actionable_feature_spec_id=actionable.actionable_feature_spec_id,
-        feature_id=actionable.feature_id,
-        feature_catalog_sha256=actionable.feature_catalog_sha256,
-        context_query_catalog_sha256=CONTEXT_QUERY_CATALOG_SHA256,
-        query_semantics_version=CONTEXT_QUERY_SEMANTICS_VERSION,
-        state=state,
-        applicable=applicable,
-        required_roles_resolved=roles_resolved,
-        bounded_matching_complete=bounded_complete,
-        match_evidence_ids=match_ids,
-        evaluation_evidence_sha256=_digest(evidence_content),
+    return _evaluate_actionable_feature_query_v2(
+        prompt_tsg=binding.prompt_tsg,
+        semantic_membership=binding.membership,
+        actionable_feature=actionable,
     )
 
 
