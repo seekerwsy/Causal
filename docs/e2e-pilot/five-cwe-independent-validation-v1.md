@@ -70,8 +70,28 @@ mechanism-extractor call. It performs no Oracle call.
   identical. Text configuration inputs now declare `lf_normalized_text_v1`; manifests and generated
   artifacts retain exact raw-byte digests. A new deployment is used for the repaired attempt.
 
-## Pending server outputs
+## Server execution prerequisites
 
 The pilot has not yet been called. Before it runs, record the target host, repository path, output
 path, model path, model-service command, GPU state, disk state, port state, environment fingerprint,
 and input archive digests. New output directories must be used for every attempt.
+
+## Completed one-assignment pilot
+
+The repaired remote pilot is stored at
+`/home/ubuntu/secaware-experiments/runs/five-cwe-independent-validation-phi14b-pilot-20260819-02`.
+It completed 1/1 assignment with zero errors and zero pending assignments. Generation, the
+single-pass functional Judge, and the code-mechanism extractor each made one call; no Oracle ran.
+The requested Java/XML artifact was extracted as
+`src/main/java/com/example/service/SessionService.java`. All five functional requirements were
+judged met, and the mechanism extractor identified `cryptographic_rng`, producing `proved_safe` and
+`z.target_mechanism_realized=1`.
+
+The root and unit manifests are closed (29 and 20 covered files respectively). Every recorded
+request/response digest matches its transport record, and no configured API-key byte sequence occurs
+in the run artifacts. This is an engineering execution-chain result, not an arm effect or causal
+discovery conclusion.
+
+The next bounded phase contains the other 19 assignments from the already frozen five-task canary.
+It authenticates the completed pilot, does not regenerate it, records per-unit elapsed time and
+cumulative speed/ETA, and stops at the first error for diagnosis.

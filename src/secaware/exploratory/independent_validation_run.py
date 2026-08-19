@@ -8,8 +8,9 @@ import os
 import platform
 import socket
 import sys
+import time
 import traceback
-from dataclasses import asdict, fields, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from secaware.config import load_config, write_resolved_config
+from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import SecAwareError
 from secaware.exploratory.code_mechanism_calibration import (
     code_mechanism_policy_from_config,
@@ -254,6 +255,155 @@ def _root_manifest(output_dir: Path) -> None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class IndependentValidationUnitResult:
+    assignment_id: str
+    failure: BaseException | None
+    generated: int
+    generation_calls: int
+    judge_calls: int
+    mechanism_calls: int
+    functional_status: str | None
+    mechanism_state: str | None
+    mechanism_value: int | None
+    duration_seconds: float
+
+
+def execute_independent_validation_unit(
+    *,
+    output_dir: Path,
+    assignment: AssignmentRecord,
+    request: GenerationRequestRecord,
+    contract: TaskFunctionalContractRecord,
+    crosswalk: dict[str, Any],
+    app_config: AppConfig,
+    provider: object,
+    generation_recorder: RecordingGenerationTransport,
+    judge: object,
+    judge_recorder: RecordingStructuredTransport,
+    mechanism_extractor: LLMCodeMechanismFactsExtractor,
+    mechanism_recorder: RecordingStructuredTransport,
+) -> IndependentValidationUnitResult:
+    """Execute one assignment and always close its diagnostic artifact directory."""
+
+    unit_dir = output_dir / "units" / assignment.assignment_id
+    unit_dir.mkdir(parents=True, exist_ok=False)
+    write_jsonl(unit_dir / "assignment.jsonl", (assignment,))
+    write_jsonl(unit_dir / "generation-request.jsonl", (request,))
+    write_jsonl(unit_dir / "functional-contract.jsonl", (contract,))
+    _write_json(unit_dir / "gate-a-crosswalk.json", crosswalk)
+    started_at_utc = datetime.now(UTC).isoformat()
+    started = time.monotonic()
+    stage = "generation"
+    failure: BaseException | None = None
+    generation_calls = 0
+    judge_calls = 0
+    mechanism_calls = 0
+    generated = 0
+    functional_status: str | None = None
+    mechanism_state: str | None = None
+    mechanism_value: int | None = None
+    try:
+        generation_recorder.bind(unit_dir / "generation-provider-transport")
+        try:
+            executions, codes = execute_confirmation_requests(
+                (request,), provider, app_config.generation
+            )
+        finally:
+            generation_recorder.release_if_unused()
+        generation_calls = executions[0].attempt_count
+        write_jsonl(unit_dir / "assignment-execution.jsonl", executions)
+        write_jsonl(unit_dir / "generated-code.jsonl", codes)
+        execution = executions[0]
+        code: CanonicalGeneratedCodeRecord | None = codes[0] if codes else None
+        if execution.status is not AssignmentExecutionStatus.GENERATED or code is None:
+            raise RuntimeError("independent validation unit returned no complete artifact")
+        generated = 1
+        extraction = extract_generated_source(
+            _raw_generated_content(unit_dir / "generation-provider-transport" / "response.json")
+        )
+        if extraction.source != code.code or extraction.source_sha256 != code.code_sha256:
+            raise ValueError("independent validation response extraction binding failed validation")
+        _write_json(unit_dir / "response-extraction.json", asdict(extraction))
+
+        stage = "functional_judge"
+        judge_recorder.bind(unit_dir / "functional-judge-transport")
+        try:
+            judge_passes, functional_outcome = judge.evaluate(  # type: ignore[attr-defined]
+                assignment, execution, code, contract
+            )
+        finally:
+            judge_recorder.release_if_unused()
+        judge_calls = 1
+        functional_status = functional_outcome.status.value
+        write_jsonl(unit_dir / "functional-judge-passes.jsonl", judge_passes)
+        write_jsonl(unit_dir / "functional-outcome.jsonl", (functional_outcome,))
+
+        stage = "code_mechanism"
+        mechanism_recorder.bind(unit_dir / "code-mechanism-transport")
+        try:
+            measurement = mechanism_extractor.extract(
+                code=code.code,
+                target_cwe=str(crosswalk["cwe"]),
+                language=str(crosswalk["language"]),
+            )
+        finally:
+            mechanism_recorder.release_if_unused()
+        mechanism_calls = 1
+        mechanism_state = measurement.mechanism_state
+        mechanism_value = measurement.z_target_mechanism_realized
+        _write_json(unit_dir / "code-mechanism-measurement.json", asdict(measurement))
+    except BaseException as error:
+        failure = error
+        _write_json(unit_dir / "error.json", _safe_error(error, stage))
+    generation_calls = max(
+        generation_calls,
+        int((unit_dir / "generation-provider-transport" / "transport.json").is_file()),
+    )
+    judge_calls = max(
+        judge_calls,
+        int((unit_dir / "functional-judge-transport" / "transport.json").is_file()),
+    )
+    mechanism_calls = max(
+        mechanism_calls,
+        int((unit_dir / "code-mechanism-transport" / "transport.json").is_file()),
+    )
+    duration_seconds = time.monotonic() - started
+    _write_json(
+        unit_dir / "status.json",
+        {
+            "schema_version": _SCHEMA_VERSION,
+            "assignment_id": assignment.assignment_id,
+            "status": "ERROR" if failure is not None else "COMPLETE",
+            **({"failed_stage": stage} if failure is not None else {}),
+            "started_at_utc": started_at_utc,
+            "finished_at_utc": datetime.now(UTC).isoformat(),
+            "duration_seconds": duration_seconds,
+            "generated": generated,
+            "generation_provider_attempts": generation_calls,
+            "functional_judge_provider_attempts": judge_calls,
+            "mechanism_extractor_provider_attempts": mechanism_calls,
+            "functional_status": functional_status,
+            "mechanism_state": mechanism_state,
+            "z_target_mechanism_realized": mechanism_value,
+            "oracle_calls": 0,
+        },
+    )
+    _unit_manifest(unit_dir)
+    return IndependentValidationUnitResult(
+        assignment_id=assignment.assignment_id,
+        failure=failure,
+        generated=generated,
+        generation_calls=generation_calls,
+        judge_calls=judge_calls,
+        mechanism_calls=mechanism_calls,
+        functional_status=functional_status,
+        mechanism_state=mechanism_state,
+        mechanism_value=mechanism_value,
+        duration_seconds=duration_seconds,
+    )
+
+
 def run_independent_validation_pilot(
     *,
     repo_root: Path,
@@ -376,104 +526,30 @@ def run_independent_validation_pilot(
     if judge.policy_sha256 != runtime_policy.get("functional_judge_policy_sha256"):
         raise ValueError("independent validation functional Judge policy failed validation")
 
-    unit_dir = output_dir / "units" / assignment.assignment_id
-    unit_dir.mkdir(parents=True, exist_ok=False)
-    write_jsonl(unit_dir / "assignment.jsonl", (assignment,))
-    write_jsonl(unit_dir / "generation-request.jsonl", (request,))
-    write_jsonl(unit_dir / "functional-contract.jsonl", (contract,))
-    _write_json(unit_dir / "gate-a-crosswalk.json", crosswalk)
-    stage = "generation"
-    failure: BaseException | None = None
-    generation_calls = 0
-    judge_calls = 0
-    mechanism_calls = 0
-    generated = 0
-    functional_status: str | None = None
-    mechanism_state: str | None = None
-    mechanism_value: int | None = None
-    try:
-        generation_recorder.bind(unit_dir / "generation-provider-transport")
-        try:
-            executions, codes = execute_confirmation_requests(
-                (request,), provider, app_config.generation
-            )
-        finally:
-            generation_recorder.release_if_unused()
-        generation_calls = executions[0].attempt_count
-        write_jsonl(unit_dir / "assignment-execution.jsonl", executions)
-        write_jsonl(unit_dir / "generated-code.jsonl", codes)
-        execution = executions[0]
-        code: CanonicalGeneratedCodeRecord | None = codes[0] if codes else None
-        if execution.status is not AssignmentExecutionStatus.GENERATED or code is None:
-            raise RuntimeError("independent validation pilot returned no complete artifact")
-        generated = 1
-        extraction = extract_generated_source(
-            _raw_generated_content(unit_dir / "generation-provider-transport" / "response.json")
-        )
-        if extraction.source != code.code or extraction.source_sha256 != code.code_sha256:
-            raise ValueError("independent validation response extraction binding failed validation")
-        _write_json(unit_dir / "response-extraction.json", asdict(extraction))
-
-        stage = "functional_judge"
-        if judge_recorder is None:
-            raise RuntimeError("independent validation functional Judge recorder is unavailable")
-        judge_recorder.bind(unit_dir / "functional-judge-transport")
-        try:
-            judge_passes, functional_outcome = judge.evaluate(assignment, execution, code, contract)
-        finally:
-            judge_recorder.release_if_unused()
-        judge_calls = 1
-        functional_status = functional_outcome.status.value
-        write_jsonl(unit_dir / "functional-judge-passes.jsonl", judge_passes)
-        write_jsonl(unit_dir / "functional-outcome.jsonl", (functional_outcome,))
-
-        stage = "code_mechanism"
-        mechanism_recorder.bind(unit_dir / "code-mechanism-transport")
-        try:
-            measurement = mechanism_extractor.extract(
-                code=code.code,
-                target_cwe=str(crosswalk["cwe"]),
-                language=str(crosswalk["language"]),
-            )
-        finally:
-            mechanism_recorder.release_if_unused()
-        mechanism_calls = 1
-        mechanism_state = measurement.mechanism_state
-        mechanism_value = measurement.z_target_mechanism_realized
-        _write_json(unit_dir / "code-mechanism-measurement.json", asdict(measurement))
-    except BaseException as error:
-        failure = error
-        _write_json(unit_dir / "error.json", _safe_error(error, stage))
-    generation_calls = max(
-        generation_calls,
-        int((unit_dir / "generation-provider-transport" / "transport.json").is_file()),
+    if judge_recorder is None:
+        raise RuntimeError("independent validation functional Judge recorder is unavailable")
+    unit_result = execute_independent_validation_unit(
+        output_dir=output_dir,
+        assignment=assignment,
+        request=request,
+        contract=contract,
+        crosswalk=crosswalk,
+        app_config=app_config,
+        provider=provider,
+        generation_recorder=generation_recorder,
+        judge=judge,
+        judge_recorder=judge_recorder,
+        mechanism_extractor=mechanism_extractor,
+        mechanism_recorder=mechanism_recorder,
     )
-    judge_calls = max(
-        judge_calls,
-        int((unit_dir / "functional-judge-transport" / "transport.json").is_file()),
-    )
-    mechanism_calls = max(
-        mechanism_calls,
-        int((unit_dir / "code-mechanism-transport" / "transport.json").is_file()),
-    )
-    _write_json(
-        unit_dir / "status.json",
-        {
-            "schema_version": _SCHEMA_VERSION,
-            "assignment_id": assignment.assignment_id,
-            "status": "ERROR" if failure is not None else "COMPLETE",
-            **({"failed_stage": stage} if failure is not None else {}),
-            "generated": generated,
-            "generation_provider_attempts": generation_calls,
-            "functional_judge_provider_attempts": judge_calls,
-            "mechanism_extractor_provider_attempts": mechanism_calls,
-            "functional_status": functional_status,
-            "mechanism_state": mechanism_state,
-            "z_target_mechanism_realized": mechanism_value,
-            "oracle_calls": 0,
-        },
-    )
-    _unit_manifest(unit_dir)
+    failure = unit_result.failure
+    generated = unit_result.generated
+    generation_calls = unit_result.generation_calls
+    judge_calls = unit_result.judge_calls
+    mechanism_calls = unit_result.mechanism_calls
+    functional_status = unit_result.functional_status
+    mechanism_state = unit_result.mechanism_state
+    mechanism_value = unit_result.mechanism_value
     _append_jsonl(
         output_dir / "progress.jsonl",
         {
@@ -521,4 +597,8 @@ def run_independent_validation_pilot(
     return report
 
 
-__all__ = ["run_independent_validation_pilot"]
+__all__ = [
+    "IndependentValidationUnitResult",
+    "execute_independent_validation_unit",
+    "run_independent_validation_pilot",
+]
