@@ -26,12 +26,19 @@ from secaware.schema.records import PromptRecord
 
 _SCHEMA_VERSION = "1.0"
 _REQUIRED_CWES = ("CWE-78", "CWE-89", "CWE-502", "CWE-328", "CWE-338")
-_TASK_FAMILY = {
+_TASK_FAMILY_V1 = {
     "CWE-78": "command_execution",
     "CWE-89": "database_query",
     "CWE-502": "data_deserialization",
     "CWE-328": "security_digest",
     "CWE-338": "security_randomness",
+}
+_TASK_FAMILY_V2 = {
+    "CWE-78": "command_execution",
+    "CWE-89": "sql_query",
+    "CWE-502": "deserialization",
+    "CWE-328": "message_hashing",
+    "CWE-338": "security_random_generation",
 }
 _CONTRACT_LABEL_LEAKAGE = re.compile(
     r"(?i)(?:\bCWE-\d+\b|\bvulnerabilit(?:y|ies)\b|\binjection\b|"
@@ -174,6 +181,7 @@ def _freeze_one(
     cluster: dict[str, Any],
     source: dict[str, Any],
     audit: dict[str, Any],
+    task_families: dict[str, str],
 ) -> tuple[
     PromptRecord,
     dict[str, object],
@@ -198,7 +206,7 @@ def _freeze_one(
             "task_id": cluster["semantic_cluster_id"],
             "split": "confirm",
             "language": cluster["language"],
-            "task_family": _TASK_FAMILY[cluster["cwe"]],
+            "task_family": task_families[cluster["cwe"]],
             "cwe": cluster["cwe"],
             "prompt": prompt,
             "prompt_role": "neutral_baseline",
@@ -268,9 +276,28 @@ def freeze_independent_validation_contracts(
         raise FileExistsError(restricted_dir if restricted_dir.exists() else public_dir)
     config = _read_json(config_path)
     inputs = config.get("inputs")
+    freeze_id = config.get("freeze_id")
+    mapping_version = config.get("task_family_mapping_version", "generic-task-family-mapping-v1")
+    task_families = (
+        _TASK_FAMILY_V2
+        if mapping_version == "feature-catalog-task-family-mapping-v2"
+        else _TASK_FAMILY_V1
+    )
     if (
         config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("freeze_id") != "five_cwe_independent_validation_contracts_v1"
+        or freeze_id
+        not in {
+            "five_cwe_independent_validation_contracts_v1",
+            "five_cwe_independent_validation_contracts_v2",
+        }
+        or (
+            freeze_id == "five_cwe_independent_validation_contracts_v1"
+            and mapping_version != "generic-task-family-mapping-v1"
+        )
+        or (
+            freeze_id == "five_cwe_independent_validation_contracts_v2"
+            and mapping_version != "feature-catalog-task-family-mapping-v2"
+        )
         or config.get("expected_tasks") != 55
         or config.get("expected_prior_tasks") != 40
         or config.get("expected_supplemental_tasks") != 15
@@ -337,7 +364,10 @@ def freeze_independent_validation_contracts(
         else:
             raise ValueError("independent functional contract origin failed validation")
         prompt, packet, decision, contract = _freeze_one(
-            cluster=cluster, source=source, audit=audit
+            cluster=cluster,
+            source=source,
+            audit=audit,
+            task_families=task_families,
         )
         prompts.append(prompt)
         packets.append(packet)
@@ -369,6 +399,7 @@ def freeze_independent_validation_contracts(
         "schema_version": _SCHEMA_VERSION,
         "status": "INDEPENDENT_VALIDATION_CONTRACTS_FROZEN",
         "scientific_claim_allowed": False,
+        "task_family_mapping_version": mapping_version,
         "provider_calls": 0,
         "outcomes_consumed": 0,
         "counts": {
