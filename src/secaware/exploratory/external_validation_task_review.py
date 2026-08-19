@@ -153,7 +153,8 @@ def prepare_external_validation_task_review(
         config.get("schema_version") != _SCHEMA_VERSION
         or config.get("review_id") != "five_cwe_external_validation_task_review_v1"
         or config.get("target_cwes") != list(_CWE_ORDER)
-        or config.get("expected_packets") != 75
+        or type(config.get("expected_packets")) is not int
+        or config["expected_packets"] <= 0
         or config.get("provider_calls_allowed") is not False
         or config.get("outcomes_allowed") is not False
         or type(inputs) is not dict

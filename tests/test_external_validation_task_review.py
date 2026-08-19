@@ -46,7 +46,7 @@ def test_external_task_review_preparation_is_outcome_blind(tmp_path: Path) -> No
                 "method_development_exact_overlap": False,
                 "review_status": "blinded_task_review_required",
             }
-            for index in range(75)
+            for index in range(30)
         ],
     )
     source_report = tmp_path / "report.json"
@@ -58,7 +58,7 @@ def test_external_task_review_preparation_is_outcome_blind(tmp_path: Path) -> No
             "schema_version": "1.0",
             "review_id": "five_cwe_external_validation_task_review_v1",
             "target_cwes": list(cwes),
-            "expected_packets": 75,
+            "expected_packets": 30,
             "inputs": {
                 "review_queue": {"path": "queue.jsonl", "sha256": _sha(queue)},
                 "source_audit_report": {"path": "report.json", "sha256": _sha(source_report)},
@@ -77,11 +77,11 @@ def test_external_task_review_preparation_is_outcome_blind(tmp_path: Path) -> No
 
     assert report["status"] == "EXTERNAL_VALIDATION_TASK_REVIEW_PACKETS_READY"
     assert report["counts"] == {
-        "packets": 75,
+        "packets": 30,
         "provider_calls": 0,
         "completed": 0,
         "errors": 0,
-        "pending": 75,
+        "pending": 30,
     }
     packet = json.loads(
         (tmp_path / "prepared" / "candidate-packets.jsonl")

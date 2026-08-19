@@ -105,3 +105,53 @@ Frozen artifacts:
 Targeted verification after reconciliation and clustering: 12 tests passed. No provider calls,
 code generations, or outcome reads were performed during reconciliation or clustering. No full
 repository test suite was run.
+
+## Supplemental acquisition and threshold resolution
+
+Two additional licensed benchmarks were inspected first. SecRepoBench was frozen at commit
+`7ca5c4a7e908f8013e7b9ae624ba0d96f8c6ec76`; its published 15-CWE mapping covers memory and
+pointer-safety weaknesses rather than the registered CWE-78/89/502/328/338 scope, so it was not
+used to change the frozen validation question. BaxBench was frozen at commit
+`de885cd93d561682e203a5a0d57c33b08aac6f5e`; it remains a useful MIT-licensed application-level
+external benchmark, but its 28 scenarios do not supply enough new five-CWE semantic clusters on
+their own. A partial-clone blob fetch also failed once during static inspection when the GitHub
+connection was unavailable; no benchmark output was read.
+
+CodeSecEval SecEvalPlus was then frozen at revision
+`c3ffce09269f2d7b092888efe05d070b6fcb97f5`, file SHA-256
+`f2098b4e0d7c8ad58c2855e3de3b8f1a4cc2d8c8dfa654c93979fa8e8fc1a050`. The 140-row source
+contains 30 registered-scope tasks: ten each for CWE-78, CWE-89, and CWE-502. The audit extracted
+only task ID, problem statement, entry point, and the presence of a functional split. Insecure
+code, secure code, combined tests, and security-test contents were neither retained nor consumed.
+All 30 prompts were exact- and normalized-digest disjoint from both the 93-task method-development
+population, the prior 40 independent clusters, and the complete repository asset inventory.
+
+The source reports that its license is under review. Consequently, raw source prompts and review
+packets remain in the local ignored `runs/restricted` area. Versioned public artifacts contain only
+the source receipt, identifiers, digests, counts, decisions, and cluster membership; they do not
+redistribute source prompts or reference fields.
+
+Protocol adjudication accepted 20 of the 30 tasks. The ten exclusions comprise six CWE-78 tasks
+that do not require a process, one arbitrary-code-execution task that cannot preserve semantics
+within the finite profile, one arbitrary-SQL executor, and two prompts that explicitly prescribe a
+security defense and therefore violate safety neutrality. Semantic consolidation produced 15 new
+clusters: 2 CWE-78, 5 CWE-89, and 8 CWE-502. Combined with the frozen public-source clusters, the
+independent validation pool now contains 55 clusters:
+CWE-78/89/502/328/338 = 16/20/17/1/1. It satisfies the frozen minimum of 50 and contains every
+registered CWE without reading outcomes.
+
+One preparation attempt stopped before producing an output directory because the supplemental
+audit lacked the required repository-asset-overlap field. The incident was corrected by adding the
+complete stage-0 repository record audit as a digest-checked input; no default value was imputed.
+The corrected `-02` source audit reports zero exact and normalized repository-asset overlaps.
+
+Frozen public artifacts:
+
+- `five-cwe-codesec-eval-plus-source-audit-20260819-02` records the restricted-source metadata and
+  overlap audit.
+- `five-cwe-supplemental-independent-validation-pool-20260819-01` records the 15 supplemental
+  clusters, 10 exclusions, and final 55-cluster pool.
+
+The next authorized stage is measurement-contract freeze. No code generation may begin until the
+mechanism extractor, single-pass functional judge, intervention renderer, Oracle behavior, model
+runtime, and causal-analysis configuration are all fixed and canary-validated.
