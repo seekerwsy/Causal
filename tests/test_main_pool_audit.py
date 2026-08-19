@@ -173,6 +173,13 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
             "authorization_id": "test-authorization",
             "max_candidates_per_cwe": 1,
             "maximum_provider_calls": 5,
+            "provider_packet_fields": [
+                "packet_id",
+                "language",
+                "finite_profile_scope",
+                "prompt",
+                "blindness",
+            ],
             "llm": {
                 "model_id": "judge-model",
                 "base_url": "https://example.invalid/v1",
@@ -219,6 +226,8 @@ def test_main_pool_audit_canary_calls_once_per_cwe_and_validates_quotes(tmp_path
     assert len(progress) == 5
     assert progress[-1]["remaining"] == 0
     request = json.loads(transport.calls[0][0])
+    assert "cwe" not in request["packet"]
+    assert "source_id" not in request["packet"]
     assert request["packet"]["blindness"] == {
         "generated_code_withheld": True,
         "intervention_arm_withheld": True,

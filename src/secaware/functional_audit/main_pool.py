@@ -669,6 +669,21 @@ def run_main_pool_audit(
     maximum_calls = config.get("maximum_provider_calls")
     if type(maximum_calls) is not int or maximum_calls != len(selected):
         raise ValueError("live main-pool audit call budget mismatch")
+    raw_provider_fields = config.get("provider_packet_fields")
+    if raw_provider_fields is not None and (
+        type(raw_provider_fields) is not list
+        or any(type(item) is not str or not item for item in raw_provider_fields)
+        or len(raw_provider_fields) != len(set(raw_provider_fields))
+        or not {
+            "packet_id",
+            "language",
+            "finite_profile_scope",
+            "prompt",
+            "blindness",
+        }.issubset(raw_provider_fields)
+    ):
+        raise ValueError("live main-pool audit provider packet view is invalid")
+    provider_fields = tuple(raw_provider_fields) if raw_provider_fields is not None else None
     policy = _policy(config)
     if transport is None:
         llm = config["llm"]
@@ -680,6 +695,8 @@ def run_main_pool_audit(
     policy_payload = {
         name: getattr(policy, name) for name in StructuredLLMPolicy.__dataclass_fields__
     }
+    if provider_fields is not None:
+        policy_payload["provider_packet_fields"] = provider_fields
     policy_sha256 = _sha(policy_payload)
     run_dir.mkdir(parents=True, exist_ok=False)
     _write_json(run_dir / "config.json", config)
@@ -702,9 +719,14 @@ def run_main_pool_audit(
     try:
         for sequence, packet in enumerate(selected, 1):
             evidence_segments = _prompt_evidence_segments(packet["prompt"])
+            provider_packet = (
+                {field: packet[field] for field in provider_fields}
+                if provider_fields is not None
+                else packet
+            )
             request_payload = {
                 "schema_version": "1.0",
-                "packet": packet,
+                "packet": provider_packet,
                 "prompt_evidence_segments": [
                     {"segment_id": index, "text": segment}
                     for index, segment in enumerate(evidence_segments, 1)
@@ -814,6 +836,7 @@ def run_main_pool_audit(
         "prepared_packet_bundle_sha256": packet_sha,
         "live_config_sha256": hashlib.sha256(live_config_path.read_bytes()).hexdigest(),
         "provider_policy_sha256": policy_sha256,
+        "provider_packet_fields": list(provider_fields) if provider_fields is not None else None,
         "artifacts": {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(run_dir.iterdir())

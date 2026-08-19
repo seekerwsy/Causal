@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "run_id": "five-cwe-external-validation-task-review-canary-bailian-v1",
+  "allow_provider_calls": true,
+  "authorization_id": "user-approved-continue-independent-validation-20260819",
+  "selected_record_ids": [
+    "codeguard_plus:cwe-078/0-py",
+    "codeguard_plus:cwe-089/0-py",
+    "codeguard_plus:cwe-502/0-py",
+    "seccodebench_v2_2_0:WeakHashMD5SHA1",
+    "seccodebench_v2_2_0:WeakRandomnessRandom"
+  ],
+  "maximum_provider_calls": 5,
+  "llm": {
+    "provider": "openai_compatible",
+    "model_id": "qwen3.5-flash-2026-02-23",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key_env": "ALI_BAILIAN_API_KEY",
+    "timeout_seconds": 60.0,
+    "max_attempts": 1,
+    "max_response_bytes": 65536,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 2026081921,
+    "enable_thinking": false
+  }
+}

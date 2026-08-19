@@ -105,3 +105,17 @@ availability boundary and either narrows the preregistered validation scope tran
 constructs a separately labelled task-generation study. It does not reuse the 93 development
 tasks, admit prompts that mandate unsafe behavior, or search analysis variants for a positive
 result.
+
+## External-source audit checkpoint
+
+The first public-source audit is frozen in
+`data/e2e-pilot/five-cwe-external-validation-source-audit-20260819-01`. Across CodeGuard+,
+LLMSecEval, and SecCodeBench v2.2.0, it found 75 five-CWE review units (43 Python and 32
+multi-language) and no exact overlap with the 93 method-development tasks. This is an upper bound:
+the 75 units still require outcome-blind task compatibility and semantic de-duplication.
+
+The first one-per-CWE structured eligibility canary exposed CWE-label anchoring on an ordinary YAML
+task. The review protocol therefore advances to `external-task-eligibility-profile-v2`: provider
+requests omit CWE/source/provenance fields, and the finite deserialization scope explicitly
+distinguishes data-only YAML parsing from arbitrary object reconstruction. The failed v1 decision is
+retained as an incident and is not pooled with v2 decisions.
