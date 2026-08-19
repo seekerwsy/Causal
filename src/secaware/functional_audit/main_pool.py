@@ -494,18 +494,28 @@ def _response_for_prompt(
     payload = json.loads(raw)
     requirements = payload.get("requirements") if type(payload) is dict else None
     expansions = 0
+    field_normalizations = 0
     if type(requirements) is list:
         for requirement in requirements:
             if type(requirement) is not dict:
                 continue
+            if requirement.get("kind") == "output":
+                requirement["kind"] = "input_output"
+                field_normalizations += 1
             quote = requirement.get("prompt_evidence_quote")
             if type(quote) is not str or quote in evidence_segments:
                 continue
             matches = tuple(segment for segment in evidence_segments if quote in segment)
+            if not matches:
+                normalized_quote = " ".join(quote.split())
+                matches = tuple(
+                    segment
+                    for segment in evidence_segments
+                    if normalized_quote in " ".join(segment.split())
+                )
             if len(matches) == 1:
                 requirement["prompt_evidence_quote"] = matches[0]
                 expansions += 1
-    field_normalizations = 0
     if type(payload) is dict:
         operation = payload.get("operation_opportunity")
         compatible = payload.get("profile_compatible")

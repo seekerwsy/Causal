@@ -320,6 +320,23 @@ def test_response_parser_deterministically_recomputes_eligibility_fields() -> No
     assert normalizations == 2
 
 
+def test_response_parser_normalizes_bounded_output_alias_and_quote_whitespace() -> None:
+    payload = json.loads(_accepted_response("First line.\nSecond line."))
+    payload["requirements"][0]["kind"] = "output"
+    payload["requirements"][0]["prompt_evidence_quote"] = "First line. Second line."
+
+    response, expansions, normalizations = _response_for_prompt(
+        json.dumps(payload).encode(),
+        "First line.\nSecond line.",
+        ("First line.\nSecond line.",),
+    )
+
+    assert response.requirements[0].kind == "input_output"
+    assert response.requirements[0].prompt_evidence_quote == "First line.\nSecond line."
+    assert expansions == 1
+    assert normalizations == 1
+
+
 def test_audit_response_accepts_semantically_valid_noncanonical_order() -> None:
     payload = json.loads(_accepted_response())
     payload["requirements"] = [

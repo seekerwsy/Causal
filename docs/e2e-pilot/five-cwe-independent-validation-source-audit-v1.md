@@ -65,3 +65,43 @@ v2 review population.
 - External source audit and task-review preparation tests: 2 passed.
 - Main-pool reviewer plus external task-review tests after provider-view blinding: 9 passed.
 - No full repository test suite was run.
+
+## Completed outcome-blind review
+
+The complete 75-unit queue was reviewed without generated code, functional outcomes, Oracle
+results, or experiment-arm assignments. The provider-facing packet contained only the prompt,
+language, finite profile scope, packet identifier, and blindness declaration. It omitted CWE,
+source, ancestry, Oracle identifiers, repository overlap, and all outcomes.
+
+The first bulk pass returned 65 structured decisions and 9 parse failures. Parser recovery was
+limited to two semantics-preserving cases: normalizing `output` to the registered
+`input_output` token, and resolving a uniquely matching whitespace-normalized evidence quote.
+Seven residual cases and three materially incorrect classifications received explicit,
+line-recorded overrides; neither failures nor original provider responses were overwritten. The
+frozen reconciliation contains 75 decisions, zero unresolved units, and 56 eligible prompt units:
+CWE-78/89/502/328/338 = 17/24/13/1/1.
+
+## Semantic independence result
+
+Prompt variants expressing the same observable programming task were then collapsed before any
+outcome was observed. Six explicit merge groups cover repeated ping-route, unsubscribe, buy-order,
+message-post, YAML-price, and payload-name tasks. One Flask YAML parsing task was also excluded as
+a semantic match to the 93-task method-development population.
+
+The resulting public-source pool has 41 semantic task clusters, of which 40 are independent of
+method development. Their CWE distribution is 14/15/9/1/1 for CWE-78/89/502/328/338. All five
+registered CWEs are present, but the frozen minimum of 50 independent tasks is not met. The pool
+therefore remains blocked with reason `insufficient_semantically_independent_tasks`; lowering the
+threshold or counting prompt paraphrases as independent tasks is not permitted.
+
+Frozen artifacts:
+
+- `five-cwe-external-validation-task-review-reconciliation-reviewed-20260819-06` records the
+  reconciled eligibility decisions and override provenance.
+- `five-cwe-external-validation-semantic-pool-20260819-01` records semantic clusters, the
+  development-overlap exclusion, independent candidates, effective configuration, commands, and
+  artifact digests.
+
+Targeted verification after reconciliation and clustering: 12 tests passed. No provider calls,
+code generations, or outcome reads were performed during reconciliation or clustering. No full
+repository test suite was run.
