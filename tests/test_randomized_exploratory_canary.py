@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from secaware.exploratory.canary import _selection_maps, build_randomized_exploratory_canary
+from secaware.exploratory.canary import (
+    _selection_maps,
+    _selection_maps_for_split,
+    build_randomized_exploratory_canary,
+)
 from secaware.intervention.arm_catalog import materialize_safety_arm_specs
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
@@ -197,3 +201,20 @@ def test_gate_a_selection_accepts_explicit_task_ids_and_checks_cluster_isolation
     selection["tasks"][1]["task_cluster_id"] = "cluster-a"
     with pytest.raises(ValueError, match="split isolation"):
         _selection_maps(selection)
+
+
+def test_gate_a_can_explicitly_accept_one_frozen_confirmation_split() -> None:
+    selection = {
+        "tasks": [{"task_id": "task-confirm", "task_cluster_id": "cluster-b", "split": "confirm"}]
+    }
+
+    confirm, discover = _selection_maps_for_split(
+        selection,
+        selected_split="confirm",
+        require_both_splits=False,
+    )
+
+    assert set(confirm) == {"task-confirm"}
+    assert discover == set()
+    with pytest.raises(ValueError, match="split isolation"):
+        _selection_maps_for_split(selection, selected_split="confirm")

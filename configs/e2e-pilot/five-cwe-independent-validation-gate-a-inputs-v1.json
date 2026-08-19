@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "input_id": "five_cwe_independent_validation_gate_a_inputs_v1",
+  "purpose": "Bind the canonical task-family Prompt bundle and functional contracts into a zero-outcome independent-validation selection ledger.",
+  "expected_tasks": 55,
+  "inputs": {
+    "source_prompts": {
+      "path": "runs/restricted/five-cwe-independent-validation-functional-contracts-20260819-02/source-prompts.jsonl",
+      "sha256": "05209e464c002df9ad94f6e40e82a3f2b45561f874ea5caa8f874872b9630a84"
+    },
+    "functional_contracts": {
+      "path": "runs/restricted/five-cwe-independent-validation-functional-contracts-20260819-02/task-functional-contracts.jsonl",
+      "sha256": "82b8f26e8bd08e3ec1edab6034b0f3642e88941ea425382c9c6f1bebcfe3cb60"
+    },
+    "contract_report": {
+      "path": "runs/restricted/five-cwe-independent-validation-functional-contracts-20260819-02/report.json",
+      "sha256": "a4baeffbacfe78c6bc950af014afe9ed533aba5c3edea4f7ce1e2d30dce4ce7a"
+    }
+  },
+  "provider_calls_allowed": false,
+  "outcomes_allowed": false,
+  "raw_prompts_in_output_allowed": false
+}

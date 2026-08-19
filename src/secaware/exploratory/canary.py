@@ -189,8 +189,9 @@ def _selection_maps_for_split(
     selection: dict[str, Any],
     *,
     selected_split: str,
+    require_both_splits: bool = True,
 ) -> tuple[dict[str, dict[str, Any]], set[str]]:
-    if selected_split not in {"discover", "confirm"}:
+    if selected_split not in {"discover", "confirm"} or type(require_both_splits) is not bool:
         raise ValueError("exploratory canary selected split failed validation")
     tasks = selection.get("tasks")
     if type(tasks) is not list or not tasks:
@@ -223,7 +224,13 @@ def _selection_maps_for_split(
                 raise ValueError("exploratory canary selection failed validation")
             confirm_ids.add(task_id)
             confirm_clusters.add(cluster_id)
-    if not discover or set(discover) & confirm_ids or discover_clusters & confirm_clusters:
+    selected_count = len(discover) if selected_split == "discover" else len(confirm_ids)
+    if (
+        not selected_count
+        or (require_both_splits and (not discover or not confirm_ids))
+        or set(discover) & confirm_ids
+        or discover_clusters & confirm_clusters
+    ):
         raise ValueError("exploratory canary split isolation failed validation")
     if selected_split == "discover":
         return discover, confirm_ids
@@ -310,6 +317,8 @@ def build_randomized_exploratory_canary(
             or config.get("allowed_source_split") not in {"discover", "confirm"}
             or config.get("allow_outcome_generation") is not False
             or config.get("rng_version") != RNG_VERSION
+            or type(config.get("single_split_selection_allowed", False)) is not bool
+            or type(config.get("next_gate", "blind_llm_intervention_and_extraction")) is not str
         ):
             raise ValueError("exploratory canary policy failed validation")
         selection_path = (repo_root / str(config["selection_path"])).resolve()
@@ -321,6 +330,7 @@ def build_randomized_exploratory_canary(
         selected_tasks, forbidden_task_ids = _selection_maps_for_split(
             selection,
             selected_split=selected_split,
+            require_both_splits=not bool(config.get("single_split_selection_allowed", False)),
         )
         expected_count_key = (
             "expected_discover_tasks" if selected_split == "discover" else "expected_confirm_tasks"
@@ -591,7 +601,7 @@ def build_randomized_exploratory_canary(
             },
             "feature_distribution": feature_distribution,
             "deterministic_extractor_gate_role": "diagnostic_only",
-            "next_gate": "blind_llm_intervention_and_extraction",
+            "next_gate": config.get("next_gate", "blind_llm_intervention_and_extraction"),
         }
         _write_json(output_dir / "report.json", report)
         artifact_names = tuple(sorted(path.name for path in output_dir.iterdir() if path.is_file()))
