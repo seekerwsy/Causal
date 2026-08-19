@@ -69,6 +69,10 @@ mechanism-extractor call. It performs no Oracle call.
   repository blobs use LF, so their raw-byte digests differed even though their parsed content was
   identical. Text configuration inputs now declare `lf_normalized_text_v1`; manifests and generated
   artifacts retain exact raw-byte digests. A new deployment is used for the repaired attempt.
+- The first remaining-canary preflight made no provider call and exposed a nested-manifest checker
+  bug. The root run manifest includes each unit's `artifact-manifest.json`, but the checker excluded
+  every file with that name rather than only the root manifest being verified. The checker now
+  excludes by exact path, and a nested-unit-manifest regression test protects the closure rule.
 
 ## Server execution prerequisites
 

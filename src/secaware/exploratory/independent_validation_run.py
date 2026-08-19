@@ -140,6 +140,7 @@ def _input_path(repo_root: Path, value: object) -> Path:
 
 def _verify_manifest(path: Path) -> None:
     root = path.parent
+    manifest_path = path.resolve()
     manifest = _read_json(path)
     entries = manifest.get("files")
     if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
@@ -166,7 +167,7 @@ def _verify_manifest(path: Path) -> None:
     actual = {
         item.relative_to(root).as_posix()
         for item in root.rglob("*")
-        if item.is_file() and item.name != "artifact-manifest.json"
+        if item.is_file() and item.resolve() != manifest_path
     }
     if actual != expected:
         raise ValueError("independent validation run manifest closure failed validation")
