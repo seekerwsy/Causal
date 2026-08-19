@@ -12,17 +12,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from enum import Enum
+from enum import Enum, StrEnum
 from fractions import Fraction
 from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from secaware.randomness import RNG_VERSION
 from secaware.schema.common import SafeValidationMixin, StrictModel
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.experiments import ArmRole
-from secaware.schema.features import FeatureOperation
 from secaware.schema.inference_v2 import (
     FORMAL_MIN_BOOTSTRAP_SAMPLES_V2,
     FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2,
@@ -31,6 +30,7 @@ from secaware.schema.inference_v2 import (
     SimultaneousFamilyManifestV2,
     SimultaneousTestCoordinateV2,
 )
+from secaware.schema.protocol_freeze_v2 import ProtocolFreezeRootV2
 
 MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION = "2.0"
 
@@ -237,15 +237,84 @@ class GlobalUnionStratumV2(_MultiSupportInferenceV2Contract):
         return self
 
 
-def _arm_pair(operation: FeatureOperation) -> tuple[ArmRole, ArmRole]:
-    if operation is FeatureOperation.ADD:
-        return ArmRole.TARGET_PATCH, ArmRole.NOOP_REWRITE
-    return ArmRole.TARGET_REMOVE, ArmRole.NOOP_RETAIN
+class MultiSupportFormalFamilyV2(StrEnum):
+    PRIMARY_SECURE_YIELD = "primary_secure_yield"
+    KEY_JOINT = "key_joint"
+    SPECIFICITY_PLACEBO = "specificity_placebo"
+    SPECIFICITY_GENERIC = "specificity_generic"
+
+
+def _family_metadata(
+    family: MultiSupportFormalFamilyV2,
+) -> tuple[
+    str,
+    SimultaneousFamilyKindV2,
+    str,
+    Literal["primary", "specificity_placebo", "specificity_generic"],
+    str,
+    str,
+]:
+    if family is MultiSupportFormalFamilyV2.PRIMARY_SECURE_YIELD:
+        return (
+            "global-primary-secure-yield-h-by-m",
+            SimultaneousFamilyKindV2.PRIMARY_SECURE_YIELD,
+            "y_secure_yield",
+            "primary",
+            "primary_secure_yield_only_v1",
+            "frozen_primary_target_vs_noop_v1",
+        )
+    if family is MultiSupportFormalFamilyV2.KEY_JOINT:
+        return (
+            "global-key-joint-h-by-m",
+            SimultaneousFamilyKindV2.JOINT_OUTCOME,
+            "y_joint",
+            "primary",
+            "formal_key_joint_v1",
+            "frozen_primary_target_vs_noop_v1",
+        )
+    if family is MultiSupportFormalFamilyV2.SPECIFICITY_PLACEBO:
+        return (
+            "global-target-vs-placebo-h-by-m",
+            SimultaneousFamilyKindV2.TARGET_SPECIFICITY,
+            "y_secure_yield",
+            "specificity_placebo",
+            "formal_specificity_secure_yield_v1",
+            "frozen_target_vs_placebo_v1",
+        )
+    return (
+        "global-target-vs-generic-h-by-m",
+        SimultaneousFamilyKindV2.TARGET_SPECIFICITY,
+        "y_secure_yield",
+        "specificity_generic",
+        "formal_specificity_secure_yield_v1",
+        "frozen_target_vs_generic_v1",
+    )
+
+
+def _contrast_for_family(
+    root: ProtocolFreezeRootV2,
+    contrast_selector: Literal["primary", "specificity_placebo", "specificity_generic"],
+) -> tuple[ArmRole, ArmRole]:
+    protocol = root.intervention_bridge.arm_protocol
+    if contrast_selector == "primary":
+        return protocol.primary_contrast
+    if contrast_selector == "specificity_placebo":
+        return protocol.specificity_contrasts[0]
+    return protocol.specificity_contrasts[1]
 
 
 def _expected_coordinate_supports(
     experiment: ConfirmatoryExperimentFreezeV2,
+    formal_family: MultiSupportFormalFamilyV2,
 ) -> tuple[CoordinateSpecificSupportV2, ...]:
+    (
+        _family_label,
+        _family_kind,
+        outcome_name,
+        contrast_selector,
+        _outcome_rule,
+        _contrast_rule,
+    ) = _family_metadata(formal_family)
     roots = {
         item.intervention_bridge.frozen_hypothesis.hypothesis_id: item
         for item in experiment.protocol_roots
@@ -262,13 +331,13 @@ def _expected_coordinate_supports(
         hypothesis = population.hypothesis
         if hypothesis.outcome_id != "y_secure_yield":
             raise ValueError("primary global family requires y_secure_yield")
-        treatment, control = _arm_pair(hypothesis.operation)
+        treatment, control = _contrast_for_family(root, contrast_selector)
         coordinate = SimultaneousTestCoordinateV2.from_content(
             hypothesis_id=hypothesis.hypothesis_id,
             target_spec_id=hypothesis.target_spec_id,
             arm_protocol_id=hypothesis.arm_protocol_id,
             model_id=hm_coordinate.model_id,
-            outcome_name="y_secure_yield",
+            outcome_name=outcome_name,
             treatment_arm=treatment,
             control_arm=control,
             coordinate_kind=SimultaneousCoordinateKindV2.POLICY_EFFECT,
@@ -348,6 +417,7 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
     experiment: ConfirmatoryExperimentFreezeV2
     global_multiplicity_family_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
     analysis_seed_domain_sha256: str = Field(pattern=_SHA256_PATTERN)
+    formal_family: MultiSupportFormalFamilyV2
     family: SimultaneousFamilyManifestV2
     coordinate_supports: tuple[CoordinateSpecificSupportV2, ...] = Field(
         min_length=1, max_length=640_000
@@ -362,8 +432,16 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
     minimum_independent_clusters_per_coordinate: StrictInt = Field(ge=2, le=100_000)
     rng_version: Literal["sha256-rejection-fisher-yates-v1"] = RNG_VERSION
     family_rule: Literal["complete_protocolized_hypothesis_by_frozen_model_cartesian_product_v1"]
-    outcome_rule: Literal["primary_secure_yield_only_v1"]
-    contrast_rule: Literal["frozen_primary_target_vs_noop_v1"]
+    outcome_rule: Literal[
+        "primary_secure_yield_only_v1",
+        "formal_key_joint_v1",
+        "formal_specificity_secure_yield_v1",
+    ]
+    contrast_rule: Literal[
+        "frozen_primary_target_vs_noop_v1",
+        "frozen_target_vs_placebo_v1",
+        "frozen_target_vs_generic_v1",
+    ]
     resampling_method: Literal["global_union_stratified_semantic_cluster_ratio_bootstrap_v1"]
     cluster_coupling_rule: Literal[
         "one_union_draw_shared_then_filtered_by_frozen_coordinate_support_v1"
@@ -374,9 +452,24 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
     quantile_rule: Literal["empirical_higher_v1"]
     interval_rule: Literal["two_sided_studentized_global_max_abs_t_v1"]
     invalid_draw_policy: Literal["fail_on_any_invalid_draw_v1"]
-    seed_derivation_rule: Literal["sha256_domain_material_plus_content_addressed_plan_id_v1"]
+    seed_derivation_rule: Literal[
+        "sha256_domain_material_plus_content_addressed_plan_id_v1",
+        "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1",
+    ]
     complete_hypothesis_model_family_required: Literal[True]
     frozen_before_outcomes: Literal[True]
+
+    @field_validator("formal_family", mode="before")
+    @classmethod
+    def parse_formal_family(cls, value: object) -> object:
+        if type(value) is MultiSupportFormalFamilyV2:
+            return value
+        if type(value) is str:
+            return next(
+                (item for item in MultiSupportFormalFamilyV2 if item.value == value),
+                value,
+            )
+        return value
 
     @classmethod
     def from_experiment(
@@ -406,11 +499,20 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 != checked.analysis_seed_domain_sha256
             ):
                 raise ValueError
-            supports = _expected_coordinate_supports(checked)
+            formal_family = MultiSupportFormalFamilyV2.PRIMARY_SECURE_YIELD
+            supports = _expected_coordinate_supports(checked, formal_family)
             coordinates = tuple(item.test_coordinate for item in supports)
+            (
+                family_label,
+                family_kind,
+                _outcome_name,
+                _contrast_selector,
+                outcome_rule,
+                contrast_rule,
+            ) = _family_metadata(formal_family)
             family = SimultaneousFamilyManifestV2.from_content(
-                family_label="global-primary-secure-yield-h-by-m",
-                family_kind=SimultaneousFamilyKindV2.PRIMARY_SECURE_YIELD,
+                family_label=family_label,
+                family_kind=family_kind,
                 coordinates=coordinates,
                 family_size=len(coordinates),
                 frozen_before_outcomes=True,
@@ -422,6 +524,7 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                     checked.global_multiplicity_family_policy_sha256
                 ),
                 analysis_seed_domain_sha256=checked.analysis_seed_domain_sha256,
+                formal_family=formal_family,
                 family=family,
                 coordinate_supports=supports,
                 global_union_strata=_expected_global_union(supports),
@@ -436,8 +539,8 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 family_rule=(
                     "complete_protocolized_hypothesis_by_frozen_model_cartesian_product_v1"
                 ),
-                outcome_rule="primary_secure_yield_only_v1",
-                contrast_rule="frozen_primary_target_vs_noop_v1",
+                outcome_rule=outcome_rule,
+                contrast_rule=contrast_rule,
                 resampling_method=("global_union_stratified_semantic_cluster_ratio_bootstrap_v1"),
                 cluster_coupling_rule=(
                     "one_union_draw_shared_then_filtered_by_frozen_coordinate_support_v1"
@@ -457,18 +560,104 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
         except Exception:  # noqa: BLE001 - sanitize the public trust boundary
             raise cls._safe_error() from None
 
+    @classmethod
+    def from_frozen_formal_family(
+        cls,
+        *,
+        experiment: ConfirmatoryExperimentFreezeV2,
+        formal_family: MultiSupportFormalFamilyV2,
+    ) -> Self:
+        """Derive a fixed formal family using only the pre-outcome experiment root."""
+
+        try:
+            checked = ConfirmatoryExperimentFreezeV2.model_validate(
+                experiment.model_dump(mode="python", round_trip=True, warnings=False),
+                strict=True,
+            )
+            checked_family = MultiSupportFormalFamilyV2(formal_family)
+            supports = _expected_coordinate_supports(checked, checked_family)
+            coordinates = tuple(item.test_coordinate for item in supports)
+            (
+                family_label,
+                family_kind,
+                _outcome_name,
+                _contrast_selector,
+                outcome_rule,
+                contrast_rule,
+            ) = _family_metadata(checked_family)
+            family = SimultaneousFamilyManifestV2.from_content(
+                family_label=family_label,
+                family_kind=family_kind,
+                coordinates=coordinates,
+                family_size=len(coordinates),
+                frozen_before_outcomes=True,
+            )
+            return cls.from_content(
+                confirmatory_experiment_freeze_id=(checked.confirmatory_experiment_freeze_id),
+                experiment=checked,
+                global_multiplicity_family_policy_sha256=(
+                    checked.global_multiplicity_family_policy_sha256
+                ),
+                analysis_seed_domain_sha256=checked.analysis_seed_domain_sha256,
+                formal_family=checked_family,
+                family=family,
+                coordinate_supports=supports,
+                global_union_strata=_expected_global_union(supports),
+                alpha_numerator=1,
+                alpha_denominator=20,
+                bootstrap_samples=FORMAL_MIN_BOOTSTRAP_SAMPLES_V2,
+                minimum_valid_bootstrap_draws=FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2,
+                minimum_independent_clusters_per_coordinate=2,
+                rng_version=RNG_VERSION,
+                family_rule=(
+                    "complete_protocolized_hypothesis_by_frozen_model_cartesian_product_v1"
+                ),
+                outcome_rule=outcome_rule,
+                contrast_rule=contrast_rule,
+                resampling_method=("global_union_stratified_semantic_cluster_ratio_bootstrap_v1"),
+                cluster_coupling_rule=(
+                    "one_union_draw_shared_then_filtered_by_frozen_coordinate_support_v1"
+                ),
+                support_rule=("coordinate_specific_no_common_intersection_no_estimand_change_v1"),
+                studentization_method="coordinate_specific_cluster_se_v1",
+                centering_method="bootstrap_minus_observed_v1",
+                quantile_rule="empirical_higher_v1",
+                interval_rule="two_sided_studentized_global_max_abs_t_v1",
+                invalid_draw_policy="fail_on_any_invalid_draw_v1",
+                seed_derivation_rule=(
+                    "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1"
+                ),
+                complete_hypothesis_model_family_required=True,
+                frozen_before_outcomes=True,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the public trust boundary
+            raise cls._safe_error() from None
+
     @property
     def alpha(self) -> Fraction:
         return Fraction(self.alpha_numerator, self.alpha_denominator)
 
     @model_validator(mode="after")
     def validate_plan(self) -> Self:
-        expected_supports = _expected_coordinate_supports(self.experiment)
+        expected_supports = _expected_coordinate_supports(
+            self.experiment,
+            self.formal_family,
+        )
         expected_union = _expected_global_union(expected_supports)
         expected_coordinates = tuple(item.test_coordinate for item in expected_supports)
+        (
+            family_label,
+            family_kind,
+            _outcome_name,
+            _contrast_selector,
+            outcome_rule,
+            contrast_rule,
+        ) = _family_metadata(self.formal_family)
         expected_family = SimultaneousFamilyManifestV2.from_content(
-            family_label="global-primary-secure-yield-h-by-m",
-            family_kind=SimultaneousFamilyKindV2.PRIMARY_SECURE_YIELD,
+            family_label=family_label,
+            family_kind=family_kind,
             coordinates=expected_coordinates,
             family_size=len(expected_coordinates),
             frozen_before_outcomes=True,
@@ -482,6 +671,8 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
             or self.coordinate_supports != expected_supports
             or self.global_union_strata != expected_union
             or self.family != expected_family
+            or self.outcome_rule != outcome_rule
+            or self.contrast_rule != contrast_rule
             or len(self.coordinate_supports) != self.experiment.hypothesis_model_coordinate_count
             or self.alpha_numerator >= self.alpha_denominator
             or self.minimum_valid_bootstrap_draws > self.bootstrap_samples
@@ -502,5 +693,6 @@ __all__ = [
     "CoordinateSpecificStratumSupportV2",
     "CoordinateSpecificSupportV2",
     "GlobalUnionStratumV2",
+    "MultiSupportFormalFamilyV2",
     "MultiSupportSimultaneousInferencePlanV2",
 ]

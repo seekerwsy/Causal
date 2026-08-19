@@ -275,15 +275,24 @@ def _artifact_input_digest(
     )
 
 
-def _bootstrap_seed(plan: MultiSupportSimultaneousInferencePlanV2, material: bytes) -> bytes:
-    if (
-        type(material) is not bytes
-        or not material
-        or hashlib.sha256(material).hexdigest() != plan.analysis_seed_domain_sha256
-    ):
-        raise _error("analysis seed domain material failed validation")
+def _bootstrap_seed(
+    plan: MultiSupportSimultaneousInferencePlanV2,
+    material: bytes | None,
+) -> bytes:
+    if plan.seed_derivation_rule == ("sha256_domain_material_plus_content_addressed_plan_id_v1"):
+        if (
+            type(material) is not bytes
+            or not material
+            or hashlib.sha256(material).hexdigest() != plan.analysis_seed_domain_sha256
+        ):
+            raise _error("analysis seed domain material failed validation")
+        domain = material
+    else:
+        if material is not None:
+            raise _error("frozen analysis seed domain accepts no caller material")
+        domain = bytes.fromhex(plan.analysis_seed_domain_sha256)
     return hashlib.sha256(
-        _SEED_DOMAIN + material + b"\x00" + plan.inference_plan_id.encode()
+        _SEED_DOMAIN + domain + b"\x00" + plan.inference_plan_id.encode()
     ).digest()
 
 
@@ -406,7 +415,7 @@ def _run(
     plan: MultiSupportSimultaneousInferencePlanV2,
     artifacts: Iterable[ConfirmatoryContributionArtifactV2],
     *,
-    analysis_seed_domain_material: bytes,
+    analysis_seed_domain_material: bytes | None,
 ) -> MultiSupportSimultaneousInferenceResultV2:
     checked_plan = _validated_plan(plan)
     checked_artifacts, values = _validated_artifacts(checked_plan, artifacts)
@@ -543,6 +552,19 @@ def run_multi_support_simultaneous_inference_v2(
     )
 
 
+def run_frozen_domain_multi_support_simultaneous_inference_v2(
+    plan: MultiSupportSimultaneousInferencePlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+) -> MultiSupportSimultaneousInferenceResultV2:
+    """Run a formal plan whose seed is derived only from its frozen domain digest."""
+
+    if plan.seed_derivation_rule != (
+        "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1"
+    ):
+        raise _error("frozen-domain multi-support plan is required")
+    return _run(plan, artifacts, analysis_seed_domain_material=None)
+
+
 def validate_multi_support_simultaneous_result_v2(
     plan: MultiSupportSimultaneousInferencePlanV2,
     artifacts: Iterable[ConfirmatoryContributionArtifactV2],
@@ -570,6 +592,7 @@ __all__ = [
     "MultiSupportSimultaneousInferenceResultV2",
     "MultiSupportSimultaneousIntervalV2",
     "UnionStratumDrawDigestV2",
+    "run_frozen_domain_multi_support_simultaneous_inference_v2",
     "run_multi_support_simultaneous_inference_v2",
     "validate_multi_support_simultaneous_result_v2",
 ]

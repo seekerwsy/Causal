@@ -23,8 +23,8 @@ of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
 
 \begin{document}
 
-\title{Discovering and Confirming Prompt-Side Security Mechanisms in LLM Code
-Generation}
+\title{Prioritizing and Confirming Prompt-Side Security Interventions in LLM
+Code Generation}
 
 \author{Anonymous Author(s)}
 \affiliation{%
@@ -39,16 +39,16 @@ authorization, trust boundaries, or safe-API constraints implicit. Existing
 attribution and perturbation methods can expose influential text, yet they do
 not by themselves turn that evidence into a task-preserving prompt
 intervention with a confirmatory effect estimate. We present \model, a
-three-stage framework that constructs a security-aware prompt representation,
-discovers stable prompt-side hypotheses with structure-constrained FCI, and
-tests frozen hypotheses through held-out prompt interventions. The discovery
-stage combines graph-derived variables, typed background knowledge, and
-task-cluster bootstrap stability while preserving PAG uncertainty. The
-confirmation stage freezes family-specific prompt variants before blocked
-random assignment and estimates task-clustered assigned-arm intent-to-treat
-effects on secure-and-functional outcomes. A fixed-budget evidence funnel
-connects native candidates, target mappings, valid protocols, randomized
-hypotheses, and confirmed effects across methods. \resultslot
+three-stage framework that represents guard-independent task/security context,
+prioritizes one-feature intervention hypotheses with structure-constrained
+FCI, and tests frozen multi-realization prompt policies on held-out tasks. The
+discovery stage combines graph-derived variables, typed background knowledge,
+and semantic-task-cluster bootstrap stability while preserving PAG
+uncertainty. The confirmation stage freezes complete four-arm prompt bundles
+before blocked random assignment and estimates semantic-task-clustered
+assigned-arm intent-to-treat effects on oracle-evaluable secure-code yield. A
+shared candidate universe supports controlled comparisons among causal,
+associational, predictive, expert, and random selectors. \resultslot
 \end{abstract}
 
 \begin{CCSXML}
@@ -105,32 +105,32 @@ effect of assignment rather than selecting cases in which the intended edit
 happened to succeed.
 
 \model provides this progression in three stages.
-\textbf{Security-Aware Prompt Representation} converts prompt requirements
-into catalog-bound factors and relational motifs.
-\textbf{Stability-Guided Causal Discovery} combines structure-derived
-constraints, FCI, and task-cluster bootstrap stability to prioritize and
-freeze reproducible prompt-side hypotheses.
-\textbf{Causal Effect Confirmation} constructs family-specific prompt
-variants, randomizes them on held-out tasks, and estimates task-clustered
-assigned-arm intent-to-treat effects. A fixed-budget evidence funnel makes the
-full path auditable, from native candidates through target mapping and valid
-protocols to randomized hypotheses and confirmed effects.
+\textbf{Security-Aware Prompt Representation} separates an immutable
+task/security context query from one catalog-bound editable feature.
+\textbf{Stability-Guided Causal Prioritization} combines structure-derived
+constraints, FCI, and semantic-task-cluster stability to rank candidates while
+preserving PAG uncertainty.
+\textbf{Randomized Policy Confirmation} freezes a finite distribution of
+task-independent realizations, constructs complete task-specific four-arm
+bundles, randomizes them on held-out tasks, and estimates assigned-arm
+intent-to-treat effects. A shared-universe selector comparison and an explicit
+candidate-to-policy bridge make both prioritization and confirmation auditable.
 
 This paper makes the following contributions:
 
 \begin{itemize}
   \item \textbf{Security-aware prompt representation.} A typed, catalog-bound
-  representation converts free-form requirements into scoped, editable
-  security factors and relational motifs.
-  \item \textbf{Stable causal hypothesis discovery.} Structure-derived
-  constraints, FCI, and task-cluster stability analysis prioritize
-  reproducible prompt-side hypotheses and freeze them before confirmation.
-  \item \textbf{Causal effect confirmation.} Family-specific prompt
-  interventions and held-out blocked randomization produce hypothesis-specific
+  representation converts free-form requirements into guard-independent
+  contexts and scoped, editable security features.
+  \item \textbf{Budgeted intervention prioritization.} Typed background
+  knowledge, FCI, and semantic-task-cluster stability rank a frozen candidate
+  universe alongside associational, predictive, expert, and random selectors.
+  \item \textbf{Randomized policy confirmation.} Multi-realization prompt
+  policies and held-out blocked randomization produce hypothesis-specific
   assigned-arm ITT evidence without conditioning on realized edit success.
-  \item \textbf{End-to-end evidence accounting.} A fixed-budget funnel exposes
-  whether candidate generation, target mapping, protocolization, randomization,
-  or confirmation limits each method.
+  \item \textbf{Provenance-complete evidence accounting.} An explicit bridge
+  records context eligibility, policy realization, protocolization,
+  randomization, and confirmation without upgrading exploratory artifacts.
 \end{itemize}
 
 \section{Motivating Example and Problem Formulation}
@@ -151,31 +151,37 @@ does not report a generated program or an effect.
 
 \subsection{Units, Outcomes, and Claim Scope}
 
-Let a generation unit be indexed by task $t$, prompt variant $v$, model $m$,
-and randomized seed slot $s$:
+Let a generation unit be indexed by semantic task cluster $c$, task instance
+$i$, hypothesis $h$, realization $r$, prompt arm $a$, model $m$, and request
+randomness slot $s$:
 
 \[
-  u = (t, v, m, s).
+  u = (c,i,h,r,a,m,s).
 \]
 
 Tasks are partitioned before model-based discovery into disjoint discovery and
 confirmation pools. The discovery pool supports observational hypothesis
 formation; the held-out confirmation pool supports prompt construction,
-randomized assignment, code generation, and effect estimation. No task crosses
-this boundary. Task identity is the clustering unit because prompt variants,
-arm assignments, and seed slots derived from the same programming request are
-not independent.
+randomized assignment, code generation, and effect estimation. No semantic
+task cluster crosses this boundary. The highest resampling unit is
+\texttt{semantic\_task\_cluster\_id}; every descendant task instance,
+hypothesis, model, arm, realization, and request slot moves with its cluster.
 
-The primary analysis estimates task-clustered assigned-arm ITT on a
-prespecified \emph{secure-and-functional} outcome for every committed
-assignment. Valid terminal non-successes remain in the assigned-arm
-denominator; a missing or corrupt required producer instead blocks publication
-and requires deterministic replay of the same assignment manifest.
+The primary analysis estimates semantic-task-clustered assigned-arm ITT on
+\emph{oracle-evaluable secure-code yield} for every committed assignment.
+Secure-and-functional joint success is a key practical secondary outcome, not
+a condition for the primary security effect. Valid terminal non-successes
+remain in the assigned-arm denominator; a missing or corrupt required producer
+instead blocks publication and requires deterministic replay of the same
+assignment manifest.
 
-$W$ contains approved pre-treatment task metadata, $X$ contains direct and
-relational Prompt TSG queries, and $Y$ contains independently committed
-outcomes. The secondary JCI table adds one categorical arm-context variable
-$C$; model identity remains an analysis coordinate and provenance field.
+$W$ contains approved pre-treatment task metadata, $X^0$ contains natural
+Prompt TSG feature queries, and $Y^0$ contains independently committed
+discovery outcomes. A non-editable context query $C_q$ scopes one actionable
+feature $f$. Randomized arm $A$ is the confirmation treatment;
+post-intervention $X^{A,R}$ is a fidelity diagnostic and never replaces $A$ in
+the ITT estimator. Model identity remains an analysis coordinate and
+provenance field.
 
 The \prompttsg defines typed prompt structure and the editable queries supplied
 to discovery, while the PAG preserves FCI uncertainty over learned relations.
@@ -389,13 +395,16 @@ provider execution order cannot alter treatment.
 \subsection{Outcomes and Assigned-Arm ITT}
 
 Generated code enters only the independent, versioned security Oracle and
-functional evaluator. The primary secure-and-functional outcome equals one
-exactly when generation produces a candidate, parsing succeeds, the committed
-functional check passes, and the Oracle labels the result secure. A valid
-terminal generation failure, parse or functional failure, or valid Oracle
-unknown is retained as an observed non-success. Missing, corrupt, or
-unavailable required producer evidence is not encoded as an outcome; it blocks
-publication and triggers deterministic replay of the same manifest.
+functional evaluator. We decompose code production and Oracle support as
+$Y_C$ and $Y_E$. The primary oracle-evaluable secure-code yield is
+$Y_CY_E I(\text{Oracle secure})$; secure-and-functional joint success further
+requires the frozen functional check to pass and is the key practical
+secondary outcome. A valid terminal generation failure or syntactically
+invalid result has $Y_C=0,Y_E=0$; valid but Oracle-unsupported or unknown code
+has $Y_C=1,Y_E=0$. These remain observed assigned-arm outcomes under the
+frozen encoding. Missing, corrupt, or unavailable required producer evidence
+is not encoded as an outcome; it blocks publication and triggers deterministic
+replay of the same manifest.
 
 For frozen hypothesis $h$, target $q$, operation $o$, model $m$, and outcome
 $Y$, the primary contrast is the hypothesis-specific target-minus-no-op
@@ -408,9 +417,11 @@ assigned-arm ITT risk difference
 \]
 
 Every committed randomized assignment enters the denominator under its
-assigned role. Uncertainty is resampled by task cluster, and confidence
-intervals and multiplicity adjustment follow the frozen hypothesis/contrast
-family. Target-minus-placebo and, where family-valid,
+assigned role. Point estimates average over the frozen task population and
+realization distribution $Q_h$. Uncertainty resamples semantic task clusters
+and carries all descendant hypotheses, models, arms, realizations, and request
+slots together. Simultaneous intervals follow the frozen hypothesis/model/
+contrast family. Target-minus-placebo and, where family-valid,
 target-minus-generic-control contrasts assess specificity. Effects remain
 separate by hypothesis, target, operation, model, and CWE unless another
 estimand was approved in advance. Task improvement, harm, and tie rates remain
@@ -418,18 +429,23 @@ descriptive diagnostics, not individual causal flips or substitutes for ITT.
 
 \subsection{Evidence Levels and Secondary Structural Analysis}
 
-\model uses six approved evidence levels:
+\model uses the prospective evidence levels below:
 
 \begin{enumerate}
   \item \textbf{Observational Candidate}: a discover-split stable possible path
   frozen before confirmation, without a causal confirmation claim.
-  \item \textbf{Confirmed Intervention Effect}: the preregistered
+  \item \textbf{Randomized Policy Effect}: the preregistered
   target-minus-no-op ITT follows the frozen expected direction, meets the
   independent-task requirement, and has a multiplicity-adjusted interval
   excluding zero with complete provenance.
-  \item \textbf{Target-Specific Effect}: a confirmed effect also supported by
+  \item \textbf{Target-Specific Policy Effect}: a randomized effect also supported by
   the preregistered target-minus-placebo and, where family-valid,
   target-minus-generic contrasts.
+  \item \textbf{Realization-Robust Policy Effect}: the average policy effect
+  is confirmed and all frozen direction, equivalence, interaction, and
+  leave-one-realization-out conditions hold simultaneously.
+  \item \textbf{Cross-Model Replication}: separately estimated model effects
+  meet the frozen replication rule without creating a pooled universal effect.
   \item \textbf{Bidirectional Support}: separate ADD and REMOVE protocols
   independently confirm opposite expected directions for the same feature.
   \item \textbf{Directionally Consistent but Inconclusive}: the point estimate
@@ -445,14 +461,13 @@ Valid post-assignment terminal non-successes remain assigned data and do not
 create a non-evaluable result. Discovery, demo, and smoke-test artifacts cannot
 be promoted to confirmatory evidence.
 
-JCI treats the finite randomized arm role as one categorical context variable
-and evaluates structural changes under explicit assumptions~\cite{mooij2020jci}.
-It is secondary to the assigned-arm ITT estimate. The context column is
-\texttt{C\_arm}; analyses remain separated by scope, model, frozen hypothesis,
-TargetSpec, and arm protocol. \model preserves the raw augmented PAG and the
-JCI-constrained PAG with its orientation deltas. Optional py-tetrad RFCI is a
-sensitivity backend. Neither JCI nor RFCI may alter frozen hypotheses,
-assignments, outcomes, primary contrasts, or ITT evidence status.
+JCI and py-tetrad RFCI are appendix-only exploratory/sensitivity analyses.
+When run, JCI preserves the raw augmented PAG, constrained PAG, and orientation
+deltas under explicit assumptions~\cite{mooij2020jci}; RFCI remains optional
+and may fail without blocking the no-Java causal-learn path. Neither analysis,
+nor implementation markers, fidelity diagnostics, or per-protocol summaries,
+may alter candidates, assignments, primary contrasts, ITT results, or evidence
+status.
 
 \section{Evaluation Design and Results}
 
@@ -463,8 +478,10 @@ encoding, task-cluster uncertainty, and multiplicity policy. Native candidates,
 mappings, directions, and ranks are frozen before confirm outcomes exist.
 
 Discovery uses the discover split, and randomized confirmation uses held-out
-confirm tasks. The primary confirmatory analysis is hypothesis-specific,
-task-clustered assigned-arm ITT on secure-and-functional success. Every
+confirm tasks. The primary confirmatory analysis is hypothesis- and
+model-specific semantic-task-clustered assigned-arm ITT on oracle-evaluable
+secure-code yield. Secure-and-functional joint success is the key practical
+secondary outcome. Every
 committed assignment remains in its assigned-arm denominator;
 \texttt{target\_changed}, semantic compliance, and non-target drift are
 diagnostics rather than filters.

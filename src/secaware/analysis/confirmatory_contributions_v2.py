@@ -188,6 +188,8 @@ def _checked_coordinate(
 def _validate_coordinate_semantics(
     population: PopulationFreezeManifestV2,
     coordinate: SimultaneousTestCoordinateV2,
+    *,
+    formal_family: bool,
 ) -> None:
     hypothesis = population.hypothesis
     if hypothesis.operation is FeatureOperation.ADD:
@@ -201,7 +203,10 @@ def _validate_coordinate_semantics(
         or coordinate.target_spec_id != hypothesis.target_spec_id
         or coordinate.arm_protocol_id != hypothesis.arm_protocol_id
         or coordinate.model_id not in population.common_model_scope
-        or coordinate.outcome_name != hypothesis.outcome_id
+        or (
+            coordinate.outcome_name
+            not in ({"y_secure_yield", "y_joint"} if formal_family else {hypothesis.outcome_id})
+        )
         or coordinate.coordinate_kind is not SimultaneousCoordinateKindV2.POLICY_EFFECT
         or coordinate.analysis_component_id != "pooled"
         or coordinate.treatment_arm is not expected_treatment
@@ -266,10 +271,16 @@ def _derive(
     population: PopulationFreezeManifestV2,
     coverage: ProvenanceClosedAssignmentCoverageManifestV2,
     coordinate: SimultaneousTestCoordinateV2,
+    *,
+    formal_family: bool = False,
 ) -> ConfirmatoryContributionArtifactV2:
     checked_population = _checked_population(population)
     checked_coordinate = _checked_coordinate(coordinate)
-    _validate_coordinate_semantics(checked_population, checked_coordinate)
+    _validate_coordinate_semantics(
+        checked_population,
+        checked_coordinate,
+        formal_family=formal_family,
+    )
     checked_coverage = _checked_coverage(coverage)
     freeze = checked_coverage.execution_policy_freeze
     randomization = freeze.randomization
@@ -459,6 +470,21 @@ def derive_confirmatory_contributions_v2(
     return _derive(population, coverage, coordinate)
 
 
+def derive_frozen_formal_family_contributions_v2(
+    population: PopulationFreezeManifestV2,
+    coverage: ProvenanceClosedAssignmentCoverageManifestV2,
+    coordinate: SimultaneousTestCoordinateV2,
+) -> ConfirmatoryContributionArtifactV2:
+    """Derive one protocol-defined secure-yield or joint formal contrast.
+
+    This remains a low-level provenance assembler and grants no confirmatory
+    label.  The formal orchestrator determines the complete family and supplies
+    its exact coordinate; callers cannot use this helper to shrink that family.
+    """
+
+    return _derive(population, coverage, coordinate, formal_family=True)
+
+
 def validate_confirmatory_contribution_artifact_v2(
     population: PopulationFreezeManifestV2,
     coverage: ProvenanceClosedAssignmentCoverageManifestV2,
@@ -480,5 +506,6 @@ __all__ = [
     "ExactCoordinateClusterContributionV2",
     "ExactRealizationClusterContributionV2",
     "derive_confirmatory_contributions_v2",
+    "derive_frozen_formal_family_contributions_v2",
     "validate_confirmatory_contribution_artifact_v2",
 ]

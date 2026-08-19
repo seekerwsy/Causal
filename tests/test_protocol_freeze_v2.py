@@ -38,7 +38,6 @@ from secaware.schema.policy_v2 import (
     SelectorSlotStatus,
     SemanticTaskClusterManifest,
     SemanticTaskClusterMembershipRecord,
-    TaskArmVariantBinding,
     TaskPolicySupportRecord,
     TaskRealizationBundleRecord,
 )
@@ -59,9 +58,13 @@ from secaware.schema.query_evidence_v2 import (
     QueryEvidenceTaskRecordV2,
 )
 from secaware.schema.records import PromptRecord
+from secaware.schema.variant_evidence_v2 import (
+    ArmVariantInvariantReceiptV2,
+    VariantInvariantEvidenceManifestV2,
+)
 from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.context_queries_v2 import CWE89_SQL_FLOW_QUERY, context_query_spec
-from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256, prompt_feature_spec
 
 
 def _sha(value: str) -> str:
@@ -329,46 +332,37 @@ def _query_evidence_manifest(
 
 def _bundle(
     *,
-    task_id: str,
-    cluster_id: str,
     bridge: InterventionBridgeRecordV2,
     realization: RealizationSpecRecord,
+    source_evidence: QueryEvidenceTaskRecordV2,
+    receipts: tuple[ArmVariantInvariantReceiptV2, ...],
 ) -> TaskRealizationBundleRecord:
-    bindings = tuple(
-        TaskArmVariantBinding.from_text(
-            arm_role=arm,
-            prompt_text=f"Synthetic {task_id}; r={realization.realization_index}; {arm.value}.",
-            validation_evidence_sha256=_sha(
-                f"validation:{task_id}:{realization.realization_index}:{arm.value}"
-            ),
-        )
-        for arm in ADD_ARMS
-    )
+    task_id = source_evidence.membership.task_instance_id
+    selected = tuple(item for item in receipts if item.realization == realization)
+    assert tuple(item.arm_role for item in selected) == ADD_ARMS
     return TaskRealizationBundleRecord.from_components(
         hypothesis=bridge.frozen_hypothesis,
         realization=realization,
-        semantic_task_cluster_id=cluster_id,
+        semantic_task_cluster_id=source_evidence.membership.semantic_task_cluster_id,
         task_instance_id=task_id,
-        source_prompt_id=f"source-prompt.{task_id}",
-        source_prompt_sha256=_sha(
-            _prompt_text(
-                task_id,
-                target_present=(bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE),
-            )
-        ),
-        arms=bindings,
+        source_prompt_id=source_evidence.natural_prompt.prompt_id,
+        source_prompt_sha256=source_evidence.natural_prompt.prompt_sha256,
+        arms=tuple(item.to_task_arm_variant_binding() for item in selected),
     )
 
 
 def _support(
-    *, task_id: str, cluster_id: str, bridge: InterventionBridgeRecordV2
+    *,
+    bridge: InterventionBridgeRecordV2,
+    source_evidence: QueryEvidenceTaskRecordV2,
+    receipts: tuple[ArmVariantInvariantReceiptV2, ...],
 ) -> TaskPolicySupportRecord:
     bundles = tuple(
         _bundle(
-            task_id=task_id,
-            cluster_id=cluster_id,
             bridge=bridge,
             realization=realization,
+            source_evidence=source_evidence,
+            receipts=receipts,
         )
         for realization in bridge.realizations
     )
@@ -380,12 +374,60 @@ def _support(
     )
 
 
+def _variant_texts(source_text: str, bridge: InterventionBridgeRecordV2) -> dict[ArmRole, str]:
+    target_clause = prompt_feature_spec(bridge.target_spec.feature_id).intervention_clauses[0]
+    target_text = source_text + target_clause
+    placebo_clauses = prompt_feature_spec(
+        "presentation.length_matched_placebo"
+    ).intervention_clauses
+    placebo_clause = min(
+        placebo_clauses,
+        key=lambda item: (
+            abs(len(item.encode("utf-8")) - len(target_clause.encode("utf-8"))),
+            placebo_clauses.index(item),
+        ),
+    )
+    return {
+        ArmRole.TARGET_PATCH: target_text,
+        ArmRole.NOOP_REWRITE: source_text + "\n",
+        ArmRole.LENGTH_MATCHED_PLACEBO: source_text + placebo_clause,
+        ArmRole.GENERIC_SECURITY_REMINDER: (
+            source_text
+            + prompt_feature_spec("safety.generic_security_reminder").intervention_clauses[0]
+        ),
+    }
+
+
+def _variant_receipts(
+    *,
+    bridge: InterventionBridgeRecordV2,
+    source_evidence: QueryEvidenceTaskRecordV2,
+) -> tuple[ArmVariantInvariantReceiptV2, ...]:
+    texts = _variant_texts(source_evidence.natural_prompt.prompt, bridge)
+    return tuple(
+        ArmVariantInvariantReceiptV2.from_variant_text(
+            source_query_evidence=source_evidence,
+            intervention_bridge=bridge,
+            realization=realization,
+            arm_role=arm_role,
+            prompt_text=texts[arm_role],
+            extractor=DeterministicCatalogExtractor(),
+            length_match_reference_prompt_text=(
+                texts[ArmRole.TARGET_PATCH] if arm_role is ArmRole.LENGTH_MATCHED_PLACEBO else None
+            ),
+        )
+        for realization in bridge.realizations
+        for arm_role in ADD_ARMS
+    )
+
+
 @dataclass(frozen=True)
 class PopulationParts:
     partition: PoolPartitionManifest
     clusters: SemanticTaskClusterManifest
     population: PopulationFreezeManifestV2
     query_evidence: QueryEvidenceManifestV2
+    variant_evidence: VariantInvariantEvidenceManifestV2
 
 
 def _population_parts(
@@ -458,6 +500,13 @@ def _population_parts(
     query_evidence_by_task = {
         item.membership.task_instance_id: item for item in query_evidence.tasks
     }
+    receipts_by_task = {
+        task_id: _variant_receipts(
+            bridge=bridge,
+            source_evidence=query_evidence_by_task[task_id],
+        )
+        for task_id, _cluster_id in coordinates
+    }
     cluster_counts = {
         cluster_id: sum(1 for _, candidate in coordinates if candidate == cluster_id)
         for cluster_id in {candidate for _, candidate in coordinates}
@@ -469,9 +518,9 @@ def _population_parts(
             hypothesis=bridge.frozen_hypothesis,
             eligibility=query_evidence_by_task[task_id].eligibility,
             task_policy_support=_support(
-                task_id=task_id,
-                cluster_id=cluster_id,
                 bridge=bridge,
+                source_evidence=query_evidence_by_task[task_id],
+                receipts=receipts_by_task[task_id],
             ),
             within_cluster_task_weight=RationalWeightV2(
                 numerator=1,
@@ -506,11 +555,20 @@ def _population_parts(
         weighting_policy_sha256=SHA_B,
         stratification_policy_sha256=SHA_C,
     )
+    variant_evidence = VariantInvariantEvidenceManifestV2.from_components(
+        intervention_bridge=bridge,
+        query_evidence=query_evidence,
+        population=population,
+        receipts=tuple(
+            receipt for task_id, _cluster_id in coordinates for receipt in receipts_by_task[task_id]
+        ),
+    )
     return PopulationParts(
         partition=partition,
         clusters=clusters,
         population=population,
         query_evidence=query_evidence,
+        variant_evidence=variant_evidence,
     )
 
 
@@ -551,6 +609,7 @@ def _fixture(
         semantic_cluster_manifest=parts.clusters,
         population=parts.population,
         query_evidence=parts.query_evidence,
+        variant_evidence=parts.variant_evidence,
         preregistered_minimum_gate_pass_tasks=minimum_tasks,
         preregistered_minimum_gate_pass_clusters=minimum_clusters,
     )
@@ -574,6 +633,7 @@ def _root_components(fixture: ProtocolFixture) -> dict[str, object]:
         "semantic_cluster_manifest": fixture.parts.clusters,
         "population": fixture.parts.population,
         "query_evidence": fixture.parts.query_evidence,
+        "variant_evidence": fixture.parts.variant_evidence,
         "preregistered_minimum_gate_pass_tasks": 3,
         "preregistered_minimum_gate_pass_clusters": 2,
     }
@@ -625,6 +685,7 @@ def test_protocol_root_rejects_synchronized_task_or_cluster_deletion_and_lowered
             semantic_cluster_manifest=attacked_parts.clusters,
             population=attacked_parts.population,
             query_evidence=attacked_parts.query_evidence,
+            variant_evidence=attacked_parts.variant_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )
@@ -688,6 +749,7 @@ def test_protocol_root_rejects_cluster_policy_mismatch_accepted_by_population_co
             semantic_cluster_manifest=attacked_parts.clusters,
             population=attacked_parts.population,
             query_evidence=attacked_parts.query_evidence,
+            variant_evidence=attacked_parts.variant_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )
@@ -715,6 +777,7 @@ def test_protocol_root_rejects_source_inventory_digest_drift() -> None:
             semantic_cluster_manifest=attacked_parts.clusters,
             population=attacked_parts.population,
             query_evidence=attacked_parts.query_evidence,
+            variant_evidence=attacked_parts.variant_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )

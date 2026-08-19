@@ -34,6 +34,7 @@ from secaware.schema.policy_v2 import (
 )
 from secaware.schema.population_v2 import PopulationFreezeManifestV2
 from secaware.schema.query_evidence_v2 import QueryEvidenceManifestV2
+from secaware.schema.variant_evidence_v2 import VariantInvariantEvidenceManifestV2
 
 PROTOCOL_FREEZE_V2_SCHEMA_VERSION = "2.0"
 
@@ -304,6 +305,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
     semantic_cluster_manifest: SemanticTaskClusterManifest
     population: PopulationFreezeManifestV2
     query_evidence: QueryEvidenceManifestV2
+    variant_evidence: VariantInvariantEvidenceManifestV2
     preregistered_minimum_gate_pass_tasks: StrictInt = Field(ge=1)
     preregistered_minimum_gate_pass_clusters: StrictInt = Field(ge=1)
     outcome_blind: Literal[True]
@@ -322,6 +324,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
         semantic_cluster_manifest: SemanticTaskClusterManifest,
         population: PopulationFreezeManifestV2,
         query_evidence: QueryEvidenceManifestV2,
+        variant_evidence: VariantInvariantEvidenceManifestV2,
         preregistered_minimum_gate_pass_tasks: int,
         preregistered_minimum_gate_pass_clusters: int,
     ) -> Self:
@@ -345,6 +348,9 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
                 ),
                 population=PopulationFreezeManifestV2.model_validate(population, strict=True),
                 query_evidence=QueryEvidenceManifestV2.model_validate(query_evidence, strict=True),
+                variant_evidence=VariantInvariantEvidenceManifestV2.model_validate(
+                    variant_evidence, strict=True
+                ),
                 preregistered_minimum_gate_pass_tasks=(preregistered_minimum_gate_pass_tasks),
                 preregistered_minimum_gate_pass_clusters=(preregistered_minimum_gate_pass_clusters),
                 outcome_blind=True,
@@ -370,6 +376,7 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
         clusters = self.semantic_cluster_manifest
         population = self.population
         query_evidence = self.query_evidence
+        variant_evidence = self.variant_evidence
         hypothesis = bridge.frozen_hypothesis
 
         universe_by_id = {item.candidate_skeleton_id: item for item in universe.skeletons}
@@ -424,6 +431,10 @@ class ProtocolFreezeRootV2(_ContentAddressedProtocolFreezeV2):
             != bridge.candidate_skeleton.feature_catalog_sha256
             or query_evidence.eligibility_function_sha256
             != bridge.candidate_skeleton.eligibility_function_sha256
+            or variant_evidence.intervention_bridge != bridge
+            or variant_evidence.query_evidence != query_evidence
+            or variant_evidence.population != population
+            or variant_evidence.retained_task_ids != population.gate_pass_task_ids
         ):
             raise ValueError(self._safe_validation_message)
 
