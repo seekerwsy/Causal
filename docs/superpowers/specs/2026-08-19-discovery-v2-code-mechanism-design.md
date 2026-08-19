@@ -96,3 +96,10 @@ variation gate.
 
 This is a measurement-availability result, not a causal-discovery claim. It authorizes the typed Z
 table implementation without changing the FCI, bootstrap, or independent-validation requirements.
+
+The subsequent provenance join completed first on five tasks and then on all 51 tasks. The pilot
+contains 40 joined rows and the full bundle contains 408, with eight model/view matrices in each
+bundle and zero provider call or dropped assignment. For each model, target/no-op security and joint
+views contain two rows per task and the full JCI views contain all four. Z is read only from the
+mechanism audit, while Y is read only from the previously archived discovery-v1 result assembly;
+their assignment, task, model, arm, and CWE coordinates must match exactly.
