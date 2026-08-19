@@ -218,3 +218,42 @@ contains the frozen tail-arrow `z.target_mechanism_realized -> y.discovery_funct
 This is an interim reference result, not the preregistered replication decision. A three-replicate
 engineering bootstrap completed with 3 successes, 0 failures, and 0/3 support, validating complete
 task-block resampling and artifact recovery before the configured 200-replicate run.
+
+## Independent replication result
+
+The complete task-cluster bootstrap ran all 200 configured replicates. All 200 FCI runs succeeded,
+none failed, and 40 retained an endpoint pattern compatible with the frozen tail-arrow mechanism to
+function relation. The resulting support is 20.0%, below the frozen 80% threshold; the frozen
+hypothesis is therefore **not replicated**. This is a valid independent result rather than a backend
+or data-pipeline failure. The full-sample raw and JCI-constrained PAGs both contain zero edges, in
+agreement with the bootstrap decision. No replacement hypothesis was selected from the validation
+outcomes.
+
+The predeclared Prompt-only sensitivity removes the code-mechanism variable and reruns the same
+G-square FCI/JCI backend on `c.arm` and `y.discovery_functional`. Its raw and constrained PAGs also
+contain zero edges, with candidate yield zero. Thus adding Z did not improve stable independent
+candidate yield in this sample, although 20% of task-bootstrap resamples recover a compatible Z-to-Y
+edge.
+
+Post-replication randomized ITT diagnostics retain all 55 task blocks and all four arms. They are
+explicitly explanatory rather than a new preregistered confirmation family. Target patch increases
+`z.target_mechanism_realized` from 63.6% to 78.2% relative to no-op, an ITT risk difference of
++14.5 percentage points with a Bonferroni simultaneous percentile interval of +3.0 to +24.3 points.
+Relative to the length-matched placebo, the increase is +18.2 points, with an interval of +7.8 to
++32.7 points. Relative to the generic reminder, the point estimate is +10.9 points and its interval
+touches zero. The corresponding functional-outcome contrasts are -1.8, -5.5, and -1.8 points; all
+three intervals include zero.
+
+The mechanism/function association explains the failed replication. In the 93-task development
+population, functional success is 78.4% when Z=1 and 61.3% when Z=0, an unadjusted difference of
++17.1 points. In the independent population, the rates are 82.4% and 87.5%, respectively, a
+difference of -5.1 points with a task-cluster interval of -18.7 to +6.9 points. This association is
+descriptive, not a causal effect. Together, the randomized and discovery results show that target
+patch changes the intended security mechanism, but the previously discovered coupling between that
+mechanism and functional success does not transport to the independent task pool.
+
+The first Prompt-only invocation was stopped before FCI because a new reference-directory argument
+was accidentally added to the mechanism-analysis function rather than the Prompt-only function.
+Static checking detected the unused and undefined variables, no output directory was created, and
+the signature was corrected before the successful run. This failure is retained here to prevent the
+same parameter-placement error in later sensitivity backends.
