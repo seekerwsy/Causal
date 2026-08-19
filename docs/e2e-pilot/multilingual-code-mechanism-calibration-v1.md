@@ -39,3 +39,28 @@ independent-validation code has been generated.
 Both directories contain effective configuration, environment, commands, every request and
 response, parsed measurements, errors, progress, report, and artifact digests. No full repository
 test suite was run.
+
+## v2 resolution and freeze
+
+The v2 policy retains the same closed mechanism vocabulary, response schema, blindness fields,
+model, and deterministic projection. It adds versioned operational definitions to the request so
+that token boundaries are explicit. The v1 request path remains the default and was replayed
+against all twenty saved v1 request payloads without a difference.
+
+The four-case CWE-78 repair canary completed 4/4 calls with 4/4 expected directions and zero
+errors. It includes Python, Java, Go, and C controls. The previously failed Go case was returned as
+`argument_vector`, with the separated `path` argument cited as code evidence.
+
+After the repair canary passed, the independently frozen twenty-case expansion completed 20/20
+calls with zero schema or provider errors and 20/20 expected directions. Each of Python, Java, Go,
+and C achieved 5/5. The frozen v2 policy digest is
+`01d279a56c64fc42aa54fd96611eec2fa7db54f5198ce3680d37388d89d1e7ac`.
+
+The additional immutable artifact directories are:
+
+- `code-mechanism-multilingual-calibration-repair-bailian-v2-20260819-01`
+- `code-mechanism-multilingual-calibration-full-bailian-v2-20260819-01`
+
+This passes the multilingual mechanism-measurement calibration gate. It does not authorize a
+scientific effect claim by itself. Independent-validation outcomes remain ungenerated at this
+point.
