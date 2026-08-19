@@ -43,8 +43,8 @@ def _rows() -> list[dict[str, object]]:
 @pytest.mark.parametrize(
     ("view_id", "expected_rows", "expected_width"),
     (
-        ("target_noop_security", 2, 4),
-        ("target_noop_joint", 2, 4),
+        ("target_noop_security", 2, 5),
+        ("target_noop_joint", 2, 5),
         ("full_jci_security", 4, 7),
         ("full_jci_joint", 4, 7),
     ),
@@ -58,6 +58,7 @@ def test_view_projection_preserves_complete_selected_arms(
         _rows(),
         model_id="qwen2.5-coder-7b-instruct",
         view_id=view_id,
+        target_noop_context_policy="explicit_jci_arm_v2",
     )
 
     assert len(rows) == expected_rows

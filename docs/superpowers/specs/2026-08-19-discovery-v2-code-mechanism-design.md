@@ -81,6 +81,16 @@ Changing methods until a positive edge appears is forbidden.
   hidden tier ceiling in the background-knowledge contract. The new unit test failed before any
   experiment run. Updating that same contract to accept tier three allowed all 103 targeted schema,
   background, JCI, and path tests to pass; existing tier-zero-through-two records remain valid.
+- The first v2 reference-FCI invocation reached no backend call and created no output because the
+  execution entry point used a nonexistent `CausalTableRecord.variable_ids` convenience property.
+  Helper-level tests had not exercised that branch. The entry point now derives IDs from the typed
+  variable records; the same frozen Qwen primary invocation is rerun after targeted regression.
+- The corrected entry point then reached the backend, which rejected the 102-row target/no-op table
+  because it was labelled observational even though each of 51 tasks contributed a randomized
+  two-row block. No output directory was created. The replacement v2 table explicitly includes the
+  JCI arm context and uses JCI raw/constrained run kinds; it does not bypass the one-row-per-task
+  observational safeguard. The one-off diagnostic command record initially named the diagnostic
+  script incorrectly; a separate corrected command record is retained without deleting the first.
 
 ## Mechanism audit result
 
@@ -103,3 +113,11 @@ bundle and zero provider call or dropped assignment. For each model, target/no-o
 views contain two rows per task and the full JCI views contain all four. Z is read only from the
 mechanism audit, while Y is read only from the previously archived discovery-v1 result assembly;
 their assignment, task, model, arm, and CWE coordinates must match exactly.
+
+The explicit-context table replay completed 40/40 pilot and 408/408 full joined rows with zero
+error. All eight model-by-view reference FCI runs then completed. Every raw and JCI-constrained PAG
+contains a `Z -> Y` edge and the context tables contain the deterministic arm-to-feature relation,
+but none contains an `X-Z` adjacency; therefore no exact possible `X-Z-Y` path exists at the
+reference stage. Because `c.arm` and the arm-specific feature indicators are deterministic copies,
+the next method-development step tests the standard nonredundant JCI representation (`C-Z-Y`)
+under a new frozen analysis record. It may not be reported as independent confirmation.

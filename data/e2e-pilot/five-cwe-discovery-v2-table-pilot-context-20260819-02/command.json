@@ -1,0 +1,1 @@
+{"argv":["scripts/build_randomized_discovery_v2_tables.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-discovery-v2-table-pilot-v2.json","--output-dir","data/e2e-pilot/five-cwe-discovery-v2-table-pilot-context-20260819-02"],"schema_version":"1.0"}

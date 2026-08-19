@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections import Counter
-from datetime import UTC, datetime
 import json
 import os
 import platform
-from pathlib import Path
 import re
 import socket
 import sys
+from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from secaware.experiments.held_out_policy_analysis import (
@@ -20,7 +20,6 @@ from secaware.experiments.held_out_policy_analysis import (
 )
 from secaware.io.jsonl import read_jsonl
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
-
 
 _SCHEMA_VERSION = "1.0"
 _MODELS = ("qwen2.5-coder-7b-instruct", "phi-4-14b")
@@ -78,6 +77,19 @@ _VIEW_VARIABLES = {
         "y_secure_functional",
     ),
 }
+_TARGET_NOOP_CONTEXT_POLICIES = (
+    "implicit_x_only_v1",
+    "explicit_jci_arm_v2",
+)
+
+
+def _view_variables(view_id: str, target_noop_context_policy: str) -> tuple[str, ...]:
+    variables = _VIEW_VARIABLES[view_id]
+    if target_noop_context_policy not in _TARGET_NOOP_CONTEXT_POLICIES:
+        raise ValueError("discovery-v2 target/no-op context policy failed validation")
+    if view_id.startswith("target_noop") and target_noop_context_policy == "explicit_jci_arm_v2":
+        return (variables[0], "c_discovery_arm", *variables[1:])
+    return variables
 
 
 def _canonical(value: object) -> bytes:
@@ -122,6 +134,7 @@ def _environment() -> dict[str, object]:
 def _validated_config(repo_root: Path, path: Path) -> dict[str, Any]:
     config = _read_json(path)
     archives = config.get("model_result_archives")
+    context_policy = config.get("target_noop_context_policy", "implicit_x_only_v1")
     if (
         config.get("schema_version") != _SCHEMA_VERSION
         or config.get("expected_tasks_per_model") not in {5, 51}
@@ -130,6 +143,7 @@ def _validated_config(repo_root: Path, path: Path) -> dict[str, Any]:
         or config.get("prompt_only_baseline") != "five_cwe_randomized_discovery_analysis_v1"
         or config.get("provider_calls_allowed") is not False
         or config.get("scientific_claim_allowed") is not False
+        or context_policy not in _TARGET_NOOP_CONTEXT_POLICIES
     ):
         raise ValueError("discovery-v2 table configuration failed validation")
     mechanism_dir = (repo_root / str(config.get("mechanism_audit_dir"))).resolve()
@@ -228,13 +242,14 @@ def _view_rows(
     *,
     model_id: str,
     view_id: str,
+    target_noop_context_policy: str = "implicit_x_only_v1",
 ) -> list[dict[str, object]]:
     if view_id not in _VIEWS or model_id not in _MODELS:
         raise ValueError("discovery-v2 view failed validation")
     selected_arms = (
         {"target_patch", "noop_rewrite"} if view_id.startswith("target_noop") else set(_ARMS)
     )
-    variables = _VIEW_VARIABLES[view_id]
+    variables = _view_variables(view_id, target_noop_context_policy)
     rows = []
     for row in joined:
         if row["model_id"] != model_id or row["arm_role"] not in selected_arms:
@@ -277,6 +292,7 @@ def build_randomized_discovery_v2_tables(
         mechanism_dir / "mechanism-rows.jsonl", required=True, allow_empty=False
     )
     expected_tasks = int(config["expected_tasks_per_model"])
+    context_policy = str(config.get("target_noop_context_policy", "implicit_x_only_v1"))
     expected_rows = expected_tasks * len(_MODELS) * len(_ARMS)
     if (
         mechanism_report.get("status") != "MECHANISM_VARIATION_SUPPORTED"
@@ -317,7 +333,12 @@ def build_randomized_discovery_v2_tables(
     for model_id in _MODELS:
         model_stem = "qwen7b" if model_id.startswith("qwen") else "phi14b"
         for view_id in _VIEWS:
-            rows = _view_rows(joined, model_id=model_id, view_id=view_id)
+            rows = _view_rows(
+                joined,
+                model_id=model_id,
+                view_id=view_id,
+                target_noop_context_policy=context_policy,
+            )
             expected_view_rows = expected_tasks * (2 if view_id.startswith("target_noop") else 4)
             task_counts = Counter(str(row["task_id"]) for row in rows)
             if (
@@ -326,7 +347,7 @@ def build_randomized_discovery_v2_tables(
                 or set(task_counts.values()) != ({2} if view_id.startswith("target_noop") else {4})
             ):
                 raise ValueError("discovery-v2 view population failed validation")
-            variables = _VIEW_VARIABLES[view_id]
+            variables = _view_variables(view_id, context_policy)
             payload = {
                 "schema_version": _SCHEMA_VERSION,
                 "view_id": view_id,
