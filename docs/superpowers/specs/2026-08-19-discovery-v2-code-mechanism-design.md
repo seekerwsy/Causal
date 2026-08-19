@@ -91,6 +91,10 @@ Changing methods until a positive edge appears is forbidden.
   JCI arm context and uses JCI raw/constrained run kinds; it does not bypass the one-row-per-task
   observational safeguard. The one-off diagnostic command record initially named the diagnostic
   script incorrectly; a separate corrected command record is retained without deleting the first.
+- Before the first v2 bootstrap, its global seed was briefly added to the already-used reference
+  analysis config. Provenance verification detected the resulting digest drift before any bootstrap
+  run. The analysis file was restored byte-for-byte (its SHA-256 again matches the reference PAG),
+  and a separate frozen bootstrap config now owns the seed and resampling contract.
 
 ## Mechanism audit result
 
@@ -121,3 +125,13 @@ but none contains an `X-Z` adjacency; therefore no exact possible `X-Z-Y` path e
 reference stage. Because `c.arm` and the arm-specific feature indicators are deterministic copies,
 the next method-development step tests the standard nonredundant JCI representation (`C-Z-Y`)
 under a new frozen analysis record. It may not be reported as independent confirmation.
+
+The nonredundant JCI replay excluded the arm-deterministic operation-specific indicator while
+retaining its semantics in the frozen target and protocol identifiers. Seven of eight reference
+views still had no complete context-mechanism-outcome path. Qwen's target/no-op joint-outcome view
+alone produced `C o-o Z -> Y`; JCI exogeneity oriented the first edge as `C -> Z`. A ten-replicate
+engineering bootstrap completed without backend failure and supported the path three times. The
+frozen 200-replicate task-block bootstrap then completed 200/200 with zero failure and support
+81/200 (0.405), below the unchanged 0.8 threshold. No hypothesis was frozen. This distinguishes a
+reference-sample candidate from a stable discovery and motivates more independent tasks rather
+than threshold relaxation.

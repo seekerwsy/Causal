@@ -71,3 +71,24 @@ def test_v2_table_orders_typed_wxzy_and_builds_temporal_background() -> None:
     assert knowledge.required_directions == ()
     assert knowledge.forbidden_adjacencies == ()
     to_causal_learn_background(knowledge)
+
+
+def test_nonredundant_projection_retains_context_mechanism_and_outcome() -> None:
+    projected = (
+        "w.cwe_scope",
+        "c.arm",
+        "z.target_mechanism_realized",
+        "y.discovery_cwe_secure",
+    )
+    table, matrix, bindings = _table_and_matrix(
+        _payload(),
+        producer_sha256="a" * 64,
+        projected_internal_ids=projected,
+    )
+
+    assert matrix.shape == (102, 4)
+    assert len(bindings) == 102
+    assert {item.variable_id for item in table.variables} == set(projected)
+    assert "x.operation_specific_security_requirement" not in {
+        item.variable_id for item in table.variables
+    }

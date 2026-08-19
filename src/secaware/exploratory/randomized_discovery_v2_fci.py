@@ -33,6 +33,8 @@ from secaware.schema.causal import (
 
 _SCHEMA_VERSION = "1.0"
 _POLICY = "five-cwe-randomized-discovery-v2-reference-fci-v1"
+_ANALYSIS_V1 = "five_cwe_randomized_discovery_v2_analysis_v1"
+_ANALYSIS_V2 = "five_cwe_randomized_discovery_v2_nonredundant_jci_v1"
 _MODELS = ("qwen2.5-coder-7b-instruct", "phi-4-14b")
 _VIEWS = (
     "target_noop_security",
@@ -90,6 +92,32 @@ _TEMPORAL_TIERS = {
     "z.target_mechanism_realized": 2,
     "y.discovery_cwe_secure": 3,
     "y.discovery_secure_functional": 3,
+}
+_NONREDUNDANT_PROJECTION_BY_VIEW = {
+    "target_noop_security": (
+        "w.cwe_scope",
+        "c.arm",
+        "z.target_mechanism_realized",
+        "y.discovery_cwe_secure",
+    ),
+    "target_noop_joint": (
+        "w.cwe_scope",
+        "c.arm",
+        "z.target_mechanism_realized",
+        "y.discovery_secure_functional",
+    ),
+    "full_jci_security": (
+        "w.cwe_scope",
+        "c.arm",
+        "z.target_mechanism_realized",
+        "y.discovery_cwe_secure",
+    ),
+    "full_jci_joint": (
+        "w.cwe_scope",
+        "c.arm",
+        "z.target_mechanism_realized",
+        "y.discovery_secure_functional",
+    ),
 }
 
 
@@ -157,12 +185,14 @@ def _config(analysis: dict[str, Any]) -> FCIDiscoveryConfig:
 
 def _validated_analysis(path: Path) -> dict[str, Any]:
     analysis = _read_json(path)
+    analysis_id = analysis.get("analysis_id")
     population = analysis.get("development_population", {})
     background = analysis.get("background_knowledge", {})
     fci = analysis.get("fci", {})
+    candidate = analysis.get("candidate_freeze", {})
     if (
         analysis.get("schema_version") != _SCHEMA_VERSION
-        or analysis.get("status") != "EXPLORATORY_METHOD_DEVELOPMENT_FROZEN_BEFORE_V2_FCI"
+        or analysis_id not in {_ANALYSIS_V1, _ANALYSIS_V2}
         or analysis.get("model_strata") != list(_MODELS)
         or analysis.get("views", {}).get("primary") != "target_noop_security"
         or analysis.get("views", {}).get("secondary") != "target_noop_joint"
@@ -172,12 +202,10 @@ def _validated_analysis(path: Path) -> dict[str, Any]:
         or population.get("scientific_confirmation_allowed") is not False
         or population.get("model_pooling") != "forbidden"
         or population.get("target_noop_context_policy") != "explicit_jci_arm_v2"
-        or analysis.get("candidate_freeze", {}).get("source_variable") != _SOURCE
-        or analysis.get("candidate_freeze", {}).get("required_mechanism_variable") != _MECHANISM
-        or analysis.get("candidate_freeze", {}).get("outcome_by_view") != _OUTCOME_BY_VIEW
-        or analysis.get("candidate_freeze", {}).get("minimum_stability") != 0.8
-        or analysis.get("candidate_freeze", {}).get("confirmation_outcomes_may_select_or_rescue")
-        is not False
+        or candidate.get("required_mechanism_variable") != _MECHANISM
+        or candidate.get("outcome_by_view") != _OUTCOME_BY_VIEW
+        or candidate.get("minimum_stability") != 0.8
+        or candidate.get("confirmation_outcomes_may_select_or_rescue") is not False
         or background.get("temporal_tiers") != _TEMPORAL_TIERS
         or background.get("jci_context_variable") != "c.arm"
         or background.get("jci_assumption") != "jci.randomized_context_exogeneity.v1"
@@ -187,12 +215,40 @@ def _validated_analysis(path: Path) -> dict[str, Any]:
         or analysis.get("independent_validation_required") is not True
     ):
         raise ValueError("discovery-v2 frozen analysis failed validation")
+    if analysis_id == _ANALYSIS_V1:
+        if (
+            analysis.get("status") != "EXPLORATORY_METHOD_DEVELOPMENT_FROZEN_BEFORE_V2_FCI"
+            or candidate.get("source_variable") != _SOURCE
+            or analysis.get("variable_projection_by_view") is not None
+        ):
+            raise ValueError("discovery-v2 original analysis failed validation")
+    elif (
+        analysis.get("status")
+        != "EXPLORATORY_METHOD_DEVELOPMENT_FROZEN_BEFORE_NONREDUNDANT_JCI_FCI"
+        or candidate.get("source_variable") != "c.arm"
+        or candidate.get("target_noop_estimand") != "target_patch_vs_noop_rewrite"
+        or analysis.get("deterministic_redundancy_resolution", {}).get("excluded_variable")
+        != _SOURCE
+        or analysis.get("deterministic_redundancy_resolution", {}).get("selection_basis")
+        != "structural_identifiability_not_observed_effect"
+        or analysis.get("variable_projection_by_view")
+        != {key: list(value) for key, value in _NONREDUNDANT_PROJECTION_BY_VIEW.items()}
+    ):
+        raise ValueError("discovery-v2 nonredundant analysis failed validation")
     _config(analysis)
     return analysis
 
 
-def _variables(payload: dict[str, Any], producer_sha256: str) -> tuple[CausalVariableSpec, ...]:
-    internal_ids = payload.get("internal_variable_ids")
+def _variables(
+    payload: dict[str, Any],
+    producer_sha256: str,
+    projected_internal_ids: tuple[str, ...] | None = None,
+) -> tuple[CausalVariableSpec, ...]:
+    internal_ids = (
+        payload.get("internal_variable_ids")
+        if projected_internal_ids is None
+        else list(projected_internal_ids)
+    )
     if type(internal_ids) is not list or not 4 <= len(internal_ids) <= 7:
         raise ValueError("discovery-v2 variable list failed validation")
     variables = []
@@ -232,10 +288,8 @@ def _variables(payload: dict[str, Any], producer_sha256: str) -> tuple[CausalVar
             )
         )
     checked = tuple(sorted(variables, key=lambda item: item.variable_id))
-    if (
-        _SOURCE not in {item.variable_id for item in checked}
-        or _MECHANISM not in {item.variable_id for item in checked}
-        or len(checked) != len({item.variable_id for item in checked})
+    if _MECHANISM not in {item.variable_id for item in checked} or len(checked) != len(
+        {item.variable_id for item in checked}
     ):
         raise ValueError("discovery-v2 required variables failed validation")
     return checked
@@ -245,6 +299,7 @@ def _table_and_matrix(
     payload: dict[str, Any],
     *,
     producer_sha256: str,
+    projected_internal_ids: tuple[str, ...] | None = None,
 ) -> tuple[CausalTableRecord, np.ndarray, tuple[dict[str, object], ...]]:
     view_id = str(payload.get("view_id"))
     model_id = str(payload.get("model_id"))
@@ -260,7 +315,19 @@ def _table_and_matrix(
         or tuple(input_internal) != _INTERNAL_VARIABLES_BY_VIEW.get(view_id)
     ):
         raise ValueError("discovery-v2 matrix payload failed validation")
-    variables = _variables(payload, producer_sha256)
+    projection = (
+        tuple(str(item) for item in input_internal)
+        if projected_internal_ids is None
+        else projected_internal_ids
+    )
+    if (
+        len(projection) != len(set(projection))
+        or not set(projection) <= set(input_internal)
+        or _MECHANISM not in projection
+        or _OUTCOME_BY_VIEW[view_id] not in projection
+    ):
+        raise ValueError("discovery-v2 variable projection failed validation")
+    variables = _variables(payload, producer_sha256, projection)
     variable_ids = tuple(item.variable_id for item in variables)
     input_index = {str(variable_id): index for index, variable_id in enumerate(input_internal)}
     observations = []
@@ -344,14 +411,14 @@ def _edge_by_pair(pag: PAGRecord) -> dict[frozenset[str], PAGEdgeRecord]:
     return {frozenset({edge.left, edge.right}): edge for edge in pag.edges}
 
 
-def _has_possible_xzy(pag: PAGRecord, outcome: str) -> bool:
+def _has_possible_xzy(pag: PAGRecord, outcome: str, *, source: str = _SOURCE) -> bool:
     edges = _edge_by_pair(PAGRecord.model_validate(pag))
-    first = edges.get(frozenset({_SOURCE, _MECHANISM}))
+    first = edges.get(frozenset({source, _MECHANISM}))
     second = edges.get(frozenset({_MECHANISM, outcome}))
     return bool(
         first is not None
         and second is not None
-        and edge_allows_possible_direction(first, _SOURCE, _MECHANISM)
+        and edge_allows_possible_direction(first, source, _MECHANISM)
         and edge_allows_possible_direction(second, _MECHANISM, outcome)
     )
 
@@ -417,6 +484,13 @@ def run_randomized_discovery_v2_reference_fci(
     model_stem = "qwen7b" if model_id.startswith("qwen") else "phi14b"
     matrix_path = table_dir / f"matrix-{model_stem}-{view_id}.json"
     payload = _read_json(matrix_path)
+    source = str(analysis["candidate_freeze"]["source_variable"])
+    projection_record = analysis.get("variable_projection_by_view")
+    projected_internal_ids = (
+        None
+        if projection_record is None
+        else tuple(str(item) for item in projection_record[view_id])
+    )
     producer_sha256 = canonical_sha256(
         {
             "policy": _POLICY,
@@ -425,7 +499,13 @@ def run_randomized_discovery_v2_reference_fci(
             "matrix_artifact_sha256": sha256_file(matrix_path),
         }
     )
-    table, matrix, bindings = _table_and_matrix(payload, producer_sha256=producer_sha256)
+    table, matrix, bindings = _table_and_matrix(
+        payload,
+        producer_sha256=producer_sha256,
+        projected_internal_ids=projected_internal_ids,
+    )
+    if source not in {item.variable_id for item in table.variables}:
+        raise ValueError("discovery-v2 candidate source projection failed validation")
     config = _config(analysis)
     base = _base_background(table)
     active_runner = SpawnedFCIRunner() if runner is None else runner
@@ -479,6 +559,8 @@ def run_randomized_discovery_v2_reference_fci(
             "matrix_sha256": hashlib.sha256(matrix.tobytes(order="C")).hexdigest(),
             "matrix_shape": list(matrix.shape),
             "candidate_path_source": "raw_pag",
+            "candidate_source_variable": source,
+            "variable_projection": [item.variable_id for item in table.variables],
             "required_directions": [],
             "required_adjacencies": [],
         },
@@ -497,9 +579,12 @@ def run_randomized_discovery_v2_reference_fci(
         "jci_constrained_pag_edges": (
             len(constrained_pag.edges) if constrained_pag is not None else None
         ),
-        "raw_possible_xzy": _has_possible_xzy(raw_pag, outcome),
+        "candidate_source_variable": source,
+        "raw_possible_xzy": _has_possible_xzy(raw_pag, outcome, source=source),
         "jci_possible_xzy": (
-            _has_possible_xzy(constrained_pag, outcome) if constrained_pag is not None else None
+            _has_possible_xzy(constrained_pag, outcome, source=source)
+            if constrained_pag is not None
+            else None
         ),
         "bootstrap_runs": 0,
         "scientific_claim_allowed": False,
