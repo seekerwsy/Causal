@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import re
+from dataclasses import asdict, dataclass
 
 from secaware.schema.causal import VariableRole
 from secaware.schema.tsg import MotifId
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG
-
 
 _VARIABLE_RE = re.compile(r"^[pwxyz]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]*$")
@@ -155,6 +154,15 @@ _MECHANISM_DISCOVERY_V2_DECLARATIONS = (
         applicable_cwes=("*",),
         tier=3,
         adjacency_type="outcome",
+    ),
+    VariableDeclaration(
+        variable_id="y.discovery_functional",
+        role=VariableRole.Y,
+        states=("not_functional", "functional"),
+        query_id="outcome.discovery_functional_judge.v1",
+        applicable_cwes=("*",),
+        tier=3,
+        adjacency_type="functional_outcome",
     ),
 )
 
@@ -309,8 +317,8 @@ def declaration_sha256(item: VariableDeclaration) -> str:
 
 __all__ = [
     "CWE_SECURITY_OUTCOME",
-    "PRIMARY_OUTCOME",
     "POOLED_RANDOMIZED_DISCOVERY_VARIABLES",
+    "PRIMARY_OUTCOME",
     "PROMPT_CAUSAL_VARIABLES",
     "VARIABLE_CATALOG_SHA256",
     "VariableDeclaration",

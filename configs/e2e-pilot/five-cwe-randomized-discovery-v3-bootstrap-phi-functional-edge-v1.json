@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "bootstrap_id": "five_cwe_randomized_discovery_v3_bootstrap_phi_functional_edge_v1",
+  "status": "FROZEN_AFTER_REFERENCE_EDGE_BEFORE_BOOTSTRAP",
+  "model_id": "phi-4-14b",
+  "view_id": "full_jci_functional",
+  "source_variable": "z.target_mechanism_realized",
+  "target_variable": "y.discovery_functional",
+  "global_seed": 2026081922,
+  "bootstrap_samples": 200,
+  "bootstrap_unit": "complete_task_block",
+  "stability_threshold": 0.8,
+  "max_failed_bootstrap_fraction": 0.1,
+  "interpretation": "mechanism_function_coupling_not_target_patch_mediation",
+  "independent_validation_required": true,
+  "scientific_claim_allowed": false
+}

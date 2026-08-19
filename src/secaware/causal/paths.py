@@ -40,6 +40,7 @@ _PREREGISTERED_OUTCOMES = frozenset(
         CWE_SECURITY_OUTCOME.variable_id,
         "y.discovery_cwe_secure",
         "y.discovery_secure_functional",
+        "y.discovery_functional",
     }
 )
 

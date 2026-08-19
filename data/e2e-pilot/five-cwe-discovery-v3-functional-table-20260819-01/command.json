@@ -1,0 +1,1 @@
+{"argv":["scripts/build_randomized_discovery_v3_functional_table.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-discovery-v3-functional-table-v1.json","--output-dir","data/e2e-pilot/five-cwe-discovery-v3-functional-table-20260819-01"]}

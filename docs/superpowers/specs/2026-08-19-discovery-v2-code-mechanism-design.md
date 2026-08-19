@@ -135,3 +135,36 @@ frozen 200-replicate task-block bootstrap then completed 200/200 with zero failu
 81/200 (0.405), below the unchanged 0.8 threshold. No hypothesis was frozen. This distinguishes a
 reference-sample candidate from a stable discovery and motivates more independent tasks rather
 than threshold relaxation.
+
+## Semantic provenance audit and functional-outcome extension
+
+File-level provenance separation was necessary but not sufficient. A row-level semantic audit
+found that `z.target_mechanism_realized` was identical to the CWE-security outcome in all 408
+discovery rows and all 336 historical held-out rows. The joint outcome was the conjunction of the
+same security decision and functional success. Consequently, the previously observed `Z -> Y`
+edges for security and joint outcomes are definitional relationships, not evidence that a code
+mechanism mediates a security effect. These outcomes are excluded from subsequent discovery with
+this Z variable. This audit is retained as a methodological finding: mechanism and outcome
+variables must be separated by semantic derivation, not merely by artifact file.
+
+A new method-development table therefore uses only the independently derived single-pass
+functional-Judge outcome, `y.discovery_functional`. It combines the 51 original discovery tasks
+with 42 complete historical held-out tasks, for 93 complete four-arm task blocks per model and 744
+rows overall. These historical held-out outcomes are reused only for method development; any
+scientific claim still requires a newly allocated independent validation set after the method is
+frozen.
+
+Four reference FCI/JCI analyses completed without backend failure. Qwen's target/no-op view had a
+context-to-mechanism adjacency but no mechanism-to-function adjacency, while its four-arm view had
+neither. Phi's target/no-op and four-arm views had a directed mechanism-to-function edge but no
+context-to-mechanism adjacency. Thus no model/view contained a complete
+`context -> mechanism -> functional outcome` chain. The result separates two partial phenomena:
+the target patch shifts Qwen's security mechanism without detectable functional coupling, whereas
+Phi exhibits mechanism/function coupling without a detectable target-patch shift.
+
+The direct Phi four-arm mechanism/function edge was frozen as a sensitivity target with the same
+0.8 task-block stability threshold. A ten-replicate engineering pilot completed 10/10 runs without
+failure and supported the edge in 6/10 replicates. Inspection confirmed that the other four PAGs
+truly omitted the edge; the 0.6 result is not caused by endpoint-matching policy. The frozen
+200-replicate run, rather than any relaxed edge definition, determines whether this partial
+association is stable.

@@ -29,11 +29,12 @@ def test_mechanism_and_v2_outcomes_are_typed_closed_declarations() -> None:
     mechanism = declaration_by_id("z.target_mechanism_realized")
     security = declaration_by_id("y.discovery_cwe_secure")
     joint = declaration_by_id("y.discovery_secure_functional")
+    functional = declaration_by_id("y.discovery_functional")
 
     assert mechanism.role is VariableRole.Z
     assert mechanism.tier == 2
-    assert security.role is joint.role is VariableRole.Y
-    assert security.tier == joint.tier == 3
+    assert security.role is joint.role is functional.role is VariableRole.Y
+    assert security.tier == joint.tier == functional.tier == 3
 
 
 def test_mechanism_background_forbids_outcome_to_z_and_z_to_x_without_required_edges() -> None:
