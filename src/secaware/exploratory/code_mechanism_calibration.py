@@ -34,6 +34,8 @@ _SCHEMA_VERSION = "1.0"
 _CWES = ("CWE-78", "CWE-89", "CWE-502", "CWE-328", "CWE-338")
 _LANGUAGES = ("python", "java", "go", "c")
 _EXPECTED_STATES = ("proved_safe", "proved_unsafe")
+_CRITERIA_V1 = "mechanism-token-names-v1"
+_CRITERIA_V2 = "mechanism-operational-definitions-v2"
 
 
 def _canonical(value: object) -> bytes:
@@ -152,9 +154,16 @@ def run_code_mechanism_calibration(
     if type(config) is not dict:
         raise ValueError("code mechanism calibration config failed validation")
     selection = config.get("selected_calibration_ids")
+    criteria_version = config.get("criteria_version", _CRITERIA_V1)
+    expected_kind = (
+        "multilingual_code_mechanism_facts_v2"
+        if criteria_version == _CRITERIA_V2
+        else "multilingual_code_mechanism_facts_v1"
+    )
     if (
         config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("calibration_kind") != "multilingual_code_mechanism_facts_v1"
+        or criteria_version not in {_CRITERIA_V1, _CRITERIA_V2}
+        or config.get("calibration_kind") != expected_kind
         or type(selection) is not list
         or not selection
         or any(type(item) is not str or not item for item in selection)
@@ -186,7 +195,9 @@ def run_code_mechanism_calibration(
             api_key_env=llm["api_key_env"],
             system_template=CODE_MECHANISM_FACTS_SYSTEM_TEMPLATE,
         )
-    extractor = LLMCodeMechanismFactsExtractor(selected_transport, policy)
+    extractor = LLMCodeMechanismFactsExtractor(
+        selected_transport, policy, criteria_version=criteria_version
+    )
 
     run_dir.mkdir(parents=True, exist_ok=False)
     _write_json(run_dir / "effective-config.json", config)
@@ -213,7 +224,10 @@ def run_code_mechanism_calibration(
     ):
         for index, row in enumerate(selected, start=1):
             request = code_mechanism_request_payload(
-                code=row["code"], target_cwe=row["cwe"], language=row["language"]
+                code=row["code"],
+                target_cwe=row["cwe"],
+                language=row["language"],
+                criteria_version=criteria_version,
             )
             request_bytes = canonical_request_bytes(request)
             request_record = {
@@ -239,6 +253,7 @@ def run_code_mechanism_calibration(
                     target_cwe=row["cwe"],
                     language=row["language"],
                     policy=policy,
+                    criteria_version=criteria_version,
                 )
                 is_correct = measurement.mechanism_state == row["expected_state"]
                 record = {
@@ -284,8 +299,11 @@ def run_code_mechanism_calibration(
     )
     report: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
-        "status": "CODE_MECHANISM_CALIBRATION_PASS" if passed else "CODE_MECHANISM_CALIBRATION_FAIL",
+        "status": "CODE_MECHANISM_CALIBRATION_PASS"
+        if passed
+        else "CODE_MECHANISM_CALIBRATION_FAIL",
         "scientific_claim_allowed": False,
+        "criteria_version": criteria_version,
         "counts": {
             "selected": len(selected),
             "provider_calls": len(selected),
@@ -307,9 +325,7 @@ def run_code_mechanism_calibration(
         run_dir / "artifact-manifest.json",
         {
             "schema_version": _SCHEMA_VERSION,
-            "files": [
-                {"path": path.name, "sha256": sha256_file(path)} for path in sorted(files)
-            ],
+            "files": [{"path": path.name, "sha256": sha256_file(path)} for path in sorted(files)],
         },
     )
     return report

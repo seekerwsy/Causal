@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "calibration_kind": "multilingual_code_mechanism_facts_v2",
+  "criteria_version": "mechanism-operational-definitions-v2",
+  "purpose": "Repair canary for the diagnosed CWE-78 semantic-boundary defect, with all adjacent CWE-78 controls retained.",
+  "corpus": {
+    "path": "configs/e2e-pilot/code-mechanism-multilingual-calibration-corpus-v1.jsonl",
+    "sha256": "9cac187ff9588252ef31a27abb69aac2970f3f2709f532f1911a273726db2e55"
+  },
+  "selected_calibration_ids": [
+    "cwe78-python-safe-argument-vector",
+    "cwe78-java-unsafe-shell",
+    "cwe78-go-safe-argument-vector",
+    "cwe78-c-unsafe-system-string"
+  ],
+  "expected_calls": 4,
+  "minimum_accuracy": 1.0,
+  "maximum_error_fraction": 0.0,
+  "arms_allowed": false,
+  "outcomes_allowed": false,
+  "provider_calls_allowed": true,
+  "next_action_on_pass": "run_full_v2_calibration",
+  "llm": {
+    "provider": "openai_compatible",
+    "model_id": "qwen3.5-flash-2026-02-23",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key_env": "ALI_BAILIAN_API_KEY",
+    "system_template_sha256": "e202db03b0fca7a9ea91ee45539ff8c3a440ef08fb807722ab07d61ee743341e",
+    "output_schema_sha256": "a7cdbccecdf0376732221fdc360588c2abb2bb13327ad8a373ebecb9d517b024",
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": null,
+    "timeout_seconds": 60.0,
+    "max_attempts": 1,
+    "max_response_bytes": 65536,
+    "enable_thinking": false
+  }
+}

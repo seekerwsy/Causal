@@ -10,6 +10,7 @@ from secaware.exploratory.code_mechanism_facts import (
     CODE_MECHANISM_FACTS_SYSTEM_TEMPLATE,
     CODE_MECHANISM_FACTS_SYSTEM_TEMPLATE_SHA256,
     LLMCodeMechanismFactsExtractor,
+    code_mechanism_policy_sha256,
     code_mechanism_request_payload,
 )
 from secaware.llm.structured_transport import StructuredLLMPolicy
@@ -42,7 +43,7 @@ def _policy() -> StructuredLLMPolicy:
 
 
 def test_multilingual_fact_projection_is_blind_and_deterministic() -> None:
-    code = "func find(name string) {\n    db.Query(\"SELECT * FROM users WHERE name = ?\", name)\n}"
+    code = 'func find(name string) {\n    db.Query("SELECT * FROM users WHERE name = ?", name)\n}'
     transport = _Transport(
         {
             "facts": [
@@ -91,7 +92,7 @@ def test_unsafe_fact_dominates_and_empty_facts_are_not_realized() -> None:
             ]
         }
     )
-    code = "os.system(\"ls \" + arg)"
+    code = 'os.system("ls " + arg)'
     result = LLMCodeMechanismFactsExtractor(unsafe, _policy()).extract(
         code=code, target_cwe="CWE-78", language="python"
     )
@@ -146,3 +147,54 @@ def test_request_rejects_unsupported_language() -> None:
     with pytest.raises(ValueError):
         code_mechanism_request_payload(code="fn main() {}", target_cwe="CWE-78", language="rust")
     assert CODE_MECHANISM_FACTS_SYSTEM_TEMPLATE.strip()
+
+
+def test_v2_adds_operational_definitions_without_changing_v1_request() -> None:
+    code = 'exec.Command("ls", path).Output()'
+    v1 = code_mechanism_request_payload(code=code, target_cwe="CWE-78", language="go")
+    v2 = code_mechanism_request_payload(
+        code=code,
+        target_cwe="CWE-78",
+        language="go",
+        criteria_version="mechanism-operational-definitions-v2",
+    )
+
+    assert "criteria_version" not in v1
+    assert "mechanism_definitions" not in v1
+    assert v2["criteria_version"] == "mechanism-operational-definitions-v2"
+    definitions = v2["mechanism_definitions"]
+    assert isinstance(definitions, dict)
+    assert "Go exec.Command(name, args...)" in definitions["argument_vector"]
+    assert (
+        "Merely passing caller text as a separate argument"
+        in definitions["shell_execution_of_external_text"]
+    )
+    assert code_mechanism_policy_sha256(_policy()) != code_mechanism_policy_sha256(
+        _policy(), criteria_version="mechanism-operational-definitions-v2"
+    )
+
+
+def test_v2_measurement_is_versioned_separately() -> None:
+    transport = _Transport(
+        {
+            "facts": [
+                {
+                    "function_name": "listDir",
+                    "sink_kind": "process creation",
+                    "mechanism_kinds": ["argument_vector"],
+                    "evidence_lines": [1],
+                    "source_names": ["path"],
+                    "properties": ["separate process argument"],
+                }
+            ]
+        }
+    )
+    measurement = LLMCodeMechanismFactsExtractor(
+        transport,
+        _policy(),
+        criteria_version="mechanism-operational-definitions-v2",
+    ).extract(code='exec.Command("ls", path)', target_cwe="CWE-78", language="go")
+
+    assert measurement.extractor_version == "llm-code-mechanism-facts-v2"
+    assert measurement.mechanism_state == "proved_safe"
+    assert "mechanism_definitions" in transport.requests[0]
