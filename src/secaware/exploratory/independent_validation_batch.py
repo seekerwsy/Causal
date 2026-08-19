@@ -83,7 +83,6 @@ def run_independent_validation_batch(
         raise FileExistsError(output_dir)
     config = _read_json(config_path.resolve())
     inputs = config.get("inputs")
-    expected_prior = config.get("expected_prior_assignment_ids")
     if (
         config.get("schema_version") != _SCHEMA_VERSION
         or config.get("run_id") != "five_cwe_independent_validation_phi14b_canary_remaining_v1"
@@ -95,9 +94,6 @@ def run_independent_validation_batch(
         or config.get("maximum_functional_judge_calls") != 19
         or config.get("maximum_mechanism_extractor_calls") != 19
         or config.get("oracle_calls_allowed") is not False
-        or type(expected_prior) is not list
-        or len(expected_prior) != 1
-        or type(expected_prior[0]) is not str
         or type(inputs) is not dict
         or set(inputs)
         != {"plan_manifest", "runtime_freeze_manifest", "app_config", "mechanism_config"}
@@ -107,13 +103,12 @@ def run_independent_validation_batch(
     _verify_manifest(paths["plan_manifest"])
     _verify_manifest(paths["runtime_freeze_manifest"])
     prior_ids = _completed_assignment_ids(completed_run_dir)
-    if prior_ids != set(expected_prior):
-        raise ValueError("independent validation prior run selection failed validation")
 
     plan_dir = paths["plan_manifest"].parent
     plan_report = _read_json(plan_dir / "report.json")
     plan_selection = _read_json(plan_dir / "execution-selection.json")
     selected = plan_selection.get("canary_assignment_ids")
+    pilot_selected = plan_selection.get("pilot_assignment_ids")
     if (
         plan_report.get("status") != "INDEPENDENT_VALIDATION_EXECUTION_PLAN_COMPLETE"
         or plan_report.get("provider_calls") != 0
@@ -122,6 +117,10 @@ def run_independent_validation_batch(
         or len(selected) != 20
         or len(set(selected)) != 20
         or any(type(item) is not str for item in selected)
+        or type(pilot_selected) is not list
+        or len(pilot_selected) != 1
+        or type(pilot_selected[0]) is not str
+        or prior_ids != set(pilot_selected)
         or not prior_ids.issubset(set(selected))
     ):
         raise ValueError("independent validation batch source plan failed validation")

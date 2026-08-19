@@ -73,6 +73,10 @@ mechanism-extractor call. It performs no Oracle call.
   bug. The root run manifest includes each unit's `artifact-manifest.json`, but the checker excluded
   every file with that name rather than only the root manifest being verified. The checker now
   excludes by exact path, and a nested-unit-manifest regression test protects the closure rule.
+- The next zero-call preflight found that the canary config's manually copied standard assignment ID
+  contained one extra hexadecimal character. Rather than correcting a duplicated identity by hand,
+  the batch now reads the sole pilot assignment ID from the closed execution plan and requires exact
+  equality with the completed run. The plan remains the single identity authority.
 
 ## Server execution prerequisites
 

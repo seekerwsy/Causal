@@ -25,9 +25,6 @@
   "selection_key": "canary_assignment_ids",
   "expected_selected_assignments": 20,
   "expected_prior_completed": 1,
-  "expected_prior_assignment_ids": [
-    "assignment_13a6a7ba6eb7cde590208ca30fd1d2aed56d14467ca159e6b396236caf8098881"
-  ],
   "expected_new_assignments": 19,
   "maximum_generation_calls": 19,
   "maximum_functional_judge_calls": 19,
