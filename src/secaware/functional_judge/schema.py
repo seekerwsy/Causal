@@ -260,7 +260,7 @@ class FunctionalRequirementDecision(StrictModel):
 
     requirement_id: str = Field(pattern=r"^req_[a-z0-9_]{1,64}$")
     verdict: RequirementVerdict
-    code_evidence: tuple[str, ...] = Field(default=(), max_length=8)
+    code_evidence: tuple[str, ...] = Field(default=(), max_length=32)
     counterexample: str | None = Field(default=None, max_length=4000)
 
     @field_validator("code_evidence", mode="before")

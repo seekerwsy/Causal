@@ -321,6 +321,48 @@ def test_judge_ignores_blank_evidence_lines_and_retains_nonblank_evidence() -> N
     assert passes[0].requirements[0].code_evidence == ("    return 42",)
 
 
+def test_judge_retains_more_than_eight_valid_evidence_lines() -> None:
+    from secaware.generation.result_importer import canonical_generated_code_from_request
+
+    assignment, _variant, code = _confirmation_code()
+    expanded_code = canonical_generated_code_from_request(
+        code.generation_request,
+        "def answer():\n"
+        "    value = 42\n"
+        "    copy_1 = value\n"
+        "    copy_2 = copy_1\n"
+        "    copy_3 = copy_2\n"
+        "    copy_4 = copy_3\n"
+        "    copy_5 = copy_4\n"
+        "    copy_6 = copy_5\n"
+        "    copy_7 = copy_6\n"
+        "    return copy_7\n",
+        code.generation_provenance,
+        provider_result_sha256=code.provider_result_sha256,
+        provider_usage_sha256=code.provider_usage_sha256,
+        provider_runtime_sha256=code.provider_runtime_sha256,
+        provider_policy_sha256=code.provider_policy_sha256,
+        provider_attempt_count=code.provider_attempt_count,
+    )
+    evidence_lines = list(range(2, 11))
+    judge = LLMFunctionalJudge(
+        FakeTransport((_response("pass", "met", evidence_lines=evidence_lines),)),
+        _policy(35),
+        mode="single_pass",
+    )
+
+    passes, outcome = judge.evaluate(
+        assignment,
+        _execution_for(assignment, expanded_code),
+        expanded_code,
+        _contract(),
+    )
+
+    assert outcome.status is FunctionalOutcomeStatus.PASS
+    assert len(passes[0].requirements[0].code_evidence) == 9
+    assert passes[0].requirements[0].code_evidence[-1] == "    return copy_7"
+
+
 def test_judge_rejects_non_integer_evidence_line() -> None:
     assignment, _variant, code = _confirmation_code()
     transport = FakeTransport(

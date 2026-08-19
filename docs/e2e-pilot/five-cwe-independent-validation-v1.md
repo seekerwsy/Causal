@@ -21,11 +21,17 @@ stability at least 0.8, and failed-bootstrap fraction at most 0.1.
 - Python: `D:\MyCode\Causal\.venv\Scripts\python.exe`.
 - Gate A: `runs/restricted/five-cwe-independent-validation-gate-a-phi14b-20260819-02`.
 - Functional contracts: `runs/restricted/five-cwe-independent-validation-functional-contracts-20260819-02`.
-- Runtime/analysis freeze v2: `data/e2e-pilot/five-cwe-independent-validation-runtime-analysis-freeze-20260819-02`.
+- Superseded runtime/analysis freeze v2: `data/e2e-pilot/five-cwe-independent-validation-runtime-analysis-freeze-20260819-02`.
+- Current runtime/analysis freeze v3: `data/e2e-pilot/five-cwe-independent-validation-runtime-analysis-freeze-20260819-03`.
 - Standard execution plan: `runs/restricted/five-cwe-independent-validation-execution-plan-phi14b-20260819-01`.
 
 The v2 runtime freeze supersedes v1 without modifying it. It adds the exact generation-provider
 runtime fingerprint after the multilingual response parser was connected to the provider. The
+v3 freeze supersedes v2 without modifying either historical freeze. It increases the maximum
+retained evidence lines for one functional requirement from 8 to 32 after the bounded canary
+returned nine valid in-range lines. It does not alter the Judge's status, requirement verdict,
+counterexample, blindness, or one-pass policy. Its functional-Judge policy SHA-256 is
+`5cffaa26b9fec5daa84eca3e96a94c28b2b5f40f3d40a7121ec866f825371907`.
 standard execution plan contains 55 blocks, 220 variants, 220 assignments, 220 generation requests,
 and 55 functional contracts. It was created with zero provider calls and zero consumed outcomes.
 
@@ -77,12 +83,21 @@ mechanism-extractor call. It performs no Oracle call.
   contained one extra hexadecimal character. Rather than correcting a duplicated identity by hand,
   the batch now reads the sole pilot assignment ID from the closed execution plan and requires exact
   equality with the completed run. The plan remains the single identity authority.
+- The first remaining-canary execution completed five new assignments and then stopped on the sixth
+  as designed. Generation and the functional Judge both completed, but the local Judge parser
+  rejected the response because one requirement cited nine valid source lines while the response
+  schema and stored decision allowed only eight. The ninth line was the in-range return statement,
+  all five requirement IDs and verdicts were present, and the failure was therefore an overly narrow
+  evidence-capacity constraint rather than a semantic Judge failure. The failed run remains at
+  `/home/ubuntu/secaware-experiments/runs/five-cwe-independent-validation-phi14b-canary-remaining-20260819-01`
+  with 5 complete, 1 error, and 13 unattempted assignments. Runtime freeze v3 lifts only this
+  capacity to 32, retains every evidence line, and is validated by a nine-line regression test.
 
 ## Server execution prerequisites
 
-The pilot has not yet been called. Before it runs, record the target host, repository path, output
-path, model path, model-service command, GPU state, disk state, port state, environment fingerprint,
-and input archive digests. New output directories must be used for every attempt.
+The target server, repository and output roots, model path, service command, GPU and disk state,
+port, environment fingerprint, and deployment archive digests are recorded with the remote runs.
+Every attempt uses a new output directory.
 
 ## Completed one-assignment pilot
 
@@ -100,6 +115,8 @@ request/response digest matches its transport record, and no configured API-key 
 in the run artifacts. This is an engineering execution-chain result, not an arm effect or causal
 discovery conclusion.
 
-The next bounded phase contains the other 19 assignments from the already frozen five-task canary.
-It authenticates the completed pilot, does not regenerate it, records per-unit elapsed time and
-cumulative speed/ETA, and stops at the first error for diagnosis.
+Because runtime freeze v3 changes the measurement-policy fingerprint, the successful v2 pilot and
+the five v2 canary completions remain engineering history but will not be mixed into the independent
+validation result. A replacement one-assignment v3 pilot is run first, followed by its remaining 19
+canary assignments. The replacement outputs use new directories, record per-unit elapsed time and
+cumulative speed/ETA, and still stop at the first error for diagnosis.

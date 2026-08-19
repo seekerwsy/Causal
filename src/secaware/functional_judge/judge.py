@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import ast
 import hashlib
-from importlib import resources
 import json
 from collections.abc import Mapping
+from importlib import resources
 from typing import Literal
 
 from secaware.errors import ErrorCode, SecAwareError
@@ -68,7 +68,7 @@ _OUTPUT_SCHEMA = {
                     "verdict": {"enum": ["met", "not_met", "unknown"]},
                     "code_evidence_lines": {
                         "type": "array",
-                        "maxItems": 8,
+                        "maxItems": 32,
                         "uniqueItems": True,
                         "items": {
                             "type": "integer",
@@ -87,7 +87,7 @@ _RESPONSE_KEYS = frozenset({"status", "requirements", "rationale"})
 _REQUIREMENT_KEYS = frozenset(
     {"requirement_id", "verdict", "code_evidence_lines", "counterexample"}
 )
-_EVIDENCE_RESOLUTION_VERSION = "valid-range-nonblank-lines-v2"
+_EVIDENCE_RESOLUTION_VERSION = "valid-range-nonblank-lines-v3"
 
 
 def _error(code: ErrorCode = ErrorCode.CONTRACT) -> SecAwareError:
@@ -170,7 +170,7 @@ def _parse_response(
             raw_line_numbers = raw_item["code_evidence_lines"]
             if (
                 type(raw_line_numbers) is not list
-                or len(raw_line_numbers) > 8
+                or len(raw_line_numbers) > 32
                 or any(type(item) is not int for item in raw_line_numbers)
                 or len(raw_line_numbers) != len(set(raw_line_numbers))
                 or any(item < 1 or item > len(program_lines) for item in raw_line_numbers)

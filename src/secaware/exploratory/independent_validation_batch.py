@@ -85,7 +85,11 @@ def run_independent_validation_batch(
     inputs = config.get("inputs")
     if (
         config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("run_id") != "five_cwe_independent_validation_phi14b_canary_remaining_v1"
+        or config.get("run_id")
+        not in {
+            "five_cwe_independent_validation_phi14b_canary_remaining_v1",
+            "five_cwe_independent_validation_phi14b_canary_remaining_v2",
+        }
         or config.get("selection_key") != "canary_assignment_ids"
         or config.get("expected_selected_assignments") != 20
         or config.get("expected_prior_completed") != 1

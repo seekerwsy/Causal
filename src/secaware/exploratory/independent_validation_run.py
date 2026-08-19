@@ -420,7 +420,11 @@ def run_independent_validation_pilot(
     inputs = config.get("inputs")
     if (
         config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("run_id") != "five_cwe_independent_validation_phi14b_pilot_v1"
+        or config.get("run_id")
+        not in {
+            "five_cwe_independent_validation_phi14b_pilot_v1",
+            "five_cwe_independent_validation_phi14b_pilot_v2",
+        }
         or config.get("selection_key") != "pilot_assignment_ids"
         or config.get("expected_assignments") != 1
         or config.get("maximum_generation_calls") != 1
