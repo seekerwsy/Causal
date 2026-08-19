@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from secaware.exploratory.independent_validation_batch import (
+    _completed_assignment_id_union,
+)
 from secaware.exploratory.independent_validation_run import _input_path, _verify_manifest
 
 
@@ -49,3 +52,53 @@ def test_root_manifest_includes_nested_unit_manifest(tmp_path: Path) -> None:
     )
 
     _verify_manifest(root)
+
+
+def _completed_run(root: Path, assignment_id: str) -> Path:
+    unit = root / "units" / assignment_id
+    unit.mkdir(parents=True)
+    status = unit / "status.json"
+    status.write_text(
+        '{"assignment_id":"' + assignment_id + '","status":"COMPLETE"}\n',
+        encoding="utf-8",
+    )
+    status_digest = hashlib.sha256(status.read_bytes()).hexdigest()
+    unit_manifest = unit / "artifact-manifest.json"
+    unit_manifest.write_text(
+        '{"files":[{"path":"status.json","sha256":"'
+        + status_digest
+        + '"}],"schema_version":"1.0"}\n',
+        encoding="utf-8",
+    )
+    entries = []
+    for path in (status, unit_manifest):
+        entries.append(
+            '{"path":"'
+            + path.relative_to(root).as_posix()
+            + '","sha256":"'
+            + hashlib.sha256(path.read_bytes()).hexdigest()
+            + '"}'
+        )
+    (root / "artifact-manifest.json").write_text(
+        '{"files":[' + ",".join(entries) + '],"schema_version":"1.0"}\n',
+        encoding="utf-8",
+    )
+    return root.resolve()
+
+
+def test_completed_assignment_union_accepts_disjoint_closed_runs(tmp_path: Path) -> None:
+    first = _completed_run(tmp_path / "first", "assignment_first")
+    second = _completed_run(tmp_path / "second", "assignment_second")
+
+    assert _completed_assignment_id_union((first, second)) == {
+        "assignment_first",
+        "assignment_second",
+    }
+
+
+def test_completed_assignment_union_rejects_overlapping_runs(tmp_path: Path) -> None:
+    first = _completed_run(tmp_path / "first", "assignment_duplicate")
+    second = _completed_run(tmp_path / "second", "assignment_duplicate")
+
+    with pytest.raises(ValueError, match="prior runs overlap"):
+        _completed_assignment_id_union((first, second))

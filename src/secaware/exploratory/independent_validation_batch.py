@@ -43,6 +43,35 @@ from secaware.schema.generation import GenerationRequestRecord
 
 _SCHEMA_VERSION = "1.0"
 _MECHANISM_POLICY_SHA256 = "01d279a56c64fc42aa54fd96611eec2fa7db54f5198ce3680d37388d89d1e7ac"
+_RUN_PROFILES = {
+    "five_cwe_independent_validation_phi14b_canary_remaining_v1": {
+        "selection_key": "canary_assignment_ids",
+        "prior_selection_key": "pilot_assignment_ids",
+        "selected": 20,
+        "prior": 1,
+        "new": 19,
+        "label": "CANARY_REMAINING",
+        "success_next_action": "validate_cumulative_twenty_assignment_canary",
+    },
+    "five_cwe_independent_validation_phi14b_canary_remaining_v2": {
+        "selection_key": "canary_assignment_ids",
+        "prior_selection_key": "pilot_assignment_ids",
+        "selected": 20,
+        "prior": 1,
+        "new": 19,
+        "label": "CANARY_REMAINING",
+        "success_next_action": "validate_cumulative_twenty_assignment_canary",
+    },
+    "five_cwe_independent_validation_phi14b_full_remaining_v1": {
+        "selection_key": "full_assignment_ids",
+        "prior_selection_key": "canary_assignment_ids",
+        "selected": 220,
+        "prior": 20,
+        "new": 200,
+        "label": "FULL_REMAINING",
+        "success_next_action": "validate_cumulative_220_assignments_then_run_frozen_discovery",
+    },
+}
 
 
 def _completed_assignment_ids(run_dir: Path) -> set[str]:
@@ -68,35 +97,45 @@ def _completed_assignment_ids(run_dir: Path) -> set[str]:
     return result
 
 
+def _completed_assignment_id_union(run_dirs: tuple[Path, ...]) -> set[str]:
+    if not run_dirs or len(run_dirs) != len(set(run_dirs)):
+        raise ValueError("independent validation prior run set failed validation")
+    result: set[str] = set()
+    for run_dir in run_dirs:
+        current = _completed_assignment_ids(run_dir)
+        if result.intersection(current):
+            raise ValueError("independent validation prior runs overlap")
+        result.update(current)
+    return result
+
+
 def run_independent_validation_batch(
     *,
     repo_root: Path,
     config_path: Path,
-    completed_run_dir: Path,
+    completed_run_dirs: tuple[Path, ...],
     output_dir: Path,
     command_argv: tuple[str, ...],
 ) -> dict[str, object]:
     repo_root = repo_root.resolve()
-    completed_run_dir = completed_run_dir.resolve()
+    completed_run_dirs = tuple(path.resolve() for path in completed_run_dirs)
     output_dir = output_dir.resolve()
     if output_dir.exists():
         raise FileExistsError(output_dir)
     config = _read_json(config_path.resolve())
     inputs = config.get("inputs")
+    run_id = config.get("run_id")
+    profile = _RUN_PROFILES.get(run_id) if type(run_id) is str else None
     if (
         config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("run_id")
-        not in {
-            "five_cwe_independent_validation_phi14b_canary_remaining_v1",
-            "five_cwe_independent_validation_phi14b_canary_remaining_v2",
-        }
-        or config.get("selection_key") != "canary_assignment_ids"
-        or config.get("expected_selected_assignments") != 20
-        or config.get("expected_prior_completed") != 1
-        or config.get("expected_new_assignments") != 19
-        or config.get("maximum_generation_calls") != 19
-        or config.get("maximum_functional_judge_calls") != 19
-        or config.get("maximum_mechanism_extractor_calls") != 19
+        or profile is None
+        or config.get("selection_key") != profile["selection_key"]
+        or config.get("expected_selected_assignments") != profile["selected"]
+        or config.get("expected_prior_completed") != profile["prior"]
+        or config.get("expected_new_assignments") != profile["new"]
+        or config.get("maximum_generation_calls") != profile["new"]
+        or config.get("maximum_functional_judge_calls") != profile["new"]
+        or config.get("maximum_mechanism_extractor_calls") != profile["new"]
         or config.get("oracle_calls_allowed") is not False
         or type(inputs) is not dict
         or set(inputs)
@@ -106,30 +145,31 @@ def run_independent_validation_batch(
     paths = {name: _input_path(repo_root, value) for name, value in inputs.items()}
     _verify_manifest(paths["plan_manifest"])
     _verify_manifest(paths["runtime_freeze_manifest"])
-    prior_ids = _completed_assignment_ids(completed_run_dir)
+    prior_ids = _completed_assignment_id_union(completed_run_dirs)
 
     plan_dir = paths["plan_manifest"].parent
     plan_report = _read_json(plan_dir / "report.json")
     plan_selection = _read_json(plan_dir / "execution-selection.json")
-    selected = plan_selection.get("canary_assignment_ids")
-    pilot_selected = plan_selection.get("pilot_assignment_ids")
+    selected = plan_selection.get(str(profile["selection_key"]))
+    expected_prior = plan_selection.get(str(profile["prior_selection_key"]))
     if (
         plan_report.get("status") != "INDEPENDENT_VALIDATION_EXECUTION_PLAN_COMPLETE"
         or plan_report.get("provider_calls") != 0
         or plan_report.get("outcomes_consumed") != 0
         or type(selected) is not list
-        or len(selected) != 20
-        or len(set(selected)) != 20
+        or len(selected) != profile["selected"]
+        or len(set(selected)) != profile["selected"]
         or any(type(item) is not str for item in selected)
-        or type(pilot_selected) is not list
-        or len(pilot_selected) != 1
-        or type(pilot_selected[0]) is not str
-        or prior_ids != set(pilot_selected)
+        or type(expected_prior) is not list
+        or len(expected_prior) != profile["prior"]
+        or len(set(expected_prior)) != profile["prior"]
+        or any(type(item) is not str for item in expected_prior)
+        or prior_ids != set(expected_prior)
         or not prior_ids.issubset(set(selected))
     ):
         raise ValueError("independent validation batch source plan failed validation")
     to_run = tuple(item for item in selected if item not in prior_ids)
-    if len(to_run) != 19:
+    if len(to_run) != profile["new"]:
         raise ValueError("independent validation remaining selection failed validation")
 
     runtime_policy = _read_json(paths["runtime_freeze_manifest"].parent / "runtime-policy.json")
@@ -176,10 +216,13 @@ def run_independent_validation_batch(
         {
             "schema_version": _SCHEMA_VERSION,
             **{name + "_sha256": sha256_file(path) for name, path in paths.items()},
-            "completed_run_manifest_sha256": sha256_file(
-                completed_run_dir / "artifact-manifest.json"
-            ),
-            "completed_run_dir": str(completed_run_dir),
+            "completed_runs": [
+                {
+                    "run_dir": str(run_dir),
+                    "manifest_sha256": sha256_file(run_dir / "artifact-manifest.json"),
+                }
+                for run_dir in completed_run_dirs
+            ],
             "prior_completed_assignment_ids": sorted(prior_ids),
         },
     )
@@ -292,14 +335,14 @@ def run_independent_validation_batch(
     report: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "status": (
-            "INDEPENDENT_VALIDATION_CANARY_REMAINING_ERROR"
+            f"INDEPENDENT_VALIDATION_{profile['label']}_ERROR"
             if failure is not None
-            else "INDEPENDENT_VALIDATION_CANARY_REMAINING_COMPLETE"
+            else f"INDEPENDENT_VALIDATION_{profile['label']}_COMPLETE"
         ),
         "counts": {
-            "selected_assignments": 20,
-            "prior_complete": 1,
-            "new_assignments": 19,
+            "selected_assignments": profile["selected"],
+            "prior_complete": profile["prior"],
+            "new_assignments": profile["new"],
             "complete": completed,
             "errors": errors,
             "pending": pending,
@@ -314,18 +357,21 @@ def run_independent_validation_batch(
         "elapsed_seconds": time.monotonic() - started,
         "mean_unit_seconds": total_duration / max(completed + errors, 1),
         "next_action": (
-            "diagnose_and_repair_failed_canary_unit"
+            "diagnose_and_repair_failed_batch_unit"
             if failure is not None
-            else "validate_cumulative_twenty_assignment_canary"
+            else profile["success_next_action"]
         ),
     }
     _write_json(output_dir / "report.json", report)
     _root_manifest(output_dir)
     if failure is not None:
         raise RuntimeError(
-            "independent validation canary stopped at the first failed unit; artifacts preserved"
+            "independent validation batch stopped at the first failed unit; artifacts preserved"
         ) from failure
     return report
 
 
-__all__ = ["run_independent_validation_batch"]
+__all__ = [
+    "_completed_assignment_id_union",
+    "run_independent_validation_batch",
+]

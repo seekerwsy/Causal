@@ -13,13 +13,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--completed-run-dir", type=Path, required=True)
+    parser.add_argument("--completed-run-dir", type=Path, action="append", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     report = run_independent_validation_batch(
         repo_root=args.repo_root,
         config_path=args.config,
-        completed_run_dir=args.completed_run_dir,
+        completed_run_dirs=tuple(args.completed_run_dir),
         output_dir=args.output_dir,
         command_argv=tuple(sys.argv),
     )

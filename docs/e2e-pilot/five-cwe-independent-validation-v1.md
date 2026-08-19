@@ -120,3 +120,33 @@ the five v2 canary completions remain engineering history but will not be mixed 
 validation result. A replacement one-assignment v3 pilot is run first, followed by its remaining 19
 canary assignments. The replacement outputs use new directories, record per-unit elapsed time and
 cumulative speed/ETA, and still stop at the first error for diagnosis.
+
+## Completed v3 measurement canary
+
+The replacement pilot is stored at
+`/home/ubuntu/secaware-experiments/runs/five-cwe-independent-validation-phi14b-pilot-v3-policy-20260819-01`,
+and the remaining assignments are stored at
+`/home/ubuntu/secaware-experiments/runs/five-cwe-independent-validation-phi14b-canary-remaining-v3-policy-20260819-01`.
+Together they contain exactly the 20 assignment IDs in the frozen canary: four arms for one task
+from each of the five CWEs, with Python, Java, Go, and C represented. All 20 assignments completed;
+generation, the functional Judge, and mechanism extraction each made 20 one-attempt calls, with no
+Oracle call. The remaining-19 batch took 175.53 seconds (9.23 seconds per assignment).
+
+The canary contains observable variation rather than constant discovery variables: functional
+status is 15 pass and 5 fail, while the mechanism state is 13 `proved_safe` and 7 `proved_unsafe`.
+Every arm has five observations. Root and unit manifests close, all recorded transport-payload
+digests match, every functional pass binds to the v3 Judge policy, and no configured API-key byte
+sequence occurs in an artifact. Functional failures are retained as observed outcomes and are not
+execution errors or filters.
+
+The first cumulative audit script incorrectly expected every transport record to use the key
+`attempts`; generation records use singular `attempt`, while the two structured transports use
+plural `attempts`. The audit was corrected to validate each established schema and then passed.
+Likewise, transport digests cover payload bytes while persisted JSON files append one newline; the
+audit validates the payload after removing that storage delimiter. These are audit-script issues,
+not experiment failures.
+
+The next run authenticates both closed v3 canary directories, requires their disjoint union to equal
+the frozen 20-assignment canary, and executes only the remaining 200 assignments from the 220-item
+full selection. It retains serial execution and first-error stop behavior; the estimated runtime at
+the observed canary rate is approximately 31 minutes before validation and analysis.
