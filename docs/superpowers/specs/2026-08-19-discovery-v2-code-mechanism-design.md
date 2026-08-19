@@ -75,6 +75,12 @@ Changing methods until a positive edge appears is forbidden.
   required a run-level manifest that the historical discovery archives never contained. The
   corrected audit retains archive-level SHA-256 binding and verifies every unit manifest. No model,
   Judge, analyzer, or causal-backend call occurred.
+- The first typed-Z test command named two obsolete test paths, so pytest collected no test and no
+  product code ran. Listing the repository tests first located the active background and path suites.
+- The first causal-schema extension raised the variable tier ceiling to three but retained a second
+  hidden tier ceiling in the background-knowledge contract. The new unit test failed before any
+  experiment run. Updating that same contract to accept tier three allowed all 103 targeted schema,
+  background, JCI, and path tests to pass; existing tier-zero-through-two records remain valid.
 
 ## Mechanism audit result
 

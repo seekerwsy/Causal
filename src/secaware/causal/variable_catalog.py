@@ -12,7 +12,7 @@ from secaware.schema.tsg import MotifId
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG
 
 
-_VARIABLE_RE = re.compile(r"^[pwxy]\.[a-z0-9][a-z0-9_.-]{0,126}$")
+_VARIABLE_RE = re.compile(r"^[pwxyz]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]*$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 
@@ -128,6 +128,36 @@ _POOLED_RANDOMIZED_DISCOVERY_DECLARATIONS = (
     ),
 )
 
+_MECHANISM_DISCOVERY_V2_DECLARATIONS = (
+    VariableDeclaration(
+        variable_id="z.target_mechanism_realized",
+        role=VariableRole.Z,
+        states=("not_realized", "realized"),
+        query_id="code.mechanism.target_cwe_realized.v1",
+        applicable_cwes=("*",),
+        tier=2,
+        adjacency_type="code_security_mechanism",
+    ),
+    VariableDeclaration(
+        variable_id="y.discovery_cwe_secure",
+        role=VariableRole.Y,
+        states=("not_secure", "secure"),
+        query_id="outcome.discovery_cwe_secure_itt.v1",
+        applicable_cwes=("*",),
+        tier=3,
+        adjacency_type="security_outcome",
+    ),
+    VariableDeclaration(
+        variable_id="y.discovery_secure_functional",
+        role=VariableRole.Y,
+        states=("no_success", "success"),
+        query_id="outcome.discovery_secure_functional_itt.v1",
+        applicable_cwes=("*",),
+        tier=3,
+        adjacency_type="outcome",
+    ),
+)
+
 _FEATURE_DECLARATIONS = tuple(
     VariableDeclaration(
         variable_id=f"x.{spec.feature_id}",
@@ -188,7 +218,11 @@ POOLED_RANDOMIZED_DISCOVERY_VARIABLES = tuple(
 
 _ALL_CAUSAL_VARIABLES = tuple(
     sorted(
-        (*PROMPT_CAUSAL_VARIABLES, *_POOLED_RANDOMIZED_DISCOVERY_DECLARATIONS),
+        (
+            *PROMPT_CAUSAL_VARIABLES,
+            *_POOLED_RANDOMIZED_DISCOVERY_DECLARATIONS,
+            *_MECHANISM_DISCOVERY_V2_DECLARATIONS,
+        ),
         key=lambda item: item.variable_id,
     )
 )
@@ -209,11 +243,12 @@ def _validate_declaration(item: VariableDeclaration) -> None:
         or ("*" in item.applicable_cwes and item.applicable_cwes != ("*",))
         or any(value != "*" and _CWE_RE.fullmatch(value) is None for value in item.applicable_cwes)
         or item.tier
-        != {
-            VariableRole.P: 1,
-            VariableRole.W: 0,
-            VariableRole.X: 1,
-            VariableRole.Y: 2,
+        not in {
+            VariableRole.P: {1},
+            VariableRole.W: {0},
+            VariableRole.X: {1},
+            VariableRole.Z: {2},
+            VariableRole.Y: {2, 3},
         }[item.role]
         or _IDENTIFIER_RE.fullmatch(item.adjacency_type) is None
     ):
