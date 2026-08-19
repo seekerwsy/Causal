@@ -7,7 +7,10 @@ import hashlib
 from secaware.config import TSGConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy, PromptExtractor
-from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
+from secaware.extractors.deterministic_catalog import (
+    DeterministicCatalogExtractor,
+    MultilingualDeterministicCatalogExtractor,
+)
 from secaware.extractors.llm_direct_graph import (
     LLM_DIRECT_GRAPH_OUTPUT_SCHEMA_SHA256,
     LLM_DIRECT_GRAPH_SYSTEM_TEMPLATE,
@@ -53,7 +56,7 @@ def _require_tsg_config(config: object) -> TSGConfig:
         )
         if type(trusted) is not TSGConfig or not model_shape_is_intact(trusted):
             raise ValueError
-    except Exception:
+    except Exception:  # noqa: BLE001 - collapse malformed config at the trust boundary
         raise _config_error() from None
     return trusted
 
@@ -98,7 +101,7 @@ def structured_policy_for_config(config: TSGConfig) -> StructuredLLMPolicy:
             max_response_bytes=llm.max_response_bytes,
             enable_thinking=llm.enable_thinking,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - collapse malformed config at the trust boundary
         raise _config_error() from None
 
 
@@ -106,7 +109,10 @@ def extraction_policy(config: TSGConfig) -> ExtractionPolicy:
     """Return the run policy digest for the selected finite backend."""
     trusted = _require_tsg_config(config)
     backend = trusted.prompt_extractor
-    if backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1:
+    if backend in {
+        PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
+    }:
         if trusted.llm is not None:
             raise _config_error() from None
         digest = canonical_sha256(
@@ -114,7 +120,11 @@ def extraction_policy(config: TSGConfig) -> ExtractionPolicy:
                 "backend": backend.value,
                 "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
                 "max_response_chars": MAX_RAW_RESPONSE_CHARS,
-                "policy_version": "deterministic_catalog_policy_v1",
+                "policy_version": (
+                    "deterministic_catalog_policy_v1"
+                    if backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
+                    else "deterministic_catalog_policy_v2_multilingual"
+                ),
             }
         )
     elif backend is PromptExtractorBackend.LLM_FACTS_V1:
@@ -153,6 +163,10 @@ def extractor_for_config(
         if trusted.llm is not None or transport is not None:
             raise _config_error() from None
         return DeterministicCatalogExtractor()
+    if backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V2:
+        if trusted.llm is not None or transport is not None:
+            raise _config_error() from None
+        return MultilingualDeterministicCatalogExtractor()
 
     template, _template_sha256, _schema_sha256 = _llm_coordinates(trusted)
     llm = trusted.llm

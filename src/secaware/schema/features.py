@@ -25,6 +25,7 @@ class PromptExtractorBackend(str, Enum):
     LLM_FACTS_V1 = "llm_facts_v1"
     LLM_DIRECT_GRAPH_V1 = "llm_direct_graph_v1"
     DETERMINISTIC_CATALOG_V1 = "deterministic_catalog_v1"
+    DETERMINISTIC_CATALOG_V2 = "deterministic_catalog_v2"
 
 
 __all__ = [

@@ -15,8 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from secaware.config import TSGConfig
-from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
-from secaware.extractors.factory import extraction_policy
+from secaware.extractors.factory import extraction_policy, extractor_for_config
 from secaware.intervention.arm_catalog import materialize_safety_arm_specs
 from secaware.intervention.executors import DETERMINISTIC_INTERVENTION_POLICY_SHA256
 from secaware.intervention.variant_validation import blind_variant_prompt_record_from_text
@@ -321,6 +320,20 @@ def build_randomized_exploratory_canary(
             or type(config.get("next_gate", "blind_llm_intervention_and_extraction")) is not str
         ):
             raise ValueError("exploratory canary policy failed validation")
+        try:
+            diagnostic_backend = PromptExtractorBackend(
+                config.get(
+                    "diagnostic_prompt_extractor",
+                    PromptExtractorBackend.DETERMINISTIC_CATALOG_V1.value,
+                )
+            )
+        except (TypeError, ValueError):
+            raise ValueError("exploratory canary extractor policy failed validation") from None
+        if diagnostic_backend not in {
+            PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+            PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
+        }:
+            raise ValueError("exploratory canary extractor policy failed validation")
         selection_path = (repo_root / str(config["selection_path"])).resolve()
         prompts_path = (repo_root / str(config["prompts_path"])).resolve()
         selection_path.relative_to(repo_root)
@@ -383,10 +396,9 @@ def build_randomized_exploratory_canary(
         if type(renderer_config) is not dict or renderer_config.get("id") != _RENDERER_ID:
             raise ValueError("exploratory canary renderer policy failed validation")
         renderer_policy_sha256 = _renderer_policy_sha256(renderer_config)
-        policy = extraction_policy(
-            TSGConfig(prompt_extractor=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1)
-        )
-        extractor = DeterministicCatalogExtractor()
+        tsg_config = TSGConfig(prompt_extractor=diagnostic_backend)
+        policy = extraction_policy(tsg_config)
+        extractor = extractor_for_config(tsg_config)
         candidates = tuple(sorted(candidates_by_cwe.values(), key=lambda item: item["cwe"]))
         source_prompts: list[PromptRecord] = []
         proposals: list[object] = []
@@ -601,6 +613,7 @@ def build_randomized_exploratory_canary(
             },
             "feature_distribution": feature_distribution,
             "deterministic_extractor_gate_role": "diagnostic_only",
+            "diagnostic_prompt_extractor": diagnostic_backend.value,
             "next_gate": config.get("next_gate", "blind_llm_intervention_and_extraction"),
         }
         _write_json(output_dir / "report.json", report)

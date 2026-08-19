@@ -50,6 +50,20 @@ The first adjacent-test command also named a nonexistent `test_functional_judge_
 correctly stopped during collection and ran no tests. After enumerating the actual files, the
 contract and Judge tests passed 26/26 and the functional-Judge stage test passed 1/1.
 
+## v2 task-family correction
+
+The first freeze used source-dataset task-family labels in the Prompt records. Those labels were
+valid dataset metadata but were not the canonical task-family coordinates required by the finite
+FeatureSpec catalog. This incompatibility was detected before any generated code, Judge result, or
+mechanism outcome existed. The `-01` public and restricted artifacts remain immutable.
+
+The v2 freeze maps only the task-family coordinate to the five canonical values:
+`command_execution`, `sql_query`, `deserialization`, `message_hashing`, and
+`security_random_generation`. Prompt text and all 207 functional requirements are unchanged. The
+v2 Prompt bundle digest is
+`05209e464c002df9ad94f6e40e82a3f2b45561f874ea5caa8f874872b9630a84`; the contract bundle digest
+remains `82b8f26e8bd08e3ec1edab6034b0f3642e88941ea425382c9c6f1bebcfe3cb60`.
+
 The next stage is the pre-generation freeze of the four-arm intervention renderer, Phi-4-14B
 runtime coordinates, generated-response code extraction policy, single-pass Judge policy digest,
 mechanism policy digest, and FCI/JCI analysis manifest.

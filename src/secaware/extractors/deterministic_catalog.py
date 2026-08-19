@@ -23,8 +23,10 @@ from secaware.tsg.feature_catalog import (
 )
 from secaware.tsg.proposal_validator import _snapshot_prompt, feature_is_applicable
 
-
-_SUPPORTED_LANGUAGE_ALIASES = frozenset({"py", "python", "python3"})
+_V1_SUPPORTED_LANGUAGE_ALIASES = frozenset({"py", "python", "python3"})
+_V2_SUPPORTED_LANGUAGE_ALIASES = frozenset(
+    {"c", "c++", "cpp", "go", "java", "py", "python", "python3"}
+)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFETY_TASK_PREREQUISITE = {
     "safety.input_validation": "task.input_consumption",
@@ -58,7 +60,10 @@ def _internal_error() -> SecAwareError:
     )
 
 
-def _validate_policy(policy: object) -> ExtractionPolicy:
+def _validate_policy(
+    policy: object,
+    expected_backend: PromptExtractorBackend,
+) -> ExtractionPolicy:
     if type(policy) is not ExtractionPolicy:
         raise _InvalidInput from None
     values = (
@@ -69,7 +74,7 @@ def _validate_policy(policy: object) -> ExtractionPolicy:
     )
     if (
         type(values[0]) is not PromptExtractorBackend
-        or values[0] is not PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
+        or values[0] is not expected_backend
         or type(values[1]) is not str
         or _SHA256.fullmatch(values[1]) is None
         or type(values[2]) is not str
@@ -106,13 +111,11 @@ def _resolved_state(
     spec: FeatureSpec,
     prompt: PromptRecord,
     matches: dict[str, tuple[int, int] | None],
+    supported_language_aliases: frozenset[str],
 ) -> tuple[FeatureState, tuple[int, int] | None]:
     if not feature_is_applicable(spec, prompt):
         return FeatureState.NOT_APPLICABLE, None
-    if (
-        prompt.language.casefold() not in _SUPPORTED_LANGUAGE_ALIASES
-        or not spec.deterministic_terms
-    ):
+    if prompt.language.casefold() not in supported_language_aliases or not spec.deterministic_terms:
         return FeatureState.UNRESOLVED, None
 
     match = matches[spec.feature_id]
@@ -124,11 +127,14 @@ def _resolved_state(
     return FeatureState.PRESENT, match
 
 
-def _fact_payload(prompt: PromptRecord) -> list[dict[str, object]]:
+def _fact_payload(
+    prompt: PromptRecord,
+    supported_language_aliases: frozenset[str],
+) -> list[dict[str, object]]:
     matches = _match_by_feature(prompt)
     facts: list[dict[str, object]] = []
     for spec in PROMPT_FEATURE_CATALOG:
-        state, match = _resolved_state(spec, prompt, matches)
+        state, match = _resolved_state(spec, prompt, matches, supported_language_aliases)
         facts.append(
             {
                 "feature_id": spec.feature_id,
@@ -151,8 +157,12 @@ def _canonical_json(value: object) -> str:
     )
 
 
-def _extract(snapshot: PromptRecord, policy: ExtractionPolicy) -> PromptExtractionProposalRecord:
-    facts = _fact_payload(snapshot)
+def _extract(
+    snapshot: PromptRecord,
+    policy: ExtractionPolicy,
+    supported_language_aliases: frozenset[str],
+) -> PromptExtractionProposalRecord:
+    facts = _fact_payload(snapshot, supported_language_aliases)
     raw_response = _canonical_json({"facts": facts})
     if len(raw_response) > policy.max_response_chars:
         raise _InvalidInput from None
@@ -161,7 +171,7 @@ def _extract(snapshot: PromptRecord, policy: ExtractionPolicy) -> PromptExtracti
         "prompt_id": snapshot.prompt_id,
         "task_id": snapshot.task_id,
         "prompt_sha256": hashlib.sha256(snapshot.prompt.encode("utf-8")).hexdigest(),
-        "backend": PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        "backend": policy.backend,
         "catalog_sha256": policy.catalog_sha256,
         "policy_sha256": policy.policy_sha256,
         "response_sha256": hashlib.sha256(raw_response.encode("utf-8")).hexdigest(),
@@ -174,6 +184,39 @@ def _extract(snapshot: PromptRecord, policy: ExtractionPolicy) -> PromptExtracti
     return PromptExtractionProposalRecord.model_validate(payload)
 
 
+def _extract_with_backend(
+    prompt: PromptRecord,
+    policy: ExtractionPolicy,
+    *,
+    backend: PromptExtractorBackend,
+    supported_language_aliases: frozenset[str],
+) -> PromptExtractionProposalRecord:
+    try:
+        trusted_policy = _validate_policy(policy, backend)
+        snapshot = _snapshot_prompt(prompt)
+    except (SecAwareError, _InvalidInput):
+        prompt = None  # type: ignore[assignment]
+        policy = None  # type: ignore[assignment]
+        raise _invalid_error() from None
+    except Exception:  # noqa: BLE001 - sanitize unexpected trust-boundary failures
+        prompt = None  # type: ignore[assignment]
+        policy = None  # type: ignore[assignment]
+        raise _internal_error() from None
+
+    try:
+        return _extract(snapshot, trusted_policy, supported_language_aliases)
+    except _InvalidInput:
+        prompt = None  # type: ignore[assignment]
+        snapshot = None  # type: ignore[assignment]
+        policy = None  # type: ignore[assignment]
+        raise _invalid_error() from None
+    except Exception:  # noqa: BLE001 - sanitize unexpected trust-boundary failures
+        prompt = None  # type: ignore[assignment]
+        snapshot = None  # type: ignore[assignment]
+        policy = None  # type: ignore[assignment]
+        raise _internal_error() from None
+
+
 class DeterministicCatalogExtractor:
     """Emit one complete facts proposal from the immutable finite term catalog."""
 
@@ -182,30 +225,28 @@ class DeterministicCatalogExtractor:
         prompt: PromptRecord,
         policy: ExtractionPolicy,
     ) -> PromptExtractionProposalRecord:
-        try:
-            trusted_policy = _validate_policy(policy)
-            snapshot = _snapshot_prompt(prompt)
-        except (SecAwareError, _InvalidInput):
-            prompt = None  # type: ignore[assignment]
-            policy = None  # type: ignore[assignment]
-            raise _invalid_error() from None
-        except Exception:
-            prompt = None  # type: ignore[assignment]
-            policy = None  # type: ignore[assignment]
-            raise _internal_error() from None
-
-        try:
-            return _extract(snapshot, trusted_policy)
-        except _InvalidInput:
-            prompt = None  # type: ignore[assignment]
-            snapshot = None  # type: ignore[assignment]
-            policy = None  # type: ignore[assignment]
-            raise _invalid_error() from None
-        except Exception:
-            prompt = None  # type: ignore[assignment]
-            snapshot = None  # type: ignore[assignment]
-            policy = None  # type: ignore[assignment]
-            raise _internal_error() from None
+        return _extract_with_backend(
+            prompt,
+            policy,
+            backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+            supported_language_aliases=_V1_SUPPORTED_LANGUAGE_ALIASES,
+        )
 
 
-__all__ = ["DeterministicCatalogExtractor"]
+class MultilingualDeterministicCatalogExtractor:
+    """Apply the reviewed English Prompt catalog across frozen code-language scopes."""
+
+    def extract(
+        self,
+        prompt: PromptRecord,
+        policy: ExtractionPolicy,
+    ) -> PromptExtractionProposalRecord:
+        return _extract_with_backend(
+            prompt,
+            policy,
+            backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
+            supported_language_aliases=_V2_SUPPORTED_LANGUAGE_ALIASES,
+        )
+
+
+__all__ = ["DeterministicCatalogExtractor", "MultilingualDeterministicCatalogExtractor"]
