@@ -38,8 +38,6 @@ class SecAwareFsePaperContractTest(unittest.TestCase):
         expected = (
             "RQ1. How effectively can different methods discover and confirm "
             "security-relevant prompt-side mechanisms in LLM code generation?",
-            "RQ2. How do SecAware's structured representation and causal analysis "
-            "components contribute to mechanism discovery and confirmation?",
             "RQ3. Which prompt-side defensive interventions effectively reduce "
             "insecure code generation?",
             "RQ4. How do security experts rate and rank the perceived quality and "
@@ -47,6 +45,12 @@ class SecAwareFsePaperContractTest(unittest.TestCase):
         )
         for research_question in expected:
             self.assertIn(research_question, manuscript)
+
+        self.assertRegex(
+            manuscript,
+            re.escape(r"RQ2. How do \model's structured representation and causal analysis ")
+            + re.escape("components contribute to mechanism discovery and confirmation?"),
+        )
 
     def test_manuscript_uses_prompt_only_fci_and_randomized_itt_contract(self) -> None:
         manuscript = PAPER.read_text(encoding="utf-8")
