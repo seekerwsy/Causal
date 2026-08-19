@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -105,18 +106,33 @@ def _environment() -> dict[str, object]:
 
 
 def _input_path(repo_root: Path, value: object) -> Path:
-    if type(value) is not dict or set(value) != {"path", "sha256"}:
+    if type(value) is not dict or set(value) not in (
+        {"path", "sha256"},
+        {"path", "sha256", "digest_mode"},
+    ):
         raise ValueError("independent validation run input failed validation")
     relative = value.get("path")
     digest = value.get("sha256")
-    if type(relative) is not str or type(digest) is not str or len(digest) != 64:
+    digest_mode = value.get("digest_mode", "raw_bytes_v1")
+    if (
+        type(relative) is not str
+        or type(digest) is not str
+        or len(digest) != 64
+        or digest_mode not in {"raw_bytes_v1", "lf_normalized_text_v1"}
+    ):
         raise ValueError("independent validation run input failed validation")
     path = (repo_root / relative).resolve()
     try:
         path.relative_to(repo_root.resolve())
     except ValueError:
         raise ValueError("independent validation run input escaped repository") from None
-    if not path.is_file() or sha256_file(path) != digest:
+    if not path.is_file():
+        raise ValueError("independent validation run input digest failed validation")
+    content = path.read_bytes()
+    if digest_mode == "lf_normalized_text_v1":
+        content = content.replace(b"\r\n", b"\n")
+    actual_digest = hashlib.sha256(content).hexdigest()
+    if actual_digest != digest:
         raise ValueError("independent validation run input digest failed validation")
     return path
 

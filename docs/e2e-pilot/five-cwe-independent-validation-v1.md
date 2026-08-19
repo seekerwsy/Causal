@@ -64,6 +64,11 @@ mechanism-extractor call. It performs no Oracle call.
 - A broad confirmation-generation test command was started while checking adjacency regressions and
   ran much longer than the intended small validation. It was terminated without using its partial
   output. The retained validation is the explicit 168-test set above; no full-suite claim is made.
+- The first remote pilot attempt stopped before creating its run directory or making a provider
+  call. Git archive exported two tracked configuration files as CRLF even though the worktree and
+  repository blobs use LF, so their raw-byte digests differed even though their parsed content was
+  identical. Text configuration inputs now declare `lf_normalized_text_v1`; manifests and generated
+  artifacts retain exact raw-byte digests. A new deployment is used for the repaired attempt.
 
 ## Pending server outputs
 
