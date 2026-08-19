@@ -70,8 +70,25 @@ _RUN_PROFILES = {
         "new": 200,
         "label": "FULL_REMAINING",
         "success_next_action": "validate_cumulative_220_assignments_then_run_frozen_discovery",
+        "allow_recovered_prior_errors": False,
+        "prior_consumed_new": 0,
+    },
+    "five_cwe_independent_validation_phi14b_full_resume_v1": {
+        "selection_key": "full_assignment_ids",
+        "prior_selection_key": "canary_assignment_ids",
+        "selected": 220,
+        "prior": 58,
+        "new": 162,
+        "label": "FULL_RESUME",
+        "success_next_action": "validate_cumulative_220_assignments_then_run_frozen_discovery",
+        "allow_recovered_prior_errors": True,
+        "prior_consumed_new": 38,
     },
 }
+
+for _profile in _RUN_PROFILES.values():
+    _profile.setdefault("allow_recovered_prior_errors", False)
+    _profile.setdefault("prior_consumed_new", 0)
 
 
 def _completed_assignment_ids(run_dir: Path) -> set[str]:
@@ -97,15 +114,49 @@ def _completed_assignment_ids(run_dir: Path) -> set[str]:
     return result
 
 
-def _completed_assignment_id_union(run_dirs: tuple[Path, ...]) -> set[str]:
+def _run_assignment_states(run_dir: Path) -> tuple[set[str], set[str]]:
+    _verify_manifest(run_dir / "artifact-manifest.json")
+    complete: set[str] = set()
+    errors: set[str] = set()
+    units = run_dir / "units"
+    if not units.is_dir():
+        raise ValueError("independent validation prior run has no units")
+    for unit_dir in sorted(units.iterdir()):
+        if not unit_dir.is_dir():
+            raise ValueError("independent validation prior unit failed validation")
+        _verify_manifest(unit_dir / "artifact-manifest.json")
+        status = _read_json(unit_dir / "status.json")
+        assignment_id = status.get("assignment_id")
+        state = status.get("status")
+        if (
+            state not in {"COMPLETE", "ERROR"}
+            or type(assignment_id) is not str
+            or not assignment_id
+            or assignment_id in complete
+            or assignment_id in errors
+        ):
+            raise ValueError("independent validation prior state failed validation")
+        (complete if state == "COMPLETE" else errors).add(assignment_id)
+    return complete, errors
+
+
+def _completed_assignment_id_union(
+    run_dirs: tuple[Path, ...],
+    *,
+    allow_recovered_errors: bool = False,
+) -> set[str]:
     if not run_dirs or len(run_dirs) != len(set(run_dirs)):
         raise ValueError("independent validation prior run set failed validation")
     result: set[str] = set()
+    errors: set[str] = set()
     for run_dir in run_dirs:
-        current = _completed_assignment_ids(run_dir)
+        current, current_errors = _run_assignment_states(run_dir)
         if result.intersection(current):
             raise ValueError("independent validation prior runs overlap")
         result.update(current)
+        errors.update(current_errors)
+    if errors and (not allow_recovered_errors or not errors.issubset(result)):
+        raise ValueError("independent validation prior errors are not recovered")
     return result
 
 
@@ -145,13 +196,24 @@ def run_independent_validation_batch(
     paths = {name: _input_path(repo_root, value) for name, value in inputs.items()}
     _verify_manifest(paths["plan_manifest"])
     _verify_manifest(paths["runtime_freeze_manifest"])
-    prior_ids = _completed_assignment_id_union(completed_run_dirs)
+    prior_ids = _completed_assignment_id_union(
+        completed_run_dirs,
+        allow_recovered_errors=bool(profile["allow_recovered_prior_errors"]),
+    )
 
     plan_dir = paths["plan_manifest"].parent
     plan_report = _read_json(plan_dir / "report.json")
     plan_selection = _read_json(plan_dir / "execution-selection.json")
     selected = plan_selection.get(str(profile["selection_key"]))
-    expected_prior = plan_selection.get(str(profile["prior_selection_key"]))
+    base_prior = plan_selection.get(str(profile["prior_selection_key"]))
+    if type(base_prior) is list and type(selected) is list:
+        nonprior = [item for item in selected if item not in set(base_prior)]
+        expected_prior = [
+            *base_prior,
+            *nonprior[: int(profile["prior_consumed_new"])],
+        ]
+    else:
+        expected_prior = None
     if (
         plan_report.get("status") != "INDEPENDENT_VALIDATION_EXECUTION_PLAN_COMPLETE"
         or plan_report.get("provider_calls") != 0

@@ -54,12 +54,12 @@ def test_root_manifest_includes_nested_unit_manifest(tmp_path: Path) -> None:
     _verify_manifest(root)
 
 
-def _completed_run(root: Path, assignment_id: str) -> Path:
+def _completed_run(root: Path, assignment_id: str, *, status_value: str = "COMPLETE") -> Path:
     unit = root / "units" / assignment_id
     unit.mkdir(parents=True)
     status = unit / "status.json"
     status.write_text(
-        '{"assignment_id":"' + assignment_id + '","status":"COMPLETE"}\n',
+        '{"assignment_id":"' + assignment_id + '","status":"' + status_value + '"}\n',
         encoding="utf-8",
     )
     status_digest = hashlib.sha256(status.read_bytes()).hexdigest()
@@ -102,3 +102,29 @@ def test_completed_assignment_union_rejects_overlapping_runs(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="prior runs overlap"):
         _completed_assignment_id_union((first, second))
+
+
+def test_completed_assignment_union_accepts_a_separately_recovered_error(
+    tmp_path: Path,
+) -> None:
+    failed = _completed_run(
+        tmp_path / "failed",
+        "assignment_recovered",
+        status_value="ERROR",
+    )
+    recovery = _completed_run(tmp_path / "recovery", "assignment_recovered")
+
+    assert _completed_assignment_id_union((failed, recovery), allow_recovered_errors=True) == {
+        "assignment_recovered"
+    }
+
+
+def test_completed_assignment_union_rejects_an_unrecovered_error(tmp_path: Path) -> None:
+    failed = _completed_run(
+        tmp_path / "failed",
+        "assignment_unrecovered",
+        status_value="ERROR",
+    )
+
+    with pytest.raises(ValueError, match="prior errors are not recovered"):
+        _completed_assignment_id_union((failed,), allow_recovered_errors=True)

@@ -19,7 +19,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from secaware.config import AppConfig, load_config, write_resolved_config
-from secaware.errors import SecAwareError
+from secaware.errors import ErrorCode, SecAwareError
 from secaware.exploratory.code_mechanism_calibration import (
     code_mechanism_policy_from_config,
 )
@@ -30,6 +30,7 @@ from secaware.exploratory.code_mechanism_facts import (
 from secaware.exploratory.gate_c_live import (
     RecordingGenerationTransport,
     RecordingStructuredTransport,
+    _invalid_judge_unknown_outcome,
 )
 from secaware.functional_judge.factory import create_functional_judge
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
@@ -330,9 +331,27 @@ def execute_independent_validation_unit(
         stage = "functional_judge"
         judge_recorder.bind(unit_dir / "functional-judge-transport")
         try:
-            judge_passes, functional_outcome = judge.evaluate(  # type: ignore[attr-defined]
-                assignment, execution, code, contract
-            )
+            try:
+                judge_passes, functional_outcome = judge.evaluate(  # type: ignore[attr-defined]
+                    assignment, execution, code, contract
+                )
+            except SecAwareError as judge_error:
+                if (
+                    judge_error.code is not ErrorCode.API_INVALID_RESPONSE
+                    or not (unit_dir / "functional-judge-transport" / "response.json").is_file()
+                ):
+                    raise
+                functional_outcome, invalid_response = _invalid_judge_unknown_outcome(
+                    unit_dir=unit_dir,
+                    assignment_id=assignment.assignment_id,
+                    contract_id=contract.contract_id,
+                    evaluator_policy_sha256=judge.policy_sha256,  # type: ignore[attr-defined]
+                )
+                judge_passes = ()
+                _write_json(
+                    unit_dir / "functional-judge-invalid-response.json",
+                    invalid_response,
+                )
         finally:
             judge_recorder.release_if_unused()
         judge_calls = 1

@@ -150,3 +150,38 @@ The next run authenticates both closed v3 canary directories, requires their dis
 the frozen 20-assignment canary, and executes only the remaining 200 assignments from the 220-item
 full selection. It retains serial execution and first-error stop behavior; the estimated runtime at
 the observed canary rate is approximately 31 minutes before validation and analysis.
+
+## Full-run interruption and no-regeneration recovery
+
+The first full-remaining run is stored at
+`/home/ubuntu/secaware-experiments/runs/five-cwe-independent-validation-phi14b-full-remaining-v3-policy-20260819-01`.
+It stopped at its first execution error after 37 complete assignments. One additional assignment
+completed generation and the single Judge call, then failed local Judge-response validation; 162
+assignments remained unattempted. No mechanism call occurred for the failed assignment and no
+Oracle ran. The 37 complete assignments, one error, and 162 pending assignments are all preserved.
+
+The failed response is valid JSON but not the required schema. It contains 10,694 persisted bytes,
+a 5,814-character repetitive rationale, and malformed top-level keys instead of the required
+`status` and `requirements`. The assigned Go program and its frozen contract are present; this is a
+functional-Judge response-format failure, not a generation failure. The call lasted about 399
+seconds before returning the invalid payload, so the anomaly was inspected rather than attributed
+to model randomness.
+
+Gate C already defines and tests the project-wide treatment for this exact condition: preserve and
+hash-bind the invalid single-pass response, publish functional `unknown`, make no additional Judge
+call, and continue later measurements. The independent-validation runner had omitted that existing
+branch. It now reuses the same implementation. A dedicated recovery command copies the immutable
+generation and Judge transports to a new run, publishes the provenance-bound `unknown`, and makes
+only the missing mechanism-extractor call. It never regenerates code or asks the functional Judge
+again. The original failed run is not modified.
+
+After recovery, the resume batch accepts the old ERROR assignment only when the same assignment is
+COMPLETE in a separate closed recovery run. Its four prior runs must jointly equal the 20 canary
+assignments plus the first 38 assignments attempted by the full run. It will then execute exactly
+the remaining 162 assignments. Malformed Judge responses encountered during the resume follow the
+same preserved-response-to-unknown policy and therefore remain outcomes/diagnostics rather than
+batch execution failures.
+
+The production Python environment does not include pytest; the updated recovery and resume code was
+therefore checked in the local fixed environment with 43 focused tests rather than installing new
+packages on the experiment server. No full repository suite was run.
