@@ -19,6 +19,7 @@ from secaware.generation.openai_compatible_provider import (
     create_replay_openai_compatible_provider,
 )
 from secaware.generation.request_planner import plan_observed_requests
+from secaware.generation.source_extraction import SOURCE_EXTRACTION_POLICY_SHA256
 from secaware.io.jsonl import write_jsonl
 from secaware.pipeline.preflight import run_preflight
 from secaware.schema.common import SCHEMA_VERSION
@@ -124,6 +125,7 @@ def _request(
     system_template: str = _SYSTEM,
     parameters: dict[str, object] | None = None,
     include_default_max_tokens: bool = True,
+    system_template_version: str = "system-v1",
 ) -> GenerationRequestRecord:
     prompt = PromptRecord(
         prompt_id="prompt-api",
@@ -153,7 +155,7 @@ def _request(
         endpoint_identity=_BASE_URL if endpoint_type == "chat_completions" else None,
         parameters=GenerationParameters(values=parameter_values),
         system_template=system_template,
-        system_template_version="system-v1",
+        system_template_version=system_template_version,
     )[0]
 
 
@@ -710,6 +712,56 @@ def test_provider_rejects_ambiguous_or_non_python_source_envelopes(content: str)
 
     with pytest.raises(SecAwareError) as exc_info:
         provider.generate(_request(), system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+
+
+@pytest.mark.parametrize(
+    ("content", "expected", "envelope"),
+    [
+        ("```java\nclass Main {}\n```", "class Main {}", "single_markdown_fence"),
+        (
+            "<result><code><path>Main.go</path><content>package main</content></code></result>",
+            "package main",
+            "result_code_xml",
+        ),
+    ],
+)
+def test_provider_uses_frozen_multilingual_requested_artifact_policy(
+    content: str,
+    expected: str,
+    envelope: str,
+) -> None:
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    result = provider.generate(
+        _request(system_template_version="multilingual-requested-artifact-v1"),
+        system_template=_SYSTEM,
+    )
+
+    assert result.code == expected
+    assert result.provenance.source_batch_id == (
+        f"requested_artifact_v1.{envelope}.{SOURCE_EXTRACTION_POLICY_SHA256}:{sha256_text(content)}"
+    )
+
+
+def test_multilingual_requested_artifact_policy_rejects_external_commentary() -> None:
+    content = "Implementation:\n```java\nclass Main {}\n```"
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(
+            _request(system_template_version="multilingual-requested-artifact-v1"),
+            system_template=_SYSTEM,
+        )
 
     assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
 

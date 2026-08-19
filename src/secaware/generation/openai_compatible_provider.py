@@ -10,6 +10,10 @@ from typing import Any
 
 from secaware.config import OpenAICompatibleConfig
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
+from secaware.generation.source_extraction import (
+    SOURCE_EXTRACTION_POLICY_SHA256,
+    extract_generated_source,
+)
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.schema.generation import (
     GenerationAttemptRecord,
@@ -252,7 +256,7 @@ def _decode_python_source_envelope(content: str) -> tuple[str, str]:
 
 
 def _response_code(
-    response: object, *, expected_model: str
+    response: object, *, expected_model: str, system_template_version: str
 ) -> tuple[str | None, str, ProviderUsageRecord, str | None, str]:
     choices: object = None
     choice: object = None
@@ -293,7 +297,14 @@ def _response_code(
             if type(content) is not str:
                 raise ValueError("invalid message content")
             raw_content_sha256 = sha256_text(content)
-            content, source_envelope = _decode_python_source_envelope(content)
+            if system_template_version == "multilingual-requested-artifact-v1":
+                extraction = extract_generated_source(content)
+                content = extraction.source
+                source_envelope = (
+                    f"requested_artifact_v1.{extraction.envelope}.{SOURCE_EXTRACTION_POLICY_SHA256}"
+                )
+            else:
+                content, source_envelope = _decode_python_source_envelope(content)
         if finish_reason == "content_filter" and content not in {None, ""}:
             raise ValueError("invalid filtered content")
         if finish_reason == "length":
@@ -614,7 +625,11 @@ class OpenAICompatibleProvider:
                         usage,
                         raw_content_sha256,
                         source_envelope,
-                    ) = _response_code(response, expected_model=trusted.model_id)
+                    ) = _response_code(
+                        response,
+                        expected_model=trusted.model_id,
+                        system_template_version=trusted.system_template_version,
+                    )
                 except Exception:
                     response_invalid = True
                 if not response_invalid and finish_reason == "length":
@@ -771,7 +786,7 @@ def openai_provider_runtime_payload() -> dict[str, str]:
         "factory_source_sha256": hashlib.sha256(factory_source.encode("utf-8")).hexdigest(),
         "response_source_sha256": hashlib.sha256(response_source.encode("utf-8")).hexdigest(),
         "usage_source_sha256": hashlib.sha256(usage_source.encode("utf-8")).hexdigest(),
-        "response_policy": "bounded-python-source-envelope-v2",
+        "response_policy": "versioned-python-v2-or-multilingual-requested-artifact-v1",
     }
 
 

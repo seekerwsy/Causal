@@ -1704,4 +1704,13 @@ def recover_gate_c_live_oracle(
     return summary
 
 
-__all__ = ["recover_gate_c_live_oracle", "run_gate_c_live_canary"]
+RecordingGenerationTransport = _RecordingGenerationTransport
+RecordingStructuredTransport = _RecordingStructuredTransport
+
+
+__all__ = [
+    "RecordingGenerationTransport",
+    "RecordingStructuredTransport",
+    "recover_gate_c_live_oracle",
+    "run_gate_c_live_canary",
+]

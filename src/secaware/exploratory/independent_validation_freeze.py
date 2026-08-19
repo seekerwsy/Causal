@@ -16,6 +16,9 @@ from typing import Any
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.functional_judge.factory import create_functional_judge
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
+from secaware.generation.openai_compatible_provider import (
+    openai_provider_runtime_fingerprint,
+)
 from secaware.generation.source_extraction import SOURCE_EXTRACTION_POLICY_SHA256
 from secaware.io.jsonl import read_jsonl
 from secaware.pipeline.artifact import sha256_file
@@ -330,6 +333,7 @@ def freeze_independent_validation_runtime(
     runtime_policy = {
         "schema_version": _SCHEMA_VERSION,
         "model_id": "phi-4-14b",
+        "generation_provider_runtime_sha256": openai_provider_runtime_fingerprint(),
         "generation_system_template_sha256": generation_template_sha256,
         "response_extraction_policy_sha256": SOURCE_EXTRACTION_POLICY_SHA256,
         "functional_judge_policy_sha256": judge_policy_sha256,

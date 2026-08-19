@@ -123,6 +123,12 @@ def _policy(config: dict[str, Any]) -> StructuredLLMPolicy:
     )
 
 
+def code_mechanism_policy_from_config(config: dict[str, Any]) -> StructuredLLMPolicy:
+    """Build the calibrated mechanism policy without starting a provider call."""
+
+    return _policy(config)
+
+
 def _validate_case(row: dict[str, Any]) -> None:
     required = {"calibration_id", "code", "cwe", "expected_state", "language"}
     if (
@@ -331,4 +337,4 @@ def run_code_mechanism_calibration(
     return report
 
 
-__all__ = ["run_code_mechanism_calibration"]
+__all__ = ["code_mechanism_policy_from_config", "run_code_mechanism_calibration"]
