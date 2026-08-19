@@ -12,7 +12,7 @@
 \usepackage{xspace}
 \usetikzlibrary{arrows.meta,fit,positioning}
 
-\newcommand{\tool}{SecAware\xspace}
+\newcommand{\model}{\textsc{Model}\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
 \newcommand{\resultslot}{\mbox{\emph{Frozen-run results pending.}}}
 
@@ -38,7 +38,7 @@ generation: they can specify the required behavior while leaving validation,
 authorization, trust boundaries, or safe-API constraints implicit. Existing
 attribution and perturbation methods can expose influential text, yet they do
 not by themselves turn that evidence into a task-preserving prompt
-intervention with a confirmatory effect estimate. We present \tool, a
+intervention with a confirmatory effect estimate. We present \model, a
 three-stage framework that constructs a security-aware prompt representation,
 discovers stable prompt-side hypotheses with structure-constrained FCI, and
 tests frozen hypotheses through held-out prompt interventions. The discovery
@@ -104,7 +104,7 @@ be fixed before held-out outcomes exist, so that confirmation estimates the
 effect of assignment rather than selecting cases in which the intended edit
 happened to succeed.
 
-\tool provides this progression in three stages.
+\model provides this progression in three stages.
 \textbf{Security-Aware Prompt Representation} converts prompt requirements
 into catalog-bound factors and relational motifs.
 \textbf{Stability-Guided Causal Discovery} combines structure-derived
@@ -187,7 +187,7 @@ model, and CWE scopes.
 
 \section{Security-Aware Prompt Representation}
 
-\tool first turns a programming request into factors that can be named,
+\model first turns a programming request into factors that can be named,
 scoped, and edited while preserving the requested task. This makes an implicit
 security requirement available as an intervention target and keeps task
 behavior and surface presentation separately auditable.
@@ -200,12 +200,12 @@ separated by a pre-confirmation freeze.
   \resizebox{\linewidth}{!}{%
     \input{figures/secaware-overview}
   }
-  \caption{\tool converts prompt semantics into stable, frozen hypotheses and
+  \caption{\model converts prompt semantics into stable, frozen hypotheses and
   evaluates their security effects on held-out tasks. Prompt TSG edges provide
   typed structure rather than causal conclusions; generated code enters only
   the independent Oracle and functional-evaluation path in the confirmation
   stage.}
-  \Description{Three-stage SecAware workflow. The discover split contains
+  \Description{Three-stage \model workflow. The discover split contains
   security-aware prompt representation and stability-guided causal discovery.
   A hypothesis-freeze boundary separates it from causal effect confirmation on
   held-out tasks using typed prompt variants, block randomization,
@@ -215,7 +215,7 @@ separated by a pre-confirmation freeze.
 
 \subsection{Typed Prompt Semantics}
 
-For each prompt, \tool separates three semantic families. Task-function
+For each prompt, \model separates three semantic families. Task-function
 factors describe required operations and functional constraints; safety-control
 factors describe guards, trust boundaries, assets, and security requirements;
 and presentation-control factors describe wording and formatting used for
@@ -236,7 +236,7 @@ digesting. The states \textsc{present}, \textsc{absent},
 
 \subsection{Run-Locked Extraction}
 
-\tool supports three ways to build the same catalog-bound representation. An
+\model supports three ways to build the same catalog-bound representation. An
 LLM can emit catalog-bound semantic facts for deterministic graph construction
 (\path{LLM_FACTS_V1}); it can instead emit a catalog-bound typed graph for
 strict validation and canonicalization
@@ -255,7 +255,7 @@ candidates for a favorable output.
 
 \subsection{Local Causal Variables}
 
-\tool builds a local table for each configured CWE/security scope and model.
+\model builds a local table for each configured CWE/security scope and model.
 $W$ contains approved pre-treatment task metadata, $X$ finite Prompt TSG
 features or motifs, and $Y$ independently committed Oracle or functional
 outcomes. $C$ is admitted only in secondary JCI, where it is instantiated as
@@ -280,7 +280,7 @@ causing pre-treatment metadata or prompt factors. Catalog types define
 family- and scope-specific forbidden directions, and typed adjacency
 restrictions exclude semantically impossible local relations. These rules may
 forbid both directions of an adjacency, but they never require a
-feature--outcome edge or any edge on the possible path being tested. \tool
+feature--outcome edge or any edge on the possible path being tested. \model
 persists the exact tiers, forbidden pairs, typed adjacency matrix, variable
 order, and background-knowledge digest and validates every learned PAG against
 them.
@@ -305,7 +305,7 @@ Path extraction retains PAG endpoint marks. A candidate begins at a
 catalog-bound intervenable Prompt TSG feature, ends at a preregistered outcome,
 and may traverse only other prompt-side features, motifs, or pre-treatment
 variables. It qualifies only when its canonical variable sequence and
-endpoint-compatible pattern meet the frozen stability rule. \tool applies a
+endpoint-compatible pattern meet the frozen stability rule. \model applies a
 fixed top-$K$ budget and deterministic ordering; it selects stable possible
 paths rather than claiming recovery of a unique DAG.
 
@@ -418,7 +418,7 @@ descriptive diagnostics, not individual causal flips or substitutes for ITT.
 
 \subsection{Evidence Levels and Secondary Structural Analysis}
 
-\tool uses six approved evidence levels:
+\model uses six approved evidence levels:
 
 \begin{enumerate}
   \item \textbf{Observational Candidate}: a discover-split stable possible path
@@ -449,7 +449,7 @@ JCI treats the finite randomized arm role as one categorical context variable
 and evaluates structural changes under explicit assumptions~\cite{mooij2020jci}.
 It is secondary to the assigned-arm ITT estimate. The context column is
 \texttt{C\_arm}; analyses remain separated by scope, model, frozen hypothesis,
-TargetSpec, and arm protocol. \tool preserves the raw augmented PAG and the
+TargetSpec, and arm protocol. \model preserves the raw augmented PAG and the
 JCI-constrained PAG with its orientation deltas. Optional py-tetrad RFCI is a
 sensitivity backend. Neither JCI nor RFCI may alter frozen hypotheses,
 assignments, outcomes, primary contrasts, or ITT evidence status.
@@ -503,7 +503,7 @@ counts, and preregistered secondary contrasts.
   \small
   \caption{RQ1 fixed-budget discovery-to-confirmation results. Panel A reports
   funnel counts. Panel B reports derived yields for the same method families:
-  SA is \tool, Attr.\ is prompt attribution, Concepts is causal prompt
+  \model is the proposed method, Attr.\ is prompt attribution, Concepts is causal prompt
   concepts, Perturb.\ is prompt perturbation, and Judge is LLM-judge
   explanation. Confirmed yield at $K$ is the primary method-level endpoint.}
   \label{tab:rq1}
@@ -513,7 +513,7 @@ counts, and preregistered secondary contrasts.
     \midrule
     Method family & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
     \midrule
-    \tool & -- & -- & -- & -- & -- & -- \\
+    \model & -- & -- & -- & -- & -- & -- \\
     Prompt attribution & -- & -- & -- & -- & -- & -- \\
     Causal prompt concepts & -- & -- & -- & -- & -- & -- \\
     Prompt perturbation & -- & -- & -- & -- & -- & -- \\
@@ -526,7 +526,7 @@ counts, and preregistered secondary contrasts.
     \toprule
     \multicolumn{6}{l}{\textit{Panel B: Derived yields}} \\
     \midrule
-    Metric & SA & Attr. & Concepts & Perturb. & Judge \\
+    Metric & Model & Attr. & Concepts & Perturb. & Judge \\
     \midrule
     Native / $K$ & -- & -- & -- & -- & -- \\
     Mapped / Native & -- & -- & -- & -- & -- \\
@@ -569,7 +569,7 @@ counts, and preregistered secondary contrasts.
 
 \subsection{RQ2: Representation and Causal Analysis}
 
-\textbf{RQ2. How do SecAware's structured representation and causal analysis
+\textbf{RQ2. How do \model's structured representation and causal analysis
 components contribute to mechanism discovery and confirmation?}
 
 RQ2 uses the preregistered two-by-two design to separate the contribution of
@@ -758,21 +758,21 @@ Integrated Gradients, TCAV, SHAP, and rationale benchmarks expose input
 features, concepts, or evidence associated with model predictions
 \cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser}.
 Because plausible explanations need not be faithful \cite{lyu2024faithful},
-\tool maps each method-native candidate to an editable prompt-side factor and
+\model maps each method-native candidate to an editable prompt-side factor and
 tests a frozen, directional intervention on held-out tasks.
 
 \paragraph{Security of LLM-generated code.}
 Empirical studies of generated and AI-assisted code identify security risks
 \cite{pearce2022copilot,perry2023assistants}, while SafeCoder and SecCoder
 improve secure generation through model-side training or inference
-\cite{he2024safecoder,zhang2024seccoder}. With the generator locked, \tool asks
+\cite{he2024safecoder,zhang2024seccoder}. With the generator locked, \model asks
 which editable prompt-side requirements have supported effects.
 
 \paragraph{Causal discovery and heterogeneous contexts.}
 FCI represents latent-variable uncertainty through PAGs
 \cite{spirtes1995fci,zhang2008ancestral}, with an implementation available in
 causal-learn \cite{zheng2024causallearn}; JCI formalizes causal discovery across
-heterogeneous contexts \cite{mooij2020jci}. \tool combines them with
+heterogeneous contexts \cite{mooij2020jci}. \model combines them with
 prompt-derived constraints, task-cluster stability, a pre-confirmation freeze,
 and held-out assigned-arm effects to turn possible paths into testable
 interventions.
@@ -842,7 +842,7 @@ remain outside this chain.
 
 \section{Conclusion}
 
-\tool represents editable prompt-side security factors and turns method outputs
+\model represents editable prompt-side security factors and turns method outputs
 into frozen directional hypotheses. It discovers stable possible paths and
 confirms those hypotheses on held-out tasks with task-clustered assigned-arm
 evidence. Its fixed-budget comparison also identifies where each method's
