@@ -64,3 +64,9 @@ The additional immutable artifact directories are:
 This passes the multilingual mechanism-measurement calibration gate. It does not authorize a
 scientific effect claim by itself. Independent-validation outcomes remain ungenerated at this
 point.
+
+One non-experimental verification command after the v2 run failed because a nested Python f-string
+was incorrectly escaped inside PowerShell. The experiment had already completed and its files were
+unchanged. Digest verification was immediately repeated using native PowerShell path handling and
+verified all nine manifest entries. Future artifact checks should use the native loop rather than a
+nested one-line Python expression.
