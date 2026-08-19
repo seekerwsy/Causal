@@ -22,6 +22,11 @@ from secaware.schema.policy_v2 import (
     RealizationPolicySpec,
     RealizationSpecRecord,
 )
+from secaware.tsg.context_queries_v2 import (
+    CWE89_SQL_FLOW_QUERY,
+    context_query_spec,
+)
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 
 def _sha(value: str) -> str:
@@ -31,23 +36,16 @@ def _sha(value: str) -> str:
 def _components(
     operation: FeatureOperation = FeatureOperation.ADD,
 ) -> tuple[
+    ContextQuerySpec,
     ActionableFeatureSpec,
     CandidateSkeleton,
     RealizationPolicySpec,
     tuple[RealizationSpecRecord, ...],
 ]:
-    context = ContextQuerySpec.from_content(
-        query_name="flow.untrusted_to_sql",
-        applicable_cwes=("CWE-89",),
-        applicable_task_archetypes=("value_parameterization",),
-        query_expression_sha256=_sha("query"),
-        context_query_catalog_sha256=_sha("context-catalog"),
-        query_semantics_version="context-query-v1",
-        target_feature_independent=True,
-    )
+    context = context_query_spec(CWE89_SQL_FLOW_QUERY)
     feature = ActionableFeatureSpec.from_content(
         feature_id="safety.sql_parameterization",
-        feature_catalog_sha256=_sha("feature-catalog"),
+        feature_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
         allowed_operations=(FeatureOperation.ADD, FeatureOperation.REMOVE),
         task_preserving_edit_policy_sha256=_sha("edit-policy"),
     )
@@ -76,10 +74,10 @@ def _components(
             else ExpectedDirection.NEGATIVE
         ),
         cwe="CWE-89",
-        task_archetype="value_parameterization",
+        task_archetype="value-parameterization",
         model_scope=("model.alpha", "model.beta"),
-        context_query_catalog_sha256=_sha("context-catalog"),
-        feature_catalog_sha256=_sha("feature-catalog"),
+        context_query_catalog_sha256=context.context_query_catalog_sha256,
+        feature_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
         eligibility_function_sha256=_sha("eligibility"),
     )
     role_order = (
@@ -113,15 +111,16 @@ def _components(
         )
         for index in range(policy.k_r)
     )
-    return feature, skeleton, policy, realizations
+    return context, feature, skeleton, policy, realizations
 
 
 def _bridge(
     operation: FeatureOperation = FeatureOperation.ADD,
 ) -> InterventionBridgeRecordV2:
-    feature, skeleton, policy, realizations = _components(operation)
+    context, feature, skeleton, policy, realizations = _components(operation)
     target = TargetSpecV2.from_components(
         skeleton=skeleton,
+        context_query=context,
         actionable_feature=feature,
         allowed_delta_policy_sha256=_sha("allowed-delta"),
         task_projection_policy_sha256=_sha("task-projection"),
@@ -156,6 +155,8 @@ def test_bridge_protocolizes_one_atomic_feature_without_selector_metadata(
     bridge = _bridge(operation)
 
     assert bridge.target_spec.feature_id == "safety.sql_parameterization"
+    assert bridge.context_query == bridge.target_spec.context_query
+    assert bridge.target_spec.context_read_feature_ids == ("task.database_query",)
     assert bridge.target_spec.operation is operation
     assert bridge.target_spec.source_state_rule is (
         TargetSourceStateRuleV2.ADD_RESOLVED_ABSENT
@@ -170,6 +171,16 @@ def test_bridge_protocolizes_one_atomic_feature_without_selector_metadata(
     payload = bridge.model_dump(mode="json")
     assert "selector" not in payload
     assert "rank" not in payload
+
+
+def test_bridge_json_round_trip_revalidates_nested_arm_contrasts() -> None:
+    bridge = _bridge()
+
+    replayed = InterventionBridgeRecordV2.model_validate_json(bridge.model_dump_json())
+
+    assert replayed == bridge
+    assert replayed.arm_protocol.primary_contrast == bridge.arm_protocol.primary_contrast
+    assert replayed.arm_protocol.specificity_contrasts == bridge.arm_protocol.specificity_contrasts
 
 
 def test_add_and_remove_are_distinct_targets_protocols_and_hypotheses() -> None:
@@ -226,3 +237,65 @@ def test_bridge_content_address_rejects_selector_rank_injection() -> None:
 
     with pytest.raises(ValidationError, match="intervention v2 contract failed validation"):
         InterventionBridgeRecordV2.model_validate(payload)
+
+
+def test_target_rejects_noncanonical_context_query() -> None:
+    context, feature, skeleton, _, _ = _components()
+    forged = ContextQuerySpec.from_content(
+        query_name=context.query_name,
+        applicable_cwes=context.applicable_cwes,
+        applicable_task_archetypes=context.applicable_task_archetypes,
+        query_expression_sha256=_sha("attacker-expression"),
+        context_query_catalog_sha256=_sha("attacker-context-catalog"),
+        query_semantics_version=context.query_semantics_version,
+        target_feature_independent=True,
+    )
+
+    with pytest.raises(ValueError, match="intervention v2 contract failed validation"):
+        TargetSpecV2.from_components(
+            skeleton=skeleton,
+            context_query=forged,
+            actionable_feature=feature,
+            allowed_delta_policy_sha256=_sha("allowed-delta"),
+            task_projection_policy_sha256=_sha("task-projection"),
+            context_projection_policy_sha256=_sha("context-projection"),
+            non_target_projection_policy_sha256=_sha("non-target-projection"),
+            security_neutrality_policy_sha256=_sha("neutrality"),
+        )
+
+
+def test_target_rejects_context_task_feature_as_the_actionable_leaf() -> None:
+    context, _, _, policy, _ = _components()
+    task_feature = ActionableFeatureSpec.from_content(
+        feature_id="task.database_query",
+        feature_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+        allowed_operations=(FeatureOperation.ADD, FeatureOperation.REMOVE),
+        task_preserving_edit_policy_sha256=_sha("attacker-edit-policy"),
+    )
+    skeleton = CandidateSkeleton.from_content(
+        context_query_id=context.context_query_id,
+        actionable_feature_spec_id=task_feature.actionable_feature_spec_id,
+        feature_id=task_feature.feature_id,
+        operation=FeatureOperation.ADD,
+        realization_policy_spec_id=policy.realization_policy_spec_id,
+        outcome_id="y_secure_yield",
+        expected_direction=ExpectedDirection.POSITIVE,
+        cwe="CWE-89",
+        task_archetype="value-parameterization",
+        model_scope=("model.alpha",),
+        context_query_catalog_sha256=context.context_query_catalog_sha256,
+        feature_catalog_sha256=PROMPT_FEATURE_CATALOG_SHA256,
+        eligibility_function_sha256=_sha("eligibility"),
+    )
+
+    with pytest.raises(ValueError, match="intervention v2 contract failed validation"):
+        TargetSpecV2.from_components(
+            skeleton=skeleton,
+            context_query=context,
+            actionable_feature=task_feature,
+            allowed_delta_policy_sha256=_sha("allowed-delta"),
+            task_projection_policy_sha256=_sha("task-projection"),
+            context_projection_policy_sha256=_sha("context-projection"),
+            non_target_projection_policy_sha256=_sha("non-target-projection"),
+            security_neutrality_policy_sha256=_sha("neutrality"),
+        )

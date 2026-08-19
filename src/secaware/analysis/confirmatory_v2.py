@@ -16,32 +16,18 @@ from secaware.analysis.itt_v2 import (
     ClusterITTResultV2,
     CoverageSummaryV2,
     ManskiContrastBoundsV2,
-    OutcomeNameV2,
     coverage_summary_v2,
     estimate_cluster_itt_v2,
     estimate_manski_bounds_v2,
 )
-from secaware.experiments.randomization_v2 import AssignmentCoverageManifestV2
+from secaware.experiments.execution_v2 import (
+    ProvenanceClosedAssignmentCoverageManifestV2,
+)
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
 from secaware.schema.population_v2 import PopulationFreezeManifestV2
 
-_ADD_ARMS = frozenset(
-    {
-        ArmRole.TARGET_PATCH,
-        ArmRole.NOOP_REWRITE,
-        ArmRole.LENGTH_MATCHED_PLACEBO,
-        ArmRole.GENERIC_SECURITY_REMINDER,
-    }
-)
-_REMOVE_ARMS = frozenset(
-    {
-        ArmRole.TARGET_REMOVE,
-        ArmRole.NOOP_RETAIN,
-        ArmRole.LENGTH_MATCHED_SHAM_EDIT,
-        ArmRole.GENERIC_SECURITY_REPLACEMENT,
-    }
-)
+_SUPPORTED_OUTCOMES = {"y_c", "y_e", "y_secure_yield", "y_joint"}
 
 
 def _digest(value: object) -> str:
@@ -60,44 +46,51 @@ def _digest(value: object) -> str:
 class ManifestBoundClusterITTResultV2:
     analysis_result_id: str
     population_freeze_manifest_id: str
+    provenance_closed_coverage_manifest_id: str
     assignment_coverage_manifest_id: str
     randomization_manifest_id: str
     cluster_itt: ClusterITTResultV2
     treatment_coverage: CoverageSummaryV2
     control_coverage: CoverageSummaryV2
     secure_yield_manski_bounds: ManskiContrastBoundsV2
+    simultaneous_confirmation_allowed: bool
+
+
+def _primary_contrast(operation: FeatureOperation) -> tuple[ArmRole, ArmRole]:
+    if operation is FeatureOperation.ADD:
+        return ArmRole.TARGET_PATCH, ArmRole.NOOP_REWRITE
+    return ArmRole.TARGET_REMOVE, ArmRole.NOOP_RETAIN
 
 
 def estimate_manifest_bound_cluster_itt_v2(
     *,
     population: PopulationFreezeManifestV2,
-    assignment_coverage: AssignmentCoverageManifestV2,
+    assignment_coverage: ProvenanceClosedAssignmentCoverageManifestV2,
     model_id: str,
-    treatment_arm: ArmRole,
-    control_arm: ArmRole,
-    outcome_name: OutcomeNameV2 = "y_secure_yield",
 ) -> ManifestBoundClusterITTResultV2:
-    """Estimate one model-specific ITT only from an exact frozen population/coverage join."""
+    """Return the frozen primary model-specific point estimate and diagnostics.
+
+    This function cannot award a confirmatory label.  Formal confirmation additionally
+    requires the registered all-hypothesis/all-model simultaneous-inference orchestrator.
+    """
 
     try:
         frozen_population = PopulationFreezeManifestV2.model_validate(population, strict=True)
-        coverage = AssignmentCoverageManifestV2.model_validate(assignment_coverage, strict=True)
+        authenticated_coverage = ProvenanceClosedAssignmentCoverageManifestV2.model_validate(
+            assignment_coverage, strict=True
+        )
+        coverage = authenticated_coverage.base_coverage
+        hypothesis = frozen_population.hypothesis
+        treatment_arm, control_arm = _primary_contrast(hypothesis.operation)
+        outcome_name = hypothesis.outcome_id
         if (
-            coverage.randomization.population != frozen_population
+            authenticated_coverage.execution_policy_freeze.randomization != coverage.randomization
+            or coverage.randomization.population != frozen_population
             or coverage.randomization.population.population_freeze_manifest_id
             != frozen_population.population_freeze_manifest_id
             or model_id not in frozen_population.common_model_scope
-            or type(treatment_arm) is not ArmRole
-            or type(control_arm) is not ArmRole
-            or treatment_arm is control_arm
+            or outcome_name not in _SUPPORTED_OUTCOMES
         ):
-            raise ValueError
-        allowed_arms = (
-            _ADD_ARMS
-            if frozen_population.hypothesis.operation is FeatureOperation.ADD
-            else _REMOVE_ARMS
-        )
-        if treatment_arm not in allowed_arms or control_arm not in allowed_arms:
             raise ValueError
 
         expected_ids = {
@@ -115,7 +108,6 @@ def estimate_manifest_bound_cluster_itt_v2(
             for item in frozen_population.task_gates
             if item.gate_passed and item.within_cluster_task_weight is not None
         }
-        hypothesis = frozen_population.hypothesis
         realization_weights = {
             realization_id: numerator / hypothesis.probability_denominator
             for realization_id, numerator in zip(
@@ -147,22 +139,30 @@ def estimate_manifest_bound_cluster_itt_v2(
         )
         payload = {
             "population_freeze_manifest_id": frozen_population.population_freeze_manifest_id,
+            "provenance_closed_coverage_manifest_id": (
+                authenticated_coverage.provenance_closed_coverage_manifest_id
+            ),
             "assignment_coverage_manifest_id": coverage.assignment_coverage_manifest_id,
             "randomization_manifest_id": coverage.randomization.randomization_manifest_id,
             "cluster_itt": asdict(result),
             "treatment_coverage": asdict(treatment_coverage),
             "control_coverage": asdict(control_coverage),
             "secure_yield_manski_bounds": asdict(manski),
+            "simultaneous_confirmation_allowed": False,
         }
         return ManifestBoundClusterITTResultV2(
             analysis_result_id="manifest_bound_itt_v2_" + _digest(payload),
             population_freeze_manifest_id=frozen_population.population_freeze_manifest_id,
+            provenance_closed_coverage_manifest_id=(
+                authenticated_coverage.provenance_closed_coverage_manifest_id
+            ),
             assignment_coverage_manifest_id=coverage.assignment_coverage_manifest_id,
             randomization_manifest_id=coverage.randomization.randomization_manifest_id,
             cluster_itt=result,
             treatment_coverage=treatment_coverage,
             control_coverage=control_coverage,
             secure_yield_manski_bounds=manski,
+            simultaneous_confirmation_allowed=False,
         )
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise

@@ -3,11 +3,24 @@ from __future__ import annotations
 import hashlib
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from functools import cache
 
 import pytest
 from pydantic import ValidationError
 
 from secaware.analysis.confirmatory_v2 import estimate_manifest_bound_cluster_itt_v2
+from secaware.experiments.execution_v2 import (
+    AssignmentExecutionReceiptV2,
+    ExecutionPolicyFreezeManifestV2,
+    InfrastructureFailureReceiptV2,
+    MeasurementExecutionPolicyV2,
+    ModelExecutionPolicyV2,
+    OutcomeAssemblyReceiptV2,
+    ProvenanceClosedAssignmentCoverageManifestV2,
+    RetryAttemptReceiptV2,
+    SyntaxValidationReceiptV2,
+    TotalAssignmentAccountingManifestV2,
+)
 from secaware.experiments.randomization_v2 import (
     AssignmentCoverageManifestV2,
     AssignmentUnitKeyV2,
@@ -443,6 +456,60 @@ def _randomization(population: PopulationFreezeManifestV2) -> RandomizationManif
     )
 
 
+def _randomization_with_provider_seeds(
+    population: PopulationFreezeManifestV2,
+) -> RandomizationManifestV2:
+    baseline = _randomization(population)
+    provider_seeds = {
+        (block.block_id, slot): index
+        for index, (block, slot) in enumerate(
+            (
+                (block, slot)
+                for block in baseline.blocks
+                for slot in baseline.request_randomness_slots
+            ),
+            start=1000,
+        )
+    }
+    return RandomizationManifestV2.from_population(
+        population=population,
+        request_randomness_slots=baseline.request_randomness_slots,
+        model_generation_parameters=baseline.model_generation_parameters,
+        randomization_seed=baseline.randomization_seed,
+        bounded_concurrency=baseline.bounded_concurrency,
+        provider_seed_by_block_slot=provider_seeds,
+    )
+
+
+def _execution_freeze(
+    randomization: RandomizationManifestV2,
+) -> ExecutionPolicyFreezeManifestV2:
+    return ExecutionPolicyFreezeManifestV2.from_randomization(
+        randomization=randomization,
+        model_policies=tuple(
+            ModelExecutionPolicyV2(
+                model_id=model_id,
+                language="python",
+                endpoint_sha256=_sha(f"endpoint:{model_id}"),
+                generation_parameters_sha256=_sha(f"generation-parameters:{model_id}"),
+                system_template_sha256=_sha(f"system-template:{model_id}"),
+                generator_producer_id="generator.synthetic",
+                generator_policy_sha256=_sha(f"generator-policy:{model_id}"),
+            )
+            for model_id in MODELS
+        ),
+        measurement_policy=MeasurementExecutionPolicyV2(
+            parser_producer_id="parser.synthetic",
+            parser_policy_sha256=_sha("parser-policy:synthetic"),
+            oracle_producer_id="oracle.synthetic",
+            oracle_policy_sha256=_sha("oracle-policy:synthetic"),
+            functional_evaluator_producer_id="functional.synthetic",
+            functional_evaluator_policy_sha256=_sha("functional-policy:synthetic"),
+        ),
+        execution_environment_sha256=_sha("execution-environment:synthetic"),
+    )
+
+
 def _committed_assignment(
     unit: AssignmentUnitKeyV2, randomization: RandomizationManifestV2
 ) -> ConfirmationAssignmentRecordV2:
@@ -491,6 +558,150 @@ def _outcome(unit: AssignmentUnitKeyV2) -> AssignmentOutcomeRecordV2:
         y_secure_yield=1,
         y_joint=1,
         source_digests_sha256=_sha(f"outcome-sources:{unit.assignment_id}"),
+    )
+
+
+def _authenticated_outcome_receipt(
+    *,
+    unit: AssignmentUnitKeyV2,
+    assignment: ConfirmationAssignmentRecordV2,
+    bundle: TaskRealizationBundleRecord,
+    execution_freeze: ExecutionPolicyFreezeManifestV2,
+    generation_parameters_sha256: str | None = None,
+) -> OutcomeAssemblyReceiptV2:
+    variant = next(item for item in bundle.arms if item.arm_role is unit.assigned_arm)
+    coordinates = {
+        "regime_id": "randomized_confirmation",
+        "semantic_task_cluster_id": assignment.semantic_task_cluster_id,
+        "task_instance_id": assignment.task_instance_id,
+        "model_id": assignment.model_id,
+        "request_randomness_slot": assignment.request_randomness_slot,
+        "provider_seed": assignment.provider_seed,
+        "assignment_id": assignment.assignment_id,
+        "hypothesis_id": assignment.hypothesis_id,
+        "target_spec_id": assignment.target_spec_id,
+        "realization_spec_id": assignment.realization_spec_id,
+        "task_realization_bundle_id": assignment.task_realization_bundle_id,
+        "variant_id": assignment.variant_id,
+        "arm_protocol_id": assignment.arm_protocol_id,
+        "block_id": assignment.block_id,
+        "assigned_arm": assignment.assigned_arm,
+    }
+    model_id = unit.block.model_id
+    request = GenerationRequestRecordV2.from_content(
+        **coordinates,
+        prompt_id=variant.variant_prompt_id,
+        prompt=variant.prompt_text,
+        prompt_sha256=variant.prompt_sha256,
+        language="python",
+        endpoint_sha256=_sha(f"endpoint:{model_id}"),
+        generation_parameters_sha256=(
+            unit.generation_parameters_sha256
+            if generation_parameters_sha256 is None
+            else generation_parameters_sha256
+        ),
+        system_template_sha256=_sha(f"system-template:{model_id}"),
+        generator_producer_id="generator.synthetic",
+        generator_policy_sha256=_sha(f"generator-policy:{model_id}"),
+    )
+    execution = AssignmentExecutionReceiptV2.from_request(
+        execution_policy_freeze=execution_freeze,
+        assignment_unit=unit,
+        committed_assignment=assignment,
+        task_realization_bundle=bundle,
+        generation_request=request,
+    )
+    code_text = "def generated():\n    return 1\n"
+    code = GeneratedCodeRecordV2.from_content(
+        **coordinates,
+        generation_request_id=request.generation_request_id,
+        code_status="generated",
+        code=code_text,
+        code_sha256=_sha(code_text),
+        terminal_reason=None,
+        provider_response_sha256=_sha(f"response:{unit.assignment_id}"),
+        generator_runtime_sha256=_sha("generator-runtime:synthetic"),
+    )
+    target = unit.assigned_arm is ArmRole.TARGET_PATCH
+    oracle = OracleResultRecordV2.from_content(
+        **coordinates,
+        generated_code_id=code.generated_code_id,
+        code_sha256=code.code_sha256,
+        status="secure" if target else "insecure",
+        oracle_supported=True,
+        oracle_evaluable=True,
+        evidence_sha256=_sha(f"oracle:{unit.assignment_id}"),
+        oracle_producer_id="oracle.synthetic",
+        oracle_policy_sha256=_sha("oracle-policy:synthetic"),
+        oracle_runtime_sha256=_sha("oracle-runtime:synthetic"),
+    )
+    functional = FunctionalResultRecordV2.from_content(
+        **coordinates,
+        generated_code_id=code.generated_code_id,
+        code_sha256=code.code_sha256,
+        status="pass",
+        evidence_sha256=_sha(f"functional:{unit.assignment_id}"),
+        evaluator_producer_id="functional.synthetic",
+        evaluator_policy_sha256=_sha("functional-policy:synthetic"),
+        evaluator_runtime_sha256=_sha("functional-runtime:synthetic"),
+    )
+    syntax = SyntaxValidationReceiptV2.from_generated_code(
+        generated_code=code,
+        language="python",
+        status="valid",
+        parser_producer_id="parser.synthetic",
+        parser_policy_sha256=_sha("parser-policy:synthetic"),
+        parser_runtime_sha256=_sha("parser-runtime:synthetic"),
+        evidence_sha256=_sha(f"parser:{unit.assignment_id}"),
+    )
+    return OutcomeAssemblyReceiptV2.from_runtime(
+        assignment_execution_receipt=execution,
+        generated_code=code,
+        syntax_validation=syntax,
+        oracle_result=oracle,
+        functional_result=functional,
+    )
+
+
+@dataclass(frozen=True)
+class AuthenticatedSyntheticExperiment:
+    population: PopulationFreezeManifestV2
+    randomization: RandomizationManifestV2
+    execution_freeze: ExecutionPolicyFreezeManifestV2
+    receipts: tuple[OutcomeAssemblyReceiptV2, ...]
+    closed_coverage: ProvenanceClosedAssignmentCoverageManifestV2
+
+
+@cache
+def _authenticated_experiment() -> AuthenticatedSyntheticExperiment:
+    population = _synthetic_population().manifest
+    randomization = _randomization(population)
+    execution_freeze = _execution_freeze(randomization)
+    bundles = {
+        bundle.task_realization_bundle_id: bundle
+        for gate in population.task_gates
+        if gate.task_policy_support is not None
+        for bundle in gate.task_policy_support.task_realization_bundles
+    }
+    receipts = tuple(
+        _authenticated_outcome_receipt(
+            unit=unit,
+            assignment=_committed_assignment(unit, randomization),
+            bundle=bundles[unit.block.task_realization_bundle_id],
+            execution_freeze=execution_freeze,
+        )
+        for unit in randomization.assignments
+    )
+    closed = ProvenanceClosedAssignmentCoverageManifestV2.from_receipts(
+        execution_policy_freeze=execution_freeze,
+        outcome_assembly_receipts=receipts,
+    )
+    return AuthenticatedSyntheticExperiment(
+        population=population,
+        randomization=randomization,
+        execution_freeze=execution_freeze,
+        receipts=receipts,
+        closed_coverage=closed,
     )
 
 
@@ -743,88 +954,58 @@ def test_assignment_coverage_is_exact_and_rejects_missing_duplicate_or_drift() -
 
 
 def test_public_itt_entrypoint_derives_support_and_weights_from_frozen_manifests() -> None:
-    population = _synthetic_population().manifest
-    randomization = _randomization(population)
-    committed = tuple(
-        _committed_assignment(unit, randomization) for unit in randomization.assignments
-    )
-    outcomes = tuple(
-        AssignmentOutcomeRecordV2.from_content(
-            assignment_id=unit.assignment_id,
-            block_id=unit.block.block_id,
-            semantic_task_cluster_id=unit.block.semantic_task_cluster_id,
-            task_instance_id=unit.block.task_instance_id,
-            hypothesis_id=unit.block.hypothesis_id,
-            target_spec_id=unit.block.target_spec_id,
-            realization_spec_id=unit.block.realization_spec_id,
-            task_realization_bundle_id=unit.block.task_realization_bundle_id,
-            variant_id=unit.variant_id,
-            model_id=unit.block.model_id,
-            arm_protocol_id=unit.block.arm_protocol_id,
-            arm_role=unit.assigned_arm,
-            request_randomness_slot=unit.request_randomness_slot,
-            provider_seed=unit.provider_seed,
-            state=(
-                AssignmentOutcomeStateV2.VALID_ORACLE_SECURE
-                if unit.assigned_arm is ArmRole.TARGET_PATCH
-                else AssignmentOutcomeStateV2.VALID_ORACLE_INSECURE
-            ),
-            functional_status=FunctionalStatusV2.PASS,
-            y_c=1,
-            y_e=1,
-            y_secure_yield=int(unit.assigned_arm is ArmRole.TARGET_PATCH),
-            y_joint=int(unit.assigned_arm is ArmRole.TARGET_PATCH),
-            source_digests_sha256=_sha(f"bound-outcome:{unit.assignment_id}"),
-        )
-        for unit in randomization.assignments
-    )
-    coverage = AssignmentCoverageManifestV2.from_components(
-        randomization=randomization,
-        committed_assignments=committed,
-        outcomes=outcomes,
-    )
+    experiment = _authenticated_experiment()
 
     result = estimate_manifest_bound_cluster_itt_v2(
-        population=population,
-        assignment_coverage=coverage,
+        population=experiment.population,
+        assignment_coverage=experiment.closed_coverage,
         model_id="model.alpha",
-        treatment_arm=ArmRole.TARGET_PATCH,
-        control_arm=ArmRole.NOOP_REWRITE,
-        outcome_name="y_secure_yield",
     )
 
     assert result.cluster_itt.estimate == pytest.approx(1.0)
     assert result.cluster_itt.independent_cluster_n == 2
     assert result.cluster_itt.treatment_n == result.cluster_itt.control_n == 6
     assert result.treatment_coverage.assigned_n == result.control_coverage.assigned_n == 6
-    assert result.population_freeze_manifest_id == population.population_freeze_manifest_id
-    assert result.assignment_coverage_manifest_id == coverage.assignment_coverage_manifest_id
+    assert result.population_freeze_manifest_id == (
+        experiment.population.population_freeze_manifest_id
+    )
+    assert result.provenance_closed_coverage_manifest_id == (
+        experiment.closed_coverage.provenance_closed_coverage_manifest_id
+    )
+    assert result.assignment_coverage_manifest_id == (
+        experiment.closed_coverage.base_coverage.assignment_coverage_manifest_id
+    )
+    assert result.simultaneous_confirmation_allowed is False
     assert result.analysis_result_id.startswith("manifest_bound_itt_v2_")
+
+    with pytest.raises(TypeError):
+        estimate_manifest_bound_cluster_itt_v2(
+            population=experiment.population,
+            assignment_coverage=experiment.closed_coverage,
+            model_id="model.alpha",
+            outcome_name="y_c",  # type: ignore[call-arg]
+        )
+    with pytest.raises(TypeError):
+        estimate_manifest_bound_cluster_itt_v2(
+            population=experiment.population,
+            assignment_coverage=experiment.closed_coverage,
+            model_id="model.alpha",
+            treatment_arm=ArmRole.NOOP_REWRITE,  # type: ignore[call-arg]
+            control_arm=ArmRole.TARGET_PATCH,
+        )
 
 
 def test_public_itt_entrypoint_rejects_rehashed_population_not_bound_to_coverage() -> None:
-    population = _synthetic_population().manifest
-    randomization = _randomization(population)
-    committed = tuple(
-        _committed_assignment(unit, randomization) for unit in randomization.assignments
-    )
-    outcomes = tuple(_outcome(unit) for unit in randomization.assignments)
-    coverage = AssignmentCoverageManifestV2.from_components(
-        randomization=randomization,
-        committed_assignments=committed,
-        outcomes=outcomes,
-    )
-    changed = _without_content_id(population, "population_freeze_manifest_id")
+    experiment = _authenticated_experiment()
+    changed = _without_content_id(experiment.population, "population_freeze_manifest_id")
     changed["population_construction_sha256"] = _sha("different-population-construction")
     rehashed_population = PopulationFreezeManifestV2.from_content(**changed)
 
     with pytest.raises(ValueError, match="manifest-bound v2 ITT failed exact validation"):
         estimate_manifest_bound_cluster_itt_v2(
             population=rehashed_population,
-            assignment_coverage=coverage,
+            assignment_coverage=experiment.closed_coverage,
             model_id="model.alpha",
-            treatment_arm=ArmRole.TARGET_PATCH,
-            control_arm=ArmRole.NOOP_REWRITE,
         )
 
 
@@ -923,12 +1104,11 @@ def test_randomization_runtime_outcome_coverage_and_itt_replay_end_to_end() -> N
         committed_assignments=committed,
         outcomes=tuple(outcomes),
     )
+    authenticated = _authenticated_experiment()
     result = estimate_manifest_bound_cluster_itt_v2(
         population=population,
-        assignment_coverage=coverage,
+        assignment_coverage=authenticated.closed_coverage,
         model_id="model.alpha",
-        treatment_arm=ArmRole.TARGET_PATCH,
-        control_arm=ArmRole.NOOP_REWRITE,
     )
 
     assert coverage.complete is True
@@ -936,3 +1116,163 @@ def test_randomization_runtime_outcome_coverage_and_itt_replay_end_to_end() -> N
     assert result.cluster_itt.estimate == pytest.approx(1.0)
     assert result.treatment_coverage.all_assignment_evaluable_yield == 1.0
     assert result.control_coverage.all_assignment_evaluable_yield == 1.0
+
+
+def test_execution_receipts_close_generation_policy_and_outcome_provenance() -> None:
+    experiment = _authenticated_experiment()
+    closed = experiment.closed_coverage
+
+    assert closed.complete is True
+    assert closed.receipt_count == closed.base_coverage.expected_count == 48
+    assert closed.assignment_ids == tuple(
+        sorted(unit.assignment_id for unit in experiment.randomization.assignments)
+    )
+    assert (
+        ProvenanceClosedAssignmentCoverageManifestV2.model_validate_json(closed.model_dump_json())
+        == closed
+    )
+
+    with pytest.raises(ValidationError, match="execution v2 contract failed validation"):
+        ProvenanceClosedAssignmentCoverageManifestV2.from_receipts(
+            execution_policy_freeze=experiment.execution_freeze,
+            outcome_assembly_receipts=experiment.receipts[:-1],
+        )
+
+
+def test_execution_receipt_rejects_generation_policy_drift_and_fabricated_outcome() -> None:
+    population = _synthetic_population().manifest
+    randomization = _randomization(population)
+    execution_freeze = _execution_freeze(randomization)
+    bundles = {
+        bundle.task_realization_bundle_id: bundle
+        for gate in population.task_gates
+        if gate.task_policy_support is not None
+        for bundle in gate.task_policy_support.task_realization_bundles
+    }
+    unit = next(
+        item for item in randomization.assignments if item.assigned_arm is ArmRole.NOOP_REWRITE
+    )
+    assignment = _committed_assignment(unit, randomization)
+    bundle = bundles[unit.block.task_realization_bundle_id]
+
+    with pytest.raises(ValidationError, match="execution v2 contract failed validation"):
+        _authenticated_outcome_receipt(
+            unit=unit,
+            assignment=assignment,
+            bundle=bundle,
+            execution_freeze=execution_freeze,
+            generation_parameters_sha256=_sha("post-hoc-generation-parameters"),
+        )
+
+    genuine = _authenticated_outcome_receipt(
+        unit=unit,
+        assignment=assignment,
+        bundle=bundle,
+        execution_freeze=execution_freeze,
+    )
+    assert genuine.outcome.state is AssignmentOutcomeStateV2.VALID_ORACLE_INSECURE
+    forged_content = genuine.model_dump(
+        mode="python", exclude={"outcome_assembly_receipt_id", "schema_version"}
+    )
+    forged_content["outcome"] = _outcome(unit)
+    with pytest.raises(ValidationError, match="execution v2 contract failed validation"):
+        OutcomeAssemblyReceiptV2.from_content(**forged_content)
+
+    drifted_oracle_content = genuine.oracle_result.model_dump(
+        mode="python", exclude={"oracle_result_id", "schema_version"}
+    )
+    drifted_oracle_content["oracle_policy_sha256"] = _sha("post-hoc-oracle-policy")
+    drifted_oracle = OracleResultRecordV2.from_content(**drifted_oracle_content)
+    with pytest.raises(ValidationError, match="execution v2 contract failed validation"):
+        OutcomeAssemblyReceiptV2.from_runtime(
+            assignment_execution_receipt=genuine.assignment_execution_receipt,
+            generated_code=genuine.generated_code,
+            syntax_validation=genuine.syntax_validation,
+            oracle_result=drifted_oracle,
+            functional_result=genuine.functional_result,
+        )
+
+    false_invalid_syntax = SyntaxValidationReceiptV2.from_generated_code(
+        generated_code=genuine.generated_code,
+        language="python",
+        status="invalid",
+        parser_producer_id="parser.synthetic",
+        parser_policy_sha256=_sha("parser-policy:synthetic"),
+        parser_runtime_sha256=_sha("parser-runtime:synthetic"),
+        evidence_sha256=_sha("false-invalid-syntax"),
+    )
+    with pytest.raises(ValidationError, match="execution v2 contract failed validation"):
+        OutcomeAssemblyReceiptV2.from_runtime(
+            assignment_execution_receipt=genuine.assignment_execution_receipt,
+            generated_code=genuine.generated_code,
+            syntax_validation=false_invalid_syntax,
+            oracle_result=genuine.oracle_result,
+            functional_result=genuine.functional_result,
+        )
+
+
+def test_non_null_provider_seed_survives_the_authenticated_chain() -> None:
+    population = _synthetic_population().manifest
+    randomization = _randomization_with_provider_seeds(population)
+    execution_freeze = _execution_freeze(randomization)
+    unit = randomization.assignments[0]
+    assignment = _committed_assignment(unit, randomization)
+    bundle = next(
+        bundle
+        for gate in population.task_gates
+        if gate.task_policy_support is not None
+        for bundle in gate.task_policy_support.task_realization_bundles
+        if bundle.task_realization_bundle_id == unit.block.task_realization_bundle_id
+    )
+    receipt = _authenticated_outcome_receipt(
+        unit=unit,
+        assignment=assignment,
+        bundle=bundle,
+        execution_freeze=execution_freeze,
+    )
+
+    assert unit.provider_seed is not None
+    assert assignment.provider_seed == unit.provider_seed
+    assert receipt.assignment_execution_receipt.generation_request.provider_seed == (
+        unit.provider_seed
+    )
+    assert receipt.outcome.provider_seed == unit.provider_seed
+
+
+def test_total_accounting_preserves_terminal_infrastructure_failure_without_regeneration() -> None:
+    experiment = _authenticated_experiment()
+    failed = experiment.receipts[-1]
+    failure = InfrastructureFailureReceiptV2.from_attempts(
+        assignment_execution_receipt=failed.assignment_execution_receipt,
+        retry_policy_sha256=_sha("retry-policy:synthetic"),
+        attempts=(
+            RetryAttemptReceiptV2(
+                attempt_index=0,
+                stage="provider_transport",
+                status="terminal_failure",
+                attempt_evidence_sha256=_sha("transport-terminal-failure"),
+                provider_response_sha256=None,
+                valid_response_persisted=False,
+            ),
+        ),
+        valid_response_lost=False,
+    )
+
+    accounting = TotalAssignmentAccountingManifestV2.from_terminal_receipts(
+        execution_policy_freeze=experiment.execution_freeze,
+        outcome_assembly_receipts=experiment.receipts[:-1],
+        infrastructure_failure_receipts=(failure,),
+    )
+
+    assert accounting.complete is True
+    assert accounting.outcome_count == 47
+    assert accounting.failure_count == 1
+    assert accounting.confirmatory_coverage is None
+    assert failure.regeneration_forbidden is True
+
+    with pytest.raises(ValidationError, match="execution v2 contract failed validation"):
+        TotalAssignmentAccountingManifestV2.from_terminal_receipts(
+            execution_policy_freeze=experiment.execution_freeze,
+            outcome_assembly_receipts=experiment.receipts[:-1],
+            infrastructure_failure_receipts=(),
+        )

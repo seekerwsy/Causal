@@ -18,16 +18,20 @@ from typing import Any, ClassVar, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.schema.features import FeatureFamily
 from secaware.schema.policy_v2 import (
+    ActionableFeatureSpec,
     ContextQueryResultRecord,
     PolicySplit,
     QueryState,
     SemanticTaskClusterManifest,
+    SemanticTaskClusterMembershipRecord,
 )
 from secaware.schema.runtime_v2 import (
     NaturalCausalObservationRecordV2,
     RuntimeProducerChainRecordV2,
 )
+from secaware.schema.tsg import PromptTSGRecord
 
 DISCOVERY_V2_SCHEMA_VERSION = "2.0"
 
@@ -41,6 +45,8 @@ _VARIABLE_SPEC_PATTERN = r"^natural_variable_spec_[0-9a-f]{64}$"
 _SLOT_SUPPORT_PATTERN = r"^discovery_slot_support_[0-9a-f]{64}$"
 _TABLE_SPEC_PATTERN = r"^natural_table_spec_[0-9a-f]{64}$"
 _TABLE_ARTIFACT_PATTERN = r"^natural_table_artifact_[0-9a-f]{64}$"
+_TASK_BINDING_PATTERN = r"^natural_task_binding_[0-9a-f]{64}$"
+_AUTHENTICATED_SCOPE_PATTERN = r"^authenticated_natural_scope_[0-9a-f]{64}$"
 
 _QUERY_STATES = tuple(item.value for item in QueryState)
 _BINARY_STATES = ("0", "1")
@@ -75,6 +81,25 @@ def _digest(value: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+NATURAL_OUTCOME_PROJECTION_POLICY_SHA256 = _digest(
+    {
+        "policy": "natural-outcome-projection-v2.0",
+        "inputs": ("generated_code", "oracle_result", "functional_result"),
+        "outputs": ("y_c", "y_e", "y_joint", "y_secure_yield"),
+        "infrastructure_failure": "fail_closed",
+        "terminal_no_code": "zero_yield",
+    }
+)
+NATURAL_OBSERVATION_ASSEMBLY_POLICY_SHA256 = _digest(
+    {
+        "policy": "authenticated-natural-observation-assembly-v2.0",
+        "x0": "canonical_prompt_tsg_query_projection",
+        "y": NATURAL_OUTCOME_PROJECTION_POLICY_SHA256,
+        "runtime_provenance": "embedded_exact_producer_chain",
+    }
+)
 
 
 def _valid_identifier(value: object) -> bool:
@@ -238,6 +263,95 @@ class NaturalDiscoveryVariableSpecV2(_ContentAddressedDiscoveryV2):
             valid_states = True
         if not valid_source or not valid_states:
             raise ValueError(self._safe_validation_message)
+        return self
+
+
+def _prompt_evidence_matches(prompt: str, attributes: object) -> bool:
+    if not isinstance(attributes, dict):
+        try:
+            attributes = dict(attributes)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+    evidence_keys = {"evidence_start", "evidence_end", "evidence_sha256"}
+    present = evidence_keys & set(attributes)
+    if not present:
+        return True
+    if present != evidence_keys:
+        return False
+    start = attributes["evidence_start"]
+    end = attributes["evidence_end"]
+    digest = attributes["evidence_sha256"]
+    return (
+        type(start) is int
+        and type(end) is int
+        and type(digest) is str
+        and 0 <= start < end <= len(prompt)
+        and hashlib.sha256(prompt[start:end].encode("utf-8")).hexdigest() == digest
+    )
+
+
+class NaturalTaskBindingV2(_ContentAddressedDiscoveryV2):
+    """One frozen task/prompt/PromptTSG identity, including excluded context tasks."""
+
+    _id_field = "task_binding_id"
+    _id_prefix = "natural_task_binding_"
+
+    task_binding_id: str = Field(pattern=_TASK_BINDING_PATTERN)
+    membership: SemanticTaskClusterMembershipRecord
+    natural_prompt_id: str
+    natural_prompt: str = Field(min_length=1, repr=False)
+    natural_prompt_sha256: str = Field(pattern=_SHA256_PATTERN)
+    prompt_tsg: PromptTSGRecord
+    prompt_tsg_sha256: str = Field(pattern=_SHA256_PATTERN)
+    extractor_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
+    feature_catalog_sha256: str = Field(pattern=_SHA256_PATTERN)
+    context_query_catalog_sha256: str = Field(pattern=_SHA256_PATTERN)
+    query_semantics_version: str
+    frozen_before_outcomes: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> Self:
+        try:
+            from secaware.tsg.context_queries_v2 import (
+                CONTEXT_QUERY_CATALOG_SHA256,
+                CONTEXT_QUERY_SEMANTICS_VERSION,
+            )
+            from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
+            from secaware.tsg.graph import record_to_multidigraph
+
+            membership = SemanticTaskClusterMembershipRecord.model_validate(
+                self.membership, strict=True
+            )
+            graph_record = PromptTSGRecord.model_validate(self.prompt_tsg, strict=True)
+            graph = record_to_multidigraph(graph_record)
+            evidence_valid = all(
+                _prompt_evidence_matches(self.natural_prompt, node["attributes"])
+                for _, node in graph.nodes(data=True)
+            ) and all(
+                _prompt_evidence_matches(self.natural_prompt, edge["attributes"])
+                for *_, edge in graph.edges(keys=True, data=True)
+            )
+            if (
+                membership.split is not PolicySplit.DISCOVER
+                or not _valid_identifier(self.natural_prompt_id)
+                or not self.natural_prompt.strip()
+                or self.natural_prompt_sha256
+                != hashlib.sha256(self.natural_prompt.encode("utf-8")).hexdigest()
+                or graph_record.prompt_id != self.natural_prompt_id
+                or graph_record.task_id != membership.task_instance_id
+                or graph_record.cwe != membership.cwe
+                or self.prompt_tsg_sha256 != graph_record.graph_sha256
+                or self.extractor_policy_sha256 != graph_record.extractor_policy_sha256
+                or self.feature_catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
+                or self.context_query_catalog_sha256 != CONTEXT_QUERY_CATALOG_SHA256
+                or self.query_semantics_version != CONTEXT_QUERY_SEMANTICS_VERSION
+                or not evidence_valid
+            ):
+                raise ValueError
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize PromptTSG/catalog boundary failures
+            raise ValueError(self._safe_validation_message) from None
         return self
 
 
@@ -427,6 +541,128 @@ class NaturalDiscoveryTableSpecV2(_ContentAddressedDiscoveryV2):
             or not analysis_rules_valid
         ):
             raise ValueError(self._safe_validation_message)
+        return self
+
+
+class AuthenticatedNaturalDiscoveryScopeV2(_ContentAddressedDiscoveryV2):
+    """Authenticated pre-outcome scope layered over the legacy/audit table spec."""
+
+    _id_field = "authenticated_scope_id"
+    _id_prefix = "authenticated_natural_scope_"
+
+    authenticated_scope_id: str = Field(pattern=_AUTHENTICATED_SCOPE_PATTERN)
+    table_spec: NaturalDiscoveryTableSpecV2
+    task_bindings: tuple[NaturalTaskBindingV2, ...] = Field(min_length=2, max_length=1_000_000)
+    actionable_feature_specs: tuple[ActionableFeatureSpec, ...] = Field(max_length=128)
+    scope_construction_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
+    frozen_before_outcomes: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> Self:
+        try:
+            from secaware.tsg.context_queries_v2 import (
+                CONTEXT_QUERY_SPECS,
+                context_query_definition,
+                evaluate_context_query,
+            )
+            from secaware.tsg.feature_catalog import (
+                PROMPT_FEATURE_CATALOG_SHA256,
+                prompt_feature_spec,
+            )
+
+            table = NaturalDiscoveryTableSpecV2.model_validate(self.table_spec, strict=True)
+            relevant = tuple(
+                item
+                for item in table.semantic_cluster_manifest.memberships
+                if item.split is PolicySplit.DISCOVER
+                and item.cwe == table.cwe
+                and item.task_archetype in table.task_archetypes
+            )
+            relevant_by_task = {item.task_instance_id: item for item in relevant}
+            bindings = tuple(
+                NaturalTaskBindingV2.model_validate(item, strict=True)
+                for item in self.task_bindings
+            )
+            binding_by_task = {item.membership.task_instance_id: item for item in bindings}
+            features = tuple(
+                ActionableFeatureSpec.model_validate(item, strict=True)
+                for item in self.actionable_feature_specs
+            )
+            feature_by_id = {item.actionable_feature_spec_id: item for item in features}
+            expected_actionable_ids = {
+                item.source_id
+                for item in table.variables
+                if item.source_kind is DiscoveryVariableSourceV2.ACTIONABLE_QUERY
+            }
+            context_specs_by_id = {item.context_query_id: item for item in CONTEXT_QUERY_SPECS}
+            if (
+                set(binding_by_task) != set(relevant_by_task)
+                or len(binding_by_task) != len(bindings)
+                or any(
+                    binding_by_task[task_id].membership != membership
+                    for task_id, membership in relevant_by_task.items()
+                )
+                or set(feature_by_id) != expected_actionable_ids
+                or len(feature_by_id) != len(features)
+                or any(
+                    item.source_kind is DiscoveryVariableSourceV2.TASK_METADATA
+                    for item in table.variables
+                )
+                or any(
+                    item.extractor_policy_sha256 != table.extractor_policy_sha256
+                    for item in bindings
+                )
+                or table.outcome_projection_policy_sha256
+                != NATURAL_OUTCOME_PROJECTION_POLICY_SHA256
+            ):
+                raise ValueError
+            for variable in table.variables:
+                if variable.source_kind is DiscoveryVariableSourceV2.ACTIONABLE_QUERY:
+                    feature = feature_by_id[variable.source_id]
+                    catalog_feature = prompt_feature_spec(feature.feature_id)
+                    if (
+                        feature.feature_catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
+                        or variable.source_catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
+                        or table.cwe not in catalog_feature.applicable_cwes
+                        or catalog_feature.feature_family is not FeatureFamily.SAFETY_CONTROL
+                        or not catalog_feature.intervenable
+                        or not set(feature.allowed_operations).issubset(catalog_feature.operations)
+                    ):
+                        raise ValueError
+                elif variable.source_kind is DiscoveryVariableSourceV2.CONTEXT_QUERY:
+                    query = context_specs_by_id.get(variable.source_id)
+                    if (
+                        query is None
+                        or variable.source_catalog_sha256 != query.context_query_catalog_sha256
+                        or variable.query_semantics_version != query.query_semantics_version
+                    ):
+                        raise ValueError
+            if table.context_conditioning_query_id is not None:
+                context_spec = context_specs_by_id.get(table.context_conditioning_query_id)
+                if context_spec is None:
+                    raise ValueError
+                definition = context_query_definition(context_spec.query_name)
+                query_by_task = {
+                    item.task_instance_id: item for item in table.context_query_results
+                }
+                for task_id, binding in binding_by_task.items():
+                    expected = evaluate_context_query(
+                        binding.prompt_tsg,
+                        definition.query_name,
+                        semantic_membership=binding.membership,
+                    ).result
+                    if query_by_task.get(task_id) != expected:
+                        raise ValueError
+            support_by_task = {item.task_instance_id: item for item in table.task_slot_support}
+            if any(
+                support.natural_prompt_id != binding_by_task[task_id].natural_prompt_id
+                for task_id, support in support_by_task.items()
+            ):
+                raise ValueError
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize scope/catalog boundary failures
+            raise ValueError(self._safe_validation_message) from None
         return self
 
 
@@ -703,6 +939,9 @@ class NaturalDiscoveryTableArtifactV2(_ContentAddressedDiscoveryV2):
 
 __all__ = [
     "DISCOVERY_V2_SCHEMA_VERSION",
+    "NATURAL_OBSERVATION_ASSEMBLY_POLICY_SHA256",
+    "NATURAL_OUTCOME_PROJECTION_POLICY_SHA256",
+    "AuthenticatedNaturalDiscoveryScopeV2",
     "DiscoveryAnalysisKindV2",
     "DiscoveryTableKindV2",
     "DiscoveryTaskSlotSupportV2",
@@ -712,5 +951,6 @@ __all__ = [
     "NaturalDiscoveryTableArtifactV2",
     "NaturalDiscoveryTableSpecV2",
     "NaturalDiscoveryVariableSpecV2",
+    "NaturalTaskBindingV2",
     "PairwiseDeterminismV2",
 ]

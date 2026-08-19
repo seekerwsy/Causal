@@ -21,7 +21,9 @@ from secaware.schema.features import FeatureFamily, FeatureState
 from secaware.schema.policy_v2 import (
     ContextQueryResultRecord,
     ContextQuerySpec,
+    PolicySplit,
     QueryState,
+    SemanticTaskClusterMembershipRecord,
 )
 from secaware.schema.tsg import (
     MAX_MOTIF_HOPS,
@@ -36,13 +38,16 @@ from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.feature_catalog import prompt_feature_spec
 from secaware.tsg.graph import record_to_multidigraph
 
-CONTEXT_QUERY_SEMANTICS_VERSION = "context-query-v2.1"
+CONTEXT_QUERY_SEMANTICS_VERSION = "context-query-v2.2"
 CWE78_COMMAND_FLOW_QUERY = "flow.untrusted_input_to_command_execution"
 CWE89_SQL_FLOW_QUERY = "flow.untrusted_value_to_sql"
 
 _CATALOG_SCHEMA_VERSION = "1.0"
 _MATCH_EVIDENCE_SCHEMA_VERSION = "1.0"
 _MAX_TRAVERSAL_STATES = MAX_TSG_EDGES * (MAX_MOTIF_HOPS + 1)
+_TRAVERSABLE_ENDPOINT_TYPES = MappingProxyType(
+    {EdgeType.FLOWS_TO: (NodeType.DATA_OBJECT, NodeType.SINK)}
+)
 
 
 def _canonical_json(value: object) -> bytes:
@@ -105,6 +110,7 @@ class ContextQueryEvaluation:
 
     definition: ContextQueryDefinition
     spec: ContextQuerySpec
+    semantic_membership: SemanticTaskClusterMembershipRecord
     result: ContextQueryResultRecord
     matches: tuple[ContextQueryMatchEvidence, ...]
 
@@ -135,6 +141,14 @@ def _expression_content(
         "sink_role": {"node_type": NodeType.SINK.value, "label": sink_label},
         "first_edge_type": first_edge_type.value,
         "traversable_edge_types": [item.value for item in traversable_edge_types],
+        "traversable_endpoint_types": [
+            {
+                "edge_type": item.value,
+                "source_node_type": _TRAVERSABLE_ENDPOINT_TYPES[item][0].value,
+                "target_node_type": _TRAVERSABLE_ENDPOINT_TYPES[item][1].value,
+            }
+            for item in traversable_edge_types
+        ],
         "max_hops": max_hops,
         "max_matches": max_matches,
         "prompt_tsg_schema_version": TSG_SCHEMA_VERSION,
@@ -286,6 +300,21 @@ CONTEXT_QUERY_SPECS = tuple(_spec(item) for item in CONTEXT_QUERY_CATALOG)
 _SPECS = MappingProxyType(
     {item.query_name: spec for item, spec in zip(CONTEXT_QUERY_CATALOG, CONTEXT_QUERY_SPECS)}
 )
+_ARCHETYPE_CWES = MappingProxyType(
+    {
+        archetype: frozenset(
+            cwe
+            for definition in CONTEXT_QUERY_CATALOG
+            if archetype in definition.applicable_task_archetypes
+            for cwe in definition.applicable_cwes
+        )
+        for archetype in {
+            value
+            for definition in CONTEXT_QUERY_CATALOG
+            for value in definition.applicable_task_archetypes
+        }
+    }
+)
 
 
 def context_query_definition(query_name: str) -> ContextQueryDefinition:
@@ -308,6 +337,35 @@ def _sorted_out_edges(graph: nx.MultiDiGraph, node_id: str):
             key=lambda item: (item[1], item[2]),
         )
     )
+
+
+def _typed_traversable_out_edges(
+    graph: nx.MultiDiGraph,
+    node_id: str,
+    definition: ContextQueryDefinition,
+) -> tuple[tuple[tuple[str, str, str, dict[str, Any]], ...], bool]:
+    """Return traversable edges only when their endpoint roles are exact.
+
+    PromptTSG 2.1 records predate a schema-level endpoint-matrix check.  A
+    context query must therefore enforce the finite endpoint matrix locally
+    instead of allowing a GUARD (including the intervention target) to become
+    an intermediate flow node.
+    """
+
+    valid = []
+    invalid = False
+    source_type = graph.nodes[node_id]["node_type"]
+    for edge in _sorted_out_edges(graph, node_id):
+        edge_type = edge[3]["edge_type"]
+        if edge_type not in definition.traversable_edge_types:
+            continue
+        endpoint_types = _TRAVERSABLE_ENDPOINT_TYPES.get(edge_type)
+        target_type = graph.nodes[edge[1]]["node_type"]
+        if endpoint_types is None or (source_type, target_type) != endpoint_types:
+            invalid = True
+            continue
+        valid.append(edge)
+    return tuple(valid), invalid
 
 
 def _evidence_binding(element_id: str, attributes: dict[str, Any]) -> PromptEvidenceBinding | None:
@@ -399,12 +457,11 @@ def _search(graph: nx.MultiDiGraph, definition: ContextQueryDefinition) -> _Sear
                     stop = True
                     break
                 current, node_path, edge_path, visited = stack.pop()
-                outgoing = tuple(
-                    edge
-                    for edge in _sorted_out_edges(graph, current)
-                    if edge[3]["edge_type"] in definition.traversable_edge_types
-                    and edge[1] not in visited
+                typed_outgoing, invalid_endpoint = _typed_traversable_out_edges(
+                    graph, current, definition
                 )
+                incomplete_candidate = incomplete_candidate or invalid_endpoint
+                outgoing = tuple(edge for edge in typed_outgoing if edge[1] not in visited)
                 if len(edge_path) >= definition.max_hops:
                     truncated = truncated or bool(outgoing)
                     continue
@@ -494,15 +551,13 @@ def _state(
 ) -> tuple[QueryState, bool | None, bool]:
     if not applicable:
         return QueryState.NOT_APPLICABLE, None, False
+    if search.traversal_truncated or search.incomplete_candidate:
+        return QueryState.UNRESOLVED, roles_resolved, False
     if search.matches:
         if task_state is FeatureState.PRESENT:
             return QueryState.PRESENT, True, True
         return QueryState.UNRESOLVED, roles_resolved, False
-    if search.traversal_truncated or search.incomplete_candidate:
-        return QueryState.UNRESOLVED, roles_resolved, False
-    if task_state is FeatureState.ABSENT:
-        return QueryState.ABSENT, True, True
-    if task_state is FeatureState.PRESENT and roles_resolved:
+    if task_state in {FeatureState.ABSENT, FeatureState.PRESENT} and roles_resolved:
         return QueryState.ABSENT, True, True
     return QueryState.UNRESOLVED, roles_resolved, False
 
@@ -511,17 +566,29 @@ def evaluate_context_query(
     record: PromptTSGRecord,
     query_name: str,
     *,
-    task_instance_id: str,
-    task_archetype: str,
+    semantic_membership: SemanticTaskClusterMembershipRecord,
 ) -> ContextQueryEvaluation:
     """Evaluate one natural-Prompt context query and freeze its provenance."""
-    trusted = PromptTSGRecord.model_validate(record)
+    trusted = PromptTSGRecord.model_validate(record, strict=True)
+    membership = SemanticTaskClusterMembershipRecord.model_validate(
+        semantic_membership, strict=True
+    )
+    if (
+        membership.task_instance_id != trusted.task_id
+        or membership.cwe != trusted.cwe
+        or membership.split is not PolicySplit.DISCOVER
+        or (
+            membership.task_archetype in _ARCHETYPE_CWES
+            and trusted.cwe not in _ARCHETYPE_CWES[membership.task_archetype]
+        )
+    ):
+        raise ValueError("context query membership does not match the trusted PromptTSG")
     definition = context_query_definition(query_name)
     spec = context_query_spec(query_name)
     graph = record_to_multidigraph(trusted)
     applicable = (
         trusted.cwe in definition.applicable_cwes
-        and task_archetype in definition.applicable_task_archetypes
+        and membership.task_archetype in definition.applicable_task_archetypes
     )
     task_state = _task_feature_state(graph, definition.task_feature_id)
     roles_resolved = _roles_resolved(graph, definition) if applicable else False
@@ -540,9 +607,13 @@ def evaluate_context_query(
         "context_query_catalog_sha256": CONTEXT_QUERY_CATALOG_SHA256,
         "query_semantics_version": CONTEXT_QUERY_SEMANTICS_VERSION,
         "prompt_tsg_sha256": trusted.graph_sha256,
-        "task_instance_id": task_instance_id,
+        "semantic_cluster_membership_id": membership.cluster_membership_id,
+        "semantic_task_cluster_id": membership.semantic_task_cluster_id,
+        "source_task_sha256": membership.source_task_sha256,
+        "clustering_policy_sha256": membership.clustering_policy_sha256,
+        "task_instance_id": membership.task_instance_id,
         "natural_prompt_id": trusted.prompt_id,
-        "task_archetype": task_archetype,
+        "task_archetype": membership.task_archetype,
         "cwe": trusted.cwe,
         "applicable": applicable,
         "task_feature_state": task_state.value if task_state is not None else None,
@@ -556,7 +627,7 @@ def evaluate_context_query(
     evaluation_evidence_sha256 = _sha256(evidence_content)
     result = ContextQueryResultRecord.from_content(
         regime_id="natural_prompt_discovery",
-        task_instance_id=task_instance_id,
+        task_instance_id=membership.task_instance_id,
         natural_prompt_id=trusted.prompt_id,
         prompt_tsg_sha256=trusted.graph_sha256,
         context_query_id=spec.context_query_id,
@@ -572,6 +643,7 @@ def evaluate_context_query(
     return ContextQueryEvaluation(
         definition=definition,
         spec=spec,
+        semantic_membership=membership,
         result=result,
         matches=published_matches,
     )

@@ -16,7 +16,7 @@ import hashlib
 import json
 import math
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 
 from secaware.analysis.simultaneous_v2 import (
@@ -24,6 +24,7 @@ from secaware.analysis.simultaneous_v2 import (
     SimultaneousInferenceResultV2,
     SimultaneousIntervalV2,
     run_simultaneous_inference_v2,
+    validate_simultaneous_inference_result_v2,
 )
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.inference_v2 import (
@@ -45,7 +46,9 @@ _INTERACTION_METHOD = "semantic_cluster_arm_randomization_v1"
 
 class RealizationRobustnessLabelV2(StrEnum):
     REALIZATION_ROBUST = "realization_robust"
-    AVERAGE_POLICY_ONLY = "average_policy_only"
+    AVERAGE_POLICY_CONFIRMED = "average_policy_confirmed"
+    UNCONFIRMED = "unconfirmed"
+    CONFLICTING = "conflicting"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,44 +59,6 @@ class RealizationClusterContributionV2:
     stratum_id: str
     semantic_task_cluster_id: str
     estimate: float
-
-
-@dataclass(frozen=True, slots=True)
-class BaseRandomizedPolicyEvidenceV2:
-    evidence_sha256: str
-    robustness_hypothesis_spec_id: str
-    hypothesis_id: str
-    model_id: str
-    primary_family_id: str
-    simultaneous_lower: float
-    simultaneous_upper: float
-    confirmed: bool
-    provenance_complete: bool
-
-    @classmethod
-    def from_content(
-        cls,
-        *,
-        robustness_hypothesis_spec_id: str,
-        hypothesis_id: str,
-        model_id: str,
-        primary_family_id: str,
-        simultaneous_lower: float,
-        simultaneous_upper: float,
-        confirmed: bool,
-        provenance_complete: bool,
-    ) -> BaseRandomizedPolicyEvidenceV2:
-        payload = {
-            "robustness_hypothesis_spec_id": robustness_hypothesis_spec_id,
-            "hypothesis_id": hypothesis_id,
-            "model_id": model_id,
-            "primary_family_id": primary_family_id,
-            "simultaneous_lower": simultaneous_lower,
-            "simultaneous_upper": simultaneous_upper,
-            "confirmed": confirmed,
-            "provenance_complete": provenance_complete,
-        }
-        return cls(evidence_sha256=_digest(payload), **payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +131,10 @@ class RealizationRobustnessHypothesisResultV2:
 
 @dataclass(frozen=True, slots=True)
 class RealizationRobustnessAnalysisResultV2:
+    analysis_result_id: str
     robustness_plan_id: str
+    primary_inference_plan_id: str
+    primary_inference_result_id: str
     simultaneous_result: SimultaneousInferenceResultV2
     hypotheses: tuple[RealizationRobustnessHypothesisResultV2, ...]
 
@@ -206,9 +174,48 @@ def _coordinate(
     )
 
 
+def _primary_coordinate_semantics(
+    hypotheses: Iterable[RealizationRobustnessHypothesisSpecV2],
+) -> set[tuple[object, ...]]:
+    return {
+        (
+            item.hypothesis_id,
+            item.target_spec_id,
+            item.arm_protocol_id,
+            item.model_id,
+            item.outcome_name,
+            item.treatment_arm,
+            item.control_arm,
+            SimultaneousCoordinateKindV2.POLICY_EFFECT,
+            "pooled",
+        )
+        for item in hypotheses
+    }
+
+
+def _plan_coordinate_semantics(
+    plan: SimultaneousInferencePlanV2,
+) -> set[tuple[object, ...]]:
+    return {
+        (
+            item.hypothesis_id,
+            item.target_spec_id,
+            item.arm_protocol_id,
+            item.model_id,
+            item.outcome_name,
+            item.treatment_arm,
+            item.control_arm,
+            item.coordinate_kind,
+            item.analysis_component_id,
+        )
+        for item in plan.family.coordinates
+    }
+
+
 def build_realization_robustness_plan_v2(
     hypotheses: Iterable[RealizationRobustnessHypothesisSpecV2],
     *,
+    primary_inference_plan: SimultaneousInferencePlanV2,
     family_label: str,
     strata: tuple[CommonStratumSupportV2, ...],
     stratum_weight_denominator: int,
@@ -242,6 +249,32 @@ def build_realization_robustness_plan_v2(
         raise _error() from None
     if not checked:
         raise _error()
+    try:
+        checked_primary = SimultaneousInferencePlanV2.model_validate(
+            primary_inference_plan,
+            strict=True,
+        )
+    except _FATAL:
+        raise
+    except Exception:  # noqa: BLE001 - sanitize the public builder boundary
+        raise _error("primary simultaneous plan failed validation") from None
+    outcomes = {item.outcome_name for item in checked}
+    expected_primary_kind = (
+        SimultaneousFamilyKindV2.PRIMARY_SECURE_YIELD
+        if outcomes == {"y_secure_yield"}
+        else SimultaneousFamilyKindV2.JOINT_OUTCOME
+        if outcomes == {"y_joint"}
+        else None
+    )
+    if (
+        expected_primary_kind is None
+        or checked_primary.family.family_kind is not expected_primary_kind
+        or _plan_coordinate_semantics(checked_primary) != _primary_coordinate_semantics(checked)
+        or len(checked_primary.family.coordinates) != len(checked)
+        or checked_primary.strata != strata
+        or checked_primary.stratum_weight_denominator != stratum_weight_denominator
+    ):
+        raise _error("primary simultaneous plan failed exact coordinate validation")
     coordinates: list[SimultaneousTestCoordinateV2] = []
     for item in checked:
         coordinates.append(
@@ -295,6 +328,8 @@ def build_realization_robustness_plan_v2(
     return RealizationRobustnessPlanV2.from_components(
         hypotheses=checked,
         simultaneous_inference_plan=inference_plan,
+        primary_inference_plan_id=checked_primary.inference_plan_id,
+        primary_family_id=checked_primary.family_id,
         interaction_minimum_reference_draws=interaction_minimum_reference_draws,
     )
 
@@ -356,7 +391,7 @@ def _validated_cluster_contributions(
             ):
                 raise _error("realization common support failed validation")
             estimate = float(item.estimate)
-            if not math.isfinite(estimate):
+            if not math.isfinite(estimate) or not -1.0 <= estimate <= 1.0:
                 raise _error("realization cluster contribution failed validation")
             values[key] = estimate
     except _FATAL:
@@ -465,55 +500,74 @@ def _derived_contributions(
     return tuple(output)
 
 
-def _validate_base_evidence(
-    plan: RealizationRobustnessPlanV2,
-    evidence: Iterable[BaseRandomizedPolicyEvidenceV2],
-) -> dict[tuple[str, str], BaseRandomizedPolicyEvidenceV2]:
-    if isinstance(evidence, (str, bytes, Mapping)):
-        raise _error()
-    expected = {
-        (item.hypothesis_id, item.model_id): item.robustness_hypothesis_spec_id
-        for item in plan.hypotheses
-    }
-    result: dict[tuple[str, str], BaseRandomizedPolicyEvidenceV2] = {}
+def _validate_primary_inference(
+    robustness_plan: RealizationRobustnessPlanV2,
+    primary_plan: SimultaneousInferencePlanV2,
+    primary_result: SimultaneousInferenceResultV2,
+    primary_contributions: tuple[CoordinateClusterContributionV2, ...],
+    primary_seed_material: bytes,
+    derived_contributions: tuple[CoordinateClusterContributionV2, ...],
+) -> dict[tuple[str, str], SimultaneousIntervalV2]:
     try:
-        for item in evidence:
-            if type(item) is not BaseRandomizedPolicyEvidenceV2:
-                raise _error("base policy evidence failed validation")
-            key = (item.hypothesis_id, item.model_id)
-            payload = {
-                "robustness_hypothesis_spec_id": item.robustness_hypothesis_spec_id,
-                "hypothesis_id": item.hypothesis_id,
-                "model_id": item.model_id,
-                "primary_family_id": item.primary_family_id,
-                "simultaneous_lower": item.simultaneous_lower,
-                "simultaneous_upper": item.simultaneous_upper,
-                "confirmed": item.confirmed,
-                "provenance_complete": item.provenance_complete,
-            }
-            if (
-                key in result
-                or expected.get(key) != item.robustness_hypothesis_spec_id
-                or item.evidence_sha256 != _digest(payload)
-                or type(item.confirmed) is not bool
-                or type(item.provenance_complete) is not bool
-                or type(item.simultaneous_lower) not in {int, float}
-                or type(item.simultaneous_upper) not in {int, float}
-                or not math.isfinite(float(item.simultaneous_lower))
-                or not math.isfinite(float(item.simultaneous_upper))
-                or item.simultaneous_lower > item.simultaneous_upper
-            ):
-                raise _error("base policy evidence failed validation")
-            result[key] = item
+        checked_primary = SimultaneousInferencePlanV2.model_validate(
+            primary_plan,
+            strict=True,
+        )
     except _FATAL:
         raise
-    except ValueError:
-        raise
-    except Exception:  # noqa: BLE001 - normalize hostile iterables
-        raise _error("base policy evidence failed validation") from None
-    if set(result) != set(expected):
-        raise _error("base policy evidence failed validation")
-    return result
+    except Exception:  # noqa: BLE001 - sanitize the public primary boundary
+        raise _error("primary simultaneous plan failed validation") from None
+    expected_semantics = _primary_coordinate_semantics(robustness_plan.hypotheses)
+    outcomes = {item.outcome_name for item in robustness_plan.hypotheses}
+    expected_kind = (
+        SimultaneousFamilyKindV2.PRIMARY_SECURE_YIELD
+        if outcomes == {"y_secure_yield"}
+        else SimultaneousFamilyKindV2.JOINT_OUTCOME
+        if outcomes == {"y_joint"}
+        else None
+    )
+    if (
+        checked_primary.inference_plan_id != robustness_plan.primary_inference_plan_id
+        or checked_primary.family_id != robustness_plan.primary_family_id
+        or expected_kind is None
+        or checked_primary.family.family_kind is not expected_kind
+        or _plan_coordinate_semantics(checked_primary) != expected_semantics
+        or len(checked_primary.family.coordinates) != len(expected_semantics)
+        or checked_primary.strata != robustness_plan.simultaneous_inference_plan.strata
+        or checked_primary.stratum_weight_denominator
+        != robustness_plan.simultaneous_inference_plan.stratum_weight_denominator
+    ):
+        raise _error("primary simultaneous plan failed exact coordinate validation")
+    primary_coordinate_ids = {
+        item.test_coordinate_id for item in checked_primary.family.coordinates
+    }
+    derived_primary_contributions = tuple(
+        item for item in derived_contributions if item.test_coordinate_id in primary_coordinate_ids
+    )
+    replayed_result = run_simultaneous_inference_v2(
+        checked_primary,
+        primary_contributions,
+        seed_material=primary_seed_material,
+    )
+    if replayed_result != primary_result:
+        raise _error("primary simultaneous result failed exact replay validation")
+    checked_result = validate_simultaneous_inference_result_v2(
+        checked_primary,
+        primary_result,
+        contributions=derived_primary_contributions,
+    )
+    intervals = {
+        (coordinate.hypothesis_id, coordinate.model_id): interval
+        for coordinate, interval in zip(
+            checked_primary.family.coordinates,
+            checked_result.intervals,
+            strict=True,
+        )
+    }
+    expected_keys = {(item.hypothesis_id, item.model_id) for item in robustness_plan.hypotheses}
+    if set(intervals) != expected_keys:
+        raise _error("primary simultaneous result failed exact coordinate validation")
+    return intervals
 
 
 def _validate_interaction_references(
@@ -622,16 +676,27 @@ def _fully_reverse_interval(
 def run_realization_robustness_v2(
     plan: RealizationRobustnessPlanV2,
     contributions: Iterable[RealizationClusterContributionV2],
-    base_policy_evidence: Iterable[BaseRandomizedPolicyEvidenceV2],
+    primary_inference_plan: SimultaneousInferencePlanV2,
+    primary_inference_result: SimultaneousInferenceResultV2,
+    primary_inference_contributions: tuple[CoordinateClusterContributionV2, ...],
     interaction_references: Iterable[ArmRealizationInteractionReferenceV2],
     *,
+    primary_seed_material: bytes,
     seed_material: bytes,
 ) -> RealizationRobustnessAnalysisResultV2:
     """Assess the strong label without weakening the average-Q_h policy estimate."""
 
     checked_plan = _validated_plan(plan)
     values = _validated_cluster_contributions(checked_plan, contributions)
-    base = _validate_base_evidence(checked_plan, base_policy_evidence)
+    derived_contributions = _derived_contributions(checked_plan, values)
+    primary_intervals = _validate_primary_inference(
+        checked_plan,
+        primary_inference_plan,
+        primary_inference_result,
+        primary_inference_contributions,
+        primary_seed_material,
+        derived_contributions,
+    )
     interactions = _validate_interaction_references(checked_plan, interaction_references)
     reference_draw_count = len(next(iter(interactions.values())).reference_statistics)
     global_interaction_reference = tuple(
@@ -640,7 +705,7 @@ def run_realization_robustness_v2(
     )
     simultaneous = run_simultaneous_inference_v2(
         checked_plan.simultaneous_inference_plan,
-        _derived_contributions(checked_plan, values),
+        derived_contributions,
         seed_material=seed_material,
     )
     interval_by_id = {item.test_coordinate_id: item for item in simultaneous.intervals}
@@ -709,17 +774,8 @@ def run_realization_robustness_v2(
             for _realization_id, item in deviation_intervals
         )
         heterogeneity_equivalent = heterogeneity_upper <= specification.practical_equivalence_margin
-        primary = base[key]
-        primary_interval_oriented = (
-            primary.simultaneous_lower > 0.0
-            if specification.expected_direction is RobustnessExpectedDirectionV2.POSITIVE
-            else primary.simultaneous_upper < 0.0
-        )
-        if primary.confirmed and not (primary.provenance_complete and primary_interval_oriented):
-            raise _error("confirmed base policy evidence is internally inconsistent")
-        base_confirmed = (
-            primary.confirmed and primary.provenance_complete and primary_interval_oriented
-        )
+        primary = primary_intervals[key]
+        base_confirmed = _expected_interval(specification.expected_direction, primary)
         pooled_supported = _expected_interval(specification.expected_direction, pooled)
         interaction = interactions[key]
         interaction_observed = max(
@@ -743,10 +799,10 @@ def run_realization_robustness_v2(
             1
             + sum(value >= interaction.observed_statistic for value in global_interaction_reference)
         ) / (len(global_interaction_reference) + 1)
+        average_confirmed = base_confirmed and pooled_supported
         robust = all(
             (
-                base_confirmed,
-                pooled_supported,
+                average_confirmed,
                 all_points,
                 direction_threshold,
                 no_reverse,
@@ -755,15 +811,23 @@ def run_realization_robustness_v2(
                 True,  # exact interaction randomization reference passed validation
             )
         )
+        conflicting = _fully_reverse_interval(
+            specification.expected_direction,
+            primary,
+        ) or _fully_reverse_interval(specification.expected_direction, pooled)
+        if robust:
+            label = RealizationRobustnessLabelV2.REALIZATION_ROBUST
+        elif average_confirmed:
+            label = RealizationRobustnessLabelV2.AVERAGE_POLICY_CONFIRMED
+        elif conflicting:
+            label = RealizationRobustnessLabelV2.CONFLICTING
+        else:
+            label = RealizationRobustnessLabelV2.UNCONFIRMED
         outputs.append(
             RealizationRobustnessHypothesisResultV2(
                 hypothesis_id=specification.hypothesis_id,
                 model_id=specification.model_id,
-                label=(
-                    RealizationRobustnessLabelV2.REALIZATION_ROBUST
-                    if robust
-                    else RealizationRobustnessLabelV2.AVERAGE_POLICY_ONLY
-                ),
+                label=label,
                 base_policy_effect_confirmed=base_confirmed,
                 pooled_global_interval_supported=pooled_supported,
                 all_realization_points_expected_direction=all_points,
@@ -787,8 +851,18 @@ def run_realization_robustness_v2(
                 deviation_intervals=deviation_intervals,
             )
         )
+    payload = {
+        "robustness_plan_id": checked_plan.robustness_plan_id,
+        "primary_inference_plan_id": checked_plan.primary_inference_plan_id,
+        "primary_inference_result_id": primary_inference_result.simultaneous_result_id,
+        "simultaneous_result_id": simultaneous.simultaneous_result_id,
+        "hypotheses": tuple(asdict(item) for item in outputs),
+    }
     return RealizationRobustnessAnalysisResultV2(
+        analysis_result_id="realization_robustness_result_v2_" + _digest(payload),
         robustness_plan_id=checked_plan.robustness_plan_id,
+        primary_inference_plan_id=checked_plan.primary_inference_plan_id,
+        primary_inference_result_id=primary_inference_result.simultaneous_result_id,
         simultaneous_result=simultaneous,
         hypotheses=tuple(outputs),
     )
@@ -796,7 +870,6 @@ def run_realization_robustness_v2(
 
 __all__ = [
     "ArmRealizationInteractionReferenceV2",
-    "BaseRandomizedPolicyEvidenceV2",
     "RealizationClusterContributionV2",
     "RealizationRobustnessAnalysisResultV2",
     "RealizationRobustnessHypothesisResultV2",

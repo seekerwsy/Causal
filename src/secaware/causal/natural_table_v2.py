@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from secaware.schema.discovery_v2 import (
+    DiscoveryAnalysisKindV2,
     NaturalDiscoveryTableArtifactV2,
     NaturalDiscoveryTableSpecV2,
 )
@@ -30,9 +31,13 @@ def build_natural_discovery_table_v2(
 def categorical_rows_v2(
     table: NaturalDiscoveryTableArtifactV2,
 ) -> tuple[tuple[int, ...], ...]:
-    """Return the state-preserving matrix defined by the frozen analysis kind."""
+    """Return audit rows except for two-level tables, which require a frozen draw."""
 
     checked = NaturalDiscoveryTableArtifactV2.model_validate(table, strict=True)
+    if checked.table_spec.analysis_kind is DiscoveryAnalysisKindV2.TWO_LEVEL:
+        raise ValueError(
+            "raw two-level observations cannot feed CI; use a frozen cluster/slot draw"
+        )
     return checked.categorical_rows()
 
 

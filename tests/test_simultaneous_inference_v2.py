@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +12,7 @@ from secaware.analysis.simultaneous_v2 import (
     BootstrapDrawStatusV2,
     CoordinateClusterContributionV2,
     run_simultaneous_inference_v2,
+    validate_simultaneous_inference_result_v2,
 )
 from secaware.schema.experiments import ArmRole
 from secaware.schema.inference_v2 import (
@@ -61,12 +63,12 @@ def _strata() -> tuple[CommonStratumSupportV2, ...]:
     return (
         CommonStratumSupportV2(
             stratum_id="cwe78.shell",
-            semantic_task_cluster_ids=("c1", "c2", "c3"),
+            semantic_task_cluster_ids=tuple(f"c{index}" for index in range(10)),
             weight_numerator=1,
         ),
         CommonStratumSupportV2(
             stratum_id="cwe89.sql",
-            semantic_task_cluster_ids=("d1", "d2", "d3"),
+            semantic_task_cluster_ids=tuple(f"d{index}" for index in range(10)),
             weight_numerator=2,
         ),
     )
@@ -76,9 +78,9 @@ def _plan(
     family: SimultaneousFamilyManifestV2,
     *,
     strata: tuple[CommonStratumSupportV2, ...] | None = None,
-    samples: int = 40,
-    invalid_numerator: int = 1,
-    invalid_denominator: int = 2,
+    samples: int = 999,
+    invalid_numerator: int = 0,
+    invalid_denominator: int = 1,
     minimum_independent: int = 4,
     minimum_per_stratum: int = 3,
     seed: bytes = SEED,
@@ -106,12 +108,12 @@ def _contributions(
     # Coordinate order is content-addressed, so bind values by hypothesis identity.
     by_hypothesis = {
         f"hypothesis_{_sha('h:a')}": {
-            "cwe78.shell": (0.0, 1.0, 2.0),
-            "cwe89.sql": (2.0, 2.0, 5.0),
+            "cwe78.shell": tuple(0.01 * index for index in range(10)),
+            "cwe89.sql": tuple(0.20 + 0.02 * index for index in range(10)),
         },
         f"hypothesis_{_sha('h:b')}": {
-            "cwe78.shell": (-1.0, 0.0, 1.0),
-            "cwe89.sql": (0.0, 3.0, 3.0),
+            "cwe78.shell": tuple(-0.05 + 0.01 * index for index in range(10)),
+            "cwe89.sql": tuple(0.10 + 0.02 * ((index * 3) % 10) for index in range(10)),
         },
     }
     rows: list[CoordinateClusterContributionV2] = []
@@ -144,15 +146,15 @@ def test_hand_calculated_stratified_cluster_se_and_simultaneous_intervals() -> N
         seed_material=SEED,
     )
 
-    # For both coordinates, within-stratum squared-deviation sums are 2 and 6.
-    # se^2 = (1/3)^2 * 2/(3*2) + (2/3)^2 * 6/(3*2) = 13/27.
-    expected_se = math.sqrt(13 / 27)
+    # Both coordinates have squared-deviation sums .00825 and .033.
+    # se^2 = (1/3)^2 * .00825/(10*9) + (2/3)^2 * .033/(10*9).
+    expected_se = math.sqrt(0.14025 / 810)
     by_hypothesis = {
         coordinate.hypothesis_id: interval
         for coordinate, interval in zip(family.coordinates, first.intervals, strict=True)
     }
-    assert by_hypothesis[f"hypothesis_{_sha('h:a')}"].estimate == pytest.approx(7 / 3)
-    assert by_hypothesis[f"hypothesis_{_sha('h:b')}"].estimate == pytest.approx(4 / 3)
+    assert by_hypothesis[f"hypothesis_{_sha('h:a')}"].estimate == pytest.approx(5 / 24)
+    assert by_hypothesis[f"hypothesis_{_sha('h:b')}"].estimate == pytest.approx(1 / 8)
     assert all(item.standard_error == pytest.approx(expected_se) for item in first.intervals)
     assert all(
         item.simultaneous_lower == pytest.approx(item.estimate - first.critical_value * expected_se)
@@ -163,17 +165,26 @@ def test_hand_calculated_stratified_cluster_se_and_simultaneous_intervals() -> N
     assert first == second
     assert len(first.draws) == plan.bootstrap_samples
     assert first.valid_draw_count + first.invalid_draw_count == plan.bootstrap_samples
+    assert first.simultaneous_result_id.startswith("simultaneous_result_v2_")
+    assert (
+        validate_simultaneous_inference_result_v2(
+            plan,
+            first,
+            contributions=_contributions(family),
+        )
+        == first
+    )
 
 
 def test_one_common_stratified_sample_is_committed_for_the_whole_family() -> None:
     family = _family("a", "b")
     result = run_simultaneous_inference_v2(
-        _plan(family, samples=12),
+        _plan(family),
         _contributions(family),
         seed_material=SEED,
     )
 
-    assert [item.replicate_index for item in result.draws] == list(range(12))
+    assert [item.replicate_index for item in result.draws] == list(range(999))
     assert all(len(item.sample_sha256) == 64 for item in result.draws)
     # A draw has one digest and one family maximum, never a coordinate-specific sample.
     assert all(
@@ -221,10 +232,10 @@ def test_zero_observed_standard_error_fails_closed() -> None:
 def test_low_support_plan_fails_before_resampling() -> None:
     family = _family("a")
     with pytest.raises(ValidationError, match="simultaneous inference v2"):
-        _plan(family, minimum_per_stratum=4)
+        _plan(family, minimum_per_stratum=11)
 
 
-def test_invalid_bootstrap_draw_fraction_fails_closed() -> None:
+def test_any_invalid_bootstrap_draw_fails_closed() -> None:
     family = _family("a")
     strata = (
         CommonStratumSupportV2(
@@ -236,7 +247,7 @@ def test_invalid_bootstrap_draw_fraction_fails_closed() -> None:
     plan = _plan(
         family,
         strata=strata,
-        samples=20,
+        samples=999,
         invalid_numerator=0,
         invalid_denominator=1,
         minimum_independent=2,
@@ -256,8 +267,34 @@ def test_invalid_bootstrap_draw_fraction_fails_closed() -> None:
             estimate=1.0,
         ),
     )
-    with pytest.raises(ValueError, match="invalid-draw fraction"):
+    with pytest.raises(ValueError, match="zero or invalid family standard error"):
         run_simultaneous_inference_v2(plan, rows, seed_material=SEED)
+
+
+def test_formal_bootstrap_minimum_rejects_b_equal_one() -> None:
+    with pytest.raises(ValidationError, match="simultaneous inference v2"):
+        _plan(_family("a"), samples=1)
+
+
+def test_result_artifact_and_contribution_range_fail_closed() -> None:
+    family = _family("a", "b")
+    plan = _plan(family)
+    rows = _contributions(family)
+    result = run_simultaneous_inference_v2(plan, rows, seed_material=SEED)
+
+    with pytest.raises(ValueError, match="result artifact"):
+        validate_simultaneous_inference_result_v2(
+            plan,
+            replace(result, critical_value=result.critical_value + 0.01),
+            contributions=rows,
+        )
+    out_of_range = replace(rows[0], estimate=1.01)
+    with pytest.raises(ValueError, match="cluster contribution"):
+        run_simultaneous_inference_v2(
+            plan,
+            (out_of_range, *rows[1:]),
+            seed_material=SEED,
+        )
 
 
 def test_family_and_plan_content_addresses_reject_post_freeze_tampering() -> None:

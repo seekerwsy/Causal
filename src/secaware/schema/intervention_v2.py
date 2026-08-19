@@ -18,16 +18,18 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, m
 
 from secaware.schema.common import SafeValidationMixin, StrictModel
 from secaware.schema.experiments import ArmRole
-from secaware.schema.features import FeatureOperation
+from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.policy_v2 import (
     ActionableFeatureSpec,
     CandidateSkeleton,
+    ContextQuerySpec,
     FrozenPolicyHypothesisRecord,
     RealizationPolicySpec,
     RealizationSpecRecord,
 )
+from secaware.schema.tsg import NodeType
 
-INTERVENTION_V2_SCHEMA_VERSION = "2.0"
+INTERVENTION_V2_SCHEMA_VERSION = "2.1"
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
@@ -102,7 +104,7 @@ class _InterventionV2Contract(SafeValidationMixin, StrictModel):
         strict=True,
     )
 
-    schema_version: Literal["2.0"] = INTERVENTION_V2_SCHEMA_VERSION
+    schema_version: Literal["2.1"] = INTERVENTION_V2_SCHEMA_VERSION
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"
@@ -150,6 +152,59 @@ class TargetSourceStateRuleV2(StrEnum):
     )
 
 
+def _canonical_target_binding(
+    *,
+    context_query: ContextQuerySpec,
+    actionable_feature: ActionableFeatureSpec,
+    cwe: str,
+    task_archetype: str,
+    operation: FeatureOperation,
+) -> tuple[ContextQuerySpec, ActionableFeatureSpec, tuple[str, ...]]:
+    """Resolve the exact reviewed context and editable security leaf or fail closed."""
+
+    try:
+        from secaware.tsg.context_queries_v2 import (
+            context_query_definition,
+            context_query_spec,
+        )
+        from secaware.tsg.feature_catalog import (
+            PROMPT_FEATURE_CATALOG_SHA256,
+            prompt_feature_spec,
+        )
+
+        context = ContextQuerySpec.model_validate(context_query, strict=True)
+        feature = ActionableFeatureSpec.model_validate(actionable_feature, strict=True)
+        canonical_context = context_query_spec(context.query_name)
+        definition = context_query_definition(context.query_name)
+        catalog_feature = prompt_feature_spec(feature.feature_id)
+        read_feature_ids = (definition.task_feature_id,)
+        if (
+            context != canonical_context
+            or context.context_query_catalog_sha256
+            != canonical_context.context_query_catalog_sha256
+            or context.query_semantics_version != canonical_context.query_semantics_version
+            or cwe not in context.applicable_cwes
+            or task_archetype not in context.applicable_task_archetypes
+            or feature.feature_catalog_sha256 != PROMPT_FEATURE_CATALOG_SHA256
+            or catalog_feature.feature_family is not FeatureFamily.SAFETY_CONTROL
+            or not catalog_feature.intervenable
+            or NodeType.GUARD not in catalog_feature.structural_node_types
+            or operation not in catalog_feature.operations
+            or operation not in feature.allowed_operations
+            or not set(feature.allowed_operations) <= set(catalog_feature.operations)
+            or cwe not in catalog_feature.applicable_cwes
+            or feature.feature_id in read_feature_ids
+        ):
+            raise ValueError
+        return context, feature, read_feature_ids
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:  # noqa: BLE001 - sanitize catalog/registry boundary failures
+        raise ValueError(
+            "intervention target is not a canonical context/security-leaf binding"
+        ) from None
+
+
 _SEMANTIC_ROLE_ORDER = (
     ArmSemanticRoleV2.TARGET_POLICY,
     ArmSemanticRoleV2.NO_OP_CONTROL,
@@ -166,12 +221,17 @@ class TargetSpecV2(_ContentAddressedInterventionV2):
 
     target_spec_id: str = Field(pattern=_TARGET_PATTERN)
     candidate_skeleton_id: str
+    context_query: ContextQuerySpec
     context_query_id: str
+    context_read_feature_ids: tuple[str, ...] = Field(min_length=1, max_length=32)
+    actionable_feature: ActionableFeatureSpec
     actionable_feature_spec_id: str
     feature_id: str
     operation: FeatureOperation
     outcome_id: str
     expected_direction: str
+    cwe: str
+    task_archetype: str
     source_state_rule: TargetSourceStateRuleV2
     allowed_delta_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
     task_projection_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
@@ -192,11 +252,17 @@ class TargetSpecV2(_ContentAddressedInterventionV2):
     def parse_source_rule(cls, value: object) -> object:
         return _exact_enum(value, TargetSourceStateRuleV2)
 
+    @field_validator("context_read_feature_ids", mode="before")
+    @classmethod
+    def snapshot_context_read_feature_ids(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
     @classmethod
     def from_components(
         cls,
         *,
         skeleton: CandidateSkeleton,
+        context_query: ContextQuerySpec,
         actionable_feature: ActionableFeatureSpec,
         allowed_delta_policy_sha256: str,
         task_projection_policy_sha256: str,
@@ -206,12 +272,20 @@ class TargetSpecV2(_ContentAddressedInterventionV2):
     ) -> Self:
         try:
             candidate = CandidateSkeleton.model_validate(skeleton, strict=True)
-            feature = ActionableFeatureSpec.model_validate(actionable_feature, strict=True)
+            context, feature, read_feature_ids = _canonical_target_binding(
+                context_query=context_query,
+                actionable_feature=actionable_feature,
+                cwe=candidate.cwe,
+                task_archetype=candidate.task_archetype,
+                operation=candidate.operation,
+            )
             if (
-                candidate.actionable_feature_spec_id != feature.actionable_feature_spec_id
+                candidate.context_query_id != context.context_query_id
+                or candidate.actionable_feature_spec_id != feature.actionable_feature_spec_id
                 or candidate.feature_id != feature.feature_id
                 or candidate.operation not in feature.allowed_operations
                 or candidate.feature_catalog_sha256 != feature.feature_catalog_sha256
+                or candidate.context_query_catalog_sha256 != context.context_query_catalog_sha256
             ):
                 raise ValueError
             source_rule = (
@@ -221,12 +295,17 @@ class TargetSpecV2(_ContentAddressedInterventionV2):
             )
             return cls.from_content(
                 candidate_skeleton_id=candidate.candidate_skeleton_id,
+                context_query=context,
                 context_query_id=candidate.context_query_id,
+                context_read_feature_ids=read_feature_ids,
+                actionable_feature=feature,
                 actionable_feature_spec_id=feature.actionable_feature_spec_id,
                 feature_id=feature.feature_id,
                 operation=candidate.operation,
                 outcome_id=candidate.outcome_id,
                 expected_direction=candidate.expected_direction.value,
+                cwe=candidate.cwe,
+                task_archetype=candidate.task_archetype,
                 source_state_rule=source_rule,
                 allowed_delta_policy_sha256=allowed_delta_policy_sha256,
                 task_projection_policy_sha256=task_projection_policy_sha256,
@@ -244,6 +323,16 @@ class TargetSpecV2(_ContentAddressedInterventionV2):
 
     @model_validator(mode="after")
     def validate_target(self) -> Self:
+        try:
+            context, feature, read_feature_ids = _canonical_target_binding(
+                context_query=self.context_query,
+                actionable_feature=self.actionable_feature,
+                cwe=self.cwe,
+                task_archetype=self.task_archetype,
+                operation=self.operation,
+            )
+        except ValueError:
+            raise ValueError(self._safe_validation_message) from None
         expected_rule = (
             TargetSourceStateRuleV2.ADD_RESOLVED_ABSENT
             if self.operation is FeatureOperation.ADD
@@ -251,10 +340,16 @@ class TargetSpecV2(_ContentAddressedInterventionV2):
         )
         if (
             not _valid_identifier(self.candidate_skeleton_id)
-            or not _valid_identifier(self.context_query_id)
+            or self.context_query != context
+            or self.context_query_id != context.context_query_id
+            or self.context_read_feature_ids != read_feature_ids
+            or self.actionable_feature != feature
             or not _valid_identifier(self.actionable_feature_spec_id)
+            or self.actionable_feature_spec_id != feature.actionable_feature_spec_id
             or not _valid_identifier(self.feature_id)
+            or self.feature_id != feature.feature_id
             or not _valid_identifier(self.outcome_id)
+            or not _valid_identifier(self.task_archetype)
             or self.expected_direction not in {"positive", "negative"}
             or self.source_state_rule is not expected_rule
         ):
@@ -305,6 +400,37 @@ class ArmProtocolV2(_ContentAddressedInterventionV2):
     @classmethod
     def parse_operation(cls, value: object) -> object:
         return _exact_enum(value, FeatureOperation)
+
+    @field_validator("arms", mode="before")
+    @classmethod
+    def snapshot_arms(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        return tuple(
+            item
+            if type(item) is ArmDefinitionV2
+            else ArmDefinitionV2.model_validate(item, strict=True)
+            for item in value
+        )
+
+    @field_validator("primary_contrast", mode="before")
+    @classmethod
+    def parse_primary_contrast(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        return tuple(_exact_enum(item, ArmRole) for item in value)
+
+    @field_validator("specificity_contrasts", mode="before")
+    @classmethod
+    def parse_specificity_contrasts(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        parsed = []
+        for contrast in value:
+            if type(contrast) not in {tuple, list}:
+                return value
+            parsed.append(tuple(_exact_enum(item, ArmRole) for item in contrast))
+        return tuple(parsed)
 
     @classmethod
     def from_target(
@@ -390,6 +516,7 @@ class InterventionBridgeRecordV2(_ContentAddressedInterventionV2):
 
     intervention_bridge_id: str = Field(pattern=_BRIDGE_PATTERN)
     candidate_skeleton: CandidateSkeleton
+    context_query: ContextQuerySpec
     actionable_feature: ActionableFeatureSpec
     realization_policy: RealizationPolicySpec
     realizations: tuple[RealizationSpecRecord, ...] = Field(min_length=1, max_length=32)
@@ -400,6 +527,18 @@ class InterventionBridgeRecordV2(_ContentAddressedInterventionV2):
     selector_invariant: Literal[True]
     outcome_blind: Literal[True]
     frozen_before_confirmation_outcomes: Literal[True]
+
+    @field_validator("realizations", mode="before")
+    @classmethod
+    def snapshot_realizations(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        return tuple(
+            item
+            if type(item) is RealizationSpecRecord
+            else RealizationSpecRecord.model_validate(item, strict=True)
+            for item in value
+        )
 
     @classmethod
     def from_components(
@@ -424,6 +563,7 @@ class InterventionBridgeRecordV2(_ContentAddressedInterventionV2):
             protocol = ArmProtocolV2.model_validate(arm_protocol, strict=True)
             if (
                 target.candidate_skeleton_id != candidate.candidate_skeleton_id
+                or target.context_query_id != candidate.context_query_id
                 or target.actionable_feature_spec_id != feature.actionable_feature_spec_id
                 or protocol.target_spec_id != target.target_spec_id
                 or protocol.operation is not candidate.operation
@@ -439,6 +579,7 @@ class InterventionBridgeRecordV2(_ContentAddressedInterventionV2):
             )
             return cls.from_content(
                 candidate_skeleton=candidate,
+                context_query=target.context_query,
                 actionable_feature=feature,
                 realization_policy=policy,
                 realizations=specs,
@@ -458,6 +599,7 @@ class InterventionBridgeRecordV2(_ContentAddressedInterventionV2):
     @model_validator(mode="after")
     def validate_bridge(self) -> Self:
         candidate = self.candidate_skeleton
+        context = self.context_query
         feature = self.actionable_feature
         policy = self.realization_policy
         target = self.target_spec
@@ -466,11 +608,17 @@ class InterventionBridgeRecordV2(_ContentAddressedInterventionV2):
         realization_ids = tuple(item.realization_spec_id for item in self.realizations)
         if (
             candidate.actionable_feature_spec_id != feature.actionable_feature_spec_id
+            or candidate.context_query_id != context.context_query_id
+            or candidate.context_query_catalog_sha256 != context.context_query_catalog_sha256
             or candidate.feature_id != feature.feature_id
             or candidate.operation not in feature.allowed_operations
             or candidate.realization_policy_spec_id != policy.realization_policy_spec_id
             or target.candidate_skeleton_id != candidate.candidate_skeleton_id
+            or target.context_query != context
             or target.context_query_id != candidate.context_query_id
+            or target.cwe != candidate.cwe
+            or target.task_archetype != candidate.task_archetype
+            or target.actionable_feature != feature
             or target.actionable_feature_spec_id != candidate.actionable_feature_spec_id
             or target.feature_id != candidate.feature_id
             or target.operation is not candidate.operation

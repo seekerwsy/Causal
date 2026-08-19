@@ -22,6 +22,8 @@ from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_mo
 from secaware.schema.experiments import ArmRole
 
 INFERENCE_V2_SCHEMA_VERSION = "2.0"
+FORMAL_MIN_BOOTSTRAP_SAMPLES_V2 = 999
+FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2 = 999
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
@@ -242,7 +244,10 @@ class SimultaneousInferencePlanV2(_ContentAddressedInferenceV2):
     stratum_weight_denominator: StrictInt = Field(ge=1, le=2**31 - 1)
     alpha_numerator: StrictInt = Field(ge=1, le=2**31 - 1)
     alpha_denominator: StrictInt = Field(ge=2, le=2**31 - 1)
-    bootstrap_samples: StrictInt = Field(ge=1, le=100_000)
+    bootstrap_samples: StrictInt = Field(ge=FORMAL_MIN_BOOTSTRAP_SAMPLES_V2, le=100_000)
+    minimum_valid_bootstrap_draws: StrictInt = Field(
+        ge=FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2, le=100_000
+    )
     minimum_independent_clusters: StrictInt = Field(ge=2, le=100_000)
     minimum_clusters_per_stratum: StrictInt = Field(ge=2, le=100_000)
     maximum_invalid_fraction_numerator: StrictInt = Field(ge=0, le=2**31 - 1)
@@ -254,6 +259,7 @@ class SimultaneousInferencePlanV2(_ContentAddressedInferenceV2):
     centering_method: Literal["bootstrap_minus_observed_v1"]
     quantile_rule: Literal["empirical_higher_v1"]
     interval_rule: Literal["two_sided_studentized_max_abs_t_v1"]
+    invalid_draw_policy: Literal["fail_on_any_invalid_draw_v1"]
     same_cluster_stratum_support_required: Literal[True]
     complete_family_required: Literal[True]
     frozen_before_outcomes: Literal[True]
@@ -284,6 +290,7 @@ class SimultaneousInferencePlanV2(_ContentAddressedInferenceV2):
                 alpha_numerator=alpha_numerator,
                 alpha_denominator=alpha_denominator,
                 bootstrap_samples=bootstrap_samples,
+                minimum_valid_bootstrap_draws=FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2,
                 minimum_independent_clusters=minimum_independent_clusters,
                 minimum_clusters_per_stratum=minimum_clusters_per_stratum,
                 maximum_invalid_fraction_numerator=maximum_invalid_fraction_numerator,
@@ -295,6 +302,7 @@ class SimultaneousInferencePlanV2(_ContentAddressedInferenceV2):
                 centering_method="bootstrap_minus_observed_v1",
                 quantile_rule="empirical_higher_v1",
                 interval_rule="two_sided_studentized_max_abs_t_v1",
+                invalid_draw_policy="fail_on_any_invalid_draw_v1",
                 same_cluster_stratum_support_required=True,
                 complete_family_required=True,
                 frozen_before_outcomes=True,
@@ -325,7 +333,9 @@ class SimultaneousInferencePlanV2(_ContentAddressedInferenceV2):
             or len(all_clusters) != len(set(all_clusters))
             or sum(item.weight_numerator for item in self.strata) != self.stratum_weight_denominator
             or self.alpha_numerator >= self.alpha_denominator
-            or self.maximum_invalid_fraction_numerator >= self.maximum_invalid_fraction_denominator
+            or self.maximum_invalid_fraction_numerator != 0
+            or self.maximum_invalid_fraction_denominator != 1
+            or self.minimum_valid_bootstrap_draws > self.bootstrap_samples
             or len(all_clusters) < self.minimum_independent_clusters
             or any(
                 len(item.semantic_task_cluster_ids) < self.minimum_clusters_per_stratum
@@ -409,9 +419,14 @@ class RealizationRobustnessPlanV2(_ContentAddressedInferenceV2):
         min_length=1, max_length=1_000
     )
     simultaneous_inference_plan: SimultaneousInferencePlanV2
+    primary_inference_plan_id: str = Field(pattern=_PLAN_PATTERN)
+    primary_family_id: str = Field(pattern=_FAMILY_PATTERN)
+    primary_result_required: Literal[True]
     interaction_statistic_method: Literal["max_abs_realization_minus_qh_policy_v1"]
     interaction_reference_method: Literal["semantic_cluster_arm_randomization_v1"]
-    interaction_minimum_reference_draws: StrictInt = Field(ge=1, le=100_000)
+    interaction_minimum_reference_draws: StrictInt = Field(
+        ge=FORMAL_MIN_BOOTSTRAP_SAMPLES_V2, le=100_000
+    )
     all_conditions_required_for_label: Literal[True]
     full_global_multiplicity_family_required: Literal[True]
     frozen_before_outcomes: Literal[True]
@@ -422,11 +437,16 @@ class RealizationRobustnessPlanV2(_ContentAddressedInferenceV2):
         *,
         hypotheses: tuple[RealizationRobustnessHypothesisSpecV2, ...],
         simultaneous_inference_plan: SimultaneousInferencePlanV2,
+        primary_inference_plan_id: str,
+        primary_family_id: str,
         interaction_minimum_reference_draws: int,
     ) -> Self:
         return cls.from_content(
             hypotheses=hypotheses,
             simultaneous_inference_plan=simultaneous_inference_plan,
+            primary_inference_plan_id=primary_inference_plan_id,
+            primary_family_id=primary_family_id,
+            primary_result_required=True,
             interaction_statistic_method="max_abs_realization_minus_qh_policy_v1",
             interaction_reference_method="semantic_cluster_arm_randomization_v1",
             interaction_minimum_reference_draws=interaction_minimum_reference_draws,
@@ -506,6 +526,8 @@ class RealizationRobustnessPlanV2(_ContentAddressedInferenceV2):
 
 
 __all__ = [
+    "FORMAL_MIN_BOOTSTRAP_SAMPLES_V2",
+    "FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2",
     "INFERENCE_V2_SCHEMA_VERSION",
     "CommonStratumSupportV2",
     "RealizationRobustnessHypothesisSpecV2",

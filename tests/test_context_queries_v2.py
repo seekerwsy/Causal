@@ -6,7 +6,11 @@ import networkx as nx
 import pytest
 
 from secaware.schema.features import FeatureFamily, FeatureState, PromptExtractorBackend
-from secaware.schema.policy_v2 import QueryState
+from secaware.schema.policy_v2 import (
+    PolicySplit,
+    QueryState,
+    SemanticTaskClusterMembershipRecord,
+)
 from secaware.schema.tsg import EdgeType, MotifId, NodeType, PromptTSGRecord
 from secaware.tsg.catalog import PROMPT_TSG_CATALOG
 from secaware.tsg.context_queries_v2 import (
@@ -193,8 +197,27 @@ def _evaluate(
     return evaluate_context_query(
         record,
         query_name,
-        task_instance_id=record.task_id,
+        semantic_membership=_membership(record, archetype),
+    )
+
+
+def _membership(
+    record: PromptTSGRecord,
+    archetype: str,
+    *,
+    task_instance_id: str | None = None,
+    cwe: str | None = None,
+) -> SemanticTaskClusterMembershipRecord:
+    clustering_policy = _sha("semantic-clustering-policy")
+    return SemanticTaskClusterMembershipRecord.from_content(
+        semantic_task_cluster_id=f"cluster.{record.task_id}",
+        task_instance_id=task_instance_id or record.task_id,
+        split=PolicySplit.DISCOVER,
+        cwe=cwe or record.cwe,
         task_archetype=archetype,
+        source_task_sha256=_sha(f"source:{record.task_id}"),
+        clustering_policy_sha256=clustering_policy,
+        adjudication_sha256=_sha(f"adjudication:{record.task_id}"),
     )
 
 
@@ -311,3 +334,111 @@ def test_context_query_four_values_are_distinct_and_provenance_bound(
     assert unresolved.result.required_roles_resolved is False
     assert unresolved.result.bounded_matching_complete is False
     assert not absent.matches and not not_applicable.matches and not unresolved.matches
+
+
+def test_guard_cannot_become_a_context_flow_intermediate() -> None:
+    record = _record(
+        CWE78_COMMAND_FLOW_QUERY,
+        "CWE-78",
+        "task.process_launch",
+        "safety.safe_subprocess",
+        target_state=FeatureState.PRESENT,
+        connected_target_sink=False,
+    )
+    graph = record_to_multidigraph(record)
+    data = next(
+        node_id
+        for node_id, node in graph.nodes(data=True)
+        if node["node_type"] is NodeType.DATA_OBJECT and node["label"] == "command_argument"
+    )
+    guard = next(
+        node_id for node_id, node in graph.nodes(data=True) if node["node_type"] is NodeType.GUARD
+    )
+    sink = next(
+        node_id
+        for node_id, node in graph.nodes(data=True)
+        if node["node_type"] is NodeType.SINK and node["label"] == "process_spawn"
+    )
+    _add_edge(graph, data, guard, EdgeType.FLOWS_TO)
+    _add_edge(graph, guard, sink, EdgeType.FLOWS_TO)
+    malformed_but_canonical = multidigraph_to_record(
+        graph,
+        prompt_id="prompt.cwe78.invalid-guard-flow",
+        task_id="task.cwe78.invalid-guard-flow",
+        task_family="command_execution",
+        cwe="CWE-78",
+        extractor_backend=record.extractor_backend,
+        extractor_policy_sha256=record.extractor_policy_sha256,
+        proposal_id=record.proposal_id,
+    )
+
+    evaluation = _evaluate(
+        malformed_but_canonical,
+        CWE78_COMMAND_FLOW_QUERY,
+        "argument-vector-subprocess",
+    )
+
+    assert evaluation.result.state is QueryState.UNRESOLVED
+    assert evaluation.result.bounded_matching_complete is False
+    assert not evaluation.matches
+
+
+def test_missing_required_roles_cannot_be_reported_as_absent() -> None:
+    record = _record(
+        CWE78_COMMAND_FLOW_QUERY,
+        "CWE-78",
+        "task.process_launch",
+        "safety.safe_subprocess",
+    )
+    graph = record_to_multidigraph(record)
+    for node_id, node in tuple(graph.nodes(data=True)):
+        if node["node_type"] not in {NodeType.FEATURE, NodeType.PRESENTATION_FEATURE}:
+            graph.remove_node(node_id)
+        else:
+            node["attributes"]["feature_state"] = FeatureState.ABSENT.value
+    roles_missing = multidigraph_to_record(
+        graph,
+        prompt_id="prompt.cwe78.roles-missing",
+        task_id="task.cwe78.roles-missing",
+        task_family="command_execution",
+        cwe="CWE-78",
+        extractor_backend=record.extractor_backend,
+        extractor_policy_sha256=record.extractor_policy_sha256,
+        proposal_id=record.proposal_id,
+    )
+
+    evaluation = _evaluate(
+        roles_missing,
+        CWE78_COMMAND_FLOW_QUERY,
+        "argument-vector-subprocess",
+    )
+
+    assert evaluation.result.state is QueryState.UNRESOLVED
+    assert evaluation.result.required_roles_resolved is False
+    assert evaluation.result.bounded_matching_complete is False
+
+
+def test_context_query_rejects_membership_with_wrong_task_or_known_cwe_archetype() -> None:
+    record = _record(
+        CWE78_COMMAND_FLOW_QUERY,
+        "CWE-78",
+        "task.process_launch",
+        "safety.safe_subprocess",
+    )
+
+    with pytest.raises(ValueError, match="membership does not match"):
+        evaluate_context_query(
+            record,
+            CWE78_COMMAND_FLOW_QUERY,
+            semantic_membership=_membership(
+                record,
+                "argument-vector-subprocess",
+                task_instance_id="task.attacker-substitution",
+            ),
+        )
+    with pytest.raises(ValueError, match="membership does not match"):
+        evaluate_context_query(
+            record,
+            CWE78_COMMAND_FLOW_QUERY,
+            semantic_membership=_membership(record, "value-parameterization"),
+        )
