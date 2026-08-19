@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from secaware.schema.experiments import ArmRole
+from secaware.schema.policy_v2 import ConfirmationBlockKeyV2
 from secaware.schema.runtime_v2 import (
     ConfirmationAssignmentRecordV2,
     DiagnosticXARValueV2,
@@ -28,20 +29,38 @@ def _sha(text: str) -> str:
 
 
 def _confirmation_coordinates(
-    *, slot: int = 7, provider_seed: int | None = None
+    *,
+    slot: int = 7,
+    provider_seed: int | None = None,
+    model_id: str = "model.test",
 ) -> dict[str, object]:
-    return {
+    coordinates: dict[str, object] = {
         "regime_id": "randomized_confirmation",
         "semantic_task_cluster_id": "cluster.sql.1",
         "task_instance_id": "task.sql.1",
+        "model_id": model_id,
         "request_randomness_slot": slot,
         "provider_seed": provider_seed,
         "assignment_id": f"assignment_{'1' * 64}",
         "hypothesis_id": f"hypothesis_{'2' * 64}",
+        "target_spec_id": f"target_{'5' * 64}",
         "realization_spec_id": f"realization_spec_{'3' * 64}",
         "task_realization_bundle_id": f"task_realization_bundle_{'4' * 64}",
+        "variant_id": f"variant_{'7' * 64}",
+        "arm_protocol_id": f"arm_protocol_{'6' * 64}",
         "assigned_arm": ArmRole.TARGET_PATCH,
     }
+    coordinates["block_id"] = ConfirmationBlockKeyV2.from_coordinates(
+        semantic_task_cluster_id=str(coordinates["semantic_task_cluster_id"]),
+        task_instance_id=str(coordinates["task_instance_id"]),
+        hypothesis_id=str(coordinates["hypothesis_id"]),
+        target_spec_id=str(coordinates["target_spec_id"]),
+        realization_spec_id=str(coordinates["realization_spec_id"]),
+        task_realization_bundle_id=str(coordinates["task_realization_bundle_id"]),
+        model_id=model_id,
+        arm_protocol_id=str(coordinates["arm_protocol_id"]),
+    ).block_id
+    return coordinates
 
 
 def _discovery_coordinates(*, slot: int = 7, provider_seed: int | None = None) -> dict[str, object]:
@@ -49,6 +68,7 @@ def _discovery_coordinates(*, slot: int = 7, provider_seed: int | None = None) -
         "regime_id": "natural_prompt_discovery",
         "semantic_task_cluster_id": "cluster.sql.1",
         "task_instance_id": "task.sql.1",
+        "model_id": "model.test",
         "request_randomness_slot": slot,
         "provider_seed": provider_seed,
     }
@@ -70,7 +90,6 @@ def _chain(
         prompt=prompt,
         prompt_sha256=_sha(prompt),
         language="python",
-        model_id="model.test",
         endpoint_sha256=ZERO,
         generation_parameters_sha256="1" * 64,
         system_template_sha256="2" * 64,
@@ -171,7 +190,6 @@ def test_discovery_rejects_forged_confirmation_coordinates() -> None:
             prompt="prompt",
             prompt_sha256=_sha("prompt"),
             language="python",
-            model_id="model.test",
             endpoint_sha256=ZERO,
             generation_parameters_sha256=ZERO,
             system_template_sha256=ZERO,
@@ -195,7 +213,6 @@ def test_x0_assignment_and_xar_have_non_interchangeable_schemas() -> None:
         producer_chain_id=chain.producer_chain_id,
         table_id="table.sql.discovery",
         prompt_id=request.prompt_id,
-        model_id=request.model_id,
         natural_x0=(NaturalX0ValueV2(variable_id="x.parameterization", state=1),),
         outcomes=(NaturalOutcomeValueV2(variable_id="y.secure", state=1),),
     )
@@ -237,3 +254,41 @@ def test_records_are_immutable_and_content_addressed() -> None:
     forged["request_randomness_slot"] = 9
     with pytest.raises(ValidationError, match="runtime v2 contract"):
         GenerationRequestRecordV2.model_validate(forged)
+
+
+def test_confirmation_rejects_noncanonical_block_and_model_drift() -> None:
+    coordinates = _confirmation_coordinates()
+    noncanonical = {**coordinates, "block_id": f"block_{'f' * 64}"}
+    with pytest.raises(ValidationError, match="runtime v2 contract"):
+        _chain(noncanonical)
+
+    request, code, _oracle, functional = _chain(coordinates)
+    drifted = _confirmation_coordinates(model_id="model.other")
+    drifted_oracle = OracleResultRecordV2.from_content(
+        **drifted,
+        generated_code_id=code.generated_code_id,
+        code_sha256=code.code_sha256,
+        status="secure",
+        oracle_supported=True,
+        oracle_evaluable=True,
+        evidence_sha256="6" * 64,
+        oracle_producer_id="oracle.test",
+        oracle_policy_sha256="7" * 64,
+        oracle_runtime_sha256="8" * 64,
+    )
+    with pytest.raises(ValueError, match="exact join"):
+        validate_runtime_producer_chain_v2(request, code, drifted_oracle, functional)
+
+    assert {request.model_id, code.model_id, functional.model_id} == {"model.test"}
+
+
+@pytest.mark.parametrize(
+    ("slot", "provider_seed"),
+    ((2_147_483_648, None), (0, -1), (0, 2**63)),
+)
+def test_runtime_randomness_domain_matches_outcome_domain(
+    slot: int,
+    provider_seed: int | None,
+) -> None:
+    with pytest.raises(ValidationError, match="runtime v2 contract"):
+        _chain(_discovery_coordinates(slot=slot, provider_seed=provider_seed))

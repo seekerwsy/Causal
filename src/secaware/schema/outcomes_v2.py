@@ -14,15 +14,16 @@ import re
 from enum import Enum
 from typing import Any, Literal, Self
 
-from pydantic import ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import ConfigDict, Field, StrictInt, ValidationError, field_validator, model_validator
 
 from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
 from secaware.schema.experiments import ArmRole
+from secaware.schema.policy_v2 import ConfirmationBlockKeyV2
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _OUTCOME_ID = re.compile(r"^assignment_outcome_v2_[0-9a-f]{64}$")
-_BLOCK_ID = re.compile(r"^block_v2_[0-9a-f]{64}$")
+_BLOCK_ID = re.compile(r"^block_[0-9a-f]{64}$")
 
 
 class AssignmentOutcomeStateV2(str, Enum):
@@ -79,21 +80,21 @@ def block_id_v2(
 ) -> str:
     """Derive the canonical v2 complete-block ID from all frozen coordinates."""
 
-    coordinates = {
-        "semantic_task_cluster_id": semantic_task_cluster_id,
-        "task_instance_id": task_instance_id,
-        "hypothesis_id": hypothesis_id,
-        "target_spec_id": target_spec_id,
-        "realization_spec_id": realization_spec_id,
-        "task_realization_bundle_id": task_realization_bundle_id,
-        "model_id": model_id,
-        "arm_protocol_id": arm_protocol_id,
-    }
-    if not all(_valid_identifier(value) for value in coordinates.values()):
-        raise ValueError("v2 block coordinates failed validation")
-    if not is_valid_model_id(model_id):
-        raise ValueError("v2 block coordinates failed validation")
-    return f"block_v2_{_canonical_sha256(coordinates)}"
+    try:
+        return ConfirmationBlockKeyV2.from_coordinates(
+            semantic_task_cluster_id=semantic_task_cluster_id,
+            task_instance_id=task_instance_id,
+            hypothesis_id=hypothesis_id,
+            target_spec_id=target_spec_id,
+            realization_spec_id=realization_spec_id,
+            task_realization_bundle_id=task_realization_bundle_id,
+            model_id=model_id,
+            arm_protocol_id=arm_protocol_id,
+        ).block_id
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise ValueError("v2 block coordinates failed validation") from None
 
 
 def _project_state(
@@ -146,6 +147,7 @@ class AssignmentOutcomeRecordV2(SafeValidationMixin, StrictModel):
     target_spec_id: str
     realization_spec_id: str
     task_realization_bundle_id: str
+    variant_id: str
     model_id: str
     arm_protocol_id: str
     arm_role: ArmRole
@@ -215,6 +217,7 @@ class AssignmentOutcomeRecordV2(SafeValidationMixin, StrictModel):
             self.target_spec_id,
             self.realization_spec_id,
             self.task_realization_bundle_id,
+            self.variant_id,
             self.model_id,
             self.arm_protocol_id,
         )

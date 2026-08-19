@@ -18,6 +18,7 @@ from pydantic import ConfigDict, Field, StrictInt, field_validator, model_valida
 
 from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
 from secaware.schema.experiments import ArmRole
+from secaware.schema.policy_v2 import ConfirmationBlockKeyV2
 
 RUNTIME_V2_SCHEMA_VERSION = "2.0"
 DiscoveryRegimeId = Literal["natural_prompt_discovery"]
@@ -29,8 +30,12 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _CONTENT_ID_PATTERN = r"^[a-z][a-z0-9_]*_[0-9a-f]{64}$"
 _ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
+_TARGET_SPEC_ID_PATTERN = r"^target_[0-9a-f]{64}$"
 _REALIZATION_SPEC_ID_PATTERN = r"^realization_spec_[0-9a-f]{64}$"
 _TASK_BUNDLE_ID_PATTERN = r"^task_realization_bundle_[0-9a-f]{64}$"
+_VARIANT_ID_PATTERN = r"^variant_[0-9a-f]{64}$"
+_ARM_PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
+_BLOCK_ID_PATTERN = r"^block_[0-9a-f]{64}$"
 
 
 def _jsonable(value: object) -> object:
@@ -125,14 +130,19 @@ class _RuntimeCoordinatesV2(_RuntimeV2Contract):
     regime_id: RuntimeRegimeId
     semantic_task_cluster_id: str
     task_instance_id: str
-    request_randomness_slot: StrictInt = Field(ge=0)
-    provider_seed: StrictInt | None
+    model_id: str
+    request_randomness_slot: StrictInt = Field(ge=0, le=2_147_483_647)
+    provider_seed: StrictInt | None = Field(ge=0, le=2**63 - 1)
 
     # These coordinates are all absent in discovery and all present in confirmation.
     assignment_id: str | None = Field(default=None, pattern=_ASSIGNMENT_ID_PATTERN)
     hypothesis_id: str | None = Field(default=None, pattern=_HYPOTHESIS_ID_PATTERN)
+    target_spec_id: str | None = Field(default=None, pattern=_TARGET_SPEC_ID_PATTERN)
     realization_spec_id: str | None = Field(default=None, pattern=_REALIZATION_SPEC_ID_PATTERN)
     task_realization_bundle_id: str | None = Field(default=None, pattern=_TASK_BUNDLE_ID_PATTERN)
+    variant_id: str | None = Field(default=None, pattern=_VARIANT_ID_PATTERN)
+    arm_protocol_id: str | None = Field(default=None, pattern=_ARM_PROTOCOL_ID_PATTERN)
+    block_id: str | None = Field(default=None, pattern=_BLOCK_ID_PATTERN)
     assigned_arm: ArmRole | None = None
 
     @field_validator("assigned_arm", mode="before")
@@ -146,15 +156,21 @@ class _RuntimeCoordinatesV2(_RuntimeV2Contract):
 
     @model_validator(mode="after")
     def validate_regime_coordinates(self) -> Self:
-        if not _valid_identifier(self.semantic_task_cluster_id) or not _valid_identifier(
-            self.task_instance_id
+        if (
+            not _valid_identifier(self.semantic_task_cluster_id)
+            or not _valid_identifier(self.task_instance_id)
+            or not is_valid_model_id(self.model_id)
         ):
             raise ValueError(self._safe_validation_message)
         confirmation = (
             self.assignment_id,
             self.hypothesis_id,
+            self.target_spec_id,
             self.realization_spec_id,
             self.task_realization_bundle_id,
+            self.variant_id,
+            self.arm_protocol_id,
+            self.block_id,
             self.assigned_arm,
         )
         if self.regime_id == "natural_prompt_discovery":
@@ -162,6 +178,19 @@ class _RuntimeCoordinatesV2(_RuntimeV2Contract):
                 raise ValueError("discovery records forbid confirmation-only coordinates")
         elif any(value is None for value in confirmation):
             raise ValueError("confirmation records require complete assignment coordinates")
+        else:
+            expected_block = ConfirmationBlockKeyV2.from_coordinates(
+                semantic_task_cluster_id=self.semantic_task_cluster_id,
+                task_instance_id=self.task_instance_id,
+                hypothesis_id=self.hypothesis_id,
+                target_spec_id=self.target_spec_id,
+                realization_spec_id=self.realization_spec_id,
+                task_realization_bundle_id=self.task_realization_bundle_id,
+                model_id=self.model_id,
+                arm_protocol_id=self.arm_protocol_id,
+            )
+            if self.block_id != expected_block.block_id:
+                raise ValueError("confirmation block coordinate failed exact validation")
         return self
 
     def exact_coordinates(self) -> tuple[object, ...]:
@@ -171,12 +200,17 @@ class _RuntimeCoordinatesV2(_RuntimeV2Contract):
             self.regime_id,
             self.semantic_task_cluster_id,
             self.task_instance_id,
+            self.model_id,
             self.request_randomness_slot,
             self.provider_seed,
             self.assignment_id,
             self.hypothesis_id,
+            self.target_spec_id,
             self.realization_spec_id,
             self.task_realization_bundle_id,
+            self.variant_id,
+            self.arm_protocol_id,
+            self.block_id,
             self.assigned_arm,
         )
 
@@ -229,7 +263,6 @@ class GenerationRequestRecordV2(_ContentAddressedRuntimeV2):
     prompt: str = Field(min_length=1, repr=False)
     prompt_sha256: str = Field(pattern=_SHA256_PATTERN)
     language: str
-    model_id: str
     endpoint_sha256: str = Field(pattern=_SHA256_PATTERN)
     generation_parameters_sha256: str = Field(pattern=_SHA256_PATTERN)
     system_template_sha256: str = Field(pattern=_SHA256_PATTERN)
@@ -312,7 +345,7 @@ class OracleResultRecordV2(_ContentAddressedRuntimeV2):
             or determinate != (self.oracle_supported and self.oracle_evaluable)
             or (
                 self.status == "not_evaluated_no_valid_code"
-                and (self.code_sha256 is not None or self.oracle_supported or self.oracle_evaluable)
+                and (self.oracle_supported or self.oracle_evaluable)
             )
         ):
             raise ValueError(self._safe_validation_message)
@@ -341,9 +374,7 @@ class FunctionalResultRecordV2(_ContentAddressedRuntimeV2):
 
     @model_validator(mode="after")
     def validate_functional_state(self) -> Self:
-        if not _valid_identifier(self.evaluator_producer_id) or (
-            self.status == "not_evaluated_no_valid_code" and self.code_sha256 is not None
-        ):
+        if not _valid_identifier(self.evaluator_producer_id):
             raise ValueError(self._safe_validation_message)
         return self
 
@@ -395,7 +426,6 @@ class NaturalCausalObservationRecordV2(_ContentAddressedRuntimeV2):
     producer_chain_id: str = Field(pattern=_CONTENT_ID_PATTERN)
     table_id: str
     prompt_id: str
-    model_id: str
     natural_x0: tuple[NaturalX0ValueV2, ...] = Field(min_length=1, max_length=10_000)
     outcomes: tuple[NaturalOutcomeValueV2, ...] = Field(min_length=1, max_length=1_000)
 
@@ -461,12 +491,17 @@ def validate_runtime_producer_chain_v2(
             regime_id=request.regime_id,
             semantic_task_cluster_id=request.semantic_task_cluster_id,
             task_instance_id=request.task_instance_id,
+            model_id=request.model_id,
             request_randomness_slot=request.request_randomness_slot,
             provider_seed=request.provider_seed,
             assignment_id=request.assignment_id,
             hypothesis_id=request.hypothesis_id,
+            target_spec_id=request.target_spec_id,
             realization_spec_id=request.realization_spec_id,
             task_realization_bundle_id=request.task_realization_bundle_id,
+            variant_id=request.variant_id,
+            arm_protocol_id=request.arm_protocol_id,
+            block_id=request.block_id,
             assigned_arm=request.assigned_arm,
             generation_request_id=request.generation_request_id,
             generated_code_id=code.generated_code_id,

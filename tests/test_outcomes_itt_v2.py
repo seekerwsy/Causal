@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 
 import pytest
@@ -18,10 +19,17 @@ from secaware.schema.outcomes_v2 import (
     block_id_v2,
 )
 
-HYPOTHESIS = "hypothesis.v2.security-add"
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+HYPOTHESIS = f"hypothesis_{_sha('v2.security-add')}"
 MODEL = "model.local-14b"
-TARGET = "target.v2.shell-guard"
-PROTOCOL = "protocol.v2.four-arm-add"
+TARGET = f"target_{_sha('v2.shell-guard')}"
+PROTOCOL = f"arm_protocol_{_sha('v2.four-arm-add')}"
+R1 = f"realization_spec_{_sha('r1')}"
+R2 = f"realization_spec_{_sha('r2')}"
 
 
 def _projection(
@@ -37,8 +45,10 @@ def _projection(
         }
     )
     secure = int(state is AssignmentOutcomeStateV2.VALID_ORACLE_SECURE)
-    joint = None if functional_status is FunctionalStatusV2.NOT_APPLICABLE else int(
-        secure == 1 and functional_status is FunctionalStatusV2.PASS
+    joint = (
+        None
+        if functional_status is FunctionalStatusV2.NOT_APPLICABLE
+        else int(secure == 1 and functional_status is FunctionalStatusV2.PASS)
     )
     return y_c, y_e, secure, joint
 
@@ -54,7 +64,9 @@ def _row(
     functional_status: FunctionalStatusV2 = FunctionalStatusV2.PASS,
     provider_seed: int | None = None,
 ) -> AssignmentOutcomeRecordV2:
-    bundle = f"bundle.{task}.{realization}"
+    realization_id = {"r1": R1, "r2": R2}.get(realization, realization)
+    bundle = f"task_realization_bundle_{_sha(f'{task}:{realization_id}')}"
+    variant = f"variant_{_sha(f'{task}:{realization_id}:{arm.value}')}"
     y_c, y_e, secure, joint = _projection(state, functional_status)
     return AssignmentOutcomeRecordV2.from_content(
         assignment_id=f"assignment.{cluster}.{task}.{realization}.{arm.value}.{slot}",
@@ -63,7 +75,7 @@ def _row(
             task_instance_id=task,
             hypothesis_id=HYPOTHESIS,
             target_spec_id=TARGET,
-            realization_spec_id=realization,
+            realization_spec_id=realization_id,
             task_realization_bundle_id=bundle,
             model_id=MODEL,
             arm_protocol_id=PROTOCOL,
@@ -72,8 +84,9 @@ def _row(
         task_instance_id=task,
         hypothesis_id=HYPOTHESIS,
         target_spec_id=TARGET,
-        realization_spec_id=realization,
+        realization_spec_id=realization_id,
         task_realization_bundle_id=bundle,
+        variant_id=variant,
         model_id=MODEL,
         arm_protocol_id=PROTOCOL,
         arm_role=arm,
@@ -121,9 +134,7 @@ def _crossed_rows() -> tuple[AssignmentOutcomeRecordV2, ...]:
                     slot=0,
                     state=_state(target),
                     functional_status=(
-                        FunctionalStatusV2.FAIL
-                        if target
-                        else FunctionalStatusV2.PASS
+                        FunctionalStatusV2.FAIL if target else FunctionalStatusV2.PASS
                     ),
                     provider_seed=None,
                 ),
@@ -135,9 +146,7 @@ def _crossed_rows() -> tuple[AssignmentOutcomeRecordV2, ...]:
                     slot=1,
                     state=_state(control),
                     functional_status=(
-                        FunctionalStatusV2.PASS
-                        if control
-                        else FunctionalStatusV2.FAIL
+                        FunctionalStatusV2.PASS if control else FunctionalStatusV2.FAIL
                     ),
                     provider_seed=None,
                 ),
@@ -147,7 +156,7 @@ def _crossed_rows() -> tuple[AssignmentOutcomeRecordV2, ...]:
 
 
 TASK_WEIGHTS = {("c1", "t1"): 0.75, ("c1", "t2"): 0.25, ("c2", "t3"): 1.0}
-REALIZATION_WEIGHTS = {"r1": 0.25, "r2": 0.75}
+REALIZATION_WEIGHTS = {R1: 0.25, R2: 0.75}
 
 
 def test_v2_total_state_projects_outcomes_and_preserves_nullable_provider_seed() -> None:
@@ -275,7 +284,9 @@ def test_hand_calculated_block_task_realization_cluster_itt() -> None:
 
     # c1 = .75*(.25*1 + .75*0) + .25*(.25*0 + .75*1) = .375
     # c2 = .25*(-1) + .75*(1) = .5; equal-cluster mean = .4375.
-    assert [(item.semantic_task_cluster_id, item.estimate) for item in result.cluster_contributions] == [
+    assert [
+        (item.semantic_task_cluster_id, item.estimate) for item in result.cluster_contributions
+    ] == [
         ("c1", pytest.approx(0.375)),
         ("c2", pytest.approx(0.5)),
     ]
@@ -338,7 +349,7 @@ def test_hand_calculated_manski_unit_and_contrast_bounds() -> None:
         treatment_arm=ArmRole.TARGET_PATCH,
         control_arm=ArmRole.NOOP_REWRITE,
         task_weights={("c1", "t1"): 1.0},
-        realization_weights={"r1": 1.0},
+        realization_weights={R1: 1.0},
     )
 
     assert bounds.observed_secure_yield_effect == -1.0
@@ -350,7 +361,7 @@ def test_hand_calculated_manski_unit_and_contrast_bounds() -> None:
     ("task_weights", "realization_weights", "drop_last"),
     (
         ({("c1", "t1"): 0.5, ("c1", "t2"): 0.25, ("c2", "t3"): 1.0}, REALIZATION_WEIGHTS, False),
-        (TASK_WEIGHTS, {"r1": 0.2, "r2": 0.7}, False),
+        (TASK_WEIGHTS, {R1: 0.2, R2: 0.7}, False),
         (TASK_WEIGHTS, REALIZATION_WEIGHTS, True),
     ),
 )
@@ -377,9 +388,7 @@ def test_weight_sums_and_complete_support_fail_closed(
 def test_bootstrap_carries_all_cluster_descendants_and_preserves_stratum_counts() -> None:
     rows = _crossed_rows()
     expected_descendants = {
-        cluster: {
-            row.assignment_id for row in rows if row.semantic_task_cluster_id == cluster
-        }
+        cluster: {row.assignment_id for row in rows if row.semantic_task_cluster_id == cluster}
         for cluster in ("c1", "c2")
     }
     result = semantic_cluster_bootstrap_v2(
