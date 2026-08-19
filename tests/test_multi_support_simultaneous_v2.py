@@ -50,7 +50,7 @@ def _coordinates(
     )
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def _experiment(kind: str) -> ConfirmatoryExperimentFreezeV2:
     if kind == "disjoint":
         coordinate_sets = (_coordinates("a", range(20)), _coordinates("b", range(20, 40)))
@@ -58,6 +58,8 @@ def _experiment(kind: str) -> ConfirmatoryExperimentFreezeV2:
         coordinate_sets = (_coordinates("a", range(20)), _coordinates("b", range(10, 30)))
     elif kind == "sparse":
         coordinate_sets = (_coordinates("a", range(2)), _coordinates("b", range(2, 40)))
+    elif kind == "bounded_invalid":
+        coordinate_sets = (_coordinates("a", range(5)), _coordinates("b", range(5, 15)))
     else:
         raise AssertionError(kind)
     bridges = (
@@ -90,6 +92,7 @@ def _experiment(kind: str) -> ConfirmatoryExperimentFreezeV2:
             semantic_cluster_manifest=parts.clusters,
             population=parts.population,
             query_evidence=parts.query_evidence,
+            variant_evidence=parts.variant_evidence,
             preregistered_minimum_gate_pass_tasks=len(coordinates),
             preregistered_minimum_gate_pass_clusters=independent_cluster_count,
         )
@@ -111,7 +114,7 @@ def _experiment(kind: str) -> ConfirmatoryExperimentFreezeV2:
     )
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def _plan(kind: str) -> MultiSupportSimultaneousInferencePlanV2:
     return MultiSupportSimultaneousInferencePlanV2.from_experiment(
         experiment=_experiment(kind),
@@ -120,7 +123,10 @@ def _plan(kind: str) -> MultiSupportSimultaneousInferencePlanV2:
         alpha_numerator=1,
         alpha_denominator=20,
         bootstrap_samples=999,
-        minimum_independent_clusters_per_coordinate=2 if kind == "sparse" else 20,
+        minimum_independent_clusters_per_coordinate={
+            "sparse": 2,
+            "bounded_invalid": 5,
+        }.get(kind, 20),
     )
 
 
@@ -158,7 +164,7 @@ def _value(
     return Fraction(((cluster_index * 7 + coordinate_index * 3) % 31) - 15, 20)
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def _artifacts(kind: str) -> tuple[ConfirmatoryContributionArtifactV2, ...]:
     plan = _plan(kind)
     result = []
@@ -206,7 +212,7 @@ def _artifacts(kind: str) -> tuple[ConfirmatoryContributionArtifactV2, ...]:
     return tuple(result)
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def _result(kind: str):
     return run_multi_support_simultaneous_inference_v2(
         _plan(kind),
@@ -273,6 +279,24 @@ def test_observed_coordinate_estimate_and_se_match_hand_calculation() -> None:
     assert result.valid_draw_count == plan.bootstrap_samples == 999
     assert result.invalid_draw_count == 0
     assert result.simultaneous_result_id.startswith("multi_support_simultaneous_result_v2_")
+
+
+def test_bounded_invalid_draws_are_retained_and_do_not_condition_silently() -> None:
+    plan = _plan("bounded_invalid")
+    result = _result("bounded_invalid")
+
+    assert plan.minimum_valid_bootstrap_draws == 950
+    assert 0 < result.invalid_draw_count <= 49
+    assert result.valid_draw_count >= plan.minimum_valid_bootstrap_draws
+    assert result.valid_draw_count + result.invalid_draw_count == plan.bootstrap_samples
+    assert len(result.invalid_draws) == result.invalid_draw_count
+    assert {item.reason_code for item in result.invalid_draws} <= {
+        "insufficient_retained_coordinate_clusters",
+        "zero_or_invalid_coordinate_standard_error",
+    }
+    assert {item.replicate_index for item in result.draws}.isdisjoint(
+        item.replicate_index for item in result.invalid_draws
+    )
 
 
 def test_overlap_uses_one_global_draw_and_preserves_shared_cluster_dependence() -> None:
@@ -476,11 +500,11 @@ def test_below_999_wrong_seed_and_zero_se_fail_closed() -> None:
             analysis_seed_domain_material=ANALYSIS_SEED_MATERIAL,
         )
 
-    # The observed two-cluster coordinate varies, but filtering one union draw
-    # can retain fewer than two occurrences (or a zero-SE repeated cluster).
-    # The preregistered formal policy rejects the whole run rather than silently
-    # discarding that inconvenient bootstrap draw.
-    with pytest.raises(ValueError, match="fewer than two|zero or invalid"):
+    # The observed two-cluster coordinate varies, but too many union draws
+    # retain fewer than two usable occurrences or have zero bootstrap SE.  The
+    # frozen 95% gate records those draws and rejects the result rather than
+    # silently conditioning on the small valid subset.
+    with pytest.raises(ValueError, match="valid-draw count"):
         run_multi_support_simultaneous_inference_v2(
             _plan("sparse"),
             _artifacts("sparse"),

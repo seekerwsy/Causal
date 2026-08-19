@@ -48,11 +48,14 @@ from secaware.schema.observational_discovery_v2 import (
     ObservationalBootstrapArtifactV2,
     ObservationalDiscoveryConfigV2,
     ObservationalDiscoveryResultV2,
+    ObservationalDrawSelectionV2,
     ObservationalFCIFailureArtifactV2,
     ObservationalFCISuiteArtifactV2,
     ObservationalPAGArtifactV2,
+    ObservationalSourceBindingV2,
     PAGEdgeDeltaV2,
     PolicyRelevantCandidateV2,
+    SyntheticTrueChainDiagnosticV2,
     TypedDiscoveryFailureV2,
     canonical_digest_v2,
 )
@@ -102,6 +105,50 @@ def _checked_source(
         draw = TwoLevelClusterResampleManifestV2.model_validate(source, strict=True)
         return draw.authenticated_table, draw
     raise ValueError("observational discovery requires authenticated v2 source evidence")
+
+
+def _source_binding(
+    table: AuthenticatedNaturalDiscoveryTableArtifactV2,
+    draw: TwoLevelClusterResampleManifestV2 | None,
+) -> ObservationalSourceBindingV2:
+    return ObservationalSourceBindingV2(
+        schema_version="2.0",
+        authenticated_table_id=table.authenticated_table_id,
+        authenticated_scope_id=table.authenticated_scope.authenticated_scope_id,
+        table_spec_id=table.authenticated_scope.table_spec.table_spec_id,
+        raw_table_artifact_id=table.raw_audit_table.table_artifact_id,
+        receipt_payload_sha256=table.receipt_payload_sha256,
+        analysis_kind=table.authenticated_scope.table_spec.analysis_kind,
+        context_conditioning_query_id=(
+            table.authenticated_scope.table_spec.context_conditioning_query_id
+        ),
+        independent_semantic_cluster_count=(
+            table.raw_audit_table.independent_semantic_cluster_count
+        ),
+        source_draw_id=draw.draw_manifest_id if draw is not None else None,
+        draw_row_payload_sha256=draw.row_payload_sha256 if draw is not None else None,
+        draw_selection_payload_sha256=(
+            canonical_digest_v2(draw.selections) if draw is not None else None
+        ),
+        draw_selections=(
+            tuple(
+                ObservationalDrawSelectionV2(
+                    schema_version="2.0",
+                    occurrence_index=item.occurrence_index,
+                    semantic_task_cluster_id=item.semantic_task_cluster_id,
+                    task_instance_id=item.task_instance_id,
+                    request_randomness_slot=item.request_randomness_slot,
+                    receipt_id=item.receipt_id,
+                    row=item.row,
+                )
+                for item in draw.selections
+            )
+            if draw is not None
+            else None
+        ),
+        resample_seed=draw.resample_seed if draw is not None else None,
+        resample_domain=draw.resample_domain if draw is not None else None,
+    )
 
 
 def _design_variables(
@@ -285,6 +332,12 @@ def _preflight(
                     "support",
                     "gsquare_nonpositive_expected_count",
                 )
+            if min(expected) < config.min_expected_pairwise_cell_count:
+                _fail(
+                    DiscoveryFailureReasonV2.SPARSE_CONTINGENCY,
+                    "support",
+                    "pairwise_expected_count_below_registered_minimum",
+                )
 
 
 def _constraint_sort_key(item: BKConstraintV2) -> tuple[str, str, str, str]:
@@ -430,19 +483,18 @@ def _causal_learn_background(
 
 
 def _endpoint_mark(endpoint: object) -> EndpointMark:
-    mapping = {
-        Endpoint.TAIL: EndpointMark.TAIL,
-        Endpoint.ARROW: EndpointMark.ARROW,
-        Endpoint.CIRCLE: EndpointMark.CIRCLE,
-    }
-    try:
-        return mapping[endpoint]  # type: ignore[index]
-    except (KeyError, TypeError):
-        _fail(
-            DiscoveryFailureReasonV2.INVALID_BACKEND_PAG,
-            "backend",
-            "unknown_pag_endpoint",
-        )
+    for backend_value, protocol_value in (
+        (Endpoint.TAIL, EndpointMark.TAIL),
+        (Endpoint.ARROW, EndpointMark.ARROW),
+        (Endpoint.CIRCLE, EndpointMark.CIRCLE),
+    ):
+        if endpoint == backend_value:
+            return protocol_value
+    _fail(
+        DiscoveryFailureReasonV2.INVALID_BACKEND_PAG,
+        "backend",
+        "unknown_pag_endpoint",
+    )
 
 
 def _edge_signature(edge: object) -> tuple[str, str, object, object]:
@@ -541,6 +593,46 @@ def _run_pag(
     knowledge: BackgroundKnowledgeArtifactV2,
     run_label: str,
 ) -> ObservationalPAGArtifactV2:
+    variable_ids = tuple(
+        item.variable_id for item in table.authenticated_scope.table_spec.variables
+    )
+    edges, stdout_text = _run_backend_edges(
+        rows=rows,
+        variable_ids=variable_ids,
+        config=config,
+        knowledge=knowledge,
+    )
+    _validate_edges_against_knowledge(edges, knowledge)
+    return ObservationalPAGArtifactV2.from_content(
+        source_table_id=table.authenticated_table_id,
+        source_draw_id=draw.draw_manifest_id if draw is not None else None,
+        run_label=run_label,
+        row_count=len(rows),
+        row_payload_sha256=canonical_digest_v2(
+            {
+                "source": (
+                    draw.draw_manifest_id if draw is not None else table.authenticated_table_id
+                ),
+                "rows": rows,
+            }
+        ),
+        config=config,
+        knowledge=knowledge,
+        variable_ids=variable_ids,
+        edges=edges,
+        backend_stdout=stdout_text,
+        backend_stderr="",
+        backend_warnings=(),
+    )
+
+
+def _run_backend_edges(
+    *,
+    rows: tuple[tuple[int, ...], ...],
+    variable_ids: tuple[str, ...],
+    config: ObservationalDiscoveryConfigV2,
+    knowledge: BackgroundKnowledgeArtifactV2 | None,
+) -> tuple[tuple[PAGEdgeRecord, ...], str]:
     try:
         version = importlib.metadata.version("causal-learn")
     except (MemoryError, KeyboardInterrupt, SystemExit):
@@ -553,9 +645,6 @@ def _run_pag(
             "backend",
             "pinned_causal_learn_unavailable",
         )
-    variable_ids = tuple(
-        item.variable_id for item in table.authenticated_scope.table_spec.variables
-    )
     matrix = np.asarray(rows, dtype=np.int64, order="C")
     matrix.flags.writeable = False
     stdout = StringIO()
@@ -571,7 +660,9 @@ def _run_pag(
                     depth=config.depth,
                     max_path_length=config.max_path_length,
                     verbose=False,
-                    background_knowledge=_causal_learn_background(knowledge),
+                    background_knowledge=(
+                        None if knowledge is None else _causal_learn_background(knowledge)
+                    ),
                     show_progress=False,
                     node_names=list(variable_ids),
                 )
@@ -589,28 +680,7 @@ def _run_pag(
                 "causal_learn_emitted_stderr",
             )
         edges = _convert_edges(graph, library_edges, variable_ids)
-        _validate_edges_against_knowledge(edges, knowledge)
-        return ObservationalPAGArtifactV2.from_content(
-            source_table_id=table.authenticated_table_id,
-            source_draw_id=draw.draw_manifest_id if draw is not None else None,
-            run_label=run_label,
-            row_count=len(rows),
-            row_payload_sha256=canonical_digest_v2(
-                {
-                    "source": (
-                        draw.draw_manifest_id if draw is not None else table.authenticated_table_id
-                    ),
-                    "rows": rows,
-                }
-            ),
-            config=config,
-            knowledge=knowledge,
-            variable_ids=variable_ids,
-            edges=edges,
-            backend_stdout=stdout.getvalue(),
-            backend_stderr="",
-            backend_warnings=(),
-        )
+        return edges, stdout.getvalue()
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except _TypedRunFailure:
@@ -720,8 +790,7 @@ def _failure_artifact(
     completed: tuple[ObservationalPAGArtifactV2, ...],
 ) -> ObservationalFCIFailureArtifactV2:
     return ObservationalFCIFailureArtifactV2.from_content(
-        source_table=table,
-        source_draw=draw,
+        source_binding=_source_binding(table, draw),
         config=config,
         failure=failure,
         completed_pags=completed,
@@ -822,8 +891,7 @@ def run_observational_fci_suite_v2(
             y_variable_id=y_variable.variable_id,
         )
         return ObservationalFCISuiteArtifactV2.from_content(
-            source_table=table,
-            source_draw=draw,
+            source_binding=_source_binding(table, draw),
             config=checked_config,
             x_variable_id=x_variable.variable_id,
             y_variable_id=y_variable.variable_id,
@@ -940,7 +1008,7 @@ def run_two_level_cluster_bootstrap_v2(
                 replicates.append(
                     BootstrapReplicateArtifactV2.from_content(
                         replicate_index=replicate_index,
-                        draw_manifest=draw,
+                        source_binding=_source_binding(table, draw),
                         raw_pag=raw_pag,
                         full_bk_pag=full_pag,
                         failure=None,
@@ -953,7 +1021,7 @@ def run_two_level_cluster_bootstrap_v2(
                 replicates.append(
                     BootstrapReplicateArtifactV2.from_content(
                         replicate_index=replicate_index,
-                        draw_manifest=draw,
+                        source_binding=_source_binding(table, draw),
                         raw_pag=raw_pag,
                         full_bk_pag=None,
                         failure=error.failure,
@@ -974,7 +1042,7 @@ def run_two_level_cluster_bootstrap_v2(
             )
         )
         return ObservationalBootstrapArtifactV2.from_content(
-            source_table=table,
+            source_binding=_source_binding(table, None),
             config=checked_config,
             resample_domain=resample_domain,
             resample_seeds=resample_seeds,
@@ -1035,11 +1103,81 @@ def build_jci_appendix_diagnostic_v2(
     )
 
 
+def run_true_chain_synthetic_gate_v2(
+    *,
+    config: ObservationalDiscoveryConfigV2,
+    sample_size: int = 8,
+    seed: int = 5,
+    flip_probability: float = 0.10,
+) -> SyntheticTrueChainDiagnosticV2:
+    """Exercise the pinned backend on an observed X-Z-Y SCM without promoting evidence.
+
+    The production authenticated scope currently admits one catalog safety feature per
+    CWE, so this deliberately separate diagnostic must never enter candidate selection.
+    """
+
+    checked_config = ObservationalDiscoveryConfigV2.model_validate(config, strict=True)
+    if (
+        type(sample_size) is not int
+        or not 4 <= sample_size <= checked_config.max_rows
+        or type(seed) is not int
+        or not 0 <= seed <= 2**63 - 1
+        or type(flip_probability) is not float
+        or not 0.0 < flip_probability < 0.5
+        or checked_config.max_variables < 3
+    ):
+        raise ValueError("synthetic true-chain gate configuration failed exact validation")
+    variable_ids = (
+        "x.synthetic_source",
+        "x.synthetic_bridge",
+        "y.secure_yield",
+    )
+    rng = np.random.default_rng(seed)
+    source = rng.integers(0, 2, size=sample_size)
+    bridge = np.bitwise_xor(
+        source,
+        rng.binomial(1, flip_probability, size=sample_size),
+    )
+    outcome = np.bitwise_xor(
+        bridge,
+        rng.binomial(1, flip_probability, size=sample_size),
+    )
+    rows = tuple(
+        (int(source[index]), int(bridge[index]), int(outcome[index]))
+        for index in range(sample_size)
+    )
+    edges, stdout_text = _run_backend_edges(
+        rows=rows,
+        variable_ids=variable_ids,
+        config=checked_config,
+        knowledge=None,
+    )
+    return SyntheticTrueChainDiagnosticV2.from_content(
+        scm_kind="true_prompt_variable_chain",
+        generator="numpy_default_rng_xor_chain_v1",
+        sample_size=sample_size,
+        seed=seed,
+        flip_probability=flip_probability,
+        variable_ids=variable_ids,
+        rows=rows,
+        row_payload_sha256=canonical_digest_v2(rows),
+        config=checked_config,
+        edges=edges,
+        recovered_possible_path=variable_ids,
+        backend_stdout=stdout_text,
+        backend_stderr="",
+        backend_warnings=(),
+        source_kind="backend_only_synthetic",
+        phase0_gate_only=True,
+        uses_authenticated_natural_table=False,
+        upgrades_main_evidence=False,
+    )
 type _WritableArtifactV2 = (
     ObservationalFCISuiteArtifactV2
     | ObservationalFCIFailureArtifactV2
     | ObservationalBootstrapArtifactV2
     | JCIAppendixDiagnosticArtifactV2
+    | SyntheticTrueChainDiagnosticV2
 )
 
 
@@ -1055,6 +1193,7 @@ def write_observational_artifact_v2(
         ObservationalFCIFailureArtifactV2,
         ObservationalBootstrapArtifactV2,
         JCIAppendixDiagnosticArtifactV2,
+        SyntheticTrueChainDiagnosticV2,
     )
     if type(artifact) not in allowed or type(path) is not Path or path.exists():
         raise ValueError("artifact path or type failed exact validation")
@@ -1069,6 +1208,7 @@ __all__ = [
     "build_jci_appendix_diagnostic_v2",
     "derive_policy_candidate_v2",
     "run_observational_fci_suite_v2",
+    "run_true_chain_synthetic_gate_v2",
     "run_two_level_cluster_bootstrap_v2",
     "write_observational_artifact_v2",
 ]

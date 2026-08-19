@@ -81,6 +81,7 @@ def _authenticated_outcome_receipt(
     *,
     unit: AssignmentUnitKeyV2,
     execution_freeze: ExecutionPolicyFreezeManifestV2,
+    secure_override: bool | None = None,
 ) -> OutcomeAssemblyReceiptV2:
     model_policy = next(
         item for item in execution_freeze.model_policies if item.model_id == unit.block.model_id
@@ -136,12 +137,16 @@ def _authenticated_outcome_receipt(
         provider_response_sha256=_sha(f"response:{unit.assignment_id}"),
         generator_runtime_sha256=_sha("generator-runtime:run-evidence"),
     )
-    is_target = unit.assigned_arm in {ArmRole.TARGET_PATCH, ArmRole.TARGET_REMOVE}
+    secure = (
+        unit.assigned_arm in {ArmRole.TARGET_PATCH, ArmRole.TARGET_REMOVE}
+        if secure_override is None
+        else secure_override
+    )
     oracle = OracleResultRecordV2.from_content(
         **coordinates,
         generated_code_id=code.generated_code_id,
         code_sha256=code.code_sha256,
-        status="secure" if is_target else "insecure",
+        status="secure" if secure else "insecure",
         oracle_supported=True,
         oracle_evaluable=True,
         evidence_sha256=_sha(f"oracle:{unit.assignment_id}"),
@@ -181,10 +186,19 @@ def _accounting_for_execution(
     *,
     experiment: ConfirmatoryExperimentFreezeV2,
     execution_index: int,
+    secure_assignment_ids: frozenset[str] | None = None,
 ) -> TotalAssignmentAccountingManifestV2:
     execution = experiment.execution_policy_freezes[execution_index]
     receipts = tuple(
-        _authenticated_outcome_receipt(unit=unit, execution_freeze=execution)
+        _authenticated_outcome_receipt(
+            unit=unit,
+            execution_freeze=execution,
+            secure_override=(
+                None
+                if secure_assignment_ids is None
+                else unit.assignment_id in secure_assignment_ids
+            ),
+        )
         for unit in execution.randomization.assignments
     )
     return TotalAssignmentAccountingManifestV2.from_terminal_receipts(
@@ -223,6 +237,7 @@ def _fixture() -> RunEvidenceFixture:
             semantic_cluster_manifest=parts.clusters,
             population=parts.population,
             query_evidence=parts.query_evidence,
+            variant_evidence=parts.variant_evidence,
             preregistered_minimum_gate_pass_tasks=3,
             preregistered_minimum_gate_pass_clusters=2,
         )

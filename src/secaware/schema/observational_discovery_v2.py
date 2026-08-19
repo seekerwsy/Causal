@@ -13,14 +13,15 @@ import re
 from enum import Enum, StrEnum
 from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from secaware.causal.authenticated_natural_table_v2 import (
     AuthenticatedNaturalDiscoveryTableArtifactV2,
     TwoLevelClusterResampleManifestV2,
 )
-from secaware.schema.causal import PAGEdgeRecord
+from secaware.schema.causal import EndpointMark, PAGEdgeRecord
 from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.discovery_v2 import DiscoveryAnalysisKindV2
 
 OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION = "2.0"
 
@@ -36,6 +37,7 @@ _FAILURE_PATTERN = r"^observational_fci_failure_v2_[0-9a-f]{64}$"
 _REPLICATE_PATTERN = r"^observational_bootstrap_replicate_v2_[0-9a-f]{64}$"
 _BOOTSTRAP_PATTERN = r"^observational_bootstrap_v2_[0-9a-f]{64}$"
 _JCI_PATTERN = r"^observational_jci_diagnostic_v2_[0-9a-f]{64}$"
+_SYNTHETIC_PATTERN = r"^observational_synthetic_gate_v2_[0-9a-f]{64}$"
 
 
 def _jsonable(value: object) -> object:
@@ -71,6 +73,14 @@ def _valid_identifier(value: object) -> bool:
         and value == value.strip()
         and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
     )
+
+
+def _exact_enum(value: object, enum_type: type[Enum]) -> object:
+    if type(value) is enum_type:
+        return value
+    if type(value) is str:
+        return next((item for item in enum_type if item.value == value), value)
+    return value
 
 
 class _ObservationalContractV2(SafeValidationMixin, StrictModel):
@@ -142,6 +152,200 @@ class ObservationalDiscoveryConfigV2(_ObservationalContractV2):
         lt=1.0,
         allow_inf_nan=False,
     )
+    min_expected_pairwise_cell_count: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=100.0,
+        allow_inf_nan=False,
+    )
+
+
+class ObservationalDrawSelectionV2(_ObservationalContractV2):
+    occurrence_index: StrictInt = Field(ge=0, le=1_000_000)
+    semantic_task_cluster_id: str
+    task_instance_id: str
+    request_randomness_slot: StrictInt = Field(ge=0, le=2_147_483_647)
+    receipt_id: str
+    row: tuple[StrictInt, ...] = Field(min_length=2, max_length=128)
+
+    @field_validator("row", mode="before")
+    @classmethod
+    def snapshot_row(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> Self:
+        if (
+            not all(
+                _valid_identifier(item)
+                for item in (
+                    self.semantic_task_cluster_id,
+                    self.task_instance_id,
+                    self.receipt_id,
+                )
+            )
+            or any(value < 0 for value in self.row)
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
+class ObservationalSourceBindingV2(_ObservationalContractV2):
+    """Compact immutable references to separately persisted authenticated evidence."""
+
+    authenticated_table_id: str
+    authenticated_scope_id: str
+    table_spec_id: str
+    raw_table_artifact_id: str
+    receipt_payload_sha256: str = Field(pattern=_SHA256_PATTERN)
+    analysis_kind: DiscoveryAnalysisKindV2
+    context_conditioning_query_id: str | None = None
+    independent_semantic_cluster_count: StrictInt = Field(ge=2, le=1_000_000)
+    source_draw_id: str | None = None
+    draw_row_payload_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    draw_selection_payload_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    draw_selections: tuple[ObservationalDrawSelectionV2, ...] | None = None
+    resample_seed: StrictInt | None = Field(default=None, ge=0, le=2**63 - 1)
+    resample_domain: str | None = None
+
+    @field_validator("analysis_kind", mode="before")
+    @classmethod
+    def parse_analysis_kind(cls, value: object) -> object:
+        return _exact_enum(value, DiscoveryAnalysisKindV2)
+
+    @field_validator("draw_selections", mode="before")
+    @classmethod
+    def snapshot_draw_selections(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
+    @classmethod
+    def from_evidence(
+        cls,
+        *,
+        table: AuthenticatedNaturalDiscoveryTableArtifactV2,
+        draw: TwoLevelClusterResampleManifestV2 | None,
+    ) -> Self:
+        checked_table = AuthenticatedNaturalDiscoveryTableArtifactV2.model_validate(
+            table, strict=True
+        )
+        checked_draw = (
+            None
+            if draw is None
+            else TwoLevelClusterResampleManifestV2.model_validate(draw, strict=True)
+        )
+        if checked_draw is not None and checked_draw.authenticated_table != checked_table:
+            raise ValueError(cls._safe_validation_message)
+        return cls(
+            schema_version=OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION,
+            authenticated_table_id=checked_table.authenticated_table_id,
+            authenticated_scope_id=checked_table.authenticated_scope.authenticated_scope_id,
+            table_spec_id=checked_table.authenticated_scope.table_spec.table_spec_id,
+            raw_table_artifact_id=checked_table.raw_audit_table.table_artifact_id,
+            receipt_payload_sha256=checked_table.receipt_payload_sha256,
+            analysis_kind=checked_table.authenticated_scope.table_spec.analysis_kind,
+            context_conditioning_query_id=(
+                checked_table.authenticated_scope.table_spec.context_conditioning_query_id
+            ),
+            independent_semantic_cluster_count=(
+                checked_table.raw_audit_table.independent_semantic_cluster_count
+            ),
+            source_draw_id=(checked_draw.draw_manifest_id if checked_draw is not None else None),
+            draw_row_payload_sha256=(
+                checked_draw.row_payload_sha256 if checked_draw is not None else None
+            ),
+            draw_selection_payload_sha256=(
+                canonical_digest_v2(checked_draw.selections)
+                if checked_draw is not None
+                else None
+            ),
+            draw_selections=(
+                tuple(
+                    ObservationalDrawSelectionV2(
+                        schema_version=OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION,
+                        occurrence_index=item.occurrence_index,
+                        semantic_task_cluster_id=item.semantic_task_cluster_id,
+                        task_instance_id=item.task_instance_id,
+                        request_randomness_slot=item.request_randomness_slot,
+                        receipt_id=item.receipt_id,
+                        row=item.row,
+                    )
+                    for item in checked_draw.selections
+                )
+                if checked_draw is not None
+                else None
+            ),
+            resample_seed=(checked_draw.resample_seed if checked_draw is not None else None),
+            resample_domain=(checked_draw.resample_domain if checked_draw is not None else None),
+        )
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> Self:
+        draw_values = (
+            self.source_draw_id,
+            self.draw_row_payload_sha256,
+            self.draw_selection_payload_sha256,
+            self.draw_selections,
+            self.resample_seed,
+            self.resample_domain,
+        )
+        has_draw = self.source_draw_id is not None
+        if (
+            not all(
+                _valid_identifier(item)
+                for item in (
+                    self.authenticated_table_id,
+                    self.authenticated_scope_id,
+                    self.table_spec_id,
+                    self.raw_table_artifact_id,
+                )
+            )
+            or (has_draw and any(item is None for item in draw_values))
+            or (not has_draw and any(item is not None for item in draw_values))
+            or (self.resample_domain is not None and not _valid_identifier(self.resample_domain))
+            or (
+                self.context_conditioning_query_id is not None
+                and not _valid_identifier(self.context_conditioning_query_id)
+            )
+            or (has_draw and self.analysis_kind is not DiscoveryAnalysisKindV2.TWO_LEVEL)
+            or (
+                self.draw_selections is not None
+                and self.draw_selection_payload_sha256
+                != canonical_digest_v2(self.draw_selections)
+            )
+            or (
+                self.draw_selections is not None
+                and self.draw_row_payload_sha256
+                != canonical_digest_v2(tuple(item.row for item in self.draw_selections))
+            )
+            or (
+                self.draw_selections is not None
+                and tuple(
+                    (
+                        item.occurrence_index,
+                        item.semantic_task_cluster_id,
+                        item.task_instance_id,
+                    )
+                    for item in self.draw_selections
+                )
+                != tuple(
+                    sorted(
+                        (
+                            item.occurrence_index,
+                            item.semantic_task_cluster_id,
+                            item.task_instance_id,
+                        )
+                        for item in self.draw_selections
+                    )
+                )
+            )
+            or (
+                self.draw_selections is not None
+                and {item.occurrence_index for item in self.draw_selections}
+                != set(range(self.independent_semantic_cluster_count))
+            )
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
 
 
 class DiscoveryFailureReasonV2(StrEnum):
@@ -151,6 +355,7 @@ class DiscoveryFailureReasonV2(StrEnum):
     INSUFFICIENT_ROWS = "insufficient_rows"
     CONSTANT_VARIABLE = "constant_variable"
     DETERMINISTIC_RELATION = "deterministic_relation"
+    SPARSE_CONTINGENCY = "sparse_contingency"
     GSQUARE_DEGENERATE = "gsquare_degenerate"
     TOO_MANY_BK_ABLATIONS = "too_many_bk_ablations"
     BACKEND_VERSION_MISMATCH = "backend_version_mismatch"
@@ -163,6 +368,11 @@ class TypedDiscoveryFailureV2(_ObservationalContractV2):
     reason: DiscoveryFailureReasonV2
     stage: str
     detail_code: str
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def parse_reason(cls, value: object) -> object:
+        return _exact_enum(value, DiscoveryFailureReasonV2)
 
     @model_validator(mode="after")
     def validate_failure(self) -> Self:
@@ -194,6 +404,11 @@ class BKConstraintV2(_ObservationalContractV2):
         "wrong_plausible_tier_swap",
     ]
 
+    @field_validator("kind", mode="before")
+    @classmethod
+    def parse_kind(cls, value: object) -> object:
+        return _exact_enum(value, BKConstraintKindV2)
+
     @model_validator(mode="after")
     def validate_constraint(self) -> Self:
         if (
@@ -223,6 +438,23 @@ class BackgroundKnowledgeArtifactV2(_ContentAddressedObservationalV2):
     constraints: tuple[BKConstraintV2, ...] = Field(max_length=4096)
     typed_adjacency_policy_sha256: str = Field(pattern=_SHA256_PATTERN)
     excluded_from_candidate_evidence: bool
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def parse_kind(cls, value: object) -> object:
+        return _exact_enum(value, BackgroundKnowledgeKindV2)
+
+    @field_validator("variable_ids", "constraints", mode="before")
+    @classmethod
+    def snapshot_sequences(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
+    @field_validator("temporal_tiers", mode="before")
+    @classmethod
+    def snapshot_tiers(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        return tuple(tuple(item) if type(item) in {tuple, list} else item for item in value)
 
     @model_validator(mode="after")
     def validate_knowledge(self) -> Self:
@@ -277,9 +509,15 @@ class ObservationalPAGArtifactV2(_ContentAddressedObservationalV2):
     backend_stderr: Literal[""] = ""
     backend_warnings: tuple[str, ...] = ()
 
+    @field_validator("variable_ids", "edges", "backend_warnings", mode="before")
+    @classmethod
+    def snapshot_sequences(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
     @model_validator(mode="after")
     def validate_pag(self) -> Self:
         pairs = tuple((item.left, item.right) for item in self.edges)
+        by_pair = {(item.left, item.right): item for item in self.edges}
         if (
             not _valid_identifier(self.source_table_id)
             or (self.source_draw_id is not None and not _valid_identifier(self.source_draw_id))
@@ -293,6 +531,19 @@ class ObservationalPAGArtifactV2(_ContentAddressedObservationalV2):
                 for edge in self.edges
             )
             or self.backend_warnings
+            or any(
+                (
+                    item.kind is BKConstraintKindV2.FORBIDDEN_ADJACENCY
+                    and tuple(sorted((item.left, item.right))) in by_pair
+                )
+                or (
+                    item.kind is BKConstraintKindV2.FORBIDDEN_DIRECTION
+                    and (edge := by_pair.get(tuple(sorted((item.left, item.right)))))
+                    is not None
+                    and _pag_edge_permits_direction(edge, item.left, item.right)
+                )
+                for item in self.knowledge.constraints
+            )
         ):
             raise ValueError(self._safe_validation_message)
         return self
@@ -339,6 +590,74 @@ class PolicyRelevantCandidateV2(_ContentAddressedObservationalV2):
         return self
 
 
+def _pag_edge_for(
+    pag: ObservationalPAGArtifactV2,
+    left: str,
+    right: str,
+) -> PAGEdgeRecord | None:
+    pair = tuple(sorted((left, right)))
+    return next((item for item in pag.edges if (item.left, item.right) == pair), None)
+
+
+def _pag_edge_permits_direction(
+    edge: PAGEdgeRecord,
+    source: str,
+    target: str,
+) -> bool:
+    source_mark, target_mark = edge.marks_from(source, target)
+    return source_mark in {EndpointMark.TAIL, EndpointMark.CIRCLE} and target_mark in {
+        EndpointMark.ARROW,
+        EndpointMark.CIRCLE,
+    }
+
+
+def _candidate_from_pages(
+    raw: ObservationalPAGArtifactV2,
+    full: ObservationalPAGArtifactV2,
+    x_variable_id: str,
+    y_variable_id: str,
+) -> PolicyRelevantCandidateV2:
+    raw_edge = _pag_edge_for(raw, x_variable_id, y_variable_id)
+    full_edge = _pag_edge_for(full, x_variable_id, y_variable_id)
+    raw_possible = raw_edge is not None and _pag_edge_permits_direction(
+        raw_edge, x_variable_id, y_variable_id
+    )
+    full_possible = full_edge is not None and _pag_edge_permits_direction(
+        full_edge, x_variable_id, y_variable_id
+    )
+    return PolicyRelevantCandidateV2.from_content(
+        x_variable_id=x_variable_id,
+        y_variable_id=y_variable_id,
+        raw_pag_id=raw.pag_id,
+        full_pag_id=full.pag_id,
+        raw_adjacent=raw_edge is not None,
+        raw_permits_x_to_y=raw_possible,
+        full_adjacent=full_edge is not None,
+        full_permits_x_to_y=full_possible,
+        bk_created_adjacency=full_edge is not None and raw_edge is None,
+        selected=raw_possible and full_possible,
+        selection_rule="raw_adjacency_and_raw_plus_full_possible_x_to_y_v1",
+    )
+
+
+def _page_edge_deltas(
+    before: ObservationalPAGArtifactV2,
+    after: ObservationalPAGArtifactV2,
+) -> tuple[PAGEdgeDeltaV2, ...]:
+    before_by_pair = {(item.left, item.right): item for item in before.edges}
+    after_by_pair = {(item.left, item.right): item for item in after.edges}
+    return tuple(
+        PAGEdgeDeltaV2(
+            left=pair[0],
+            right=pair[1],
+            before=before_by_pair.get(pair),
+            after=after_by_pair.get(pair),
+        )
+        for pair in sorted(set(before_by_pair) | set(after_by_pair))
+        if before_by_pair.get(pair) != after_by_pair.get(pair)
+    )
+
+
 class PAGEdgeDeltaV2(_ObservationalContractV2):
     left: str
     right: str
@@ -376,6 +695,11 @@ class BKDeletionDeltaArtifactV2(_ContentAddressedObservationalV2):
     edge_deltas: tuple[PAGEdgeDeltaV2, ...]
     candidate_selected_after_deletion: bool
 
+    @field_validator("edge_deltas", mode="before")
+    @classmethod
+    def snapshot_edge_deltas(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
     @model_validator(mode="after")
     def validate_delta_artifact(self) -> Self:
         if (
@@ -393,8 +717,7 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
     _id_prefix = "observational_fci_suite_v2_"
 
     suite_id: str = Field(pattern=_SUITE_PATTERN)
-    source_table: AuthenticatedNaturalDiscoveryTableArtifactV2
-    source_draw: TwoLevelClusterResampleManifestV2 | None
+    source_binding: ObservationalSourceBindingV2
     config: ObservationalDiscoveryConfigV2
     x_variable_id: str
     y_variable_id: str
@@ -406,9 +729,15 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
     wrong_plausible_bk_pag: ObservationalPAGArtifactV2
     candidate: PolicyRelevantCandidateV2
 
+    @field_validator("deletion_deltas", mode="before")
+    @classmethod
+    def snapshot_deletion_deltas(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
     @model_validator(mode="after")
     def validate_suite(self) -> Self:
-        source_draw_id = self.source_draw.draw_manifest_id if self.source_draw else None
+        source_table_id = self.source_binding.authenticated_table_id
+        source_draw_id = self.source_binding.source_draw_id
         pages = (
             self.raw_pag,
             self.minimal_bk_pag,
@@ -416,13 +745,65 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
             self.wrong_plausible_bk_pag,
             *(item.ablation_pag for item in self.deletion_deltas),
         )
+        reference_pages = (
+            self.raw_pag,
+            self.minimal_bk_pag,
+            self.full_bk_pag,
+            self.wrong_plausible_bk_pag,
+        )
+        full_constraints = self.full_bk_pag.knowledge.constraints
+        minimal_constraints = self.minimal_bk_pag.knowledge.constraints
+        tier_map = dict(self.full_bk_pag.knowledge.temporal_tiers)
+        expected_minimal = tuple(
+            sorted(
+                (
+                    BKConstraintV2(
+                        kind=BKConstraintKindV2.FORBIDDEN_DIRECTION,
+                        left=later,
+                        right=earlier,
+                        rationale="temporal_tier",
+                    )
+                    for later, later_tier in tier_map.items()
+                    for earlier, earlier_tier in tier_map.items()
+                    if later_tier > earlier_tier
+                ),
+                key=lambda item: item.sort_key(),
+            )
+        )
+        reverse_temporal = BKConstraintV2(
+            kind=BKConstraintKindV2.FORBIDDEN_DIRECTION,
+            left=self.x_variable_id,
+            right=self.y_variable_id,
+            rationale="wrong_plausible_tier_swap",
+        )
+        expected_wrong = tuple(
+            sorted(
+                {
+                    *(
+                        item
+                        for item in full_constraints
+                        if not (
+                            item.kind is BKConstraintKindV2.FORBIDDEN_DIRECTION
+                            and item.left == self.y_variable_id
+                            and item.right == self.x_variable_id
+                        )
+                    ),
+                    reverse_temporal,
+                },
+                key=lambda item: item.sort_key(),
+            )
+        )
+        expected_candidate = _candidate_from_pages(
+            self.raw_pag,
+            self.full_bk_pag,
+            self.x_variable_id,
+            self.y_variable_id,
+        )
+        deletion_by_constraint = {
+            item.removed_constraint: item for item in self.deletion_deltas
+        }
         if (
-            self.source_draw is not None
-            and self.source_draw.authenticated_table != self.source_table
-        ):
-            raise ValueError(self._safe_validation_message)
-        if (
-            any(page.source_table_id != self.source_table.authenticated_table_id for page in pages)
+            any(page.source_table_id != source_table_id for page in pages)
             or any(page.source_draw_id != source_draw_id for page in pages)
             or any(page.config != self.config for page in pages)
             or self.raw_pag.knowledge.kind is not BackgroundKnowledgeKindV2.RAW
@@ -431,12 +812,71 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
             or self.wrong_plausible_bk_pag.knowledge.kind
             is not BackgroundKnowledgeKindV2.WRONG_PLAUSIBLE
             or not self.wrong_plausible_bk_pag.knowledge.excluded_from_candidate_evidence
+            or self.raw_pag.run_label != "reference.raw"
+            or self.minimal_bk_pag.run_label != "reference.minimal_bk"
+            or self.full_bk_pag.run_label != "reference.full_bk"
+            or self.wrong_plausible_bk_pag.run_label
+            != "sensitivity.wrong_plausible_bk"
+            or any(
+                (page.row_count, page.row_payload_sha256, page.variable_ids)
+                != (
+                    self.raw_pag.row_count,
+                    self.raw_pag.row_payload_sha256,
+                    self.raw_pag.variable_ids,
+                )
+                for page in reference_pages
+            )
+            or any(
+                page.knowledge.temporal_tiers
+                != self.full_bk_pag.knowledge.temporal_tiers
+                or page.knowledge.typed_adjacency_policy_sha256
+                != self.full_bk_pag.knowledge.typed_adjacency_policy_sha256
+                for page in pages
+            )
+            or minimal_constraints != expected_minimal
+            or any(item not in full_constraints for item in minimal_constraints)
+            or any(
+                item not in minimal_constraints
+                and not (
+                    item.kind is BKConstraintKindV2.FORBIDDEN_ADJACENCY
+                    and item.rationale == "typed_adjacency"
+                )
+                for item in full_constraints
+            )
+            or self.wrong_plausible_bk_pag.knowledge.constraints != expected_wrong
+            or len(deletion_by_constraint) != len(self.deletion_deltas)
+            or set(deletion_by_constraint) != set(full_constraints)
+            or any(
+                delta.full_pag_id != self.full_bk_pag.pag_id
+                or delta.ablation_pag.run_label != f"reference.single_deletion.{index}"
+                or delta.ablation_pag.knowledge.constraints
+                != tuple(item for item in full_constraints if item != delta.removed_constraint)
+                or delta.edge_deltas
+                != _page_edge_deltas(self.full_bk_pag, delta.ablation_pag)
+                or delta.candidate_selected_after_deletion
+                != _candidate_from_pages(
+                    self.raw_pag,
+                    delta.ablation_pag,
+                    self.x_variable_id,
+                    self.y_variable_id,
+                ).selected
+                for index, delta in enumerate(self.deletion_deltas)
+            )
+            or (
+                self.source_binding.analysis_kind is DiscoveryAnalysisKindV2.TWO_LEVEL
+            )
+            != (source_draw_id is not None)
+            or not self.x_variable_id.startswith("x.")
+            or not self.y_variable_id.startswith("y.")
+            or self.x_variable_id not in self.raw_pag.variable_ids
+            or self.y_variable_id not in self.raw_pag.variable_ids
             or self.candidate.x_variable_id != self.x_variable_id
             or self.candidate.y_variable_id != self.y_variable_id
             or self.candidate.raw_pag_id != self.raw_pag.pag_id
             or self.candidate.full_pag_id != self.full_bk_pag.pag_id
+            or self.candidate != expected_candidate
             or self.context_conditioning_query_id
-            != self.source_table.authenticated_scope.table_spec.context_conditioning_query_id
+            != self.source_binding.context_conditioning_query_id
         ):
             raise ValueError(self._safe_validation_message)
         return self
@@ -447,21 +887,21 @@ class ObservationalFCIFailureArtifactV2(_ContentAddressedObservationalV2):
     _id_prefix = "observational_fci_failure_v2_"
 
     failure_artifact_id: str = Field(pattern=_FAILURE_PATTERN)
-    source_table: AuthenticatedNaturalDiscoveryTableArtifactV2
-    source_draw: TwoLevelClusterResampleManifestV2 | None
+    source_binding: ObservationalSourceBindingV2
     config: ObservationalDiscoveryConfigV2
     failure: TypedDiscoveryFailureV2
     completed_pags: tuple[ObservationalPAGArtifactV2, ...] = ()
 
+    @field_validator("completed_pags", mode="before")
+    @classmethod
+    def snapshot_completed_pags(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
     @model_validator(mode="after")
     def validate_failure_artifact(self) -> Self:
-        source_draw_id = self.source_draw.draw_manifest_id if self.source_draw else None
-        if (
-            self.source_draw is not None
-            and self.source_draw.authenticated_table != self.source_table
-        ) or any(
-            page.source_table_id != self.source_table.authenticated_table_id
-            or page.source_draw_id != source_draw_id
+        if any(
+            page.source_table_id != self.source_binding.authenticated_table_id
+            or page.source_draw_id != self.source_binding.source_draw_id
             or page.config != self.config
             for page in self.completed_pags
         ):
@@ -475,7 +915,7 @@ class BootstrapReplicateArtifactV2(_ContentAddressedObservationalV2):
 
     replicate_id: str = Field(pattern=_REPLICATE_PATTERN)
     replicate_index: StrictInt = Field(ge=0, le=100_000)
-    draw_manifest: TwoLevelClusterResampleManifestV2
+    source_binding: ObservationalSourceBindingV2
     raw_pag: ObservationalPAGArtifactV2 | None
     full_bk_pag: ObservationalPAGArtifactV2 | None
     failure: TypedDiscoveryFailureV2 | None
@@ -484,23 +924,63 @@ class BootstrapReplicateArtifactV2(_ContentAddressedObservationalV2):
     @model_validator(mode="after")
     def validate_replicate(self) -> Self:
         complete = self.failure is None
+        expected_selected = (
+            False
+            if not complete
+            else _candidate_from_pages(
+                self.raw_pag,  # type: ignore[arg-type]
+                self.full_bk_pag,  # type: ignore[arg-type]
+                next(
+                    item
+                    for item in self.raw_pag.variable_ids  # type: ignore[union-attr]
+                    if item.startswith("x.")
+                ),
+                next(
+                    item
+                    for item in self.raw_pag.variable_ids  # type: ignore[union-attr]
+                    if item.startswith("y.")
+                ),
+            ).selected
+        )
         if (
+            self.source_binding.source_draw_id is None
+            or self.source_binding.analysis_kind is not DiscoveryAnalysisKindV2.TWO_LEVEL
+            or
             complete != (self.raw_pag is not None and self.full_bk_pag is not None)
             or (not complete and self.full_bk_pag is not None)
             or self.candidate_selected
             and not complete
+            or self.candidate_selected != expected_selected
         ):
             raise ValueError(self._safe_validation_message)
         if self.raw_pag is not None and (
-            self.raw_pag.source_draw_id != self.draw_manifest.draw_manifest_id
+            self.raw_pag.source_draw_id != self.source_binding.source_draw_id
             or self.raw_pag.source_table_id
-            != self.draw_manifest.authenticated_table.authenticated_table_id
+            != self.source_binding.authenticated_table_id
+            or self.raw_pag.knowledge.kind is not BackgroundKnowledgeKindV2.RAW
+            or self.raw_pag.run_label != f"bootstrap.{self.replicate_index}.raw"
         ):
             raise ValueError(self._safe_validation_message)
         if self.full_bk_pag is not None and (
-            self.full_bk_pag.source_draw_id != self.draw_manifest.draw_manifest_id
+            self.full_bk_pag.source_draw_id != self.source_binding.source_draw_id
             or self.full_bk_pag.source_table_id
-            != self.draw_manifest.authenticated_table.authenticated_table_id
+            != self.source_binding.authenticated_table_id
+            or self.full_bk_pag.knowledge.kind is not BackgroundKnowledgeKindV2.FULL
+            or self.full_bk_pag.run_label
+            != f"bootstrap.{self.replicate_index}.full_bk"
+            or self.raw_pag is None
+            or (
+                self.full_bk_pag.row_count,
+                self.full_bk_pag.row_payload_sha256,
+                self.full_bk_pag.variable_ids,
+                self.full_bk_pag.config,
+            )
+            != (
+                self.raw_pag.row_count,
+                self.raw_pag.row_payload_sha256,
+                self.raw_pag.variable_ids,
+                self.raw_pag.config,
+            )
         ):
             raise ValueError(self._safe_validation_message)
         return self
@@ -511,7 +991,7 @@ class ObservationalBootstrapArtifactV2(_ContentAddressedObservationalV2):
     _id_prefix = "observational_bootstrap_v2_"
 
     bootstrap_id: str = Field(pattern=_BOOTSTRAP_PATTERN)
-    source_table: AuthenticatedNaturalDiscoveryTableArtifactV2
+    source_binding: ObservationalSourceBindingV2
     config: ObservationalDiscoveryConfigV2
     resample_domain: str
     resample_seeds: tuple[StrictInt, ...] = Field(min_length=1, max_length=10_000)
@@ -522,6 +1002,11 @@ class ObservationalBootstrapArtifactV2(_ContentAddressedObservationalV2):
     stability_eligible: bool
     overall_failure: TypedDiscoveryFailureV2 | None
 
+    @field_validator("resample_seeds", "replicates", mode="before")
+    @classmethod
+    def snapshot_sequences(cls, value: object) -> object:
+        return tuple(value) if type(value) in {tuple, list} else value
+
     @model_validator(mode="after")
     def validate_bootstrap(self) -> Self:
         failures = sum(item.failure is not None for item in self.replicates)
@@ -529,15 +1014,37 @@ class ObservationalBootstrapArtifactV2(_ContentAddressedObservationalV2):
         threshold_ok = failures / len(self.replicates) <= self.config.max_failed_bootstrap_fraction
         if (
             not _valid_identifier(self.resample_domain)
+            or self.source_binding.source_draw_id is not None
+            or self.source_binding.analysis_kind is not DiscoveryAnalysisKindV2.TWO_LEVEL
             or self.resample_seeds != tuple(sorted(self.resample_seeds))
             or len(self.resample_seeds) != len(set(self.resample_seeds))
             or len(self.replicates) != len(self.resample_seeds)
             or tuple(item.replicate_index for item in self.replicates)
             != tuple(range(len(self.replicates)))
-            or tuple(item.draw_manifest.resample_seed for item in self.replicates)
+            or tuple(item.source_binding.resample_seed for item in self.replicates)
             != self.resample_seeds
             or any(
-                item.draw_manifest.authenticated_table != self.source_table
+                item.source_binding.authenticated_table_id
+                != self.source_binding.authenticated_table_id
+                or item.source_binding.authenticated_scope_id
+                != self.source_binding.authenticated_scope_id
+                or item.source_binding.table_spec_id != self.source_binding.table_spec_id
+                or item.source_binding.raw_table_artifact_id
+                != self.source_binding.raw_table_artifact_id
+                or item.source_binding.receipt_payload_sha256
+                != self.source_binding.receipt_payload_sha256
+                or item.source_binding.context_conditioning_query_id
+                != self.source_binding.context_conditioning_query_id
+                or item.source_binding.independent_semantic_cluster_count
+                != self.source_binding.independent_semantic_cluster_count
+                or item.source_binding.resample_domain != self.resample_domain
+                or (
+                    item.raw_pag is not None and item.raw_pag.config != self.config
+                )
+                or (
+                    item.full_bk_pag is not None
+                    and item.full_bk_pag.config != self.config
+                )
                 for item in self.replicates
             )
             or self.candidate_support_numerator != numerator
@@ -587,6 +1094,15 @@ class JCIAppendixDiagnosticArtifactV2(_ContentAddressedObservationalV2):
     appendix_only: Literal[True]
     upgrades_main_evidence: Literal[False]
 
+    @field_validator("variable_ids", "rows", "deterministic_relations", mode="before")
+    @classmethod
+    def snapshot_sequences(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        if cls is JCIAppendixDiagnosticArtifactV2 and value and type(value[0]) in {tuple, list}:
+            return tuple(tuple(item) for item in value)
+        return tuple(value)
+
     @model_validator(mode="after")
     def validate_jci_diagnostic(self) -> Self:
         expected_status = (
@@ -617,6 +1133,105 @@ class JCIAppendixDiagnosticArtifactV2(_ContentAddressedObservationalV2):
         return self
 
 
+def _path_edge_permits_direction(
+    edge: PAGEdgeRecord,
+    source: str,
+    target: str,
+) -> bool:
+    source_mark, target_mark = edge.marks_from(source, target)
+    return source_mark in {EndpointMark.TAIL, EndpointMark.CIRCLE} and target_mark in {
+        EndpointMark.ARROW,
+        EndpointMark.CIRCLE,
+    }
+
+
+class SyntheticTrueChainDiagnosticV2(_ContentAddressedObservationalV2):
+    """Backend-only Phase-0 gate; it can never promote main observational evidence."""
+
+    _id_field = "diagnostic_id"
+    _id_prefix = "observational_synthetic_gate_v2_"
+
+    diagnostic_id: str = Field(pattern=_SYNTHETIC_PATTERN)
+    scm_kind: Literal["true_prompt_variable_chain"]
+    generator: Literal["numpy_default_rng_xor_chain_v1"]
+    sample_size: StrictInt = Field(ge=4, le=100_000)
+    seed: StrictInt = Field(ge=0, le=2**63 - 1)
+    flip_probability: float = Field(gt=0.0, lt=0.5, allow_inf_nan=False)
+    variable_ids: tuple[str, ...] = Field(min_length=3, max_length=3)
+    rows: tuple[tuple[StrictInt, ...], ...] = Field(min_length=4, max_length=100_000)
+    row_payload_sha256: str = Field(pattern=_SHA256_PATTERN)
+    config: ObservationalDiscoveryConfigV2
+    edges: tuple[PAGEdgeRecord, ...]
+    recovered_possible_path: tuple[str, ...] = Field(min_length=3, max_length=3)
+    backend_stdout: str = Field(max_length=200_000, repr=False)
+    backend_stderr: Literal[""] = ""
+    backend_warnings: tuple[str, ...] = ()
+    source_kind: Literal["backend_only_synthetic"]
+    phase0_gate_only: Literal[True]
+    uses_authenticated_natural_table: Literal[False]
+    upgrades_main_evidence: Literal[False]
+
+    @field_validator(
+        "variable_ids",
+        "rows",
+        "edges",
+        "recovered_possible_path",
+        "backend_warnings",
+        mode="before",
+    )
+    @classmethod
+    def snapshot_sequences(cls, value: object) -> object:
+        if type(value) not in {tuple, list}:
+            return value
+        if value and type(value[0]) in {tuple, list}:
+            return tuple(tuple(item) for item in value)
+        return tuple(value)
+
+    @model_validator(mode="after")
+    def validate_gate(self) -> Self:
+        expected_variables = (
+            "x.synthetic_source",
+            "x.synthetic_bridge",
+            "y.secure_yield",
+        )
+        by_pair = {(item.left, item.right): item for item in self.edges}
+        path_pairs = tuple(
+            tuple(sorted((left, right)))
+            for left, right in zip(
+                self.recovered_possible_path[:-1],
+                self.recovered_possible_path[1:],
+                strict=True,
+            )
+        )
+        if (
+            self.variable_ids != expected_variables
+            or self.recovered_possible_path != expected_variables
+            or len(self.rows) != self.sample_size
+            or any(len(row) != 3 or any(value not in {0, 1} for value in row) for row in self.rows)
+            or self.row_payload_sha256 != canonical_digest_v2(self.rows)
+            or tuple((item.left, item.right) for item in self.edges)
+            != tuple(sorted(by_pair))
+            or len(by_pair) != len(self.edges)
+            or set(by_pair) != set(path_pairs)
+            or any(
+                not _path_edge_permits_direction(
+                    by_pair[pair],
+                    source,
+                    target,
+                )
+                for pair, source, target in zip(
+                    path_pairs,
+                    self.recovered_possible_path[:-1],
+                    self.recovered_possible_path[1:],
+                    strict=True,
+                )
+            )
+            or self.backend_warnings
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 ObservationalDiscoveryResultV2 = ObservationalFCISuiteArtifactV2 | ObservationalFCIFailureArtifactV2
 
 
@@ -634,11 +1249,14 @@ __all__ = [
     "ObservationalBootstrapArtifactV2",
     "ObservationalDiscoveryConfigV2",
     "ObservationalDiscoveryResultV2",
+    "ObservationalDrawSelectionV2",
     "ObservationalFCIFailureArtifactV2",
     "ObservationalFCISuiteArtifactV2",
     "ObservationalPAGArtifactV2",
+    "ObservationalSourceBindingV2",
     "PAGEdgeDeltaV2",
     "PolicyRelevantCandidateV2",
+    "SyntheticTrueChainDiagnosticV2",
     "TypedDiscoveryFailureV2",
     "canonical_digest_v2",
 ]

@@ -37,6 +37,22 @@ _SEED_DOMAIN = b"secaware.multi-support-global-max-t.v2\x00"
 _CLOSED_COVERAGE_PATTERN = re.compile(r"^provenance_closed_coverage_v2_[0-9a-f]{64}$")
 
 
+class _InvalidBootstrapDraw(Exception):
+    __slots__ = ("reason_code", "stratum_id", "test_coordinate_id")
+
+    def __init__(
+        self,
+        *,
+        reason_code: str,
+        test_coordinate_id: str,
+        stratum_id: str | None,
+    ) -> None:
+        self.reason_code = reason_code
+        self.test_coordinate_id = test_coordinate_id
+        self.stratum_id = stratum_id
+        super().__init__(reason_code)
+
+
 @dataclass(frozen=True, slots=True)
 class MultiSupportSimultaneousIntervalV2:
     test_coordinate_id: str
@@ -72,6 +88,16 @@ class GlobalUnionMaxTDrawV2:
 
 
 @dataclass(frozen=True, slots=True)
+class InvalidGlobalUnionDrawV2:
+    replicate_index: int
+    global_sample_sha256: str
+    stratum_draws: tuple[UnionStratumDrawDigestV2, ...]
+    reason_code: str
+    test_coordinate_id: str
+    stratum_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class MultiSupportSimultaneousInferenceResultV2:
     simultaneous_result_id: str
     inference_plan_id: str
@@ -86,6 +112,7 @@ class MultiSupportSimultaneousInferenceResultV2:
     invalid_draw_count: int
     intervals: tuple[MultiSupportSimultaneousIntervalV2, ...]
     draws: tuple[GlobalUnionMaxTDrawV2, ...]
+    invalid_draws: tuple[InvalidGlobalUnionDrawV2, ...]
 
 
 def _error(
@@ -317,6 +344,12 @@ def _coordinate_statistics(
         )
         count = len(retained)
         if count < 2:
+            if filter_union_sample:
+                raise _InvalidBootstrapDraw(
+                    reason_code="insufficient_retained_coordinate_clusters",
+                    test_coordinate_id=coordinate_id,
+                    stratum_id=stratum.stratum_id,
+                )
             raise _error("bootstrap draw has fewer than two retained coordinate clusters")
         observations = tuple(
             values[(coordinate_id, stratum.stratum_id, cluster_id)] for cluster_id in retained
@@ -361,6 +394,12 @@ def _coordinate_statistics(
         )
     standard_error = math.sqrt(variance)
     if not math.isfinite(standard_error) or standard_error <= 0.0:
+        if filter_union_sample:
+            raise _InvalidBootstrapDraw(
+                reason_code="zero_or_invalid_coordinate_standard_error",
+                test_coordinate_id=coordinate_id,
+                stratum_id=None,
+            )
         raise _error("coordinate has zero or invalid cluster standard error")
     return estimate, standard_error, tuple(retained_counts)
 
@@ -424,6 +463,7 @@ def _run(
     rng = DeterministicRNG(seed)
 
     draws: list[GlobalUnionMaxTDrawV2] = []
+    invalid_draws: list[InvalidGlobalUnionDrawV2] = []
     maxima: list[float] = []
     for replicate in range(checked_plan.bootstrap_samples):
         samples = {
@@ -433,25 +473,7 @@ def _run(
             )
             for stratum in checked_plan.global_union_strata
         }
-        bootstrap: dict[str, tuple[Fraction, float]] = {}
-        counts: list[CoordinateStratumRetainedCountV2] = []
-        for support in checked_plan.coordinate_supports:
-            estimate, standard_error, retained = _coordinate_statistics(
-                support,
-                values,
-                samples,
-                filter_union_sample=True,
-            )
-            coordinate_id = support.test_coordinate.test_coordinate_id
-            bootstrap[coordinate_id] = (estimate, standard_error)
-            counts.extend(retained)
-        max_abs_t = max(
-            abs((float(bootstrap_estimate - observed[coordinate_id][0])) / bootstrap_standard_error)
-            for coordinate_id, (bootstrap_estimate, bootstrap_standard_error) in (bootstrap.items())
-        )
-        if not math.isfinite(max_abs_t):
-            raise _error("bootstrap global max-|T| statistic failed validation")
-        maxima.append(max_abs_t)
+        sample_sha256 = _sample_digest(samples)
         stratum_draws = tuple(
             UnionStratumDrawDigestV2(
                 stratum_id=stratum.stratum_id,
@@ -460,10 +482,42 @@ def _run(
             )
             for stratum in checked_plan.global_union_strata
         )
+        bootstrap: dict[str, tuple[Fraction, float]] = {}
+        counts: list[CoordinateStratumRetainedCountV2] = []
+        try:
+            for support in checked_plan.coordinate_supports:
+                estimate, standard_error, retained = _coordinate_statistics(
+                    support,
+                    values,
+                    samples,
+                    filter_union_sample=True,
+                )
+                coordinate_id = support.test_coordinate.test_coordinate_id
+                bootstrap[coordinate_id] = (estimate, standard_error)
+                counts.extend(retained)
+        except _InvalidBootstrapDraw as invalid:
+            invalid_draws.append(
+                InvalidGlobalUnionDrawV2(
+                    replicate_index=replicate,
+                    global_sample_sha256=sample_sha256,
+                    stratum_draws=stratum_draws,
+                    reason_code=invalid.reason_code,
+                    test_coordinate_id=invalid.test_coordinate_id,
+                    stratum_id=invalid.stratum_id,
+                )
+            )
+            continue
+        max_abs_t = max(
+            abs((float(bootstrap_estimate - observed[coordinate_id][0])) / bootstrap_standard_error)
+            for coordinate_id, (bootstrap_estimate, bootstrap_standard_error) in (bootstrap.items())
+        )
+        if not math.isfinite(max_abs_t):
+            raise _error("bootstrap global max-|T| statistic failed validation")
+        maxima.append(max_abs_t)
         draws.append(
             GlobalUnionMaxTDrawV2(
                 replicate_index=replicate,
-                global_sample_sha256=_sample_digest(samples),
+                global_sample_sha256=sample_sha256,
                 stratum_draws=stratum_draws,
                 coordinate_retained_counts=tuple(
                     sorted(
@@ -514,9 +568,10 @@ def _run(
         input_contributions_sha256=_artifact_input_digest(checked_artifacts),
         critical_value=critical,
         valid_draw_count=len(draws),
-        invalid_draw_count=0,
+        invalid_draw_count=len(invalid_draws),
         intervals=intervals,
         draws=tuple(draws),
+        invalid_draws=tuple(invalid_draws),
     )
     return MultiSupportSimultaneousInferenceResultV2(
         simultaneous_result_id=_RESULT_PREFIX + _digest(_result_payload(provisional)),
@@ -534,6 +589,7 @@ def _run(
         invalid_draw_count=provisional.invalid_draw_count,
         intervals=provisional.intervals,
         draws=provisional.draws,
+        invalid_draws=provisional.invalid_draws,
     )
 
 
@@ -589,6 +645,7 @@ def validate_multi_support_simultaneous_result_v2(
 __all__ = [
     "CoordinateStratumRetainedCountV2",
     "GlobalUnionMaxTDrawV2",
+    "InvalidGlobalUnionDrawV2",
     "MultiSupportSimultaneousInferenceResultV2",
     "MultiSupportSimultaneousIntervalV2",
     "UnionStratumDrawDigestV2",

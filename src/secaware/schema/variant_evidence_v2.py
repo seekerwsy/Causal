@@ -36,11 +36,12 @@ from secaware.schema.experiments import (
     FeatureFamily,
     GraphDeltaRecord,
     LengthMatchRecord,
+    PromptRole,
     PromptVariantRecord,
     TargetInstanceRecord,
     TargetSpecRecord,
 )
-from secaware.schema.features import FeatureState
+from secaware.schema.features import FeatureOperation, FeatureState
 from secaware.schema.intervention_v2 import InterventionBridgeRecordV2
 from secaware.schema.policy_v2 import (
     ExpectedDirection,
@@ -53,6 +54,7 @@ from secaware.schema.policy_v2 import (
 from secaware.schema.population_v2 import PopulationFreezeManifestV2
 from secaware.schema.prompt_extraction import PromptExtractionProposalRecord
 from secaware.schema.query_evidence_v2 import (
+    NaturalPromptSnapshotV2,
     QueryEvidenceManifestV2,
     QueryEvidenceTaskRecordV2,
 )
@@ -268,16 +270,84 @@ def _legacy_target(bridge: InterventionBridgeRecordV2) -> TargetSpecRecord:
     )
 
 
-def _target_instance(*, source: PromptRecord, target: TargetSpecRecord) -> TargetInstanceRecord:
+def make_neutral_counterpart_attestation_sha256_v2(
+    *,
+    source_prompt: PromptRecord,
+    neutral_counterpart_prompt: PromptRecord,
+    intervention_bridge: InterventionBridgeRecordV2,
+) -> str:
+    """Bind one pre-outcome REMOVE counterpart to its source and frozen policy."""
+
+    try:
+        source = PromptRecord.model_validate(source_prompt.model_dump(mode="python"))
+        counterpart = PromptRecord.model_validate(
+            neutral_counterpart_prompt.model_dump(mode="python")
+        )
+        bridge = InterventionBridgeRecordV2.model_validate(intervention_bridge, strict=True)
+        if (
+            bridge.frozen_hypothesis.operation is not FeatureOperation.REMOVE
+            or counterpart.prompt_role is not PromptRole.NEUTRAL_BASELINE
+            or counterpart.counterpart_prompt_id is not None
+            or counterpart.task_id != source.task_id
+            or counterpart.split != source.split
+            or counterpart.language != source.language
+            or counterpart.task_family != source.task_family
+            or counterpart.cwe != source.cwe
+            or counterpart.prompt_id == source.prompt_id
+            or counterpart.prompt == source.prompt
+        ):
+            raise ValueError
+        return _digest(
+            {
+                "schema_version": VARIANT_EVIDENCE_V2_SCHEMA_VERSION,
+                "attestation_policy": "remove-neutral-counterpart-v2.0",
+                "source_prompt_id": source.prompt_id,
+                "source_prompt_sha256": source.prompt_sha256,
+                "counterpart_prompt_id": counterpart.prompt_id,
+                "counterpart_prompt_sha256": counterpart.prompt_sha256,
+                "context_query_id": bridge.context_query.context_query_id,
+                "actionable_feature_spec_id": (
+                    bridge.actionable_feature.actionable_feature_spec_id
+                ),
+                "target_spec_id": bridge.target_spec.target_spec_id,
+                "feature_id": bridge.target_spec.feature_id,
+                "operation": bridge.target_spec.operation.value,
+                "eligibility_function_sha256": (
+                    bridge.candidate_skeleton.eligibility_function_sha256
+                ),
+                "security_neutrality_policy_sha256": (
+                    bridge.target_spec.security_neutrality_policy_sha256
+                ),
+            }
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:  # noqa: BLE001 - sanitize Prompt-bearing attestation failures
+        raise ValueError("neutral counterpart attestation failed validation") from None
+
+
+def _target_instance(
+    *,
+    source: PromptRecord,
+    target: TargetSpecRecord,
+    neutral_counterpart: NaturalPromptSnapshotV2 | None,
+) -> TargetInstanceRecord:
+    remove = target.operation is FeatureOperation.REMOVE
+    if remove != (neutral_counterpart is not None):
+        raise ValueError
     return TargetInstanceRecord.from_content(
         target_spec_id=target.target_spec_id,
         task_id=source.task_id,
         source_prompt_id=source.prompt_id,
         source_prompt_sha256=source.prompt_sha256,
-        counterpart_prompt_id=None,
-        counterpart_prompt_sha256=None,
+        counterpart_prompt_id=(
+            None if neutral_counterpart is None else neutral_counterpart.prompt_id
+        ),
+        counterpart_prompt_sha256=(
+            None if neutral_counterpart is None else neutral_counterpart.prompt_sha256
+        ),
         source_prompt_role=source.prompt_role,
-        counterpart_required=False,
+        counterpart_required=remove,
     )
 
 
@@ -293,8 +363,8 @@ def _protocol_instance(
         task_id=source.task_id,
         source_prompt_id=source.prompt_id,
         source_prompt_sha256=source.prompt_sha256,
-        counterpart_prompt_id=None,
-        counterpart_prompt_sha256=None,
+        counterpart_prompt_id=target_instance.counterpart_prompt_id,
+        counterpart_prompt_sha256=target_instance.counterpart_prompt_sha256,
     )
 
 
@@ -344,6 +414,7 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
     extraction_proposal: PromptExtractionProposalRecord = Field(repr=False)
     prompt_tsg: PromptTSGRecord = Field(repr=False)
     variant_membership: SemanticTaskClusterMembershipRecord
+    neutral_counterpart_prompt: NaturalPromptSnapshotV2 | None = Field(default=None, repr=False)
     source_context_projection: ContextQuerySemanticProjectionV2
     variant_context_projection: ContextQuerySemanticProjectionV2
     legacy_target: TargetSpecRecord
@@ -383,6 +454,7 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
         extractor: PromptExtractor,
         extractor_max_response_chars: int = 262_144,
         length_match_reference_prompt_text: str | None = None,
+        neutral_counterpart_prompt: PromptRecord | None = None,
     ) -> Self:
         try:
             source_evidence = QueryEvidenceTaskRecordV2.model_validate(
@@ -391,6 +463,28 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
             bridge = InterventionBridgeRecordV2.model_validate(intervention_bridge, strict=True)
             checked_realization = RealizationSpecRecord.model_validate(realization, strict=True)
             source = source_evidence.natural_prompt.to_prompt_record()
+            remove = bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE
+            if remove:
+                if neutral_counterpart_prompt is None:
+                    raise ValueError
+                neutral_counterpart = NaturalPromptSnapshotV2.from_prompt_record(
+                    neutral_counterpart_prompt
+                )
+                expected_attestation = make_neutral_counterpart_attestation_sha256_v2(
+                    source_prompt=source,
+                    neutral_counterpart_prompt=neutral_counterpart.to_prompt_record(),
+                    intervention_bridge=bridge,
+                )
+                if (
+                    not source_evidence.eligibility.neutral_counterpart_attested
+                    or source_evidence.eligibility.neutral_counterpart_attestation_sha256
+                    != expected_attestation
+                ):
+                    raise ValueError
+            else:
+                if neutral_counterpart_prompt is not None:
+                    raise ValueError
+                neutral_counterpart = None
             policy = ExtractionPolicy(
                 backend=source_evidence.extraction_proposal.backend,
                 policy_sha256=bridge.realization_policy.extractor_policy_sha256,
@@ -401,11 +495,21 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
             proposal = extractor.extract(variant_prompt, policy)
             graph = build_prompt_tsg(proposal, variant_prompt)
             target = _legacy_target(bridge)
-            target_instance = _target_instance(source=source, target=target)
+            target_instance = _target_instance(
+                source=source,
+                target=target,
+                neutral_counterpart=neutral_counterpart,
+            )
             protocol_instance = _protocol_instance(
                 source=source, target_instance=target_instance, bridge=bridge
             )
             arm = _arm_spec(bridge, arm_role)
+            if (
+                remove
+                and arm_role is bridge.arm_protocol.arms[0].arm_role
+                and (neutral_counterpart is None or prompt_text != neutral_counterpart.prompt)
+            ):
+                raise ValueError
             reference_role = _MATCHED_REFERENCE_ROLE.get(arm_role)
             if reference_role is None:
                 if length_match_reference_prompt_text is not None:
@@ -481,6 +585,7 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
                 extraction_proposal=proposal,
                 prompt_tsg=graph,
                 variant_membership=membership,
+                neutral_counterpart_prompt=neutral_counterpart,
                 source_context_projection=_context_projection(
                     source_evidence.prompt_tsg, source_evaluation
                 ),
@@ -520,6 +625,24 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
             )
             realization = RealizationSpecRecord.model_validate(self.realization, strict=True)
             source = source_evidence.natural_prompt.to_prompt_record()
+            remove = bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE
+            neutral_counterpart = self.neutral_counterpart_prompt
+            if remove:
+                if neutral_counterpart is None:
+                    raise ValueError
+                expected_attestation = make_neutral_counterpart_attestation_sha256_v2(
+                    source_prompt=source,
+                    neutral_counterpart_prompt=neutral_counterpart.to_prompt_record(),
+                    intervention_bridge=bridge,
+                )
+                if (
+                    not source_evidence.eligibility.neutral_counterpart_attested
+                    or source_evidence.eligibility.neutral_counterpart_attestation_sha256
+                    != expected_attestation
+                ):
+                    raise ValueError
+            elif neutral_counterpart is not None:
+                raise ValueError
             if (
                 not source_evidence.eligibility.eligible
                 or source_evidence.context_query != bridge.context_query
@@ -538,6 +661,15 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
                 raise ValueError
             canonical_arm = _arm_spec(bridge, self.arm_role)
             if self.allowed_arm != canonical_arm:
+                raise ValueError
+            if (
+                remove
+                and self.arm_role is bridge.arm_protocol.arms[0].arm_role
+                and (
+                    neutral_counterpart is None
+                    or self.prompt_variant.prompt_text != neutral_counterpart.prompt
+                )
+            ):
                 raise ValueError
             target_role = bridge.arm_protocol.arms[0].arm_role
             target_allowed = _arm_spec(bridge, target_role).allowed_delta.allowed_transitions
@@ -561,7 +693,11 @@ class ArmVariantInvariantReceiptV2(_ContentAddressedVariantEvidenceV2):
             proposal = validate_proposal(self.extraction_proposal, expected_prompt)
             graph = build_prompt_tsg(proposal, expected_prompt)
             target = _legacy_target(bridge)
-            target_instance = _target_instance(source=source, target=target)
+            target_instance = _target_instance(
+                source=source,
+                target=target,
+                neutral_counterpart=neutral_counterpart,
+            )
             protocol_instance = _protocol_instance(
                 source=source, target_instance=target_instance, bridge=bridge
             )
@@ -863,4 +999,5 @@ __all__ = [
     "ContextPathSignatureV2",
     "ContextQuerySemanticProjectionV2",
     "VariantInvariantEvidenceManifestV2",
+    "make_neutral_counterpart_attestation_sha256_v2",
 ]

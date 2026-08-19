@@ -24,7 +24,6 @@ from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.experiments import ArmRole
 from secaware.schema.inference_v2 import (
     FORMAL_MIN_BOOTSTRAP_SAMPLES_V2,
-    FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2,
     SimultaneousCoordinateKindV2,
     SimultaneousFamilyKindV2,
     SimultaneousFamilyManifestV2,
@@ -32,7 +31,9 @@ from secaware.schema.inference_v2 import (
 )
 from secaware.schema.protocol_freeze_v2 import ProtocolFreezeRootV2
 
-MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION = "2.0"
+MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION = "2.1"
+MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2 = 19
+MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2 = 20
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
@@ -95,7 +96,7 @@ class _MultiSupportInferenceV2Contract(SafeValidationMixin, StrictModel):
         strict=True,
     )
 
-    schema_version: Literal["2.0"] = MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION
+    schema_version: Literal["2.1"] = MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION
 
     @model_validator(mode="before")
     @classmethod
@@ -426,9 +427,9 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
     alpha_numerator: StrictInt = Field(ge=1, le=2**31 - 1)
     alpha_denominator: StrictInt = Field(ge=2, le=2**31 - 1)
     bootstrap_samples: StrictInt = Field(ge=FORMAL_MIN_BOOTSTRAP_SAMPLES_V2, le=100_000)
-    minimum_valid_bootstrap_draws: StrictInt = Field(
-        ge=FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2, le=100_000
-    )
+    minimum_valid_bootstrap_draws: StrictInt = Field(ge=1, le=100_000)
+    minimum_valid_fraction_numerator: Literal[19]
+    minimum_valid_fraction_denominator: Literal[20]
     minimum_independent_clusters_per_coordinate: StrictInt = Field(ge=2, le=100_000)
     rng_version: Literal["sha256-rejection-fisher-yates-v1"] = RNG_VERSION
     family_rule: Literal["complete_protocolized_hypothesis_by_frozen_model_cartesian_product_v1"]
@@ -451,7 +452,7 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
     centering_method: Literal["bootstrap_minus_observed_v1"]
     quantile_rule: Literal["empirical_higher_v1"]
     interval_rule: Literal["two_sided_studentized_global_max_abs_t_v1"]
-    invalid_draw_policy: Literal["fail_on_any_invalid_draw_v1"]
+    invalid_draw_policy: Literal["retain_reason_and_fail_below_frozen_fraction_v2"]
     seed_derivation_rule: Literal[
         "sha256_domain_material_plus_content_addressed_plan_id_v1",
         "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1",
@@ -531,7 +532,16 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 alpha_numerator=alpha_numerator,
                 alpha_denominator=alpha_denominator,
                 bootstrap_samples=bootstrap_samples,
-                minimum_valid_bootstrap_draws=FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2,
+                minimum_valid_bootstrap_draws=(
+                    bootstrap_samples * MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2
+                    + MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
+                    - 1
+                )
+                // MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2,
+                minimum_valid_fraction_numerator=(MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2),
+                minimum_valid_fraction_denominator=(
+                    MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
+                ),
                 minimum_independent_clusters_per_coordinate=(
                     minimum_independent_clusters_per_coordinate
                 ),
@@ -550,7 +560,7 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 centering_method="bootstrap_minus_observed_v1",
                 quantile_rule="empirical_higher_v1",
                 interval_rule="two_sided_studentized_global_max_abs_t_v1",
-                invalid_draw_policy="fail_on_any_invalid_draw_v1",
+                invalid_draw_policy="retain_reason_and_fail_below_frozen_fraction_v2",
                 seed_derivation_rule=("sha256_domain_material_plus_content_addressed_plan_id_v1"),
                 complete_hypothesis_model_family_required=True,
                 frozen_before_outcomes=True,
@@ -606,7 +616,16 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 alpha_numerator=1,
                 alpha_denominator=20,
                 bootstrap_samples=FORMAL_MIN_BOOTSTRAP_SAMPLES_V2,
-                minimum_valid_bootstrap_draws=FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2,
+                minimum_valid_bootstrap_draws=(
+                    FORMAL_MIN_BOOTSTRAP_SAMPLES_V2 * MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2
+                    + MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
+                    - 1
+                )
+                // MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2,
+                minimum_valid_fraction_numerator=(MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2),
+                minimum_valid_fraction_denominator=(
+                    MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
+                ),
                 minimum_independent_clusters_per_coordinate=2,
                 rng_version=RNG_VERSION,
                 family_rule=(
@@ -623,7 +642,7 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 centering_method="bootstrap_minus_observed_v1",
                 quantile_rule="empirical_higher_v1",
                 interval_rule="two_sided_studentized_global_max_abs_t_v1",
-                invalid_draw_policy="fail_on_any_invalid_draw_v1",
+                invalid_draw_policy="retain_reason_and_fail_below_frozen_fraction_v2",
                 seed_derivation_rule=(
                     "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1"
                 ),
@@ -662,6 +681,11 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
             family_size=len(expected_coordinates),
             frozen_before_outcomes=True,
         )
+        expected_minimum_valid_draws = (
+            self.bootstrap_samples * MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2
+            + MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
+            - 1
+        ) // MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
         if (
             self.confirmatory_experiment_freeze_id
             != self.experiment.confirmatory_experiment_freeze_id
@@ -675,6 +699,7 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
             or self.contrast_rule != contrast_rule
             or len(self.coordinate_supports) != self.experiment.hypothesis_model_coordinate_count
             or self.alpha_numerator >= self.alpha_denominator
+            or self.minimum_valid_bootstrap_draws != expected_minimum_valid_draws
             or self.minimum_valid_bootstrap_draws > self.bootstrap_samples
             or any(
                 item.coordinate_cluster_count < self.minimum_independent_clusters_per_coordinate
@@ -690,6 +715,8 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
 
 __all__ = [
     "MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION",
+    "MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2",
+    "MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2",
     "CoordinateSpecificStratumSupportV2",
     "CoordinateSpecificSupportV2",
     "GlobalUnionStratumV2",

@@ -61,6 +61,7 @@ from secaware.schema.records import PromptRecord
 from secaware.schema.variant_evidence_v2 import (
     ArmVariantInvariantReceiptV2,
     VariantInvariantEvidenceManifestV2,
+    make_neutral_counterpart_attestation_sha256_v2,
 )
 from secaware.tsg.builder import build_prompt_tsg
 from secaware.tsg.context_queries_v2 import CWE89_SQL_FLOW_QUERY, context_query_spec
@@ -86,6 +87,12 @@ ADD_ARMS = (
     ArmRole.NOOP_REWRITE,
     ArmRole.LENGTH_MATCHED_PLACEBO,
     ArmRole.GENERIC_SECURITY_REMINDER,
+)
+REMOVE_ARMS = (
+    ArmRole.TARGET_REMOVE,
+    ArmRole.NOOP_RETAIN,
+    ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+    ArmRole.GENERIC_SECURITY_REPLACEMENT,
 )
 
 
@@ -117,17 +124,25 @@ def _realization_policy(k_r: int) -> RealizationPolicySpec:
     )
 
 
-def _skeleton(policy: RealizationPolicySpec) -> CandidateSkeleton:
+def _skeleton(
+    policy: RealizationPolicySpec,
+    *,
+    operation: FeatureOperation = FeatureOperation.ADD,
+) -> CandidateSkeleton:
     context = _context_spec()
     feature = _feature_spec()
     return CandidateSkeleton.from_content(
         context_query_id=context.context_query_id,
         actionable_feature_spec_id=feature.actionable_feature_spec_id,
         feature_id=feature.feature_id,
-        operation=FeatureOperation.ADD,
+        operation=operation,
         realization_policy_spec_id=policy.realization_policy_spec_id,
         outcome_id="y_secure_yield",
-        expected_direction=ExpectedDirection.POSITIVE,
+        expected_direction=(
+            ExpectedDirection.POSITIVE
+            if operation is FeatureOperation.ADD
+            else ExpectedDirection.NEGATIVE
+        ),
         cwe="CWE-89",
         task_archetype="value-parameterization",
         model_scope=MODELS,
@@ -140,6 +155,7 @@ def _skeleton(policy: RealizationPolicySpec) -> CandidateSkeleton:
 def _realizations(
     skeleton: CandidateSkeleton, policy: RealizationPolicySpec
 ) -> tuple[RealizationSpecRecord, ...]:
+    arms = ADD_ARMS if skeleton.operation is FeatureOperation.ADD else REMOVE_ARMS
     return tuple(
         RealizationSpecRecord.from_policy(
             skeleton=skeleton,
@@ -153,16 +169,21 @@ def _realizations(
                     ),
                     validation_requirements_sha256=SHA_D,
                 )
-                for arm in ADD_ARMS
+                for arm in arms
             ),
         )
         for index in range(policy.k_r)
     )
 
 
-def _bridge(*, k_r: int = 2, target_salt: str = "base") -> InterventionBridgeRecordV2:
+def _bridge(
+    *,
+    k_r: int = 2,
+    target_salt: str = "base",
+    operation: FeatureOperation = FeatureOperation.ADD,
+) -> InterventionBridgeRecordV2:
     policy = _realization_policy(k_r)
-    skeleton = _skeleton(policy)
+    skeleton = _skeleton(policy, operation=operation)
     feature = _feature_spec()
     realizations = _realizations(skeleton, policy)
     target = TargetSpecV2.from_components(
@@ -233,12 +254,12 @@ def _selection(
     return universe, freeze
 
 
-def _source_task(task_id: str) -> SourceInventoryTaskRecordV2:
+def _source_task(task_id: str, *, target_present: bool = False) -> SourceInventoryTaskRecordV2:
     return SourceInventoryTaskRecordV2.from_source(
         task_instance_id=task_id,
         source_id="synthetic.registry",
         source_record_id=f"source.{task_id}",
-        prompt_sha256=_sha(_prompt_text(task_id)),
+        prompt_sha256=_sha(_prompt_text(task_id, target_present=target_present)),
         cwe_id="CWE-89",
         archetype_id="value-parameterization",
         template_family_id="sql.lookup",
@@ -250,9 +271,13 @@ def _source_task(task_id: str) -> SourceInventoryTaskRecordV2:
 
 def _inventory(
     coordinates: tuple[tuple[str, str], ...] = TASK_COORDINATES,
+    *,
+    target_present: bool = False,
 ) -> SourceInventoryManifestV2:
     return SourceInventoryManifestV2.from_tasks(
-        tasks=tuple(_source_task(task_id) for task_id, _ in coordinates),
+        tasks=tuple(
+            _source_task(task_id, target_present=target_present) for task_id, _ in coordinates
+        ),
         source_registry_snapshot_sha256=SHA_B,
         inventory_construction_sha256=SHA_C,
     )
@@ -277,6 +302,20 @@ def _natural_prompt(task_id: str, *, target_present: bool = False) -> PromptReco
     )
 
 
+def _neutral_counterpart_prompt(task_id: str) -> PromptRecord:
+    return PromptRecord(
+        prompt_id=f"neutral-counterpart.{task_id}",
+        task_id=task_id,
+        split="confirm",
+        language="python",
+        task_family="sql_query",
+        cwe="CWE-89",
+        prompt=_prompt_text(task_id, target_present=False),
+        prompt_role=PromptRole.NEUTRAL_BASELINE,
+        counterpart_prompt_id=None,
+    )
+
+
 def _query_evidence_task(
     *,
     bridge: InterventionBridgeRecordV2,
@@ -295,6 +334,16 @@ def _query_evidence_task(
     proposal = DeterministicCatalogExtractor().extract(prompt, extraction_policy)
     graph = build_prompt_tsg(proposal, prompt)
     remove = bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE
+    counterpart = _neutral_counterpart_prompt(membership.task_instance_id) if remove else None
+    counterpart_attestation = (
+        make_neutral_counterpart_attestation_sha256_v2(
+            source_prompt=prompt,
+            neutral_counterpart_prompt=counterpart,
+            intervention_bridge=bridge,
+        )
+        if counterpart is not None
+        else None
+    )
     return QueryEvidenceTaskRecordV2.from_natural_prompt(
         membership=membership,
         natural_prompt=prompt,
@@ -305,9 +354,7 @@ def _query_evidence_task(
         operation=bridge.frozen_hypothesis.operation,
         eligibility_function_sha256=(bridge.candidate_skeleton.eligibility_function_sha256),
         neutral_counterpart_attested=True if remove else None,
-        neutral_counterpart_attestation_sha256=(
-            _sha(f"neutral-counterpart:{membership.task_instance_id}") if remove else None
-        ),
+        neutral_counterpart_attestation_sha256=counterpart_attestation,
     )
 
 
@@ -339,7 +386,9 @@ def _bundle(
 ) -> TaskRealizationBundleRecord:
     task_id = source_evidence.membership.task_instance_id
     selected = tuple(item for item in receipts if item.realization == realization)
-    assert tuple(item.arm_role for item in selected) == ADD_ARMS
+    assert tuple(item.arm_role for item in selected) == tuple(
+        item.arm_role for item in bridge.arm_protocol.arms
+    )
     return TaskRealizationBundleRecord.from_components(
         hypothesis=bridge.frozen_hypothesis,
         realization=realization,
@@ -376,23 +425,44 @@ def _support(
 
 def _variant_texts(source_text: str, bridge: InterventionBridgeRecordV2) -> dict[ArmRole, str]:
     target_clause = prompt_feature_spec(bridge.target_spec.feature_id).intervention_clauses[0]
-    target_text = source_text + target_clause
-    placebo_clauses = prompt_feature_spec(
-        "presentation.length_matched_placebo"
-    ).intervention_clauses
-    placebo_clause = min(
-        placebo_clauses,
+    if bridge.frozen_hypothesis.operation is FeatureOperation.ADD:
+        target_text = source_text + target_clause
+        placebo_clauses = prompt_feature_spec(
+            "presentation.length_matched_placebo"
+        ).intervention_clauses
+        placebo_clause = min(
+            placebo_clauses,
+            key=lambda item: (
+                abs(len(item.encode("utf-8")) - len(target_clause.encode("utf-8"))),
+                placebo_clauses.index(item),
+            ),
+        )
+        return {
+            ArmRole.TARGET_PATCH: target_text,
+            ArmRole.NOOP_REWRITE: source_text + "\n",
+            ArmRole.LENGTH_MATCHED_PLACEBO: source_text + placebo_clause,
+            ArmRole.GENERIC_SECURITY_REMINDER: (
+                source_text
+                + prompt_feature_spec("safety.generic_security_reminder").intervention_clauses[0]
+            ),
+        }
+
+    neutral_text = source_text.removesuffix(" Use parameterized queries.")
+    removed_span_bytes = len(source_text.encode("utf-8")) - len(neutral_text.encode("utf-8"))
+    sham_clauses = prompt_feature_spec("presentation.sham_edit").intervention_clauses
+    sham_clause = min(
+        sham_clauses,
         key=lambda item: (
-            abs(len(item.encode("utf-8")) - len(target_clause.encode("utf-8"))),
-            placebo_clauses.index(item),
+            abs(len(item.encode("utf-8")) - removed_span_bytes),
+            sham_clauses.index(item),
         ),
     )
     return {
-        ArmRole.TARGET_PATCH: target_text,
-        ArmRole.NOOP_REWRITE: source_text + "\n",
-        ArmRole.LENGTH_MATCHED_PLACEBO: source_text + placebo_clause,
-        ArmRole.GENERIC_SECURITY_REMINDER: (
-            source_text
+        ArmRole.TARGET_REMOVE: neutral_text,
+        ArmRole.NOOP_RETAIN: source_text + "\n",
+        ArmRole.LENGTH_MATCHED_SHAM_EDIT: source_text + sham_clause,
+        ArmRole.GENERIC_SECURITY_REPLACEMENT: (
+            neutral_text
             + prompt_feature_spec("safety.generic_security_reminder").intervention_clauses[0]
         ),
     }
@@ -404,6 +474,16 @@ def _variant_receipts(
     source_evidence: QueryEvidenceTaskRecordV2,
 ) -> tuple[ArmVariantInvariantReceiptV2, ...]:
     texts = _variant_texts(source_evidence.natural_prompt.prompt, bridge)
+    target_role = bridge.arm_protocol.arms[0].arm_role
+    matched_roles = {
+        ArmRole.LENGTH_MATCHED_PLACEBO,
+        ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+    }
+    neutral_counterpart = (
+        _neutral_counterpart_prompt(source_evidence.membership.task_instance_id)
+        if bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE
+        else None
+    )
     return tuple(
         ArmVariantInvariantReceiptV2.from_variant_text(
             source_query_evidence=source_evidence,
@@ -413,11 +493,12 @@ def _variant_receipts(
             prompt_text=texts[arm_role],
             extractor=DeterministicCatalogExtractor(),
             length_match_reference_prompt_text=(
-                texts[ArmRole.TARGET_PATCH] if arm_role is ArmRole.LENGTH_MATCHED_PLACEBO else None
+                texts[target_role] if arm_role in matched_roles else None
             ),
+            neutral_counterpart_prompt=neutral_counterpart,
         )
         for realization in bridge.realizations
-        for arm_role in ADD_ARMS
+        for arm_role in tuple(item.arm_role for item in bridge.arm_protocol.arms)
     )
 
 
@@ -591,7 +672,10 @@ def _fixture(
     minimum_clusters: int = 2,
 ) -> ProtocolFixture:
     checked_bridge = bridge or _bridge()
-    checked_inventory = inventory or _inventory(coordinates)
+    checked_inventory = inventory or _inventory(
+        coordinates,
+        target_present=(checked_bridge.frozen_hypothesis.operation is FeatureOperation.REMOVE),
+    )
     universe, selection = _selection(checked_bridge)
     parts = _population_parts(
         bridge=checked_bridge,

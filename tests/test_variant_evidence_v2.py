@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
 from secaware.schema.experiments import ArmRole
+from secaware.schema.features import FeatureOperation
 from secaware.schema.policy_v2 import (
     TaskArmVariantBinding,
     TaskPolicySupportRecord,
@@ -29,10 +30,18 @@ ONE_TASK = (("task.1", "cluster.1"),)
 TWO_TASKS = (("task.1", "cluster.1"), ("task.2", "cluster.2"))
 
 
-def _parts(*, two_tasks: bool = False, k_r: int = 2):
+def _parts(
+    *,
+    two_tasks: bool = False,
+    k_r: int = 2,
+    operation: FeatureOperation = FeatureOperation.ADD,
+):
     coordinates = TWO_TASKS if two_tasks else ONE_TASK
-    bridge = _bridge(k_r=k_r)
-    inventory = _inventory(coordinates)
+    bridge = _bridge(k_r=k_r, operation=operation)
+    inventory = _inventory(
+        coordinates,
+        target_present=operation is FeatureOperation.REMOVE,
+    )
     parts = _population_parts(
         bridge=bridge,
         inventory=inventory,
@@ -63,6 +72,50 @@ def test_receipts_replay_from_json_and_bind_real_evidence_digest() -> None:
     assert tuple(item.validation_evidence_sha256 for item in bundle.arms) == tuple(
         item.semantic_sha256 for item in manifest.receipts
     )
+
+
+def test_remove_replays_with_exact_neutral_counterpart_and_distinct_arm_family() -> None:
+    bridge, parts = _parts(k_r=1, operation=FeatureOperation.REMOVE)
+    manifest = parts.variant_evidence
+    replayed = VariantInvariantEvidenceManifestV2.model_validate_json(manifest.model_dump_json())
+
+    assert replayed == manifest
+    assert tuple(item.arm_role for item in manifest.receipts) == (
+        ArmRole.TARGET_REMOVE,
+        ArmRole.NOOP_RETAIN,
+        ArmRole.LENGTH_MATCHED_SHAM_EDIT,
+        ArmRole.GENERIC_SECURITY_REPLACEMENT,
+    )
+    assert all(item.neutral_counterpart_prompt is not None for item in manifest.receipts)
+    target = manifest.receipts[0]
+    assert target.neutral_counterpart_prompt is not None
+    assert target.prompt_variant.prompt_text == target.neutral_counterpart_prompt.prompt
+    assert target.target_instance.counterpart_required
+    assert (
+        target.target_instance.counterpart_prompt_sha256
+        == target.neutral_counterpart_prompt.prompt_sha256
+    )
+    assert parts.query_evidence.tasks[0].eligibility.target_evidence_sha256 is not None
+    assert bridge.frozen_hypothesis.expected_direction.value == "negative"
+
+
+def test_remove_rejects_wrong_neutral_counterpart_before_generation() -> None:
+    bridge, parts = _parts(k_r=1, operation=FeatureOperation.REMOVE)
+    target = parts.variant_evidence.receipts[0]
+    wrong = target.neutral_counterpart_prompt
+    assert wrong is not None
+    forged = wrong.to_prompt_record().model_copy(update={"prompt_id": "neutral-counterpart.other"})
+
+    with pytest.raises(ValidationError, match="variant evidence v2 contract failed validation"):
+        ArmVariantInvariantReceiptV2.from_variant_text(
+            source_query_evidence=target.source_query_evidence,
+            intervention_bridge=bridge,
+            realization=bridge.realizations[0],
+            arm_role=ArmRole.TARGET_REMOVE,
+            prompt_text=wrong.prompt,
+            extractor=DeterministicCatalogExtractor(),
+            neutral_counterpart_prompt=forged,
+        )
 
 
 @pytest.mark.parametrize(

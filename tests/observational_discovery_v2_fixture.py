@@ -135,8 +135,8 @@ def _prompt_tsg(task_index: int, *, x_state: int):
         )
     return multidigraph_to_record(
         graph,
-        prompt_id=f"prompt.synthetic.sql.{task_index}",
-        task_id=f"task.synthetic.sql.{task_index}",
+        prompt_id=f"prompt.synthetic.sql.{task_index:06d}",
+        task_id=f"task.synthetic.sql.{task_index:06d}",
         task_family="sql_query",
         cwe="CWE-89",
         extractor_backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
@@ -167,8 +167,8 @@ def build_authenticated_synthetic_table_v2(
     clustering_policy = _sha("synthetic-semantic-clustering-v2")
     memberships = tuple(
         SemanticTaskClusterMembershipRecord.from_content(
-            semantic_task_cluster_id=f"cluster.synthetic.sql.{index}",
-            task_instance_id=f"task.synthetic.sql.{index}",
+            semantic_task_cluster_id=f"cluster.synthetic.sql.{index:06d}",
+            task_instance_id=f"task.synthetic.sql.{index:06d}",
             split=PolicySplit.DISCOVER,
             cwe="CWE-89",
             task_archetype="value-parameterization",
