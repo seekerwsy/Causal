@@ -4,13 +4,34 @@ These instructions apply to all files under `paper/`.
 
 - Use the project skill `.agents/skills/secaware-fse-paper/SKILL.md` for paper
   audits, revisions, result backfilling, and submission checks.
-- Treat the approved dated specifications in `docs/superpowers/specs/` as more
-  authoritative than existing manuscript prose.
+- Treat the dated specifications in `docs/superpowers/specs/` as more
+  authoritative than existing manuscript prose. New-protocol work follows the
+  2026-08-20 context-conditioned intervention-policy successor; legacy runs
+  retain the protocol declared by their immutable manifests.
 - Keep the causal representation Prompt-only: Prompt TSG structure is not a
-  causal graph, and generated code is only Oracle/functional-evaluator input.
+  causal graph. Generated code supplies Oracle/functional outcomes and may
+  supply separately provenanced implementation diagnostics, but never a Code
+  TSG, primary-PAG variable, treatment, or causal mediator.
 - Keep task-clustered assigned-arm ITT as the primary confirmatory analysis.
   `target_changed`, semantic compliance, and non-target drift are diagnostics,
   not filters for the primary denominator.
+- Keep natural-Prompt discovery variables `X^0`, randomized arm `A`, and
+  post-intervention diagnostic projections `X^{A,R}` distinct. Randomized
+  confirmation identifies a frozen finite-realization Prompt-policy effect,
+  not an observational PAG edge or universal abstract-feature effect.
+- A confirmable hypothesis has one non-actionable context query and exactly
+  one actionable feature. Relational context motifs define applicability or
+  effect modification; they are not directly assigned treatments.
+- Use `semantic_task_cluster_id` as the highest resampling unit. Preserve all
+  descendant hypotheses, models, arms, task instances, request-randomness
+  slots, and realizations when that cluster is resampled.
+- For the prospective protocol, the primary safety outcome is
+  oracle-evaluable secure-code yield. Report code validity, Oracle support,
+  unknowns, bounds, and secure-and-functional joint success separately.
+- The main paper has three RQs covering selector effectiveness, representation
+  and prioritization contribution, and security interventions. JCI and RFCI
+  are appendix analyses; the former RQ4 expert study is a separately versioned
+  optional study and must not be presented as a main-paper RQ.
 - Do not invent quantitative results, citations, completed experiments, or
   implementation status. Trace inserted results to frozen artifacts and leave
   unsupported cells as explicit placeholders.

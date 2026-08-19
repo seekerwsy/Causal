@@ -30,6 +30,7 @@ Read these files completely before changing Methods, Evaluation, Results,
 Threats, or Conclusion:
 
 - `paper/AGENTS.md`
+- `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
 - `docs/superpowers/specs/2026-07-13-prompt-only-fci-jci-randomized-confirmation-design.md`
 - `docs/superpowers/specs/2026-07-22-paper-research-questions-design.md`
 - `references/causal-boundaries.md`
@@ -42,7 +43,8 @@ specific frozen run manifest and table-building code before `results-backfill`.
 Resolve contradictions in this order:
 
 1. The user's current explicit instruction.
-2. Approved dated design and RQ specifications.
+2. The 2026-08-20 prospective successor specification for new-protocol work; legacy dated design
+   and RQ specifications remain authoritative for runs produced under their manifests.
 3. Frozen run manifests, immutable artifacts, and table builders.
 4. Current implementation and tests.
 5. Existing manuscript prose and comments.
