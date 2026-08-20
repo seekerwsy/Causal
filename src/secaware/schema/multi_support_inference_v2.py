@@ -19,7 +19,7 @@ from typing import Any, ClassVar, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from secaware.randomness import RNG_VERSION
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.common import SafeValidationMixin, StrictModel, model_shape_is_intact
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.experiments import ArmRole
 from secaware.schema.inference_v2 import (
@@ -39,6 +39,13 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _PLAN_PATTERN = r"^multi_support_simultaneous_plan_v2_[0-9a-f]{64}$"
 _SUPPORT_PATTERN = r"^multi_support_coordinate_v2_[0-9a-f]{64}$"
+
+# These identity capabilities separate a fully checked public constructor from
+# the formal orchestrator's two-root context.  They are an internal API guard,
+# not a Python sandbox: callers cannot select a fast path with a boolean or pass
+# an arbitrary object that merely looks prevalidated.
+_CHECKED_FORMAL_PLAN_ACCESS = object()
+_FORMAL_CONTEXT_PLAN_ACCESS = object()
 
 
 def _jsonable(value: object) -> object:
@@ -585,7 +592,69 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 strict=True,
             )
             checked_family = MultiSupportFormalFamilyV2(formal_family)
-            supports = _expected_coordinate_supports(checked, checked_family)
+            return cls._from_checked_frozen_formal_family(
+                experiment=checked,
+                formal_family=checked_family,
+                access=_CHECKED_FORMAL_PLAN_ACCESS,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the public trust boundary
+            raise cls._safe_error() from None
+
+    @classmethod
+    def _from_formal_context(
+        cls,
+        *,
+        context: object,
+        formal_family: MultiSupportFormalFamilyV2,
+    ) -> Self:
+        """Derive one plan from the sealed formal two-root context only."""
+
+        try:
+            # Local import avoids a schema -> analysis import cycle at module
+            # initialization while retaining an exact runtime type boundary.
+            from secaware.analysis.formal_confirmation_v2 import (
+                _ValidatedFormalContextV2,
+            )
+
+            if type(context) is not _ValidatedFormalContextV2:
+                raise ValueError
+            experiment = context._experiment_for_plan_builder(_FORMAL_CONTEXT_PLAN_ACCESS)
+            return cls._from_checked_frozen_formal_family(
+                experiment=experiment,
+                formal_family=MultiSupportFormalFamilyV2(formal_family),
+                access=_CHECKED_FORMAL_PLAN_ACCESS,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the internal context boundary
+            raise cls._safe_error() from None
+
+    @classmethod
+    def _from_checked_frozen_formal_family(
+        cls,
+        *,
+        experiment: ConfirmatoryExperimentFreezeV2,
+        formal_family: MultiSupportFormalFamilyV2,
+        access: object,
+    ) -> Self:
+        """Construct after either the public or formal-context trust boundary.
+
+        The identity capability is supplied only by a constructor that already
+        completed its relevant boundary.  Supports, coordinates, outcomes,
+        contrasts, multiplicity settings, and seeds remain deterministic.
+        """
+
+        try:
+            if (
+                access is not _CHECKED_FORMAL_PLAN_ACCESS
+                or type(experiment) is not ConfirmatoryExperimentFreezeV2
+                or not model_shape_is_intact(experiment)
+            ):
+                raise ValueError
+            checked_family = MultiSupportFormalFamilyV2(formal_family)
+            supports = _expected_coordinate_supports(experiment, checked_family)
             coordinates = tuple(item.test_coordinate for item in supports)
             (
                 family_label,
@@ -602,56 +671,67 @@ class MultiSupportSimultaneousInferencePlanV2(_ContentAddressedMultiSupportInfer
                 family_size=len(coordinates),
                 frozen_before_outcomes=True,
             )
-            return cls.from_content(
-                confirmatory_experiment_freeze_id=(checked.confirmatory_experiment_freeze_id),
-                experiment=checked,
-                global_multiplicity_family_policy_sha256=(
-                    checked.global_multiplicity_family_policy_sha256
+            payload = {
+                "schema_version": MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION,
+                "confirmatory_experiment_freeze_id": (experiment.confirmatory_experiment_freeze_id),
+                "experiment": experiment,
+                "global_multiplicity_family_policy_sha256": (
+                    experiment.global_multiplicity_family_policy_sha256
                 ),
-                analysis_seed_domain_sha256=checked.analysis_seed_domain_sha256,
-                formal_family=checked_family,
-                family=family,
-                coordinate_supports=supports,
-                global_union_strata=_expected_global_union(supports),
-                alpha_numerator=1,
-                alpha_denominator=20,
-                bootstrap_samples=FORMAL_MIN_BOOTSTRAP_SAMPLES_V2,
-                minimum_valid_bootstrap_draws=(
+                "analysis_seed_domain_sha256": experiment.analysis_seed_domain_sha256,
+                "formal_family": checked_family,
+                "family": family,
+                "coordinate_supports": supports,
+                "global_union_strata": _expected_global_union(supports),
+                "alpha_numerator": 1,
+                "alpha_denominator": 20,
+                "bootstrap_samples": FORMAL_MIN_BOOTSTRAP_SAMPLES_V2,
+                "minimum_valid_bootstrap_draws": (
                     FORMAL_MIN_BOOTSTRAP_SAMPLES_V2 * MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2
                     + MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
                     - 1
                 )
                 // MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2,
-                minimum_valid_fraction_numerator=(MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2),
-                minimum_valid_fraction_denominator=(
+                "minimum_valid_fraction_numerator": (
+                    MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2
+                ),
+                "minimum_valid_fraction_denominator": (
                     MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2
                 ),
-                minimum_independent_clusters_per_coordinate=2,
-                rng_version=RNG_VERSION,
-                family_rule=(
+                "minimum_independent_clusters_per_coordinate": 2,
+                "rng_version": RNG_VERSION,
+                "family_rule": (
                     "complete_protocolized_hypothesis_by_frozen_model_cartesian_product_v1"
                 ),
-                outcome_rule=outcome_rule,
-                contrast_rule=contrast_rule,
-                resampling_method=("global_union_stratified_semantic_cluster_ratio_bootstrap_v1"),
-                cluster_coupling_rule=(
+                "outcome_rule": outcome_rule,
+                "contrast_rule": contrast_rule,
+                "resampling_method": (
+                    "global_union_stratified_semantic_cluster_ratio_bootstrap_v1"
+                ),
+                "cluster_coupling_rule": (
                     "one_union_draw_shared_then_filtered_by_frozen_coordinate_support_v1"
                 ),
-                support_rule=("coordinate_specific_no_common_intersection_no_estimand_change_v1"),
-                studentization_method="coordinate_specific_cluster_se_v1",
-                centering_method="bootstrap_minus_observed_v1",
-                quantile_rule="empirical_higher_v1",
-                interval_rule="two_sided_studentized_global_max_abs_t_v1",
-                invalid_draw_policy="retain_reason_and_fail_below_frozen_fraction_v2",
-                seed_derivation_rule=(
+                "support_rule": (
+                    "coordinate_specific_no_common_intersection_no_estimand_change_v1"
+                ),
+                "studentization_method": "coordinate_specific_cluster_se_v1",
+                "centering_method": "bootstrap_minus_observed_v1",
+                "quantile_rule": "empirical_higher_v1",
+                "interval_rule": "two_sided_studentized_global_max_abs_t_v1",
+                "invalid_draw_policy": "retain_reason_and_fail_below_frozen_fraction_v2",
+                "seed_derivation_rule": (
                     "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1"
                 ),
-                complete_hypothesis_model_family_required=True,
-                frozen_before_outcomes=True,
+                "complete_hypothesis_model_family_required": True,
+                "frozen_before_outcomes": True,
+            }
+            return cls.model_construct(
+                **payload,
+                inference_plan_id="multi_support_simultaneous_plan_v2_" + _digest(payload),
             )
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
-        except Exception:  # noqa: BLE001 - sanitize the public trust boundary
+        except Exception:  # noqa: BLE001 - sanitize the internal deterministic boundary
             raise cls._safe_error() from None
 
     @property

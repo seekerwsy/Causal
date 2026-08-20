@@ -1172,6 +1172,8 @@ def run_true_chain_synthetic_gate_v2(
         uses_authenticated_natural_table=False,
         upgrades_main_evidence=False,
     )
+
+
 type _WritableArtifactV2 = (
     ObservationalFCISuiteArtifactV2
     | ObservationalFCIFailureArtifactV2

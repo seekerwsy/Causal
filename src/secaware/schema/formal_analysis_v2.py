@@ -9,9 +9,10 @@ from typing import ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.schema.common import SafeValidationMixin, StrictModel, model_shape_is_intact
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.multi_support_inference_v2 import (
+    _CHECKED_FORMAL_PLAN_ACCESS,
     MultiSupportFormalFamilyV2,
     MultiSupportSimultaneousInferencePlanV2,
 )
@@ -19,6 +20,8 @@ from secaware.schema.multi_support_inference_v2 import (
 FORMAL_ANALYSIS_V2_SCHEMA_VERSION = "2.0"
 
 _PROTOCOL_ID_PATTERN = r"^formal_analysis_protocol_v2_[0-9a-f]{64}$"
+_CHECKED_FORMAL_PROTOCOL_ACCESS = object()
+_FORMAL_CONTEXT_PROTOCOL_ACCESS = object()
 
 
 class FormalConfirmationStatusV2(StrEnum):
@@ -148,24 +151,92 @@ class FormalAnalysisProtocolV2(_FormalAnalysisV2Contract):
                 experiment.model_dump(mode="python", round_trip=True, warnings=False),
                 strict=True,
             )
-            order = tuple(item for item in MultiSupportFormalFamilyV2)
+            order = tuple(MultiSupportFormalFamilyV2)
             plans = tuple(
-                MultiSupportSimultaneousInferencePlanV2.from_frozen_formal_family(
+                MultiSupportSimultaneousInferencePlanV2._from_checked_frozen_formal_family(
                     experiment=checked,
+                    formal_family=item,
+                    access=_CHECKED_FORMAL_PLAN_ACCESS,
+                )
+                for item in order
+            )
+            return cls._construct_checked_protocol(
+                experiment=checked,
+                plans=plans,
+                access=_CHECKED_FORMAL_PROTOCOL_ACCESS,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the formal protocol boundary
+            raise cls._safe_error() from None
+
+    @classmethod
+    def _from_formal_context(
+        cls,
+        context: object,
+    ) -> Self:
+        """Derive the protocol from the sealed formal two-root context only."""
+
+        try:
+            from secaware.analysis.formal_confirmation_v2 import (
+                _ValidatedFormalContextV2,
+            )
+
+            if type(context) is not _ValidatedFormalContextV2:
+                raise ValueError
+            experiment = context._experiment_for_protocol_builder(_FORMAL_CONTEXT_PROTOCOL_ACCESS)
+            order = tuple(MultiSupportFormalFamilyV2)
+            plans = tuple(
+                MultiSupportSimultaneousInferencePlanV2._from_formal_context(
+                    context=context,
                     formal_family=item,
                 )
                 for item in order
             )
+            return cls._construct_checked_protocol(
+                experiment=experiment,
+                plans=plans,
+                access=_CHECKED_FORMAL_PROTOCOL_ACCESS,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the formal context boundary
+            raise cls._safe_error() from None
+
+    @classmethod
+    def _construct_checked_protocol(
+        cls,
+        *,
+        experiment: ConfirmatoryExperimentFreezeV2,
+        plans: tuple[MultiSupportSimultaneousInferencePlanV2, ...],
+        access: object,
+    ) -> Self:
+        """Assemble deterministic plans after an explicit checked boundary."""
+
+        try:
+            if (
+                access is not _CHECKED_FORMAL_PROTOCOL_ACCESS
+                or type(experiment) is not ConfirmatoryExperimentFreezeV2
+                or not model_shape_is_intact(experiment)
+                or len(plans) != len(tuple(MultiSupportFormalFamilyV2))
+                or any(
+                    type(plan) is not MultiSupportSimultaneousInferencePlanV2
+                    or not model_shape_is_intact(plan)
+                    for plan in plans
+                )
+            ):
+                raise ValueError
+            order = tuple(MultiSupportFormalFamilyV2)
             content = {
                 "schema_version": FORMAL_ANALYSIS_V2_SCHEMA_VERSION,
-                "confirmatory_experiment_freeze_id": (checked.confirmatory_experiment_freeze_id),
-                "experiment": checked,
+                "confirmatory_experiment_freeze_id": (experiment.confirmatory_experiment_freeze_id),
+                "experiment": experiment,
                 "family_order": tuple(item.value for item in order),
                 "family_plans": plans,
                 "global_multiplicity_family_policy_sha256": (
-                    checked.global_multiplicity_family_policy_sha256
+                    experiment.global_multiplicity_family_policy_sha256
                 ),
-                "analysis_seed_domain_sha256": checked.analysis_seed_domain_sha256,
+                "analysis_seed_domain_sha256": experiment.analysis_seed_domain_sha256,
                 "primary_outcome": "y_secure_yield",
                 "key_practical_outcome": "y_joint",
                 "primary_contrast_source": "arm_protocol.primary_contrast",
@@ -182,7 +253,7 @@ class FormalAnalysisProtocolV2(_FormalAnalysisV2Contract):
                 "optional_jci_rfci_marker_per_protocol_cannot_promote_label": True,
                 "frozen_before_outcomes": True,
             }
-            return cls(
+            return cls.model_construct(
                 **content,
                 formal_analysis_protocol_id=("formal_analysis_protocol_v2_" + _digest(content)),
             )
@@ -194,9 +265,10 @@ class FormalAnalysisProtocolV2(_FormalAnalysisV2Contract):
     @model_validator(mode="after")
     def validate_protocol(self) -> Self:
         expected = tuple(
-            MultiSupportSimultaneousInferencePlanV2.from_frozen_formal_family(
+            MultiSupportSimultaneousInferencePlanV2._from_checked_frozen_formal_family(
                 experiment=self.experiment,
                 formal_family=item,
+                access=_CHECKED_FORMAL_PLAN_ACCESS,
             )
             for item in MultiSupportFormalFamilyV2
         )

@@ -36,6 +36,8 @@ from secaware.schema.population_v2 import PopulationFreezeManifestV2
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _ARTIFACT_PREFIX = "confirmatory_contributions_v2_"
 _DERIVATION_RULE = "authenticated_block_arm_means_then_frozen_task_weights_then_qh_then_cluster_v1"
+_CHECKED_CONTRIBUTION_ACCESS = object()
+_FORMAL_CONTEXT_CONTRIBUTION_ACCESS = object()
 
 _ADD_CONTROLS = frozenset(
     {
@@ -276,12 +278,39 @@ def _derive(
 ) -> ConfirmatoryContributionArtifactV2:
     checked_population = _checked_population(population)
     checked_coordinate = _checked_coordinate(coordinate)
+    checked_coverage = _checked_coverage(coverage)
+    return _derive_checked_inputs(
+        checked_population,
+        checked_coverage,
+        checked_coordinate,
+        formal_family=formal_family,
+        access=_CHECKED_CONTRIBUTION_ACCESS,
+    )
+
+
+def _derive_checked_inputs(
+    checked_population: PopulationFreezeManifestV2,
+    checked_coverage: ProvenanceClosedAssignmentCoverageManifestV2,
+    checked_coordinate: SimultaneousTestCoordinateV2,
+    *,
+    formal_family: bool,
+    access: object,
+) -> ConfirmatoryContributionArtifactV2:
+    if (
+        access is not _CHECKED_CONTRIBUTION_ACCESS
+        or type(checked_population) is not PopulationFreezeManifestV2
+        or not model_shape_is_intact(checked_population)
+        or type(checked_coverage) is not ProvenanceClosedAssignmentCoverageManifestV2
+        or not model_shape_is_intact(checked_coverage)
+        or type(checked_coordinate) is not SimultaneousTestCoordinateV2
+        or not model_shape_is_intact(checked_coordinate)
+    ):
+        raise _error("checked contribution inputs lost model shape")
     _validate_coordinate_semantics(
         checked_population,
         checked_coordinate,
         formal_family=formal_family,
     )
-    checked_coverage = _checked_coverage(coverage)
     freeze = checked_coverage.execution_policy_freeze
     randomization = freeze.randomization
     if randomization.population != checked_population:
@@ -483,6 +512,41 @@ def derive_frozen_formal_family_contributions_v2(
     """
 
     return _derive(population, coverage, coordinate, formal_family=True)
+
+
+def _derive_from_formal_context_v2(
+    context: object,
+    *,
+    formal_family: object,
+    hypothesis_id: str,
+    model_id: str,
+) -> ConfirmatoryContributionArtifactV2:
+    """Derive one artifact using only a sealed two-root context lookup."""
+
+    try:
+        from secaware.analysis.formal_confirmation_v2 import _ValidatedFormalContextV2
+
+        if type(context) is not _ValidatedFormalContextV2:
+            raise _error("sealed formal context is required")
+        population, coverage, coordinate = context._contribution_inputs(
+            _FORMAL_CONTEXT_CONTRIBUTION_ACCESS,
+            formal_family=formal_family,
+            hypothesis_id=hypothesis_id,
+            model_id=model_id,
+        )
+    except _FATAL:
+        raise
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - normalize a forged context
+        raise _error("sealed formal context is required") from None
+    return _derive_checked_inputs(
+        population,
+        coverage,
+        coordinate,
+        formal_family=True,
+        access=_CHECKED_CONTRIBUTION_ACCESS,
+    )
 
 
 def validate_confirmatory_contribution_artifact_v2(

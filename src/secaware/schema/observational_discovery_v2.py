@@ -175,17 +175,14 @@ class ObservationalDrawSelectionV2(_ObservationalContractV2):
 
     @model_validator(mode="after")
     def validate_selection(self) -> Self:
-        if (
-            not all(
-                _valid_identifier(item)
-                for item in (
-                    self.semantic_task_cluster_id,
-                    self.task_instance_id,
-                    self.receipt_id,
-                )
+        if not all(
+            _valid_identifier(item)
+            for item in (
+                self.semantic_task_cluster_id,
+                self.task_instance_id,
+                self.receipt_id,
             )
-            or any(value < 0 for value in self.row)
-        ):
+        ) or any(value < 0 for value in self.row):
             raise ValueError(self._safe_validation_message)
         return self
 
@@ -254,9 +251,7 @@ class ObservationalSourceBindingV2(_ObservationalContractV2):
                 checked_draw.row_payload_sha256 if checked_draw is not None else None
             ),
             draw_selection_payload_sha256=(
-                canonical_digest_v2(checked_draw.selections)
-                if checked_draw is not None
-                else None
+                canonical_digest_v2(checked_draw.selections) if checked_draw is not None else None
             ),
             draw_selections=(
                 tuple(
@@ -309,8 +304,7 @@ class ObservationalSourceBindingV2(_ObservationalContractV2):
             or (has_draw and self.analysis_kind is not DiscoveryAnalysisKindV2.TWO_LEVEL)
             or (
                 self.draw_selections is not None
-                and self.draw_selection_payload_sha256
-                != canonical_digest_v2(self.draw_selections)
+                and self.draw_selection_payload_sha256 != canonical_digest_v2(self.draw_selections)
             )
             or (
                 self.draw_selections is not None
@@ -538,8 +532,7 @@ class ObservationalPAGArtifactV2(_ContentAddressedObservationalV2):
                 )
                 or (
                     item.kind is BKConstraintKindV2.FORBIDDEN_DIRECTION
-                    and (edge := by_pair.get(tuple(sorted((item.left, item.right)))))
-                    is not None
+                    and (edge := by_pair.get(tuple(sorted((item.left, item.right))))) is not None
                     and _pag_edge_permits_direction(edge, item.left, item.right)
                 )
                 for item in self.knowledge.constraints
@@ -799,9 +792,7 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
             self.x_variable_id,
             self.y_variable_id,
         )
-        deletion_by_constraint = {
-            item.removed_constraint: item for item in self.deletion_deltas
-        }
+        deletion_by_constraint = {item.removed_constraint: item for item in self.deletion_deltas}
         if (
             any(page.source_table_id != source_table_id for page in pages)
             or any(page.source_draw_id != source_draw_id for page in pages)
@@ -815,8 +806,7 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
             or self.raw_pag.run_label != "reference.raw"
             or self.minimal_bk_pag.run_label != "reference.minimal_bk"
             or self.full_bk_pag.run_label != "reference.full_bk"
-            or self.wrong_plausible_bk_pag.run_label
-            != "sensitivity.wrong_plausible_bk"
+            or self.wrong_plausible_bk_pag.run_label != "sensitivity.wrong_plausible_bk"
             or any(
                 (page.row_count, page.row_payload_sha256, page.variable_ids)
                 != (
@@ -827,8 +817,7 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
                 for page in reference_pages
             )
             or any(
-                page.knowledge.temporal_tiers
-                != self.full_bk_pag.knowledge.temporal_tiers
+                page.knowledge.temporal_tiers != self.full_bk_pag.knowledge.temporal_tiers
                 or page.knowledge.typed_adjacency_policy_sha256
                 != self.full_bk_pag.knowledge.typed_adjacency_policy_sha256
                 for page in pages
@@ -851,8 +840,7 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
                 or delta.ablation_pag.run_label != f"reference.single_deletion.{index}"
                 or delta.ablation_pag.knowledge.constraints
                 != tuple(item for item in full_constraints if item != delta.removed_constraint)
-                or delta.edge_deltas
-                != _page_edge_deltas(self.full_bk_pag, delta.ablation_pag)
+                or delta.edge_deltas != _page_edge_deltas(self.full_bk_pag, delta.ablation_pag)
                 or delta.candidate_selected_after_deletion
                 != _candidate_from_pages(
                     self.raw_pag,
@@ -862,9 +850,7 @@ class ObservationalFCISuiteArtifactV2(_ContentAddressedObservationalV2):
                 ).selected
                 for index, delta in enumerate(self.deletion_deltas)
             )
-            or (
-                self.source_binding.analysis_kind is DiscoveryAnalysisKindV2.TWO_LEVEL
-            )
+            or (self.source_binding.analysis_kind is DiscoveryAnalysisKindV2.TWO_LEVEL)
             != (source_draw_id is not None)
             or not self.x_variable_id.startswith("x.")
             or not self.y_variable_id.startswith("y.")
@@ -945,8 +931,7 @@ class BootstrapReplicateArtifactV2(_ContentAddressedObservationalV2):
         if (
             self.source_binding.source_draw_id is None
             or self.source_binding.analysis_kind is not DiscoveryAnalysisKindV2.TWO_LEVEL
-            or
-            complete != (self.raw_pag is not None and self.full_bk_pag is not None)
+            or complete != (self.raw_pag is not None and self.full_bk_pag is not None)
             or (not complete and self.full_bk_pag is not None)
             or self.candidate_selected
             and not complete
@@ -955,19 +940,16 @@ class BootstrapReplicateArtifactV2(_ContentAddressedObservationalV2):
             raise ValueError(self._safe_validation_message)
         if self.raw_pag is not None and (
             self.raw_pag.source_draw_id != self.source_binding.source_draw_id
-            or self.raw_pag.source_table_id
-            != self.source_binding.authenticated_table_id
+            or self.raw_pag.source_table_id != self.source_binding.authenticated_table_id
             or self.raw_pag.knowledge.kind is not BackgroundKnowledgeKindV2.RAW
             or self.raw_pag.run_label != f"bootstrap.{self.replicate_index}.raw"
         ):
             raise ValueError(self._safe_validation_message)
         if self.full_bk_pag is not None and (
             self.full_bk_pag.source_draw_id != self.source_binding.source_draw_id
-            or self.full_bk_pag.source_table_id
-            != self.source_binding.authenticated_table_id
+            or self.full_bk_pag.source_table_id != self.source_binding.authenticated_table_id
             or self.full_bk_pag.knowledge.kind is not BackgroundKnowledgeKindV2.FULL
-            or self.full_bk_pag.run_label
-            != f"bootstrap.{self.replicate_index}.full_bk"
+            or self.full_bk_pag.run_label != f"bootstrap.{self.replicate_index}.full_bk"
             or self.raw_pag is None
             or (
                 self.full_bk_pag.row_count,
@@ -1038,13 +1020,8 @@ class ObservationalBootstrapArtifactV2(_ContentAddressedObservationalV2):
                 or item.source_binding.independent_semantic_cluster_count
                 != self.source_binding.independent_semantic_cluster_count
                 or item.source_binding.resample_domain != self.resample_domain
-                or (
-                    item.raw_pag is not None and item.raw_pag.config != self.config
-                )
-                or (
-                    item.full_bk_pag is not None
-                    and item.full_bk_pag.config != self.config
-                )
+                or (item.raw_pag is not None and item.raw_pag.config != self.config)
+                or (item.full_bk_pag is not None and item.full_bk_pag.config != self.config)
                 for item in self.replicates
             )
             or self.candidate_support_numerator != numerator
@@ -1209,8 +1186,7 @@ class SyntheticTrueChainDiagnosticV2(_ContentAddressedObservationalV2):
             or len(self.rows) != self.sample_size
             or any(len(row) != 3 or any(value not in {0, 1} for value in row) for row in self.rows)
             or self.row_payload_sha256 != canonical_digest_v2(self.rows)
-            or tuple((item.left, item.right) for item in self.edges)
-            != tuple(sorted(by_pair))
+            or tuple((item.left, item.right) for item in self.edges) != tuple(sorted(by_pair))
             or len(by_pair) != len(self.edges)
             or set(by_pair) != set(path_pairs)
             or any(

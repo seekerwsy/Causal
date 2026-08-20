@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 
 import networkx as nx
 
@@ -145,6 +146,7 @@ def _prompt_tsg(task_index: int, *, x_state: int):
     )
 
 
+@lru_cache(maxsize=16)
 def build_authenticated_synthetic_table_v2(
     *,
     x_states: tuple[int, ...],

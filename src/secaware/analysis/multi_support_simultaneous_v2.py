@@ -28,6 +28,7 @@ from secaware.randomness import DeterministicRNG
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.multi_support_inference_v2 import (
     CoordinateSpecificSupportV2,
+    MultiSupportFormalFamilyV2,
     MultiSupportSimultaneousInferencePlanV2,
 )
 
@@ -35,6 +36,8 @@ _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _RESULT_PREFIX = "multi_support_simultaneous_result_v2_"
 _SEED_DOMAIN = b"secaware.multi-support-global-max-t.v2\x00"
 _CLOSED_COVERAGE_PATTERN = re.compile(r"^provenance_closed_coverage_v2_[0-9a-f]{64}$")
+_CHECKED_RUN_ACCESS = object()
+_FORMAL_CONTEXT_RUN_ACCESS = object()
 
 
 class _InvalidBootstrapDraw(Exception):
@@ -457,6 +460,27 @@ def _run(
     analysis_seed_domain_material: bytes | None,
 ) -> MultiSupportSimultaneousInferenceResultV2:
     checked_plan = _validated_plan(plan)
+    return _run_checked_inputs(
+        checked_plan,
+        artifacts,
+        analysis_seed_domain_material=analysis_seed_domain_material,
+        access=_CHECKED_RUN_ACCESS,
+    )
+
+
+def _run_checked_inputs(
+    checked_plan: MultiSupportSimultaneousInferencePlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    *,
+    analysis_seed_domain_material: bytes | None,
+    access: object,
+) -> MultiSupportSimultaneousInferenceResultV2:
+    if (
+        access is not _CHECKED_RUN_ACCESS
+        or type(checked_plan) is not MultiSupportSimultaneousInferencePlanV2
+        or not model_shape_is_intact(checked_plan)
+    ):
+        raise _error("checked multi-support inference plan is required")
     checked_artifacts, values = _validated_artifacts(checked_plan, artifacts)
     observed = _observed_statistics(checked_plan, values)
     seed = _bootstrap_seed(checked_plan, analysis_seed_domain_material)
@@ -619,6 +643,44 @@ def run_frozen_domain_multi_support_simultaneous_inference_v2(
     ):
         raise _error("frozen-domain multi-support plan is required")
     return _run(plan, artifacts, analysis_seed_domain_material=None)
+
+
+def _run_frozen_domain_from_formal_context_v2(
+    context: object,
+    formal_family: MultiSupportFormalFamilyV2,
+) -> tuple[
+    MultiSupportSimultaneousInferencePlanV2,
+    tuple[ConfirmatoryContributionArtifactV2, ...],
+    MultiSupportSimultaneousInferenceResultV2,
+]:
+    """Run one exact family obtainable only from the sealed formal context."""
+
+    try:
+        from secaware.analysis.formal_confirmation_v2 import _ValidatedFormalContextV2
+
+        if type(context) is not _ValidatedFormalContextV2:
+            raise _error("sealed formal context is required")
+        plan, artifacts = context._family_bundle(
+            _FORMAL_CONTEXT_RUN_ACCESS,
+            formal_family=MultiSupportFormalFamilyV2(formal_family),
+        )
+    except _FATAL:
+        raise
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - normalize a forged context
+        raise _error("sealed formal context is required") from None
+    if plan.seed_derivation_rule != (
+        "sha256_frozen_domain_digest_plus_content_addressed_plan_id_v1"
+    ):
+        raise _error("frozen-domain multi-support plan is required")
+    result = _run_checked_inputs(
+        plan,
+        artifacts,
+        analysis_seed_domain_material=None,
+        access=_CHECKED_RUN_ACCESS,
+    )
+    return plan, artifacts, result
 
 
 def validate_multi_support_simultaneous_result_v2(

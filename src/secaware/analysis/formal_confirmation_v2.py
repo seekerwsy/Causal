@@ -11,28 +11,38 @@ from pydantic import BaseModel, ValidationError
 
 from secaware.analysis.confirmatory_contributions_v2 import (
     ConfirmatoryContributionArtifactV2,
-    derive_frozen_formal_family_contributions_v2,
+    _derive_from_formal_context_v2,
 )
 from secaware.analysis.multi_support_simultaneous_v2 import (
     MultiSupportSimultaneousInferenceResultV2,
     MultiSupportSimultaneousIntervalV2,
-    run_frozen_domain_multi_support_simultaneous_inference_v2,
+    _run_frozen_domain_from_formal_context_v2,
 )
+from secaware.experiments.execution_v2 import ProvenanceClosedAssignmentCoverageManifestV2
 from secaware.experiments.run_evidence_v2 import ConfirmatoryRunEvidenceManifestV2
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.formal_analysis_v2 import (
+    _FORMAL_CONTEXT_PROTOCOL_ACCESS,
     FormalAnalysisProtocolV2,
     FormalConfirmationStatusV2,
     FormalCoordinateLabelV2,
     FormalJointInterpretationV2,
     FormalNonEvaluableReasonV2,
 )
-from secaware.schema.multi_support_inference_v2 import MultiSupportFormalFamilyV2
+from secaware.schema.inference_v2 import SimultaneousTestCoordinateV2
+from secaware.schema.multi_support_inference_v2 import (
+    _FORMAL_CONTEXT_PLAN_ACCESS,
+    MultiSupportFormalFamilyV2,
+    MultiSupportSimultaneousInferencePlanV2,
+)
 from secaware.schema.policy_v2 import ExpectedDirection
+from secaware.schema.population_v2 import PopulationFreezeManifestV2
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _RESULT_PREFIX = "formal_confirmation_result_v2_"
+_FORMAL_CONTEXT_SEAL = object()
+_FORMAL_ENTRY_CONTEXT_ACCESS = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +96,30 @@ class FormalConfirmationResultV2:
     optional_jci_rfci_marker_per_protocol_present: bool
     optional_evidence_can_promote_confirmatory_label: bool
     confirmation_label_rule: str
+
+
+@dataclass(frozen=True, slots=True)
+class _FormalPlanBindingV2:
+    formal_family: MultiSupportFormalFamilyV2
+    plan: MultiSupportSimultaneousInferencePlanV2
+
+
+@dataclass(frozen=True, slots=True)
+class _FormalContributionInputBindingV2:
+    formal_family: MultiSupportFormalFamilyV2
+    hypothesis_id: str
+    model_id: str
+    population: PopulationFreezeManifestV2
+    coverage: ProvenanceClosedAssignmentCoverageManifestV2
+    coordinate: SimultaneousTestCoordinateV2
+
+
+@dataclass(frozen=True, slots=True)
+class _FormalArtifactBindingV2:
+    formal_family: MultiSupportFormalFamilyV2
+    hypothesis_id: str
+    model_id: str
+    artifact: ConfirmatoryContributionArtifactV2
 
 
 def _error(message: str = "formal confirmation v2 failed validation") -> ValueError:
@@ -152,6 +186,384 @@ def _checked_run_evidence(
         raise
     except (TypeError, ValueError, ValidationError):
         raise _error("confirmatory run evidence failed validation") from None
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class _ValidatedFormalContextV2:
+    """Sealed, immutable registry derived from the two fully checked roots.
+
+    This is an internal API capability rather than a security sandbox.  Its
+    constructor is disabled; the formal entry creates it only after both root
+    round-trips and their exact cross-binding succeed.  Downstream fast paths
+    receive this context plus a family/key, never caller-supplied plans,
+    coverage, coordinates, or contribution artifacts.
+    """
+
+    _seal: object
+    _phase: str
+    _confirmatory_experiment_freeze_id: str
+    _confirmatory_run_evidence_manifest_id: str
+    _experiment: ConfirmatoryExperimentFreezeV2
+    _evidence: ConfirmatoryRunEvidenceManifestV2
+    _protocol: FormalAnalysisProtocolV2 | None
+    _plan_bindings: tuple[_FormalPlanBindingV2, ...]
+    _input_bindings: tuple[_FormalContributionInputBindingV2, ...]
+    _artifact_bindings: tuple[_FormalArtifactBindingV2, ...]
+    _registry_sha256: str
+
+    @classmethod
+    def _from_roots(
+        cls,
+        experiment_freeze: ConfirmatoryExperimentFreezeV2,
+        run_evidence: ConfirmatoryRunEvidenceManifestV2,
+        *,
+        access: object,
+    ) -> _ValidatedFormalContextV2:
+        if access is not _FORMAL_ENTRY_CONTEXT_ACCESS:
+            raise _error("formal context can only be created by the formal entry")
+        experiment = _checked_experiment(experiment_freeze)
+        evidence = _checked_run_evidence(run_evidence)
+        if evidence.experiment_freeze != experiment:
+            raise _error("run evidence does not belong to the exact experiment freeze")
+
+        context = object.__new__(cls)
+        object.__setattr__(context, "_seal", _FORMAL_CONTEXT_SEAL)
+        object.__setattr__(context, "_phase", "roots")
+        object.__setattr__(
+            context,
+            "_confirmatory_experiment_freeze_id",
+            experiment.confirmatory_experiment_freeze_id,
+        )
+        object.__setattr__(
+            context,
+            "_confirmatory_run_evidence_manifest_id",
+            evidence.confirmatory_run_evidence_manifest_id,
+        )
+        object.__setattr__(context, "_experiment", experiment)
+        object.__setattr__(context, "_evidence", evidence)
+        object.__setattr__(context, "_protocol", None)
+        object.__setattr__(context, "_plan_bindings", ())
+        object.__setattr__(context, "_input_bindings", ())
+        object.__setattr__(context, "_artifact_bindings", ())
+        object.__setattr__(context, "_registry_sha256", "")
+
+        protocol = FormalAnalysisProtocolV2._from_formal_context(context)
+        plans = tuple(
+            _FormalPlanBindingV2(formal_family=plan.formal_family, plan=plan)
+            for plan in protocol.family_plans
+        )
+        if tuple(item.formal_family for item in plans) != tuple(MultiSupportFormalFamilyV2):
+            raise _error("formal context plan registry is incomplete")
+        object.__setattr__(context, "_protocol", protocol)
+        object.__setattr__(context, "_plan_bindings", plans)
+
+        if evidence.formal_point_estimation_ready:
+            inputs = context._derive_input_bindings()
+            object.__setattr__(context, "_input_bindings", inputs)
+            object.__setattr__(context, "_phase", "inputs")
+            artifacts = tuple(
+                _FormalArtifactBindingV2(
+                    formal_family=binding.formal_family,
+                    hypothesis_id=binding.hypothesis_id,
+                    model_id=binding.model_id,
+                    artifact=_derive_from_formal_context_v2(
+                        context,
+                        formal_family=binding.formal_family,
+                        hypothesis_id=binding.hypothesis_id,
+                        model_id=binding.model_id,
+                    ),
+                )
+                for binding in inputs
+            )
+            object.__setattr__(context, "_artifact_bindings", artifacts)
+
+        object.__setattr__(context, "_phase", "complete")
+        object.__setattr__(context, "_registry_sha256", context._registry_digest())
+        context._assert_complete_registry()
+        return context
+
+    def _assert_roots(self) -> None:
+        try:
+            if (
+                type(self) is not _ValidatedFormalContextV2
+                or self._seal is not _FORMAL_CONTEXT_SEAL
+                or self._phase not in {"roots", "inputs", "complete"}
+                or type(self._experiment) is not ConfirmatoryExperimentFreezeV2
+                or not model_shape_is_intact(self._experiment)
+                or type(self._evidence) is not ConfirmatoryRunEvidenceManifestV2
+                or not model_shape_is_intact(self._evidence)
+                or self._experiment.confirmatory_experiment_freeze_id
+                != self._confirmatory_experiment_freeze_id
+                or self._evidence.confirmatory_run_evidence_manifest_id
+                != self._confirmatory_run_evidence_manifest_id
+                or self._evidence.experiment_freeze != self._experiment
+            ):
+                raise _error("sealed formal context failed root validation")
+        except _FATAL:
+            raise
+        except ValueError:
+            raise
+        except Exception:  # noqa: BLE001 - normalize forged/uninitialized instances
+            raise _error("sealed formal context failed root validation") from None
+
+    def _experiment_for_protocol_builder(self, access: object) -> ConfirmatoryExperimentFreezeV2:
+        if access is not _FORMAL_CONTEXT_PROTOCOL_ACCESS:
+            raise _error("formal protocol builder requires the sealed context")
+        self._assert_roots()
+        return self._experiment
+
+    def _experiment_for_plan_builder(self, access: object) -> ConfirmatoryExperimentFreezeV2:
+        if access is not _FORMAL_CONTEXT_PLAN_ACCESS:
+            raise _error("formal plan builder requires the sealed context")
+        self._assert_roots()
+        return self._experiment
+
+    @property
+    def experiment(self) -> ConfirmatoryExperimentFreezeV2:
+        self._assert_roots()
+        if self._phase != "complete":
+            raise _error("formal context is not complete")
+        return self._experiment
+
+    @property
+    def evidence(self) -> ConfirmatoryRunEvidenceManifestV2:
+        self._assert_roots()
+        if self._phase != "complete":
+            raise _error("formal context is not complete")
+        return self._evidence
+
+    @property
+    def protocol(self) -> FormalAnalysisProtocolV2:
+        self._assert_roots()
+        if self._phase != "complete" or self._protocol is None:
+            raise _error("formal context is not complete")
+        return self._protocol
+
+    def _derive_input_bindings(self) -> tuple[_FormalContributionInputBindingV2, ...]:
+        self._assert_roots()
+        if self._protocol is None:
+            raise _error("formal context protocol is unavailable")
+        accounting_by_hypothesis = {
+            item.execution_policy_freeze.randomization.population.hypothesis.hypothesis_id: item
+            for item in self._evidence.total_assignment_accountings
+        }
+        population_by_hypothesis = {
+            item.intervention_bridge.frozen_hypothesis.hypothesis_id: item.population
+            for item in self._experiment.protocol_roots
+        }
+        bindings = []
+        for plan in self._protocol.family_plans:
+            for coordinate in plan.family.coordinates:
+                accounting = accounting_by_hypothesis.get(coordinate.hypothesis_id)
+                population = population_by_hypothesis.get(coordinate.hypothesis_id)
+                if (
+                    accounting is None
+                    or population is None
+                    or accounting.confirmatory_coverage is None
+                ):
+                    raise _error("ready run evidence lost provenance-closed coverage")
+                bindings.append(
+                    _FormalContributionInputBindingV2(
+                        formal_family=plan.formal_family,
+                        hypothesis_id=coordinate.hypothesis_id,
+                        model_id=coordinate.model_id,
+                        population=population,
+                        coverage=accounting.confirmatory_coverage,
+                        coordinate=coordinate,
+                    )
+                )
+        frozen = tuple(bindings)
+        expected_keys = {
+            (family, coordinate.hypothesis_id, coordinate.model_id)
+            for family in MultiSupportFormalFamilyV2
+            for coordinate in self._experiment.hypothesis_model_coordinates
+        }
+        actual_keys = {(item.formal_family, item.hypothesis_id, item.model_id) for item in frozen}
+        if len(frozen) != len(expected_keys) or actual_keys != expected_keys:
+            raise _error("formal context input registry is not the complete H x M family")
+        return frozen
+
+    def _expected_protocol(self) -> FormalAnalysisProtocolV2:
+        self._assert_roots()
+        return FormalAnalysisProtocolV2._from_formal_context(self)
+
+    def _expected_input_for(
+        self,
+        binding: _FormalContributionInputBindingV2,
+        expected_plan: MultiSupportSimultaneousInferencePlanV2,
+    ) -> None:
+        expected_coordinate = {
+            (item.hypothesis_id, item.model_id): item for item in expected_plan.family.coordinates
+        }.get((binding.hypothesis_id, binding.model_id))
+        population = {
+            item.intervention_bridge.frozen_hypothesis.hypothesis_id: item.population
+            for item in self._experiment.protocol_roots
+        }.get(binding.hypothesis_id)
+        accounting = {
+            item.execution_policy_freeze.randomization.population.hypothesis.hypothesis_id: item
+            for item in self._evidence.total_assignment_accountings
+        }.get(binding.hypothesis_id)
+        if (
+            expected_coordinate is None
+            or population is None
+            or accounting is None
+            or accounting.confirmatory_coverage is None
+            or binding.coordinate != expected_coordinate
+            or binding.population != population
+            or binding.coverage != accounting.confirmatory_coverage
+        ):
+            raise _error("formal context contribution input binding failed validation")
+
+    def _contribution_inputs(
+        self,
+        access: object,
+        *,
+        formal_family: object,
+        hypothesis_id: str,
+        model_id: str,
+    ) -> tuple[
+        PopulationFreezeManifestV2,
+        ProvenanceClosedAssignmentCoverageManifestV2,
+        SimultaneousTestCoordinateV2,
+    ]:
+        from secaware.analysis.confirmatory_contributions_v2 import (
+            _FORMAL_CONTEXT_CONTRIBUTION_ACCESS,
+        )
+
+        if access is not _FORMAL_CONTEXT_CONTRIBUTION_ACCESS:
+            raise _error("formal contribution lookup requires the sealed context")
+        self._assert_roots()
+        if self._phase not in {"inputs", "complete"}:
+            raise _error("formal contribution registry is unavailable")
+        try:
+            family = MultiSupportFormalFamilyV2(formal_family)
+        except (TypeError, ValueError):
+            raise _error("formal contribution family failed validation") from None
+        matches = tuple(
+            item
+            for item in self._input_bindings
+            if (item.formal_family, item.hypothesis_id, item.model_id)
+            == (family, hypothesis_id, model_id)
+        )
+        if len(matches) != 1:
+            raise _error("formal contribution lookup is not unique")
+        expected_protocol = self._expected_protocol()
+        expected_plan = {item.formal_family: item for item in expected_protocol.family_plans}[
+            family
+        ]
+        binding = matches[0]
+        self._expected_input_for(binding, expected_plan)
+        return binding.population, binding.coverage, binding.coordinate
+
+    def _registry_digest(self) -> str:
+        return _digest(
+            {
+                "experiment_id": self._confirmatory_experiment_freeze_id,
+                "evidence_id": self._confirmatory_run_evidence_manifest_id,
+                "protocol_id": None
+                if self._protocol is None
+                else self._protocol.formal_analysis_protocol_id,
+                "plans": tuple(
+                    (item.formal_family.value, item.plan.inference_plan_id)
+                    for item in self._plan_bindings
+                ),
+                "inputs": tuple(
+                    (
+                        item.formal_family.value,
+                        item.hypothesis_id,
+                        item.model_id,
+                        item.population.population_freeze_manifest_id,
+                        item.coverage.provenance_closed_coverage_manifest_id,
+                        item.coordinate.test_coordinate_id,
+                    )
+                    for item in self._input_bindings
+                ),
+                "artifacts": tuple(
+                    (
+                        item.formal_family.value,
+                        item.hypothesis_id,
+                        item.model_id,
+                        item.artifact.contribution_artifact_id,
+                    )
+                    for item in self._artifact_bindings
+                ),
+            }
+        )
+
+    def _assert_complete_registry(self) -> None:
+        self._assert_roots()
+        expected_protocol = self._expected_protocol()
+        expected_plans = tuple(
+            _FormalPlanBindingV2(formal_family=item.formal_family, plan=item)
+            for item in expected_protocol.family_plans
+        )
+        if (
+            self._phase != "complete"
+            or self._protocol != expected_protocol
+            or self._plan_bindings != expected_plans
+            or self._registry_sha256 != self._registry_digest()
+        ):
+            raise _error("formal context deterministic plan registry failed validation")
+        if not self._evidence.formal_point_estimation_ready:
+            if self._input_bindings or self._artifact_bindings:
+                raise _error("non-evaluable formal context contains outcome artifacts")
+            return
+        expected_keys = {
+            (family, coordinate.hypothesis_id, coordinate.model_id)
+            for family in MultiSupportFormalFamilyV2
+            for coordinate in self._experiment.hypothesis_model_coordinates
+        }
+        input_keys = {
+            (item.formal_family, item.hypothesis_id, item.model_id) for item in self._input_bindings
+        }
+        artifact_keys = {
+            (item.formal_family, item.hypothesis_id, item.model_id)
+            for item in self._artifact_bindings
+        }
+        if (
+            len(self._input_bindings) != len(expected_keys)
+            or len(self._artifact_bindings) != len(expected_keys)
+            or input_keys != expected_keys
+            or artifact_keys != expected_keys
+        ):
+            raise _error("formal context artifact registry is not the complete H x M family")
+
+    def _family_bundle(
+        self,
+        access: object,
+        *,
+        formal_family: MultiSupportFormalFamilyV2,
+    ) -> tuple[
+        MultiSupportSimultaneousInferencePlanV2,
+        tuple[ConfirmatoryContributionArtifactV2, ...],
+    ]:
+        from secaware.analysis.multi_support_simultaneous_v2 import (
+            _FORMAL_CONTEXT_RUN_ACCESS,
+        )
+
+        if access is not _FORMAL_CONTEXT_RUN_ACCESS:
+            raise _error("formal family lookup requires the sealed context")
+        self._assert_complete_registry()
+        family = MultiSupportFormalFamilyV2(formal_family)
+        expected_plan = {
+            item.formal_family: item for item in self._expected_protocol().family_plans
+        }[family]
+        registered_plan = tuple(
+            item.plan for item in self._plan_bindings if item.formal_family is family
+        )
+        if len(registered_plan) != 1 or registered_plan[0] != expected_plan:
+            raise _error("formal family plan differs from its deterministic context plan")
+        artifact_by_key = {
+            (item.hypothesis_id, item.model_id): item.artifact
+            for item in self._artifact_bindings
+            if item.formal_family is family
+        }
+        expected_keys = tuple(
+            (item.hypothesis_id, item.model_id) for item in expected_plan.family.coordinates
+        )
+        if len(artifact_by_key) != len(expected_keys) or set(artifact_by_key) != set(expected_keys):
+            raise _error("formal family artifact registry is incomplete")
+        return expected_plan, tuple(artifact_by_key[key] for key in expected_keys)
 
 
 def _result_payload(result: FormalConfirmationResultV2) -> dict[str, object]:
@@ -335,11 +747,14 @@ def _run_formal(
     experiment_freeze: ConfirmatoryExperimentFreezeV2,
     run_evidence: ConfirmatoryRunEvidenceManifestV2,
 ) -> FormalConfirmationResultV2:
-    experiment = _checked_experiment(experiment_freeze)
-    evidence = _checked_run_evidence(run_evidence)
-    if evidence.experiment_freeze != experiment:
-        raise _error("run evidence does not belong to the exact experiment freeze")
-    protocol = FormalAnalysisProtocolV2.from_experiment(experiment)
+    context = _ValidatedFormalContextV2._from_roots(
+        experiment_freeze,
+        run_evidence,
+        access=_FORMAL_ENTRY_CONTEXT_ACCESS,
+    )
+    experiment = context.experiment
+    evidence = context.evidence
+    protocol = context.protocol
     if not evidence.formal_point_estimation_ready:
         return _base_result(
             experiment=experiment,
@@ -352,33 +767,12 @@ def _run_formal(
             decisions=(),
         )
 
-    accounting_by_hypothesis = {
-        item.execution_policy_freeze.randomization.population.hypothesis.hypothesis_id: item
-        for item in evidence.total_assignment_accountings
-    }
-    population_by_hypothesis = {
-        item.intervention_bridge.frozen_hypothesis.hypothesis_id: item.population
-        for item in experiment.protocol_roots
-    }
     family_results = []
-    for plan in protocol.family_plans:
-        artifacts = []
-        for coordinate in plan.family.coordinates:
-            accounting = accounting_by_hypothesis[coordinate.hypothesis_id]
-            coverage = accounting.confirmatory_coverage
-            if coverage is None:
-                raise _error("ready run evidence lost provenance-closed coverage")
-            artifacts.append(
-                derive_frozen_formal_family_contributions_v2(
-                    population_by_hypothesis[coordinate.hypothesis_id],
-                    coverage,
-                    coordinate,
-                )
-            )
+    for formal_family in MultiSupportFormalFamilyV2:
         try:
-            simultaneous = run_frozen_domain_multi_support_simultaneous_inference_v2(
-                plan,
-                tuple(artifacts),
+            plan, artifacts, simultaneous = _run_frozen_domain_from_formal_context_v2(
+                context,
+                formal_family,
             )
         except ValueError:
             return _base_result(
@@ -387,7 +781,7 @@ def _run_formal(
                 protocol=protocol,
                 status=FormalConfirmationStatusV2.NON_EVALUABLE,
                 reason=FormalNonEvaluableReasonV2.INFERENCE_UNDEFINED,
-                failed_family=plan.formal_family,
+                failed_family=formal_family,
                 family_results=(),
                 decisions=(),
             )
@@ -399,7 +793,7 @@ def _run_formal(
                 contribution_artifact_ids=tuple(
                     item.contribution_artifact_id for item in artifacts
                 ),
-                contribution_artifacts=tuple(artifacts),
+                contribution_artifacts=artifacts,
                 simultaneous_result=simultaneous,
             )
         )
