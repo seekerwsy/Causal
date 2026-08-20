@@ -716,6 +716,35 @@ def make_synthetic_verified_selector_primary_inputs_v2(
     """Seal a hand-checkable primary fixture for synthetic 19x19 tests only."""
 
     checked_plan = _validated_plan(plan)
+    return _make_synthetic_verified_checked_plan(
+        checked_plan,
+        artifacts,
+        synthetic_critical_value=synthetic_critical_value,
+    )
+
+
+def _make_synthetic_verified_selector_primary_inputs_from_fresh_plan_v2(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    *,
+    synthetic_critical_value: float,
+) -> VerifiedSelectorPrimaryInputsV2:
+    """Fast non-claiming path for a plan constructed immediately by the caller."""
+
+    checked_plan = _content_address_checked_plan(plan)
+    return _make_synthetic_verified_checked_plan(
+        checked_plan,
+        artifacts,
+        synthetic_critical_value=synthetic_critical_value,
+    )
+
+
+def _make_synthetic_verified_checked_plan(
+    checked_plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    *,
+    synthetic_critical_value: float,
+) -> VerifiedSelectorPrimaryInputsV2:
     if (
         checked_plan.plan_scope is not SelectorUtilityPlanScopeV2.SYNTHETIC_VALIDATION_ONLY
         or checked_plan.formal_selector_claim_allowed

@@ -30,9 +30,13 @@ from secaware.schema.pre_generation_closure_v2 import (
 )
 
 FORMAL_ROBUSTNESS_V2_SCHEMA_VERSION = "2.0"
+FORMAL_INTERACTION_REPLAY_DRAWS_V2 = 999
+
+_INTERACTION_SEED_DOMAIN = b"secaware.formal-robustness-interaction-replay.v2\x00"
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _REGISTRATION_ID_PATTERN = r"^confirmatory_robustness_policy_registration_v2_[0-9a-f]{64}$"
+_INTERACTION_REPLAY_PLAN_ID_PATTERN = r"^formal_robustness_interaction_replay_plan_v2_[0-9a-f]{64}$"
 _INTERACTION_FAMILY_ID_PATTERN = r"^formal_robustness_interaction_family_v2_[0-9a-f]{64}$"
 _CLOSED_RUN_ID_PATTERN = r"^confirmatory_closed_run_evidence_v2_[0-9a-f]{64}$"
 _FORMAL_RESULT_ID_PATTERN = r"^formal_confirmation_result_v2_[0-9a-f]{64}$"
@@ -223,6 +227,148 @@ class ConfirmatoryRobustnessPolicyRegistrationV2(_ContentAddressedFormalRobustne
         return self
 
 
+class FormalRobustnessInteractionReplayPlanV2(_ContentAddressedFormalRobustnessV2):
+    """Pre-outcome domain for a future closed-run interaction replay.
+
+    No observed statistic or reference draw is accepted here.  The typed
+    B=999 replay runner remains a separate implementation segment, so this
+    plan cannot yet authorize a formal strong label.
+    """
+
+    _id_field = "formal_robustness_interaction_replay_plan_id"
+    _id_prefix = "formal_robustness_interaction_replay_plan_v2_"
+
+    formal_robustness_interaction_replay_plan_id: str = Field(
+        pattern=_INTERACTION_REPLAY_PLAN_ID_PATTERN
+    )
+    policy_registration: ConfirmatoryRobustnessPolicyRegistrationV2
+    confirmatory_robustness_policy_registration_id: str
+    confirmatory_experiment_freeze_id: str
+    robustness_policy_freeze_id: str
+    robustness_family_id: str
+    expected_hypothesis_model_keys: tuple[tuple[str, str], ...] = Field(min_length=1)
+    expected_reference_count: StrictInt = Field(ge=1)
+    reference_draws_per_hypothesis_model: Literal[999]
+    interaction_seed_domain_sha256: str = Field(pattern=_SHA256_PATTERN)
+    rng_algorithm: Literal["sha256-rejection-fisher-yates-v1"]
+    seed_derivation_rule: Literal[
+        "sha256_domain_policy_seed_plus_content_addressed_plan_id_v1"
+    ]
+    interaction_statistic_method: Literal["max_abs_realization_minus_qh_policy_v1"]
+    reference_method: Literal["semantic_cluster_arm_randomization_v1"]
+    permutation_rule: Literal[
+        "shuffle_frozen_arm_multiset_across_request_slots_within_each_block_v1"
+    ]
+    descendant_retention_rule: Literal[
+        "outcome_and_all_descendants_remain_attached_to_original_request_slot_v1"
+    ]
+    joint_replicate_rule: Literal[
+        "one_replicate_jointly_covers_complete_hypothesis_by_model_family_v1"
+    ]
+    global_reference_rule: Literal["max_hypothesis_model_interaction_statistic_v1"]
+    closed_run_coverage_is_sole_outcome_source: Literal[True]
+    exact_randomization_manifest_replay_required: Literal[True]
+    one_joint_family_reference_run_required: Literal[True]
+    caller_supplied_observed_statistics_forbidden: Literal[True]
+    caller_supplied_reference_statistics_forbidden: Literal[True]
+    p_values_are_diagnostic_only: Literal[True]
+    full_reference_replay_status: Literal["pending_typed_999_draw_replay_next_segment_v1"]
+    formal_strong_labels_authorized: Literal[False]
+    frozen_before_outcomes: Literal[True]
+    external_pre_generation_pin_required: Literal[True]
+
+    @classmethod
+    def from_registration(
+        cls,
+        policy_registration: ConfirmatoryRobustnessPolicyRegistrationV2,
+    ) -> Self:
+        try:
+            registration = ConfirmatoryRobustnessPolicyRegistrationV2.model_validate(
+                policy_registration, strict=True
+            )
+            policy = registration.robustness_policy
+            expected = tuple(
+                sorted(
+                    (item.hypothesis_id, item.model_id)
+                    for item in policy.hypothesis_model_specifications
+                )
+            )
+            return cls.from_content(
+                policy_registration=registration,
+                confirmatory_robustness_policy_registration_id=(
+                    registration.confirmatory_robustness_policy_registration_id
+                ),
+                confirmatory_experiment_freeze_id=(registration.confirmatory_experiment_freeze_id),
+                robustness_policy_freeze_id=policy.robustness_policy_freeze_id,
+                robustness_family_id=policy.robustness_family.family_id,
+                expected_hypothesis_model_keys=expected,
+                expected_reference_count=len(expected),
+                reference_draws_per_hypothesis_model=(
+                    FORMAL_INTERACTION_REPLAY_DRAWS_V2
+                ),
+                interaction_seed_domain_sha256=hashlib.sha256(
+                    _INTERACTION_SEED_DOMAIN
+                ).hexdigest(),
+                rng_algorithm="sha256-rejection-fisher-yates-v1",
+                seed_derivation_rule=(
+                    "sha256_domain_policy_seed_plus_content_addressed_plan_id_v1"
+                ),
+                interaction_statistic_method=("max_abs_realization_minus_qh_policy_v1"),
+                reference_method="semantic_cluster_arm_randomization_v1",
+                permutation_rule=(
+                    "shuffle_frozen_arm_multiset_across_request_slots_within_each_block_v1"
+                ),
+                descendant_retention_rule=(
+                    "outcome_and_all_descendants_remain_attached_to_original_request_slot_v1"
+                ),
+                joint_replicate_rule=(
+                    "one_replicate_jointly_covers_complete_hypothesis_by_model_family_v1"
+                ),
+                global_reference_rule=(
+                    "max_hypothesis_model_interaction_statistic_v1"
+                ),
+                closed_run_coverage_is_sole_outcome_source=True,
+                exact_randomization_manifest_replay_required=True,
+                one_joint_family_reference_run_required=True,
+                caller_supplied_observed_statistics_forbidden=True,
+                caller_supplied_reference_statistics_forbidden=True,
+                p_values_are_diagnostic_only=True,
+                full_reference_replay_status=("pending_typed_999_draw_replay_next_segment_v1"),
+                formal_strong_labels_authorized=False,
+                frozen_before_outcomes=True,
+                external_pre_generation_pin_required=True,
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the plan boundary
+            raise cls._safe_error() from None
+
+    @model_validator(mode="after")
+    def validate_plan(self) -> Self:
+        registration = self.policy_registration
+        policy = registration.robustness_policy
+        expected = tuple(
+            sorted(
+                (item.hypothesis_id, item.model_id)
+                for item in policy.hypothesis_model_specifications
+            )
+        )
+        if (
+            self.confirmatory_robustness_policy_registration_id
+            != registration.confirmatory_robustness_policy_registration_id
+            or self.confirmatory_experiment_freeze_id
+            != registration.confirmatory_experiment_freeze_id
+            or self.robustness_policy_freeze_id != policy.robustness_policy_freeze_id
+            or self.robustness_family_id != policy.robustness_family.family_id
+            or self.expected_hypothesis_model_keys != expected
+            or self.expected_reference_count != len(expected)
+            or self.interaction_seed_domain_sha256
+            != hashlib.sha256(_INTERACTION_SEED_DOMAIN).hexdigest()
+        ):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 class FormalRobustnessInteractionFamilyV2(_ContentAddressedFormalRobustnessV2):
     """Typed reference registry; full 999-draw replay lands in the next segment."""
 
@@ -350,7 +496,9 @@ class FormalRobustnessInteractionFamilyV2(_ContentAddressedFormalRobustnessV2):
 
 
 __all__ = [
+    "FORMAL_INTERACTION_REPLAY_DRAWS_V2",
     "FORMAL_ROBUSTNESS_V2_SCHEMA_VERSION",
     "ConfirmatoryRobustnessPolicyRegistrationV2",
     "FormalRobustnessInteractionFamilyV2",
+    "FormalRobustnessInteractionReplayPlanV2",
 ]

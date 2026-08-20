@@ -234,10 +234,15 @@ def _inference_undefined_result() -> FormalConfirmationResultV2:
 
 
 @cache
-def _terminal_failure_result() -> FormalConfirmationResultV2:
+def _terminal_failure_closed_root() -> ConfirmatoryClosedRunEvidenceV2:
     fixture = _minimal_fixture()
     failing_evidence, _accounting = _with_one_terminal_failure(fixture)
-    return run_formal_confirmation_v2(_closed_with_evidence(fixture, failing_evidence))
+    return _closed_with_evidence(fixture, failing_evidence)
+
+
+@cache
+def _terminal_failure_result() -> FormalConfirmationResultV2:
+    return run_formal_confirmation_v2(_terminal_failure_closed_root())
 
 
 def _without_protocol_id(protocol: FormalAnalysisProtocolV2) -> dict[str, object]:
@@ -459,8 +464,7 @@ def test_two_cluster_valid_draw_shortfall_is_non_evaluable_not_a_partial_family(
 
 
 def test_terminal_infrastructure_failure_is_non_evaluable_before_inference() -> None:
-    fixture = _minimal_fixture()
-    failing_evidence, _accounting = _with_one_terminal_failure(fixture)
+    failing_evidence = _terminal_failure_closed_root().run_evidence
     result = _terminal_failure_result()
 
     assert result.status is FormalConfirmationStatusV2.NON_EVALUABLE
@@ -619,23 +623,57 @@ def test_forged_result_cannot_survive_exact_replay() -> None:
         )
 
 
-def test_result_replay_rejects_replaced_closed_run_id() -> None:
-    fixture = _minimal_fixture()
-    failing_evidence, _accounting = _with_one_terminal_failure(fixture)
+def test_result_replay_binds_all_root_ids_and_rejects_replaced_closed_run_id() -> None:
+    closed = _terminal_failure_closed_root()
     genuine = _terminal_failure_result()
-    forged = replace(
-        genuine,
-        confirmatory_closed_run_evidence_id=("confirmatory_closed_run_evidence_v2_" + "f" * 64),
-    )
+    expected_ids = {
+        "confirmatory_closed_run_evidence_id": (closed.confirmatory_closed_run_evidence_id),
+        "confirmatory_pre_generation_closure_id": (
+            closed.pre_generation_closure.confirmatory_pre_generation_closure_id
+        ),
+        "confirmatory_experiment_freeze_id": (
+            closed.pre_generation_closure.experiment_freeze.confirmatory_experiment_freeze_id
+        ),
+        "confirmatory_run_evidence_manifest_id": (
+            closed.run_evidence.confirmatory_run_evidence_manifest_id
+        ),
+    }
+    assert {field: getattr(genuine, field) for field in expected_ids} == expected_ids
+
+    forged_by_field = {
+        field: replace(genuine, **{field: prefix + "f" * 64})
+        for field, prefix in (
+            ("confirmatory_closed_run_evidence_id", "confirmatory_closed_run_evidence_v2_"),
+            (
+                "confirmatory_pre_generation_closure_id",
+                "confirmatory_pre_generation_closure_v2_",
+            ),
+            ("confirmatory_experiment_freeze_id", "confirmatory_experiment_freeze_v2_"),
+            (
+                "confirmatory_run_evidence_manifest_id",
+                "confirmatory_run_evidence_v2_",
+            ),
+        )
+    }
+    for forged in forged_by_field.values():
+        readdressed = formal_confirmation_module._content_address(forged)
+        assert readdressed.formal_confirmation_result_id != (genuine.formal_confirmation_result_id)
 
     with pytest.raises(ValueError, match="result artifact failed validation"):
         validate_formal_confirmation_result_v2(
-            _closed_with_evidence(fixture, failing_evidence),
-            forged,
+            closed,
+            forged_by_field["confirmatory_closed_run_evidence_id"],
         )
 
 
 def test_callers_cannot_supply_outcome_contrast_or_family_arguments() -> None:
+    assert tuple(inspect.signature(run_formal_confirmation_v2).parameters) == (
+        "closed_run_evidence",
+    )
+    assert tuple(inspect.signature(validate_formal_confirmation_result_v2).parameters) == (
+        "closed_run_evidence",
+        "result",
+    )
     with pytest.raises(TypeError):
         run_formal_confirmation_v2(  # type: ignore[call-arg]
             object(),  # type: ignore[arg-type]

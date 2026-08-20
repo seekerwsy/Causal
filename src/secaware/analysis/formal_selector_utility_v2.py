@@ -28,8 +28,8 @@ from secaware.analysis.formal_confirmation_v2 import (
 from secaware.analysis.selector_utility_v2 import (
     SelectorUtilityAnalysisResultV2,
     VerifiedSelectorPrimaryInputsV2,
+    _make_synthetic_verified_selector_primary_inputs_from_fresh_plan_v2,
     make_same_closed_run_formal_primary_inputs_v2,
-    make_synthetic_verified_selector_primary_inputs_v2,
     run_verified_selector_utility_analysis_v2,
 )
 from secaware.experiments.closed_run_evidence_v2 import ConfirmatoryClosedRunEvidenceV2
@@ -49,6 +49,7 @@ FORMAL_SELECTOR_UTILITY_V2_SCHEMA_VERSION = "2.0"
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _BUNDLE_PREFIX = "formal_selector_utility_bundle_v2_"
+_CLOSED_RUN_PREFIX = "confirmatory_closed_run_evidence_v2_"
 _FORMAL_RESULT_PREFIX = "formal_confirmation_result_v2_"
 _CORE_RESULT_PREFIX = "selector_utility_result_v2_"
 _OFFICIAL_SCOPE = "same_closed_run_formal_primary_reuse_v1"
@@ -88,6 +89,7 @@ class FormalSelectorUtilityBundleV2:
     core_remains_nonclaiming: bool
     formal_glue_required: bool
     formal_glue_completed: bool
+    formal_strict_yield_point_summary_allowed: bool
     formal_selector_claim_allowed: bool
     formal_selector_pair_claim_allowed: bool
     exact_combined_replay_required: bool
@@ -139,6 +141,35 @@ def _checked_closed_run(
         raise
     except (TypeError, ValueError, ValidationError):
         raise _error("confirmatory closed run evidence failed validation") from None
+
+
+def _content_address_checked_closed_run_for_synthetic(
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
+) -> ConfirmatoryClosedRunEvidenceV2:
+    """Check a frozen closed root without a second deep round-trip in nonclaim smoke."""
+
+    if type(
+        closed_run_evidence
+    ) is not ConfirmatoryClosedRunEvidenceV2 or not model_shape_is_intact(closed_run_evidence):
+        raise _error("exact confirmatory closed run evidence is required")
+    closure = closed_run_evidence.pre_generation_closure
+    evidence = closed_run_evidence.run_evidence
+    content = closed_run_evidence.model_dump(
+        mode="json",
+        exclude={"confirmatory_closed_run_evidence_id"},
+    )
+    if (
+        closed_run_evidence.confirmatory_closed_run_evidence_id
+        != _CLOSED_RUN_PREFIX + _digest(content)
+        or closure.experiment_freeze != evidence.experiment_freeze
+        or closure.hypothesis_ids != evidence.hypothesis_ids
+        or closed_run_evidence.runtime_expected_assignment_count
+        != closed_run_evidence.runtime_terminally_accounted_assignment_count
+        or not closed_run_evidence.all_runtime_assignments_terminally_accounted
+        or not closed_run_evidence.formal_analysis_requires_this_root
+    ):
+        raise _error("synthetic closed run evidence failed content-address validation")
+    return closed_run_evidence
 
 
 def _formal_result_payload(result: FormalConfirmationResultV2) -> dict[str, object]:
@@ -313,7 +344,8 @@ def _assemble_bundle(
         core_remains_nonclaiming=True,
         formal_glue_required=True,
         formal_glue_completed=official,
-        formal_selector_claim_allowed=official,
+        formal_strict_yield_point_summary_allowed=official,
+        formal_selector_claim_allowed=pair_claim,
         formal_selector_pair_claim_allowed=pair_claim,
         exact_combined_replay_required=True,
     )
@@ -389,7 +421,7 @@ def run_synthetic_formal_selector_utility_smoke_v2(
 ) -> FormalSelectorUtilityBundleV2:
     """Run a cheap 19x19 end-to-end smoke that can never authorize a claim."""
 
-    closed = _checked_closed_run(closed_run_evidence)
+    closed = _content_address_checked_closed_run_for_synthetic(closed_run_evidence)
     experiment = closed.pre_generation_closure.experiment_freeze
     plan = SelectorUtilityAnalysisPlanV2.for_synthetic_validation(
         experiment,
@@ -397,7 +429,7 @@ def run_synthetic_formal_selector_utility_smoke_v2(
         inner_bootstrap_samples=19,
     )
     artifacts = _synthetic_primary_artifacts(closed, plan)
-    verified = make_synthetic_verified_selector_primary_inputs_v2(
+    verified = _make_synthetic_verified_selector_primary_inputs_from_fresh_plan_v2(
         plan,
         artifacts,
         synthetic_critical_value=2.0,
@@ -466,7 +498,8 @@ def _checked_bundle_shape(
         or not bundle.core_remains_nonclaiming
         or not bundle.formal_glue_required
         or bundle.formal_glue_completed is not official
-        or bundle.formal_selector_claim_allowed is not official
+        or bundle.formal_strict_yield_point_summary_allowed is not official
+        or bundle.formal_selector_claim_allowed is not bundle.formal_selector_pair_claim_allowed
         or not bundle.exact_combined_replay_required
         or bundle.selector_core_result.formal_glue_completed
         or bundle.selector_core_result.formal_selector_claim_allowed
