@@ -5,16 +5,26 @@ import pytest
 from secaware.exploratory.gate_b import (
     _APPEND_SUFFIX_OUTPUT_MODE,
     _INTERVENTION_SYSTEM_TEMPLATE,
+    _append_boundary_policy,
     _intervention_payload,
     _intervention_template,
     _materialize_intervention_text,
     _parse_append_suffix_response,
     _RecordingTransport,
+    _reuse_transport_roots,
     _reviewed_placebo_suffix_bank,
     _reviewed_target_suffix_matches,
     _reviewed_target_suffixes,
     _select_reviewed_placebo_suffix,
+    _selected_gate_b_task_ids,
+    _validated_gate_b_cwe_counts,
+    _validated_provider_call_budget,
+    _variant_extractor_reuse_exclusions,
     validate_length_matched_placebo,
+)
+from secaware.intervention.append_boundary import (
+    LEGACY_DIRECT_CONCAT_POLICY,
+    PYTHON_COMMENT_BOUNDARY_POLICY,
 )
 from secaware.llm.structured_transport import StructuredLLMPolicy
 from secaware.schema.experiments import AllowedDeltaRecord
@@ -113,6 +123,39 @@ def test_append_suffix_response_is_strict_and_materializes_exact_prefix() -> Non
     )
     assert text == "Write a query function. Use parameterized queries."
     assert suffix == " Use parameterized queries."
+
+
+def test_append_suffix_python_comment_policy_materializes_a_safe_boundary() -> None:
+    source = "def remove_user(username):\n    '''Remove the named user.'''"
+    text, suffix = _materialize_intervention_text(
+        source_prompt=source,
+        raw_response=b'{"append_suffix":" Use parameterized queries."}',
+        output_mode=_APPEND_SUFFIX_OUTPUT_MODE,
+        maximum=1024,
+        append_boundary_policy=PYTHON_COMMENT_BOUNDARY_POLICY,
+    )
+
+    assert suffix == " Use parameterized queries."
+    assert text == source + "\n\n# Use parameterized queries."
+
+
+def test_append_boundary_policy_is_explicit_and_legacy_by_default() -> None:
+    assert (
+        _append_boundary_policy({}, intervention_output_mode=_APPEND_SUFFIX_OUTPUT_MODE)
+        == LEGACY_DIRECT_CONCAT_POLICY
+    )
+    assert (
+        _append_boundary_policy(
+            {"append_boundary_policy": PYTHON_COMMENT_BOUNDARY_POLICY},
+            intervention_output_mode=_APPEND_SUFFIX_OUTPUT_MODE,
+        )
+        == PYTHON_COMMENT_BOUNDARY_POLICY
+    )
+    with pytest.raises(ValueError, match="append-boundary policy"):
+        _append_boundary_policy(
+            {"append_boundary_policy": PYTHON_COMMENT_BOUNDARY_POLICY},
+            intervention_output_mode="full_candidate_text_v1",
+        )
 
 
 @pytest.mark.parametrize(
@@ -388,6 +431,154 @@ def _policy() -> StructuredLLMPolicy:
         max_response_bytes=1024,
         enable_thinking=False,
     )
+
+
+def test_reuse_channel_policy_can_reuse_only_intervention_and_refresh_extractor(
+    tmp_path,
+) -> None:
+    reuse = tmp_path / "reuse"
+    assert _reuse_transport_roots(reuse)[:2] == (reuse, reuse)
+    intervention_root, extractor_root, mode = _reuse_transport_roots(
+        reuse,
+        intervention_responses_only=True,
+    )
+    assert intervention_root == reuse
+    assert extractor_root == reuse
+    assert mode == "intervention_and_source_extractor_reuse_variant_fresh_v1"
+    with pytest.raises(ValueError, match="reuse channel policy"):
+        _reuse_transport_roots(None, intervention_responses_only=True)
+
+
+def test_variant_refresh_excludes_only_variant_extractions_from_reuse() -> None:
+    labels = _variant_extractor_reuse_exclusions(
+        frozenset({"gate-a-1", "gate-a-2"}),
+        refresh_variants=True,
+    )
+
+    assert labels == frozenset({"variant-gate-a-1", "variant-gate-a-2"})
+    assert "source-prompt-1" not in labels
+
+
+def test_extractor_reuse_keeps_source_and_refreshes_changed_variant(tmp_path) -> None:
+    reuse = tmp_path / "reuse"
+    channel = reuse / "raw" / "extractor"
+    channel.mkdir(parents=True)
+    (channel / "source-prompt-1.request.json").write_bytes(b'{"source":true}\n')
+    (channel / "source-prompt-1.response.json").write_bytes(b'{"facts":[]}\n')
+    (channel / "variant-gate-a-1.request.json").write_bytes(b'{"old":true}\n')
+    (channel / "variant-gate-a-1.response.json").write_bytes(b'{"facts":["old"]}\n')
+    delegate = _FixedTransport(b'{"facts":["fresh"]}')
+    transport = _RecordingTransport(
+        delegate,
+        tmp_path / "new",
+        "extractor",
+        reuse_root=reuse,
+        reuse_excluded_labels=frozenset({"variant-gate-a-1"}),
+    )
+
+    transport.select("source-prompt-1")
+    assert transport.complete(b'{"source":true}', _policy()) == b'{"facts":[]}'
+    transport.select("variant-gate-a-1")
+    assert transport.complete(b'{"new":true}', _policy()) == b'{"facts":["fresh"]}'
+    assert transport.reused_labels == ("source-prompt-1",)
+    assert transport.live_labels == ("variant-gate-a-1",)
+    assert transport.reuse_exclusion_labels == ("variant-gate-a-1",)
+
+
+def _source_prompt(task_id: str, cwe: str) -> PromptRecord:
+    return PromptRecord.model_validate(
+        {
+            "prompt_id": f"prompt-{task_id}",
+            "task_id": task_id,
+            "split": "discover",
+            "language": "python",
+            "task_family": "test",
+            "cwe": cwe,
+            "prompt": "value = 1",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+
+
+def test_multi_per_cwe_selection_accepts_unique_gate_a_tasks_and_exact_budget() -> None:
+    sources = {
+        "task-78-a": _source_prompt("task-78-a", "CWE-78"),
+        "task-78-b": _source_prompt("task-78-b", "CWE-78"),
+        "task-89-a": _source_prompt("task-89-a", "CWE-89"),
+        "task-89-b": _source_prompt("task-89-b", "CWE-89"),
+    }
+    config = {
+        "task_selection_policy": "explicit_task_ids_multi_per_cwe_v1",
+        "selected_task_ids": list(sources),
+        "provider_call_budget": {
+            "intervention_calls": 16,
+            "extractor_calls": 20,
+            "total_provider_calls": 36,
+        },
+    }
+    selected = _selected_gate_b_task_ids(config, sources)
+
+    assert selected == tuple(sources)
+    assert _validated_gate_b_cwe_counts(
+        task_selection_policy=config["task_selection_policy"],
+        selected_sources=tuple(sources[item] for item in selected),
+        gate_a_candidate_count=2,
+    ) == {"CWE-78": 2, "CWE-89": 2}
+    assert (
+        _validated_provider_call_budget(
+            config,
+            independent_tasks=4,
+            require_explicit=True,
+        )
+        == config["provider_call_budget"]
+    )
+
+
+def test_multi_per_cwe_selection_rejects_duplicate_unknown_and_single_cwe_tasks() -> None:
+    sources = {
+        "task-a": _source_prompt("task-a", "CWE-78"),
+        "task-b": _source_prompt("task-b", "CWE-78"),
+    }
+    for selected in (["task-a", "task-a"], ["task-a", "missing"]):
+        with pytest.raises(ValueError, match="task selection"):
+            _selected_gate_b_task_ids(
+                {
+                    "task_selection_policy": "explicit_task_ids_multi_per_cwe_v1",
+                    "selected_task_ids": selected,
+                },
+                sources,
+            )
+    with pytest.raises(ValueError, match="CWE coverage"):
+        _validated_gate_b_cwe_counts(
+            task_selection_policy="explicit_task_ids_multi_per_cwe_v1",
+            selected_sources=tuple(sources.values()),
+            gate_a_candidate_count=1,
+        )
+    with pytest.raises(ValueError, match="provider budget"):
+        _validated_provider_call_budget(
+            {},
+            independent_tasks=2,
+            require_explicit=True,
+        )
+
+
+def test_legacy_explicit_selection_keeps_one_task_per_cwe_contract() -> None:
+    sources = (
+        _source_prompt("task-78", "CWE-78"),
+        _source_prompt("task-89", "CWE-89"),
+    )
+
+    assert _validated_gate_b_cwe_counts(
+        task_selection_policy="explicit_task_ids",
+        selected_sources=sources,
+        gate_a_candidate_count=2,
+    ) == {"CWE-78": 1, "CWE-89": 1}
+    with pytest.raises(ValueError, match="CWE coverage"):
+        _validated_gate_b_cwe_counts(
+            task_selection_policy="explicit_task_ids",
+            selected_sources=(sources[0], _source_prompt("task-78-b", "CWE-78")),
+            gate_a_candidate_count=2,
+        )
 
 
 def test_explicit_reuse_exclusion_calls_live_transport_and_records_reason(tmp_path) -> None:

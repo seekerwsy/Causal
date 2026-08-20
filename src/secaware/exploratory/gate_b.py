@@ -22,6 +22,13 @@ from secaware.extractors.llm_facts import (
     LLM_FACTS_SYSTEM_TEMPLATE,
     llm_facts_response_normalization_sha256,
 )
+from secaware.intervention.append_boundary import (
+    APPEND_BOUNDARY_POLICIES,
+    LEGACY_DIRECT_CONCAT_POLICY,
+    PYTHON_COMMENT_BOUNDARY_POLICY,
+    python_parse_preservation,
+    render_append_boundary,
+)
 from secaware.intervention.executors import (
     _OUTPUT_SCHEMA as INTERVENTION_OUTPUT_SCHEMA,
 )
@@ -67,6 +74,15 @@ _APPEND_SUFFIX_SYSTEM_TEMPLATE_VERSION = "exploratory-intervention-executor-v6"
 _FULL_CANDIDATE_OUTPUT_MODE = "full_candidate_text_v1"
 _APPEND_SUFFIX_OUTPUT_MODE = "append_suffix_v1"
 _INTERVENTION_OUTPUT_MODES = frozenset({_FULL_CANDIDATE_OUTPUT_MODE, _APPEND_SUFFIX_OUTPUT_MODE})
+_REUSE_BOTH_CHANNELS = "matching_intervention_and_extractor_v1"
+_REUSE_INTERVENTION_ONLY = "intervention_and_source_extractor_reuse_variant_fresh_v1"
+_FRESH_EXTRACTOR_ONLY = "fresh_extractor_only_v1"
+_EXTRACTOR_REUSE_EXACT = "exact_request_response_reuse_v1"
+_EXTRACTOR_REUSE_FRESH = "fresh_only_v1"
+_EXTRACTOR_REUSE_SOURCE_ONLY = "source_exact_reuse_variant_fresh_v1"
+_TASK_SELECTION_EXPLICIT = "explicit_task_ids"
+_TASK_SELECTION_MULTI_PER_CWE = "explicit_task_ids_multi_per_cwe_v1"
+_TASK_SELECTION_ALL = "all_gate_a_tasks"
 _MAX_APPEND_SUFFIX_BYTES = 262_144
 _APPEND_SUFFIX_OUTPUT_SCHEMA = {
     "schema_version": "1.0",
@@ -302,14 +318,22 @@ def _materialize_intervention_text(
     raw_response: bytes,
     output_mode: str,
     maximum: int,
+    append_boundary_policy: str = LEGACY_DIRECT_CONCAT_POLICY,
 ) -> tuple[str, str]:
     if output_mode == _APPEND_SUFFIX_OUTPUT_MODE:
         suffix = _parse_append_suffix_response(raw_response, maximum)
         if suffix.startswith(source_prompt):
             raise ValueError("append-suffix intervention repeated the source prompt")
-        return source_prompt + suffix, suffix
+        rendered = render_append_boundary(
+            source_prompt,
+            suffix,
+            policy=append_boundary_policy,
+        )
+        return rendered.candidate_text, suffix
     if output_mode != _FULL_CANDIDATE_OUTPUT_MODE:
         raise ValueError("exploratory Gate B intervention output mode failed validation")
+    if append_boundary_policy != LEGACY_DIRECT_CONCAT_POLICY:
+        raise ValueError("exploratory Gate B append-boundary policy failed validation")
     text = _parse_response(raw_response, maximum)
     suffix = text[len(source_prompt) :] if text.startswith(source_prompt) else ""
     return text, suffix
@@ -329,6 +353,52 @@ def _reuse_policy_config_sha256(path: Path) -> str:
     normalized_run.pop("output_dir", None)
     normalized["run"] = normalized_run
     return canonical_sha256(normalized)
+
+
+def _append_boundary_policy(
+    gate_b_config: Mapping[str, object],
+    *,
+    intervention_output_mode: str,
+) -> str:
+    policy = gate_b_config.get("append_boundary_policy", LEGACY_DIRECT_CONCAT_POLICY)
+    if (
+        type(policy) is not str
+        or policy not in APPEND_BOUNDARY_POLICIES
+        or (
+            policy != LEGACY_DIRECT_CONCAT_POLICY
+            and intervention_output_mode != _APPEND_SUFFIX_OUTPUT_MODE
+        )
+    ):
+        raise ValueError("exploratory Gate B append-boundary policy failed validation")
+    return policy
+
+
+def _reuse_transport_roots(
+    reuse_run_dir: Path | None,
+    *,
+    intervention_responses_only: bool = False,
+) -> tuple[Path | None, Path | None, str]:
+    if type(intervention_responses_only) is not bool or (
+        intervention_responses_only and reuse_run_dir is None
+    ):
+        raise ValueError("exploratory Gate B reuse channel policy failed validation")
+    if intervention_responses_only:
+        return reuse_run_dir, reuse_run_dir, _REUSE_INTERVENTION_ONLY
+    if reuse_run_dir is None:
+        return None, None, _FRESH_EXTRACTOR_ONLY
+    return reuse_run_dir, reuse_run_dir, _REUSE_BOTH_CHANNELS
+
+
+def _variant_extractor_reuse_exclusions(
+    selected_variant_ids: frozenset[str],
+    *,
+    refresh_variants: bool,
+) -> frozenset[str]:
+    if type(refresh_variants) is not bool or any(not item for item in selected_variant_ids):
+        raise ValueError("exploratory Gate B extractor reuse exclusion failed validation")
+    if not refresh_variants:
+        return frozenset()
+    return frozenset(f"variant-{item}" for item in selected_variant_ids)
 
 
 def _artifact_stem(label: str) -> str:
@@ -663,28 +733,59 @@ def _selected_gate_b_task_ids(
     gate_b_config: Mapping[str, object],
     source_by_task: Mapping[str, object],
 ) -> tuple[str, ...]:
-    policy = gate_b_config.get("task_selection_policy", "explicit_task_ids")
+    policy = gate_b_config.get("task_selection_policy", _TASK_SELECTION_EXPLICIT)
     explicit = gate_b_config.get("selected_task_ids")
-    if policy == "all_gate_a_tasks":
+    if policy == _TASK_SELECTION_ALL:
         if explicit is not None or not source_by_task:
             raise ValueError("exploratory Gate B task selection failed validation")
         return tuple(sorted(source_by_task))
-    if policy != "explicit_task_ids" or type(explicit) is not list:
+    if (
+        policy not in {_TASK_SELECTION_EXPLICIT, _TASK_SELECTION_MULTI_PER_CWE}
+        or type(explicit) is not list
+    ):
         raise ValueError("exploratory Gate B task selection failed validation")
     selected = tuple(explicit)
     if (
         not selected
+        or any(type(item) is not str or not item for item in selected)
         or len(selected) != len(set(selected))
-        or any(type(item) is not str or item not in source_by_task for item in selected)
+        or any(item not in source_by_task for item in selected)
     ):
         raise ValueError("exploratory Gate B task selection failed validation")
     return selected
+
+
+def _validated_gate_b_cwe_counts(
+    *,
+    task_selection_policy: object,
+    selected_sources: tuple[PromptRecord, ...],
+    gate_a_candidate_count: object,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for source in selected_sources:
+        counts[source.cwe] = counts.get(source.cwe, 0) + 1
+    if task_selection_policy == _TASK_SELECTION_ALL:
+        valid = (
+            bool(selected_sources)
+            and type(gate_a_candidate_count) is int
+            and len(counts) == gate_a_candidate_count
+        )
+    elif task_selection_policy == _TASK_SELECTION_EXPLICIT:
+        valid = bool(selected_sources) and len(counts) == len(selected_sources)
+    elif task_selection_policy == _TASK_SELECTION_MULTI_PER_CWE:
+        valid = len(counts) >= 2 and all(value > 0 for value in counts.values())
+    else:
+        valid = False
+    if not valid:
+        raise ValueError("exploratory Gate B CWE coverage failed validation")
+    return dict(sorted(counts.items()))
 
 
 def _validated_provider_call_budget(
     gate_b_config: Mapping[str, object],
     *,
     independent_tasks: int,
+    require_explicit: bool = False,
 ) -> dict[str, int]:
     expected = {
         "intervention_calls": independent_tasks * 4,
@@ -693,6 +794,8 @@ def _validated_provider_call_budget(
     }
     configured = gate_b_config.get("provider_call_budget")
     if configured is None:
+        if require_explicit:
+            raise ValueError("exploratory Gate B provider budget failed validation")
         return expected
     if type(configured) is not dict or configured != expected:
         raise ValueError("exploratory Gate B provider budget failed validation")
@@ -763,8 +866,22 @@ def run_exploratory_gate_b(
         reuse_excluded_intervention_variant_ids = frozenset(
             reuse_excluded_intervention_variant_ids_value
         )
+        reuse_intervention_responses_only = gate_b_config.get(
+            "reuse_intervention_responses_only",
+            False,
+        )
+        (
+            intervention_reuse_root,
+            extractor_reuse_root,
+            reuse_channel_policy,
+        ) = _reuse_transport_roots(
+            reuse_run_dir,
+            intervention_responses_only=reuse_intervention_responses_only,
+        )
         allow_live_calls = gate_b_config.get("allow_live_calls", True)
-        if type(allow_live_calls) is not bool:
+        if type(allow_live_calls) is not bool or (
+            reuse_intervention_responses_only and not allow_live_calls
+        ):
             raise ValueError("exploratory Gate B live-call policy failed validation")
         reviewed_placebo_suffix_bank = _reviewed_placebo_suffix_bank(gate_b_config)
         reviewed_target_suffixes = _reviewed_target_suffixes(gate_b_config)
@@ -776,6 +893,16 @@ def run_exploratory_gate_b(
             or intervention_output_mode not in _INTERVENTION_OUTPUT_MODES
         ):
             raise ValueError("exploratory Gate B intervention output mode failed validation")
+        append_boundary_policy = _append_boundary_policy(
+            gate_b_config,
+            intervention_output_mode=str(intervention_output_mode),
+        )
+        if (
+            append_boundary_policy == PYTHON_COMMENT_BOUNDARY_POLICY
+            and reuse_run_dir is not None
+            and not reuse_intervention_responses_only
+        ):
+            raise ValueError("exploratory Gate B fresh extractor policy failed validation")
         intervention_system_template = _intervention_template(
             reviewed_placebo_suffix_bank, str(intervention_output_mode)
         )
@@ -808,6 +935,8 @@ def run_exploratory_gate_b(
             )
         )
         source_by_task = {item.task_id: item for item in source_prompts}
+        if len(source_by_task) != len(source_prompts):
+            raise ValueError("exploratory Gate B source Prompt identity failed validation")
         gate_a_variants = read_jsonl(
             gate_a_dir / "variants.jsonl",
             required=True,
@@ -820,16 +949,22 @@ def run_exploratory_gate_b(
         )
         selected_task_ids = _selected_gate_b_task_ids(gate_b_config, source_by_task)
         selected_sources = tuple(source_by_task[item] for item in selected_task_ids)
+        if append_boundary_policy == PYTHON_COMMENT_BOUNDARY_POLICY and any(
+            item.language != "python" for item in selected_sources
+        ):
+            raise ValueError("exploratory Gate B Python append-boundary scope failed validation")
         if any(task_id not in selected_task_ids for task_id in reviewed_target_suffixes):
             raise ValueError("exploratory Gate B reviewed target task failed validation")
-        task_selection_policy = gate_b_config.get("task_selection_policy", "explicit_task_ids")
-        if task_selection_policy == "all_gate_a_tasks":
-            if set(selected_task_ids) != set(source_by_task) or len(
-                {item.cwe for item in selected_sources}
-            ) != gate_a_report.get("counts", {}).get("candidates"):
-                raise ValueError("exploratory Gate B CWE coverage failed validation")
-        elif len({item.cwe for item in selected_sources}) != len(selected_sources):
-            raise ValueError("exploratory Gate B CWE coverage failed validation")
+        task_selection_policy = gate_b_config.get("task_selection_policy", _TASK_SELECTION_EXPLICIT)
+        if task_selection_policy == _TASK_SELECTION_ALL and set(selected_task_ids) != set(
+            source_by_task
+        ):
+            raise ValueError("exploratory Gate B task selection failed validation")
+        cwe_counts = _validated_gate_b_cwe_counts(
+            task_selection_policy=task_selection_policy,
+            selected_sources=selected_sources,
+            gate_a_candidate_count=gate_a_report.get("counts", {}).get("candidates"),
+        )
         selected_variants = tuple(
             sorted(
                 (item for item in gate_a_variants if item.get("task_id") in selected_task_ids),
@@ -844,6 +979,7 @@ def run_exploratory_gate_b(
         provider_call_budget = _validated_provider_call_budget(
             gate_b_config,
             independent_tasks=len(selected_sources),
+            require_explicit=task_selection_policy == _TASK_SELECTION_MULTI_PER_CWE,
         )
         if (
             app_config.intervention.max_protocols < len({item.cwe for item in selected_sources})
@@ -852,9 +988,13 @@ def run_exploratory_gate_b(
             or app_config.randomization.max_blocks < len(selected_sources)
         ):
             raise ValueError("exploratory Gate B application budget failed validation")
-        selected_variant_ids = {str(item["variant_id"]) for item in selected_variants}
+        selected_variant_ids = frozenset(str(item["variant_id"]) for item in selected_variants)
         if not reuse_excluded_intervention_variant_ids <= selected_variant_ids:
             raise ValueError("exploratory Gate B reuse exclusion scope failed validation")
+        reuse_excluded_extractor_labels = _variant_extractor_reuse_exclusions(
+            selected_variant_ids,
+            refresh_variants=reuse_intervention_responses_only,
+        )
         if any(item.get("outcome_generation_allowed") is not False for item in selected_variants):
             raise ValueError("exploratory Gate B generation boundary failed validation")
 
@@ -889,7 +1029,7 @@ def run_exploratory_gate_b(
             intervention_delegate,
             output_dir,
             "intervention",
-            reuse_root=reuse_run_dir,
+            reuse_root=intervention_reuse_root,
             reuse_excluded_labels=reuse_excluded_intervention_variant_ids,
             allow_live=allow_live_calls,
         )
@@ -903,7 +1043,8 @@ def run_exploratory_gate_b(
             extractor_delegate,
             output_dir,
             "extractor",
-            reuse_root=reuse_run_dir,
+            reuse_root=extractor_reuse_root,
+            reuse_excluded_labels=reuse_excluded_extractor_labels,
             allow_live=allow_live_calls,
         )
         extractor = extractor_for_config(app_config.tsg, transport=extractor_transport)
@@ -913,6 +1054,7 @@ def run_exploratory_gate_b(
             {
                 "request_policy_version": request_policy_version,
                 "intervention_output_mode": intervention_output_mode,
+                "append_boundary_policy": append_boundary_policy,
                 "control_target_visibility": (
                     "withheld-for-non-target-arms-v1"
                     if intervention_output_mode == _APPEND_SUFFIX_OUTPUT_MODE
@@ -1015,7 +1157,37 @@ def run_exploratory_gate_b(
                 raw_response=raw_response,
                 output_mode=str(intervention_output_mode),
                 maximum=intervention_policy.max_response_bytes,
+                append_boundary_policy=append_boundary_policy,
             )
+            append_metadata: dict[str, object] = {}
+            parse_metadata: dict[str, object] = {}
+            if intervention_output_mode == _APPEND_SUFFIX_OUTPUT_MODE:
+                rendered = render_append_boundary(
+                    source.prompt,
+                    suffix,
+                    policy=append_boundary_policy,
+                )
+                if rendered.candidate_text != text:
+                    raise ValueError("exploratory Gate B append rendering failed validation")
+                append_metadata = rendered.metadata()
+            if append_boundary_policy == PYTHON_COMMENT_BOUNDARY_POLICY:
+                parse_check = python_parse_preservation(source.prompt, text)
+                parse_metadata = parse_check.metadata()
+                if not parse_check.passed:
+                    _write_json(
+                        output_dir / "validation" / f"{_artifact_stem(label)}.json",
+                        {
+                            "schema_version": _SCHEMA_VERSION,
+                            "status": "FAILED",
+                            "failure_codes": ["PYTHON_PARSE_REGRESSION"],
+                            "gate_a_variant_id": label,
+                            "task_id": source.task_id,
+                            "source_prefix_preserved": text.startswith(source.prompt),
+                            **append_metadata,
+                            **parse_metadata,
+                        },
+                    )
+                    raise ValueError("exploratory Gate B Python parse preservation failed")
             if not text.startswith(source.prompt):
                 _write_json(
                     output_dir / "validation" / f"{_artifact_stem(label)}.json",
@@ -1026,6 +1198,8 @@ def run_exploratory_gate_b(
                         "gate_a_variant_id": label,
                         "task_id": source.task_id,
                         "source_prefix_preserved": False,
+                        **append_metadata,
+                        **parse_metadata,
                     },
                 )
                 raise ValueError("exploratory Gate B source prefix failed validation")
@@ -1058,6 +1232,8 @@ def run_exploratory_gate_b(
                         "append_only_suffix_sha256": hashlib.sha256(
                             suffix.encode("utf-8")
                         ).hexdigest(),
+                        **append_metadata,
+                        **parse_metadata,
                     },
                 )
                 raise ValueError("exploratory Gate B reviewed exact execution failed validation")
@@ -1082,6 +1258,8 @@ def run_exploratory_gate_b(
                 "source_prefix_preserved": True,
                 "append_only_suffix_length": len(suffix),
                 "append_only_suffix_sha256": hashlib.sha256(suffix.encode("utf-8")).hexdigest(),
+                **append_metadata,
+                **parse_metadata,
             }
             _write_json(
                 output_dir / "validation" / f"{_artifact_stem(label)}.json",
@@ -1106,6 +1284,8 @@ def run_exploratory_gate_b(
                 "blind_prompt_id": blind_prompt.prompt_id,
                 "intervention_policy_sha256": intervention_policy_sha256,
                 "intervention_output_mode": intervention_output_mode,
+                **append_metadata,
+                **parse_metadata,
                 "intervention_system_template_version": (intervention_system_template_version),
                 "exploratory_request_policy_sha256": exploratory_request_policy_sha256,
                 "extractor_policy_sha256": extractor_policy.policy_sha256,
@@ -1223,6 +1403,8 @@ def run_exploratory_gate_b(
             "status": "GATE_B_PASSED",
             "scientific_claim_allowed": False,
             "outcome_generation_allowed": False,
+            "task_selection_policy": task_selection_policy,
+            "selected_task_ids": list(selected_task_ids),
             "counts": {
                 "independent_tasks": len(selected_sources),
                 "cwes": len({item.cwe for item in selected_sources}),
@@ -1240,6 +1422,7 @@ def run_exploratory_gate_b(
                 "reuse_excluded_intervention_calls": len(
                     intervention_transport.reuse_exclusion_labels
                 ),
+                "reuse_excluded_extractor_calls": len(extractor_transport.reuse_exclusion_labels),
                 "validated_variants": len(llm_variants),
                 "assignments": len(assignments),
                 "generic_control_realized": generic_realized,
@@ -1253,10 +1436,12 @@ def run_exploratory_gate_b(
                 "pending": 0,
             },
             "provider_call_budget": provider_call_budget,
+            "selected_task_counts_by_cwe": cwe_counts,
             "policy_digests": {
                 "catalog_sha256": PROMPT_FEATURE_CATALOG_SHA256,
                 "intervention_policy_sha256": intervention_policy_sha256,
                 "intervention_output_mode": intervention_output_mode,
+                "append_boundary_policy": append_boundary_policy,
                 "intervention_output_schema_sha256": (intervention_policy.output_schema_sha256),
                 "exploratory_request_policy_sha256": exploratory_request_policy_sha256,
                 "extractor_policy_sha256": extractor_policy.policy_sha256,
@@ -1302,6 +1487,11 @@ def run_exploratory_gate_b(
                     if reuse_excluded_intervention_variant_ids
                     else None
                 ),
+                "reuse_excluded_extractor_labels_sha256": (
+                    canonical_sha256(sorted(reuse_excluded_extractor_labels))
+                    if reuse_excluded_extractor_labels
+                    else None
+                ),
                 "reuse_policy_config_sha256": (
                     _reuse_policy_config_sha256(reuse_run_dir / "effective-app-config.yaml")
                     if reuse_run_dir is not None
@@ -1310,6 +1500,17 @@ def run_exploratory_gate_b(
             },
             "reuse": {
                 "enabled": reuse_run_dir is not None,
+                "channel_policy": reuse_channel_policy,
+                "intervention_responses_only": reuse_intervention_responses_only,
+                "intervention_reuse_enabled": intervention_reuse_root is not None,
+                "extractor_reuse_enabled": extractor_reuse_root is not None,
+                "extractor_reuse_policy": (
+                    _EXTRACTOR_REUSE_FRESH
+                    if extractor_reuse_root is None
+                    else _EXTRACTOR_REUSE_SOURCE_ONLY
+                    if reuse_intervention_responses_only
+                    else _EXTRACTOR_REUSE_EXACT
+                ),
                 "source_run_dir": (
                     reuse_run_dir.relative_to(repo_root).as_posix()
                     if reuse_run_dir is not None
@@ -1320,7 +1521,14 @@ def run_exploratory_gate_b(
                 "excluded_intervention_variant_ids": sorted(
                     reuse_excluded_intervention_variant_ids
                 ),
+                "excluded_extractor_labels": sorted(reuse_excluded_extractor_labels),
+                "observed_intervention_exclusion_labels": list(
+                    intervention_transport.reuse_exclusion_labels
+                ),
                 "observed_exclusion_labels": list(intervention_transport.reuse_exclusion_labels),
+                "observed_extractor_exclusion_labels": list(
+                    extractor_transport.reuse_exclusion_labels
+                ),
             },
             "next_gate": "bounded_real_outcome_canary",
         }

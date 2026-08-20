@@ -16,6 +16,13 @@ from typing import Any
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
 from secaware.generation.request_planner import plan_confirmation_requests
+from secaware.intervention.append_boundary import (
+    APPEND_BOUNDARY_POLICIES,
+    LEGACY_DIRECT_CONCAT_POLICY,
+    PYTHON_COMMENT_BOUNDARY_POLICY,
+    python_parse_preservation,
+    render_append_boundary,
+)
 from secaware.io.jsonl import read_jsonl, write_jsonl
 from secaware.oracle.policy import load_policy_bundle
 from secaware.pipeline.artifact import canonical_sha256, sha256_file
@@ -47,6 +54,8 @@ _GATE_B_DIRECT_SCHEMA = "direct_exploratory_v1"
 _TASK_SELECTION_BOUNDED_CANARY = "explicit_bounded_canary"
 _TASK_SELECTION_DEV_CANARY = "explicit_dev_canary"
 _TASK_SELECTION_ALL_GATE_B = "all_gate_b_tasks"
+_EXTRACTOR_REUSE_FRESH = "fresh_only_v1"
+_EXTRACTOR_REUSE_SOURCE_ONLY = "source_exact_reuse_variant_fresh_v1"
 
 
 def _gate_b_artifact_schema(config: dict[str, Any]) -> str:
@@ -212,6 +221,7 @@ def _direct_gate_b_records(
     gate_b_dir: Path,
     *,
     source_by_task: dict[str, PromptRecord],
+    gate_b_report: Mapping[str, object],
 ) -> tuple[
     tuple[PromptRecord, ...],
     tuple[dict[str, Any], ...],
@@ -226,6 +236,53 @@ def _direct_gate_b_records(
         if type(variant_id) is not str or not variant_id or variant_id in direct_by_variant:
             raise ValueError("Gate C direct Gate B variant identity failed validation")
         direct_by_variant[variant_id] = item
+
+    policy_digests = gate_b_report.get("policy_digests")
+    report_boundary_policy = (
+        policy_digests.get("append_boundary_policy", LEGACY_DIRECT_CONCAT_POLICY)
+        if isinstance(policy_digests, Mapping)
+        else LEGACY_DIRECT_CONCAT_POLICY
+    )
+    if report_boundary_policy not in APPEND_BOUNDARY_POLICIES:
+        raise ValueError("Gate C direct Gate B append-boundary policy failed validation")
+    requires_fresh_graph = report_boundary_policy == PYTHON_COMMENT_BOUNDARY_POLICY
+    proposal_by_id: dict[str, dict[str, Any]] = {}
+    graph_by_sha256: dict[str, dict[str, Any]] = {}
+    if requires_fresh_graph:
+        reuse = gate_b_report.get("reuse")
+        counts = gate_b_report.get("counts")
+        if not _fresh_variant_extractor_reuse_is_authenticated(
+            reuse=reuse,
+            counts=counts,
+            variant_ids=frozenset(direct_by_variant),
+        ):
+            raise ValueError("Gate C direct Gate B fresh extractor policy failed validation")
+        proposals = tuple(
+            read_jsonl(
+                gate_b_dir / "variant-extraction-proposals.jsonl",
+                required=True,
+                allow_empty=False,
+            )
+        )
+        graphs = tuple(
+            read_jsonl(
+                gate_b_dir / "variant-prompt-tsg.jsonl",
+                required=True,
+                allow_empty=False,
+            )
+        )
+        for item in proposals:
+            proposal_id = item.get("proposal_id")
+            if type(proposal_id) is not str or not proposal_id or proposal_id in proposal_by_id:
+                raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
+            proposal_by_id[proposal_id] = item
+        for item in graphs:
+            graph_sha256 = item.get("graph_sha256")
+            if type(graph_sha256) is not str or not graph_sha256 or graph_sha256 in graph_by_sha256:
+                raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
+            graph_by_sha256[graph_sha256] = item
+        if len(proposals) != len(direct) or len(graphs) != len(direct):
+            raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
 
     pairs: dict[str, tuple[Path, Path, dict[str, Any], dict[str, Any]]] = {}
     for request_path in sorted((gate_b_dir / "raw" / "intervention").glob("*.request.json")):
@@ -268,6 +325,8 @@ def _direct_gate_b_records(
         )
         if (
             source is None
+            or item.get("append_boundary_policy", LEGACY_DIRECT_CONCAT_POLICY)
+            != report_boundary_policy
             or candidate_text != item.get("prompt")
             or source.prompt_id != item.get("source_prompt_id")
             or source.prompt_sha256 != item.get("source_prompt_sha256")
@@ -292,6 +351,13 @@ def _direct_gate_b_records(
                 "counterpart_prompt_id": None,
             }
         )
+        if requires_fresh_graph and not _prompt_graph_binding_is_authenticated(
+            variant=item,
+            prompt=prompt,
+            proposal=proposal_by_id.get(str(item.get("proposal_id"))),
+            graph=graph_by_sha256.get(str(item.get("graph_sha256"))),
+        ):
+            raise ValueError("Gate C direct Gate B fresh graph binding failed validation")
         prompts.append(prompt)
         provenance.append(
             {
@@ -311,6 +377,38 @@ def _direct_gate_b_records(
             }
         )
     return tuple(prompts), tuple(provenance), tuple(records), validations
+
+
+def _fresh_variant_extractor_reuse_is_authenticated(
+    *,
+    reuse: object,
+    counts: object,
+    variant_ids: frozenset[str],
+) -> bool:
+    if not isinstance(reuse, Mapping) or not isinstance(counts, Mapping) or not variant_ids:
+        return False
+    expected_variant_labels = {f"variant-{item}" for item in variant_ids}
+    extractor_reuse_policy = reuse.get("extractor_reuse_policy")
+    if extractor_reuse_policy == _EXTRACTOR_REUSE_FRESH:
+        return bool(
+            counts.get("reused_extractor_calls") == 0
+            and counts.get("provider_extractor_calls")
+            == counts.get("source_extractions", 0) + len(variant_ids)
+        )
+    if extractor_reuse_policy != _EXTRACTOR_REUSE_SOURCE_ONLY:
+        return False
+    excluded = reuse.get("excluded_extractor_labels")
+    observed = reuse.get("observed_extractor_exclusion_labels")
+    return bool(
+        type(excluded) is list
+        and type(observed) is list
+        and set(excluded) == expected_variant_labels
+        and set(observed) == expected_variant_labels
+        and len(excluded) == len(expected_variant_labels)
+        and len(observed) == len(expected_variant_labels)
+        and counts.get("reused_extractor_calls") == counts.get("source_extractions")
+        and counts.get("provider_extractor_calls") == len(variant_ids)
+    )
 
 
 def _direct_candidate_text(
@@ -337,7 +435,48 @@ def _direct_candidate_text(
     suffix = response.get("append_suffix")
     if type(suffix) is not str or not suffix.strip() or suffix.startswith(source.prompt):
         return None
-    return source.prompt + suffix
+    policy = variant.get("append_boundary_policy", LEGACY_DIRECT_CONCAT_POLICY)
+    if type(policy) is not str or policy not in APPEND_BOUNDARY_POLICIES:
+        return None
+    try:
+        rendered = render_append_boundary(source.prompt, suffix, policy=policy)
+    except ValueError:
+        return None
+    if "append_boundary_policy" in variant:
+        metadata = rendered.metadata()
+        if any(variant.get(key) != value for key, value in metadata.items()):
+            return None
+    if policy == PYTHON_COMMENT_BOUNDARY_POLICY:
+        if source.language != "python":
+            return None
+        parse_check = python_parse_preservation(source.prompt, rendered.candidate_text)
+        if not parse_check.passed or any(
+            variant.get(key) != value for key, value in parse_check.metadata().items()
+        ):
+            return None
+    return rendered.candidate_text
+
+
+def _prompt_graph_binding_is_authenticated(
+    *,
+    variant: Mapping[str, object],
+    prompt: PromptRecord,
+    proposal: Mapping[str, object] | None,
+    graph: Mapping[str, object] | None,
+) -> bool:
+    if proposal is None or graph is None:
+        return False
+    return bool(
+        proposal.get("proposal_id") == variant.get("proposal_id")
+        and proposal.get("prompt_id") == prompt.prompt_id
+        and proposal.get("prompt_sha256") == prompt.prompt_sha256
+        and proposal.get("policy_sha256") == variant.get("extractor_policy_sha256")
+        and graph.get("graph_sha256") == variant.get("graph_sha256")
+        and graph.get("prompt_id") == prompt.prompt_id
+        and graph.get("task_id") == proposal.get("task_id")
+        and graph.get("proposal_id") == proposal.get("proposal_id")
+        and graph.get("extractor_policy_sha256") == variant.get("extractor_policy_sha256")
+    )
 
 
 def _build_standard_records(
@@ -652,6 +791,7 @@ def plan_gate_c_canary(
         prompts, provenance, records, validations = _direct_gate_b_records(
             gate_b_dir,
             source_by_task=source_by_task,
+            gate_b_report=gate_b_report,
         )
         gate_b_variants_path = gate_b_dir / "llm-variants.jsonl"
     else:

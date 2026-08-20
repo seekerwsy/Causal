@@ -7,6 +7,11 @@ import pytest
 from secaware.config import load_config
 from secaware.exploratory import gate_c
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
+from secaware.intervention.append_boundary import (
+    PYTHON_COMMENT_BOUNDARY_POLICY,
+    python_parse_preservation,
+    render_append_boundary,
+)
 from secaware.io.jsonl import read_jsonl
 from secaware.schema.records import PromptRecord
 
@@ -138,6 +143,144 @@ def test_gate_c_direct_adapter_authenticates_append_suffix_envelope() -> None:
             response={"append_suffix": " Use parameterized queries."},
         )
         == "Write a query function. Use parameterized queries."
+    )
+
+
+def test_gate_c_rebuilds_and_authenticates_python_comment_boundary() -> None:
+    source = PromptRecord.model_validate(
+        {
+            "prompt_id": "prompt-1",
+            "task_id": "task-1",
+            "split": "discover",
+            "language": "python",
+            "task_family": "sql_query",
+            "cwe": "CWE-89",
+            "prompt": "def remove_user(username):\n    '''Remove the named user.'''",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    suffix = " Use parameterized queries."
+    rendered = render_append_boundary(
+        source.prompt,
+        suffix,
+        policy=PYTHON_COMMENT_BOUNDARY_POLICY,
+    )
+    parse_check = python_parse_preservation(source.prompt, rendered.candidate_text)
+    variant = {
+        "intervention_output_mode": "append_suffix_v1",
+        **rendered.metadata(),
+        **parse_check.metadata(),
+    }
+
+    assert (
+        gate_c._direct_candidate_text(
+            source=source,
+            variant=variant,
+            request={"intervention_output_mode": "append_suffix_v1"},
+            response={"append_suffix": suffix},
+        )
+        == rendered.candidate_text
+    )
+    assert (
+        gate_c._direct_candidate_text(
+            source=source,
+            variant={**variant, "rendered_append_sha256": "0" * 64},
+            request={"intervention_output_mode": "append_suffix_v1"},
+            response={"append_suffix": suffix},
+        )
+        is None
+    )
+
+
+def test_gate_c_fresh_graph_binding_rejects_an_old_prompt_interpretation() -> None:
+    prompt = PromptRecord.model_validate(
+        {
+            "prompt_id": "variant-prompt-1",
+            "task_id": "task-1",
+            "split": "confirm",
+            "language": "python",
+            "task_family": "sql_query",
+            "cwe": "CWE-89",
+            "prompt": "value = 1\n\n# Use parameters.",
+            "prompt_role": "neutral_baseline",
+        }
+    )
+    variant = {
+        "proposal_id": "proposal-1",
+        "graph_sha256": "a" * 64,
+        "extractor_policy_sha256": "b" * 64,
+    }
+    proposal = {
+        "proposal_id": "proposal-1",
+        "prompt_id": prompt.prompt_id,
+        "prompt_sha256": prompt.prompt_sha256,
+        "task_id": "blind-task-1",
+        "policy_sha256": "b" * 64,
+    }
+    graph = {
+        "graph_sha256": "a" * 64,
+        "prompt_id": prompt.prompt_id,
+        "task_id": "blind-task-1",
+        "proposal_id": "proposal-1",
+        "extractor_policy_sha256": "b" * 64,
+    }
+
+    assert gate_c._prompt_graph_binding_is_authenticated(
+        variant=variant,
+        prompt=prompt,
+        proposal=proposal,
+        graph=graph,
+    )
+    assert not gate_c._prompt_graph_binding_is_authenticated(
+        variant=variant,
+        prompt=prompt,
+        proposal={**proposal, "prompt_sha256": "c" * 64},
+        graph=graph,
+    )
+
+
+def test_gate_c_authenticates_source_reuse_only_when_every_variant_was_fresh() -> None:
+    variant_ids = frozenset({"gate-a-1", "gate-a-2"})
+    reuse = {
+        "extractor_reuse_policy": "source_exact_reuse_variant_fresh_v1",
+        "excluded_extractor_labels": ["variant-gate-a-1", "variant-gate-a-2"],
+        "observed_extractor_exclusion_labels": [
+            "variant-gate-a-1",
+            "variant-gate-a-2",
+        ],
+    }
+    counts = {
+        "source_extractions": 1,
+        "reused_extractor_calls": 1,
+        "provider_extractor_calls": 2,
+    }
+
+    assert gate_c._fresh_variant_extractor_reuse_is_authenticated(
+        reuse=reuse,
+        counts=counts,
+        variant_ids=variant_ids,
+    )
+    assert not gate_c._fresh_variant_extractor_reuse_is_authenticated(
+        reuse={
+            **reuse,
+            "observed_extractor_exclusion_labels": ["variant-gate-a-1"],
+        },
+        counts=counts,
+        variant_ids=variant_ids,
+    )
+    assert not gate_c._fresh_variant_extractor_reuse_is_authenticated(
+        reuse={"extractor_reuse_policy": "exact_request_response_reuse_v1"},
+        counts=counts,
+        variant_ids=variant_ids,
+    )
+    assert gate_c._fresh_variant_extractor_reuse_is_authenticated(
+        reuse={"extractor_reuse_policy": "fresh_only_v1"},
+        counts={
+            "source_extractions": 1,
+            "reused_extractor_calls": 0,
+            "provider_extractor_calls": 3,
+        },
+        variant_ids=variant_ids,
     )
 
 
