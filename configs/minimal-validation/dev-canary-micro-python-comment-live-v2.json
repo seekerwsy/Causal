@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "gate_c_live_id": "minimal-validation-dev-canary-micro-python-comment-live-qwen7b-v2",
+  "source_plan_dir": "runs/minimal-validation/dev-canary-micro-python-comment-plan-v2",
+  "required_source_plan_contract": {
+    "manifest_sha256": "9e38163e2401d5a0b8ab81bead0c30048bd58bf367f9f84fd6e7a8c40f5664bf",
+    "task_selection_binding_policy": "exact_content_addressed_v1",
+    "seed_assignment_policy": "inherited_gate_a_randomization_v1"
+  },
+  "task_selection_policy": "explicit_dev_canary",
+  "pilot_assignment_id": "assignment_05867d4b65d75f77bf167c465b9807ddfca2210049898c466aa82693c5b2f66e",
+  "expected_assignments": 4,
+  "maximum_generation_provider_attempts": 4,
+  "maximum_functional_judge_provider_attempts": 4,
+  "require_pilot_before_remaining": true,
+  "fail_fast": true,
+  "oracle_coordinate_blinding": true,
+  "zero_finding_interpretation": "profile_scoped_decision",
+  "scientific_claim_allowed": false,
+  "scale_up_allowed": false
+}

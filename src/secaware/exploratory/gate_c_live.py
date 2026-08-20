@@ -121,6 +121,9 @@ _SCALE_UP_AUTHORIZATION_BY_LIVE_ID = {
     "minimal-validation-dev-canary-micro-python-comment-live-qwen7b-v1": (
         "user-approved-minimal-validation-dev-canary-20260820-v1"
     ),
+    "minimal-validation-dev-canary-micro-python-comment-live-qwen7b-v2": (
+        "user-approved-minimal-validation-dev-canary-micro-python-comment-20260821-v2"
+    ),
 }
 _SCALE_UP_AUTHORIZATION_IDS = frozenset(_SCALE_UP_AUTHORIZATION_BY_LIVE_ID.values())
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
