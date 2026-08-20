@@ -75,12 +75,45 @@ def test_gate_c_task_selection_distinguishes_canary_from_frozen_full_population(
         }
     ) == ("all_gate_b_tasks", tuple(held_out))
 
+    development = [f"dev-task-{index:02d}" for index in range(12)]
+    assert gate_c._selected_task_ids(
+        {
+            "task_selection_policy": "explicit_dev_canary",
+            "selected_task_ids": development,
+        }
+    ) == ("explicit_dev_canary", tuple(development))
+
     with pytest.raises(ValueError, match="task selection"):
         gate_c._selected_task_ids(
             {
                 "task_selection_policy": "all_gate_b_tasks",
                 "selected_task_ids": full[:-1],
             }
+        )
+
+
+def test_gate_c_two_arm_protocol_is_strictly_development_only() -> None:
+    development = {
+        "task_selection_policy": "explicit_dev_canary",
+        "arm_roles": ["target_patch", "noop_rewrite"],
+    }
+    assert gate_c._arm_roles(development, task_selection_policy="explicit_dev_canary") == (
+        gate_c.ArmRole.TARGET_PATCH,
+        gate_c.ArmRole.NOOP_REWRITE,
+    )
+    assert (
+        gate_c._arm_roles({}, task_selection_policy="explicit_bounded_canary")
+        == gate_c._LEGACY_ARMS
+    )
+
+    with pytest.raises(ValueError, match="restricted to the development canary"):
+        gate_c._arm_roles(development, task_selection_policy="explicit_bounded_canary")
+    with pytest.raises(ValueError, match="requires the frozen two-arm protocol"):
+        gate_c._arm_roles({}, task_selection_policy="explicit_dev_canary")
+    with pytest.raises(ValueError, match="arm roles"):
+        gate_c._arm_roles(
+            {"arm_roles": ["target_patch", "generic_security_reminder"]},
+            task_selection_policy="explicit_dev_canary",
         )
 
 

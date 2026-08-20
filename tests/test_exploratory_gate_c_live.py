@@ -31,6 +31,35 @@ def test_gate_c_live_accepts_only_the_frozen_full_population_at_scale() -> None:
         gate_c_live._bounded_task_count(204)
 
 
+@pytest.mark.parametrize(("assignments", "tasks"), ((4, 2), (24, 12)))
+def test_gate_c_live_accepts_only_registered_two_arm_development_sizes(
+    assignments: int, tasks: int
+) -> None:
+    assert gate_c_live._bounded_task_count(assignments, "explicit_dev_canary", 2) == tasks
+    with pytest.raises(ValueError, match="assignment count"):
+        gate_c_live._bounded_task_count(assignments, "explicit_dev_canary", 4)
+
+
+def test_gate_c_live_reads_arm_contract_from_plan_report_with_legacy_fallback() -> None:
+    assert gate_c_live._plan_arm_roles({}) == gate_c_live._LEGACY_ARM_ROLES
+    assert (
+        gate_c_live._plan_arm_roles(
+            {
+                "arm_roles": ["target_patch", "noop_rewrite"],
+                "arms_per_task": 2,
+            }
+        )
+        == gate_c_live._DEV_CANARY_ARM_ROLES
+    )
+    with pytest.raises(ValueError, match="arm roles"):
+        gate_c_live._plan_arm_roles(
+            {
+                "arm_roles": ["target_patch", "noop_rewrite"],
+                "arms_per_task": 4,
+            }
+        )
+
+
 @pytest.mark.parametrize("assignments", (0, 4, 9, 24))
 def test_gate_c_live_rejects_unregistered_assignment_count(assignments: int) -> None:
     with pytest.raises(ValueError, match="assignment count"):
@@ -315,6 +344,36 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
         mode="remaining",
         stored_base=frozen_randomized_main,
     )
+
+
+def test_minimal_validation_remaining_authorization_id_is_exact() -> None:
+    stored_base = {
+        "schema_version": "1.0",
+        "gate_c_live_id": "minimal-validation-dev-canary-v1",
+        "task_selection_policy": "explicit_dev_canary",
+        "scale_up_allowed": False,
+        "expected_assignments": 24,
+    }
+    authorized = {
+        **stored_base,
+        "scale_up_allowed": True,
+        "scale_up_authorization_id": ("user-approved-minimal-validation-dev-canary-20260820-v1"),
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+
+    gate_c_live._validate_scale_up_authorization(
+        authorized,
+        mode="remaining",
+        stored_base=stored_base,
+    )
+
+    rejected = {**authorized, "scale_up_authorization_id": "user-approved-minimal-validation"}
+    with pytest.raises(ValueError, match="authorization failed"):
+        gate_c_live._validate_scale_up_authorization(
+            rejected,
+            mode="remaining",
+            stored_base=stored_base,
+        )
 
 
 def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(

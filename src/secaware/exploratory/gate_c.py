@@ -28,11 +28,15 @@ from secaware.schema.experiments import (
 from secaware.schema.records import PromptRecord
 
 _SCHEMA_VERSION = "1.0"
-_ARMS = (
+_LEGACY_ARMS = (
     ArmRole.TARGET_PATCH,
     ArmRole.NOOP_REWRITE,
     ArmRole.LENGTH_MATCHED_PLACEBO,
     ArmRole.GENERIC_SECURITY_REMINDER,
+)
+_DEV_CANARY_ARMS = (
+    ArmRole.TARGET_PATCH,
+    ArmRole.NOOP_REWRITE,
 )
 _ORACLE_UNKNOWN_MODE = "preserve_unknown_coverage"
 _ORACLE_PROFILE_MODE = "profile_scoped_decision"
@@ -41,6 +45,7 @@ _GATE_B_SEMANTIC_MAPPING = "task_arm_target_feature_v1"
 _GATE_B_REVALIDATION_SCHEMA = "revalidation_v1"
 _GATE_B_DIRECT_SCHEMA = "direct_exploratory_v1"
 _TASK_SELECTION_BOUNDED_CANARY = "explicit_bounded_canary"
+_TASK_SELECTION_DEV_CANARY = "explicit_dev_canary"
 _TASK_SELECTION_ALL_GATE_B = "all_gate_b_tasks"
 
 
@@ -72,7 +77,12 @@ def _selected_task_ids(config: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
     policy = config.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY)
     raw = config.get("selected_task_ids")
     if (
-        policy not in {_TASK_SELECTION_BOUNDED_CANARY, _TASK_SELECTION_ALL_GATE_B}
+        policy
+        not in {
+            _TASK_SELECTION_BOUNDED_CANARY,
+            _TASK_SELECTION_DEV_CANARY,
+            _TASK_SELECTION_ALL_GATE_B,
+        }
         or type(raw) is not list
         or any(type(item) is not str or not item for item in raw)
     ):
@@ -81,11 +91,35 @@ def _selected_task_ids(config: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
     valid_size = (
         2 <= len(selected) <= 5
         if policy == _TASK_SELECTION_BOUNDED_CANARY
+        else len(selected) in {2, 12}
+        if policy == _TASK_SELECTION_DEV_CANARY
         else len(selected) in {42, 51}
     )
     if not valid_size or len(set(selected)) != len(selected):
         raise ValueError("Gate C task selection failed validation")
     return str(policy), selected
+
+
+def _arm_roles(config: dict[str, Any], *, task_selection_policy: str) -> tuple[ArmRole, ...]:
+    raw = config.get("arm_roles")
+    if raw is None:
+        roles = _LEGACY_ARMS
+    elif type(raw) is list and all(type(item) is str for item in raw):
+        try:
+            roles = tuple(ArmRole(item) for item in raw)
+        except ValueError:
+            raise ValueError("Gate C arm roles failed validation") from None
+    else:
+        raise ValueError("Gate C arm roles failed validation")
+    if roles == _DEV_CANARY_ARMS:
+        if task_selection_policy != _TASK_SELECTION_DEV_CANARY:
+            raise ValueError("Gate C two-arm protocol is restricted to the development canary")
+    elif roles == _LEGACY_ARMS:
+        if task_selection_policy == _TASK_SELECTION_DEV_CANARY:
+            raise ValueError("Gate C development canary requires the frozen two-arm protocol")
+    else:
+        raise ValueError("Gate C arm roles failed validation")
+    return roles
 
 
 def _canonical(value: object) -> bytes:
@@ -315,6 +349,7 @@ def _build_standard_records(
     gate_b_validations: dict[str, dict[str, Any]],
     source_by_task: dict[str, PromptRecord],
     selected_task_ids: tuple[str, ...],
+    arm_roles: tuple[ArmRole, ...],
     model_id: str,
     randomization_plan_sha256: str,
     extractor_policy_sha256: str,
@@ -323,7 +358,7 @@ def _build_standard_records(
 ) -> tuple[
     tuple[AssignmentRecord, ...], tuple[PromptVariantRecord, ...], tuple[dict[str, object], ...]
 ]:
-    expected_assignments = len(selected_task_ids) * len(_ARMS)
+    expected_assignments = len(selected_task_ids) * len(arm_roles)
     prompt_by_id = {item.prompt_id: item for item in gate_b_prompts}
     provenance_by_variant = {str(item["variant_id"]): item for item in gate_b_provenance}
     provenance_by_coordinate: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -340,7 +375,10 @@ def _build_standard_records(
         str(item["variant_id"]): item for item in gate_b_records if item.get("kind") == "variant"
     }
     selected = tuple(
-        item for item in gate_a_assignments if item.get("task_id") in selected_task_ids
+        item
+        for item in gate_a_assignments
+        if item.get("task_id") in selected_task_ids
+        and item.get("arm_role") in {role.value for role in arm_roles}
     )
     if (
         len(selected) != expected_assignments
@@ -409,7 +447,7 @@ def _build_standard_records(
                     {
                         "gate_c": "v1",
                         "candidate_id": candidate_id,
-                        "arm_roles": [item.value for item in _ARMS],
+                        "arm_roles": [item.value for item in arm_roles],
                     },
                 ),
             },
@@ -500,7 +538,7 @@ def _build_standard_records(
         or len({item.variant_id for item in variants}) != expected_assignments
         or any(
             {item.arm_role for item in assignments if item.experimental_unit.task_id == task_id}
-            != set(_ARMS)
+            != set(arm_roles)
             for task_id in selected_task_ids
         )
     ):
@@ -556,7 +594,8 @@ def plan_gate_c_canary(
     ):
         raise ValueError("Gate C policy failed validation")
     task_selection_policy, selected_task_ids = _selected_task_ids(config)
-    expected_assignments = len(selected_task_ids) * len(_ARMS)
+    arm_roles = _arm_roles(config, task_selection_policy=task_selection_policy)
+    expected_assignments = len(selected_task_ids) * len(arm_roles)
     if any(
         config.get(key) != expected_assignments
         for key in (
@@ -676,6 +715,7 @@ def plan_gate_c_canary(
         gate_b_validations=validations,
         source_by_task=source_by_task,
         selected_task_ids=selected_task_ids,
+        arm_roles=arm_roles,
         model_id=model_id,
         randomization_plan_sha256=sha256_file(gate_a_dir / "assignments.jsonl"),
         extractor_policy_sha256=str(gate_b_report["policy_digests"]["extractor_policy_sha256"]),
@@ -749,6 +789,8 @@ def plan_gate_c_canary(
         "gate_b_variant_mapping_policy": gate_b_mapping_policy,
         "gate_b_artifact_schema": gate_b_artifact_schema,
         "task_selection_policy": task_selection_policy,
+        "arm_roles": [item.value for item in arm_roles],
+        "arms_per_task": len(arm_roles),
         "scientific_claim_allowed": False,
         "scale_up_allowed": False,
         "counts": {

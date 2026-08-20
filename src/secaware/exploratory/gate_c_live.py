@@ -69,6 +69,7 @@ _SCALE_UP_AUTHORIZATION_IDS = frozenset(
         "user-approved-main-prompt-outcome-canary-20260818-v1",
         "user-approved-five-cwe-randomized-discovery-main-20260818-v1",
         "user-approved-five-cwe-held-out-policy-itt-main-20260819-v1",
+        "user-approved-minimal-validation-dev-canary-20260820-v1",
     }
 )
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
@@ -77,25 +78,59 @@ _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
 _ORACLE_UNKNOWN_MODE = "unknown_coverage"
 _ORACLE_PROFILE_MODE = "profile_scoped_decision"
 _TASK_SELECTION_BOUNDED_CANARY = "explicit_bounded_canary"
+_TASK_SELECTION_DEV_CANARY = "explicit_dev_canary"
 _TASK_SELECTION_ALL_GATE_B = "all_gate_b_tasks"
+_LEGACY_ARM_ROLES = (
+    "target_patch",
+    "noop_rewrite",
+    "length_matched_placebo",
+    "generic_security_reminder",
+)
+_DEV_CANARY_ARM_ROLES = ("target_patch", "noop_rewrite")
 
 
 def _bounded_task_count(
     expected_assignments: int,
     task_selection_policy: str = _TASK_SELECTION_BOUNDED_CANARY,
+    arms_per_task: int = 4,
 ) -> int:
-    if expected_assignments % 4 != 0:
+    if arms_per_task not in {2, 4} or expected_assignments % arms_per_task != 0:
         raise ValueError("Gate C live assignment count failed validation")
-    task_count = expected_assignments // 4
+    task_count = expected_assignments // arms_per_task
     if task_selection_policy == _TASK_SELECTION_BOUNDED_CANARY:
-        valid_size = 2 <= task_count <= 5
+        valid_size = arms_per_task == 4 and 2 <= task_count <= 5
+    elif task_selection_policy == _TASK_SELECTION_DEV_CANARY:
+        valid_size = arms_per_task == 2 and task_count in {2, 12}
     elif task_selection_policy == _TASK_SELECTION_ALL_GATE_B:
-        valid_size = task_count in {42, 51}
+        valid_size = arms_per_task == 4 and task_count in {42, 51}
     else:
         valid_size = False
     if not valid_size:
         raise ValueError("Gate C live assignment count failed validation")
     return task_count
+
+
+def _plan_arm_roles(plan_report: dict[str, object]) -> tuple[str, ...]:
+    raw_roles = plan_report.get("arm_roles")
+    raw_count = plan_report.get("arms_per_task")
+    if raw_roles is None and raw_count is None:
+        return _LEGACY_ARM_ROLES
+    if raw_roles is None:
+        if raw_count == 4:
+            roles = _LEGACY_ARM_ROLES
+        elif raw_count == 2:
+            roles = _DEV_CANARY_ARM_ROLES
+        else:
+            roles = ()
+    elif type(raw_roles) is list and all(type(item) is str for item in raw_roles):
+        roles = tuple(raw_roles)
+    else:
+        raise ValueError("Gate C live arm roles failed validation")
+    if roles not in {_LEGACY_ARM_ROLES, _DEV_CANARY_ARM_ROLES} or (
+        raw_count is not None and raw_count != len(roles)
+    ):
+        raise ValueError("Gate C live arm roles failed validation")
+    return roles
 
 
 def _canonical(value: object) -> bytes:
@@ -853,7 +888,12 @@ def run_gate_c_live_canary(
     plan_report = _verify_plan(plan_dir)
     expected = int(live.get("expected_assignments", 0))
     task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
-    task_count = _bounded_task_count(expected, task_selection_policy)
+    arm_roles = _plan_arm_roles(plan_report)
+    task_count = _bounded_task_count(expected, task_selection_policy, len(arm_roles))
+    if (task_selection_policy == _TASK_SELECTION_DEV_CANARY) != (
+        arm_roles == _DEV_CANARY_ARM_ROLES
+    ):
+        raise ValueError("Gate C live development arm protocol failed validation")
     oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
         live.get("schema_version") != _SCHEMA_VERSION
