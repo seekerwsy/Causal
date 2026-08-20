@@ -68,7 +68,7 @@ These directories are ignored by Git but must not be overwritten or deleted.
 
 ## Server layout
 
-- Deployment: `/home/ubuntu/secaware-deployments/minimal-validation-25e42c2-20260820-01`
+- Deployment: `/home/ubuntu/secaware-deployments/minimal-validation-da056b4-20260820-01`
 - Model service record: `/home/ubuntu/secaware-model-services/qwen25-coder-7b-minimal-validation-20260820-01`
 - Micro live run: `/home/ubuntu/secaware-experiments/runs/minimal-validation-qwen7b-2task-20260820-01`
 - Full live run: `/home/ubuntu/secaware-experiments/runs/minimal-validation-qwen7b-12task-20260820-01`
