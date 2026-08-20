@@ -8,12 +8,17 @@ import os
 import platform
 import socket
 import sys
+from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from secaware.config import AppConfig, load_config, write_resolved_config
+from secaware.exploratory.artifact_integrity import (
+    verify_closed_manifest,
+    write_closed_manifest_atomic,
+)
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
 from secaware.generation.request_planner import plan_confirmation_requests
 from secaware.intervention.append_boundary import (
@@ -54,6 +59,10 @@ _GATE_B_DIRECT_SCHEMA = "direct_exploratory_v1"
 _TASK_SELECTION_BOUNDED_CANARY = "explicit_bounded_canary"
 _TASK_SELECTION_DEV_CANARY = "explicit_dev_canary"
 _TASK_SELECTION_ALL_GATE_B = "all_gate_b_tasks"
+_TASK_SELECTION_BINDING_LEGACY = "legacy_unbound_v1"
+_TASK_SELECTION_BINDING_EXACT = "exact_content_addressed_v1"
+_SEED_ASSIGNMENT_INHERITED = "inherited_gate_a_randomization_v1"
+_RNG_VERSION = "sha256-rejection-fisher-yates-v1"
 _EXTRACTOR_REUSE_FRESH = "fresh_only_v1"
 _EXTRACTOR_REUSE_SOURCE_ONLY = "source_exact_reuse_variant_fresh_v1"
 
@@ -131,6 +140,237 @@ def _arm_roles(config: dict[str, Any], *, task_selection_policy: str) -> tuple[A
     return roles
 
 
+def _repo_relative_file(repo_root: Path, raw: object, *, label: str) -> Path:
+    if type(raw) is not str or not raw:
+        raise ValueError(f"{label} failed validation")
+    relative = Path(raw)
+    if relative.is_absolute() or relative.as_posix() != raw:
+        raise ValueError(f"{label} failed validation")
+    path = (repo_root / relative).resolve()
+    try:
+        path.relative_to(repo_root.resolve())
+    except ValueError:
+        raise ValueError(f"{label} failed validation") from None
+    if not path.is_file():
+        raise ValueError(f"{label} failed validation")
+    return path
+
+
+def _validated_task_selection_binding(
+    *,
+    config: Mapping[str, object],
+    repo_root: Path,
+    selected_task_ids: tuple[str, ...],
+    arm_roles: tuple[ArmRole, ...],
+    source_by_task: Mapping[str, PromptRecord],
+) -> dict[str, object]:
+    policy = config.get("task_selection_binding_policy", _TASK_SELECTION_BINDING_LEGACY)
+    if policy == _TASK_SELECTION_BINDING_LEGACY:
+        if any(
+            key in config
+            for key in (
+                "task_selection_path",
+                "task_selection_sha256",
+                "task_selection_authoritative_source_sha256",
+            )
+        ):
+            raise ValueError("Gate C task selection binding failed validation")
+        return {"policy": _TASK_SELECTION_BINDING_LEGACY}
+    if policy != _TASK_SELECTION_BINDING_EXACT:
+        raise ValueError("Gate C task selection binding failed validation")
+
+    selection_path = _repo_relative_file(
+        repo_root,
+        config.get("task_selection_path"),
+        label="Gate C task selection binding",
+    )
+    selection_sha256 = config.get("task_selection_sha256")
+    source_sha256 = config.get("task_selection_authoritative_source_sha256")
+    if (
+        type(selection_sha256) is not str
+        or selection_sha256 != sha256_file(selection_path)
+        or type(source_sha256) is not str
+        or len(source_sha256) != 64
+    ):
+        raise ValueError("Gate C task selection binding failed validation")
+
+    selection = _read_json(selection_path)
+    selection_policy = selection.get("selection_policy")
+    intervention_policy = selection.get("intervention_policy")
+    tasks = selection.get("tasks")
+    if (
+        selection.get("schema_version") != _SCHEMA_VERSION
+        or type(selection.get("selection_id")) is not str
+        or not selection.get("selection_id")
+        or selection.get("scientific_claim_allowed") is not False
+        or not isinstance(selection_policy, Mapping)
+        or not isinstance(intervention_policy, Mapping)
+        or type(tasks) is not list
+        or not tasks
+        or selection_policy.get("language") != "python"
+        or selection_policy.get("require_distinct_task_cluster") is not True
+        or selection_policy.get("outcomes_consulted") is not False
+        or intervention_policy.get("canonical_realization_count") != 1
+        or intervention_policy.get("multi_realization_claim_allowed") is not False
+        or intervention_policy.get("arm_roles") != [item.value for item in arm_roles]
+    ):
+        raise ValueError("Gate C task selection binding failed validation")
+
+    expected_cwes = selection_policy.get("cwes")
+    tasks_per_cwe = selection_policy.get("tasks_per_cwe")
+    if (
+        type(expected_cwes) is not list
+        or len(expected_cwes) < 2
+        or any(type(item) is not str or not item for item in expected_cwes)
+        or len(set(expected_cwes)) != len(expected_cwes)
+        or type(tasks_per_cwe) is not int
+        or tasks_per_cwe < 1
+    ):
+        raise ValueError("Gate C task selection binding failed validation")
+
+    task_ids: list[str] = []
+    task_clusters: list[str] = []
+    task_cwes: list[str] = []
+    for item in tasks:
+        if not isinstance(item, Mapping):
+            raise ValueError("Gate C task selection binding failed validation")
+        task_id = item.get("task_id")
+        task_cluster_id = item.get("task_cluster_id")
+        cwe = item.get("cwe")
+        if (
+            type(task_id) is not str
+            or not task_id
+            or type(task_cluster_id) is not str
+            or not task_cluster_id
+            or type(cwe) is not str
+            or not cwe
+        ):
+            raise ValueError("Gate C task selection binding failed validation")
+        task_ids.append(task_id)
+        task_clusters.append(task_cluster_id)
+        task_cwes.append(cwe)
+    cwe_counts = Counter(task_cwes)
+    if (
+        tuple(task_ids) != selected_task_ids
+        or len(set(task_ids)) != len(task_ids)
+        or len(set(task_clusters)) != len(task_clusters)
+        or set(cwe_counts) != set(expected_cwes)
+        or any(cwe_counts[cwe] != tasks_per_cwe for cwe in expected_cwes)
+        or any(
+            task_id not in source_by_task or source_by_task[task_id].cwe != cwe
+            for task_id, cwe in zip(task_ids, task_cwes, strict=True)
+        )
+    ):
+        raise ValueError("Gate C task selection binding failed validation")
+
+    authoritative_source = _repo_relative_file(
+        repo_root,
+        selection.get("authoritative_source"),
+        label="Gate C task selection authoritative source",
+    )
+    if sha256_file(authoritative_source) != source_sha256:
+        raise ValueError("Gate C task selection authoritative source failed validation")
+    authoritative_records = tuple(
+        read_jsonl(authoritative_source, required=True, allow_empty=False)
+    )
+    authoritative_by_task: dict[str, Mapping[str, object]] = {}
+    for item in authoritative_records:
+        task_id = item.get("task_id")
+        if type(task_id) is not str or not task_id or task_id in authoritative_by_task:
+            raise ValueError("Gate C task selection authoritative source failed validation")
+        authoritative_by_task[task_id] = item
+    if any(
+        task_id not in authoritative_by_task
+        or authoritative_by_task[task_id].get("task_cluster_id") != cluster_id
+        or authoritative_by_task[task_id].get("cwe") != cwe
+        or authoritative_by_task[task_id].get("language") != "python"
+        for task_id, cluster_id, cwe in zip(task_ids, task_clusters, task_cwes, strict=True)
+    ):
+        raise ValueError("Gate C task selection authoritative source failed validation")
+
+    return {
+        "policy": _TASK_SELECTION_BINDING_EXACT,
+        "selection_id": selection["selection_id"],
+        "selection_path": selection_path.relative_to(repo_root.resolve()).as_posix(),
+        "selection_sha256": selection_sha256,
+        "authoritative_source_path": authoritative_source.relative_to(
+            repo_root.resolve()
+        ).as_posix(),
+        "authoritative_source_sha256": source_sha256,
+        "task_count": len(task_ids),
+        "unique_task_cluster_count": len(set(task_clusters)),
+        "task_cluster_counts": dict(sorted(Counter(task_clusters).items())),
+        "cwe_task_counts": {cwe: cwe_counts[cwe] for cwe in expected_cwes},
+    }
+
+
+def _seed_assignment_policy(config: Mapping[str, object]) -> str:
+    policy = config.get("seed_assignment_policy", _SEED_ASSIGNMENT_INHERITED)
+    if policy != _SEED_ASSIGNMENT_INHERITED or config.get("inherit_gate_a_seed_slots") is not True:
+        raise ValueError("Gate C seed assignment policy failed validation")
+    return _SEED_ASSIGNMENT_INHERITED
+
+
+def _validated_inherited_randomization(
+    assignments: tuple[dict[str, Any], ...],
+) -> dict[str, tuple[int, int]]:
+    """Validate and retain Gate A's exact randomized seed coordinates."""
+
+    validated: dict[str, tuple[int, int]] = {}
+    seed_id_by_slot: dict[int, int] = {}
+    seed_slot_by_id: dict[int, int] = {}
+    task_seed_slots: set[tuple[str, int]] = set()
+    for item in assignments:
+        assignment_id = item.get("assignment_id")
+        task_id = item.get("task_id")
+        seed_slot = item.get("seed_slot")
+        seed_id = item.get("seed_id")
+        if (
+            type(assignment_id) is not str
+            or not assignment_id
+            or type(task_id) is not str
+            or not task_id
+            or item.get("rng_version") != _RNG_VERSION
+            or type(seed_slot) is not int
+            or not 0 <= seed_slot <= 99_999
+            or type(seed_id) is not int
+            or not -(2**63) <= seed_id <= 2**63 - 1
+            or assignment_id in validated
+            or (task_id, seed_slot) in task_seed_slots
+            or (seed_slot in seed_id_by_slot and seed_id_by_slot[seed_slot] != seed_id)
+            or (seed_id in seed_slot_by_id and seed_slot_by_id[seed_id] != seed_slot)
+        ):
+            raise ValueError("Gate C inherited randomization failed validation")
+        validated[assignment_id] = (seed_slot, seed_id)
+        task_seed_slots.add((task_id, seed_slot))
+        seed_id_by_slot[seed_slot] = seed_id
+        seed_slot_by_id[seed_id] = seed_slot
+    return validated
+
+
+def _validate_gate_b_selection_binding(
+    *,
+    gate_b_report: Mapping[str, object],
+    task_selection_binding: Mapping[str, object],
+) -> None:
+    if task_selection_binding.get("policy") == _TASK_SELECTION_BINDING_LEGACY:
+        return
+    strict = gate_b_report.get("strict_selection_contract")
+    if not isinstance(strict, Mapping) or strict != {
+        "policy_version": "strict_selection_manifest_v1",
+        "selection_id": task_selection_binding.get("selection_id"),
+        "manifest_path": task_selection_binding.get("selection_path"),
+        "manifest_sha256": task_selection_binding.get("selection_sha256"),
+        "task_count": task_selection_binding.get("task_count"),
+        "cwe_counts": task_selection_binding.get("cwe_task_counts"),
+        "unique_cluster_count": task_selection_binding.get("unique_task_cluster_count"),
+        "cluster_counts": task_selection_binding.get("task_cluster_counts"),
+        "outcomes_consulted": False,
+        "scientific_claim_allowed": False,
+    }:
+        raise ValueError("Gate C Gate B task selection binding failed validation")
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value,
@@ -168,37 +408,7 @@ def _id(prefix: str, value: object) -> str:
 
 
 def _verify_closed_manifest(root: Path) -> None:
-    manifest = _read_json(root / "artifact-manifest.json")
-    entries = manifest.get("files")
-    if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
-        raise ValueError("Gate C upstream manifest failed validation")
-    expected: set[str] = set()
-    for item in entries:
-        if type(item) is not dict or type(item.get("path")) is not str:
-            raise ValueError("Gate C upstream manifest failed validation")
-        relative = Path(str(item["path"]))
-        normalized = relative.as_posix()
-        path = (root / relative).resolve()
-        try:
-            path.relative_to(root.resolve())
-        except ValueError:
-            raise ValueError("Gate C upstream manifest failed validation") from None
-        if (
-            relative.is_absolute()
-            or normalized != item["path"]
-            or normalized in expected
-            or not path.is_file()
-            or sha256_file(path) != item.get("sha256")
-        ):
-            raise ValueError("Gate C upstream manifest failed validation")
-        expected.add(normalized)
-    actual = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.name != "artifact-manifest.json"
-    }
-    if expected != actual:
-        raise ValueError("Gate C upstream manifest closure failed validation")
+    verify_closed_manifest(root / "artifact-manifest.json", label="Gate C upstream")
 
 
 def _validations(
@@ -228,7 +438,6 @@ def _direct_gate_b_records(
     tuple[dict[str, Any], ...],
     dict[str, dict[str, Any]],
 ]:
-    _verify_closed_manifest(gate_b_dir)
     direct = tuple(read_jsonl(gate_b_dir / "llm-variants.jsonl", required=True, allow_empty=False))
     direct_by_variant: dict[str, dict[str, Any]] = {}
     for item in direct:
@@ -539,11 +748,14 @@ def _build_standard_records(
         or len({str(item["assignment_id"]) for item in selected}) != expected_assignments
     ):
         raise ValueError("Gate C inherited assignment coverage failed validation")
+    inherited_randomization = _validated_inherited_randomization(selected)
     variants: list[PromptVariantRecord] = []
     assignments: list[AssignmentRecord] = []
     mappings: list[dict[str, object]] = []
     coordinate_by_task: dict[str, dict[str, str]] = {}
     for inherited in selected:
+        inherited_assignment_id = str(inherited["assignment_id"])
+        seed_slot, seed_id = inherited_randomization[inherited_assignment_id]
         task_id = str(inherited["task_id"])
         gate_a_variant_id = str(inherited["variant_id"])
         candidate_id = str(inherited["candidate_id"])
@@ -648,7 +860,7 @@ def _build_standard_records(
             hypothesis_id=coordinates["hypothesis_id"],
             target_spec_id=coordinates["target_spec_id"],
             model_id=model_id,
-            seed_slot=int(inherited["seed_slot"]),
+            seed_slot=seed_slot,
         )
         assignment = AssignmentRecord.from_content(
             block_id=AssignmentRecord.block_id_from_key(
@@ -665,10 +877,16 @@ def _build_standard_records(
             protocol_instance_id=coordinates["protocol_instance_id"],
             variant_id=standard_variant.variant_id,
             arm_role=role,
-            seed_id=int(inherited["seed_id"]),
-            rng_version="sha256-rejection-fisher-yates-v1",
+            seed_id=seed_id,
+            rng_version=_RNG_VERSION,
             randomization_plan_sha256=randomization_plan_sha256,
         )
+        if (
+            unit.seed_slot != inherited["seed_slot"]
+            or assignment.seed_id != inherited["seed_id"]
+            or assignment.rng_version != inherited["rng_version"]
+        ):
+            raise ValueError("Gate C inherited randomization failed validation")
         variants.append(standard_variant)
         assignments.append(assignment)
         mappings.append(
@@ -676,7 +894,7 @@ def _build_standard_records(
                 "schema_version": _SCHEMA_VERSION,
                 "task_id": task_id,
                 "arm_role": role.value,
-                "gate_a_assignment_id": inherited["assignment_id"],
+                "gate_a_assignment_id": inherited_assignment_id,
                 "gate_a_variant_id": gate_a_variant_id,
                 "gate_b_variant_id": exploratory_variant_id,
                 "assignment_id": assignment.assignment_id,
@@ -733,7 +951,6 @@ def plan_gate_c_canary(
     gate_b_artifact_schema = _gate_b_artifact_schema(config)
     if (
         config.get("schema_version") != _SCHEMA_VERSION
-        or config.get("inherit_gate_a_seed_slots") is not True
         or config.get("require_gate_b_pass") is not True
         or config.get("scientific_claim_allowed") is not False
         or config.get("scale_up_allowed") is not False
@@ -749,6 +966,7 @@ def plan_gate_c_canary(
         raise ValueError("Gate C policy failed validation")
     task_selection_policy, selected_task_ids = _selected_task_ids(config)
     arm_roles = _arm_roles(config, task_selection_policy=task_selection_policy)
+    seed_assignment_policy = _seed_assignment_policy(config)
     expected_assignments = len(selected_task_ids) * len(arm_roles)
     if any(
         config.get(key) != expected_assignments
@@ -765,6 +983,10 @@ def plan_gate_c_canary(
     contracts_path = (repo_root / str(config["functional_contracts_path"])).resolve()
     for path in (gate_a_dir, gate_b_dir, contracts_path):
         path.relative_to(repo_root)
+    _verify_closed_manifest(gate_a_dir)
+    _verify_closed_manifest(gate_b_dir)
+    gate_a_manifest_sha256 = sha256_file(gate_a_dir / "artifact-manifest.json")
+    gate_b_manifest_sha256 = sha256_file(gate_b_dir / "artifact-manifest.json")
     gate_a_report = _read_json(gate_a_dir / "report.json")
     gate_b_report = _read_json(gate_b_dir / "report.json")
     expected_gate_b_status = (
@@ -802,6 +1024,17 @@ def plan_gate_c_canary(
         )
     ):
         raise ValueError("Gate C task selection failed validation")
+    task_selection_binding = _validated_task_selection_binding(
+        config=config,
+        repo_root=repo_root,
+        selected_task_ids=selected_task_ids,
+        arm_roles=arm_roles,
+        source_by_task=source_by_task,
+    )
+    _validate_gate_b_selection_binding(
+        gate_b_report=gate_b_report,
+        task_selection_binding=task_selection_binding,
+    )
     if gate_b_artifact_schema == _GATE_B_DIRECT_SCHEMA:
         prompts, provenance, records, validations = _direct_gate_b_records(
             gate_b_dir,
@@ -862,6 +1095,8 @@ def plan_gate_c_canary(
     ):
         raise ValueError("Gate C functional contract coverage failed validation")
     model_id = app_config.generation.models[0]
+    gate_a_assignments_sha256 = sha256_file(gate_a_dir / "assignments.jsonl")
+    randomization_plan_sha256 = gate_a_assignments_sha256
     assignments, variants, mappings = _build_standard_records(
         gate_a_assignments=gate_a_assignments,
         gate_b_prompts=prompts,
@@ -872,7 +1107,7 @@ def plan_gate_c_canary(
         selected_task_ids=selected_task_ids,
         arm_roles=arm_roles,
         model_id=model_id,
-        randomization_plan_sha256=sha256_file(gate_a_dir / "assignments.jsonl"),
+        randomization_plan_sha256=randomization_plan_sha256,
         extractor_policy_sha256=str(gate_b_report["policy_digests"]["extractor_policy_sha256"]),
         gate_b_mapping_policy=gate_b_mapping_policy,
         target_feature_by_candidate=target_feature_by_candidate,
@@ -944,6 +1179,10 @@ def plan_gate_c_canary(
         "gate_b_variant_mapping_policy": gate_b_mapping_policy,
         "gate_b_artifact_schema": gate_b_artifact_schema,
         "task_selection_policy": task_selection_policy,
+        "task_selection_binding": task_selection_binding,
+        "seed_assignment_policy": seed_assignment_policy,
+        "same_seed_within_task": False,
+        "arm_seed_distribution_balanced": False,
         "arm_roles": [item.value for item in arm_roles],
         "arms_per_task": len(arm_roles),
         "scientific_claim_allowed": False,
@@ -979,28 +1218,22 @@ def plan_gate_c_canary(
         "input_digests": {
             "gate_c_config_sha256": sha256_file(gate_c_config_path),
             "app_config_sha256": sha256_file(app_config_path),
-            "gate_a_assignments_sha256": sha256_file(gate_a_dir / "assignments.jsonl"),
+            "gate_a_manifest_sha256": gate_a_manifest_sha256,
+            "gate_a_assignments_sha256": gate_a_assignments_sha256,
+            "gate_b_manifest_sha256": gate_b_manifest_sha256,
+            "randomization_plan_sha256": randomization_plan_sha256,
             "gate_b_report_sha256": sha256_file(gate_b_dir / "report.json"),
             "gate_b_variants_sha256": sha256_file(gate_b_variants_path),
             "functional_contracts_sha256": sha256_file(contracts_path),
             "oracle_policy_sha256": policy.combined_sha256,
+            "task_selection_sha256": task_selection_binding.get("selection_sha256"),
+            "task_selection_authoritative_source_sha256": task_selection_binding.get(
+                "authoritative_source_sha256"
+            ),
         },
     }
     _write_json(output_dir / "report.json", report)
-    files = sorted(path for path in output_dir.rglob("*") if path.is_file())
-    _write_json(
-        output_dir / "artifact-manifest.json",
-        {
-            "schema_version": _SCHEMA_VERSION,
-            "files": [
-                {
-                    "path": path.relative_to(output_dir).as_posix(),
-                    "sha256": sha256_file(path),
-                }
-                for path in files
-            ],
-        },
-    )
+    write_closed_manifest_atomic(output_dir, label="Gate C plan")
     return report
 
 

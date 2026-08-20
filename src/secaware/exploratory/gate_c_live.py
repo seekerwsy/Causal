@@ -20,6 +20,11 @@ from pydantic import BaseModel
 
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.exploratory.artifact_integrity import (
+    verify_closed_manifest,
+    write_closed_manifest_atomic,
+    write_json_atomic_exclusive,
+)
 from secaware.functional_judge.factory import create_functional_judge
 from secaware.functional_judge.schema import (
     ProgramFunctionalOutcomeRecord,
@@ -61,17 +66,63 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 _SCHEMA_VERSION = "1.0"
 _Mode = Literal["validate", "pilot", "remaining"]
-_SCALE_UP_AUTHORIZATION_SCOPE = "remaining_assignments_only"
-_SCALE_UP_AUTHORIZATION_IDS = frozenset(
-    {
-        "user-approved-remaining-20260817-v1",
-        "user-approved-five-cwe-outcome-pilot-20260818-v1",
-        "user-approved-main-prompt-outcome-canary-20260818-v1",
-        "user-approved-five-cwe-randomized-discovery-main-20260818-v1",
-        "user-approved-five-cwe-held-out-policy-itt-main-20260819-v1",
-        "user-approved-minimal-validation-dev-canary-20260820-v1",
-    }
+_TASK_SELECTION_BINDING_EXACT = "exact_content_addressed_v1"
+_SEED_ASSIGNMENT_INHERITED = "inherited_gate_a_randomization_v1"
+_REQUIRED_SOURCE_PLAN_CONTRACT_KEYS = frozenset(
+    {"manifest_sha256", "task_selection_binding_policy", "seed_assignment_policy"}
 )
+_SCALE_UP_AUTHORIZATION_SCOPE = "remaining_assignments_only"
+_AUTHORIZATION_RECEIPT_NAME = "authorization-receipt-remaining.json"
+_REMAINING_LIVE_CONFIG_NAME = "live-config-remaining.json"
+_REMAINING_INPUT_PROVENANCE_NAME = "input-provenance-remaining.json"
+_SCALE_UP_AUTHORIZATION_BY_LIVE_ID = {
+    "randomized-exploratory-gate-c-live-cwe78-cwe89-qwen25-coder-7b-v1": (
+        "user-approved-remaining-20260817-v1"
+    ),
+    "randomized-exploratory-gate-c-live-cwe78-cwe89-phi4-14b-v1": (
+        "user-approved-remaining-20260817-v1"
+    ),
+    "randomized-exploratory-gate-c-live-cwe78-cwe89-qwen25-coder-7b-v2-protocol-repair": (
+        "user-approved-remaining-20260817-v1"
+    ),
+    "randomized-exploratory-gate-c-live-cwe78-cwe89-phi4-14b-v2-protocol-repair": (
+        "user-approved-remaining-20260817-v1"
+    ),
+    "randomized-exploratory-gate-c-live-five-cwe-qwen25-coder-7b-v1": (
+        "user-approved-five-cwe-outcome-pilot-20260818-v1"
+    ),
+    "gate-c-main-prompt-canary-live-qwen25-coder-7b-v1": (
+        "user-approved-main-prompt-outcome-canary-20260818-v1"
+    ),
+    "gate-c-main-prompt-canary-live-phi4-14b-v1": (
+        "user-approved-main-prompt-outcome-canary-20260818-v1"
+    ),
+    "randomized-discovery-gate-c-main-live-qwen7b-v1": (
+        "user-approved-five-cwe-randomized-discovery-main-20260818-v1"
+    ),
+    "randomized-discovery-gate-c-main-live-phi14b-v1": (
+        "user-approved-five-cwe-randomized-discovery-main-20260818-v1"
+    ),
+    "five-cwe-held-out-policy-itt-gate-c-live-qwen7b-v1": (
+        "user-approved-five-cwe-held-out-policy-itt-main-20260819-v1"
+    ),
+    "five-cwe-held-out-policy-itt-gate-c-live-phi14b-v1": (
+        "user-approved-five-cwe-held-out-policy-itt-main-20260819-v1"
+    ),
+    "minimal-validation-dev-canary-full-live-qwen7b-v1": (
+        "user-approved-minimal-validation-dev-canary-20260820-v1"
+    ),
+    "minimal-validation-dev-canary-full-python-comment-live-qwen7b-v1": (
+        "user-approved-minimal-validation-dev-canary-20260820-v1"
+    ),
+    "minimal-validation-dev-canary-micro-live-qwen7b-v1": (
+        "user-approved-minimal-validation-dev-canary-20260820-v1"
+    ),
+    "minimal-validation-dev-canary-micro-python-comment-live-qwen7b-v1": (
+        "user-approved-minimal-validation-dev-canary-20260820-v1"
+    ),
+}
+_SCALE_UP_AUTHORIZATION_IDS = frozenset(_SCALE_UP_AUTHORIZATION_BY_LIVE_ID.values())
 _SCALE_UP_AUTHORIZATION_KEYS = frozenset(
     {"scale_up_authorization_id", "scale_up_authorization_scope"}
 )
@@ -411,38 +462,49 @@ def _environment() -> dict[str, object]:
 
 
 def _verify_plan(plan_dir: Path) -> dict[str, object]:
-    manifest = _read_json(plan_dir / "artifact-manifest.json")
-    entries = manifest.get("files")
-    if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
-        raise ValueError("Gate C plan manifest failed validation")
-    expected: set[str] = set()
-    for raw in entries:
-        if type(raw) is not dict or type(raw.get("path")) is not str:
-            raise ValueError("Gate C plan manifest failed validation")
-        relative = Path(str(raw["path"]))
-        path = (plan_dir / relative).resolve()
-        path.relative_to(plan_dir.resolve())
-        if (
-            relative.as_posix() in expected
-            or not path.is_file()
-            or sha256_file(path) != raw.get("sha256")
-        ):
-            raise ValueError("Gate C plan manifest failed validation")
-        expected.add(relative.as_posix())
-    actual = {
-        path.relative_to(plan_dir).as_posix()
-        for path in plan_dir.rglob("*")
-        if path.is_file() and path.name != "artifact-manifest.json"
-    }
-    if expected != actual:
-        raise ValueError("Gate C plan manifest closure failed validation")
+    verify_closed_manifest(plan_dir / "artifact-manifest.json", label="Gate C plan")
     report = _read_json(plan_dir / "report.json")
     if (
         report.get("status") != "GATE_C_PLAN_COMPLETE"
         or report.get("provider_calls_allowed") is not False
         or report.get("oracle_execution_allowed") is not False
+        or report.get("scientific_claim_allowed") is not False
     ):
         raise ValueError("Gate C source plan failed validation")
+    binding = report.get("task_selection_binding")
+    if binding is not None and type(binding) is not dict:
+        raise ValueError("Gate C source plan selection binding failed validation")
+    if type(binding) is dict:
+        binding_policy = binding.get("policy")
+        if binding_policy == _TASK_SELECTION_BINDING_EXACT:
+            if (
+                type(binding.get("selection_id")) is not str
+                or type(binding.get("selection_sha256")) is not str
+                or len(binding["selection_sha256"]) != 64
+                or type(binding.get("task_count")) is not int
+                or binding.get("task_count", 0) <= 0
+                or type(binding.get("unique_task_cluster_count")) is not int
+                or binding.get("unique_task_cluster_count") != binding.get("task_count")
+                or type(binding.get("task_cluster_counts")) is not dict
+                or len(binding.get("task_cluster_counts", {}))
+                != binding.get("unique_task_cluster_count")
+                or any(
+                    type(cluster_id) is not str or not cluster_id or count != 1
+                    for cluster_id, count in binding.get("task_cluster_counts", {}).items()
+                )
+                or type(binding.get("cwe_task_counts")) is not dict
+                or any(
+                    type(cwe) is not str or not cwe or type(count) is not int or count <= 0
+                    for cwe, count in binding.get("cwe_task_counts", {}).items()
+                )
+                or sum(binding["cwe_task_counts"].values()) != binding.get("task_count")
+                or report.get("seed_assignment_policy") != _SEED_ASSIGNMENT_INHERITED
+                or report.get("same_seed_within_task") is not False
+                or report.get("arm_seed_distribution_balanced") is not False
+            ):
+                raise ValueError("Gate C source plan selection binding failed validation")
+        elif binding_policy != "legacy_unbound_v1":
+            raise ValueError("Gate C source plan selection binding failed validation")
     return report
 
 
@@ -693,57 +755,11 @@ def _safe_error(error: BaseException, stage: str) -> dict[str, object]:
 
 
 def _unit_manifest(unit_dir: Path) -> None:
-    files = sorted(path for path in unit_dir.rglob("*") if path.is_file())
-    _write_json(
-        unit_dir / "artifact-manifest.json",
-        {
-            "schema_version": _SCHEMA_VERSION,
-            "files": [
-                {
-                    "path": path.relative_to(unit_dir).as_posix(),
-                    "sha256": sha256_file(path),
-                }
-                for path in files
-            ],
-        },
-    )
+    write_closed_manifest_atomic(unit_dir, label="Gate C live unit")
 
 
 def _verify_unit_manifest(unit_dir: Path) -> dict[str, object]:
-    manifest_path = unit_dir / "artifact-manifest.json"
-    manifest = _read_json(manifest_path)
-    entries = manifest.get("files")
-    if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
-        raise ValueError("Gate C live unit manifest failed validation")
-    expected: set[str] = set()
-    root = unit_dir.resolve()
-    for item in entries:
-        if type(item) is not dict or type(item.get("path")) is not str:
-            raise ValueError("Gate C live unit manifest failed validation")
-        relative = Path(str(item["path"]))
-        normalized = relative.as_posix()
-        path = (unit_dir / relative).resolve()
-        try:
-            path.relative_to(root)
-        except ValueError:
-            raise ValueError("Gate C live unit manifest failed validation") from None
-        if (
-            relative.is_absolute()
-            or normalized != item["path"]
-            or normalized in expected
-            or not path.is_file()
-            or sha256_file(path) != item.get("sha256")
-        ):
-            raise ValueError("Gate C live unit manifest failed validation")
-        expected.add(normalized)
-    actual = {
-        path.relative_to(unit_dir).as_posix()
-        for path in unit_dir.rglob("*")
-        if path.is_file() and path.name != "artifact-manifest.json"
-    }
-    if expected != actual:
-        raise ValueError("Gate C live unit manifest closure failed validation")
-    return manifest
+    return verify_closed_manifest(unit_dir / "artifact-manifest.json", label="Gate C live unit")
 
 
 def _completed_assignments(output_dir: Path) -> tuple[set[str], set[str]]:
@@ -813,12 +829,19 @@ def _validate_scale_up_authorization(
         ):
             raise ValueError("Gate C live scale-up authorization failed validation")
         return
+    gate_c_live_id = live.get("gate_c_live_id")
+    expected_authorization_id = (
+        _SCALE_UP_AUTHORIZATION_BY_LIVE_ID.get(gate_c_live_id)
+        if type(gate_c_live_id) is str
+        else None
+    )
     if (
         stored_base is None
         or stored_base.get("scale_up_allowed") is not False
         or any(key in stored_base for key in _SCALE_UP_AUTHORIZATION_KEYS)
         or live.get("scale_up_allowed") is not True
-        or live.get("scale_up_authorization_id") not in _SCALE_UP_AUTHORIZATION_IDS
+        or expected_authorization_id is None
+        or live.get("scale_up_authorization_id") != expected_authorization_id
         or live.get("scale_up_authorization_scope") != _SCALE_UP_AUTHORIZATION_SCOPE
     ):
         raise ValueError("Gate C live scale-up authorization failed validation")
@@ -828,6 +851,484 @@ def _validate_scale_up_authorization(
     normalized["scale_up_allowed"] = False
     if normalized != stored_base:
         raise ValueError("Gate C live scale-up authorization changed the frozen pilot config")
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validate_required_source_plan_contract(
+    live: dict[str, Any],
+    *,
+    plan_report: dict[str, object],
+    source_plan_manifest_sha256: str,
+) -> None:
+    contract = live.get("required_source_plan_contract")
+    if contract is None:
+        return
+    binding = plan_report.get("task_selection_binding")
+    binding_policy = binding.get("policy") if type(binding) is dict else None
+    if (
+        type(contract) is not dict
+        or set(contract) != _REQUIRED_SOURCE_PLAN_CONTRACT_KEYS
+        or not _is_sha256(contract.get("manifest_sha256"))
+        or contract.get("task_selection_binding_policy") != _TASK_SELECTION_BINDING_EXACT
+        or contract.get("seed_assignment_policy") != _SEED_ASSIGNMENT_INHERITED
+        or not _is_sha256(source_plan_manifest_sha256)
+        or contract.get("manifest_sha256") != source_plan_manifest_sha256
+        or binding_policy != contract.get("task_selection_binding_policy")
+        or plan_report.get("seed_assignment_policy") != contract.get("seed_assignment_policy")
+    ):
+        raise ValueError("Gate C live required source plan contract failed validation")
+
+
+def _content_addressed_payload(
+    payload: dict[str, object], *, id_key: str, prefix: str
+) -> dict[str, object]:
+    if id_key in payload:
+        raise ValueError("Gate C live content-address input failed validation")
+    result = dict(payload)
+    result[id_key] = f"{prefix}{hashlib.sha256(_canonical(payload)).hexdigest()}"
+    return result
+
+
+def _authorization_receipt_payload(
+    *,
+    live: dict[str, Any],
+    source_plan_id: str,
+    source_plan_manifest_sha256: str,
+    app_config_id: str,
+    app_config_sha256: str,
+    base_live_config_sha256: str,
+    pilot_snapshot_id: str,
+    pilot_snapshot_sha256: str,
+    authorized_assignment_ids: tuple[str, ...],
+) -> dict[str, object]:
+    gate_c_live_id = live.get("gate_c_live_id")
+    authorization_id = live.get("scale_up_authorization_id")
+    pilot_assignment_id = live.get("pilot_assignment_id")
+    authorized = tuple(sorted(authorized_assignment_ids))
+    if (
+        type(gate_c_live_id) is not str
+        or not gate_c_live_id
+        or _SCALE_UP_AUTHORIZATION_BY_LIVE_ID.get(gate_c_live_id) != authorization_id
+        or live.get("scale_up_authorization_scope") != _SCALE_UP_AUTHORIZATION_SCOPE
+        or type(source_plan_id) is not str
+        or not source_plan_id
+        or type(app_config_id) is not str
+        or not app_config_id
+        or type(pilot_assignment_id) is not str
+        or not pilot_assignment_id
+        or type(pilot_snapshot_id) is not str
+        or not pilot_snapshot_id
+        or authorized != authorized_assignment_ids
+        or not authorized
+        or len(set(authorized)) != len(authorized)
+        or any(type(item) is not str or not item for item in authorized)
+        or pilot_assignment_id in authorized
+        or not all(
+            _is_sha256(value)
+            for value in (
+                source_plan_manifest_sha256,
+                app_config_sha256,
+                base_live_config_sha256,
+                pilot_snapshot_sha256,
+            )
+        )
+    ):
+        raise ValueError("Gate C live authorization receipt input failed validation")
+    authorized_digest = hashlib.sha256(_canonical(list(authorized))).hexdigest()
+    count = len(authorized)
+    payload: dict[str, object] = {
+        "schema_version": _SCHEMA_VERSION,
+        "receipt_version": "gate_c_live_remaining_authorization_v2",
+        "status": "AUTHORIZED",
+        "scientific_claim_allowed": False,
+        "gate_c_live_id": gate_c_live_id,
+        "scale_up_authorization_id": authorization_id,
+        "scale_up_authorization_scope": _SCALE_UP_AUTHORIZATION_SCOPE,
+        "source_plan": {
+            "id": source_plan_id,
+            "manifest_sha256": source_plan_manifest_sha256,
+        },
+        "app_config": {"id": app_config_id, "sha256": app_config_sha256},
+        "base_live_config": {
+            "id": f"{gate_c_live_id}:pilot-base-v1",
+            "sha256": base_live_config_sha256,
+        },
+        "pilot": {
+            "assignment_id": pilot_assignment_id,
+            "phase_snapshot_id": pilot_snapshot_id,
+            "phase_snapshot_sha256": pilot_snapshot_sha256,
+        },
+        "authorized_assignment_ids": list(authorized),
+        "authorized_assignment_ids_sha256": authorized_digest,
+        "typed_budgets": {
+            "generation_provider_attempts": {
+                "unit": "provider_attempts",
+                "maximum": count,
+            },
+            "functional_judge_provider_attempts": {
+                "unit": "provider_attempts",
+                "maximum": count,
+            },
+            "oracle_executions": {"unit": "executions", "maximum": count},
+        },
+    }
+    return _content_addressed_payload(
+        payload,
+        id_key="authorization_receipt_id",
+        prefix="gate_c_live_authorization_receipt_",
+    )
+
+
+def _verify_authorization_receipt(
+    receipt: dict[str, Any],
+    **expected_inputs: Any,
+) -> dict[str, object]:
+    expected = _authorization_receipt_payload(**expected_inputs)
+    if receipt != expected:
+        raise ValueError("Gate C live authorization receipt failed validation")
+    budgets = receipt.get("typed_budgets")
+    if type(budgets) is not dict or any(
+        type(item) is not dict or type(item.get("maximum")) is not int or item["maximum"] <= 0
+        for item in budgets.values()
+    ):
+        raise ValueError("Gate C live authorization receipt budget failed validation")
+    return receipt
+
+
+def _load_or_create_authorization_receipt(
+    output_dir: Path,
+    *,
+    allow_create: bool,
+    expected_inputs: dict[str, Any],
+) -> tuple[Path, dict[str, object]]:
+    path = output_dir / _AUTHORIZATION_RECEIPT_NAME
+    expected = _authorization_receipt_payload(**expected_inputs)
+    if path.exists():
+        return path, _verify_authorization_receipt(_read_json(path), **expected_inputs)
+    if not allow_create:
+        raise FileNotFoundError("Gate C live durable authorization receipt is missing")
+    write_json_atomic_exclusive(path, expected)
+    return path, _verify_authorization_receipt(_read_json(path), **expected_inputs)
+
+
+def _write_or_verify_durable_json(
+    path: Path,
+    payload: dict[str, object],
+    *,
+    allow_create: bool,
+    label: str,
+) -> None:
+    if path.exists():
+        if _read_json(path) != payload:
+            raise ValueError(f"Gate C live durable {label} failed validation")
+        return
+    if not allow_create:
+        raise FileNotFoundError(f"Gate C live durable {label} is missing")
+    write_json_atomic_exclusive(path, payload)
+
+
+def _path_id(repo_root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def _pilot_phase_snapshot_payload(
+    output_dir: Path,
+    *,
+    live: dict[str, Any],
+    source_plan_manifest_sha256: str,
+    app_config_id: str,
+    app_config_sha256: str,
+    base_live_config_sha256: str,
+) -> dict[str, object]:
+    pilot_id = live.get("pilot_assignment_id")
+    gate_c_live_id = live.get("gate_c_live_id")
+    phase_dir = output_dir / "phases" / "phase-001-pilot"
+    phase_report = _read_json(phase_dir / "report.json")
+    root_report = _read_json(output_dir / "report-pilot.json")
+    selection = _read_json(phase_dir / "selection.json")
+    counts = phase_report.get("counts")
+    unit_manifest = output_dir / "units" / str(pilot_id) / "artifact-manifest.json"
+    _verify_unit_manifest(unit_manifest.parent)
+    if (
+        type(gate_c_live_id) is not str
+        or not gate_c_live_id
+        or type(pilot_id) is not str
+        or not pilot_id
+        or not all(
+            _is_sha256(value)
+            for value in (
+                source_plan_manifest_sha256,
+                app_config_sha256,
+                base_live_config_sha256,
+            )
+        )
+        or selection.get("mode") != "pilot"
+        or selection.get("assignment_ids") != [pilot_id]
+        or phase_report != root_report
+        or phase_report.get("phase") != "pilot"
+        or phase_report.get("status") != "GATE_C_LIVE_PARTIAL"
+        or phase_report.get("scientific_claim_allowed") is not False
+        or type(counts) is not dict
+        or counts.get("completed") != 1
+        or counts.get("errors") != 0
+        or phase_report.get("completed_assignment_ids") != [pilot_id]
+        or phase_report.get("failed_assignment_ids") != []
+    ):
+        raise ValueError("Gate C live pilot phase snapshot failed validation")
+    payload: dict[str, object] = {
+        "schema_version": _SCHEMA_VERSION,
+        "snapshot_version": "gate_c_live_pilot_phase_v1",
+        "status": "GATE_C_LIVE_PILOT_COMPLETE",
+        "scientific_claim_allowed": False,
+        "gate_c_live_id": gate_c_live_id,
+        "source_plan": {
+            "id": str(live.get("source_plan_dir")),
+            "manifest_sha256": source_plan_manifest_sha256,
+        },
+        "app_config": {"id": app_config_id, "sha256": app_config_sha256},
+        "base_live_config": {
+            "id": f"{gate_c_live_id}:pilot-base-v1",
+            "sha256": base_live_config_sha256,
+        },
+        "pilot_assignment_id": pilot_id,
+        "artifacts": {
+            "selection_sha256": sha256_file(phase_dir / "selection.json"),
+            "phase_report_sha256": sha256_file(phase_dir / "report.json"),
+            "root_report_sha256": sha256_file(output_dir / "report-pilot.json"),
+            "unit_manifest_sha256": sha256_file(unit_manifest),
+        },
+    }
+    return _content_addressed_payload(
+        payload,
+        id_key="pilot_phase_snapshot_id",
+        prefix="gate_c_live_pilot_snapshot_",
+    )
+
+
+def _write_pilot_phase_snapshot(
+    output_dir: Path,
+    **expected_inputs: Any,
+) -> dict[str, object]:
+    payload = _pilot_phase_snapshot_payload(output_dir, **expected_inputs)
+    path = output_dir / "phases" / "phase-001-pilot" / "phase-snapshot.json"
+    write_json_atomic_exclusive(path, payload)
+    return payload
+
+
+def _verify_pilot_phase_snapshot(
+    output_dir: Path,
+    **expected_inputs: Any,
+) -> dict[str, object]:
+    path = output_dir / "phases" / "phase-001-pilot" / "phase-snapshot.json"
+    observed = _read_json(path)
+    expected = _pilot_phase_snapshot_payload(output_dir, **expected_inputs)
+    if observed != expected:
+        raise ValueError("Gate C live pilot phase snapshot failed validation")
+    return observed
+
+
+def _root_relative_artifact_path(root: Path, path: Path, *, label: str) -> str:
+    root = root.resolve()
+    resolved = path.resolve()
+    try:
+        relative = resolved.relative_to(root).as_posix()
+    except ValueError:
+        raise ValueError(f"Gate C live {label} escaped final root") from None
+    if not resolved.is_file() or not relative or relative != Path(relative).as_posix():
+        raise ValueError(f"Gate C live {label} path failed validation")
+    return relative
+
+
+def _finalize_live_root(
+    output_dir: Path,
+    *,
+    live: dict[str, Any],
+    summary: dict[str, object],
+    expected_assignment_ids: tuple[str, ...],
+    source_plan_manifest_sha256: str,
+    app_config_sha256: str,
+    base_live_config_sha256: str,
+    pilot_snapshot: dict[str, object],
+    authorization_receipt_path: Path,
+    authorization_receipt_inputs: dict[str, Any],
+    phase_report_path: Path,
+    root_report_path: Path,
+) -> dict[str, object]:
+    completed = tuple(summary.get("completed_assignment_ids", ()))
+    counts = summary.get("counts")
+    normalized_expected = tuple(sorted(expected_assignment_ids))
+    if (
+        summary.get("status") != "GATE_C_LIVE_COMPLETE"
+        or summary.get("phase") != "remaining"
+        or summary.get("scientific_claim_allowed") is not False
+        or type(counts) is not dict
+        or not normalized_expected
+        or len(set(normalized_expected)) != len(normalized_expected)
+        or counts.get("completed") != len(normalized_expected)
+        or counts.get("errors") != 0
+        or counts.get("pending") != 0
+        or completed != normalized_expected
+        or summary.get("failed_assignment_ids") != []
+    ):
+        raise ValueError("Gate C live final root requires an exact COMPLETE summary")
+    pilot_snapshot_path = output_dir / "phases" / "phase-001-pilot" / "phase-snapshot.json"
+    receipt_relative_path = _root_relative_artifact_path(
+        output_dir, authorization_receipt_path, label="authorization receipt"
+    )
+    phase_report_relative_path = _root_relative_artifact_path(
+        output_dir, phase_report_path, label="final phase report"
+    )
+    root_report_relative_path = _root_relative_artifact_path(
+        output_dir, root_report_path, label="final root report"
+    )
+    phase_parts = Path(phase_report_relative_path).parts
+    phase_name = phase_parts[1] if len(phase_parts) == 3 else ""
+    valid_remaining_phase = phase_name == "phase-002-remaining" or (
+        phase_name.startswith("phase-remaining-")
+        and len(phase_name.removeprefix("phase-remaining-")) == 3
+        and phase_name.removeprefix("phase-remaining-").isdigit()
+    )
+    expected_root_report_path = (
+        "report-remaining.json"
+        if phase_name == "phase-002-remaining"
+        else f"report-remaining-{phase_name.removeprefix('phase-remaining-')}.json"
+    )
+    if (
+        receipt_relative_path != _AUTHORIZATION_RECEIPT_NAME
+        or phase_parts[0:1] != ("phases",)
+        or phase_parts[-1:] != ("report.json",)
+        or not valid_remaining_phase
+        or root_report_relative_path != expected_root_report_path
+        or _read_json(phase_report_path) != summary
+        or _read_json(root_report_path) != summary
+        or _read_json(pilot_snapshot_path) != pilot_snapshot
+    ):
+        raise ValueError("Gate C live final report binding failed validation")
+    receipt = _verify_authorization_receipt(
+        _read_json(authorization_receipt_path), **authorization_receipt_inputs
+    )
+    receipt_id = receipt.get("authorization_receipt_id")
+    pilot_snapshot_id = pilot_snapshot.get("pilot_phase_snapshot_id")
+    receipt_source_plan = receipt.get("source_plan")
+    receipt_app_config = receipt.get("app_config")
+    receipt_base_config = receipt.get("base_live_config")
+    receipt_pilot = receipt.get("pilot")
+    pilot_assignment_id = live.get("pilot_assignment_id")
+    if type(pilot_assignment_id) is not str or pilot_assignment_id not in normalized_expected:
+        raise ValueError("Gate C live final pilot binding failed validation")
+    expected_pending = tuple(item for item in normalized_expected if item != pilot_assignment_id)
+    pilot_snapshot_sha256 = sha256_file(pilot_snapshot_path)
+    cumulative_actuals = {
+        "generation_provider_attempts": counts.get("generation_provider_attempts"),
+        "functional_judge_provider_attempts": counts.get("functional_judge_provider_attempts"),
+        "oracle_executions": counts.get("oracle_results"),
+    }
+    remaining_actuals = {
+        "generation_provider_attempts": 0,
+        "functional_judge_provider_attempts": 0,
+        "oracle_executions": 0,
+    }
+    observed_cumulative_actuals = {key: 0 for key in cumulative_actuals}
+    for assignment_id in normalized_expected:
+        unit_dir = output_dir / "units" / assignment_id
+        _verify_unit_manifest(unit_dir)
+        status = _read_json(unit_dir / "status.json")
+        unit_actuals = {
+            "generation_provider_attempts": status.get("generation_provider_attempts"),
+            "functional_judge_provider_attempts": status.get("functional_judge_provider_attempts"),
+            "oracle_executions": status.get("oracle_results"),
+        }
+        if (
+            status.get("assignment_id") != assignment_id
+            or status.get("status") != "COMPLETE"
+            or any(type(value) is not int or value < 0 for value in unit_actuals.values())
+        ):
+            raise ValueError("Gate C live typed actual failed validation")
+        for key, value in unit_actuals.items():
+            observed_cumulative_actuals[key] += value
+            if assignment_id in expected_pending:
+                remaining_actuals[key] += value
+    typed_budgets = receipt.get("typed_budgets")
+    if (
+        type(receipt_id) is not str
+        or not receipt_id
+        or type(pilot_snapshot_id) is not str
+        or not pilot_snapshot_id
+        or receipt.get("gate_c_live_id") != live.get("gate_c_live_id")
+        or type(receipt_source_plan) is not dict
+        or receipt_source_plan.get("manifest_sha256") != source_plan_manifest_sha256
+        or type(receipt_app_config) is not dict
+        or receipt_app_config.get("sha256") != app_config_sha256
+        or type(receipt_base_config) is not dict
+        or receipt_base_config.get("sha256") != base_live_config_sha256
+        or type(receipt_pilot) is not dict
+        or receipt_pilot.get("assignment_id") != pilot_assignment_id
+        or receipt_pilot.get("phase_snapshot_id") != pilot_snapshot_id
+        or receipt_pilot.get("phase_snapshot_sha256") != pilot_snapshot_sha256
+        or tuple(receipt.get("authorized_assignment_ids", ())) != expected_pending
+        or type(typed_budgets) is not dict
+        or any(type(value) is not int or value < 0 for value in cumulative_actuals.values())
+        or observed_cumulative_actuals != cumulative_actuals
+        or any(
+            type(typed_budgets.get(key)) is not dict
+            or remaining_actuals[key] > typed_budgets[key].get("maximum", -1)
+            for key in remaining_actuals
+        )
+        or not all(
+            _is_sha256(value)
+            for value in (
+                source_plan_manifest_sha256,
+                app_config_sha256,
+                base_live_config_sha256,
+            )
+        )
+    ):
+        raise ValueError("Gate C live final root provenance failed validation")
+    provenance_payload: dict[str, object] = {
+        "schema_version": _SCHEMA_VERSION,
+        "provenance_version": "gate_c_live_final_root_v2",
+        "status": "GATE_C_LIVE_ROOT_READY",
+        "completion_marker": "artifact-manifest.json",
+        "scientific_claim_allowed": False,
+        "gate_c_live_id": live["gate_c_live_id"],
+        "source_plan_manifest_sha256": source_plan_manifest_sha256,
+        "app_config_sha256": app_config_sha256,
+        "base_live_config_sha256": base_live_config_sha256,
+        "pilot_phase_snapshot_id": pilot_snapshot_id,
+        "pilot_phase_snapshot_sha256": pilot_snapshot_sha256,
+        "authorization_receipt_id": receipt_id,
+        "authorization_receipt_path": receipt_relative_path,
+        "authorization_receipt_sha256": sha256_file(authorization_receipt_path),
+        "final_phase_report_path": phase_report_relative_path,
+        "final_phase_report_sha256": sha256_file(phase_report_path),
+        "root_report_sha256": sha256_file(root_report_path),
+        "completed_assignment_ids": list(completed),
+        "completed_assignment_ids_sha256": hashlib.sha256(_canonical(list(completed))).hexdigest(),
+        "typed_remaining_actuals": remaining_actuals,
+        "typed_cumulative_actuals": cumulative_actuals,
+    }
+    provenance = _content_addressed_payload(
+        provenance_payload,
+        id_key="root_provenance_id",
+        prefix="gate_c_live_root_provenance_",
+    )
+    provenance_path = output_dir / "root-provenance.json"
+    if provenance_path.exists():
+        if _read_json(provenance_path) != provenance:
+            raise ValueError("Gate C live existing root provenance failed validation")
+    else:
+        write_json_atomic_exclusive(provenance_path, provenance)
+    return write_closed_manifest_atomic(output_dir, label="Gate C live final root")
 
 
 def _summary(
@@ -925,6 +1426,14 @@ def run_gate_c_live_canary(
     plan_dir = (repo_root / str(live.get("source_plan_dir"))).resolve()
     plan_dir.relative_to(repo_root)
     plan_report = _verify_plan(plan_dir)
+    source_plan_manifest_sha256 = sha256_file(plan_dir / "artifact-manifest.json")
+    _validate_required_source_plan_contract(
+        live,
+        plan_report=plan_report,
+        source_plan_manifest_sha256=source_plan_manifest_sha256,
+    )
+    app_config_id = _path_id(repo_root, app_config_path)
+    app_config_sha256 = sha256_file(app_config_path)
     expected = int(live.get("expected_assignments", 0))
     task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
     task_count, arm_roles = _validated_plan_dimensions(
@@ -1022,24 +1531,14 @@ def run_gate_c_live_canary(
             "validated_assignments": len(selected),
             "pending": len(selected),
             "pilot_assignment_id": pilot_id,
-            "source_plan_manifest_sha256": sha256_file(plan_dir / "artifact-manifest.json"),
+            "source_plan_manifest_sha256": source_plan_manifest_sha256,
         }
         _write_json(output_dir / "report.json", report)
-        files = sorted(path for path in output_dir.rglob("*") if path.is_file())
-        _write_json(
-            output_dir / "artifact-manifest.json",
-            {
-                "schema_version": _SCHEMA_VERSION,
-                "files": [
-                    {
-                        "path": path.relative_to(output_dir).as_posix(),
-                        "sha256": sha256_file(path),
-                    }
-                    for path in files
-                ],
-            },
-        )
+        write_closed_manifest_atomic(output_dir, label="Gate C live preflight")
         return report
+    pilot_snapshot: dict[str, object] | None = None
+    authorization_receipt_path: Path | None = None
+    authorization_receipt_inputs: dict[str, Any] | None = None
     if mode == "pilot":
         if completed:
             raise ValueError("Gate C live pilot must start from an empty run")
@@ -1053,8 +1552,8 @@ def run_gate_c_live_canary(
             {
                 "schema_version": _SCHEMA_VERSION,
                 "live_config_sha256": sha256_file(live_config_path),
-                "app_config_sha256": sha256_file(app_config_path),
-                "source_plan_manifest_sha256": sha256_file(plan_dir / "artifact-manifest.json"),
+                "app_config_sha256": app_config_sha256,
+                "source_plan_manifest_sha256": source_plan_manifest_sha256,
             },
         )
         phase_name = "phase-001-pilot"
@@ -1063,18 +1562,70 @@ def run_gate_c_live_canary(
         if pilot_id not in completed:
             raise ValueError("Gate C live pilot has not completed")
         input_provenance = _read_json(output_dir / "input-provenance.json")
-        if input_provenance.get("app_config_sha256") != sha256_file(
-            app_config_path
-        ) or input_provenance.get("source_plan_manifest_sha256") != sha256_file(
-            plan_dir / "artifact-manifest.json"
+        base_live_config_sha256 = sha256_file(output_dir / "live-config.json")
+        if (
+            input_provenance.get("app_config_sha256") != app_config_sha256
+            or input_provenance.get("source_plan_manifest_sha256") != source_plan_manifest_sha256
         ):
             raise ValueError("Gate C live remaining input provenance failed validation")
+        pilot_snapshot = _verify_pilot_phase_snapshot(
+            output_dir,
+            live=stored_base,
+            source_plan_manifest_sha256=source_plan_manifest_sha256,
+            app_config_id=app_config_id,
+            app_config_sha256=app_config_sha256,
+            base_live_config_sha256=base_live_config_sha256,
+        )
+        authorized_assignment_ids = tuple(sorted(set(assignment_by_id) - {pilot_id}))
         selected = tuple(sorted(set(assignment_by_id) - completed))
-        if not selected:
+        if not selected or not set(selected).issubset(authorized_assignment_ids):
             raise ValueError("Gate C live has no pending assignments")
         remaining_attempt = _next_remaining_attempt(output_dir)
         remaining_suffix = "" if remaining_attempt == 1 else f"-{remaining_attempt:03d}"
-        _write_json(output_dir / f"live-config-remaining{remaining_suffix}.json", live)
+        receipt_inputs: dict[str, Any] = {
+            "live": live,
+            "source_plan_id": str(live["source_plan_dir"]),
+            "source_plan_manifest_sha256": source_plan_manifest_sha256,
+            "app_config_id": app_config_id,
+            "app_config_sha256": app_config_sha256,
+            "base_live_config_sha256": base_live_config_sha256,
+            "pilot_snapshot_id": str(pilot_snapshot["pilot_phase_snapshot_id"]),
+            "pilot_snapshot_sha256": sha256_file(
+                output_dir / "phases" / "phase-001-pilot" / "phase-snapshot.json"
+            ),
+            "authorized_assignment_ids": authorized_assignment_ids,
+        }
+        authorization_receipt_inputs = receipt_inputs
+        authorization_receipt_path, receipt = _load_or_create_authorization_receipt(
+            output_dir,
+            allow_create=remaining_attempt == 1,
+            expected_inputs=receipt_inputs,
+        )
+        _write_or_verify_durable_json(
+            output_dir / _REMAINING_LIVE_CONFIG_NAME,
+            live,
+            allow_create=remaining_attempt == 1,
+            label="remaining live config",
+        )
+        remaining_input_provenance: dict[str, object] = {
+            "schema_version": _SCHEMA_VERSION,
+            "live_config_sha256": sha256_file(live_config_path),
+            "stored_base_live_config_sha256": base_live_config_sha256,
+            "app_config_sha256": app_config_sha256,
+            "source_plan_manifest_sha256": source_plan_manifest_sha256,
+            "scale_up_authorization_id": live["scale_up_authorization_id"],
+            "scale_up_authorization_scope": _SCALE_UP_AUTHORIZATION_SCOPE,
+            "authorization_receipt_id": receipt["authorization_receipt_id"],
+            "authorization_receipt_path": _AUTHORIZATION_RECEIPT_NAME,
+            "authorization_receipt_sha256": sha256_file(authorization_receipt_path),
+            "authorized_assignment_ids": list(authorized_assignment_ids),
+        }
+        _write_or_verify_durable_json(
+            output_dir / _REMAINING_INPUT_PROVENANCE_NAME,
+            remaining_input_provenance,
+            allow_create=remaining_attempt == 1,
+            label="remaining input provenance",
+        )
         _write_json(
             output_dir / f"command-remaining{remaining_suffix}.json",
             {"argv": list(command_argv)},
@@ -1082,19 +1633,6 @@ def run_gate_c_live_canary(
         _write_json(
             output_dir / f"environment-remaining{remaining_suffix}.json",
             _environment(),
-        )
-        _write_json(
-            output_dir / f"input-provenance-remaining{remaining_suffix}.json",
-            {
-                "schema_version": _SCHEMA_VERSION,
-                "live_config_sha256": sha256_file(live_config_path),
-                "stored_base_live_config_sha256": sha256_file(output_dir / "live-config.json"),
-                "app_config_sha256": sha256_file(app_config_path),
-                "source_plan_manifest_sha256": sha256_file(plan_dir / "artifact-manifest.json"),
-                "scale_up_authorization_id": live["scale_up_authorization_id"],
-                "scale_up_authorization_scope": _SCALE_UP_AUTHORIZATION_SCOPE,
-                "authorized_assignment_ids": list(selected),
-            },
         )
         phase_name = (
             "phase-002-remaining"
@@ -1274,11 +1812,42 @@ def run_gate_c_live_canary(
         arm_roles=arm_roles,
     )
     _write_json(phase_dir / "report.json", summary)
-    _write_json(output_dir / root_report_name, summary)
+    if mode == "pilot" or failure is None:
+        _write_json(output_dir / root_report_name, summary)
     if failure is not None:
         raise RuntimeError(
             "Gate C live phase failed; preserved unit artifacts require diagnosis"
         ) from failure
+    if mode == "pilot":
+        _write_pilot_phase_snapshot(
+            output_dir,
+            live=live,
+            source_plan_manifest_sha256=source_plan_manifest_sha256,
+            app_config_id=app_config_id,
+            app_config_sha256=app_config_sha256,
+            base_live_config_sha256=sha256_file(output_dir / "live-config.json"),
+        )
+    else:
+        if (
+            pilot_snapshot is None
+            or authorization_receipt_path is None
+            or authorization_receipt_inputs is None
+        ):
+            raise RuntimeError("Gate C live finalization inputs are unavailable")
+        _finalize_live_root(
+            output_dir,
+            live=live,
+            summary=summary,
+            expected_assignment_ids=tuple(sorted(assignment_by_id)),
+            source_plan_manifest_sha256=source_plan_manifest_sha256,
+            app_config_sha256=app_config_sha256,
+            base_live_config_sha256=sha256_file(output_dir / "live-config.json"),
+            pilot_snapshot=pilot_snapshot,
+            authorization_receipt_path=authorization_receipt_path,
+            authorization_receipt_inputs=authorization_receipt_inputs,
+            phase_report_path=phase_dir / "report.json",
+            root_report_path=output_dir / root_report_name,
+        )
     return summary
 
 
@@ -1307,6 +1876,12 @@ def recover_gate_c_live_oracle(
     plan_dir = (repo_root / str(live.get("source_plan_dir"))).resolve()
     plan_dir.relative_to(repo_root)
     plan_report = _verify_plan(plan_dir)
+    source_plan_manifest_sha256 = sha256_file(plan_dir / "artifact-manifest.json")
+    _validate_required_source_plan_contract(
+        live,
+        plan_report=plan_report,
+        source_plan_manifest_sha256=source_plan_manifest_sha256,
+    )
     expected = int(live.get("expected_assignments", 0))
     task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
     _, arm_roles = _validated_plan_dimensions(
@@ -1331,7 +1906,7 @@ def recover_gate_c_live_oracle(
         "schema_version": _SCHEMA_VERSION,
         "live_config_sha256": sha256_file(live_config_path),
         "app_config_sha256": sha256_file(app_config_path),
-        "source_plan_manifest_sha256": sha256_file(plan_dir / "artifact-manifest.json"),
+        "source_plan_manifest_sha256": source_plan_manifest_sha256,
     }:
         raise ValueError("Gate C Oracle repair input provenance failed validation")
     completed, failed = _completed_assignments(source_dir)

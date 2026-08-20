@@ -20,6 +20,10 @@ from pydantic import BaseModel
 
 from secaware.config import AppConfig, load_config, write_resolved_config
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.exploratory.artifact_integrity import (
+    verify_closed_manifest,
+    write_closed_manifest_atomic,
+)
 from secaware.exploratory.code_mechanism_calibration import (
     code_mechanism_policy_from_config,
 )
@@ -140,52 +144,11 @@ def _input_path(repo_root: Path, value: object) -> Path:
 
 
 def _verify_manifest(path: Path) -> None:
-    root = path.parent
-    manifest_path = path.resolve()
-    manifest = _read_json(path)
-    entries = manifest.get("files")
-    if manifest.get("schema_version") != _SCHEMA_VERSION or type(entries) is not list:
-        raise ValueError("independent validation run manifest failed validation")
-    expected: set[str] = set()
-    for item in entries:
-        if type(item) is not dict or set(item) != {"path", "sha256"}:
-            raise ValueError("independent validation run manifest failed validation")
-        relative = Path(str(item["path"]))
-        resolved = (root / relative).resolve()
-        try:
-            resolved.relative_to(root.resolve())
-        except ValueError:
-            raise ValueError("independent validation run manifest escaped root") from None
-        normalized = relative.as_posix()
-        if (
-            relative.is_absolute()
-            or normalized in expected
-            or not resolved.is_file()
-            or sha256_file(resolved) != item["sha256"]
-        ):
-            raise ValueError("independent validation run manifest failed validation")
-        expected.add(normalized)
-    actual = {
-        item.relative_to(root).as_posix()
-        for item in root.rglob("*")
-        if item.is_file() and item.resolve() != manifest_path
-    }
-    if actual != expected:
-        raise ValueError("independent validation run manifest closure failed validation")
+    verify_closed_manifest(path, label="independent validation run")
 
 
 def _unit_manifest(unit_dir: Path) -> None:
-    files = sorted(path for path in unit_dir.rglob("*") if path.is_file())
-    _write_json(
-        unit_dir / "artifact-manifest.json",
-        {
-            "schema_version": _SCHEMA_VERSION,
-            "files": [
-                {"path": path.relative_to(unit_dir).as_posix(), "sha256": sha256_file(path)}
-                for path in files
-            ],
-        },
-    )
+    write_closed_manifest_atomic(unit_dir, label="independent validation run unit")
 
 
 def _safe_error(error: BaseException, stage: str) -> dict[str, object]:
@@ -244,17 +207,7 @@ def _indexed_dicts(path: Path, key: str) -> dict[str, dict[str, Any]]:
 
 
 def _root_manifest(output_dir: Path) -> None:
-    files = sorted(path for path in output_dir.rglob("*") if path.is_file())
-    _write_json(
-        output_dir / "artifact-manifest.json",
-        {
-            "schema_version": _SCHEMA_VERSION,
-            "files": [
-                {"path": path.relative_to(output_dir).as_posix(), "sha256": sha256_file(path)}
-                for path in files
-            ],
-        },
-    )
+    write_closed_manifest_atomic(output_dir, label="independent validation run root")
 
 
 @dataclass(frozen=True, slots=True)

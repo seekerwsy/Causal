@@ -8,6 +8,7 @@ import os
 import platform
 import socket
 import sys
+from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,6 +84,17 @@ _EXTRACTOR_REUSE_SOURCE_ONLY = "source_exact_reuse_variant_fresh_v1"
 _TASK_SELECTION_EXPLICIT = "explicit_task_ids"
 _TASK_SELECTION_MULTI_PER_CWE = "explicit_task_ids_multi_per_cwe_v1"
 _TASK_SELECTION_ALL = "all_gate_a_tasks"
+_STRICT_SELECTION_CONTRACT_KEY = "strict_selection_contract"
+_STRICT_SELECTION_CONTRACT_KEYS = frozenset(
+    {
+        "manifest_path",
+        "manifest_sha256",
+        "selection_id",
+        "expected_task_count",
+        "expected_cwe_counts",
+        "expected_unique_cluster_count",
+    }
+)
 _MAX_APPEND_SUFFIX_BYTES = 262_144
 _APPEND_SUFFIX_OUTPUT_SCHEMA = {
     "schema_version": "1.0",
@@ -428,13 +440,23 @@ class _RecordingTransport:
         *,
         reuse_root: Path | None = None,
         reuse_excluded_labels: frozenset[str] = frozenset(),
+        required_reuse_labels: frozenset[str] = frozenset(),
         allow_live: bool = True,
     ) -> None:
+        if (
+            type(reuse_excluded_labels) is not frozenset
+            or type(required_reuse_labels) is not frozenset
+            or any(not item for item in reuse_excluded_labels | required_reuse_labels)
+            or (required_reuse_labels and reuse_root is None)
+            or required_reuse_labels & reuse_excluded_labels
+        ):
+            raise ValueError("exploratory Gate B required reuse policy failed validation")
         self._delegate = delegate
         self._root = root
         self._channel = channel
         self._reuse_root = reuse_root
         self._reuse_excluded_labels = reuse_excluded_labels
+        self._required_reuse_labels = required_reuse_labels
         self._allow_live = allow_live
         self._label: str | None = None
         self._reused_labels: list[str] = []
@@ -526,6 +548,8 @@ class _RecordingTransport:
                     },
                 )
                 self._reuse_exclusion_labels.append(label)
+            if label in self._required_reuse_labels:
+                raise ValueError("exploratory Gate B required reusable response is unavailable")
             if not self._allow_live:
                 raise ValueError(
                     "exploratory Gate B live call disabled and reusable response unavailable"
@@ -542,6 +566,51 @@ class _RecordingTransport:
                 {"error_type": type(error).__name__, "message": str(error)},
             )
             raise
+
+
+def _validated_strict_reuse_postcondition(
+    *,
+    independent_tasks: int,
+    selected_variant_ids: frozenset[str],
+    source_extractor_labels: frozenset[str],
+    intervention_transport: _RecordingTransport,
+    extractor_transport: _RecordingTransport,
+) -> dict[str, object]:
+    expected_variant_count = independent_tasks * 4
+    expected_variant_extractor_labels = frozenset(
+        f"variant-{variant_id}" for variant_id in selected_variant_ids
+    )
+
+    def exact_labels(observed: tuple[str, ...], expected: frozenset[str]) -> bool:
+        return len(observed) == len(expected) and frozenset(observed) == expected
+
+    if (
+        independent_tasks <= 0
+        or len(selected_variant_ids) != expected_variant_count
+        or len(source_extractor_labels) != independent_tasks
+        or intervention_transport.live_labels
+        or not exact_labels(intervention_transport.reused_labels, selected_variant_ids)
+        or intervention_transport.reuse_exclusion_labels
+        or not exact_labels(extractor_transport.reused_labels, source_extractor_labels)
+        or not exact_labels(extractor_transport.live_labels, expected_variant_extractor_labels)
+        or not exact_labels(
+            extractor_transport.reuse_exclusion_labels,
+            expected_variant_extractor_labels,
+        )
+    ):
+        raise ValueError("exploratory Gate B strict reuse postcondition failed validation")
+    return {
+        "policy_version": "intervention_and_source_exact_reuse_variant_fresh_v1",
+        "status": "PASSED",
+        "expected_live_intervention_calls": 0,
+        "expected_reused_intervention_calls": expected_variant_count,
+        "expected_reused_source_extractor_calls": independent_tasks,
+        "expected_live_variant_extractor_calls": expected_variant_count,
+        "observed_live_intervention_calls": len(intervention_transport.live_labels),
+        "observed_reused_intervention_calls": len(intervention_transport.reused_labels),
+        "observed_reused_source_extractor_calls": len(extractor_transport.reused_labels),
+        "observed_live_variant_extractor_calls": len(extractor_transport.live_labels),
+    }
 
 
 def _state_map(graph_record: object) -> dict[str, FeatureState]:
@@ -755,6 +824,158 @@ def _selected_gate_b_task_ids(
     return selected
 
 
+def _validated_selected_gate_b_variants(
+    gate_a_variants: list[dict[str, Any]],
+    selected_task_ids: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    expected_roles = frozenset(_ARM_EXECUTION_ORDER)
+    by_task: dict[str, dict[str, dict[str, Any]]] = {task_id: {} for task_id in selected_task_ids}
+    variant_ids: set[str] = set()
+    for item in gate_a_variants:
+        task_id = item.get("task_id")
+        if task_id not in by_task:
+            continue
+        variant_id = item.get("variant_id")
+        arm_role = item.get("arm_role")
+        if (
+            type(variant_id) is not str
+            or not variant_id
+            or variant_id in variant_ids
+            or type(arm_role) is not str
+            or arm_role not in expected_roles
+            or arm_role in by_task[str(task_id)]
+        ):
+            raise ValueError("exploratory Gate B exact arm coverage failed validation")
+        variant_ids.add(variant_id)
+        by_task[str(task_id)][arm_role] = item
+    if any(set(roles) != expected_roles for roles in by_task.values()):
+        raise ValueError("exploratory Gate B exact arm coverage failed validation")
+    selected = tuple(item for roles in by_task.values() for item in roles.values())
+    if len(selected) != len(selected_task_ids) * len(expected_roles):
+        raise ValueError("exploratory Gate B exact arm coverage failed validation")
+    return tuple(
+        sorted(
+            selected,
+            key=lambda item: (
+                str(item["task_id"]),
+                _ARM_EXECUTION_ORDER[str(item["arm_role"])],
+            ),
+        )
+    )
+
+
+def _validated_strict_selection_contract(
+    gate_b_config: Mapping[str, object],
+    *,
+    repo_root: Path,
+    selected_task_ids: tuple[str, ...],
+    selected_sources: tuple[PromptRecord, ...],
+) -> dict[str, object] | None:
+    raw = gate_b_config.get(_STRICT_SELECTION_CONTRACT_KEY)
+    if raw is None:
+        return None
+    if type(raw) is not dict or set(raw) != _STRICT_SELECTION_CONTRACT_KEYS:
+        raise ValueError("exploratory Gate B strict selection contract failed validation")
+    manifest_path_value = raw.get("manifest_path")
+    manifest_sha256 = raw.get("manifest_sha256")
+    selection_id = raw.get("selection_id")
+    expected_task_count = raw.get("expected_task_count")
+    expected_cwe_counts = raw.get("expected_cwe_counts")
+    expected_unique_cluster_count = raw.get("expected_unique_cluster_count")
+    if (
+        type(manifest_path_value) is not str
+        or not manifest_path_value
+        or type(manifest_sha256) is not str
+        or len(manifest_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in manifest_sha256)
+        or type(selection_id) is not str
+        or not selection_id
+        or type(expected_task_count) is not int
+        or expected_task_count <= 0
+        or type(expected_cwe_counts) is not dict
+        or not expected_cwe_counts
+        or any(
+            type(cwe) is not str or not cwe or type(count) is not int or count <= 0
+            for cwe, count in expected_cwe_counts.items()
+        )
+        or sum(expected_cwe_counts.values()) != expected_task_count
+        or type(expected_unique_cluster_count) is not int
+        or expected_unique_cluster_count != expected_task_count
+    ):
+        raise ValueError("exploratory Gate B strict selection contract failed validation")
+    manifest_path = (repo_root / manifest_path_value).resolve()
+    try:
+        manifest_path.relative_to(repo_root.resolve())
+    except ValueError:
+        raise ValueError(
+            "exploratory Gate B strict selection contract escaped repository"
+        ) from None
+    if not manifest_path.is_file() or sha256_file(manifest_path) != manifest_sha256:
+        raise ValueError("exploratory Gate B strict selection manifest digest failed validation")
+    manifest = _read_json(manifest_path)
+    selection_policy = manifest.get("selection_policy")
+    tasks = manifest.get("tasks")
+    if (
+        manifest.get("schema_version") != _SCHEMA_VERSION
+        or manifest.get("selection_id") != selection_id
+        or manifest.get("scientific_claim_allowed") is not False
+        or type(selection_policy) is not dict
+        or selection_policy.get("outcomes_consulted") is not False
+        or selection_policy.get("require_distinct_task_cluster") is not True
+        or type(selection_policy.get("cwes")) is not list
+        or any(type(cwe) is not str or not cwe for cwe in selection_policy["cwes"])
+        or set(selection_policy["cwes"]) != set(expected_cwe_counts)
+        or len(selection_policy["cwes"]) != len(expected_cwe_counts)
+        or type(tasks) is not list
+    ):
+        raise ValueError("exploratory Gate B strict selection manifest failed validation")
+    rows: list[tuple[str, str, str]] = []
+    for item in tasks:
+        if type(item) is not dict:
+            raise ValueError("exploratory Gate B strict selection manifest failed validation")
+        task_id = item.get("task_id")
+        cwe = item.get("cwe")
+        cluster_id = item.get("task_cluster_id")
+        if (
+            type(task_id) is not str
+            or not task_id
+            or type(cwe) is not str
+            or not cwe
+            or type(cluster_id) is not str
+            or not cluster_id
+        ):
+            raise ValueError("exploratory Gate B strict selection manifest failed validation")
+        rows.append((task_id, cwe, cluster_id))
+    manifest_task_ids = tuple(item[0] for item in rows)
+    manifest_cwe_by_task = {task_id: cwe for task_id, cwe, _cluster_id in rows}
+    source_cwe_by_task = {source.task_id: source.cwe for source in selected_sources}
+    observed_cwe_counts = Counter(cwe for _task_id, cwe, _cluster_id in rows)
+    observed_cluster_counts = Counter(cluster_id for _task_id, _cwe, cluster_id in rows)
+    observed_cluster_count = len(observed_cluster_counts)
+    if (
+        len(rows) != expected_task_count
+        or len(set(manifest_task_ids)) != len(manifest_task_ids)
+        or manifest_task_ids != selected_task_ids
+        or source_cwe_by_task != manifest_cwe_by_task
+        or observed_cwe_counts != Counter(expected_cwe_counts)
+        or observed_cluster_count != expected_unique_cluster_count
+        or any(count != 1 for count in observed_cluster_counts.values())
+    ):
+        raise ValueError("exploratory Gate B strict selection population failed validation")
+    return {
+        "policy_version": "strict_selection_manifest_v1",
+        "selection_id": selection_id,
+        "manifest_path": manifest_path.relative_to(repo_root.resolve()).as_posix(),
+        "manifest_sha256": manifest_sha256,
+        "task_count": expected_task_count,
+        "cwe_counts": dict(sorted(observed_cwe_counts.items())),
+        "unique_cluster_count": observed_cluster_count,
+        "cluster_counts": dict(sorted(observed_cluster_counts.items())),
+        "outcomes_consulted": False,
+        "scientific_claim_allowed": False,
+    }
+
+
 def _validated_gate_b_cwe_counts(
     *,
     task_selection_policy: object,
@@ -773,7 +994,7 @@ def _validated_gate_b_cwe_counts(
     elif task_selection_policy == _TASK_SELECTION_EXPLICIT:
         valid = bool(selected_sources) and len(counts) == len(selected_sources)
     elif task_selection_policy == _TASK_SELECTION_MULTI_PER_CWE:
-        valid = len(counts) >= 2 and all(value > 0 for value in counts.values())
+        valid = len(counts) >= 2 and all(value >= 2 for value in counts.values())
     else:
         valid = False
     if not valid:
@@ -802,6 +1023,13 @@ def _validated_provider_call_budget(
     return expected
 
 
+def _validate_no_claim_boundary(gate_b_config: Mapping[str, object]) -> None:
+    value = gate_b_config.get("scientific_claim_allowed")
+    strict = _STRICT_SELECTION_CONTRACT_KEY in gate_b_config
+    if (value is not None and value is not False) or (strict and value is not False):
+        raise ValueError("exploratory Gate B scientific-claim boundary failed validation")
+
+
 def run_exploratory_gate_b(
     *,
     repo_root: Path,
@@ -824,6 +1052,7 @@ def run_exploratory_gate_b(
     _write_json(output_dir / "command.json", {"argv": list(command_argv)})
     _write_json(output_dir / "environment.json", _environment())
     try:
+        _validate_no_claim_boundary(gate_b_config)
         if (
             gate_b_config.get("schema_version") != _SCHEMA_VERSION
             or gate_b_config.get("gate") != "blind_llm_intervention_and_extraction"
@@ -965,17 +1194,16 @@ def run_exploratory_gate_b(
             selected_sources=selected_sources,
             gate_a_candidate_count=gate_a_report.get("counts", {}).get("candidates"),
         )
-        selected_variants = tuple(
-            sorted(
-                (item for item in gate_a_variants if item.get("task_id") in selected_task_ids),
-                key=lambda item: (
-                    str(item["task_id"]),
-                    _ARM_EXECUTION_ORDER.get(str(item["arm_role"]), len(_ARM_EXECUTION_ORDER)),
-                ),
-            )
+        strict_selection_contract = _validated_strict_selection_contract(
+            gate_b_config,
+            repo_root=repo_root,
+            selected_task_ids=selected_task_ids,
+            selected_sources=selected_sources,
         )
-        if len(selected_variants) != len(selected_task_ids) * 4:
-            raise ValueError("exploratory Gate B arm coverage failed validation")
+        selected_variants = _validated_selected_gate_b_variants(
+            gate_a_variants,
+            selected_task_ids,
+        )
         provider_call_budget = _validated_provider_call_budget(
             gate_b_config,
             independent_tasks=len(selected_sources),
@@ -995,6 +1223,11 @@ def run_exploratory_gate_b(
             selected_variant_ids,
             refresh_variants=reuse_intervention_responses_only,
         )
+        source_extractor_labels = frozenset(
+            f"source-{source.prompt_id}" for source in selected_sources
+        )
+        if len(source_extractor_labels) != len(selected_sources):
+            raise ValueError("exploratory Gate B source extractor identity failed validation")
         if any(item.get("outcome_generation_allowed") is not False for item in selected_variants):
             raise ValueError("exploratory Gate B generation boundary failed validation")
 
@@ -1031,7 +1264,10 @@ def run_exploratory_gate_b(
             "intervention",
             reuse_root=intervention_reuse_root,
             reuse_excluded_labels=reuse_excluded_intervention_variant_ids,
-            allow_live=allow_live_calls,
+            required_reuse_labels=(
+                selected_variant_ids if reuse_intervention_responses_only else frozenset()
+            ),
+            allow_live=allow_live_calls and not reuse_intervention_responses_only,
         )
         extractor_config = app_config.tsg.llm
         extractor_delegate = OpenAICompatibleStructuredTransport(
@@ -1045,6 +1281,9 @@ def run_exploratory_gate_b(
             "extractor",
             reuse_root=extractor_reuse_root,
             reuse_excluded_labels=reuse_excluded_extractor_labels,
+            required_reuse_labels=(
+                source_extractor_labels if reuse_intervention_responses_only else frozenset()
+            ),
             allow_live=allow_live_calls,
         )
         extractor = extractor_for_config(app_config.tsg, transport=extractor_transport)
@@ -1332,6 +1571,17 @@ def run_exploratory_gate_b(
             variant_graphs.append(graph)
             llm_variant_by_gate_a_id[str(item["variant_id"])] = llm_variant
 
+        strict_reuse_postcondition = (
+            _validated_strict_reuse_postcondition(
+                independent_tasks=len(selected_sources),
+                selected_variant_ids=selected_variant_ids,
+                source_extractor_labels=source_extractor_labels,
+                intervention_transport=intervention_transport,
+                extractor_transport=extractor_transport,
+            )
+            if reuse_intervention_responses_only
+            else None
+        )
         placebo_length_validations: list[dict[str, object]] = []
         for source in selected_sources:
             validation = {
@@ -1405,6 +1655,7 @@ def run_exploratory_gate_b(
             "outcome_generation_allowed": False,
             "task_selection_policy": task_selection_policy,
             "selected_task_ids": list(selected_task_ids),
+            "strict_selection_contract": strict_selection_contract,
             "counts": {
                 "independent_tasks": len(selected_sources),
                 "cwes": len({item.cwe for item in selected_sources}),
@@ -1477,6 +1728,11 @@ def run_exploratory_gate_b(
                 "gate_a_report_sha256": sha256_file(gate_a_dir / "report.json"),
                 "gate_a_variants_sha256": sha256_file(gate_a_dir / "variants.jsonl"),
                 "gate_a_assignments_sha256": sha256_file(gate_a_dir / "assignments.jsonl"),
+                "strict_selection_manifest_sha256": (
+                    strict_selection_contract["manifest_sha256"]
+                    if strict_selection_contract is not None
+                    else None
+                ),
                 "reuse_effective_app_config_sha256": (
                     sha256_file(reuse_run_dir / "effective-app-config.yaml")
                     if reuse_run_dir is not None
@@ -1518,6 +1774,7 @@ def run_exploratory_gate_b(
                 ),
                 "request_match": "exact_bytes",
                 "allow_live_calls": allow_live_calls,
+                "strict_reuse_postcondition": strict_reuse_postcondition,
                 "excluded_intervention_variant_ids": sorted(
                     reuse_excluded_intervention_variant_ids
                 ),

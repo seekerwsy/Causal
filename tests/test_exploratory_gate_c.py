@@ -122,6 +122,263 @@ def test_gate_c_two_arm_protocol_is_strictly_development_only() -> None:
         )
 
 
+def test_gate_c_exact_task_selection_binding_closes_tasks_clusters_and_source(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "data/tasks.jsonl"
+    source_path.parent.mkdir(parents=True)
+    authoritative = [
+        {
+            "task_id": "task-78",
+            "task_cluster_id": "cluster-78",
+            "cwe": "CWE-78",
+            "language": "python",
+        },
+        {
+            "task_id": "task-89",
+            "task_cluster_id": "cluster-89",
+            "cwe": "CWE-89",
+            "language": "python",
+        },
+    ]
+    source_path.write_text(
+        "".join(json.dumps(item, sort_keys=True) + "\n" for item in authoritative),
+        encoding="utf-8",
+    )
+    selection_path = tmp_path / "configs/selection.json"
+    selection_path.parent.mkdir(parents=True)
+    selection = {
+        "schema_version": "1.0",
+        "selection_id": "selection-v1",
+        "authoritative_source": "data/tasks.jsonl",
+        "selection_policy": {
+            "language": "python",
+            "cwes": ["CWE-78", "CWE-89"],
+            "tasks_per_cwe": 1,
+            "require_distinct_task_cluster": True,
+            "outcomes_consulted": False,
+        },
+        "intervention_policy": {
+            "arm_roles": ["target_patch", "noop_rewrite"],
+            "canonical_realization_count": 1,
+            "multi_realization_claim_allowed": False,
+        },
+        "scientific_claim_allowed": False,
+        "tasks": authoritative,
+    }
+    selection_path.write_text(json.dumps(selection, sort_keys=True) + "\n", encoding="utf-8")
+    sources = {
+        cwe: PromptRecord.model_validate(
+            {
+                "prompt_id": f"prompt-{cwe}",
+                "task_id": task_id,
+                "split": "confirm",
+                "language": "python",
+                "task_family": "command_execution" if cwe == "78" else "sql_query",
+                "cwe": f"CWE-{cwe}",
+                "prompt": "Write a function.",
+                "prompt_role": "neutral_baseline",
+            }
+        )
+        for cwe, task_id in (("78", "task-78"), ("89", "task-89"))
+    }
+    config = {
+        "task_selection_binding_policy": "exact_content_addressed_v1",
+        "task_selection_path": "configs/selection.json",
+        "task_selection_sha256": hashlib.sha256(selection_path.read_bytes()).hexdigest(),
+        "task_selection_authoritative_source_sha256": hashlib.sha256(
+            source_path.read_bytes()
+        ).hexdigest(),
+    }
+
+    binding = gate_c._validated_task_selection_binding(
+        config=config,
+        repo_root=tmp_path,
+        selected_task_ids=("task-78", "task-89"),
+        arm_roles=(gate_c.ArmRole.TARGET_PATCH, gate_c.ArmRole.NOOP_REWRITE),
+        source_by_task={item.task_id: item for item in sources.values()},
+    )
+    assert binding["selection_id"] == "selection-v1"
+    assert binding["cwe_task_counts"] == {"CWE-78": 1, "CWE-89": 1}
+    assert binding["unique_task_cluster_count"] == 2
+    assert binding["task_cluster_counts"] == {"cluster-78": 1, "cluster-89": 1}
+
+    selection["tasks"][1]["task_cluster_id"] = "cluster-78"
+    selection_path.write_text(json.dumps(selection, sort_keys=True) + "\n", encoding="utf-8")
+    rehashed = {
+        **config,
+        "task_selection_sha256": hashlib.sha256(selection_path.read_bytes()).hexdigest(),
+    }
+    with pytest.raises(ValueError, match="task selection binding"):
+        gate_c._validated_task_selection_binding(
+            config=rehashed,
+            repo_root=tmp_path,
+            selected_task_ids=("task-78", "task-89"),
+            arm_roles=(gate_c.ArmRole.TARGET_PATCH, gate_c.ArmRole.NOOP_REWRITE),
+            source_by_task={item.task_id: item for item in sources.values()},
+        )
+
+
+def test_gate_c_selection_binding_rejects_partial_or_ambiguous_configuration() -> None:
+    with pytest.raises(ValueError, match="task selection binding"):
+        gate_c._validated_task_selection_binding(
+            config={"task_selection_path": "configs/selection.json"},
+            repo_root=_ROOT,
+            selected_task_ids=("task-78", "task-89"),
+            arm_roles=(gate_c.ArmRole.TARGET_PATCH, gate_c.ArmRole.NOOP_REWRITE),
+            source_by_task={},
+        )
+    with pytest.raises(ValueError, match="task selection binding"):
+        gate_c._validated_task_selection_binding(
+            config={"task_selection_binding_policy": "best_effort"},
+            repo_root=_ROOT,
+            selected_task_ids=("task-78", "task-89"),
+            arm_roles=(gate_c.ArmRole.TARGET_PATCH, gate_c.ArmRole.NOOP_REWRITE),
+            source_by_task={},
+        )
+
+
+def test_gate_c_seed_policy_preserves_authenticated_gate_a_randomization() -> None:
+    assert (
+        gate_c._seed_assignment_policy({"inherit_gate_a_seed_slots": True})
+        == "inherited_gate_a_randomization_v1"
+    )
+    assert (
+        gate_c._seed_assignment_policy(
+            {
+                "inherit_gate_a_seed_slots": True,
+                "seed_assignment_policy": "inherited_gate_a_randomization_v1",
+            }
+        )
+        == "inherited_gate_a_randomization_v1"
+    )
+    for attacked in (
+        {"inherit_gate_a_seed_slots": False},
+        {
+            "inherit_gate_a_seed_slots": False,
+            "seed_assignment_policy": "balanced_distinct_seed_slots_v1",
+        },
+    ):
+        with pytest.raises(ValueError, match="seed assignment policy"):
+            gate_c._seed_assignment_policy(attacked)
+
+
+def test_gate_c_inherited_randomization_requires_exact_gate_a_seed_records() -> None:
+    assignments = (
+        {
+            "assignment_id": "assignment-a",
+            "task_id": "task-1",
+            "seed_slot": 0,
+            "seed_id": 101,
+            "rng_version": "sha256-rejection-fisher-yates-v1",
+        },
+        {
+            "assignment_id": "assignment-b",
+            "task_id": "task-1",
+            "seed_slot": 1,
+            "seed_id": 202,
+            "rng_version": "sha256-rejection-fisher-yates-v1",
+        },
+    )
+
+    assert gate_c._validated_inherited_randomization(assignments) == {
+        "assignment-a": (0, 101),
+        "assignment-b": (1, 202),
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("rng_version", "future-rng"),
+        ("seed_slot", True),
+        ("seed_slot", "0"),
+        ("seed_slot", 100_000),
+        ("seed_id", True),
+        ("seed_id", "101"),
+        ("seed_id", 2**63),
+    ),
+)
+def test_gate_c_rejects_forged_gate_a_seed_fields(field: str, value: object) -> None:
+    assignment = {
+        "assignment_id": "assignment-a",
+        "task_id": "task-1",
+        "seed_slot": 0,
+        "seed_id": 101,
+        "rng_version": "sha256-rejection-fisher-yates-v1",
+    }
+    assignment[field] = value
+
+    with pytest.raises(ValueError, match="inherited randomization"):
+        gate_c._validated_inherited_randomization((assignment,))
+
+
+def test_gate_c_rejects_inconsistent_gate_a_seed_coordinates() -> None:
+    assignments = (
+        {
+            "assignment_id": "assignment-a",
+            "task_id": "task-1",
+            "seed_slot": 0,
+            "seed_id": 101,
+            "rng_version": "sha256-rejection-fisher-yates-v1",
+        },
+        {
+            "assignment_id": "assignment-b",
+            "task_id": "task-2",
+            "seed_slot": 0,
+            "seed_id": 202,
+            "rng_version": "sha256-rejection-fisher-yates-v1",
+        },
+    )
+
+    with pytest.raises(ValueError, match="inherited randomization"):
+        gate_c._validated_inherited_randomization(assignments)
+
+
+def test_gate_c_requires_gate_b_to_bind_the_same_exact_selection() -> None:
+    binding = {
+        "policy": "exact_content_addressed_v1",
+        "selection_id": "selection-v2",
+        "selection_path": "configs/selection-v2.json",
+        "selection_sha256": "a" * 64,
+        "task_count": 2,
+        "cwe_task_counts": {"CWE-78": 1, "CWE-89": 1},
+        "unique_task_cluster_count": 2,
+        "task_cluster_counts": {"cluster-78": 1, "cluster-89": 1},
+    }
+    strict = {
+        "policy_version": "strict_selection_manifest_v1",
+        "selection_id": "selection-v2",
+        "manifest_path": "configs/selection-v2.json",
+        "manifest_sha256": "a" * 64,
+        "task_count": 2,
+        "cwe_counts": {"CWE-78": 1, "CWE-89": 1},
+        "unique_cluster_count": 2,
+        "cluster_counts": {"cluster-78": 1, "cluster-89": 1},
+        "outcomes_consulted": False,
+        "scientific_claim_allowed": False,
+    }
+    gate_c._validate_gate_b_selection_binding(
+        gate_b_report={"strict_selection_contract": strict},
+        task_selection_binding=binding,
+    )
+    for attacked in (
+        {},
+        {"strict_selection_contract": {**strict, "manifest_sha256": "b" * 64}},
+        {"strict_selection_contract": {**strict, "task_count": 3}},
+    ):
+        with pytest.raises(ValueError, match="Gate B task selection binding"):
+            gate_c._validate_gate_b_selection_binding(
+                gate_b_report=attacked,
+                task_selection_binding=binding,
+            )
+
+    gate_c._validate_gate_b_selection_binding(
+        gate_b_report={},
+        task_selection_binding={"policy": "legacy_unbound_v1"},
+    )
+
+
 def test_gate_c_direct_adapter_authenticates_append_suffix_envelope() -> None:
     source = PromptRecord.model_validate(
         {
@@ -414,6 +671,56 @@ def test_gate_c_config_freezes_exact_single_attempt_provider_budgets() -> None:
     assert config.functional_judge.mode == "single_pass"
     assert config.functional_judge.llm is not None
     assert config.functional_judge.llm.max_attempts == 1
+
+
+@pytest.mark.parametrize(
+    ("scope", "task_count", "selection_name", "selection_sha256"),
+    (
+        (
+            "micro",
+            2,
+            "dev-canary-micro-task-selection-v2.json",
+            "fd9239e40cba80af1c2c2af870a79672b5b8fc69ac0a718d68316979b911193a",
+        ),
+        (
+            "full",
+            12,
+            "dev-canary-task-selection-v1.json",
+            "4f53128a6a5d3b8ad1a8676feb28767085a1f0c3bb351ccda2613c038635c444",
+        ),
+    ),
+)
+def test_gate_c_v2_configs_bind_selection_and_preserve_gate_a_randomization(
+    scope: str,
+    task_count: int,
+    selection_name: str,
+    selection_sha256: str,
+) -> None:
+    config = json.loads(
+        (
+            _ROOT
+            / "configs/minimal-validation"
+            / f"dev-canary-{scope}-python-comment-gate-c-v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    selection_path = _ROOT / "configs/minimal-validation" / selection_name
+    assert hashlib.sha256(selection_path.read_bytes()).hexdigest() == selection_sha256
+    assert config["task_selection_sha256"] == selection_sha256
+    assert config["task_selection_binding_policy"] == "exact_content_addressed_v1"
+    assert (
+        config["task_selection_authoritative_source_sha256"]
+        == hashlib.sha256(
+            (
+                _ROOT / "data/e2e-pilot/five-cwe-main-task-pool-frozen-20260818-07/tasks.jsonl"
+            ).read_bytes()
+        ).hexdigest()
+    )
+    assert config["inherit_gate_a_seed_slots"] is True
+    assert config["seed_assignment_policy"] == "inherited_gate_a_randomization_v1"
+    assert len(config["selected_task_ids"]) == task_count
+    assert config["expected_blocks"] == task_count
+    assert config["expected_assignments"] == task_count * 2
+    assert config["scientific_claim_allowed"] is False
 
 
 def test_gate_c_five_cwe_plan_freezes_twenty_single_attempt_units() -> None:

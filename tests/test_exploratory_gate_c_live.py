@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from secaware.exploratory import gate_c_live
+from secaware.exploratory import artifact_integrity, gate_c_live
 from secaware.oracle.aggregator import OracleCodeAnalysis
 from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.profile_decision import extract_python_mechanism_trace
@@ -104,6 +104,7 @@ def test_gate_c_live_plan_manifest_is_closed_and_authenticated(tmp_path: Path) -
         "status": "GATE_C_PLAN_COMPLETE",
         "provider_calls_allowed": False,
         "oracle_execution_allowed": False,
+        "scientific_claim_allowed": False,
     }
     _write_json(plan / "report.json", report)
     digest = hashlib.sha256((plan / "report.json").read_bytes()).hexdigest()
@@ -119,6 +120,173 @@ def test_gate_c_live_plan_manifest_is_closed_and_authenticated(tmp_path: Path) -
     (plan / "report.json").write_text("{}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="manifest"):
         gate_c_live._verify_plan(plan)
+
+
+def test_gate_c_live_plan_manifest_covers_nested_manifest(tmp_path: Path) -> None:
+    plan = tmp_path / "plan"
+    nested = plan / "nested"
+    nested.mkdir(parents=True)
+    report = {
+        "schema_version": "1.0",
+        "status": "GATE_C_PLAN_COMPLETE",
+        "provider_calls_allowed": False,
+        "oracle_execution_allowed": False,
+        "scientific_claim_allowed": False,
+    }
+    _write_json(plan / "report.json", report)
+    _write_json(nested / "artifact-manifest.json", {"nested": True})
+    files = tuple(path for path in plan.rglob("*") if path.is_file())
+    _write_json(
+        plan / "artifact-manifest.json",
+        {
+            "schema_version": "1.0",
+            "files": [
+                {
+                    "path": path.relative_to(plan).as_posix(),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+                for path in sorted(files)
+            ],
+        },
+    )
+
+    gate_c_live._verify_plan(plan)
+    manifest = json.loads((plan / "artifact-manifest.json").read_text(encoding="utf-8"))
+    manifest["files"] = [
+        item for item in manifest["files"] if item["path"] != "nested/artifact-manifest.json"
+    ]
+    _write_json(plan / "replacement.json", manifest)
+    (plan / "artifact-manifest.json").write_bytes((plan / "replacement.json").read_bytes())
+    (plan / "replacement.json").unlink()
+    with pytest.raises(ValueError, match="closure"):
+        gate_c_live._verify_plan(plan)
+
+
+def test_gate_c_live_rejects_a_plan_that_allows_scientific_claims(tmp_path: Path) -> None:
+    plan = tmp_path / "plan"
+    plan.mkdir()
+    _write_json(
+        plan / "report.json",
+        {
+            "schema_version": "1.0",
+            "status": "GATE_C_PLAN_COMPLETE",
+            "provider_calls_allowed": False,
+            "oracle_execution_allowed": False,
+            "scientific_claim_allowed": True,
+        },
+    )
+    artifact_integrity.write_closed_manifest_atomic(plan)
+
+    with pytest.raises(ValueError, match="source plan"):
+        gate_c_live._verify_plan(plan)
+
+
+def test_gate_c_live_requires_exact_selection_to_retain_authenticated_randomization(
+    tmp_path: Path,
+) -> None:
+    base = {
+        "schema_version": "1.0",
+        "status": "GATE_C_PLAN_COMPLETE",
+        "provider_calls_allowed": False,
+        "oracle_execution_allowed": False,
+        "scientific_claim_allowed": False,
+        "task_selection_binding": {
+            "policy": "exact_content_addressed_v1",
+            "selection_id": "selection-v2",
+            "selection_sha256": "a" * 64,
+            "task_count": 2,
+            "unique_task_cluster_count": 2,
+            "task_cluster_counts": {"cluster-78": 1, "cluster-89": 1},
+            "cwe_task_counts": {"CWE-78": 1, "CWE-89": 1},
+        },
+        "same_seed_within_task": False,
+        "arm_seed_distribution_balanced": False,
+    }
+    for name, policy, accepted in (
+        ("valid", "inherited_gate_a_randomization_v1", True),
+        ("forged", "balanced_distinct_seed_slots_v1", False),
+    ):
+        plan = tmp_path / name
+        plan.mkdir()
+        _write_json(plan / "report.json", {**base, "seed_assignment_policy": policy})
+        artifact_integrity.write_closed_manifest_atomic(plan)
+        if accepted:
+            assert gate_c_live._verify_plan(plan)["seed_assignment_policy"] == policy
+        else:
+            with pytest.raises(ValueError, match="selection binding"):
+                gate_c_live._verify_plan(plan)
+
+
+def test_gate_c_live_required_source_plan_contract_binds_exact_v2_plan(
+    tmp_path: Path,
+) -> None:
+    plan = tmp_path / "plan"
+    plan.mkdir()
+    report = {
+        "schema_version": "1.0",
+        "status": "GATE_C_PLAN_COMPLETE",
+        "provider_calls_allowed": False,
+        "oracle_execution_allowed": False,
+        "scientific_claim_allowed": False,
+        "task_selection_binding": {
+            "policy": "exact_content_addressed_v1",
+            "selection_id": "selection-v2",
+            "selection_sha256": "a" * 64,
+            "task_count": 2,
+            "unique_task_cluster_count": 2,
+            "task_cluster_counts": {"cluster-78": 1, "cluster-89": 1},
+            "cwe_task_counts": {"CWE-78": 1, "CWE-89": 1},
+        },
+        "seed_assignment_policy": "inherited_gate_a_randomization_v1",
+        "same_seed_within_task": False,
+        "arm_seed_distribution_balanced": False,
+    }
+    _write_json(plan / "report.json", report)
+    artifact_integrity.write_closed_manifest_atomic(plan)
+    verified_report = gate_c_live._verify_plan(plan)
+    manifest_sha256 = hashlib.sha256((plan / "artifact-manifest.json").read_bytes()).hexdigest()
+    contract = {
+        "manifest_sha256": manifest_sha256,
+        "task_selection_binding_policy": "exact_content_addressed_v1",
+        "seed_assignment_policy": "inherited_gate_a_randomization_v1",
+    }
+
+    gate_c_live._validate_required_source_plan_contract(
+        {"required_source_plan_contract": contract},
+        plan_report=verified_report,
+        source_plan_manifest_sha256=manifest_sha256,
+    )
+    gate_c_live._validate_required_source_plan_contract(
+        {},
+        plan_report={},
+        source_plan_manifest_sha256=manifest_sha256,
+    )
+
+    attacks = (
+        (
+            {**contract, "manifest_sha256": "b" * 64},
+            verified_report,
+        ),
+        (
+            contract,
+            {**verified_report, "task_selection_binding": {"policy": "legacy_unbound_v1"}},
+        ),
+        (
+            contract,
+            {**verified_report, "seed_assignment_policy": "balanced_distinct_seed_slots_v1"},
+        ),
+        (
+            {**contract, "unexpected": True},
+            verified_report,
+        ),
+    )
+    for attacked_contract, attacked_report in attacks:
+        with pytest.raises(ValueError, match="required source plan contract"):
+            gate_c_live._validate_required_source_plan_contract(
+                {"required_source_plan_contract": attacked_contract},
+                plan_report=attacked_report,
+                source_plan_manifest_sha256=manifest_sha256,
+            )
 
 
 def test_gate_c_live_unit_manifest_requires_closed_file_set(tmp_path: Path) -> None:
@@ -138,6 +306,41 @@ def test_gate_c_live_unit_manifest_requires_closed_file_set(tmp_path: Path) -> N
     _write_json(unit / "unlisted.json", {"unexpected": True})
     with pytest.raises(ValueError, match="closure"):
         gate_c_live._verify_unit_manifest(unit)
+
+
+def test_gate_c_live_root_unit_manifest_covers_nested_manifest(tmp_path: Path) -> None:
+    unit = tmp_path / "unit"
+    nested = unit / "transport"
+    nested.mkdir(parents=True)
+    _write_json(unit / "status.json", {"status": "COMPLETE"})
+    _write_json(nested / "artifact-manifest.json", {"nested": True})
+
+    gate_c_live._unit_manifest(unit)
+
+    manifest = gate_c_live._verify_unit_manifest(unit)
+    assert "transport/artifact-manifest.json" in {item["path"] for item in manifest["files"]}
+
+
+def test_atomic_manifest_publish_never_clobbers_a_racing_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    _write_json(root / "evidence.json", {"preserved": True})
+    target = root / "artifact-manifest.json"
+    competitor = b'{"competitor":true}\n'
+    real_link = artifact_integrity.os.link
+
+    def racing_link(source: Path, destination: Path) -> None:
+        Path(destination).write_bytes(competitor)
+        real_link(source, destination)
+
+    monkeypatch.setattr(artifact_integrity.os, "link", racing_link)
+
+    with pytest.raises(FileExistsError):
+        artifact_integrity.write_closed_manifest_atomic(root)
+    assert target.read_bytes() == competitor
+    assert not tuple(root.glob(".*.tmp"))
 
 
 def test_functional_judge_transport_persists_exact_request_and_response(
@@ -289,7 +492,7 @@ def test_invalid_single_pass_judge_response_becomes_provenance_bound_unknown(
 def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
     stored_base = {
         "schema_version": "1.0",
-        "gate_c_live_id": "frozen-pilot",
+        "gate_c_live_id": ("randomized-exploratory-gate-c-live-cwe78-cwe89-qwen25-coder-7b-v1"),
         "scale_up_allowed": False,
         "expected_assignments": 8,
     }
@@ -317,6 +520,7 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
 
     five_cwe = {
         **stored_base,
+        "gate_c_live_id": ("randomized-exploratory-gate-c-live-five-cwe-qwen25-coder-7b-v1"),
         "expected_assignments": 20,
         "scale_up_allowed": True,
         "scale_up_authorization_id": "user-approved-five-cwe-outcome-pilot-20260818-v1",
@@ -336,6 +540,7 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
 
     main_prompt = {
         **stored_base,
+        "gate_c_live_id": "gate-c-main-prompt-canary-live-qwen25-coder-7b-v1",
         "expected_assignments": 20,
         "scale_up_allowed": True,
         "scale_up_authorization_id": ("user-approved-main-prompt-outcome-canary-20260818-v1"),
@@ -355,6 +560,7 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
 
     randomized_main = {
         **stored_base,
+        "gate_c_live_id": "randomized-discovery-gate-c-main-live-qwen7b-v1",
         "expected_assignments": 204,
         "task_selection_policy": "all_gate_b_tasks",
         "scale_up_allowed": True,
@@ -379,7 +585,7 @@ def test_gate_c_live_remaining_requires_an_authorization_only_delta() -> None:
 def test_minimal_validation_remaining_authorization_id_is_exact() -> None:
     stored_base = {
         "schema_version": "1.0",
-        "gate_c_live_id": "minimal-validation-dev-canary-v1",
+        "gate_c_live_id": "minimal-validation-dev-canary-full-live-qwen7b-v1",
         "task_selection_policy": "explicit_dev_canary",
         "scale_up_allowed": False,
         "expected_assignments": 24,
@@ -404,6 +610,393 @@ def test_minimal_validation_remaining_authorization_id_is_exact() -> None:
             mode="remaining",
             stored_base=stored_base,
         )
+
+    cross_experiment = {
+        **authorized,
+        "scale_up_authorization_id": "user-approved-remaining-20260817-v1",
+    }
+    with pytest.raises(ValueError, match="authorization failed"):
+        gate_c_live._validate_scale_up_authorization(
+            cross_experiment,
+            mode="remaining",
+            stored_base=stored_base,
+        )
+
+
+def _authorization_receipt_inputs() -> dict[str, object]:
+    live = {
+        "gate_c_live_id": "minimal-validation-dev-canary-full-live-qwen7b-v1",
+        "pilot_assignment_id": "assignment_pilot",
+        "scale_up_authorization_id": ("user-approved-minimal-validation-dev-canary-20260820-v1"),
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+    return {
+        "live": live,
+        "source_plan_id": "runs/minimal-validation/plan",
+        "source_plan_manifest_sha256": "1" * 64,
+        "app_config_id": "configs/minimal-validation/app.yaml",
+        "app_config_sha256": "2" * 64,
+        "base_live_config_sha256": "3" * 64,
+        "pilot_snapshot_id": "gate_c_live_pilot_snapshot_test",
+        "pilot_snapshot_sha256": "4" * 64,
+        "authorized_assignment_ids": ("assignment_a", "assignment_b"),
+    }
+
+
+def test_gate_c_live_authorization_receipt_binds_plan_ids_and_typed_budgets() -> None:
+    inputs = _authorization_receipt_inputs()
+    receipt = gate_c_live._authorization_receipt_payload(**inputs)
+
+    assert receipt["source_plan"]["manifest_sha256"] == "1" * 64
+    assert receipt["pilot"]["assignment_id"] == "assignment_pilot"
+    assert receipt["authorized_assignment_ids"] == ["assignment_a", "assignment_b"]
+    assert receipt["typed_budgets"]["oracle_executions"] == {
+        "unit": "executions",
+        "maximum": 2,
+    }
+    gate_c_live._verify_authorization_receipt(receipt, **inputs)
+
+    wrong_plan = {**inputs, "source_plan_manifest_sha256": "9" * 64}
+    with pytest.raises(ValueError, match="receipt failed"):
+        gate_c_live._verify_authorization_receipt(receipt, **wrong_plan)
+
+    wrong_id = json.loads(json.dumps(receipt))
+    wrong_id["authorization_receipt_id"] = "gate_c_live_authorization_receipt_wrong"
+    with pytest.raises(ValueError, match="receipt failed"):
+        gate_c_live._verify_authorization_receipt(wrong_id, **inputs)
+
+    wrong_budget = json.loads(json.dumps(receipt))
+    wrong_budget["typed_budgets"]["oracle_executions"]["maximum"] = 3
+    with pytest.raises(ValueError, match="receipt failed"):
+        gate_c_live._verify_authorization_receipt(wrong_budget, **inputs)
+
+
+def test_recovered_remaining_retry_reuses_one_durable_full_scope_receipt(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "live"
+    output.mkdir()
+    inputs = _authorization_receipt_inputs()
+
+    path, first = gate_c_live._load_or_create_authorization_receipt(
+        output,
+        allow_create=True,
+        expected_inputs=inputs,
+    )
+    original = path.read_bytes()
+    _write_json(output / "command-remaining.json", {"argv": ["first-attempt"]})
+
+    retry_path, retry = gate_c_live._load_or_create_authorization_receipt(
+        output,
+        allow_create=False,
+        expected_inputs=inputs,
+    )
+
+    assert retry_path == path
+    assert retry == first
+    assert retry_path.read_bytes() == original
+    assert retry["authorized_assignment_ids"] == ["assignment_a", "assignment_b"]
+    assert retry["typed_budgets"]["generation_provider_attempts"]["maximum"] == 2
+    assert not (output / "authorization-receipt-remaining-002.json").exists()
+
+    narrowed = {**inputs, "authorized_assignment_ids": ("assignment_b",)}
+    with pytest.raises(ValueError, match="receipt failed"):
+        gate_c_live._load_or_create_authorization_receipt(
+            output,
+            allow_create=False,
+            expected_inputs=narrowed,
+        )
+
+    missing = tmp_path / "missing-receipt"
+    missing.mkdir()
+    with pytest.raises(FileNotFoundError, match="durable authorization receipt"):
+        gate_c_live._load_or_create_authorization_receipt(
+            missing,
+            allow_create=False,
+            expected_inputs=inputs,
+        )
+
+
+def test_remaining_retry_only_reuses_durable_scope_files(tmp_path: Path) -> None:
+    output = tmp_path / "live"
+    output.mkdir()
+    live = {"gate_c_live_id": "test", "scale_up_allowed": True}
+    provenance = {"authorization_receipt_id": "receipt_test"}
+    live_path = output / gate_c_live._REMAINING_LIVE_CONFIG_NAME
+    provenance_path = output / gate_c_live._REMAINING_INPUT_PROVENANCE_NAME
+    gate_c_live._write_or_verify_durable_json(
+        live_path,
+        live,
+        allow_create=True,
+        label="remaining live config",
+    )
+    gate_c_live._write_or_verify_durable_json(
+        provenance_path,
+        provenance,
+        allow_create=True,
+        label="remaining input provenance",
+    )
+    original_files = {path.name: path.read_bytes() for path in output.iterdir()}
+
+    gate_c_live._write_or_verify_durable_json(
+        live_path,
+        live,
+        allow_create=False,
+        label="remaining live config",
+    )
+    gate_c_live._write_or_verify_durable_json(
+        provenance_path,
+        provenance,
+        allow_create=False,
+        label="remaining input provenance",
+    )
+
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == original_files
+    with pytest.raises(ValueError, match="durable remaining input provenance"):
+        gate_c_live._write_or_verify_durable_json(
+            provenance_path,
+            {"authorization_receipt_id": "tampered"},
+            allow_create=False,
+            label="remaining input provenance",
+        )
+
+
+def test_gate_c_live_pilot_snapshot_is_content_addressed_and_non_overwriting(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "live"
+    phase = output / "phases" / "phase-001-pilot"
+    unit = output / "units" / "assignment_pilot"
+    phase.mkdir(parents=True)
+    unit.mkdir(parents=True)
+    summary = {
+        "schema_version": "1.0",
+        "phase": "pilot",
+        "status": "GATE_C_LIVE_PARTIAL",
+        "scientific_claim_allowed": False,
+        "counts": {"completed": 1, "errors": 0, "pending": 23},
+        "completed_assignment_ids": ["assignment_pilot"],
+        "failed_assignment_ids": [],
+    }
+    _write_json(phase / "selection.json", {"mode": "pilot", "assignment_ids": ["assignment_pilot"]})
+    _write_json(phase / "report.json", summary)
+    _write_json(output / "report-pilot.json", summary)
+    _write_json(unit / "status.json", {"assignment_id": "assignment_pilot", "status": "COMPLETE"})
+    gate_c_live._unit_manifest(unit)
+    live = {
+        "gate_c_live_id": "minimal-validation-dev-canary-full-live-qwen7b-v1",
+        "source_plan_dir": "runs/minimal-validation/plan",
+        "pilot_assignment_id": "assignment_pilot",
+    }
+    inputs = {
+        "live": live,
+        "source_plan_manifest_sha256": "1" * 64,
+        "app_config_id": "configs/app.yaml",
+        "app_config_sha256": "2" * 64,
+        "base_live_config_sha256": "3" * 64,
+    }
+
+    snapshot = gate_c_live._write_pilot_phase_snapshot(output, **inputs)
+
+    assert str(snapshot["pilot_phase_snapshot_id"]).startswith("gate_c_live_pilot_snapshot_")
+    assert gate_c_live._verify_pilot_phase_snapshot(output, **inputs) == snapshot
+    with pytest.raises(FileExistsError):
+        gate_c_live._write_pilot_phase_snapshot(output, **inputs)
+
+
+@pytest.mark.parametrize(
+    ("phase_report_relative", "root_report_name"),
+    (
+        ("phases/phase-002-remaining/report.json", "report-remaining.json"),
+        ("phases/phase-remaining-002/report.json", "report-remaining-002.json"),
+    ),
+)
+def test_gate_c_live_final_root_is_first_write_closed_and_covers_retry_manifests(
+    tmp_path: Path,
+    phase_report_relative: str,
+    root_report_name: str,
+) -> None:
+    output = tmp_path / "live"
+    pilot_snapshot_path = output / "phases" / "phase-001-pilot" / "phase-snapshot.json"
+    remaining_report_path = output / phase_report_relative
+    root_report_path = output / root_report_name
+    pilot_snapshot_path.parent.mkdir(parents=True)
+    remaining_report_path.parent.mkdir(parents=True)
+    pilot_snapshot = {"pilot_phase_snapshot_id": "gate_c_live_pilot_snapshot_test"}
+    _write_json(pilot_snapshot_path, pilot_snapshot)
+    expected_ids = ("assignment_a", "assignment_pilot")
+    summary = {
+        "schema_version": "1.0",
+        "phase": "remaining",
+        "status": "GATE_C_LIVE_COMPLETE",
+        "scientific_claim_allowed": False,
+        "counts": {
+            "completed": 2,
+            "errors": 0,
+            "pending": 0,
+            "generation_provider_attempts": 2,
+            "functional_judge_provider_attempts": 2,
+            "oracle_results": 2,
+        },
+        "completed_assignment_ids": list(expected_ids),
+        "failed_assignment_ids": [],
+    }
+    _write_json(remaining_report_path, summary)
+    _write_json(root_report_path, summary)
+    for assignment_id in expected_ids:
+        unit = output / "units" / assignment_id
+        unit.mkdir(parents=True)
+        _write_json(
+            unit / "status.json",
+            {
+                "assignment_id": assignment_id,
+                "status": "COMPLETE",
+                "generation_provider_attempts": 1,
+                "functional_judge_provider_attempts": 1,
+                "oracle_results": 1,
+            },
+        )
+        gate_c_live._unit_manifest(unit)
+    inputs = {
+        **_authorization_receipt_inputs(),
+        "pilot_snapshot_sha256": hashlib.sha256(pilot_snapshot_path.read_bytes()).hexdigest(),
+        "authorized_assignment_ids": ("assignment_a",),
+    }
+    receipt = gate_c_live._authorization_receipt_payload(**inputs)
+    receipt_path = output / "authorization-receipt-remaining.json"
+    _write_json(receipt_path, receipt)
+
+    manifest = gate_c_live._finalize_live_root(
+        output,
+        live=inputs["live"],
+        summary=summary,
+        expected_assignment_ids=expected_ids,
+        source_plan_manifest_sha256="1" * 64,
+        app_config_sha256="2" * 64,
+        base_live_config_sha256="3" * 64,
+        pilot_snapshot=pilot_snapshot,
+        authorization_receipt_path=receipt_path,
+        authorization_receipt_inputs=inputs,
+        phase_report_path=remaining_report_path,
+        root_report_path=root_report_path,
+    )
+
+    covered = {item["path"] for item in manifest["files"]}
+    assert "root-provenance.json" in covered
+    assert "units/assignment_pilot/artifact-manifest.json" in covered
+    assert "units/assignment_a/artifact-manifest.json" in covered
+    assert (output / "artifact-manifest.json").is_file()
+    provenance = json.loads((output / "root-provenance.json").read_text(encoding="utf-8"))
+    assert provenance["provenance_version"] == "gate_c_live_final_root_v2"
+    assert provenance["authorization_receipt_path"] == "authorization-receipt-remaining.json"
+    assert provenance["final_phase_report_path"] == phase_report_relative
+    assert (
+        provenance["final_phase_report_sha256"]
+        == hashlib.sha256(remaining_report_path.read_bytes()).hexdigest()
+    )
+    with pytest.raises(FileExistsError):
+        gate_c_live._finalize_live_root(
+            output,
+            live=inputs["live"],
+            summary=summary,
+            expected_assignment_ids=expected_ids,
+            source_plan_manifest_sha256="1" * 64,
+            app_config_sha256="2" * 64,
+            base_live_config_sha256="3" * 64,
+            pilot_snapshot=pilot_snapshot,
+            authorization_receipt_path=receipt_path,
+            authorization_receipt_inputs=inputs,
+            phase_report_path=remaining_report_path,
+            root_report_path=root_report_path,
+        )
+
+    outside_receipt = tmp_path / "outside-receipt.json"
+    outside_receipt.write_bytes(receipt_path.read_bytes())
+    with pytest.raises(ValueError, match="escaped final root"):
+        gate_c_live._finalize_live_root(
+            output,
+            live=inputs["live"],
+            summary=summary,
+            expected_assignment_ids=expected_ids,
+            source_plan_manifest_sha256="1" * 64,
+            app_config_sha256="2" * 64,
+            base_live_config_sha256="3" * 64,
+            pilot_snapshot=pilot_snapshot,
+            authorization_receipt_path=outside_receipt,
+            authorization_receipt_inputs=inputs,
+            phase_report_path=remaining_report_path,
+            root_report_path=root_report_path,
+        )
+
+    partial_report = {**summary, "status": "GATE_C_LIVE_PARTIAL"}
+    remaining_report_path.write_text(
+        json.dumps(partial_report, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="final report binding"):
+        gate_c_live._finalize_live_root(
+            output,
+            live=inputs["live"],
+            summary=summary,
+            expected_assignment_ids=expected_ids,
+            source_plan_manifest_sha256="1" * 64,
+            app_config_sha256="2" * 64,
+            base_live_config_sha256="3" * 64,
+            pilot_snapshot=pilot_snapshot,
+            authorization_receipt_path=receipt_path,
+            authorization_receipt_inputs=inputs,
+            phase_report_path=remaining_report_path,
+            root_report_path=root_report_path,
+        )
+    remaining_report_path.write_text(json.dumps(summary, sort_keys=True) + "\n", encoding="utf-8")
+
+    tampered_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    tampered_receipt["authorized_assignment_ids"] = []
+    receipt_path.write_text(json.dumps(tampered_receipt, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="receipt failed"):
+        gate_c_live._finalize_live_root(
+            output,
+            live=inputs["live"],
+            summary=summary,
+            expected_assignment_ids=expected_ids,
+            source_plan_manifest_sha256="1" * 64,
+            app_config_sha256="2" * 64,
+            base_live_config_sha256="3" * 64,
+            pilot_snapshot=pilot_snapshot,
+            authorization_receipt_path=receipt_path,
+            authorization_receipt_inputs=inputs,
+            phase_report_path=remaining_report_path,
+            root_report_path=root_report_path,
+        )
+
+
+def test_gate_c_live_partial_or_error_summary_never_finalizes_root(tmp_path: Path) -> None:
+    output = tmp_path / "live"
+    output.mkdir()
+    partial = {
+        "phase": "remaining",
+        "status": "GATE_C_LIVE_PARTIAL",
+        "scientific_claim_allowed": False,
+        "counts": {"completed": 1, "errors": 0, "pending": 1},
+        "completed_assignment_ids": ["assignment_pilot"],
+        "failed_assignment_ids": [],
+    }
+    with pytest.raises(ValueError, match="exact COMPLETE"):
+        gate_c_live._finalize_live_root(
+            output,
+            live={},
+            summary=partial,
+            expected_assignment_ids=("assignment_a", "assignment_pilot"),
+            source_plan_manifest_sha256="1" * 64,
+            app_config_sha256="2" * 64,
+            base_live_config_sha256="3" * 64,
+            pilot_snapshot={},
+            authorization_receipt_path=output / "missing-receipt.json",
+            authorization_receipt_inputs={},
+            phase_report_path=output / "missing-phase.json",
+            root_report_path=output / "missing-root.json",
+        )
+    assert not (output / "root-provenance.json").exists()
+    assert not (output / "artifact-manifest.json").exists()
 
 
 def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(

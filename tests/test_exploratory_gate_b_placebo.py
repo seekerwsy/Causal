@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import Path
+
 import pytest
 
 from secaware.exploratory.gate_b import (
@@ -17,8 +21,12 @@ from secaware.exploratory.gate_b import (
     _reviewed_target_suffixes,
     _select_reviewed_placebo_suffix,
     _selected_gate_b_task_ids,
+    _validate_no_claim_boundary,
     _validated_gate_b_cwe_counts,
     _validated_provider_call_budget,
+    _validated_selected_gate_b_variants,
+    _validated_strict_reuse_postcondition,
+    _validated_strict_selection_contract,
     _variant_extractor_reuse_exclusions,
     validate_length_matched_placebo,
 )
@@ -485,6 +493,122 @@ def test_extractor_reuse_keeps_source_and_refreshes_changed_variant(tmp_path) ->
     assert transport.reuse_exclusion_labels == ("variant-gate-a-1",)
 
 
+@pytest.mark.parametrize(
+    ("channel", "label", "request_bytes"),
+    [
+        ("intervention", "gate-a-variant-1", b'{"intervention":true}'),
+        ("extractor", "source-prompt-1", b'{"source":true}'),
+    ],
+)
+def test_required_reuse_missing_fails_before_a_live_call(
+    tmp_path,
+    channel: str,
+    label: str,
+    request_bytes: bytes,
+) -> None:
+    reuse = tmp_path / "reuse"
+    reuse.mkdir()
+    delegate = _FixedTransport(b'{"facts":["must-not-run"]}')
+    transport = _RecordingTransport(
+        delegate,
+        tmp_path / "new",
+        channel,
+        reuse_root=reuse,
+        required_reuse_labels=frozenset({label}),
+    )
+
+    transport.select(label)
+    with pytest.raises(ValueError, match="required reusable response"):
+        transport.complete(request_bytes, _policy())
+
+    assert delegate.calls == []
+    assert transport.live_labels == ()
+
+
+def test_required_reuse_request_mismatch_fails_before_a_live_call(tmp_path) -> None:
+    reuse_channel = tmp_path / "reuse" / "raw" / "intervention"
+    reuse_channel.mkdir(parents=True)
+    (reuse_channel / "gate-a-variant-1.request.json").write_bytes(b'{"old":true}\n')
+    (reuse_channel / "gate-a-variant-1.response.json").write_bytes(b'{"candidate_text":"old"}\n')
+    delegate = _FixedTransport(b'{"candidate_text":"must-not-run"}')
+    transport = _RecordingTransport(
+        delegate,
+        tmp_path / "new",
+        "intervention",
+        reuse_root=tmp_path / "reuse",
+        required_reuse_labels=frozenset({"gate-a-variant-1"}),
+    )
+
+    transport.select("gate-a-variant-1")
+    with pytest.raises(ValueError, match="request bytes"):
+        transport.complete(b'{"new":true}', _policy())
+
+    assert delegate.calls == []
+    assert transport.live_labels == ()
+
+
+class _ObservedTransport:
+    def __init__(
+        self,
+        *,
+        reused: tuple[str, ...] = (),
+        live: tuple[str, ...] = (),
+        excluded: tuple[str, ...] = (),
+    ) -> None:
+        self.reused_labels = reused
+        self.live_labels = live
+        self.reuse_exclusion_labels = excluded
+
+
+def test_strict_reuse_postcondition_requires_exact_channel_counts() -> None:
+    variants = frozenset({"target", "noop", "generic", "placebo"})
+    variant_labels = tuple(f"variant-{item}" for item in sorted(variants))
+    intervention = _ObservedTransport(reused=tuple(sorted(variants)))
+    extractor = _ObservedTransport(
+        reused=("source-prompt",),
+        live=variant_labels,
+        excluded=variant_labels,
+    )
+
+    receipt = _validated_strict_reuse_postcondition(
+        independent_tasks=1,
+        selected_variant_ids=variants,
+        source_extractor_labels=frozenset({"source-prompt"}),
+        intervention_transport=intervention,
+        extractor_transport=extractor,
+    )
+    assert receipt["status"] == "PASSED"
+    assert receipt["observed_live_intervention_calls"] == 0
+    assert receipt["observed_live_variant_extractor_calls"] == 4
+
+    missing_variant = _ObservedTransport(
+        reused=("source-prompt",),
+        live=variant_labels[:-1],
+        excluded=variant_labels,
+    )
+    with pytest.raises(ValueError, match="strict reuse postcondition"):
+        _validated_strict_reuse_postcondition(
+            independent_tasks=1,
+            selected_variant_ids=variants,
+            source_extractor_labels=frozenset({"source-prompt"}),
+            intervention_transport=intervention,
+            extractor_transport=missing_variant,
+        )
+
+    live_intervention = _ObservedTransport(
+        reused=tuple(sorted(variants)),
+        live=("unexpected-live-intervention",),
+    )
+    with pytest.raises(ValueError, match="strict reuse postcondition"):
+        _validated_strict_reuse_postcondition(
+            independent_tasks=1,
+            selected_variant_ids=variants,
+            source_extractor_labels=frozenset({"source-prompt"}),
+            intervention_transport=live_intervention,
+            extractor_transport=extractor,
+        )
+
+
 def _source_prompt(task_id: str, cwe: str) -> PromptRecord:
     return PromptRecord.model_validate(
         {
@@ -498,6 +622,46 @@ def _source_prompt(task_id: str, cwe: str) -> PromptRecord:
             "prompt_role": "neutral_baseline",
         }
     )
+
+
+def _gate_a_variant(task_id: str, arm_role: str, index: int) -> dict[str, object]:
+    return {
+        "task_id": task_id,
+        "variant_id": f"variant-{task_id}-{index}",
+        "arm_role": arm_role,
+    }
+
+
+def test_selected_variants_require_exact_unique_four_arm_blocks() -> None:
+    roles = (
+        "target_patch",
+        "noop_rewrite",
+        "generic_security_reminder",
+        "length_matched_placebo",
+    )
+    variants = [_gate_a_variant("task-1", role, index) for index, role in enumerate(roles)]
+
+    selected = _validated_selected_gate_b_variants(variants, ("task-1",))
+
+    assert {item["arm_role"] for item in selected} == set(roles)
+    assert len({item["variant_id"] for item in selected}) == 4
+
+    duplicated_id = [dict(item) for item in variants]
+    duplicated_id[-1]["variant_id"] = duplicated_id[0]["variant_id"]
+    with pytest.raises(ValueError, match="exact arm coverage"):
+        _validated_selected_gate_b_variants(duplicated_id, ("task-1",))
+
+    compensated_missing_arm = [dict(item) for item in variants]
+    compensated_missing_arm[-1]["arm_role"] = "target_patch"
+    with pytest.raises(ValueError, match="exact arm coverage"):
+        _validated_selected_gate_b_variants(compensated_missing_arm, ("task-1",))
+
+    second_task = [
+        _gate_a_variant("task-2", role, index + len(roles)) for index, role in enumerate(roles)
+    ]
+    second_task[0]["variant_id"] = variants[0]["variant_id"]
+    with pytest.raises(ValueError, match="exact arm coverage"):
+        _validated_selected_gate_b_variants(variants + second_task, ("task-1", "task-2"))
 
 
 def test_multi_per_cwe_selection_accepts_unique_gate_a_tasks_and_exact_budget() -> None:
@@ -534,6 +698,20 @@ def test_multi_per_cwe_selection_accepts_unique_gate_a_tasks_and_exact_budget() 
     )
 
 
+@pytest.mark.parametrize("value", [True, 0, "false"])
+def test_gate_b_rejects_non_false_scientific_claim_policy(value) -> None:
+    with pytest.raises(ValueError, match="scientific-claim boundary"):
+        _validate_no_claim_boundary({"scientific_claim_allowed": value})
+
+    _validate_no_claim_boundary({"scientific_claim_allowed": False})
+
+
+def test_gate_b_requires_explicit_no_claim_only_for_the_strict_v2_contract() -> None:
+    _validate_no_claim_boundary({})
+    with pytest.raises(ValueError, match="scientific-claim boundary"):
+        _validate_no_claim_boundary({"strict_selection_contract": {}})
+
+
 def test_multi_per_cwe_selection_rejects_duplicate_unknown_and_single_cwe_tasks() -> None:
     sources = {
         "task-a": _source_prompt("task-a", "CWE-78"),
@@ -554,12 +732,206 @@ def test_multi_per_cwe_selection_rejects_duplicate_unknown_and_single_cwe_tasks(
             selected_sources=tuple(sources.values()),
             gate_a_candidate_count=1,
         )
+    with pytest.raises(ValueError, match="CWE coverage"):
+        _validated_gate_b_cwe_counts(
+            task_selection_policy="explicit_task_ids_multi_per_cwe_v1",
+            selected_sources=(
+                _source_prompt("task-78", "CWE-78"),
+                _source_prompt("task-89", "CWE-89"),
+            ),
+            gate_a_candidate_count=2,
+        )
     with pytest.raises(ValueError, match="provider budget"):
         _validated_provider_call_budget(
             {},
             independent_tasks=2,
             require_explicit=True,
         )
+
+
+def _write_selection_manifest(
+    path,
+    tasks: list[dict[str, str]],
+    *,
+    outcomes_consulted: bool = False,
+    scientific_claim_allowed: bool = False,
+    require_distinct_task_cluster: bool = True,
+) -> str:
+    payload = {
+        "schema_version": "1.0",
+        "selection_id": "selection-v2",
+        "selection_policy": {
+            "cwes": ["CWE-78", "CWE-89"],
+            "outcomes_consulted": outcomes_consulted,
+            "require_distinct_task_cluster": require_distinct_task_cluster,
+        },
+        "scientific_claim_allowed": scientific_claim_allowed,
+        "tasks": tasks,
+    }
+    content = (json.dumps(payload, sort_keys=True) + "\n").encode()
+    path.write_bytes(content)
+    return hashlib.sha256(content).hexdigest()
+
+
+def test_strict_selection_contract_binds_digest_tasks_cwes_and_clusters(tmp_path) -> None:
+    tasks = [
+        {"task_id": "task-78-a", "cwe": "CWE-78", "task_cluster_id": "cluster-1"},
+        {"task_id": "task-78-b", "cwe": "CWE-78", "task_cluster_id": "cluster-2"},
+        {"task_id": "task-89-a", "cwe": "CWE-89", "task_cluster_id": "cluster-3"},
+        {"task_id": "task-89-b", "cwe": "CWE-89", "task_cluster_id": "cluster-4"},
+    ]
+    selected_task_ids = tuple(item["task_id"] for item in tasks)
+    sources = tuple(_source_prompt(item["task_id"], item["cwe"]) for item in tasks)
+    manifest = tmp_path / "selection.json"
+    contract = {
+        "manifest_path": "selection.json",
+        "manifest_sha256": _write_selection_manifest(manifest, tasks),
+        "selection_id": "selection-v2",
+        "expected_task_count": 4,
+        "expected_cwe_counts": {"CWE-78": 2, "CWE-89": 2},
+        "expected_unique_cluster_count": 4,
+    }
+
+    receipt = _validated_strict_selection_contract(
+        {"strict_selection_contract": contract},
+        repo_root=tmp_path,
+        selected_task_ids=selected_task_ids,
+        selected_sources=sources,
+    )
+
+    assert receipt == {
+        "policy_version": "strict_selection_manifest_v1",
+        "selection_id": "selection-v2",
+        "manifest_path": "selection.json",
+        "manifest_sha256": contract["manifest_sha256"],
+        "task_count": 4,
+        "cwe_counts": {"CWE-78": 2, "CWE-89": 2},
+        "unique_cluster_count": 4,
+        "cluster_counts": {
+            "cluster-1": 1,
+            "cluster-2": 1,
+            "cluster-3": 1,
+            "cluster-4": 1,
+        },
+        "outcomes_consulted": False,
+        "scientific_claim_allowed": False,
+    }
+    assert (
+        _validated_strict_selection_contract(
+            {},
+            repo_root=tmp_path,
+            selected_task_ids=selected_task_ids,
+            selected_sources=sources,
+        )
+        is None
+    )
+
+    manifest.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="manifest digest"):
+        _validated_strict_selection_contract(
+            {"strict_selection_contract": contract},
+            repo_root=tmp_path,
+            selected_task_ids=selected_task_ids,
+            selected_sources=sources,
+        )
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "duplicate_cluster",
+        "cwe_imbalance",
+        "outcome_leakage",
+        "claim_leakage",
+        "non_distinct_policy",
+    ],
+)
+def test_strict_selection_contract_rejects_population_attacks(tmp_path, attack: str) -> None:
+    tasks = [
+        {"task_id": "task-78-a", "cwe": "CWE-78", "task_cluster_id": "cluster-1"},
+        {"task_id": "task-78-b", "cwe": "CWE-78", "task_cluster_id": "cluster-2"},
+        {"task_id": "task-89-a", "cwe": "CWE-89", "task_cluster_id": "cluster-3"},
+        {"task_id": "task-89-b", "cwe": "CWE-89", "task_cluster_id": "cluster-4"},
+    ]
+    selected_task_ids = tuple(item["task_id"] for item in tasks)
+    sources = tuple(_source_prompt(item["task_id"], item["cwe"]) for item in tasks)
+    attacked = [dict(item) for item in tasks]
+    outcomes_consulted = attack == "outcome_leakage"
+    scientific_claim_allowed = attack == "claim_leakage"
+    require_distinct_task_cluster = attack != "non_distinct_policy"
+    if attack == "duplicate_cluster":
+        attacked[-1]["task_cluster_id"] = attacked[0]["task_cluster_id"]
+    elif attack == "cwe_imbalance":
+        attacked[-1]["cwe"] = "CWE-78"
+    manifest = tmp_path / "selection.json"
+    contract = {
+        "manifest_path": "selection.json",
+        "manifest_sha256": _write_selection_manifest(
+            manifest,
+            attacked,
+            outcomes_consulted=outcomes_consulted,
+            scientific_claim_allowed=scientific_claim_allowed,
+            require_distinct_task_cluster=require_distinct_task_cluster,
+        ),
+        "selection_id": "selection-v2",
+        "expected_task_count": 4,
+        "expected_cwe_counts": {"CWE-78": 2, "CWE-89": 2},
+        "expected_unique_cluster_count": 4,
+    }
+
+    with pytest.raises(ValueError, match="strict selection"):
+        _validated_strict_selection_contract(
+            {"strict_selection_contract": contract},
+            repo_root=tmp_path,
+            selected_task_ids=selected_task_ids,
+            selected_sources=sources,
+        )
+
+
+@pytest.mark.parametrize(
+    ("config_name", "expected_tasks", "expected_cwes", "expected_clusters"),
+    [
+        (
+            "dev-canary-micro-python-comment-gate-b-v2.json",
+            2,
+            {"CWE-78": 1, "CWE-89": 1},
+            2,
+        ),
+        (
+            "dev-canary-full-python-comment-gate-b-v2.json",
+            12,
+            {"CWE-78": 6, "CWE-89": 6},
+            12,
+        ),
+    ],
+)
+def test_shipped_v2_gate_b_configs_bind_exact_selection_manifests(
+    config_name: str,
+    expected_tasks: int,
+    expected_cwes: dict[str, int],
+    expected_clusters: int,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    config = json.loads(
+        (repo_root / "configs" / "minimal-validation" / config_name).read_text(encoding="utf-8")
+    )
+    contract = config["strict_selection_contract"]
+    manifest = json.loads((repo_root / contract["manifest_path"]).read_text(encoding="utf-8"))
+    selected_task_ids = tuple(config["selected_task_ids"])
+    sources = tuple(_source_prompt(item["task_id"], item["cwe"]) for item in manifest["tasks"])
+
+    receipt = _validated_strict_selection_contract(
+        config,
+        repo_root=repo_root,
+        selected_task_ids=selected_task_ids,
+        selected_sources=sources,
+    )
+
+    assert receipt is not None
+    assert receipt["task_count"] == expected_tasks
+    assert receipt["cwe_counts"] == expected_cwes
+    assert receipt["unique_cluster_count"] == expected_clusters
+    assert set(receipt["cluster_counts"].values()) == {1}
 
 
 def test_legacy_explicit_selection_keeps_one_task_per_cwe_contract() -> None:
