@@ -60,6 +60,36 @@ def test_gate_c_live_reads_arm_contract_from_plan_report_with_legacy_fallback() 
         )
 
 
+def test_gate_c_live_validates_development_dimensions_for_main_and_recovery_paths() -> None:
+    plan_report = {
+        "arm_roles": ["target_patch", "noop_rewrite"],
+        "arms_per_task": 2,
+    }
+    assert gate_c_live._validated_plan_dimensions(
+        plan_report,
+        expected_assignments=24,
+        task_selection_policy="explicit_dev_canary",
+    ) == (12, gate_c_live._DEV_CANARY_ARM_ROLES)
+
+    with pytest.raises(ValueError, match="development arm protocol"):
+        gate_c_live._validated_plan_dimensions(
+            plan_report,
+            expected_assignments=8,
+            task_selection_policy="explicit_bounded_canary",
+        )
+
+
+def test_gate_c_live_report_contract_is_explicit_and_non_scientific() -> None:
+    assert gate_c_live._report_contract_fields(
+        "explicit_dev_canary", gate_c_live._DEV_CANARY_ARM_ROLES
+    ) == {
+        "scientific_claim_allowed": False,
+        "task_selection_policy": "explicit_dev_canary",
+        "arm_roles": ["target_patch", "noop_rewrite"],
+        "arms_per_task": 2,
+    }
+
+
 @pytest.mark.parametrize("assignments", (0, 4, 9, 24))
 def test_gate_c_live_rejects_unregistered_assignment_count(assignments: int) -> None:
     with pytest.raises(ValueError, match="assignment count"):
@@ -399,9 +429,19 @@ def test_gate_c_live_summary_counts_profile_decisions_and_joint_outcome(
     )
     gate_c_live._unit_manifest(unit)
 
-    summary = gate_c_live._summary(tmp_path, 1, "pilot")
+    summary = gate_c_live._summary(
+        tmp_path,
+        1,
+        "pilot",
+        task_selection_policy="explicit_dev_canary",
+        arm_roles=gate_c_live._DEV_CANARY_ARM_ROLES,
+    )
 
     assert summary["status"] == "GATE_C_LIVE_COMPLETE"
+    assert summary["scientific_claim_allowed"] is False
+    assert summary["task_selection_policy"] == "explicit_dev_canary"
+    assert summary["arm_roles"] == ["target_patch", "noop_rewrite"]
+    assert summary["arms_per_task"] == 2
     assert summary["counts"]["secure"] == 1
     assert summary["counts"]["secure_and_functional"] == 1
 

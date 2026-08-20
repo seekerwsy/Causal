@@ -133,6 +133,37 @@ def _plan_arm_roles(plan_report: dict[str, object]) -> tuple[str, ...]:
     return roles
 
 
+def _validated_plan_dimensions(
+    plan_report: dict[str, object],
+    *,
+    expected_assignments: int,
+    task_selection_policy: str,
+) -> tuple[int, tuple[str, ...]]:
+    arm_roles = _plan_arm_roles(plan_report)
+    if (task_selection_policy == _TASK_SELECTION_DEV_CANARY) != (
+        arm_roles == _DEV_CANARY_ARM_ROLES
+    ):
+        raise ValueError("Gate C live development arm protocol failed validation")
+    task_count = _bounded_task_count(
+        expected_assignments,
+        task_selection_policy,
+        len(arm_roles),
+    )
+    return task_count, arm_roles
+
+
+def _report_contract_fields(
+    task_selection_policy: str,
+    arm_roles: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "scientific_claim_allowed": False,
+        "task_selection_policy": task_selection_policy,
+        "arm_roles": list(arm_roles),
+        "arms_per_task": len(arm_roles),
+    }
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value,
@@ -799,7 +830,14 @@ def _validate_scale_up_authorization(
         raise ValueError("Gate C live scale-up authorization changed the frozen pilot config")
 
 
-def _summary(output_dir: Path, expected: int, phase: str) -> dict[str, object]:
+def _summary(
+    output_dir: Path,
+    expected: int,
+    phase: str,
+    *,
+    task_selection_policy: str,
+    arm_roles: tuple[str, ...],
+) -> dict[str, object]:
     completed, failed = _completed_assignments(output_dir)
     judge_calls = 0
     oracle_results = 0
@@ -829,6 +867,7 @@ def _summary(output_dir: Path, expected: int, phase: str) -> dict[str, object]:
     return {
         "schema_version": _SCHEMA_VERSION,
         "phase": phase,
+        **_report_contract_fields(task_selection_policy, arm_roles),
         "status": (
             "GATE_C_LIVE_COMPLETE"
             if len(completed) == expected and not failed
@@ -888,12 +927,11 @@ def run_gate_c_live_canary(
     plan_report = _verify_plan(plan_dir)
     expected = int(live.get("expected_assignments", 0))
     task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
-    arm_roles = _plan_arm_roles(plan_report)
-    task_count = _bounded_task_count(expected, task_selection_policy, len(arm_roles))
-    if (task_selection_policy == _TASK_SELECTION_DEV_CANARY) != (
-        arm_roles == _DEV_CANARY_ARM_ROLES
-    ):
-        raise ValueError("Gate C live development arm protocol failed validation")
+    task_count, arm_roles = _validated_plan_dimensions(
+        plan_report,
+        expected_assignments=expected,
+        task_selection_policy=task_selection_policy,
+    )
     oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
         live.get("schema_version") != _SCHEMA_VERSION
@@ -978,6 +1016,7 @@ def run_gate_c_live_canary(
         report = {
             "schema_version": _SCHEMA_VERSION,
             "status": "GATE_C_LIVE_PREFLIGHT_COMPLETE",
+            **_report_contract_fields(task_selection_policy, arm_roles),
             "provider_calls": 0,
             "oracle_executions": 0,
             "validated_assignments": len(selected),
@@ -1227,7 +1266,13 @@ def run_gate_c_live_canary(
             )
             _unit_manifest(unit_dir)
             break
-    summary = _summary(output_dir, expected, mode)
+    summary = _summary(
+        output_dir,
+        expected,
+        mode,
+        task_selection_policy=task_selection_policy,
+        arm_roles=arm_roles,
+    )
     _write_json(phase_dir / "report.json", summary)
     _write_json(output_dir / root_report_name, summary)
     if failure is not None:
@@ -1264,11 +1309,16 @@ def recover_gate_c_live_oracle(
     plan_report = _verify_plan(plan_dir)
     expected = int(live.get("expected_assignments", 0))
     task_selection_policy = str(live.get("task_selection_policy", _TASK_SELECTION_BOUNDED_CANARY))
-    _bounded_task_count(expected, task_selection_policy)
+    _, arm_roles = _validated_plan_dimensions(
+        plan_report,
+        expected_assignments=expected,
+        task_selection_policy=task_selection_policy,
+    )
     pilot_id = live.get("pilot_assignment_id")
     oracle_decision_mode = live.get("zero_finding_interpretation")
     if (
         live.get("schema_version") != _SCHEMA_VERSION
+        or live.get("scientific_claim_allowed") is not False
         or type(pilot_id) is not str
         or oracle_decision_mode not in {_ORACLE_UNKNOWN_MODE, _ORACLE_PROFILE_MODE}
         or plan_report.get("counts", {}).get("generation_requests") != expected
@@ -1726,7 +1776,13 @@ def recover_gate_c_live_oracle(
         },
     )
     _unit_manifest(unit_dir)
-    summary = _summary(output_dir, expected, "oracle-repair")
+    summary = _summary(
+        output_dir,
+        expected,
+        "oracle-repair",
+        task_selection_policy=task_selection_policy,
+        arm_roles=arm_roles,
+    )
     summary["status"] = (
         "GATE_C_LIVE_ORACLE_REPAIR_ERROR"
         if failure is not None
