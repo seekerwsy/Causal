@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import cache
 
 import pytest
@@ -23,6 +23,7 @@ from secaware.analysis.multi_support_simultaneous_v2 import (
     _run,
     _run_frozen_domain_from_formal_context_v2,
 )
+from secaware.experiments.closed_run_evidence_v2 import ConfirmatoryClosedRunEvidenceV2
 from secaware.experiments.run_evidence_v2 import ConfirmatoryRunEvidenceManifestV2
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.experiments import ArmRole
@@ -31,8 +32,13 @@ from secaware.schema.formal_analysis_v2 import (
     FormalConfirmationStatusV2,
     FormalNonEvaluableReasonV2,
 )
-from secaware.schema.multi_support_inference_v2 import MultiSupportFormalFamilyV2
+from secaware.schema.multi_support_inference_v2 import (
+    MultiSupportFormalFamilyV2,
+    MultiSupportSimultaneousInferencePlanV2,
+)
+from secaware.schema.pre_generation_closure_v2 import ConfirmatoryPreGenerationClosureV2
 from secaware.schema.protocol_freeze_v2 import ProtocolFreezeRootV2
+from secaware.schema.variant_failure_evidence_v2 import VariantFailureEvidenceManifestV2
 from test_experiment_freeze_v2 import (
     ExperimentComponents,
     _custom_bridge,
@@ -52,11 +58,20 @@ EVALUATED_COORDINATES = tuple(
 MINIMAL_COORDINATES = tuple(
     (f"task.formal.minimal.{index}", f"cluster.formal.minimal.{index}") for index in range(2)
 )
+FOREIGN_MINIMAL_COORDINATES = tuple(
+    (f"task.formal.foreign.{index}", f"cluster.formal.foreign.{index}") for index in range(2)
+)
+
+
+@dataclass(frozen=True)
+class FormalRunEvidenceFixture(RunEvidenceFixture):
+    pre_generation_closure: ConfirmatoryPreGenerationClosureV2
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2
 
 
 def _formal_fixture(
     coordinates: tuple[tuple[str, str], ...],
-) -> RunEvidenceFixture:
+) -> FormalRunEvidenceFixture:
     bridge = _custom_bridge(
         model_scope=("model.alpha",),
         k_r=1,
@@ -122,30 +137,63 @@ def _formal_fixture(
         experiment_freeze=experiment,
         total_assignment_accountings=(accounting,),
     )
-    return RunEvidenceFixture(
+    failure_manifests = tuple(
+        VariantFailureEvidenceManifestV2.from_components(
+            intervention_bridge=protocol_root.intervention_bridge,
+            query_evidence=protocol_root.query_evidence,
+            population=protocol_root.population,
+            failure_receipts=(),
+        )
+        for protocol_root in experiment.protocol_roots
+    )
+    closure = ConfirmatoryPreGenerationClosureV2.from_components(
+        experiment_freeze=experiment,
+        variant_failure_evidence_manifests=failure_manifests,
+    )
+    closed = ConfirmatoryClosedRunEvidenceV2.from_components(
+        pre_generation_closure=closure,
+        run_evidence=evidence,
+    )
+    return FormalRunEvidenceFixture(
         experiment=experiment,
         accountings=(accounting,),
         evidence=evidence,
+        pre_generation_closure=closure,
+        closed_run_evidence=closed,
     )
 
 
 @cache
-def _evaluated_fixture() -> RunEvidenceFixture:
+def _evaluated_fixture() -> FormalRunEvidenceFixture:
     return _formal_fixture(EVALUATED_COORDINATES)
 
 
 @cache
-def _minimal_fixture() -> RunEvidenceFixture:
+def _minimal_fixture() -> FormalRunEvidenceFixture:
     return _formal_fixture(MINIMAL_COORDINATES)
+
+
+@cache
+def _foreign_minimal_fixture() -> FormalRunEvidenceFixture:
+    return _formal_fixture(FOREIGN_MINIMAL_COORDINATES)
 
 
 @cache
 def _minimal_context() -> _ValidatedFormalContextV2:
     fixture = _minimal_fixture()
-    return _ValidatedFormalContextV2._from_roots(
-        fixture.experiment,
-        fixture.evidence,
+    return _ValidatedFormalContextV2._from_root(
+        fixture.closed_run_evidence,
         access=formal_confirmation_module._FORMAL_ENTRY_CONTEXT_ACCESS,
+    )
+
+
+def _closed_with_evidence(
+    fixture: FormalRunEvidenceFixture,
+    evidence: ConfirmatoryRunEvidenceManifestV2,
+) -> ConfirmatoryClosedRunEvidenceV2:
+    return ConfirmatoryClosedRunEvidenceV2.from_components(
+        pre_generation_closure=fixture.pre_generation_closure,
+        run_evidence=evidence,
     )
 
 
@@ -161,23 +209,35 @@ def _unsafe_context_clone(
     return clone
 
 
+def _synchronously_rehash_plan(
+    plan: MultiSupportSimultaneousInferencePlanV2,
+) -> MultiSupportSimultaneousInferencePlanV2:
+    payload = plan.model_dump(mode="json", exclude={"inference_plan_id"})
+    return plan.model_copy(
+        update={
+            "inference_plan_id": "multi_support_simultaneous_plan_v2_"
+            + multi_support_schema_module._digest(payload)
+        }
+    )
+
+
 @cache
 def _evaluated_result() -> FormalConfirmationResultV2:
     fixture = _evaluated_fixture()
-    return run_formal_confirmation_v2(fixture.experiment, fixture.evidence)
+    return run_formal_confirmation_v2(fixture.closed_run_evidence)
 
 
 @cache
 def _inference_undefined_result() -> FormalConfirmationResultV2:
     fixture = _minimal_fixture()
-    return run_formal_confirmation_v2(fixture.experiment, fixture.evidence)
+    return run_formal_confirmation_v2(fixture.closed_run_evidence)
 
 
 @cache
 def _terminal_failure_result() -> FormalConfirmationResultV2:
     fixture = _minimal_fixture()
     failing_evidence, _accounting = _with_one_terminal_failure(fixture)
-    return run_formal_confirmation_v2(fixture.experiment, failing_evidence)
+    return run_formal_confirmation_v2(_closed_with_evidence(fixture, failing_evidence))
 
 
 def _without_protocol_id(protocol: FormalAnalysisProtocolV2) -> dict[str, object]:
@@ -300,8 +360,11 @@ def test_only_official_entry_derives_exactly_four_frozen_families_and_replays_js
     protocol = FormalAnalysisProtocolV2.from_experiment(fixture.experiment)
 
     assert tuple(inspect.signature(run_formal_confirmation_v2).parameters) == (
-        "experiment_freeze",
-        "run_evidence",
+        "closed_run_evidence",
+    )
+    assert tuple(inspect.signature(validate_formal_confirmation_result_v2).parameters) == (
+        "closed_run_evidence",
+        "result",
     )
     assert protocol.family_order == tuple(item.value for item in MultiSupportFormalFamilyV2)
     assert tuple(item.formal_family for item in protocol.family_plans) == tuple(
@@ -313,25 +376,71 @@ def test_only_official_entry_derives_exactly_four_frozen_families_and_replays_js
     )
     assert FormalAnalysisProtocolV2.model_validate_json(protocol.model_dump_json()) == protocol
 
-    experiment_json = fixture.experiment.model_dump_json()
-    evidence_json = fixture.evidence.model_dump_json()
-    replayed_experiment = ConfirmatoryExperimentFreezeV2.model_validate_json(experiment_json)
-    replayed_evidence = type(fixture.evidence).model_validate_json(evidence_json)
+    closed_json = fixture.closed_run_evidence.model_dump_json()
+    replayed_closed = ConfirmatoryClosedRunEvidenceV2.model_validate_json(closed_json)
     result = _inference_undefined_result()
     replayed_result = TypeAdapter(FormalConfirmationResultV2).validate_json(
         TypeAdapter(FormalConfirmationResultV2).dump_json(result)
     )
-    assert replayed_experiment == fixture.experiment
-    assert replayed_evidence == fixture.evidence
+    assert replayed_closed == fixture.closed_run_evidence
     assert replayed_result == result
+    assert result.confirmatory_closed_run_evidence_id == (
+        fixture.closed_run_evidence.confirmatory_closed_run_evidence_id
+    )
+    assert result.confirmatory_pre_generation_closure_id == (
+        fixture.pre_generation_closure.confirmatory_pre_generation_closure_id
+    )
     assert (
         validate_formal_confirmation_result_v2(
-            replayed_experiment,
-            replayed_evidence,
+            replayed_closed,
             replayed_result,
         )
         == result
     )
+
+
+def test_raw_experiment_and_missing_failure_manifest_cannot_enter_formal_analysis() -> None:
+    fixture = _minimal_fixture()
+    with pytest.raises(ValueError, match="exact confirmatory closed run evidence is required"):
+        run_formal_confirmation_v2(fixture.experiment)  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError):
+        run_formal_confirmation_v2(  # type: ignore[call-arg]
+            fixture.pre_generation_closure,  # type: ignore[arg-type]
+            fixture.evidence,
+        )
+
+    missing = fixture.pre_generation_closure.model_copy(
+        update={
+            "variant_failure_evidence_manifests": (),
+            "hypothesis_variant_evidence_bindings": (),
+            "variant_failure_evidence_manifest_ids": (),
+        }
+    )
+    attacked = fixture.closed_run_evidence.model_copy(update={"pre_generation_closure": missing})
+    with pytest.raises(ValueError, match="closed run evidence failed validation"):
+        run_formal_confirmation_v2(attacked)
+
+
+def test_foreign_or_synchronously_rehashed_closed_root_fails_closed() -> None:
+    fixture = _minimal_fixture()
+    foreign = _foreign_minimal_fixture()
+
+    impersonated = foreign.closed_run_evidence.model_copy(
+        update={
+            "confirmatory_closed_run_evidence_id": (
+                fixture.closed_run_evidence.confirmatory_closed_run_evidence_id
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="closed run evidence failed validation"):
+        run_formal_confirmation_v2(impersonated)
+
+    substituted_closure = fixture.closed_run_evidence.model_copy(
+        update={"pre_generation_closure": foreign.pre_generation_closure}
+    )
+    with pytest.raises(ValueError, match="closed run evidence failed validation"):
+        run_formal_confirmation_v2(substituted_closure)
 
 
 def test_two_cluster_valid_draw_shortfall_is_non_evaluable_not_a_partial_family() -> None:
@@ -369,10 +478,16 @@ def test_synchronized_hypothesis_or_model_deletion_cannot_shrink_the_h_by_m_fami
     delete: str,
 ) -> None:
     fixture = _minimal_fixture()
-    attacked = _synchronized_incomplete_experiment(fixture, delete=delete)
+    attacked_experiment = _synchronized_incomplete_experiment(fixture, delete=delete)
+    attacked_closure = fixture.pre_generation_closure.model_copy(
+        update={"experiment_freeze": attacked_experiment}
+    )
+    attacked = fixture.closed_run_evidence.model_copy(
+        update={"pre_generation_closure": attacked_closure}
+    )
 
-    with pytest.raises(ValueError, match="confirmatory experiment freeze failed validation"):
-        run_formal_confirmation_v2(attacked, fixture.evidence)
+    with pytest.raises(ValueError, match="closed run evidence failed validation"):
+        run_formal_confirmation_v2(attacked)
 
 
 @pytest.mark.parametrize(
@@ -429,7 +544,7 @@ def test_post_hoc_family_substitution_cannot_rewrite_the_frozen_protocol() -> No
         )
 
 
-def test_fake_coverage_or_outcome_receipt_is_rejected_at_the_two_root_boundary() -> None:
+def test_fake_coverage_or_outcome_receipt_is_rejected_at_the_closed_root_boundary() -> None:
     fixture = _minimal_fixture()
     evidence = fixture.evidence
     accounting = evidence.total_assignment_accountings[0]
@@ -458,8 +573,11 @@ def test_fake_coverage_or_outcome_receipt_is_rejected_at_the_two_root_boundary()
         }
     )
 
-    with pytest.raises(ValueError, match="confirmatory run evidence failed validation"):
-        run_formal_confirmation_v2(fixture.experiment, attacked_evidence)
+    attacked_closed = fixture.closed_run_evidence.model_copy(
+        update={"run_evidence": attacked_evidence}
+    )
+    with pytest.raises(ValueError, match="closed run evidence failed validation"):
+        run_formal_confirmation_v2(attacked_closed)
 
     attacked_provenance = coverage.model_copy(
         update={
@@ -477,8 +595,11 @@ def test_fake_coverage_or_outcome_receipt_is_rejected_at_the_two_root_boundary()
             )
         }
     )
-    with pytest.raises(ValueError, match="confirmatory run evidence failed validation"):
-        run_formal_confirmation_v2(fixture.experiment, provenance_evidence)
+    provenance_closed = fixture.closed_run_evidence.model_copy(
+        update={"run_evidence": provenance_evidence}
+    )
+    with pytest.raises(ValueError, match="closed run evidence failed validation"):
+        run_formal_confirmation_v2(provenance_closed)
 
 
 def test_forged_result_cannot_survive_exact_replay() -> None:
@@ -493,8 +614,23 @@ def test_forged_result_cannot_survive_exact_replay() -> None:
 
     with pytest.raises(ValueError, match="result artifact failed validation"):
         validate_formal_confirmation_result_v2(
-            fixture.experiment,
-            fixture.evidence,
+            fixture.closed_run_evidence,
+            forged,
+        )
+
+
+def test_result_replay_rejects_replaced_closed_run_id() -> None:
+    fixture = _minimal_fixture()
+    failing_evidence, _accounting = _with_one_terminal_failure(fixture)
+    genuine = _terminal_failure_result()
+    forged = replace(
+        genuine,
+        confirmatory_closed_run_evidence_id=("confirmatory_closed_run_evidence_v2_" + "f" * 64),
+    )
+
+    with pytest.raises(ValueError, match="result artifact failed validation"):
+        validate_formal_confirmation_result_v2(
+            _closed_with_evidence(fixture, failing_evidence),
             forged,
         )
 
@@ -503,12 +639,10 @@ def test_callers_cannot_supply_outcome_contrast_or_family_arguments() -> None:
     with pytest.raises(TypeError):
         run_formal_confirmation_v2(  # type: ignore[call-arg]
             object(),  # type: ignore[arg-type]
-            object(),  # type: ignore[arg-type]
             outcome_name="y_joint",
         )
     with pytest.raises(TypeError):
         run_formal_confirmation_v2(  # type: ignore[call-arg]
-            object(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
             family="primary_secure_yield",
         )
@@ -530,6 +664,8 @@ def test_fast_paths_have_no_caller_selectable_prevalidated_switch() -> None:
 
 
 def test_direct_fast_calls_and_uninitialized_context_are_rejected() -> None:
+    with pytest.raises(TypeError, match="only be created by the formal entry"):
+        _ValidatedFormalContextV2()
     forged = object.__new__(_ValidatedFormalContextV2)
     with pytest.raises(ValueError, match="sealed formal context"):
         _derive_from_formal_context_v2(
@@ -544,8 +680,7 @@ def test_direct_fast_calls_and_uninitialized_context_are_rejected() -> None:
             MultiSupportFormalFamilyV2.PRIMARY_SECURE_YIELD,
         )
     with pytest.raises(ValueError, match="only be created by the formal entry"):
-        _ValidatedFormalContextV2._from_roots(  # type: ignore[arg-type]
-            object(),
+        _ValidatedFormalContextV2._from_root(  # type: ignore[arg-type]
             object(),
             access=object(),
         )
@@ -577,13 +712,7 @@ def test_synchronously_rehashed_shrunk_plan_cannot_replace_context_plan() -> Non
             "global_union_strata": (),
         }
     )
-    attacked_payload = attacked_plan.model_dump(mode="json", exclude={"inference_plan_id"})
-    attacked_plan = attacked_plan.model_copy(
-        update={
-            "inference_plan_id": "multi_support_simultaneous_plan_v2_"
-            + multi_support_schema_module._digest(attacked_payload)
-        }
-    )
+    attacked_plan = _synchronously_rehash_plan(attacked_plan)
     assert attacked_plan.inference_plan_id == (
         "multi_support_simultaneous_plan_v2_"
         + multi_support_schema_module._digest(
@@ -600,6 +729,37 @@ def test_synchronously_rehashed_shrunk_plan_cannot_replace_context_plan() -> Non
         ValueError,
         match="deterministic plan registry|differs from its deterministic context plan",
     ):
+        _run_frozen_domain_from_formal_context_v2(
+            attacked,
+            MultiSupportFormalFamilyV2.PRIMARY_SECURE_YIELD,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("outcome_name", "y_joint"),
+        ("control_arm", ArmRole.LENGTH_MATCHED_PLACEBO),
+    ),
+)
+def test_synchronously_rehashed_outcome_or_contrast_cannot_replace_context_plan(
+    field: str,
+    replacement: object,
+) -> None:
+    context = _minimal_context()
+    first_binding = context._plan_bindings[0]
+    plan = first_binding.plan
+    coordinate = plan.family.coordinates[0]
+    attacked_coordinate = coordinate.model_copy(update={field: replacement})
+    attacked_family = plan.family.model_copy(update={"coordinates": (attacked_coordinate,)})
+    attacked_plan = _synchronously_rehash_plan(plan.model_copy(update={"family": attacked_family}))
+    attacked_bindings = (
+        replace(first_binding, plan=attacked_plan),
+        *context._plan_bindings[1:],
+    )
+    attacked = _unsafe_context_clone(context, _plan_bindings=attacked_bindings)
+
+    with pytest.raises(ValueError, match="deterministic plan registry"):
         _run_frozen_domain_from_formal_context_v2(
             attacked,
             MultiSupportFormalFamilyV2.PRIMARY_SECURE_YIELD,

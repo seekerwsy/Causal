@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
@@ -21,11 +22,16 @@ from pydantic import ValidationError
 
 from secaware.analysis.confirmatory_contributions_v2 import (
     ConfirmatoryContributionArtifactV2,
+    ExactCoordinateClusterContributionV2,
 )
 from secaware.analysis.multi_support_simultaneous_v2 import (
+    GlobalUnionMaxTDrawV2,
+    InvalidGlobalUnionDrawV2,
     MultiSupportSimultaneousInferenceResultV2,
+    MultiSupportSimultaneousIntervalV2,
     run_frozen_domain_multi_support_simultaneous_inference_v2,
 )
+from secaware.analysis.simultaneous_v2 import CoordinateClusterContributionV2
 from secaware.randomness import DeterministicRNG
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.multi_support_inference_v2 import CoordinateSpecificSupportV2
@@ -33,12 +39,76 @@ from secaware.schema.selector_utility_v2 import (
     SelectorPairInferenceStatusV2,
     SelectorPairNonEvaluableReasonV2,
     SelectorUtilityAnalysisPlanV2,
+    SelectorUtilityPlanScopeV2,
     SelectorUtilitySlotStatusV2,
 )
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _RESULT_PREFIX = "selector_utility_result_v2_"
 _SEED_DOMAIN = b"secaware.selector-utility-nested-bootstrap.v2\x00"
+_CLOSED_COVERAGE_PATTERN = re.compile(r"^provenance_closed_coverage_v2_[0-9a-f]{64}$")
+_CLOSED_RUN_PATTERN = re.compile(r"^confirmatory_closed_run_evidence_v2_[0-9a-f]{64}$")
+_FORMAL_RESULT_PATTERN = re.compile(r"^formal_confirmation_result_v2_[0-9a-f]{64}$")
+_VERIFIED_PRIMARY_ACCESS = object()
+
+
+class VerifiedSelectorPrimaryInputsV2:
+    """Opaque, provenance-checked primary inputs consumed by the statistics core.
+
+    Public constructors below are the only supported way to obtain this token.
+    The synthetic constructor is available solely for a synthetic selector plan
+    and can never authorize a formal selector claim.
+    """
+
+    __slots__ = (
+        "_access",
+        "artifacts",
+        "confirmatory_closed_run_evidence_id",
+        "formal_confirmation_result_id",
+        "input_contributions_sha256",
+        "intervals",
+        "primary_simultaneous_result_id",
+        "selector_utility_plan_id",
+        "verification_scope",
+        "verified_primary_inputs_id",
+    )
+
+    def __init__(
+        self,
+        *,
+        access: object,
+        artifacts: tuple[ConfirmatoryContributionArtifactV2, ...],
+        intervals: tuple[MultiSupportSimultaneousIntervalV2, ...],
+        primary_simultaneous_result_id: str,
+        selector_utility_plan_id: str,
+        input_contributions_sha256: str,
+        verification_scope: str,
+        confirmatory_closed_run_evidence_id: str | None = None,
+        formal_confirmation_result_id: str | None = None,
+    ) -> None:
+        if access is not _VERIFIED_PRIMARY_ACCESS:
+            raise _error("verified selector primary inputs cannot be caller constructed")
+        self._access = access
+        self.artifacts = artifacts
+        self.confirmatory_closed_run_evidence_id = confirmatory_closed_run_evidence_id
+        self.formal_confirmation_result_id = formal_confirmation_result_id
+        self.intervals = intervals
+        self.primary_simultaneous_result_id = primary_simultaneous_result_id
+        self.selector_utility_plan_id = selector_utility_plan_id
+        self.input_contributions_sha256 = input_contributions_sha256
+        self.verification_scope = verification_scope
+        self.verified_primary_inputs_id = "verified_selector_primary_inputs_v2_" + _digest(
+            (
+                tuple(item.contribution_artifact_id for item in artifacts),
+                intervals,
+                primary_simultaneous_result_id,
+                selector_utility_plan_id,
+                input_contributions_sha256,
+                verification_scope,
+                confirmatory_closed_run_evidence_id,
+                formal_confirmation_result_id,
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +239,7 @@ class SelectorUtilityAnalysisResultV2:
     selection_freeze_id: str
     primary_inference_plan_id: str
     primary_simultaneous_result_id: str
+    primary_input_verification_scope: str
     primary_family_id: str
     input_contribution_artifact_ids: tuple[str, ...]
     input_contributions_sha256: str
@@ -185,6 +256,8 @@ class SelectorUtilityAnalysisResultV2:
     outer_pair_max_abs_t_sha256: str | None
     pair_intervals: tuple[SelectorPairSimultaneousIntervalV2, ...]
     conditional_on_single_frozen_discovery_split: bool
+    formal_glue_required: bool
+    formal_glue_completed: bool
     discovery_rerun_or_rerank_performed: bool
     formal_selector_claim_allowed: bool
 
@@ -257,10 +330,36 @@ def _validated_plan(plan: SelectorUtilityAnalysisPlanV2) -> SelectorUtilityAnaly
         raise _error("selector utility analysis plan failed validation") from None
 
 
-def _validated_primary_inputs(
+def _content_address_checked_plan(
+    plan: SelectorUtilityAnalysisPlanV2,
+) -> SelectorUtilityAnalysisPlanV2:
+    """Check a plan already fully validated by a verified-input constructor."""
+
+    if type(plan) is not SelectorUtilityAnalysisPlanV2 or not model_shape_is_intact(plan):
+        raise _error("selector utility analysis plan failed validation")
+    content = plan.model_dump(mode="json", exclude={"selector_utility_plan_id"})
+    if plan.selector_utility_plan_id != "selector_utility_plan_v2_" + _digest(content):
+        raise _error("selector utility analysis plan failed validation")
+    return plan
+
+
+def _artifact_payload(artifact: ConfirmatoryContributionArtifactV2) -> dict[str, object]:
+    payload = asdict(artifact)
+    payload.pop("contribution_artifact_id")
+    return payload
+
+
+def _artifact_input_digest(
+    artifacts: tuple[ConfirmatoryContributionArtifactV2, ...],
+) -> str:
+    return _digest(
+        tuple((item.test_coordinate_id, item.contribution_artifact_id) for item in artifacts)
+    )
+
+
+def _validated_artifact_family(
     plan: SelectorUtilityAnalysisPlanV2,
     artifacts: Iterable[ConfirmatoryContributionArtifactV2],
-    primary_result: MultiSupportSimultaneousInferenceResultV2,
 ) -> tuple[
     tuple[ConfirmatoryContributionArtifactV2, ...],
     dict[tuple[str, str, str], Fraction],
@@ -273,38 +372,238 @@ def _validated_primary_inputs(
         raise
     except Exception:  # noqa: BLE001 - normalize hostile iterables
         raise _error("complete primary contribution artifact family is required") from None
-    if (
-        type(primary_result) is not MultiSupportSimultaneousInferenceResultV2
-        or len(snapshot) != len(plan.primary_inference_plan.coordinate_supports)
-        or any(type(item) is not ConfirmatoryContributionArtifactV2 for item in snapshot)
+    if len(snapshot) != len(plan.primary_inference_plan.coordinate_supports) or any(
+        type(item) is not ConfirmatoryContributionArtifactV2 for item in snapshot
     ):
+        raise _error("complete primary contribution artifact family is required")
+    by_coordinate = {item.test_coordinate_id: item for item in snapshot}
+    supports = {
+        item.test_coordinate.test_coordinate_id: item
+        for item in plan.primary_inference_plan.coordinate_supports
+    }
+    if len(by_coordinate) != len(snapshot) or set(by_coordinate) != set(supports):
+        raise _error("complete primary contribution artifact family is required")
+    ordered = tuple(by_coordinate[coordinate_id] for coordinate_id in sorted(supports))
+    values: dict[tuple[str, str, str], Fraction] = {}
+    coverage_ids_by_hypothesis: dict[str, set[str]] = {}
+    for artifact in ordered:
+        support = supports[artifact.test_coordinate_id]
+        coordinate = support.test_coordinate
+        if (
+            artifact.contribution_artifact_id
+            != "confirmatory_contributions_v2_" + _digest(_artifact_payload(artifact))
+            or artifact.population_freeze_manifest_id != support.population_freeze_manifest_id
+            or artifact.randomization_manifest_id != support.randomization_manifest_id
+            or artifact.execution_policy_freeze_manifest_id
+            != support.execution_policy_freeze_manifest_id
+            or _CLOSED_COVERAGE_PATTERN.fullmatch(artifact.provenance_closed_coverage_manifest_id)
+            is None
+            or artifact.derivation_rule
+            != "authenticated_block_arm_means_then_frozen_task_weights_then_qh_then_cluster_v1"
+            or artifact.rational_arithmetic_until_final_projection is not True
+        ):
+            raise _error("primary contribution artifact provenance binding failed validation")
+        coverage_ids_by_hypothesis.setdefault(coordinate.hypothesis_id, set()).add(
+            artifact.provenance_closed_coverage_manifest_id
+        )
+        expected_keys = {
+            (stratum.stratum_id, cluster_id)
+            for stratum in support.strata
+            for cluster_id in stratum.semantic_task_cluster_ids
+        }
+        exact_rows: dict[tuple[str, str], Fraction] = {}
+        for row in artifact.exact_coordinate_contributions:
+            if (
+                type(row) is not ExactCoordinateClusterContributionV2
+                or row.test_coordinate_id != artifact.test_coordinate_id
+                or type(row.numerator) is not int
+                or type(row.denominator) is not int
+                or row.denominator <= 0
+            ):
+                raise _error("primary contribution artifact support failed validation")
+            key = (row.stratum_id, row.semantic_task_cluster_id)
+            value = Fraction(row.numerator, row.denominator)
+            if (
+                key in exact_rows
+                or value.numerator != row.numerator
+                or value.denominator != row.denominator
+                or not Fraction(-1, 1) <= value <= Fraction(1, 1)
+            ):
+                raise _error("primary contribution artifact support failed validation")
+            exact_rows[key] = value
+        projected_rows: dict[tuple[str, str], float] = {}
+        for row in artifact.coordinate_contributions:
+            if (
+                type(row) is not CoordinateClusterContributionV2
+                or row.test_coordinate_id != artifact.test_coordinate_id
+                or type(row.estimate) is not float
+                or not math.isfinite(row.estimate)
+            ):
+                raise _error("primary contribution artifact projection failed validation")
+            key = (row.stratum_id, row.semantic_task_cluster_id)
+            if key in projected_rows:
+                raise _error("primary contribution artifact projection failed validation")
+            projected_rows[key] = row.estimate
+        if set(exact_rows) != expected_keys or set(projected_rows) != expected_keys:
+            raise _error("primary contribution artifact support failed validation")
+        for key, value in exact_rows.items():
+            if projected_rows[key] != float(value):
+                raise _error("primary contribution artifact projection failed validation")
+            values[(artifact.test_coordinate_id, *key)] = value
+    if any(len(item) != 1 for item in coverage_ids_by_hypothesis.values()) or len(
+        {next(iter(item)) for item in coverage_ids_by_hypothesis.values()}
+    ) != len(coverage_ids_by_hypothesis):
+        raise _error("primary contribution artifact coverage family failed validation")
+    return ordered, values
+
+
+def _validated_public_primary_inputs(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    primary_result: MultiSupportSimultaneousInferenceResultV2,
+) -> VerifiedSelectorPrimaryInputsV2:
+    checked_artifacts, _values = _validated_artifact_family(plan, artifacts)
+    if type(primary_result) is not MultiSupportSimultaneousInferenceResultV2:
         raise _error("complete real primary result and contribution family are required")
     try:
         expected = run_frozen_domain_multi_support_simultaneous_inference_v2(
             plan.primary_inference_plan,
-            snapshot,
+            checked_artifacts,
         )
     except _FATAL:
         raise
-    except Exception:  # noqa: BLE001 - normalize the provenance boundary
+    except Exception:  # noqa: BLE001 - normalize the public provenance boundary
         raise _error("primary result provenance replay failed validation") from None
     if primary_result != expected:
         raise _error("primary result provenance replay failed validation")
-
-    by_coordinate = {item.test_coordinate_id: item for item in snapshot}
-    if len(by_coordinate) != len(snapshot):
-        raise _error("complete primary contribution artifact family is required")
-    ordered = tuple(
-        by_coordinate[item.test_coordinate.test_coordinate_id]
-        for item in plan.primary_inference_plan.coordinate_supports
+    return VerifiedSelectorPrimaryInputsV2(
+        access=_VERIFIED_PRIMARY_ACCESS,
+        artifacts=checked_artifacts,
+        intervals=primary_result.intervals,
+        primary_simultaneous_result_id=primary_result.simultaneous_result_id,
+        selector_utility_plan_id=plan.selector_utility_plan_id,
+        input_contributions_sha256=primary_result.input_contributions_sha256,
+        verification_scope="public_primary_result_full_replay_v1",
     )
-    values: dict[tuple[str, str, str], Fraction] = {}
-    for artifact in ordered:
-        for row in artifact.exact_coordinate_contributions:
-            values[(row.test_coordinate_id, row.stratum_id, row.semantic_task_cluster_id)] = (
-                Fraction(row.numerator, row.denominator)
+
+
+def _primary_result_payload(
+    result: MultiSupportSimultaneousInferenceResultV2,
+) -> dict[str, object]:
+    payload = asdict(result)
+    payload.pop("simultaneous_result_id")
+    return payload
+
+
+def _validated_same_run_primary_result(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: tuple[ConfirmatoryContributionArtifactV2, ...],
+    primary_result: MultiSupportSimultaneousInferenceResultV2,
+) -> MultiSupportSimultaneousInferenceResultV2:
+    """Validate a just-produced formal primary result without replaying its 999 draws."""
+
+    if type(primary_result) is not MultiSupportSimultaneousInferenceResultV2:
+        raise _error("same-run formal primary result failed validation")
+    expected_coordinate_ids = tuple(item.test_coordinate_id for item in plan.coordinate_bindings)
+    interval_ids = tuple(item.test_coordinate_id for item in primary_result.intervals)
+    artifact_ids = tuple(item.contribution_artifact_id for item in artifacts)
+    valid_indices = tuple(item.replicate_index for item in primary_result.draws)
+    invalid_indices = tuple(item.replicate_index for item in primary_result.invalid_draws)
+    all_indices = tuple(sorted((*valid_indices, *invalid_indices)))
+    if (
+        plan.plan_scope is not SelectorUtilityPlanScopeV2.FORMAL
+        or not plan.formal_selector_claim_allowed
+        or primary_result.simultaneous_result_id
+        != "multi_support_simultaneous_result_v2_"
+        + _digest(_primary_result_payload(primary_result))
+        or primary_result.inference_plan_id != plan.primary_inference_plan.inference_plan_id
+        or primary_result.confirmatory_experiment_freeze_id
+        != plan.confirmatory_experiment_freeze_id
+        or primary_result.family_id != plan.primary_family_id
+        or primary_result.global_multiplicity_family_policy_sha256
+        != plan.primary_inference_plan.global_multiplicity_family_policy_sha256
+        or re.fullmatch(r"[0-9a-f]{64}", primary_result.bootstrap_seed_sha256) is None
+        or primary_result.input_contribution_artifact_ids != artifact_ids
+        or primary_result.input_contributions_sha256 != _artifact_input_digest(artifacts)
+        or not math.isfinite(primary_result.critical_value)
+        or primary_result.critical_value <= 0.0
+        or primary_result.valid_draw_count != len(primary_result.draws)
+        or primary_result.invalid_draw_count != len(primary_result.invalid_draws)
+        or primary_result.valid_draw_count
+        < plan.primary_inference_plan.minimum_valid_bootstrap_draws
+        or primary_result.valid_draw_count + primary_result.invalid_draw_count
+        != plan.primary_inference_plan.bootstrap_samples
+        or all_indices != tuple(range(plan.primary_inference_plan.bootstrap_samples))
+        or len(set(valid_indices)) != len(valid_indices)
+        or len(set(invalid_indices)) != len(invalid_indices)
+        or any(
+            type(item) is not GlobalUnionMaxTDrawV2 or not math.isfinite(item.max_abs_t)
+            for item in primary_result.draws
+        )
+        or any(type(item) is not InvalidGlobalUnionDrawV2 for item in primary_result.invalid_draws)
+        or interval_ids != expected_coordinate_ids
+        or len(interval_ids) != len(set(interval_ids))
+        or any(
+            type(item) is not MultiSupportSimultaneousIntervalV2
+            or not all(
+                math.isfinite(value)
+                for value in (
+                    item.estimate,
+                    item.standard_error,
+                    item.simultaneous_lower,
+                    item.simultaneous_upper,
+                )
             )
-    return ordered, values
+            or item.standard_error <= 0.0
+            or item.simultaneous_lower > item.estimate
+            or item.simultaneous_upper < item.estimate
+            for item in primary_result.intervals
+        )
+    ):
+        raise _error("same-run formal primary result failed validation")
+    return primary_result
+
+
+def make_same_closed_run_formal_primary_inputs_v2(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    primary_result: MultiSupportSimultaneousInferenceResultV2,
+    *,
+    confirmatory_closed_run_evidence_id: str,
+    formal_confirmation_result_id: str,
+) -> VerifiedSelectorPrimaryInputsV2:
+    """Seal a same-invocation formal primary bundle without a second 999-draw replay.
+
+    This token never authorizes a formal claim by itself.  The combined formal
+    wrapper must additionally prove that both identifiers came from the formal
+    result it just generated from the exact closed-run root.
+    """
+
+    checked_plan = _validated_plan(plan)
+    checked_artifacts, _values = _validated_artifact_family(checked_plan, artifacts)
+    checked_result = _validated_same_run_primary_result(
+        checked_plan,
+        checked_artifacts,
+        primary_result,
+    )
+    if (
+        type(confirmatory_closed_run_evidence_id) is not str
+        or _CLOSED_RUN_PATTERN.fullmatch(confirmatory_closed_run_evidence_id) is None
+        or type(formal_confirmation_result_id) is not str
+        or _FORMAL_RESULT_PATTERN.fullmatch(formal_confirmation_result_id) is None
+    ):
+        raise _error("same-run formal primary provenance identifiers failed validation")
+    return VerifiedSelectorPrimaryInputsV2(
+        access=_VERIFIED_PRIMARY_ACCESS,
+        artifacts=checked_artifacts,
+        intervals=checked_result.intervals,
+        primary_simultaneous_result_id=checked_result.simultaneous_result_id,
+        selector_utility_plan_id=checked_plan.selector_utility_plan_id,
+        input_contributions_sha256=checked_result.input_contributions_sha256,
+        verification_scope="same_closed_run_formal_primary_reuse_v1",
+        confirmatory_closed_run_evidence_id=confirmatory_closed_run_evidence_id,
+        formal_confirmation_result_id=formal_confirmation_result_id,
+    )
 
 
 def _higher_quantile(
@@ -392,6 +691,83 @@ def _all_coordinate_statistics(
     )
 
 
+def validate_selector_primary_inputs_v2(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    primary_result: MultiSupportSimultaneousInferenceResultV2,
+) -> VerifiedSelectorPrimaryInputsV2:
+    """Replay the public primary plan once and seal its exact selector inputs.
+
+    This is deliberately not the future two-root formal glue.  A token created
+    here is provenance checked, but the final result continues to declare that
+    formal glue has not been completed.
+    """
+
+    checked_plan = _validated_plan(plan)
+    return _validated_public_primary_inputs(checked_plan, artifacts, primary_result)
+
+
+def make_synthetic_verified_selector_primary_inputs_v2(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    *,
+    synthetic_critical_value: float,
+) -> VerifiedSelectorPrimaryInputsV2:
+    """Seal a hand-checkable primary fixture for synthetic 19x19 tests only."""
+
+    checked_plan = _validated_plan(plan)
+    if (
+        checked_plan.plan_scope is not SelectorUtilityPlanScopeV2.SYNTHETIC_VALIDATION_ONLY
+        or checked_plan.formal_selector_claim_allowed
+        or type(synthetic_critical_value) is not float
+        or not math.isfinite(synthetic_critical_value)
+        or synthetic_critical_value <= 0.0
+    ):
+        raise _error("synthetic verified primary inputs require a non-claiming synthetic plan")
+    checked_artifacts, values = _validated_artifact_family(checked_plan, artifacts)
+    full_samples = {
+        stratum.stratum_id: stratum.semantic_task_cluster_ids
+        for stratum in checked_plan.primary_inference_plan.global_union_strata
+    }
+    statistics, _counts = _all_coordinate_statistics(checked_plan, values, full_samples)
+    intervals = tuple(
+        MultiSupportSimultaneousIntervalV2(
+            test_coordinate_id=binding.test_coordinate_id,
+            estimate_numerator=statistics[binding.test_coordinate_id][0].numerator,
+            estimate_denominator=statistics[binding.test_coordinate_id][0].denominator,
+            estimate=float(statistics[binding.test_coordinate_id][0]),
+            standard_error=statistics[binding.test_coordinate_id][1],
+            simultaneous_lower=(
+                float(statistics[binding.test_coordinate_id][0])
+                - synthetic_critical_value * statistics[binding.test_coordinate_id][1]
+            ),
+            simultaneous_upper=(
+                float(statistics[binding.test_coordinate_id][0])
+                + synthetic_critical_value * statistics[binding.test_coordinate_id][1]
+            ),
+        )
+        for binding in checked_plan.coordinate_bindings
+    )
+    input_digest = _artifact_input_digest(checked_artifacts)
+    result_id = "synthetic_verified_selector_primary_v2_" + _digest(
+        (
+            checked_plan.selector_utility_plan_id,
+            input_digest,
+            synthetic_critical_value,
+            intervals,
+        )
+    )
+    return VerifiedSelectorPrimaryInputsV2(
+        access=_VERIFIED_PRIMARY_ACCESS,
+        artifacts=checked_artifacts,
+        intervals=intervals,
+        primary_simultaneous_result_id=result_id,
+        selector_utility_plan_id=checked_plan.selector_utility_plan_id,
+        input_contributions_sha256=input_digest,
+        verification_scope="synthetic_hand_checked_primary_fixture_v1",
+    )
+
+
 def _root_seed(plan: SelectorUtilityAnalysisPlanV2) -> bytes:
     return hashlib.sha256(
         _SEED_DOMAIN
@@ -404,13 +780,17 @@ def _root_seed(plan: SelectorUtilityAnalysisPlanV2) -> bytes:
 def _full_coordinate_confirmations(
     plan: SelectorUtilityAnalysisPlanV2,
     artifacts: tuple[ConfirmatoryContributionArtifactV2, ...],
-    primary_result: MultiSupportSimultaneousInferenceResultV2,
+    intervals: tuple[MultiSupportSimultaneousIntervalV2, ...],
 ) -> tuple[StrictCoordinateConfirmationV2, ...]:
-    intervals = {item.test_coordinate_id: item for item in primary_result.intervals}
+    intervals_by_coordinate = {item.test_coordinate_id: item for item in intervals}
+    if set(intervals_by_coordinate) != {
+        item.test_coordinate_id for item in plan.coordinate_bindings
+    }:
+        raise _error("verified primary interval family failed validation")
     artifacts_by_coordinate = {item.test_coordinate_id: item for item in artifacts}
     result = []
     for binding in plan.coordinate_bindings:
-        interval = intervals[binding.test_coordinate_id]
+        interval = intervals_by_coordinate[binding.test_coordinate_id]
         oriented_lower = (
             interval.simultaneous_lower
             if binding.direction_multiplier == 1
@@ -811,21 +1191,108 @@ def _result_payload(result: SelectorUtilityAnalysisResultV2) -> dict[str, object
     return payload
 
 
-def _run(
+def _checked_verified_inputs(
     plan: SelectorUtilityAnalysisPlanV2,
-    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
-    primary_result: MultiSupportSimultaneousInferenceResultV2,
-) -> SelectorUtilityAnalysisResultV2:
-    checked_plan = _validated_plan(plan)
-    checked_artifacts, values = _validated_primary_inputs(
-        checked_plan,
-        artifacts,
-        primary_result,
+    verified: VerifiedSelectorPrimaryInputsV2,
+) -> tuple[
+    tuple[ConfirmatoryContributionArtifactV2, ...],
+    dict[tuple[str, str, str], Fraction],
+]:
+    if (
+        type(verified) is not VerifiedSelectorPrimaryInputsV2
+        or verified._access is not _VERIFIED_PRIMARY_ACCESS
+    ):
+        raise _error("verified selector primary inputs are required")
+    checked_artifacts, values = _validated_artifact_family(plan, verified.artifacts)
+    expected_id = "verified_selector_primary_inputs_v2_" + _digest(
+        (
+            tuple(item.contribution_artifact_id for item in checked_artifacts),
+            verified.intervals,
+            verified.primary_simultaneous_result_id,
+            verified.selector_utility_plan_id,
+            verified.input_contributions_sha256,
+            verified.verification_scope,
+            verified.confirmatory_closed_run_evidence_id,
+            verified.formal_confirmation_result_id,
+        )
     )
+    interval_ids = tuple(item.test_coordinate_id for item in verified.intervals)
+    expected_interval_ids = tuple(item.test_coordinate_id for item in plan.coordinate_bindings)
+    if (
+        verified.verified_primary_inputs_id != expected_id
+        or verified.selector_utility_plan_id != plan.selector_utility_plan_id
+        or checked_artifacts != verified.artifacts
+        or verified.input_contributions_sha256 != _artifact_input_digest(checked_artifacts)
+        or interval_ids != expected_interval_ids
+        or len(interval_ids) != len(set(interval_ids))
+        or any(
+            type(item) is not MultiSupportSimultaneousIntervalV2
+            or not all(
+                math.isfinite(value)
+                for value in (
+                    item.estimate,
+                    item.standard_error,
+                    item.simultaneous_lower,
+                    item.simultaneous_upper,
+                )
+            )
+            or item.standard_error <= 0.0
+            or item.simultaneous_lower > item.estimate
+            or item.simultaneous_upper < item.estimate
+            for item in verified.intervals
+        )
+        or verified.verification_scope
+        not in {
+            "public_primary_result_full_replay_v1",
+            "same_closed_run_formal_primary_reuse_v1",
+            "synthetic_hand_checked_primary_fixture_v1",
+        }
+        or (
+            verified.verification_scope == "same_closed_run_formal_primary_reuse_v1"
+            and (
+                plan.plan_scope is not SelectorUtilityPlanScopeV2.FORMAL
+                or not plan.formal_selector_claim_allowed
+                or verified.confirmatory_closed_run_evidence_id is None
+                or _CLOSED_RUN_PATTERN.fullmatch(verified.confirmatory_closed_run_evidence_id)
+                is None
+                or verified.formal_confirmation_result_id is None
+                or _FORMAL_RESULT_PATTERN.fullmatch(verified.formal_confirmation_result_id) is None
+                or not verified.primary_simultaneous_result_id.startswith(
+                    "multi_support_simultaneous_result_v2_"
+                )
+            )
+        )
+        or (
+            verified.verification_scope != "same_closed_run_formal_primary_reuse_v1"
+            and (
+                verified.confirmatory_closed_run_evidence_id is not None
+                or verified.formal_confirmation_result_id is not None
+            )
+        )
+        or (
+            verified.verification_scope == "synthetic_hand_checked_primary_fixture_v1"
+            and (
+                plan.plan_scope is not SelectorUtilityPlanScopeV2.SYNTHETIC_VALIDATION_ONLY
+                or plan.formal_selector_claim_allowed
+                or not verified.primary_simultaneous_result_id.startswith(
+                    "synthetic_verified_selector_primary_v2_"
+                )
+            )
+        )
+    ):
+        raise _error("verified selector primary inputs failed validation")
+    return checked_artifacts, values
+
+
+def _run_verified_checked_plan(
+    checked_plan: SelectorUtilityAnalysisPlanV2,
+    verified: VerifiedSelectorPrimaryInputsV2,
+) -> SelectorUtilityAnalysisResultV2:
+    checked_artifacts, values = _checked_verified_inputs(checked_plan, verified)
     confirmations = _full_coordinate_confirmations(
         checked_plan,
         checked_artifacts,
-        primary_result,
+        verified.intervals,
     )
     confirmed_ids = frozenset(item.test_coordinate_id for item in confirmations if item.confirmed)
     selector_points = _selector_points(checked_plan, confirmed_ids)
@@ -848,10 +1315,13 @@ def _run(
         candidate_universe_id=checked_plan.candidate_universe_id,
         selection_freeze_id=checked_plan.selection_freeze_id,
         primary_inference_plan_id=checked_plan.primary_inference_plan.inference_plan_id,
-        primary_simultaneous_result_id=primary_result.simultaneous_result_id,
+        primary_simultaneous_result_id=verified.primary_simultaneous_result_id,
+        primary_input_verification_scope=verified.verification_scope,
         primary_family_id=checked_plan.primary_family_id,
-        input_contribution_artifact_ids=primary_result.input_contribution_artifact_ids,
-        input_contributions_sha256=primary_result.input_contributions_sha256,
+        input_contribution_artifact_ids=tuple(
+            item.contribution_artifact_id for item in checked_artifacts
+        ),
+        input_contributions_sha256=verified.input_contributions_sha256,
         coordinate_confirmations=confirmations,
         selector_points=selector_points,
         pair_points=pair_points,
@@ -865,8 +1335,10 @@ def _run(
         outer_pair_max_abs_t_sha256=maxima_sha256,
         pair_intervals=pair_intervals,
         conditional_on_single_frozen_discovery_split=True,
+        formal_glue_required=True,
+        formal_glue_completed=False,
         discovery_rerun_or_rerank_performed=False,
-        formal_selector_claim_allowed=checked_plan.formal_selector_claim_allowed,
+        formal_selector_claim_allowed=False,
     )
     return SelectorUtilityAnalysisResultV2(
         selector_utility_result_id=_RESULT_PREFIX + _digest(_result_payload(provisional)),
@@ -876,6 +1348,7 @@ def _run(
         selection_freeze_id=provisional.selection_freeze_id,
         primary_inference_plan_id=provisional.primary_inference_plan_id,
         primary_simultaneous_result_id=provisional.primary_simultaneous_result_id,
+        primary_input_verification_scope=provisional.primary_input_verification_scope,
         primary_family_id=provisional.primary_family_id,
         input_contribution_artifact_ids=provisional.input_contribution_artifact_ids,
         input_contributions_sha256=provisional.input_contributions_sha256,
@@ -892,9 +1365,21 @@ def _run(
         outer_pair_max_abs_t_sha256=provisional.outer_pair_max_abs_t_sha256,
         pair_intervals=provisional.pair_intervals,
         conditional_on_single_frozen_discovery_split=True,
+        formal_glue_required=True,
+        formal_glue_completed=False,
         discovery_rerun_or_rerank_performed=False,
         formal_selector_claim_allowed=provisional.formal_selector_claim_allowed,
     )
+
+
+def _run(
+    plan: SelectorUtilityAnalysisPlanV2,
+    artifacts: Iterable[ConfirmatoryContributionArtifactV2],
+    primary_result: MultiSupportSimultaneousInferenceResultV2,
+) -> SelectorUtilityAnalysisResultV2:
+    checked_plan = _validated_plan(plan)
+    verified = _validated_public_primary_inputs(checked_plan, artifacts, primary_result)
+    return _run_verified_checked_plan(checked_plan, verified)
 
 
 def run_selector_utility_analysis_v2(
@@ -905,6 +1390,16 @@ def run_selector_utility_analysis_v2(
     """Run strict yield@K and the frozen nested paired-selector family."""
 
     return _run(plan, artifacts, primary_result)
+
+
+def run_verified_selector_utility_analysis_v2(
+    plan: SelectorUtilityAnalysisPlanV2,
+    verified_primary_inputs: VerifiedSelectorPrimaryInputsV2,
+) -> SelectorUtilityAnalysisResultV2:
+    """Run the statistics core from one publicly sealed primary-input token."""
+
+    checked_plan = _content_address_checked_plan(plan)
+    return _run_verified_checked_plan(checked_plan, verified_primary_inputs)
 
 
 def validate_selector_utility_analysis_result_v2(
@@ -923,6 +1418,21 @@ def validate_selector_utility_analysis_result_v2(
     return result
 
 
+def validate_verified_selector_utility_analysis_result_v2(
+    plan: SelectorUtilityAnalysisPlanV2,
+    verified_primary_inputs: VerifiedSelectorPrimaryInputsV2,
+    result: SelectorUtilityAnalysisResultV2,
+) -> SelectorUtilityAnalysisResultV2:
+    """Replay a result from its already sealed primary-input token."""
+
+    if type(result) is not SelectorUtilityAnalysisResultV2:
+        raise _error("selector utility result artifact failed validation")
+    expected = run_verified_selector_utility_analysis_v2(plan, verified_primary_inputs)
+    if result != expected:
+        raise _error("selector utility result artifact failed validation")
+    return result
+
+
 __all__ = [
     "InvalidNestedOuterDrawV2",
     "NestedCoordinateRetainedCountV2",
@@ -936,6 +1446,12 @@ __all__ = [
     "StrictCoordinateConfirmationV2",
     "StrictSlotContributionV2",
     "ValidNestedOuterDrawV2",
+    "VerifiedSelectorPrimaryInputsV2",
+    "make_same_closed_run_formal_primary_inputs_v2",
+    "make_synthetic_verified_selector_primary_inputs_v2",
     "run_selector_utility_analysis_v2",
+    "run_verified_selector_utility_analysis_v2",
+    "validate_selector_primary_inputs_v2",
     "validate_selector_utility_analysis_result_v2",
+    "validate_verified_selector_utility_analysis_result_v2",
 ]

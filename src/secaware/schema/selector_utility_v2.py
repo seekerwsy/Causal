@@ -491,6 +491,7 @@ class SelectorUtilityAnalysisPlanV2(_ContentAddressedSelectorUtilityV2):
     quantile_rule: Literal["empirical_higher_v1"]
     invalid_draw_policy: Literal["retain_reason_and_fail_below_frozen_fraction_v1"]
     conditional_on_single_frozen_discovery_split: Literal[True]
+    formal_glue_required: Literal[True]
     formal_selector_claim_allowed: bool
     frozen_before_confirmation_outcomes: Literal[True]
 
@@ -606,6 +607,7 @@ class SelectorUtilityAnalysisPlanV2(_ContentAddressedSelectorUtilityV2):
                 quantile_rule="empirical_higher_v1",
                 invalid_draw_policy=("retain_reason_and_fail_below_frozen_fraction_v1"),
                 conditional_on_single_frozen_discovery_split=True,
+                formal_glue_required=True,
                 formal_selector_claim_allowed=(plan_scope is SelectorUtilityPlanScopeV2.FORMAL),
                 frozen_before_confirmation_outcomes=True,
             )
@@ -619,10 +621,8 @@ class SelectorUtilityAnalysisPlanV2(_ContentAddressedSelectorUtilityV2):
             )
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
-        except Exception as exc:
-            raise RuntimeError(
-                f"selector utility derivation diagnostic: {type(exc).__name__}: {exc}"
-            ) from exc
+        except Exception:  # noqa: BLE001 - sanitize the public plan boundary
+            raise cls._safe_error() from None
 
     @model_validator(mode="after")
     def validate_exact_derivation(self) -> Self:

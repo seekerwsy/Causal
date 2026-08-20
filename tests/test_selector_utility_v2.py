@@ -1,31 +1,25 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 from dataclasses import replace
 from fractions import Fraction
 from functools import lru_cache
 
 import pytest
-from pydantic import ValidationError
 
 from secaware.analysis.confirmatory_contributions_v2 import (
     ConfirmatoryContributionArtifactV2,
     ExactCoordinateClusterContributionV2,
 )
-from secaware.analysis.multi_support_simultaneous_v2 import (
-    run_frozen_domain_multi_support_simultaneous_inference_v2,
-)
 from secaware.analysis.selector_utility_v2 import (
-    run_selector_utility_analysis_v2,
-    validate_selector_utility_analysis_result_v2,
+    make_synthetic_verified_selector_primary_inputs_v2,
+    run_verified_selector_utility_analysis_v2,
+    validate_verified_selector_utility_analysis_result_v2,
 )
 from secaware.analysis.simultaneous_v2 import CoordinateClusterContributionV2
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
-from secaware.schema.multi_support_inference_v2 import (
-    CoordinateSpecificStratumSupportV2,
-    CoordinateSpecificSupportV2,
-    GlobalUnionStratumV2,
-)
+from secaware.schema.multi_support_inference_v2 import CoordinateSpecificSupportV2
 from secaware.schema.policy_v2 import (
     SelectionFreezeManifest,
     SelectorSlotRecord,
@@ -221,26 +215,19 @@ def _selector_artifacts() -> tuple[ConfirmatoryContributionArtifactV2, ...]:
 
 
 @lru_cache(maxsize=1)
-def _primary_result():
-    return run_frozen_domain_multi_support_simultaneous_inference_v2(
-        _selector_plan().primary_inference_plan,
+def _verified_primary_inputs():
+    return make_synthetic_verified_selector_primary_inputs_v2(
+        _selector_plan(),
         _selector_artifacts(),
+        synthetic_critical_value=2.0,
     )
 
 
 @lru_cache(maxsize=1)
 def _selector_result():
-    return run_selector_utility_analysis_v2(
+    return run_verified_selector_utility_analysis_v2(
         _selector_plan(),
-        _selector_artifacts(),
-        _primary_result(),
-    )
-
-
-def _plan_content(plan: SelectorUtilityAnalysisPlanV2) -> dict[str, object]:
-    return plan.model_dump(
-        mode="python",
-        exclude={"schema_version", "selector_utility_plan_id"},
+        _verified_primary_inputs(),
     )
 
 
@@ -250,6 +237,7 @@ def test_plan_is_uniquely_derived_and_synthetic_mode_cannot_claim_formal_status(
 
     assert plan.plan_scope is SelectorUtilityPlanScopeV2.SYNTHETIC_VALIDATION_ONLY
     assert plan.formal_selector_claim_allowed is False
+    assert plan.formal_glue_required is True
     assert plan.outer_bootstrap_samples == plan.inner_bootstrap_samples == 19
     assert plan.primary_inference_plan.experiment == experiment
     assert plan.candidate_universe_id == experiment.candidate_universe.candidate_universe_id
@@ -274,6 +262,9 @@ def test_strict_yield_counts_empty_failed_and_duplicate_h_slots_without_duplicat
     assert result.conditional_on_single_frozen_discovery_split is True
     assert result.discovery_rerun_or_rerank_performed is False
     assert result.formal_selector_claim_allowed is False
+    assert result.formal_glue_required is True
+    assert result.formal_glue_completed is False
+    assert result.primary_input_verification_scope == ("synthetic_hand_checked_primary_fixture_v1")
     assert all(item.budget_k == 4 for item in points.values())
     assert {item.slot_status for point in points.values() for item in point.slot_contributions} >= {
         SelectorUtilitySlotStatusV2.EMPTY.value,
@@ -328,92 +319,110 @@ def test_nested_pair_family_is_complete_and_zero_or_low_variance_is_typed_non_ev
 
 def test_slot_rank_universe_coordinate_direction_pair_and_bootstrap_tampering_fail_closed() -> None:
     plan = _selector_plan()
+    verified = _verified_primary_inputs()
     attacks = []
 
-    deleted_slot = _plan_content(plan)
-    deleted_slot["slot_bindings"] = plan.slot_bindings[:-1]
+    deleted_slot = plan.model_copy(update={"slot_bindings": plan.slot_bindings[:-1]})
     attacks.append(deleted_slot)
 
-    deleted_failed_slot = _plan_content(plan)
-    deleted_failed_slot["slot_bindings"] = tuple(
-        item
-        for item in plan.slot_bindings
-        if item.slot_status is not SelectorUtilitySlotStatusV2.BRIDGE_OR_PROTOCOLIZATION_FAILED
+    deleted_failed_slot = plan.model_copy(
+        update={
+            "slot_bindings": tuple(
+                item
+                for item in plan.slot_bindings
+                if item.slot_status
+                is not SelectorUtilitySlotStatusV2.BRIDGE_OR_PROTOCOLIZATION_FAILED
+            )
+        }
     )
     attacks.append(deleted_failed_slot)
 
-    reranked = _plan_content(plan)
-    reranked["slot_bindings"] = (
-        plan.slot_bindings[0].model_copy(update={"rank": 2}),
-        *plan.slot_bindings[1:],
+    reranked = plan.model_copy(
+        update={
+            "slot_bindings": (
+                plan.slot_bindings[0].model_copy(update={"rank": 2}),
+                *plan.slot_bindings[1:],
+            )
+        }
     )
     attacks.append(reranked)
 
-    wrong_universe = _plan_content(plan)
-    wrong_universe["candidate_universe_id"] = "candidate_universe_" + "f" * 64
+    wrong_universe = plan.model_copy(
+        update={"candidate_universe_id": "candidate_universe_" + "f" * 64}
+    )
     attacks.append(wrong_universe)
 
-    wrong_direction = _plan_content(plan)
-    wrong_direction["coordinate_bindings"] = (
-        plan.coordinate_bindings[0].model_copy(update={"direction_multiplier": -1}),
-        *plan.coordinate_bindings[1:],
+    wrong_direction = plan.model_copy(
+        update={
+            "coordinate_bindings": (
+                plan.coordinate_bindings[0].model_copy(update={"direction_multiplier": -1}),
+                *plan.coordinate_bindings[1:],
+            )
+        }
     )
     attacks.append(wrong_direction)
 
-    wrong_model = _plan_content(plan)
-    wrong_model["coordinate_bindings"] = (
-        plan.coordinate_bindings[0].model_copy(update={"model_id": "model.foreign"}),
-        *plan.coordinate_bindings[1:],
+    wrong_model = plan.model_copy(
+        update={
+            "coordinate_bindings": (
+                plan.coordinate_bindings[0].model_copy(update={"model_id": "model.foreign"}),
+                *plan.coordinate_bindings[1:],
+            )
+        }
     )
     attacks.append(wrong_model)
 
-    wrong_hypothesis = _plan_content(plan)
-    wrong_hypothesis["coordinate_bindings"] = (
-        plan.coordinate_bindings[0].model_copy(update={"hypothesis_id": "hypothesis_" + "f" * 64}),
-        *plan.coordinate_bindings[1:],
+    wrong_hypothesis = plan.model_copy(
+        update={
+            "coordinate_bindings": (
+                plan.coordinate_bindings[0].model_copy(
+                    update={"hypothesis_id": "hypothesis_" + "f" * 64}
+                ),
+                *plan.coordinate_bindings[1:],
+            )
+        }
     )
     attacks.append(wrong_hypothesis)
 
-    wrong_outcome = _plan_content(plan)
-    wrong_outcome["coordinate_bindings"] = (
-        plan.coordinate_bindings[0].model_copy(update={"outcome_name": "y_joint"}),
-        *plan.coordinate_bindings[1:],
+    wrong_outcome = plan.model_copy(
+        update={
+            "coordinate_bindings": (
+                plan.coordinate_bindings[0].model_copy(update={"outcome_name": "y_joint"}),
+                *plan.coordinate_bindings[1:],
+            )
+        }
     )
     attacks.append(wrong_outcome)
 
-    deleted_coordinate = _plan_content(plan)
-    deleted_coordinate["coordinate_bindings"] = plan.coordinate_bindings[:-1]
+    deleted_coordinate = plan.model_copy(
+        update={"coordinate_bindings": plan.coordinate_bindings[:-1]}
+    )
     attacks.append(deleted_coordinate)
 
-    shrunk_pairs = _plan_content(plan)
-    shrunk_pairs["pair_family"] = ()
-    shrunk_pairs["pair_family_size"] = 0
+    shrunk_pairs = plan.model_copy(update={"pair_family": (), "pair_family_size": 0})
     attacks.append(shrunk_pairs)
 
-    wrong_b = _plan_content(plan)
-    wrong_b["outer_bootstrap_samples"] = 21
+    wrong_b = plan.model_copy(update={"outer_bootstrap_samples": 21})
     attacks.append(wrong_b)
 
-    wrong_seed = _plan_content(plan)
-    wrong_seed["analysis_seed_domain_sha256"] = "f" * 64
+    wrong_seed = plan.model_copy(update={"analysis_seed_domain_sha256": "f" * 64})
     attacks.append(wrong_seed)
 
-    for content in attacks:
-        with pytest.raises(
-            (ValidationError, ValueError),
-            match="selector utility v2 contract failed validation",
-        ):
-            SelectorUtilityAnalysisPlanV2.from_content(**content)
+    for attacked_plan in attacks:
+        with pytest.raises(ValueError, match="selector utility analysis plan failed validation"):
+            run_verified_selector_utility_analysis_v2(attacked_plan, verified)
 
 
 def test_cluster_or_artifact_deletion_intersection_and_result_tampering_fail_replay() -> None:
     plan = _selector_plan()
     artifacts = _selector_artifacts()
-    primary = _primary_result()
+    verified = _verified_primary_inputs()
     result = _selector_result()
 
-    with pytest.raises(ValueError, match="complete real primary"):
-        run_selector_utility_analysis_v2(plan, artifacts[:-1], primary)
+    missing_artifact_inputs = copy.copy(verified)
+    missing_artifact_inputs.artifacts = artifacts[:-1]
+    with pytest.raises(ValueError, match="complete primary contribution"):
+        run_verified_selector_utility_analysis_v2(plan, missing_artifact_inputs)
 
     victim = artifacts[0]
     deleted_cluster = _address_artifact(
@@ -423,16 +432,11 @@ def test_cluster_or_artifact_deletion_intersection_and_result_tampering_fail_rep
             coordinate_contributions=victim.coordinate_contributions[:-1],
         )
     )
-    with pytest.raises(ValueError, match="primary result provenance replay"):
-        run_selector_utility_analysis_v2(
-            plan,
-            (deleted_cluster, *artifacts[1:]),
-            primary,
-        )
+    deleted_cluster_inputs = copy.copy(verified)
+    deleted_cluster_inputs.artifacts = (deleted_cluster, *artifacts[1:])
+    with pytest.raises(ValueError, match="primary contribution artifact support"):
+        run_verified_selector_utility_analysis_v2(plan, deleted_cluster_inputs)
 
-    primary_payload = plan.primary_inference_plan.model_dump(
-        mode="python", exclude={"schema_version", "inference_plan_id"}
-    )
     common = tuple(
         sorted(
             set.intersection(
@@ -448,64 +452,40 @@ def test_cluster_or_artifact_deletion_intersection_and_result_tampering_fail_rep
         )
     )
     assert common == ()
-    old = plan.primary_inference_plan.coordinate_supports[0]
-    fake_clusters = old.strata[0].semantic_task_cluster_ids[:2]
-    shrunk_stratum = CoordinateSpecificStratumSupportV2(
-        stratum_id=old.strata[0].stratum_id,
-        semantic_task_cluster_ids=fake_clusters,
-        cluster_weight_numerators=(1, 1),
-        cluster_weight_denominator=2,
-        stratum_weight_numerator=1,
-        stratum_weight_denominator=1,
+    shared_clusters = (
+        plan.primary_inference_plan.coordinate_supports[0].strata[0].semantic_task_cluster_ids[:2]
     )
-    primary_payload["coordinate_supports"] = (
-        CoordinateSpecificSupportV2.from_content(
-            hypothesis_model_coordinate_id=old.hypothesis_model_coordinate_id,
-            population_freeze_manifest_id=old.population_freeze_manifest_id,
-            randomization_manifest_id=old.randomization_manifest_id,
-            execution_policy_freeze_manifest_id=old.execution_policy_freeze_manifest_id,
-            test_coordinate=old.test_coordinate,
-            strata=(shrunk_stratum,),
-            coordinate_cluster_count=2,
-            estimand_rule=old.estimand_rule,
-        ),
-        *plan.primary_inference_plan.coordinate_supports[1:],
+    intersected_supports = tuple(
+        support.model_copy(
+            update={
+                "strata": (
+                    support.strata[0].model_copy(
+                        update={
+                            "semantic_task_cluster_ids": shared_clusters,
+                            "cluster_weight_numerators": (1, 1),
+                            "cluster_weight_denominator": 2,
+                        }
+                    ),
+                ),
+                "coordinate_cluster_count": 2,
+            }
+        )
+        for support in plan.primary_inference_plan.coordinate_supports
     )
-    primary_payload["global_union_strata"] = (
-        GlobalUnionStratumV2(
-            stratum_id=old.strata[0].stratum_id,
-            semantic_task_cluster_ids=tuple(
-                sorted(
-                    {
-                        cluster_id
-                        for support in primary_payload["coordinate_supports"]
-                        for stratum in support.strata
-                        for cluster_id in stratum.semantic_task_cluster_ids
-                    }
-                )
-            ),
-            union_cluster_count=len(
-                {
-                    cluster_id
-                    for support in primary_payload["coordinate_supports"]
-                    for stratum in support.strata
-                    for cluster_id in stratum.semantic_task_cluster_ids
-                }
-            ),
-        ),
+    intersection_attempt = plan.model_copy(
+        update={
+            "primary_inference_plan": plan.primary_inference_plan.model_copy(
+                update={"coordinate_supports": intersected_supports}
+            )
+        }
     )
-    from secaware.schema.multi_support_inference_v2 import (
-        MultiSupportSimultaneousInferencePlanV2,
-    )
-
-    with pytest.raises(ValidationError):
-        MultiSupportSimultaneousInferencePlanV2.from_content(**primary_payload)
+    with pytest.raises(ValueError, match="selector utility analysis plan failed validation"):
+        run_verified_selector_utility_analysis_v2(intersection_attempt, verified)
 
     tampered = replace(result, valid_outer_draw_count=result.valid_outer_draw_count + 1)
     with pytest.raises(ValueError, match="result artifact"):
-        validate_selector_utility_analysis_result_v2(
+        validate_verified_selector_utility_analysis_result_v2(
             plan,
-            artifacts,
-            primary,
+            verified,
             tampered,
         )

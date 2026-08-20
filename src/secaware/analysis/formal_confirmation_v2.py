@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
+from typing import Self
 
 from pydantic import BaseModel, ValidationError
 
@@ -18,6 +19,7 @@ from secaware.analysis.multi_support_simultaneous_v2 import (
     MultiSupportSimultaneousIntervalV2,
     _run_frozen_domain_from_formal_context_v2,
 )
+from secaware.experiments.closed_run_evidence_v2 import ConfirmatoryClosedRunEvidenceV2
 from secaware.experiments.execution_v2 import ProvenanceClosedAssignmentCoverageManifestV2
 from secaware.experiments.run_evidence_v2 import ConfirmatoryRunEvidenceManifestV2
 from secaware.schema.common import model_shape_is_intact
@@ -38,6 +40,7 @@ from secaware.schema.multi_support_inference_v2 import (
 )
 from secaware.schema.policy_v2 import ExpectedDirection
 from secaware.schema.population_v2 import PopulationFreezeManifestV2
+from secaware.schema.pre_generation_closure_v2 import ConfirmatoryPreGenerationClosureV2
 
 _FATAL = (MemoryError, KeyboardInterrupt, SystemExit)
 _RESULT_PREFIX = "formal_confirmation_result_v2_"
@@ -77,6 +80,8 @@ class FormalCoordinateDecisionV2:
 @dataclass(frozen=True, slots=True)
 class FormalConfirmationResultV2:
     formal_confirmation_result_id: str
+    confirmatory_closed_run_evidence_id: str
+    confirmatory_pre_generation_closure_id: str
     confirmatory_experiment_freeze_id: str
     confirmatory_run_evidence_manifest_id: str
     formal_analysis_protocol_id: str
@@ -152,57 +157,43 @@ def _digest(value: object) -> str:
     ).hexdigest()
 
 
-def _checked_experiment(
-    experiment: ConfirmatoryExperimentFreezeV2,
-) -> ConfirmatoryExperimentFreezeV2:
-    if type(experiment) is not ConfirmatoryExperimentFreezeV2 or not model_shape_is_intact(
-        experiment
-    ):
-        raise _error("exact confirmatory experiment freeze is required")
+def _checked_closed_run_evidence(
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
+) -> ConfirmatoryClosedRunEvidenceV2:
+    if type(
+        closed_run_evidence
+    ) is not ConfirmatoryClosedRunEvidenceV2 or not model_shape_is_intact(closed_run_evidence):
+        raise _error("exact confirmatory closed run evidence is required")
     try:
-        return ConfirmatoryExperimentFreezeV2.model_validate(
-            experiment.model_dump(mode="python", round_trip=True, warnings=False),
+        return ConfirmatoryClosedRunEvidenceV2.model_validate(
+            closed_run_evidence.model_dump(mode="python", round_trip=True, warnings=False),
             strict=True,
         )
     except _FATAL:
         raise
     except (TypeError, ValueError, ValidationError):
-        raise _error("confirmatory experiment freeze failed validation") from None
-
-
-def _checked_run_evidence(
-    run_evidence: ConfirmatoryRunEvidenceManifestV2,
-) -> ConfirmatoryRunEvidenceManifestV2:
-    if type(run_evidence) is not ConfirmatoryRunEvidenceManifestV2 or not model_shape_is_intact(
-        run_evidence
-    ):
-        raise _error("exact confirmatory run evidence is required")
-    try:
-        return ConfirmatoryRunEvidenceManifestV2.model_validate(
-            run_evidence.model_dump(mode="python", round_trip=True, warnings=False),
-            strict=True,
-        )
-    except _FATAL:
-        raise
-    except (TypeError, ValueError, ValidationError):
-        raise _error("confirmatory run evidence failed validation") from None
+        raise _error("confirmatory closed run evidence failed validation") from None
 
 
 @dataclass(frozen=True, slots=True, init=False)
 class _ValidatedFormalContextV2:
-    """Sealed, immutable registry derived from the two fully checked roots.
+    """Sealed, immutable registry derived from one fully checked closed-run root.
 
     This is an internal API capability rather than a security sandbox.  Its
-    constructor is disabled; the formal entry creates it only after both root
-    round-trips and their exact cross-binding succeed.  Downstream fast paths
+    constructor is disabled; the formal entry creates it only after the root
+    round-trip and its internal cross-bindings succeed.  Downstream fast paths
     receive this context plus a family/key, never caller-supplied plans,
     coverage, coordinates, or contribution artifacts.
     """
 
     _seal: object
     _phase: str
+    _confirmatory_closed_run_evidence_id: str
+    _confirmatory_pre_generation_closure_id: str
     _confirmatory_experiment_freeze_id: str
     _confirmatory_run_evidence_manifest_id: str
+    _closed_run_evidence: ConfirmatoryClosedRunEvidenceV2
+    _pre_generation_closure: ConfirmatoryPreGenerationClosureV2
     _experiment: ConfirmatoryExperimentFreezeV2
     _evidence: ConfirmatoryRunEvidenceManifestV2
     _protocol: FormalAnalysisProtocolV2 | None
@@ -211,24 +202,38 @@ class _ValidatedFormalContextV2:
     _artifact_bindings: tuple[_FormalArtifactBindingV2, ...]
     _registry_sha256: str
 
+    def __new__(cls) -> Self:
+        raise TypeError("formal context can only be created by the formal entry")
+
     @classmethod
-    def _from_roots(
+    def _from_root(
         cls,
-        experiment_freeze: ConfirmatoryExperimentFreezeV2,
-        run_evidence: ConfirmatoryRunEvidenceManifestV2,
+        closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
         *,
         access: object,
     ) -> _ValidatedFormalContextV2:
         if access is not _FORMAL_ENTRY_CONTEXT_ACCESS:
             raise _error("formal context can only be created by the formal entry")
-        experiment = _checked_experiment(experiment_freeze)
-        evidence = _checked_run_evidence(run_evidence)
+        closed = _checked_closed_run_evidence(closed_run_evidence)
+        closure = closed.pre_generation_closure
+        experiment = closure.experiment_freeze
+        evidence = closed.run_evidence
         if evidence.experiment_freeze != experiment:
             raise _error("run evidence does not belong to the exact experiment freeze")
 
         context = object.__new__(cls)
         object.__setattr__(context, "_seal", _FORMAL_CONTEXT_SEAL)
         object.__setattr__(context, "_phase", "roots")
+        object.__setattr__(
+            context,
+            "_confirmatory_closed_run_evidence_id",
+            closed.confirmatory_closed_run_evidence_id,
+        )
+        object.__setattr__(
+            context,
+            "_confirmatory_pre_generation_closure_id",
+            closure.confirmatory_pre_generation_closure_id,
+        )
         object.__setattr__(
             context,
             "_confirmatory_experiment_freeze_id",
@@ -239,6 +244,8 @@ class _ValidatedFormalContextV2:
             "_confirmatory_run_evidence_manifest_id",
             evidence.confirmatory_run_evidence_manifest_id,
         )
+        object.__setattr__(context, "_closed_run_evidence", closed)
+        object.__setattr__(context, "_pre_generation_closure", closure)
         object.__setattr__(context, "_experiment", experiment)
         object.__setattr__(context, "_evidence", evidence)
         object.__setattr__(context, "_protocol", None)
@@ -288,6 +295,10 @@ class _ValidatedFormalContextV2:
                 type(self) is not _ValidatedFormalContextV2
                 or self._seal is not _FORMAL_CONTEXT_SEAL
                 or self._phase not in {"roots", "inputs", "complete"}
+                or type(self._closed_run_evidence) is not ConfirmatoryClosedRunEvidenceV2
+                or not model_shape_is_intact(self._closed_run_evidence)
+                or type(self._pre_generation_closure) is not ConfirmatoryPreGenerationClosureV2
+                or not model_shape_is_intact(self._pre_generation_closure)
                 or type(self._experiment) is not ConfirmatoryExperimentFreezeV2
                 or not model_shape_is_intact(self._experiment)
                 or type(self._evidence) is not ConfirmatoryRunEvidenceManifestV2
@@ -296,6 +307,13 @@ class _ValidatedFormalContextV2:
                 != self._confirmatory_experiment_freeze_id
                 or self._evidence.confirmatory_run_evidence_manifest_id
                 != self._confirmatory_run_evidence_manifest_id
+                or self._closed_run_evidence.confirmatory_closed_run_evidence_id
+                != self._confirmatory_closed_run_evidence_id
+                or self._closed_run_evidence.pre_generation_closure != self._pre_generation_closure
+                or self._closed_run_evidence.run_evidence != self._evidence
+                or self._pre_generation_closure.confirmatory_pre_generation_closure_id
+                != self._confirmatory_pre_generation_closure_id
+                or self._pre_generation_closure.experiment_freeze != self._experiment
                 or self._evidence.experiment_freeze != self._experiment
             ):
                 raise _error("sealed formal context failed root validation")
@@ -317,6 +335,20 @@ class _ValidatedFormalContextV2:
             raise _error("formal plan builder requires the sealed context")
         self._assert_roots()
         return self._experiment
+
+    @property
+    def closed_run_evidence(self) -> ConfirmatoryClosedRunEvidenceV2:
+        self._assert_roots()
+        if self._phase != "complete":
+            raise _error("formal context is not complete")
+        return self._closed_run_evidence
+
+    @property
+    def pre_generation_closure(self) -> ConfirmatoryPreGenerationClosureV2:
+        self._assert_roots()
+        if self._phase != "complete":
+            raise _error("formal context is not complete")
+        return self._pre_generation_closure
 
     @property
     def experiment(self) -> ConfirmatoryExperimentFreezeV2:
@@ -458,6 +490,8 @@ class _ValidatedFormalContextV2:
     def _registry_digest(self) -> str:
         return _digest(
             {
+                "closed_run_evidence_id": self._confirmatory_closed_run_evidence_id,
+                "pre_generation_closure_id": (self._confirmatory_pre_generation_closure_id),
                 "experiment_id": self._confirmatory_experiment_freeze_id,
                 "evidence_id": self._confirmatory_run_evidence_manifest_id,
                 "protocol_id": None
@@ -575,6 +609,8 @@ def _result_payload(result: FormalConfirmationResultV2) -> dict[str, object]:
 def _content_address(result: FormalConfirmationResultV2) -> FormalConfirmationResultV2:
     return FormalConfirmationResultV2(
         formal_confirmation_result_id=_RESULT_PREFIX + _digest(_result_payload(result)),
+        confirmatory_closed_run_evidence_id=result.confirmatory_closed_run_evidence_id,
+        confirmatory_pre_generation_closure_id=(result.confirmatory_pre_generation_closure_id),
         confirmatory_experiment_freeze_id=result.confirmatory_experiment_freeze_id,
         confirmatory_run_evidence_manifest_id=(result.confirmatory_run_evidence_manifest_id),
         formal_analysis_protocol_id=result.formal_analysis_protocol_id,
@@ -607,6 +643,8 @@ def _content_address(result: FormalConfirmationResultV2) -> FormalConfirmationRe
 
 def _base_result(
     *,
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
+    pre_generation_closure: ConfirmatoryPreGenerationClosureV2,
     experiment: ConfirmatoryExperimentFreezeV2,
     evidence: ConfirmatoryRunEvidenceManifestV2,
     protocol: FormalAnalysisProtocolV2,
@@ -618,6 +656,12 @@ def _base_result(
 ) -> FormalConfirmationResultV2:
     provisional = FormalConfirmationResultV2(
         formal_confirmation_result_id="",
+        confirmatory_closed_run_evidence_id=(
+            closed_run_evidence.confirmatory_closed_run_evidence_id
+        ),
+        confirmatory_pre_generation_closure_id=(
+            pre_generation_closure.confirmatory_pre_generation_closure_id
+        ),
         confirmatory_experiment_freeze_id=(experiment.confirmatory_experiment_freeze_id),
         confirmatory_run_evidence_manifest_id=(evidence.confirmatory_run_evidence_manifest_id),
         formal_analysis_protocol_id=protocol.formal_analysis_protocol_id,
@@ -744,19 +788,21 @@ def _coordinate_decisions(
 
 
 def _run_formal(
-    experiment_freeze: ConfirmatoryExperimentFreezeV2,
-    run_evidence: ConfirmatoryRunEvidenceManifestV2,
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
 ) -> FormalConfirmationResultV2:
-    context = _ValidatedFormalContextV2._from_roots(
-        experiment_freeze,
-        run_evidence,
+    context = _ValidatedFormalContextV2._from_root(
+        closed_run_evidence,
         access=_FORMAL_ENTRY_CONTEXT_ACCESS,
     )
+    closed = context.closed_run_evidence
+    closure = context.pre_generation_closure
     experiment = context.experiment
     evidence = context.evidence
     protocol = context.protocol
     if not evidence.formal_point_estimation_ready:
         return _base_result(
+            closed_run_evidence=closed,
+            pre_generation_closure=closure,
             experiment=experiment,
             evidence=evidence,
             protocol=protocol,
@@ -776,6 +822,8 @@ def _run_formal(
             )
         except ValueError:
             return _base_result(
+                closed_run_evidence=closed,
+                pre_generation_closure=closure,
                 experiment=experiment,
                 evidence=evidence,
                 protocol=protocol,
@@ -804,6 +852,8 @@ def _run_formal(
         family_results=frozen_family_results,
     )
     return _base_result(
+        closed_run_evidence=closed,
+        pre_generation_closure=closure,
         experiment=experiment,
         evidence=evidence,
         protocol=protocol,
@@ -816,24 +866,22 @@ def _run_formal(
 
 
 def run_formal_confirmation_v2(
-    experiment_freeze: ConfirmatoryExperimentFreezeV2,
-    run_evidence: ConfirmatoryRunEvidenceManifestV2,
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
 ) -> FormalConfirmationResultV2:
-    """Run the four immutable formal families from two provenance roots only."""
+    """Run four immutable families from the single closed-run trust root."""
 
-    return _run_formal(experiment_freeze, run_evidence)
+    return _run_formal(closed_run_evidence)
 
 
 def validate_formal_confirmation_result_v2(
-    experiment_freeze: ConfirmatoryExperimentFreezeV2,
-    run_evidence: ConfirmatoryRunEvidenceManifestV2,
+    closed_run_evidence: ConfirmatoryClosedRunEvidenceV2,
     result: FormalConfirmationResultV2,
 ) -> FormalConfirmationResultV2:
     """Replay the complete formal analysis and require exact artifact equality."""
 
     if type(result) is not FormalConfirmationResultV2:
         raise _error("formal confirmation result artifact failed validation")
-    expected = _run_formal(experiment_freeze, run_evidence)
+    expected = _run_formal(closed_run_evidence)
     if result != expected:
         raise _error("formal confirmation result artifact failed validation")
     return result
