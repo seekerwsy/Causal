@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import shutil
 import signal
 import stat
@@ -15,10 +12,12 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import BinaryIO, Literal
 
 from secaware.errors import ErrorCode, SecAwareError
-
 
 _ANALYZER_STAGE = "oracle_analyzer"
 _MISSING_MESSAGE = "analyzer executable is unavailable"
@@ -36,6 +35,12 @@ _MAX_EXECUTABLE_BYTES = 128 * 1024 * 1024
 _RUNTIME_PROBE_TIMEOUT_SECONDS = 5.0
 _POPEN_CLASS = subprocess.Popen
 _WINDOWS_RUNTIME_PROBE_SOURCE = "pass"
+_LINUX_F_ADD_SEALS = 1033
+_LINUX_F_GET_SEALS = 1034
+_LINUX_F_SEAL_SEAL = 0x0001
+_LINUX_F_SEAL_SHRINK = 0x0002
+_LINUX_F_SEAL_GROW = 0x0004
+_LINUX_F_SEAL_WRITE = 0x0008
 
 _LINUX_RUNTIME_PROBE_SOURCE = r"""
 import ctypes
@@ -44,6 +49,7 @@ import fcntl
 import hashlib
 import os
 import signal
+import sys
 
 CLONE_NEWNS = 0x00020000
 CLONE_NEWUSER = 0x10000000
@@ -56,6 +62,12 @@ MS_PRIVATE = 0x40000
 PR_SET_PDEATHSIG = 1
 MFD_CLOEXEC = 0x1
 MFD_ALLOW_SEALING = 0x2
+F_ADD_SEALS = 1033
+F_GET_SEALS = 1034
+F_SEAL_SEAL = 0x0001
+F_SEAL_SHRINK = 0x0002
+F_SEAL_GROW = 0x0004
+F_SEAL_WRITE = 0x0008
 
 
 def check(call):
@@ -76,12 +88,42 @@ def write(path, value):
         os.close(descriptor)
 
 
+def memfd_create(name, flags):
+    if sys.platform != "linux":
+        raise OSError(errno.ENOSYS, "runtime capability unavailable")
+    creator = getattr(os, "memfd_create", None)
+    if callable(creator):
+        return creator(name, flags)
+    libc = ctypes.CDLL(None, use_errno=True)
+    creator = getattr(libc, "memfd_create", None)
+    if not callable(creator):
+        raise OSError(errno.ENOSYS, "runtime capability unavailable")
+    creator.argtypes = (ctypes.c_char_p, ctypes.c_uint)
+    creator.restype = ctypes.c_int
+    descriptor = creator(name.encode("ascii"), flags)
+    if descriptor < 0:
+        error_number = ctypes.get_errno() or errno.EIO
+        raise OSError(error_number, "runtime capability unavailable")
+    return descriptor
+
+
+def seal_constants():
+    return (
+        getattr(fcntl, "F_ADD_SEALS", F_ADD_SEALS),
+        getattr(fcntl, "F_GET_SEALS", F_GET_SEALS),
+        getattr(fcntl, "F_SEAL_WRITE", F_SEAL_WRITE)
+        | getattr(fcntl, "F_SEAL_GROW", F_SEAL_GROW)
+        | getattr(fcntl, "F_SEAL_SHRINK", F_SEAL_SHRINK)
+        | getattr(fcntl, "F_SEAL_SEAL", F_SEAL_SEAL),
+    )
+
+
 def check_memfd():
     sealed_fd = -1
     proc_fd = -1
     payload = b"secaware-runtime-capability"
     try:
-        sealed_fd = os.memfd_create(
+        sealed_fd = memfd_create(
             "secaware-runtime-probe",
             MFD_CLOEXEC | MFD_ALLOW_SEALING,
         )
@@ -97,16 +139,14 @@ def check_memfd():
             os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
         )
         observed = os.read(proc_fd, len(payload) + 1)
-        if observed != payload or hashlib.sha256(observed).digest() != hashlib.sha256(payload).digest():
+        if (
+            observed != payload
+            or hashlib.sha256(observed).digest() != hashlib.sha256(payload).digest()
+        ):
             raise OSError("runtime capability unavailable")
-        required_seals = (
-            fcntl.F_SEAL_WRITE
-            | fcntl.F_SEAL_GROW
-            | fcntl.F_SEAL_SHRINK
-            | fcntl.F_SEAL_SEAL
-        )
-        fcntl.fcntl(sealed_fd, fcntl.F_ADD_SEALS, required_seals)
-        if fcntl.fcntl(sealed_fd, fcntl.F_GET_SEALS) & required_seals != required_seals:
+        add_seals, get_seals, required_seals = seal_constants()
+        fcntl.fcntl(sealed_fd, add_seals, required_seals)
+        if fcntl.fcntl(sealed_fd, get_seals) & required_seals != required_seals:
             raise OSError("runtime capability unavailable")
         os.lseek(sealed_fd, 0, os.SEEK_SET)
         try:
@@ -119,7 +159,9 @@ def check_memfd():
         if os.fstat(sealed_fd).st_size != len(payload):
             raise OSError("runtime capability unavailable")
         os.lseek(proc_fd, 0, os.SEEK_SET)
-        if hashlib.sha256(os.read(proc_fd, len(payload) + 1)).digest() != hashlib.sha256(payload).digest():
+        if hashlib.sha256(os.read(proc_fd, len(payload) + 1)).digest() != hashlib.sha256(
+            payload
+        ).digest():
             raise OSError("runtime capability unavailable")
     finally:
         if proc_fd >= 0:
@@ -462,14 +504,20 @@ def _minimal_environment(executable: Path, cwd: Path) -> dict[str, str]:
     root = ""
     system_root: str | None = None
     environment: dict[str, str] = {}
+    path_entries: list[str] = []
     try:
         root = str(cwd)
+        path_entries = [str(executable.parent)]
+        if _detect_runtime_platform() == "linux":
+            for directory in _trusted_linux_tool_directories():
+                if directory not in path_entries:
+                    path_entries.append(directory)
         environment = {
             "HOME": root,
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "NO_COLOR": "1",
-            "PATH": str(executable.parent),
+            "PATH": os.pathsep.join(path_entries),
             "PYTHONHASHSEED": "0",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
@@ -491,6 +539,49 @@ def _minimal_environment(executable: Path, cwd: Path) -> dict[str, str]:
         root = ""
         system_root = None
         environment = {}
+        path_entries = []
+
+
+def _trusted_linux_tool_directories() -> tuple[str, ...]:
+    if _detect_runtime_platform() != "linux":
+        return ()
+    configured = ""
+    candidates: list[str] = []
+    trusted: list[str] = []
+    try:
+        confstr = getattr(os, "confstr", None)
+        if callable(confstr):
+            try:
+                configured = confstr("CS_PATH") or ""
+            except (OSError, TypeError, ValueError):
+                configured = ""
+        candidates.extend(configured.split(os.pathsep))
+        candidates.extend(("/usr/bin", "/bin"))
+        for candidate in candidates:
+            if not candidate:
+                continue
+            path = Path(candidate)
+            if not path.is_absolute():
+                continue
+            try:
+                resolved = path.resolve(strict=True)
+                metadata = resolved.stat()
+            except (AttributeError, OSError, RuntimeError, ValueError):
+                continue
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != 0
+                or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            ):
+                continue
+            rendered = str(resolved)
+            if rendered not in trusted:
+                trusted.append(rendered)
+        return tuple(trusted)
+    finally:
+        configured = ""
+        candidates = []
+        trusted = []
 
 
 def _open_windows_path_lease(path: Path, *, directory: bool) -> _WindowsPathLease | None:
@@ -609,12 +700,7 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
                 raise _RunnerFailure(ErrorCode.ANALYZER_MISSING)
             if metadata.st_size <= 0 or metadata.st_size > _MAX_EXECUTABLE_BYTES:
                 raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-            import fcntl
-
-            sealed_descriptor = os.memfd_create(
-                "secaware-analyzer",
-                getattr(os, "MFD_CLOEXEC", 0x1) | getattr(os, "MFD_ALLOW_SEALING", 0x2),
-            )
+            sealed_descriptor = _linux_memfd_create("secaware-analyzer")
             digest_hash = hashlib.sha256()
             while True:
                 chunk = os.read(descriptor, 1024 * 1024)
@@ -631,11 +717,7 @@ def _open_posix_path_lease(path: Path, *, directory: bool) -> _PosixPathLease | 
             if sealed_digest != digest or sealed_size != metadata.st_size:
                 raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
             os.fchmod(sealed_descriptor, metadata.st_mode & 0o777)
-            fcntl.fcntl(
-                sealed_descriptor,
-                fcntl.F_ADD_SEALS,
-                fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL,
-            )
+            _seal_linux_memfd(sealed_descriptor)
             os.close(descriptor)
             descriptor = sealed_descriptor
             sealed_descriptor = -1
@@ -703,6 +785,61 @@ def _detect_runtime_platform() -> Literal["windows", "linux"] | None:
     if os.name == "posix" and sys.platform == "linux":
         return "linux"
     return None
+
+
+def _linux_memfd_create(name: str) -> int:
+    if _detect_runtime_platform() != "linux" or not name or "\x00" in name:
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    flags = getattr(os, "MFD_CLOEXEC", 0x1) | getattr(os, "MFD_ALLOW_SEALING", 0x2)
+    descriptor = -1
+    try:
+        creator = getattr(os, "memfd_create", None)
+        if callable(creator):
+            descriptor = creator(name, flags)
+        else:
+            import ctypes
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            creator = getattr(libc, "memfd_create", None)
+            if not callable(creator):
+                raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+            creator.argtypes = (ctypes.c_char_p, ctypes.c_uint)
+            creator.restype = ctypes.c_int
+            descriptor = int(creator(name.encode("ascii", errors="strict"), flags))
+            if descriptor < 0:
+                raise OSError(ctypes.get_errno(), "memfd_create failed")
+        if descriptor < 0:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+        return descriptor
+    except _RunnerFailure:
+        raise
+    except (AttributeError, OSError, TypeError, UnicodeError, ValueError):
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
+
+
+def _seal_linux_memfd(descriptor: int) -> None:
+    if _detect_runtime_platform() != "linux" or descriptor < 0:
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    try:
+        import fcntl
+
+        add_seals = getattr(fcntl, "F_ADD_SEALS", _LINUX_F_ADD_SEALS)
+        get_seals = getattr(fcntl, "F_GET_SEALS", _LINUX_F_GET_SEALS)
+        required_seals = (
+            getattr(fcntl, "F_SEAL_WRITE", _LINUX_F_SEAL_WRITE)
+            | getattr(fcntl, "F_SEAL_GROW", _LINUX_F_SEAL_GROW)
+            | getattr(fcntl, "F_SEAL_SHRINK", _LINUX_F_SEAL_SHRINK)
+            | getattr(fcntl, "F_SEAL_SEAL", _LINUX_F_SEAL_SEAL)
+        )
+        fcntl.fcntl(descriptor, add_seals, required_seals)
+        if fcntl.fcntl(descriptor, get_seals) & required_seals != required_seals:
+            raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
+    except _RunnerFailure:
+        raise
+    except (AttributeError, OSError, TypeError, ValueError):
+        raise _RunnerFailure(ErrorCode.ANALYZER_FAILED) from None
 
 
 def _probe_windows_runtime_capabilities() -> None:
@@ -898,8 +1035,6 @@ def _seal_posix_internal_file(
 ) -> None:
     if sys.platform != "linux" or lease.fd >= 0:
         raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-    import fcntl
-
     descriptor = -1
     sealed_descriptor = -1
     chunk = b""
@@ -924,10 +1059,7 @@ def _seal_posix_internal_file(
             or (require_executable and not metadata.st_mode & 0o111)
         ):
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
-        sealed_descriptor = os.memfd_create(
-            "secaware-supervisor",
-            getattr(os, "MFD_CLOEXEC", 0x1) | getattr(os, "MFD_ALLOW_SEALING", 0x2),
-        )
+        sealed_descriptor = _linux_memfd_create("secaware-supervisor")
         lease.fd = sealed_descriptor
         sealed_descriptor = -1
         digest = hashlib.sha256()
@@ -954,11 +1086,7 @@ def _seal_posix_internal_file(
         ):
             raise _RunnerFailure(ErrorCode.ANALYZER_FAILED)
         os.fchmod(lease.fd, 0o500 if require_executable else 0o400)
-        fcntl.fcntl(
-            lease.fd,
-            fcntl.F_ADD_SEALS,
-            fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL,
-        )
+        _seal_linux_memfd(lease.fd)
         lease.sha256 = sealed_digest
         lease.identity = identity
     finally:
