@@ -239,6 +239,31 @@ def test_gate_c_fresh_graph_binding_rejects_an_old_prompt_interpretation() -> No
     )
 
 
+def test_gate_c_fresh_graph_index_allows_equal_semantic_hashes_for_distinct_proposals() -> None:
+    shared_graph_sha256 = "a" * 64
+    graphs = (
+        {
+            "proposal_id": "proposal-1",
+            "prompt_id": "prompt-1",
+            "graph_sha256": shared_graph_sha256,
+        },
+        {
+            "proposal_id": "proposal-2",
+            "prompt_id": "prompt-2",
+            "graph_sha256": shared_graph_sha256,
+        },
+    )
+
+    indexed = gate_c._fresh_graphs_by_proposal_id(graphs)
+
+    assert indexed == {
+        "proposal-1": graphs[0],
+        "proposal-2": graphs[1],
+    }
+    with pytest.raises(ValueError, match="fresh graph coverage"):
+        gate_c._fresh_graphs_by_proposal_id((graphs[0], {**graphs[1], "proposal_id": "proposal-1"}))
+
+
 def test_gate_c_authenticates_source_reuse_only_when_every_variant_was_fresh() -> None:
     variant_ids = frozenset({"gate-a-1", "gate-a-2"})
     reuse = {

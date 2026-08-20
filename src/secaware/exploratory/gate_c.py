@@ -247,7 +247,7 @@ def _direct_gate_b_records(
         raise ValueError("Gate C direct Gate B append-boundary policy failed validation")
     requires_fresh_graph = report_boundary_policy == PYTHON_COMMENT_BOUNDARY_POLICY
     proposal_by_id: dict[str, dict[str, Any]] = {}
-    graph_by_sha256: dict[str, dict[str, Any]] = {}
+    graph_by_proposal_id: dict[str, dict[str, Any]] = {}
     if requires_fresh_graph:
         reuse = gate_b_report.get("reuse")
         counts = gate_b_report.get("counts")
@@ -276,11 +276,7 @@ def _direct_gate_b_records(
             if type(proposal_id) is not str or not proposal_id or proposal_id in proposal_by_id:
                 raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
             proposal_by_id[proposal_id] = item
-        for item in graphs:
-            graph_sha256 = item.get("graph_sha256")
-            if type(graph_sha256) is not str or not graph_sha256 or graph_sha256 in graph_by_sha256:
-                raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
-            graph_by_sha256[graph_sha256] = item
+        graph_by_proposal_id = _fresh_graphs_by_proposal_id(graphs)
         if len(proposals) != len(direct) or len(graphs) != len(direct):
             raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
 
@@ -355,7 +351,7 @@ def _direct_gate_b_records(
             variant=item,
             prompt=prompt,
             proposal=proposal_by_id.get(str(item.get("proposal_id"))),
-            graph=graph_by_sha256.get(str(item.get("graph_sha256"))),
+            graph=graph_by_proposal_id.get(str(item.get("proposal_id"))),
         ):
             raise ValueError("Gate C direct Gate B fresh graph binding failed validation")
         prompts.append(prompt)
@@ -409,6 +405,25 @@ def _fresh_variant_extractor_reuse_is_authenticated(
         and counts.get("reused_extractor_calls") == counts.get("source_extractions")
         and counts.get("provider_extractor_calls") == len(variant_ids)
     )
+
+
+def _fresh_graphs_by_proposal_id(
+    graphs: tuple[dict[str, Any], ...],
+) -> dict[str, dict[str, Any]]:
+    by_proposal_id: dict[str, dict[str, Any]] = {}
+    for graph in graphs:
+        proposal_id = graph.get("proposal_id")
+        graph_sha256 = graph.get("graph_sha256")
+        if (
+            type(proposal_id) is not str
+            or not proposal_id
+            or proposal_id in by_proposal_id
+            or type(graph_sha256) is not str
+            or not graph_sha256
+        ):
+            raise ValueError("Gate C direct Gate B fresh graph coverage failed validation")
+        by_proposal_id[proposal_id] = graph
+    return by_proposal_id
 
 
 def _direct_candidate_text(
