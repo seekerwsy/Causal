@@ -753,6 +753,112 @@ def test_minimal_validation_v2_micro_live_configs_are_frozen_and_fail_closed() -
             )
 
 
+def test_minimal_validation_v2_full_live_configs_are_frozen_and_fail_closed() -> None:
+    root = Path(__file__).resolve().parents[1]
+    config_dir = root / "configs" / "minimal-validation"
+    base = json.loads(
+        (config_dir / "dev-canary-full-python-comment-live-v2.json").read_text(encoding="utf-8")
+    )
+    remaining = json.loads(
+        (config_dir / "dev-canary-full-python-comment-live-remaining-v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    live_id = "minimal-validation-dev-canary-full-python-comment-live-qwen7b-v2"
+    authorization_id = "user-approved-minimal-validation-dev-canary-full-python-comment-20260821-v2"
+    pilot_id = "assignment_05867d4b65d75f77bf167c465b9807ddfca2210049898c466aa82693c5b2f66e"
+    plan_manifest_sha256 = "dcd10ad1f0e113d75301ee272696772aa1276d43f7476872a13b38001912cefc"
+    contract = {
+        "manifest_sha256": plan_manifest_sha256,
+        "task_selection_binding_policy": "exact_content_addressed_v1",
+        "seed_assignment_policy": "inherited_gate_a_randomization_v1",
+    }
+    assert base == {
+        "schema_version": "1.0",
+        "gate_c_live_id": live_id,
+        "source_plan_dir": "runs/minimal-validation/dev-canary-full-python-comment-plan-v2",
+        "required_source_plan_contract": contract,
+        "task_selection_policy": "explicit_dev_canary",
+        "pilot_assignment_id": pilot_id,
+        "expected_assignments": 24,
+        "maximum_generation_provider_attempts": 24,
+        "maximum_functional_judge_provider_attempts": 24,
+        "require_pilot_before_remaining": True,
+        "fail_fast": True,
+        "oracle_coordinate_blinding": True,
+        "zero_finding_interpretation": "profile_scoped_decision",
+        "scientific_claim_allowed": False,
+        "scale_up_allowed": False,
+    }
+    expected_remaining = {
+        **base,
+        "scale_up_allowed": True,
+        "scale_up_authorization_id": authorization_id,
+        "scale_up_authorization_scope": "remaining_assignments_only",
+    }
+    assert remaining == expected_remaining
+    assert gate_c_live._SCALE_UP_AUTHORIZATION_BY_LIVE_ID[live_id] == authorization_id
+    assert (
+        tuple(gate_c_live._SCALE_UP_AUTHORIZATION_BY_LIVE_ID.values()).count(authorization_id) == 1
+    )
+    gate_c_live._validate_scale_up_authorization(base, mode="validate")
+    gate_c_live._validate_scale_up_authorization(
+        remaining,
+        mode="remaining",
+        stored_base=base,
+    )
+
+    plan_report = {
+        "task_selection_binding": {"policy": "exact_content_addressed_v1"},
+        "seed_assignment_policy": "inherited_gate_a_randomization_v1",
+    }
+    gate_c_live._validate_required_source_plan_contract(
+        base,
+        plan_report=plan_report,
+        source_plan_manifest_sha256=plan_manifest_sha256,
+    )
+
+    for rejected_token in (
+        "user-approved-remaining-20260817-v1",
+        "user-approved-minimal-validation-dev-canary-20260820-v1",
+        "user-approved-minimal-validation-dev-canary-micro-python-comment-20260821-v2",
+    ):
+        attacked = {**remaining, "scale_up_authorization_id": rejected_token}
+        with pytest.raises(ValueError, match="authorization failed"):
+            gate_c_live._validate_scale_up_authorization(
+                attacked,
+                mode="remaining",
+                stored_base=base,
+            )
+
+    for key, attacked_value in (
+        ("pilot_assignment_id", "assignment_" + "f" * 64),
+        ("maximum_generation_provider_attempts", 25),
+        ("maximum_functional_judge_provider_attempts", 25),
+    ):
+        attacked = {**remaining, key: attacked_value}
+        with pytest.raises(ValueError, match="changed the frozen pilot config"):
+            gate_c_live._validate_scale_up_authorization(
+                attacked,
+                mode="remaining",
+                stored_base=base,
+            )
+
+    attacked_contracts = (
+        {**contract, "manifest_sha256": "f" * 64},
+        {**contract, "task_selection_binding_policy": "legacy_unbound_v1"},
+        {**contract, "seed_assignment_policy": "balanced_distinct_seed_slots_v1"},
+    )
+    for attacked_contract in attacked_contracts:
+        attacked = {**base, "required_source_plan_contract": attacked_contract}
+        with pytest.raises(ValueError, match="required source plan contract"):
+            gate_c_live._validate_required_source_plan_contract(
+                attacked,
+                plan_report=plan_report,
+                source_plan_manifest_sha256=plan_manifest_sha256,
+            )
+
+
 def _authorization_receipt_inputs() -> dict[str, object]:
     live = {
         "gate_c_live_id": "minimal-validation-dev-canary-full-live-qwen7b-v1",
