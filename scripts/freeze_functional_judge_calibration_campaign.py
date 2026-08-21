@@ -90,6 +90,11 @@ _PREFLIGHT_CONFIG_KEYS = frozenset(
         "validation_only_raw_exchange_capture",
     }
 )
+_V3_PREFLIGHT_CONFIG_KEYS = _PREFLIGHT_CONFIG_KEYS | {
+    "aggregate_status_rule",
+    "aggregate_status_rule_sha256",
+    "top_level_status_role",
+}
 _PREFLIGHT_REPORT_KEYS = frozenset(
     {
         "candidate_id",
@@ -502,11 +507,14 @@ def _verify_preflight(
     shared_coordinates = analyzer._validated_evaluator_coordinates(config)
     expected_coordinates = _evaluator_shared_coordinates(evaluator)
     expected_method = canary._measurement_method(evaluator.protocol_version)
+    expected_config_keys = (
+        _V3_PREFLIGHT_CONFIG_KEYS if evaluator.protocol_version == "v3" else _PREFLIGHT_CONFIG_KEYS
+    )
     if (
         len(provider_cases) != expected_count
         or cases != expected_cases
         or planned != expected_planned
-        or frozenset(config) != _PREFLIGHT_CONFIG_KEYS
+        or frozenset(config) != expected_config_keys
         or config.get("schema_version") != "1.0"
         or config.get("candidate_id") != evaluator.candidate_id
         or config.get("candidate_role") != evaluator.candidate_role

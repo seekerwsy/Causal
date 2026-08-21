@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from scripts import analyze_functional_judge_v3_single_candidate as analysis
+from scripts import freeze_functional_judge_calibration_campaign as full_freezer
 from scripts import freeze_functional_judge_v3_single_candidate_campaign as freezer
 from scripts import plan_functional_judge_v3_single_candidate as plan_module
 
@@ -344,3 +345,15 @@ def test_pilot_selection_falls_back_deterministically_when_tune_has_one_class() 
         "case-a",
         "case-b",
     ]
+
+
+def test_v3_preflight_accepts_only_the_three_frozen_aggregate_metadata_keys() -> None:
+    assert (
+        full_freezer._PREFLIGHT_CONFIG_KEYS
+        | {
+            "aggregate_status_rule",
+            "aggregate_status_rule_sha256",
+            "top_level_status_role",
+        }
+        == full_freezer._V3_PREFLIGHT_CONFIG_KEYS
+    )
