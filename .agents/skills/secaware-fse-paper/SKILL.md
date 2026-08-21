@@ -1,6 +1,6 @@
 ---
 name: secaware-fse-paper
-description: Use when auditing, revising, backfilling verified results into, or preparing the SecAware FSE manuscript and its LaTeX submission artifacts.
+description: Use only when the requested deliverable directly writes, edits, reviews, backfills, compiles, or prepares the SecAware FSE manuscript or its LaTeX submission artifacts. Do not use for experiment implementation, execution, debugging, planning, result analysis, evidence auditing, or progress reporting unless the user also asks to change or verify manuscript content.
 ---
 
 # SecAware FSE Paper
@@ -12,11 +12,23 @@ traceable experiment artifacts. Specifications and frozen evidence outrank
 existing prose; no polished sentence justifies changing an estimand or
 inventing a result.
 
+## Trigger Boundary
+
+Trigger this skill only when the current request directly works on the manuscript,
+its paper-facing tables or figures, or its LaTeX submission package. The fact that
+an experiment may eventually support the paper is not sufficient.
+
+Do not trigger this skill for standalone experiment implementation, execution,
+debugging, protocol or sample-size planning, runtime/Oracle/Judge work, artifact
+verification, result analysis, or progress reporting. If a later request asks to
+translate verified evidence into manuscript prose or tables, trigger the skill at
+that point and verify the evidence before writing.
+
 ## Choose a Mode
 
 | Mode | Use for | Default action |
 |---|---|---|
-| `audit` | Checking claims, consistency, or readiness | Report evidence-backed findings; do not edit |
+| `audit` | Checking manuscript claims, prose consistency, or submission readiness | Report evidence-backed manuscript findings; do not edit |
 | `revise` | Changing framing, methods, RQs, or prose | Edit only the requested scope, then verify |
 | `results-backfill` | Replacing placeholders with frozen results | Require artifact provenance before every quantitative claim |
 | `presubmit` | Venue, anonymity, compilation, and package checks | Run the complete manuscript and FSE checklist |
