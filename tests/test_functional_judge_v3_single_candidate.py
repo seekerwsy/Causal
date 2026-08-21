@@ -331,3 +331,16 @@ def test_single_candidate_plan_freezes_only_one_candidate() -> None:
         "historical_comparison_allowed": False,
         "historical_trace_reuse_allowed": False,
     }
+
+
+def test_pilot_selection_falls_back_deterministically_when_tune_has_one_class() -> None:
+    tune = [
+        {"case_id": "case-c", "expected_status": "fail"},
+        {"case_id": "case-a", "expected_status": "fail"},
+        {"case_id": "case-b", "expected_status": "fail"},
+    ]
+
+    assert [row["case_id"] for row in plan_module._select_pilot_cases(tune)] == [
+        "case-a",
+        "case-b",
+    ]

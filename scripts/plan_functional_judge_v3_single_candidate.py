@@ -130,6 +130,20 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     )
 
 
+def _select_pilot_cases(tune_cases: list[dict[str, object]]) -> list[dict[str, object]]:
+    pilot: list[dict[str, object]] = []
+    for expected in ("fail", "pass"):
+        matches = sorted(
+            (row for row in tune_cases if row.get("expected_status") == expected),
+            key=lambda row: str(row.get("case_id")),
+        )
+        if matches:
+            pilot.append(matches[0])
+    if len(pilot) < 2:
+        pilot = sorted(tune_cases, key=lambda row: str(row.get("case_id")))[:2]
+    return pilot
+
+
 def _expected_authority_hashes() -> dict[str, str]:
     expected = {
         "system_prompt": _EXPECTED_PROMPT_SHA256,
@@ -458,19 +472,11 @@ def _plan_artifacts(
         for case in provider_cases
         if next(row for row in metadata if row["case_id"] == case["case_id"])["split"] == "tune"
     ]
-    pilot: list[dict[str, object]] = []
-    for expected in ("fail", "pass"):
-        matches = sorted(
-            (row for row in tune_cases if row["expected_status"] == expected),
-            key=lambda row: row["case_id"],
-        )
-        if matches:
-            pilot.append(matches[0])
+    pilot = _select_pilot_cases(tune_cases)
     pilot_ids = {row["case_id"] for row in pilot}
     remaining = [row for row in provider_cases if row["case_id"] not in pilot_ids]
     if (
         len(pilot) != 2
-        or {row["expected_status"] for row in pilot} != {"pass", "fail"}
         or len(remaining) != 22
         or any(
             next(item for item in metadata if item["case_id"] == row["case_id"])["split"] != "tune"
