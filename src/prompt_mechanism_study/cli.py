@@ -9,6 +9,11 @@ from typing import Any, Mapping, Sequence
 
 from prompt_mechanism_study.adapters import AdapterBundle, AdapterKind, AdapterSpec
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.functional_judge import (
+    finalize_gate,
+    preflight as judge_preflight,
+    run_phase as run_judge_phase,
+)
 from prompt_mechanism_study.inference import AnalysisPlan, Metric
 from prompt_mechanism_study.intervention import (
     ARM_ORDER,
@@ -60,6 +65,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     summarize = commands.add_parser("summarize", help="print a stored analysis summary")
     summarize.add_argument("root", type=Path)
 
+    judge = commands.add_parser("judge-gate", help="run the bounded Functional Judge gate")
+    judge.add_argument("phase", choices=("preflight", "pilot", "remaining", "finalize"))
+    judge.add_argument("output", type=Path)
+    judge.add_argument("--repository-root", type=Path, default=Path.cwd())
+    judge.add_argument("--pilot-root", type=Path)
+    judge.add_argument("--remaining-root", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "freeze":
         _freeze(args.protocol, args.output)
@@ -68,10 +80,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "verify":
         verify_bundle(args.root)
         print("VERIFIED")
-    else:
+    elif args.command == "summarize":
         verify_bundle(args.root)
         print(json.dumps(read_json(args.root / "analysis.json"), indent=2, sort_keys=True))
+    else:
+        _judge_gate(args)
     return 0
+
+
+def _judge_gate(args: argparse.Namespace) -> None:
+    if args.phase == "preflight":
+        report = judge_preflight(args.repository_root, args.output)
+    elif args.phase in {"pilot", "remaining"}:
+        report = run_judge_phase(
+            args.repository_root,
+            args.phase,
+            args.output,
+            pilot_root=args.pilot_root,
+        )
+    else:
+        if args.pilot_root is None or args.remaining_root is None:
+            raise ValueError("finalize requires --pilot-root and --remaining-root")
+        report = finalize_gate(
+            args.repository_root,
+            args.pilot_root,
+            args.remaining_root,
+            args.output,
+        )
+    print(report["status"])
 
 
 def _freeze(protocol_path: Path, output: Path) -> None:
