@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -675,6 +676,36 @@ def test_test_double_requires_explicit_authorization(tmp_path: Path) -> None:
         )
 
     assert not output.exists()
+
+
+def test_worker_safe_path_resolves_relative_to_fixture_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_path = Path(sensitivity_module.__file__).with_name("_executable_functional_worker.py")
+    parsed = ast.parse(worker_path.read_text(encoding="utf-8"))
+    selected = [
+        node
+        for node in parsed.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in {"_relative_path", "_safe_path"}
+    ]
+    assert [node.name for node in selected] == ["_relative_path", "_safe_path"]
+    namespace: dict[str, object] = {"Path": Path}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), worker_path, "exec"), namespace)  # noqa: S102
+    safe_path = namespace["_safe_path"]
+
+    fixture_root = tmp_path / "fixture-src"
+    fixture_root.mkdir()
+    candidate = fixture_root / "candidate.py"
+    candidate.write_text("pass\n", encoding="utf-8")
+    unrelated_cwd = tmp_path / "work"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
+
+    assert safe_path(fixture_root, "candidate.py") == candidate.resolve()  # type: ignore[operator]
+    with pytest.raises(ValueError):
+        safe_path(fixture_root, "../candidate.py")  # type: ignore[operator]
 
 
 def test_runtime_extension_inventory_excludes_unloaded_tkinter(

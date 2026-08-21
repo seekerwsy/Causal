@@ -314,10 +314,10 @@ def _install_kernel_policy() -> dict[str, object]:
 
 
 def _safe_path(root: Path, value: object) -> Path:
-    if type(value) is not str or not value:
-        raise ValueError("worker path failed validation")
-    path = Path(value).resolve(strict=True)
-    path.relative_to(root.resolve(strict=True))
+    relative = _relative_path(value)
+    resolved_root = root.resolve(strict=True)
+    path = (resolved_root / relative).resolve(strict=True)
+    path.relative_to(resolved_root)
     return path
 
 
