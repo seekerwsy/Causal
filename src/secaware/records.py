@@ -105,7 +105,7 @@ class SnapshotResearchRecord(FrozenResearchRecord):
         return snapshot_json_arrays(value)
 
 
-class ContentAddressedResearchRecord(SnapshotResearchRecord):
+class ContentAddressedResearchRecord(FrozenResearchRecord):
     """Shared constructor and verifier for ordinary content-addressed records."""
 
     _schema_version: ClassVar[str]
@@ -139,9 +139,19 @@ class ContentAddressedResearchRecord(SnapshotResearchRecord):
         return self
 
 
+class SnapshotContentAddressedResearchRecord(ContentAddressedResearchRecord):
+    """Content-addressed record that also snapshots caller-owned JSON arrays."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def snapshot_arrays(cls, value: object) -> object:
+        return snapshot_json_arrays(value)
+
+
 __all__ = [
     "ContentAddressedResearchRecord",
     "FrozenResearchRecord",
+    "SnapshotContentAddressedResearchRecord",
     "SnapshotResearchRecord",
     "parse_exact_enum",
     "raise_record_validation_error",

@@ -7,26 +7,29 @@ analysis, the complete frozen draw manifest) by the orchestration layer.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
-from enum import Enum, StrEnum
-from typing import Any, ClassVar, Literal, Self
+from enum import StrEnum
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.causal.authenticated_natural_table_v2 import (
     AuthenticatedNaturalDiscoveryTableArtifactV2,
     TwoLevelClusterResampleManifestV2,
 )
 from secaware.schema.causal import EndpointMark, PAGEdgeRecord
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.records import (
+    ContentAddressedResearchRecord,
+    FrozenResearchRecord,
+    parse_exact_enum as _exact_enum,
+    record_sha256 as canonical_digest_v2,
+    valid_identifier as _valid_identifier,
+)
 from secaware.schema.discovery_v2 import DiscoveryAnalysisKindV2
 
 OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION = "2.0"
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _VARIABLE_RE = re.compile(r"^[xy]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _KNOWLEDGE_PATTERN = r"^observational_bk_v2_[0-9a-f]{64}$"
 _PAG_PATTERN = r"^observational_pag_v2_[0-9a-f]{64}$"
@@ -40,97 +43,15 @@ _JCI_PATTERN = r"^observational_jci_diagnostic_v2_[0-9a-f]{64}$"
 _SYNTHETIC_PATTERN = r"^observational_synthetic_gate_v2_[0-9a-f]{64}$"
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def canonical_digest_v2(value: object) -> str:
-    """Return the protocol-v2 canonical SHA-256 digest."""
-
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _valid_identifier(value: object) -> bool:
-    return (
-        type(value) is str
-        and _IDENTIFIER_RE.fullmatch(value) is not None
-        and value == value.strip()
-        and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-    )
-
-
-def _exact_enum(value: object, enum_type: type[Enum]) -> object:
-    if type(value) is enum_type:
-        return value
-    if type(value) is str:
-        return next((item for item in enum_type if item.value == value), value)
-    return value
-
-
-class _ObservationalContractV2(SafeValidationMixin, StrictModel):
-    _safe_validation_message: ClassVar[str] = (
-        "observational discovery v2 artifact failed exact validation"
-    )
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
+class _ObservationalContractV2(FrozenResearchRecord):
+    _safe_validation_message = "observational discovery v2 artifact failed exact validation"
 
     schema_version: Literal["2.0"] = OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION
 
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
-
-
-class _ContentAddressedObservationalV2(_ObservationalContractV2):
-    _id_field: ClassVar[str]
-    _id_prefix: ClassVar[str]
-
-    @classmethod
-    def from_content(cls, **content: Any) -> Self:
-        try:
-            if "schema_version" in content or cls._id_field in content:
-                raise ValueError
-            payload = {
-                "schema_version": OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION,
-                **content,
-            }
-            return cls(**payload, **{cls._id_field: cls._id_prefix + canonical_digest_v2(payload)})
-        except (MemoryError, KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:  # noqa: BLE001 - sanitize the content-addressed boundary
-            content.clear()
-            raise cls._safe_error() from None
-
-    @model_validator(mode="after")
-    def validate_content_address(self) -> Self:
-        content = self.model_dump(mode="json", exclude={self._id_field})
-        if getattr(self, self._id_field) != self._id_prefix + canonical_digest_v2(content):
-            raise ValueError(self._safe_validation_message)
-        return self
+class _ContentAddressedObservationalV2(ContentAddressedResearchRecord):
+    _safe_validation_message = "observational discovery v2 artifact failed exact validation"
+    _schema_version = OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION
+    schema_version: Literal["2.0"] = OBSERVATIONAL_DISCOVERY_V2_SCHEMA_VERSION
 
 
 class ObservationalDiscoveryConfigV2(_ObservationalContractV2):

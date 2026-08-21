@@ -24,7 +24,7 @@ from secaware.experiments.randomization_v2 import (
 )
 from secaware.outcomes.assembler_v2 import assemble_assignment_outcome_v2
 from secaware.records import (
-    ContentAddressedResearchRecord,
+    SnapshotContentAddressedResearchRecord,
     SnapshotResearchRecord,
     raise_record_validation_error as _raise_contract_error,
     valid_identifier as _valid_identifier,
@@ -58,7 +58,7 @@ class _ExecutionV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "execution v2 contract failed validation"
 
 
-class _ContentAddressedExecutionV2(ContentAddressedResearchRecord):
+class _ContentAddressedExecutionV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "execution v2 contract failed validation"
     _schema_version = EXECUTION_V2_SCHEMA_VERSION
 

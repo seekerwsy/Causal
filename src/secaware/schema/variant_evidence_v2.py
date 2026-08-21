@@ -11,13 +11,10 @@ an incomplete realization can only exclude the whole task upstream.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
-from enum import Enum
-from typing import Any, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.extractors.base import ExtractionPolicy, PromptExtractor
 from secaware.intervention.arm_catalog import materialize_safety_arm_specs
@@ -28,7 +25,11 @@ from secaware.intervention.variant_validation import (
     validate_graph_delta_record,
     validate_length_match_record,
 )
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.records import (
+    SnapshotContentAddressedResearchRecord,
+    SnapshotResearchRecord,
+    record_sha256 as _digest,
+)
 from secaware.schema.experiments import (
     ArmRole,
     ArmSpecRecord,
@@ -78,38 +79,6 @@ _MATCHED_REFERENCE_ROLE = {
 }
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _snapshot_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_arrays(item) for item in value)
-    return value
-
-
 def _valid_identifier(value: object) -> bool:
     return (
         type(value) is str
@@ -119,58 +88,15 @@ def _valid_identifier(value: object) -> bool:
     )
 
 
-class _VariantEvidenceV2Contract(SafeValidationMixin, StrictModel):
+class _VariantEvidenceV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "variant evidence v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
     schema_version: Literal["2.0"] = VARIANT_EVIDENCE_V2_SCHEMA_VERSION
 
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_arrays(cls, value: object) -> object:
-        return _snapshot_arrays(value)
 
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
-
-
-class _ContentAddressedVariantEvidenceV2(_VariantEvidenceV2Contract):
-    _id_field: ClassVar[str]
-    _id_prefix: ClassVar[str]
-
-    @classmethod
-    def from_content(cls, **content: Any) -> Self:
-        payload: dict[str, Any] | None = None
-        try:
-            if "schema_version" in content or cls._id_field in content:
-                raise ValueError
-            payload = {"schema_version": VARIANT_EVIDENCE_V2_SCHEMA_VERSION, **content}
-            return cls(**payload, **{cls._id_field: cls._id_prefix + _digest(payload)})
-        except (MemoryError, KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:  # noqa: BLE001 - sanitize the public evidence boundary
-            content.clear()
-            if payload is not None:
-                payload.clear()
-            raise cls._safe_error() from None
-
-    @model_validator(mode="after")
-    def validate_content_address(self) -> Self:
-        content = self.model_dump(mode="json", exclude={self._id_field})
-        if getattr(self, self._id_field) != self._id_prefix + _digest(content):
-            raise ValueError(self._safe_validation_message)
-        return self
+class _ContentAddressedVariantEvidenceV2(SnapshotContentAddressedResearchRecord):
+    _safe_validation_message: ClassVar[str] = "variant evidence v2 contract failed validation"
+    _schema_version = VARIANT_EVIDENCE_V2_SCHEMA_VERSION
+    schema_version: Literal["2.0"] = VARIANT_EVIDENCE_V2_SCHEMA_VERSION
 
 
 class ContextPathSignatureV2(_VariantEvidenceV2Contract):

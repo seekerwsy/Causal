@@ -21,7 +21,7 @@ from secaware.phased_exploration.pools import (
     PoolTaskRecord,
 )
 from secaware.records import (
-    ContentAddressedResearchRecord,
+    SnapshotContentAddressedResearchRecord,
     SnapshotResearchRecord,
     raise_record_validation_error as _raise_contract_error,
     valid_identifier as _valid_identifier,
@@ -79,7 +79,7 @@ class _PopulationV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "population v2 contract failed validation"
 
 
-class _ContentAddressedPopulationV2(ContentAddressedResearchRecord):
+class _ContentAddressedPopulationV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "population v2 contract failed validation"
     _schema_version = POPULATION_V2_SCHEMA_VERSION
 

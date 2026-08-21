@@ -20,7 +20,7 @@ from typing import ClassVar, Literal, Self
 
 from pydantic import Field, StrictInt, model_validator
 
-from secaware.records import ContentAddressedResearchRecord
+from secaware.records import SnapshotContentAddressedResearchRecord
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.inference_v2 import (
     RealizationRobustnessHypothesisSpecV2,
@@ -55,7 +55,7 @@ _CLOSED_COVERAGE_PATTERN = r"^provenance_closed_coverage_v2_[0-9a-f]{64}$"
 _RANDOMIZATION_PATTERN = r"^randomization_manifest_v2_[0-9a-f]{64}$"
 
 
-class _ContentAddressedRobustnessV2(ContentAddressedResearchRecord):
+class _ContentAddressedRobustnessV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = (
         "multi-support robustness v2 contract failed validation"
     )

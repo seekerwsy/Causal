@@ -17,7 +17,7 @@ from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.randomness import RNG_VERSION
 from secaware.records import (
-    ContentAddressedResearchRecord,
+    SnapshotContentAddressedResearchRecord,
     SnapshotResearchRecord,
     record_sha256 as _digest,
     valid_identifier as _valid_identifier,
@@ -58,7 +58,7 @@ class _MultiSupportInferenceV2Contract(SnapshotResearchRecord):
     schema_version: Literal["2.1"] = MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION
 
 
-class _ContentAddressedMultiSupportInferenceV2(ContentAddressedResearchRecord):
+class _ContentAddressedMultiSupportInferenceV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = (
         "multi-support simultaneous inference v2 contract failed validation"
     )

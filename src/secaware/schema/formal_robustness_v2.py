@@ -17,7 +17,7 @@ from typing import ClassVar, Literal, Self
 
 from pydantic import Field, StrictInt, model_validator
 
-from secaware.records import ContentAddressedResearchRecord
+from secaware.records import SnapshotContentAddressedResearchRecord
 from secaware.schema.multi_support_robustness_v2 import (
     MultiSupportArmRealizationInteractionReferenceV2,
     MultiSupportRobustnessPolicyFreezeV2,
@@ -39,7 +39,7 @@ _CLOSED_RUN_ID_PATTERN = r"^confirmatory_closed_run_evidence_v2_[0-9a-f]{64}$"
 _FORMAL_RESULT_ID_PATTERN = r"^formal_confirmation_result_v2_[0-9a-f]{64}$"
 
 
-class _ContentAddressedFormalRobustnessV2(ContentAddressedResearchRecord):
+class _ContentAddressedFormalRobustnessV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "formal robustness v2 contract failed validation"
     _schema_version = FORMAL_ROBUSTNESS_V2_SCHEMA_VERSION
     schema_version: Literal["2.0"] = FORMAL_ROBUSTNESS_V2_SCHEMA_VERSION

@@ -19,7 +19,7 @@ from typing import ClassVar, Literal, Self
 from pydantic import Field, StrictInt, model_validator
 
 from secaware.experiments.run_evidence_v2 import ConfirmatoryRunEvidenceManifestV2
-from secaware.records import ContentAddressedResearchRecord
+from secaware.records import SnapshotContentAddressedResearchRecord
 from secaware.schema.pre_generation_closure_v2 import ConfirmatoryPreGenerationClosureV2
 
 CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION = "2.0"
@@ -27,7 +27,7 @@ CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION = "2.0"
 _CLOSED_RUN_ID_PATTERN = r"^confirmatory_closed_run_evidence_v2_[0-9a-f]{64}$"
 
 
-class ConfirmatoryClosedRunEvidenceV2(ContentAddressedResearchRecord):
+class ConfirmatoryClosedRunEvidenceV2(SnapshotContentAddressedResearchRecord):
     """Complete formal-analysis input root for one confirmatory run."""
 
     _safe_validation_message: ClassVar[str] = "closed run evidence v2 contract failed validation"

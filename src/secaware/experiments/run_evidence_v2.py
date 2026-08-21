@@ -22,7 +22,7 @@ from pydantic import Field, StrictInt, model_validator
 
 from secaware.experiments.execution_v2 import TotalAssignmentAccountingManifestV2
 from secaware.records import (
-    ContentAddressedResearchRecord,
+    SnapshotContentAddressedResearchRecord,
     SnapshotResearchRecord,
     raise_record_validation_error as _raise_contract_error,
 )
@@ -51,7 +51,7 @@ class _RunEvidenceV2Contract(SnapshotResearchRecord):
     schema_version: Literal["2.0"] = RUN_EVIDENCE_V2_SCHEMA_VERSION
 
 
-class _ContentAddressedRunEvidenceV2(ContentAddressedResearchRecord):
+class _ContentAddressedRunEvidenceV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "run evidence v2 contract failed validation"
     _schema_version = RUN_EVIDENCE_V2_SCHEMA_VERSION
     schema_version: Literal["2.0"] = RUN_EVIDENCE_V2_SCHEMA_VERSION

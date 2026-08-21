@@ -17,7 +17,7 @@ from typing import ClassVar, Literal, Self
 from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.records import (
-    ContentAddressedResearchRecord,
+    SnapshotContentAddressedResearchRecord,
     SnapshotResearchRecord,
     parse_exact_enum as _exact_enum,
     raise_record_validation_error as _raise_contract_error,
@@ -76,7 +76,7 @@ class _PolicyV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "policy v2 contract failed validation"
 
 
-class _ContentAddressedV2Contract(ContentAddressedResearchRecord):
+class _ContentAddressedV2Contract(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "policy v2 contract failed validation"
     _schema_version = POLICY_V2_SCHEMA_VERSION
     schema_version: Literal["2.0"]

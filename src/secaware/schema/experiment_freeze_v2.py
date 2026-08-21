@@ -16,7 +16,7 @@ from pydantic import Field, StrictInt, model_validator
 
 from secaware.experiments.execution_v2 import ExecutionPolicyFreezeManifestV2
 from secaware.records import (
-    ContentAddressedResearchRecord,
+    SnapshotContentAddressedResearchRecord,
 )
 from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
@@ -48,7 +48,7 @@ _REMOVE_ARM_ORDER = (
 )
 
 
-class _ContentAddressedExperimentFreezeV2(ContentAddressedResearchRecord):
+class _ContentAddressedExperimentFreezeV2(SnapshotContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "experiment freeze v2 contract failed validation"
     _schema_version = EXPERIMENT_FREEZE_V2_SCHEMA_VERSION
     schema_version: Literal["2.0"] = EXPERIMENT_FREEZE_V2_SCHEMA_VERSION
