@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secaware"
-version = "1.0.0"
-description = "Compact reproducible artifact for randomized security-intervention studies."
+version = "1.1.0"
+description = "Auditable framework for frozen prompt policies and cluster-aware security effects."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = []

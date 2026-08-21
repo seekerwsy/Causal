@@ -1,71 +1,200 @@
 from __future__ import annotations
 
-from secaware.intervention import Arm, freeze_intervention
-from secaware.measurement import FunctionalLabel, Measurement, SecurityLabel, TerminalFailure
-from secaware.representation import Candidate, Operation, Task
-from secaware.workflow import FrozenStudy, arm_texts, freeze_study
+from copy import deepcopy
+from typing import Callable
+
+from secaware.cli import build_study
+from secaware.measurement import CodeStatus, FunctionalStatus, Measurement, OracleStatus
+from secaware.randomization import Assignment
+from secaware.records import content_hash
+from secaware.workflow import StudyFreeze
 
 
-def example_study(*, seed: int = 17) -> FrozenStudy:
-    tasks = (
-        Task("task.a", "cluster.1", "CWE-89", "Use a SQL query."),
-        Task("task.b", "cluster.2", "CWE-78", "Run a command."),
-    )
-    candidates = tuple(
-        Candidate(task.task_id, f"feature.{task.task_id}", Operation.ADD, "frozen rationale")
-        for task in tasks
-    )
-    interventions = tuple(
-        freeze_intervention(
-            candidate,
-            arm_texts(
-                target=f"{candidate.task_id}: target",
-                noop=f"{candidate.task_id}: noop",
-                placebo=f"{candidate.task_id}: placebo",
-                generic=f"{candidate.task_id}: generic",
-            ),
-        )
-        for candidate in candidates
-    )
-    return freeze_study(
-        tasks,
-        candidates,
-        interventions,
-        models=("model.a",),
-        slots=tuple(range(8)),
-        seed=seed,
-    )
+def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
+    tasks = [
+        _task("discover.1", "discover.cluster.1", "discover"),
+        _task("discover.2", "discover.cluster.2", "discover"),
+        _task("confirm.1a", "confirm.cluster.1", "confirm", weight=1),
+        _task("confirm.1b", "confirm.cluster.1", "confirm", weight=3),
+        _task("confirm.2", "confirm.cluster.2", "confirm", weight=1),
+    ]
+    candidate = {
+        "candidate_key": "sql.parameterization",
+        "context_query_id": "sql.user_input",
+        "actionable_feature_id": "sql.parameterized_query",
+        "operation": "add",
+        "cwe": "CWE-89",
+        "outcome_id": "oracle_evaluable_secure_code_yield",
+        "expected_direction": "increase",
+    }
+    bundles = []
+    for task in tasks:
+        if task["split"] != "confirm":
+            continue
+        for realization in ("direct", "constraint"):
+            bundles.append(
+                {
+                    "task_id": task["task_id"],
+                    "realization_label": realization,
+                    "arms": {
+                        "target": f"{task['task_id']} {realization} target",
+                        "noop": f"{task['task_id']} {realization} noop",
+                        "placebo": f"{task['task_id']} {realization} placebo",
+                        "generic": f"{task['task_id']} {realization} generic",
+                    },
+                    "validation": {
+                        "context_invariant": True,
+                        "task_invariant": True,
+                        "non_target_invariant": True,
+                        "allowed_delta": True,
+                        "controls_matched": True,
+                        "evidence_sha256": "e" * 64,
+                    },
+                }
+            )
+    return {
+        "tasks": tasks,
+        "candidates": [candidate],
+        "selector": {
+            "top_k": 1,
+            "scores": {"sql.parameterization": 0.75},
+        },
+        "policies": [
+            {
+                "candidate_key": "sql.parameterization",
+                "realizations": [
+                    {"label": "direct", "weight": 1},
+                    {"label": "constraint", "weight": 3},
+                ],
+                "bundles": bundles,
+            }
+        ],
+        "adapters": {
+            "representation": _adapter("representation"),
+            "selector": _adapter("selector"),
+            "intervention_executor": _adapter("intervention"),
+            "generator": _adapter("generator"),
+            "security_oracle": _adapter("oracle"),
+            "functional_evaluator": _adapter("functional"),
+        },
+        "analysis": {
+            "metrics": [
+                "code_valid",
+                "oracle_evaluable",
+                "secure_yield",
+                "functionality",
+                "joint",
+            ],
+            "bootstrap_seed": 73001,
+            "bootstrap_draws": 200,
+            "alpha": 0.05,
+        },
+        "models": list(models),
+        "slots": [0, 1, 2, 3],
+        "randomization_seed": 41021,
+    }
+
+
+def example_study(*, models: tuple[str, ...] = ("model.a",)) -> StudyFreeze:
+    return build_study(protocol_spec(models=models))
 
 
 def complete_measurements(
-    study: FrozenStudy,
-    *,
-    security: dict[Arm, SecurityLabel] | None = None,
-    functionality: dict[Arm, FunctionalLabel] | None = None,
-    unknown_assignment_id: str | None = None,
-    failed_assignment_id: str | None = None,
-) -> tuple[tuple[Measurement, ...], tuple[TerminalFailure, ...]]:
-    security = security or {
-        Arm.TARGET: SecurityLabel.SECURE,
-        Arm.NOOP: SecurityLabel.INSECURE,
-        Arm.PLACEBO: SecurityLabel.INSECURE,
-        Arm.GENERIC: SecurityLabel.INSECURE,
-    }
-    functionality = functionality or {arm: FunctionalLabel.PASS for arm in Arm}
-    measurements: list[Measurement] = []
-    failures: list[TerminalFailure] = []
+    study: StudyFreeze,
+    classify: Callable[
+        [Assignment],
+        tuple[CodeStatus, OracleStatus, FunctionalStatus],
+    ]
+    | None = None,
+) -> tuple[Measurement, ...]:
+    classify = classify or _default_labels
+    rows = []
     for assignment in study.randomization.assignments:
-        if assignment.assignment_id == failed_assignment_id:
-            failures.append(TerminalFailure(assignment.assignment_id, "provider"))
-            continue
-        label = security[assignment.arm]
-        if assignment.assignment_id == unknown_assignment_id:
-            label = SecurityLabel.UNKNOWN
-        measurements.append(
+        code, oracle, functional = classify(assignment)
+        rows.append(
             Measurement(
-                assignment.assignment_id,
-                label,
-                functionality[assignment.arm],
+                assignment_id=assignment.assignment_id,
+                code_status=code,
+                oracle_status=oracle,
+                functional_status=functional,
+                generator_evidence_sha256=content_hash({"generator": assignment.assignment_id}),
+                code_sha256=(
+                    content_hash({"assignment_id": assignment.assignment_id})
+                    if code is CodeStatus.VALID
+                    else None
+                ),
+                oracle_evidence_sha256=(
+                    content_hash({"oracle": assignment.assignment_id})
+                    if code is CodeStatus.VALID
+                    else None
+                ),
+                functional_evidence_sha256=(
+                    content_hash({"functional": assignment.assignment_id})
+                    if code is CodeStatus.VALID
+                    else None
+                ),
+                terminal_reason=None if code is CodeStatus.VALID else code.value,
             )
         )
-    return tuple(measurements), tuple(failures)
+    return tuple(rows)
+
+
+def measurement_document(study: StudyFreeze, rows: tuple[Measurement, ...]) -> dict:
+    return {
+        "study_id": study.study_id,
+        "adapter_ids": {
+            "generator": study.adapters.generator.adapter_id,
+            "security_oracle": study.adapters.security_oracle.adapter_id,
+            "functional_evaluator": study.adapters.functional_evaluator.adapter_id,
+        },
+        "records": [
+            {
+                "assignment_id": row.assignment_id,
+                "code_status": row.code_status.value,
+                "oracle_status": row.oracle_status.value,
+                "functional_status": row.functional_status.value,
+                "generator_evidence_sha256": row.generator_evidence_sha256,
+                **({"code_sha256": row.code_sha256} if row.code_sha256 else {}),
+                **(
+                    {"oracle_evidence_sha256": row.oracle_evidence_sha256}
+                    if row.oracle_evidence_sha256
+                    else {}
+                ),
+                **(
+                    {"functional_evidence_sha256": row.functional_evidence_sha256}
+                    if row.functional_evidence_sha256
+                    else {}
+                ),
+                **({"terminal_reason": row.terminal_reason} if row.terminal_reason else {}),
+            }
+            for row in rows
+        ],
+        "infrastructure_failures": [],
+    }
+
+
+def changed_spec() -> dict:
+    return deepcopy(protocol_spec())
+
+
+def _default_labels(
+    assignment: Assignment,
+) -> tuple[CodeStatus, OracleStatus, FunctionalStatus]:
+    oracle = OracleStatus.SECURE if assignment.arm.value == "target" else OracleStatus.INSECURE
+    return CodeStatus.VALID, oracle, FunctionalStatus.PASS
+
+
+def _adapter(name: str) -> dict[str, str]:
+    return {"name": name, "version": "1", "policy_sha256": content_hash(name)}
+
+
+def _task(task_id: str, cluster: str, split: str, *, weight: int = 1) -> dict:
+    return {
+        "task_id": task_id,
+        "semantic_cluster_id": cluster,
+        "cwe": "CWE-89",
+        "archetype": "database",
+        "split": split,
+        "prompt": f"Task {task_id}",
+        "weight": weight,
+    }

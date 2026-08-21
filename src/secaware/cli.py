@@ -1,42 +1,61 @@
-"""Command-line interface for reproducing and verifying the compact artifact."""
+"""CLI for prospective freeze, external measurement import, and analysis."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
-from secaware.artifact_io import read_json, verify_bundle, write_bundle
-from secaware.intervention import freeze_intervention
+from secaware.adapters import AdapterBundle, AdapterKind, AdapterSpec
+from secaware.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from secaware.inference import AnalysisPlan, Metric
+from secaware.intervention import (
+    ARM_ORDER,
+    RealizationSpec,
+    VariantValidation,
+    freeze_bundle,
+    freeze_policy,
+)
 from secaware.measurement import (
-    FunctionalLabel,
+    CodeStatus,
+    FunctionalStatus,
+    InfrastructureFailure,
     Measurement,
-    SecurityLabel,
-    TerminalFailure,
+    OracleStatus,
 )
 from secaware.records import canonical_value
-from secaware.representation import Candidate, Operation, Task
-from secaware.workflow import analyze, arm_texts, freeze_study
+from secaware.representation import Candidate, ExpectedDirection, Operation, Split, Task
+from secaware.workflow import StudyFreeze, analyze, freeze_study
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="secaware")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    reproduce = commands.add_parser("reproduce", help="run the frozen method on JSON inputs")
-    reproduce.add_argument("spec", type=Path)
-    reproduce.add_argument("output", type=Path)
+    freeze = commands.add_parser("freeze", help="freeze the pre-outcome study protocol")
+    freeze.add_argument("protocol", type=Path)
+    freeze.add_argument("output", type=Path)
 
-    verify = commands.add_parser("verify", help="verify an artifact bundle")
+    analyze_command = commands.add_parser(
+        "analyze",
+        help="analyze external measurements against a frozen study",
+    )
+    analyze_command.add_argument("freeze_root", type=Path)
+    analyze_command.add_argument("measurements", type=Path)
+    analyze_command.add_argument("output", type=Path)
+
+    verify = commands.add_parser("verify", help="verify an exact artifact bundle")
     verify.add_argument("root", type=Path)
 
-    summarize = commands.add_parser("summarize", help="print the stored ITT summary")
+    summarize = commands.add_parser("summarize", help="print a stored analysis summary")
     summarize.add_argument("root", type=Path)
 
     args = parser.parse_args(argv)
-    if args.command == "reproduce":
-        _reproduce(args.spec, args.output)
+    if args.command == "freeze":
+        _freeze(args.protocol, args.output)
+    elif args.command == "analyze":
+        _analyze(args.freeze_root, args.measurements, args.output)
     elif args.command == "verify":
         verify_bundle(args.root)
         print("VERIFIED")
@@ -46,95 +65,323 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _reproduce(spec_path: Path, output: Path) -> None:
-    raw = read_json(spec_path)
-    tasks = tuple(
-        Task(item["task_id"], item["cluster_id"], item["cwe"], item["prompt"])
-        for item in raw["tasks"]
+def _freeze(protocol_path: Path, output: Path) -> None:
+    protocol = read_json(protocol_path)
+    study = build_study(protocol)
+    write_bundle(
+        output,
+        {
+            "protocol.json": protocol,
+            "freeze.json": {
+                "study_id": study.study_id,
+                "study": canonical_value(study),
+            },
+            "randomization.json": canonical_value(study.randomization),
+        },
     )
-    candidates = tuple(
-        Candidate(
-            item["task_id"],
-            item["feature_id"],
-            Operation(item["operation"]),
-            item["rationale"],
-        )
-        for item in raw["candidates"]
+    print(study.study_id)
+
+
+def _analyze(freeze_root: Path, measurement_path: Path, output: Path) -> None:
+    verify_bundle(freeze_root)
+    study = build_study(read_json(freeze_root / "protocol.json"))
+    frozen = _exact(read_json(freeze_root / "freeze.json"), {"study_id", "study"})
+    if frozen["study_id"] != study.study_id or frozen["study"] != canonical_value(study):
+        raise ValueError("frozen study does not replay from its protocol")
+    measurement_input = read_json(measurement_path)
+    measurements, failures = _measurement_input(measurement_input, study)
+    result = analyze(study, measurements, infrastructure_failures=failures)
+    write_bundle(
+        output,
+        {
+            "source.json": {
+                "freeze_manifest_sha256": bundle_digest(freeze_root),
+                "study_id": study.study_id,
+            },
+            "measurements.json": measurement_input,
+            "outcomes.json": canonical_value(result.outcomes),
+            "inference.json": canonical_value(result.inference),
+            "analysis.json": {
+                "analysis_id": result.analysis_id,
+                "study_id": result.study_id,
+                "ledger_id": result.ledger.ledger_id,
+                "inference_id": result.inference.inference_id,
+                "estimates": canonical_value(result.inference.estimates),
+                "intervals": canonical_value(result.inference.intervals),
+            },
+        },
     )
-    by_task = {candidate.task_id: candidate for candidate in candidates}
-    interventions = tuple(
-        freeze_intervention(
-            by_task[item["task_id"]],
-            arm_texts(
-                target=item["arms"]["target"],
-                noop=item["arms"]["noop"],
-                placebo=item["arms"]["placebo"],
-                generic=item["arms"]["generic"],
-            ),
-        )
-        for item in raw["interventions"]
+    print(result.analysis_id)
+
+
+def build_study(raw: object) -> StudyFreeze:
+    data = _exact(
+        raw,
+        {
+            "tasks",
+            "candidates",
+            "selector",
+            "policies",
+            "adapters",
+            "analysis",
+            "models",
+            "slots",
+            "randomization_seed",
+        },
     )
-    study = freeze_study(
+    adapters = _adapters(data["adapters"])
+    tasks = tuple(_task(item) for item in _list(data["tasks"], "tasks"))
+    candidates = tuple(_candidate(item) for item in _list(data["candidates"], "candidates"))
+    by_key = {item.candidate_key: item for item in candidates}
+    if len(by_key) != len(candidates):
+        raise ValueError("candidate keys must be unique")
+    selector = _exact(data["selector"], {"top_k", "scores"})
+    raw_scores = _mapping(selector["scores"], "selector scores")
+    if set(raw_scores) != set(by_key):
+        raise ValueError("selector scores must bind every candidate key")
+    scores = {by_key[key].candidate_id: value for key, value in raw_scores.items()}
+    task_by_id = {item.task_id: item for item in tasks}
+    policies = tuple(
+        _policy(item, by_key, task_by_id, adapters) for item in _list(data["policies"], "policies")
+    )
+    analysis = _exact(
+        data["analysis"],
+        {"metrics", "bootstrap_seed", "bootstrap_draws", "alpha"},
+    )
+    plan = AnalysisPlan(
+        tuple(Metric(item) for item in _list(analysis["metrics"], "analysis metrics")),
+        analysis["bootstrap_seed"],
+        analysis["bootstrap_draws"],
+        analysis["alpha"],
+    )
+    return freeze_study(
         tasks,
         candidates,
-        interventions,
-        models=tuple(raw["models"]),
-        slots=tuple(raw["slots"]),
-        seed=raw["seed"],
+        scores,
+        policies,
+        adapters,
+        plan,
+        top_k=selector["top_k"],
+        models=tuple(_list(data["models"], "models")),
+        slots=tuple(_list(data["slots"], "slots")),
+        randomization_seed=data["randomization_seed"],
     )
 
-    artifacts: dict[str, Any] = {
-        "study.json": {"study_id": study.study_id, "study": canonical_value(study)},
-        "randomization.json": {
-            "randomization_id": study.randomization.randomization_id,
-            "randomization": canonical_value(study.randomization),
+
+def _task(raw: object) -> Task:
+    data = _exact(
+        raw,
+        {"task_id", "semantic_cluster_id", "cwe", "archetype", "split", "prompt"},
+        {"weight"},
+    )
+    return Task(
+        data["task_id"],
+        data["semantic_cluster_id"],
+        data["cwe"],
+        data["archetype"],
+        Split(data["split"]),
+        data["prompt"],
+        data.get("weight", 1),
+    )
+
+
+def _candidate(raw: object) -> Candidate:
+    data = _exact(
+        raw,
+        {
+            "candidate_key",
+            "context_query_id",
+            "actionable_feature_id",
+            "operation",
+            "cwe",
+            "outcome_id",
+            "expected_direction",
         },
-    }
-    if "measurements" in raw:
-        measurements, failures = _measurements(raw["measurements"], study.randomization.assignments)
-        result = analyze(study, measurements, failures)
-        artifacts["outcomes.json"] = canonical_value(result.outcomes)
-        artifacts["analysis.json"] = {
-            "analysis_id": result.analysis_id,
-            "security": canonical_value(result.security),
-            "functionality": canonical_value(result.functionality),
-            "joint": canonical_value(result.joint),
-        }
-    write_bundle(output, artifacts)
-    print(output)
+    )
+    return Candidate(
+        data["candidate_key"],
+        data["context_query_id"],
+        data["actionable_feature_id"],
+        Operation(data["operation"]),
+        data["cwe"],
+        data["outcome_id"],
+        ExpectedDirection(data["expected_direction"]),
+    )
 
 
-def _measurements(
-    rows: list[dict[str, Any]], assignments: tuple[Any, ...]
-) -> tuple[
-    tuple[Measurement, ...],
-    tuple[TerminalFailure, ...],
-]:
-    coordinates = {
-        (item.task_id, item.model_id, item.request_slot): item.assignment_id for item in assignments
-    }
-    measurements: list[Measurement] = []
-    failures: list[TerminalFailure] = []
-    for row in rows:
-        key = (row["task_id"], row["model_id"], row["request_slot"])
-        assignment_id = coordinates.get(key)
-        if assignment_id is None:
-            raise ValueError(f"measurement does not bind a frozen assignment: {key}")
-        if "failure_stage" in row:
-            failures.append(TerminalFailure(assignment_id, row["failure_stage"]))
-        else:
-            measurements.append(
-                Measurement(
-                    assignment_id,
-                    SecurityLabel(row["security"]),
-                    FunctionalLabel(row["functionality"]),
-                )
+def _policy(
+    raw: object,
+    candidates: Mapping[str, Candidate],
+    tasks: Mapping[str, Task],
+    adapters: AdapterBundle,
+) -> object:
+    data = _exact(raw, {"candidate_key", "realizations", "bundles"})
+    candidate = candidates.get(data["candidate_key"])
+    if candidate is None:
+        raise ValueError("policy references an unknown candidate")
+    realizations = tuple(
+        RealizationSpec(
+            item["label"],
+            item["weight"],
+            adapters.intervention_executor.adapter_id,
+        )
+        for item in (
+            _exact(value, {"label", "weight"})
+            for value in _list(data["realizations"], "realizations")
+        )
+    )
+    by_label = {item.label: item for item in realizations}
+    if len(by_label) != len(realizations):
+        raise ValueError("realization labels must be unique")
+    bundles = []
+    for value in _list(data["bundles"], "bundles"):
+        item = _exact(value, {"task_id", "realization_label", "arms", "validation"})
+        task = tasks.get(item["task_id"])
+        realization = by_label.get(item["realization_label"])
+        if task is None or realization is None or task.split is not Split.CONFIRM:
+            raise ValueError("bundle references an invalid confirm task or realization")
+        arm_values = _exact(item["arms"], {arm.value for arm in ARM_ORDER})
+        validation_values = _exact(
+            item["validation"],
+            {
+                "context_invariant",
+                "task_invariant",
+                "non_target_invariant",
+                "allowed_delta",
+                "controls_matched",
+                "evidence_sha256",
+            },
+        )
+        validation = VariantValidation(**validation_values)
+        bundles.append(
+            freeze_bundle(
+                candidate,
+                task_id=task.task_id,
+                semantic_cluster_id=task.semantic_cluster_id,
+                realization=realization,
+                arm_texts={arm: arm_values[arm.value] for arm in ARM_ORDER},
+                validation=validation,
             )
-    return tuple(measurements), tuple(failures)
+        )
+    return freeze_policy(candidate, realizations, tuple(bundles))
+
+
+def _adapters(raw: object) -> AdapterBundle:
+    values = _exact(
+        raw,
+        {
+            "representation",
+            "selector",
+            "intervention_executor",
+            "generator",
+            "security_oracle",
+            "functional_evaluator",
+        },
+    )
+    return AdapterBundle(
+        _adapter(AdapterKind.REPRESENTATION, values["representation"]),
+        _adapter(AdapterKind.SELECTOR, values["selector"]),
+        _adapter(AdapterKind.INTERVENTION_EXECUTOR, values["intervention_executor"]),
+        _adapter(AdapterKind.GENERATOR, values["generator"]),
+        _adapter(AdapterKind.SECURITY_ORACLE, values["security_oracle"]),
+        _adapter(AdapterKind.FUNCTIONAL_EVALUATOR, values["functional_evaluator"]),
+    )
+
+
+def _adapter(kind: AdapterKind, raw: object) -> AdapterSpec:
+    data = _exact(raw, {"name", "version", "policy_sha256"})
+    return AdapterSpec(kind, data["name"], data["version"], data["policy_sha256"])
+
+
+def _measurement_input(
+    raw: object,
+    study: StudyFreeze,
+) -> tuple[tuple[Measurement, ...], tuple[InfrastructureFailure, ...]]:
+    data = _exact(
+        raw,
+        {"study_id", "adapter_ids", "records", "infrastructure_failures"},
+    )
+    if data["study_id"] != study.study_id:
+        raise ValueError("measurement input does not bind the frozen study")
+    adapter_ids = _exact(
+        data["adapter_ids"],
+        {"generator", "security_oracle", "functional_evaluator"},
+    )
+    expected = {
+        "generator": study.adapters.generator.adapter_id,
+        "security_oracle": study.adapters.security_oracle.adapter_id,
+        "functional_evaluator": study.adapters.functional_evaluator.adapter_id,
+    }
+    if adapter_ids != expected:
+        raise ValueError("measurement adapter identity drift")
+    records = []
+    for value in _list(data["records"], "measurement records"):
+        item = _exact(
+            value,
+            {
+                "assignment_id",
+                "code_status",
+                "oracle_status",
+                "functional_status",
+                "generator_evidence_sha256",
+            },
+            {
+                "code_sha256",
+                "oracle_evidence_sha256",
+                "functional_evidence_sha256",
+                "terminal_reason",
+            },
+        )
+        records.append(
+            Measurement(
+                item["assignment_id"],
+                CodeStatus(item["code_status"]),
+                OracleStatus(item["oracle_status"]),
+                FunctionalStatus(item["functional_status"]),
+                item["generator_evidence_sha256"],
+                item.get("code_sha256"),
+                item.get("oracle_evidence_sha256"),
+                item.get("functional_evidence_sha256"),
+                item.get("terminal_reason"),
+            )
+        )
+    failures = tuple(
+        InfrastructureFailure(item["assignment_id"], item["producer"], item["reason"])
+        for item in (
+            _exact(value, {"assignment_id", "producer", "reason"})
+            for value in _list(data["infrastructure_failures"], "infrastructure failures")
+        )
+    )
+    return tuple(records), failures
+
+
+def _exact(
+    raw: object,
+    required: set[str],
+    optional: set[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+        raise ValueError("record must be an object with string keys")
+    optional = optional or set()
+    if not required <= set(raw) or set(raw) - required - optional:
+        raise ValueError("record keys are not exact")
+    return raw
+
+
+def _list(raw: object, name: str) -> list[Any]:
+    if not isinstance(raw, list):
+        raise ValueError(f"{name} must be a list")
+    return raw
+
+
+def _mapping(raw: object, name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+        raise ValueError(f"{name} must be an object")
+    return raw
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["main"]
+__all__ = ["build_study", "main"]

@@ -1,22 +1,31 @@
 # Test suite
 
-The suite is deliberately small. Each scientific invariant has one primary
-reviewer-facing test; operational history remains available in Git rather than
-being shipped as an active test matrix.
+The maintained suite has two layers.
 
-Default review:
+Default reviewer layer:
 
     python -m pytest -q
 
-This runs 24 tests covering frozen inputs, deterministic prioritization,
-four-arm intervention construction, replayable complete-block randomization,
-independent security and functionality labels, explicit unknown states, total
-assignment accounting, hand-calculated ITT estimates, uncertainty bounds, and
-exact artifact closure.
+Its 24 tests each own a scientific invariant:
 
-After a structural change, run the two end-to-end checks:
+- discover/confirm and semantic-cluster separation;
+- exact candidate-universe, score, rank, and top-K freeze;
+- operation-specific four-arm semantics;
+- complete multi-realization task support and validation;
+- replayable complete-block randomization;
+- frozen adapter identities;
+- code/Oracle/functionality outcome decomposition;
+- terminal and infrastructure failure semantics;
+- equal semantic-cluster weighting and per-model estimates;
+- simultaneous cluster bootstrap replay;
+- exact-byte artifact closure.
+
+Structural milestone layer:
 
     python -m pytest -q -m milestone
 
-No larger default suite exists. Add a test only when it owns a distinct
-scientific invariant or a minimal reproduction boundary.
+The two milestone tests run freeze, external measurement import, analysis, and
+independent verification, including rejection of cross-study measurements.
+
+There is no active historical full suite. Add a test only when it protects a
+distinct method invariant or an end-to-end reproduction boundary.

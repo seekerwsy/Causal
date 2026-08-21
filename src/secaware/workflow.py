@@ -1,34 +1,69 @@
-"""Minimal freeze-to-inference research workflow."""
+"""Prospective freeze and post-measurement analysis workflow."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
-from secaware.inference import ITTEstimate, estimate_itt
-from secaware.intervention import Arm, InterventionBundle
-from secaware.measurement import Measurement, MeasurementLedger, TerminalFailure, close_measurements
+from secaware.adapters import AdapterBundle
+from secaware.inference import AnalysisPlan, InferenceResult, estimate_policy_effects
+from secaware.intervention import InterventionPolicy
+from secaware.measurement import (
+    InfrastructureFailure,
+    Measurement,
+    MeasurementLedger,
+    close_measurements,
+)
 from secaware.outcomes import Outcome, derive_outcomes
+from secaware.prioritization import SelectionFreeze, freeze_selection
 from secaware.randomization import Randomization, randomize
 from secaware.records import content_id
-from secaware.representation import Candidate, Population, Task, freeze_population
+from secaware.representation import (
+    Candidate,
+    CandidateUniverse,
+    Population,
+    Task,
+    freeze_population,
+    freeze_universe,
+)
+
+METHOD_VERSION = "secaware-method-1.1.0"
 
 
 @dataclass(frozen=True, slots=True)
-class FrozenStudy:
+class StudyFreeze:
+    method_version: str
     population: Population
-    candidates: tuple[Candidate, ...]
-    interventions: tuple[InterventionBundle, ...]
+    universe: CandidateUniverse
+    selection: SelectionFreeze
+    policies: tuple[InterventionPolicy, ...]
+    adapters: AdapterBundle
     randomization: Randomization
+    analysis_plan: AnalysisPlan
 
     def __post_init__(self) -> None:
-        task_ids = {task.task_id for task in self.population.tasks}
-        candidate_tasks = tuple(candidate.task_id for candidate in self.candidates)
-        intervention_tasks = tuple(bundle.task_id for bundle in self.interventions)
-        if len(candidate_tasks) != len(task_ids) or set(candidate_tasks) != task_ids:
-            raise ValueError("one selected candidate must bind every task")
-        if len(intervention_tasks) != len(task_ids) or set(intervention_tasks) != task_ids:
-            raise ValueError("one intervention must bind every task")
+        if self.method_version != METHOD_VERSION:
+            raise ValueError("unsupported method version")
+        selected = set(self.selection.selected_candidate_ids)
+        if self.selection.universe_id != self.universe.universe_id:
+            raise ValueError("selection does not bind the candidate universe")
+        if self.universe.representation_adapter_id != self.adapters.representation.adapter_id:
+            raise ValueError("candidate universe representation adapter drift")
+        if self.selection.selector_adapter_id != self.adapters.selector.adapter_id:
+            raise ValueError("selection adapter drift")
+        if {item.candidate_id for item in self.policies} != selected:
+            raise ValueError("one intervention policy must bind every selected candidate")
+        candidates = {item.candidate_id: item for item in self.universe.candidates}
+        if any(
+            policy.protocol.operation is not candidates[policy.candidate_id].operation
+            for policy in self.policies
+        ):
+            raise ValueError("intervention policy operation drifts from its candidate")
+        if self.randomization.population_id != self.population.population_id:
+            raise ValueError("randomization population drift")
+        if self.randomization.selection_id != self.selection.selection_id:
+            raise ValueError("randomization selection drift")
+        _validate_policy_support(self)
 
     @property
     def study_id(self) -> str:
@@ -40,9 +75,11 @@ class Analysis:
     study_id: str
     ledger: MeasurementLedger
     outcomes: tuple[Outcome, ...]
-    security: ITTEstimate
-    functionality: ITTEstimate
-    joint: ITTEstimate
+    inference: InferenceResult
+
+    def __post_init__(self) -> None:
+        if self.ledger.study_id != self.study_id:
+            raise ValueError("measurement ledger does not bind the study")
 
     @property
     def analysis_id(self) -> str:
@@ -52,66 +89,93 @@ class Analysis:
 def freeze_study(
     tasks: Iterable[Task],
     candidates: Iterable[Candidate],
-    interventions: Iterable[InterventionBundle],
+    scores: Mapping[str, float],
+    policies: Iterable[InterventionPolicy],
+    adapters: AdapterBundle,
+    analysis_plan: AnalysisPlan,
     *,
+    top_k: int,
     models: Iterable[str],
     slots: Iterable[int],
-    seed: int,
-) -> FrozenStudy:
+    randomization_seed: int,
+) -> StudyFreeze:
     population = freeze_population(tasks)
-    frozen_candidates = tuple(sorted(candidates, key=lambda item: item.candidate_id))
-    frozen_interventions = tuple(sorted(interventions, key=lambda item: item.intervention_id))
-    by_candidate = {candidate.candidate_id: candidate for candidate in frozen_candidates}
-    if len(by_candidate) != len(frozen_candidates):
-        raise ValueError("candidate identities must be unique")
-    if len({bundle.intervention_id for bundle in frozen_interventions}) != len(
-        frozen_interventions
-    ):
-        raise ValueError("intervention identities must be unique")
-    for bundle in frozen_interventions:
-        candidate = by_candidate.get(bundle.candidate_id)
-        if candidate is None or candidate.task_id != bundle.task_id:
-            raise ValueError("intervention-to-candidate binding drift")
+    universe = freeze_universe(
+        candidates,
+        representation_adapter_id=adapters.representation.adapter_id,
+    )
+    selection = freeze_selection(
+        universe,
+        scores,
+        selector_adapter_id=adapters.selector.adapter_id,
+        top_k=top_k,
+    )
+    frozen_policies = tuple(sorted(tuple(policies), key=lambda item: item.policy_id))
     assignment = randomize(
-        population,
-        frozen_interventions,
+        frozen_policies,
+        population_id=population.population_id,
+        selection_id=selection.selection_id,
         models=models,
         slots=slots,
-        seed=seed,
+        seed=randomization_seed,
     )
-    return FrozenStudy(population, frozen_candidates, frozen_interventions, assignment)
+    return StudyFreeze(
+        METHOD_VERSION,
+        population,
+        universe,
+        selection,
+        frozen_policies,
+        adapters,
+        assignment,
+        analysis_plan,
+    )
 
 
 def analyze(
-    study: FrozenStudy,
-    measurements: Sequence[Measurement],
-    failures: Sequence[TerminalFailure] = (),
-) -> Analysis:
-    ledger = close_measurements(study.randomization, measurements, failures)
-    outcomes = derive_outcomes(ledger)
-    return Analysis(
-        study_id=study.study_id,
-        ledger=ledger,
-        outcomes=outcomes,
-        security=estimate_itt(study.randomization, outcomes, dimension="security"),
-        functionality=estimate_itt(study.randomization, outcomes, dimension="functionality"),
-        joint=estimate_itt(study.randomization, outcomes, dimension="joint"),
-    )
-
-
-def arm_texts(
+    study: StudyFreeze,
+    measurements: Iterable[Measurement],
     *,
-    target: str,
-    noop: str,
-    placebo: str,
-    generic: str,
-) -> Mapping[Arm, str]:
-    return {
-        Arm.TARGET: target,
-        Arm.NOOP: noop,
-        Arm.PLACEBO: placebo,
-        Arm.GENERIC: generic,
-    }
+    infrastructure_failures: Iterable[InfrastructureFailure] = (),
+) -> Analysis:
+    ledger = close_measurements(
+        study.randomization,
+        study.adapters,
+        measurements,
+        study_id=study.study_id,
+        infrastructure_failures=infrastructure_failures,
+    )
+    outcomes = derive_outcomes(ledger)
+    inference = estimate_policy_effects(
+        study.randomization,
+        outcomes,
+        study.policies,
+        study.population.confirm_tasks,
+        study.analysis_plan,
+    )
+    return Analysis(study.study_id, ledger, outcomes, inference)
 
 
-__all__ = ["Analysis", "FrozenStudy", "analyze", "arm_texts", "freeze_study"]
+def _validate_policy_support(study: StudyFreeze) -> None:
+    confirm_tasks = {item.task_id: item for item in study.population.confirm_tasks}
+    for policy in study.policies:
+        realization_ids = {item.realization_id for item in policy.realizations}
+        support = {(item.task_id, item.realization_id) for item in policy.bundles}
+        expected = {
+            (task_id, realization_id)
+            for task_id in confirm_tasks
+            for realization_id in realization_ids
+        }
+        if len(support) != len(policy.bundles) or support != expected:
+            raise ValueError("policy lacks complete confirm-task realization support")
+        for bundle in policy.bundles:
+            task = confirm_tasks.get(bundle.task_id)
+            if task is None or bundle.semantic_cluster_id != task.semantic_cluster_id:
+                raise ValueError("task bundle population binding drift")
+        if any(
+            realization.executor_adapter_id != study.adapters.intervention_executor.adapter_id
+            for realization in policy.realizations
+        ):
+            raise ValueError("intervention executor adapter drift")
+
+
+__all__ = ["Analysis", "METHOD_VERSION", "StudyFreeze", "analyze", "freeze_study"]

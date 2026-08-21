@@ -1,112 +1,132 @@
 # SecAware research artifact
 
-SecAware is a compact, standard-library Python prototype for studying whether a
-pre-specified prompt intervention changes generated-program security while
-preserving functionality.
+SecAware is a compact, auditable framework for testing whether a frozen prompt
+intervention policy changes oracle-evaluable secure-code yield while preserving
+functionality.
 
-The repository now contains the method itself, not the historical deployment
-platform. Model serving, provider clients, calibration campaigns, recovery
-machinery, migration layers, and incident-specific scripts are intentionally
-outside the active artifact. They remain recoverable from Git history.
+The artifact implements the scientific protocol and delegates environment-
+specific execution to frozen adapters. It intentionally excludes model
+deployment, remote transfer, campaign recovery, credential handling, and
+provider-specific orchestration.
 
-## Method
+## Implemented method
 
-The executable method is a short, auditable sequence:
+The active path has three layers.
 
-1. Freeze the complete task population and outcome-blind candidates.
-2. Rank candidates using externally supplied pre-treatment scores.
-3. Freeze exactly four prompt arms: target, no-op, placebo, and generic.
-4. Randomize every task-by-model block with a replayable seed.
-5. Import independent security and functionality measurements.
-6. Preserve unknown and terminal states for every randomized assignment.
-7. Derive security, functionality, and joint outcomes deterministically.
-8. Estimate target-minus-no-op ITT effects using registered denominators.
-9. When outcomes are unknown, report worst-case bounds instead of filtering.
-10. Write and independently verify an exact, content-addressed artifact bundle.
+### 1. Representation and prioritization
 
-This prototype does not claim that a particular generator, security analyzer, or
-functional evaluator is universally correct. Those systems produce measurement
-inputs; they are deliberately separated from randomization and inference.
+- Freeze discover and confirm tasks before outcomes.
+- Prevent one semantic task cluster from crossing the split.
+- Freeze context query, actionable feature, ADD/REMOVE operation, outcome, and
+  expected direction as candidate identities.
+- Bind the complete candidate universe to a representation adapter.
+- Bind every candidate score, deterministic tie break, rank, top-K slot, and
+  selector adapter before confirmation.
+
+The artifact executes ranking and top-K selection. A Prompt TSG extractor or
+causal selector may produce the frozen universe and score manifest externally;
+its name, version, and policy digest remain part of the study identity.
+
+### 2. Intervention and randomization
+
+- Use operation-specific target, no-op, placebo, and generic arm semantics.
+- Freeze a finite realization distribution using positive integer weights.
+- Materialize one complete task-realization bundle for every confirm task.
+- Require context, task, non-target, AllowedDelta, and control-matching
+  validation before randomization.
+- Bind cluster, task, candidate, policy, realization, task bundle, model, and
+  arm protocol into every complete-block identity.
+- Balance all four arms inside every block using a replayable randomization
+  seed and request-randomness slots.
+
+### 3. Measurement and cluster-aware inference
+
+- Freeze generator, Security Oracle, and functional-evaluator identities.
+- Bind generator, Oracle, and functional raw-evidence digests for every result.
+- Import measurements only after a separate immutable study freeze exists.
+- Distinguish valid code, terminal no-code, invalid code, Oracle unknown, and
+  infrastructure failure.
+- Decompose each assignment into code-valid yield, Oracle evaluability,
+  observed secure yield, latent secure upper support, functionality, and joint
+  success.
+- Keep terminal no-code and invalid code as assigned-arm zeros.
+- Require infrastructure failures to be repaired or replayed before analysis.
+- Estimate every candidate and model separately.
+- Average request slots inside task-realization blocks, then apply frozen
+  realization and within-cluster task weights, then weight semantic clusters
+  equally.
+- Report target-minus-no-op ITT, unknown bounds, and deterministic
+  semantic-cluster simultaneous bootstrap intervals.
+
+No treatment-fidelity diagnostic filters an assigned unit.
+
+## External adapter boundary
+
+Six adapter identities are frozen:
+
+| Adapter | Artifact responsibility |
+| --- | --- |
+| representation | Candidate-universe evidence |
+| selector | Pre-outcome candidate scores |
+| intervention executor | Task-realization variant production |
+| generator | Generated-code production |
+| security oracle | Secure, insecure, or unknown decision |
+| functional evaluator | Pass, fail, or unknown decision |
+
+An adapter identity contains a kind, name, version, and policy SHA-256 digest.
+Changing any of them changes the study identity. The core never silently
+substitutes a producer. The study identity also binds the active method version
+and the complete pre-outcome analysis plan.
+
+## Commands
+
+Freeze a protocol before measurement:
+
+    secaware freeze protocol.json freeze-artifact
+
+After external generators and evaluators produce a complete measurement file:
+
+    secaware analyze freeze-artifact measurements.json analysis-artifact
+
+Verify or inspect a bundle:
+
+    secaware verify freeze-artifact
+    secaware verify analysis-artifact
+    secaware summarize analysis-artifact
+
+The freeze command rejects outcome fields. The analyze command replays the
+study from the frozen protocol, verifies the exact-byte bundle, checks study
+and adapter identities, and requires one measurement for every randomized
+assignment.
 
 ## Code map
 
-The active implementation is under src/secaware:
-
 | Module | Responsibility |
 | --- | --- |
-| representation.py | Frozen tasks, candidates, and population |
-| prioritization.py | Deterministic pre-treatment ranking |
-| intervention.py | Exact four-arm prompt interventions |
-| randomization.py | Replayable complete-block assignment |
-| measurement.py | Independent labels and total accounting |
-| outcomes.py | Explicit deterministic outcome projection |
-| inference.py | ITT estimates and unknown bounds |
-| workflow.py | Freeze-to-analysis orchestration |
-| records.py | Canonical serialization and content identities |
-| artifact_io.py | Exact-closure artifact writing and verification |
-| cli.py | Reproduce, verify, and summarize commands |
-
-All scientific records are immutable dataclasses. Identities are SHA-256 hashes
-of canonical JSON. Outcomes never enter population freeze, prioritization,
-intervention construction, or randomization.
-
-## Input boundary
-
-The reproduce command accepts one JSON study specification containing:
-
-- tasks: task_id, cluster_id, cwe, and prompt;
-- candidates: task_id, feature_id, add/remove operation, and rationale;
-- interventions: the four arm texts for each task;
-- models, integer request slots, and a randomization seed;
-- optionally, one terminal measurement per randomized coordinate.
-
-A measurement contains task_id, model_id, request_slot, security, and
-functionality. Security is secure, insecure, or unknown. Functionality is pass,
-fail, or unknown. A terminal execution failure is represented by failure_stage
-instead and remains in the ITT denominator.
-
-The artifact rejects missing, duplicate, substituted, or post-randomization
-filtered assignments.
-
-## Reproduction
-
-Install the package in an isolated Python 3.12 environment, then run:
-
-    secaware reproduce study.json artifact
-    secaware verify artifact
-    secaware summarize artifact
-
-The output directory must not already exist. It contains the frozen study,
-randomization, optional outcomes and estimates, and an exact file manifest.
-Verification rejects both modified files and unlisted extra files.
-
-## Estimand
-
-The primary contrast is the assigned-arm intention-to-treat difference:
-
-    mean(Y | assigned target) - mean(Y | assigned no-op)
-
-No assignment is removed after randomization. A point estimate is reported only
-when both compared arms are fully observed. Otherwise the artifact reports the
-minimum and maximum effect obtained by assigning every unknown outcome first to
-failure and then to success.
-
-Security and functionality are measured independently. Joint success equals one
-only when both are positive; a known failure in either dimension makes joint
-success zero; all other incomplete combinations remain unknown.
+| adapters.py | Frozen external-producer identities |
+| representation.py | Splits, semantic clusters, candidates, universe |
+| prioritization.py | Score, rank, and top-K freeze |
+| intervention.py | Four-arm multi-realization policies |
+| randomization.py | Complete-block assignment |
+| measurement.py | External results and infrastructure boundary |
+| outcomes.py | Total outcome decomposition |
+| inference.py | Cluster-weighted ITT, bounds, simultaneous intervals |
+| workflow.py | Prospective freeze and post-measurement analysis |
+| records.py | Canonical content identities |
+| artifact_io.py | Exact-byte bundle closure |
+| cli.py | Freeze, analyze, verify, and summarize |
 
 ## Review
 
-The default reviewer suite contains 24 focused tests and normally completes in
-well under a minute:
+The default suite contains 24 focused scientific-invariant tests:
 
     python -m pytest -q
 
-Two additional milestone tests exercise the complete in-memory workflow and the
-CLI plus independent bundle verification:
+Two additional milestone tests execute the separated freeze and analyze CLI
+path:
 
     python -m pytest -q -m milestone
 
-See tests/README.md for the test boundary. The compact suite is the maintained
-artifact; historical operational and field-by-field mutation tests are not part
-of routine review.
+The default suite is intentionally small. Historical deployment incidents,
+provider diagnostics, campaign receipts, and field-by-field migration tests
+remain in Git history rather than the active reviewer artifact.

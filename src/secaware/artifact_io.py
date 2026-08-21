@@ -1,20 +1,19 @@
-"""Small exact-closure artifact store used by the reproducibility CLI."""
+"""Exact-byte artifact bundles for freeze and analysis outputs."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from secaware.records import canonical_json, canonical_value, content_hash
+from secaware.records import canonical_json
 
 
 MANIFEST = "manifest.json"
 
 
 def write_bundle(root: Path, artifacts: Mapping[str, Any]) -> Path:
-    """Write a new immutable bundle and its exact file manifest."""
-
     root = root.resolve()
     if root.exists():
         raise FileExistsError(root)
@@ -22,15 +21,11 @@ def write_bundle(root: Path, artifacts: Mapping[str, Any]) -> Path:
     hashes: dict[str, str] = {}
     for name, value in sorted(artifacts.items()):
         _valid_name(name)
-        payload = canonical_json(value) + "\n"
-        (root / name).write_text(payload, encoding="utf-8", newline="\n")
-        hashes[name] = content_hash(canonical_value(value))
-    manifest = {"schema_version": "1.0", "files": hashes}
-    (root / MANIFEST).write_text(
-        canonical_json(manifest) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+        payload = (canonical_json(value) + "\n").encode("utf-8")
+        (root / name).write_bytes(payload)
+        hashes[name] = hashlib.sha256(payload).hexdigest()
+    manifest = {"schema_version": "2.0", "files": hashes}
+    (root / MANIFEST).write_bytes((canonical_json(manifest) + "\n").encode("utf-8"))
     return root
 
 
@@ -39,20 +34,18 @@ def verify_bundle(root: Path) -> dict[str, Any]:
     manifest_path = root / MANIFEST
     if not manifest_path.is_file():
         raise ValueError("bundle manifest is missing")
-    manifest = read_json(manifest_path)
-    if set(manifest) != {"schema_version", "files"} or manifest["schema_version"] != "1.0":
+    manifest_payload = manifest_path.read_bytes()
+    manifest = json.loads(manifest_payload)
+    if manifest_payload != (canonical_json(manifest) + "\n").encode("utf-8"):
+        raise ValueError("bundle manifest is not canonical")
+    if set(manifest) != {"schema_version", "files"} or manifest["schema_version"] != "2.0":
         raise ValueError("invalid bundle manifest")
     expected = manifest["files"]
     if not isinstance(expected, dict):
         raise ValueError("invalid bundle file map")
     for name, digest in expected.items():
         _valid_name(name)
-        if (
-            not isinstance(digest, str)
-            or len(digest) != 64
-            or any(character not in "0123456789abcdef" for character in digest)
-        ):
-            raise ValueError("invalid bundle digest")
+        _digest(digest)
     actual = {
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
@@ -61,10 +54,18 @@ def verify_bundle(root: Path) -> dict[str, Any]:
     if actual != set(expected):
         raise ValueError("bundle file set is not exact")
     for name, digest in expected.items():
-        value = read_json(root / name)
-        if content_hash(value) != digest:
+        payload = (root / name).read_bytes()
+        if hashlib.sha256(payload).hexdigest() != digest:
             raise ValueError(f"artifact digest mismatch: {name}")
+        value = json.loads(payload)
+        if payload != (canonical_json(value) + "\n").encode("utf-8"):
+            raise ValueError(f"artifact is not canonical: {name}")
     return manifest
+
+
+def bundle_digest(root: Path) -> str:
+    verify_bundle(root)
+    return hashlib.sha256((root.resolve() / MANIFEST).read_bytes()).hexdigest()
 
 
 def read_json(path: Path) -> Any:
@@ -77,4 +78,13 @@ def _valid_name(name: str) -> None:
         raise ValueError("artifact names must be simple relative filenames")
 
 
-__all__ = ["MANIFEST", "read_json", "verify_bundle", "write_bundle"]
+def _digest(value: object) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError("invalid artifact digest")
+
+
+__all__ = ["MANIFEST", "bundle_digest", "read_json", "verify_bundle", "write_bundle"]

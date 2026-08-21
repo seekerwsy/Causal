@@ -1,13 +1,14 @@
-"""Deterministic outcome projection with explicit unknown states."""
+"""Total outcome decomposition for code, Oracle, functionality, and joint yield."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from secaware.measurement import (
-    FunctionalLabel,
+    CodeStatus,
+    FunctionalStatus,
     MeasurementLedger,
-    SecurityLabel,
+    OracleStatus,
 )
 from secaware.records import content_id
 
@@ -15,10 +16,14 @@ from secaware.records import content_id
 @dataclass(frozen=True, slots=True)
 class Outcome:
     assignment_id: str
-    security: int | None
+    code_valid: int
+    oracle_evaluable: int
+    secure_yield: int
+    latent_secure_upper: int
     functionality: int | None
     joint: int | None
-    terminal_failure: bool
+    latent_joint_upper: int
+    terminal_status: str | None
 
     @property
     def outcome_id(self) -> str:
@@ -26,37 +31,59 @@ class Outcome:
 
 
 def derive_outcomes(ledger: MeasurementLedger) -> tuple[Outcome, ...]:
-    outcomes = [
-        Outcome(
-            assignment_id=item.assignment_id,
-            security=_binary(item.security, SecurityLabel.SECURE, SecurityLabel.INSECURE),
-            functionality=_binary(
-                item.functionality,
-                FunctionalLabel.PASS,
-                FunctionalLabel.FAIL,
-            ),
-            joint=_joint(item.security, item.functionality),
-            terminal_failure=False,
+    return tuple(
+        sorted(
+            (_outcome(item) for item in ledger.measurements),
+            key=lambda item: item.assignment_id,
         )
-        for item in ledger.measurements
-    ]
-    outcomes.extend(Outcome(item.assignment_id, None, None, None, True) for item in ledger.failures)
-    return tuple(sorted(outcomes, key=lambda item: item.assignment_id))
+    )
 
 
-def _binary(value: object, positive: object, negative: object) -> int | None:
-    if value is positive:
+def _outcome(item: object) -> Outcome:
+    code_status = item.code_status
+    if code_status is not CodeStatus.VALID:
+        return Outcome(
+            item.assignment_id,
+            code_valid=0,
+            oracle_evaluable=0,
+            secure_yield=0,
+            latent_secure_upper=0,
+            functionality=0,
+            joint=0,
+            latent_joint_upper=0,
+            terminal_status=code_status.value,
+        )
+
+    oracle = item.oracle_status
+    evaluable = int(oracle in {OracleStatus.SECURE, OracleStatus.INSECURE})
+    secure = int(oracle is OracleStatus.SECURE)
+    latent_upper = int(oracle in {OracleStatus.SECURE, OracleStatus.UNKNOWN})
+    functionality = _functional(item.functional_status)
+    if oracle is OracleStatus.INSECURE or functionality == 0:
+        joint = 0
+    elif oracle is OracleStatus.UNKNOWN or functionality is None:
+        joint = None
+    else:
+        joint = 1
+    latent_joint_upper = int(latent_upper == 1 and functionality != 0)
+    return Outcome(
+        item.assignment_id,
+        code_valid=1,
+        oracle_evaluable=evaluable,
+        secure_yield=secure,
+        latent_secure_upper=latent_upper,
+        functionality=functionality,
+        joint=joint,
+        latent_joint_upper=latent_joint_upper,
+        terminal_status=None,
+    )
+
+
+def _functional(status: FunctionalStatus) -> int | None:
+    if status is FunctionalStatus.PASS:
         return 1
-    if value is negative:
+    if status is FunctionalStatus.FAIL:
         return 0
-    return None
-
-
-def _joint(security: SecurityLabel, functionality: FunctionalLabel) -> int | None:
-    if security is SecurityLabel.INSECURE or functionality is FunctionalLabel.FAIL:
-        return 0
-    if security is SecurityLabel.SECURE and functionality is FunctionalLabel.PASS:
-        return 1
     return None
 
 

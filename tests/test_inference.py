@@ -3,112 +3,155 @@ from __future__ import annotations
 import pytest
 
 from helpers import complete_measurements, example_study
-from secaware.inference import estimate_itt
-from secaware.intervention import Arm
-from secaware.measurement import FunctionalLabel, SecurityLabel, close_measurements
-from secaware.outcomes import derive_outcomes
+from secaware.measurement import (
+    CodeStatus,
+    FunctionalStatus,
+    InfrastructureFailure,
+    OracleStatus,
+)
 from secaware.workflow import analyze
 
 
 @pytest.mark.reviewer
-def test_hand_calculated_security_itt_uses_registered_denominators() -> None:
+def test_primary_secure_yield_itt_uses_semantic_clusters() -> None:
     study = example_study()
-    measurements, failures = complete_measurements(study)
-    result = analyze(study, measurements, failures)
-    assert result.security.target.total == 4
-    assert result.security.control.total == 4
-    assert result.security.target.mean == 1.0
-    assert result.security.control.mean == 0.0
-    assert result.security.difference == 1.0
+    result = analyze(study, complete_measurements(study))
+    estimate = _estimate(result, "secure_yield")
+    assert estimate.difference == 1.0
+    assert len(estimate.cluster_effects) == 2
 
 
 @pytest.mark.reviewer
-def test_functionality_does_not_enter_the_security_outcome() -> None:
+def test_terminal_no_code_is_observed_zero_not_missing() -> None:
     study = example_study()
-    functional = {arm: FunctionalLabel.FAIL for arm in Arm}
-    measurements, failures = complete_measurements(study, functionality=functional)
-    result = analyze(study, measurements, failures)
-    assert result.security.difference == 1.0
-    assert result.functionality.target.mean == 0.0
-
-
-@pytest.mark.reviewer
-def test_unknown_is_not_treated_as_secure() -> None:
-    study = example_study()
-    target = next(a for a in study.randomization.assignments if a.arm is Arm.TARGET)
-    measurements, failures = complete_measurements(
-        study,
-        unknown_assignment_id=target.assignment_id,
+    target_id = next(
+        item.assignment_id for item in study.randomization.assignments if item.arm.value == "target"
     )
-    result = analyze(study, measurements, failures)
-    outcome = next(o for o in result.outcomes if o.assignment_id == target.assignment_id)
-    assert outcome.security is None
-    assert result.security.target.successes == 3
-    assert result.security.target.unknown == 1
+
+    def classify(assignment):
+        if assignment.assignment_id == target_id:
+            return CodeStatus.NO_CODE, OracleStatus.NOT_RUN, FunctionalStatus.NOT_RUN
+        oracle = OracleStatus.SECURE if assignment.arm.value == "target" else OracleStatus.INSECURE
+        return CodeStatus.VALID, oracle, FunctionalStatus.PASS
+
+    result = analyze(study, complete_measurements(study, classify))
+    estimate = _estimate(result, "secure_yield")
+    assert estimate.difference is not None
+    assert estimate.difference < 1.0
+    outcome = next(item for item in result.outcomes if item.assignment_id == target_id)
+    assert (outcome.code_valid, outcome.oracle_evaluable, outcome.secure_yield) == (0, 0, 0)
 
 
 @pytest.mark.reviewer
-def test_unknown_produces_bounds_instead_of_a_filtered_point_estimate() -> None:
+def test_oracle_unknown_is_zero_observed_yield_with_latent_upper_bound() -> None:
     study = example_study()
-    target = next(a for a in study.randomization.assignments if a.arm is Arm.TARGET)
-    measurements, failures = complete_measurements(
-        study,
-        unknown_assignment_id=target.assignment_id,
+    target_id = next(
+        item.assignment_id for item in study.randomization.assignments if item.arm.value == "target"
     )
-    result = analyze(study, measurements, failures)
-    assert result.security.difference is None
-    assert result.security.lower == 0.75
-    assert result.security.upper == 1.0
 
+    def classify(assignment):
+        oracle = OracleStatus.SECURE if assignment.arm.value == "target" else OracleStatus.INSECURE
+        if assignment.assignment_id == target_id:
+            oracle = OracleStatus.UNKNOWN
+        return CodeStatus.VALID, oracle, FunctionalStatus.PASS
 
-@pytest.mark.reviewer
-def test_terminal_failure_remains_in_the_itt_denominator() -> None:
-    study = example_study()
-    target = next(a for a in study.randomization.assignments if a.arm is Arm.TARGET)
-    measurements, failures = complete_measurements(
-        study,
-        failed_assignment_id=target.assignment_id,
+    result = analyze(study, complete_measurements(study, classify))
+    estimate = _estimate(result, "secure_yield")
+    joint = _estimate(result, "joint")
+    assert estimate.difference is not None
+    assert estimate.upper > estimate.difference
+    assert joint.difference is None
+    assert joint.upper > joint.lower
+    outcome = next(item for item in result.outcomes if item.assignment_id == target_id)
+    assert (outcome.oracle_evaluable, outcome.secure_yield, outcome.latent_secure_upper) == (
+        0,
+        0,
+        1,
     )
-    result = analyze(study, measurements, failures)
-    assert result.security.target.total == 4
-    assert result.security.target.unknown == 1
-    assert result.security.difference is None
+    assert (outcome.joint, outcome.latent_joint_upper) == (None, 1)
 
 
 @pytest.mark.reviewer
-def test_inference_rejects_post_randomization_outcome_filtering() -> None:
+def test_functionality_is_independent_of_the_security_outcome() -> None:
     study = example_study()
-    measurements, failures = complete_measurements(study)
-    ledger = close_measurements(study.randomization, measurements, failures)
-    outcomes = derive_outcomes(ledger)
-    with pytest.raises(ValueError):
-        estimate_itt(study.randomization, outcomes[:-1])
+
+    def classify(assignment):
+        oracle = OracleStatus.SECURE if assignment.arm.value == "target" else OracleStatus.INSECURE
+        return CodeStatus.VALID, oracle, FunctionalStatus.FAIL
+
+    result = analyze(study, complete_measurements(study, classify))
+    assert _estimate(result, "secure_yield").difference == 1.0
+    assert _estimate(result, "functionality").difference == 0.0
+    assert _estimate(result, "joint").difference == 0.0
 
 
 @pytest.mark.reviewer
-def test_joint_outcome_requires_both_security_and_functionality() -> None:
+def test_cluster_weighting_prevents_large_clusters_from_dominating() -> None:
     study = example_study()
-    functionality = {arm: FunctionalLabel.PASS for arm in Arm}
-    functionality[Arm.TARGET] = FunctionalLabel.FAIL
-    measurements, failures = complete_measurements(study, functionality=functionality)
-    result = analyze(study, measurements, failures)
-    assert result.security.target.mean == 1.0
-    assert result.joint.target.mean == 0.0
+
+    def classify(assignment):
+        secure = (
+            assignment.arm.value == "target"
+            and assignment.block.semantic_cluster_id == "confirm.cluster.1"
+        )
+        return (
+            CodeStatus.VALID,
+            OracleStatus.SECURE if secure else OracleStatus.INSECURE,
+            FunctionalStatus.PASS,
+        )
+
+    estimate = _estimate(analyze(study, complete_measurements(study, classify)), "secure_yield")
+    assert estimate.difference == 0.5
 
 
 @pytest.mark.reviewer
-def test_security_unknown_and_functional_pass_remain_joint_unknown() -> None:
+def test_models_receive_separate_effect_estimates() -> None:
+    study = example_study(models=("model.a", "model.b"))
+
+    def classify(assignment):
+        secure = assignment.arm.value == "target" and assignment.block.model_id == "model.a"
+        return (
+            CodeStatus.VALID,
+            OracleStatus.SECURE if secure else OracleStatus.INSECURE,
+            FunctionalStatus.PASS,
+        )
+
+    result = analyze(study, complete_measurements(study, classify))
+    estimates = {
+        item.model_id: item.difference
+        for item in result.inference.estimates
+        if item.metric.value == "secure_yield"
+    }
+    assert estimates == {"model.a": 1.0, "model.b": 0.0}
+
+
+@pytest.mark.reviewer
+def test_total_ledger_rejects_missing_duplicate_and_infrastructure_failure() -> None:
     study = example_study()
-    target = next(a for a in study.randomization.assignments if a.arm is Arm.TARGET)
-    security = {arm: SecurityLabel.INSECURE for arm in Arm}
-    security[Arm.TARGET] = SecurityLabel.SECURE
-    measurements, failures = complete_measurements(
-        study,
-        security=security,
-        unknown_assignment_id=target.assignment_id,
+    rows = complete_measurements(study)
+    with pytest.raises(ValueError, match="every randomized assignment"):
+        analyze(study, rows[:-1])
+    with pytest.raises(ValueError, match="every randomized assignment"):
+        analyze(study, rows + rows[:1])
+    failure = InfrastructureFailure(rows[0].assignment_id, "oracle", "unavailable")
+    with pytest.raises(ValueError, match="repair or replay"):
+        analyze(study, rows, infrastructure_failures=(failure,))
+
+
+@pytest.mark.reviewer
+def test_semantic_cluster_bootstrap_is_replayable_and_simultaneous() -> None:
+    study = example_study()
+    rows = complete_measurements(study)
+    first = analyze(study, rows).inference
+    replay = analyze(study, rows).inference
+    assert first == replay
+    assert first.intervals
+    assert all(-1.0 <= item.lower <= item.upper <= 1.0 for item in first.intervals)
+
+
+def _estimate(result, metric: str):
+    return next(
+        item
+        for item in result.inference.estimates
+        if item.metric.value == metric and item.model_id == "model.a"
     )
-    result = analyze(study, measurements, failures)
-    outcome = next(o for o in result.outcomes if o.assignment_id == target.assignment_id)
-    assert outcome.functionality == 1
-    assert outcome.security is None
-    assert outcome.joint is None

@@ -5,95 +5,69 @@ from pathlib import Path
 
 import pytest
 
-from helpers import complete_measurements, example_study
+from helpers import complete_measurements, example_study, measurement_document, protocol_spec
 from secaware.artifact_io import verify_bundle
 from secaware.cli import main
-from secaware.intervention import Arm
-from secaware.measurement import FunctionalLabel, SecurityLabel
 from secaware.workflow import analyze
 
 
 @pytest.mark.reviewer
-def test_study_identity_binds_population_interventions_and_randomization() -> None:
-    first = example_study(seed=11)
-    replay = example_study(seed=11)
-    changed = example_study(seed=12)
+def test_freeze_identity_is_outcome_blind_and_replayable() -> None:
+    first = example_study()
+    replay = example_study()
+    assert first == replay
     assert first.study_id == replay.study_id
-    assert first.study_id != changed.study_id
+    assert not hasattr(first, "measurements")
 
 
 @pytest.mark.reviewer
-def test_analysis_is_replayable_from_frozen_measurements() -> None:
+def test_analysis_replays_from_frozen_study_and_external_measurements() -> None:
     study = example_study()
-    measurements, failures = complete_measurements(study)
-    assert analyze(study, measurements, failures) == analyze(study, measurements, failures)
+    rows = complete_measurements(study)
+    assert analyze(study, rows) == analyze(study, rows)
 
 
 @pytest.mark.milestone
-def test_freeze_measure_outcome_infer_smoke() -> None:
+def test_cli_freeze_then_analyze_then_verify(tmp_path: Path) -> None:
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text(json.dumps(protocol_spec()), encoding="utf-8")
+    freeze_root = tmp_path / "freeze"
+    assert main(["freeze", str(protocol_path), str(freeze_root)]) == 0
+    verify_bundle(freeze_root)
+
     study = example_study()
-    measurements, failures = complete_measurements(study)
-    result = analyze(study, measurements, failures)
-    assert result.security.difference == 1.0
-    assert len(result.outcomes) == len(study.randomization.assignments)
+    measurement_path = tmp_path / "measurements.json"
+    measurement_path.write_text(
+        json.dumps(measurement_document(study, complete_measurements(study))),
+        encoding="utf-8",
+    )
+    analysis_root = tmp_path / "analysis"
+    assert (
+        main(
+            [
+                "analyze",
+                str(freeze_root),
+                str(measurement_path),
+                str(analysis_root),
+            ]
+        )
+        == 0
+    )
+    assert main(["verify", str(analysis_root)]) == 0
+    summary = json.loads((analysis_root / "analysis.json").read_text(encoding="utf-8"))
+    assert summary["study_id"] == study.study_id
 
 
 @pytest.mark.milestone
-def test_cli_reproduce_and_independent_verify(tmp_path: Path) -> None:
+def test_cli_rejects_cross_study_measurements(tmp_path: Path) -> None:
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text(json.dumps(protocol_spec()), encoding="utf-8")
+    freeze_root = tmp_path / "freeze"
+    main(["freeze", str(protocol_path), str(freeze_root)])
     study = example_study()
-    security = {
-        Arm.TARGET: SecurityLabel.SECURE,
-        Arm.NOOP: SecurityLabel.INSECURE,
-        Arm.PLACEBO: SecurityLabel.INSECURE,
-        Arm.GENERIC: SecurityLabel.INSECURE,
-    }
-    rows = [
-        {
-            "task_id": assignment.task_id,
-            "model_id": assignment.model_id,
-            "request_slot": assignment.request_slot,
-            "security": security[assignment.arm].value,
-            "functionality": FunctionalLabel.PASS.value,
-        }
-        for assignment in study.randomization.assignments
-    ]
-    spec = {
-        "seed": 17,
-        "models": ["model.a"],
-        "slots": list(range(8)),
-        "tasks": [
-            {
-                "task_id": task.task_id,
-                "cluster_id": task.cluster_id,
-                "cwe": task.cwe,
-                "prompt": task.prompt,
-            }
-            for task in study.population.tasks
-        ],
-        "candidates": [
-            {
-                "task_id": candidate.task_id,
-                "feature_id": candidate.feature_id,
-                "operation": candidate.operation.value,
-                "rationale": candidate.rationale,
-            }
-            for candidate in study.candidates
-        ],
-        "interventions": [
-            {
-                "task_id": bundle.task_id,
-                "arms": {item.arm.value: item.text for item in bundle.arms},
-            }
-            for bundle in study.interventions
-        ],
-        "measurements": rows,
-    }
-    spec_path = tmp_path / "spec.json"
-    spec_path.write_text(json.dumps(spec), encoding="utf-8")
-    output = tmp_path / "output"
-
-    assert main(["reproduce", str(spec_path), str(output)]) == 0
-    assert main(["verify", str(output)]) == 0
-    verify_bundle(output)
-    summary = json.loads((output / "analysis.json").read_text(encoding="utf-8"))
-    assert summary["security"]["difference"] == 1.0
+    document = measurement_document(study, complete_measurements(study))
+    document["study_id"] = "study_" + "0" * 64
+    measurement_path = tmp_path / "measurements.json"
+    measurement_path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match="frozen study"):
+        main(["analyze", str(freeze_root), str(measurement_path), str(tmp_path / "analysis")])
