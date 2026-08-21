@@ -22,7 +22,7 @@ from secaware.schema.causal import (
 )
 from secaware.schema.common import model_shape_is_intact
 from secaware.schema.features import FeatureState
-from secaware.schema.oracle import OracleRecord, SecurityLabel
+from secaware.schema.oracle import OracleEvaluability, OracleRecord, SecurityLabel
 from secaware.schema.records import PromptRecord
 from secaware.schema.tsg import MotifId, PromptTSGRecord
 from secaware.tsg.graph import record_to_multidigraph
@@ -39,7 +39,9 @@ _TASK_FAMILY_STATES = (
     "deserialization",
     "file_access",
     "input_handling",
+    "message_hashing",
     "path_handling",
+    "security_random_generation",
     "sql_query",
     "other",
 )
@@ -188,7 +190,10 @@ def _snapshot_declarations(value: object) -> tuple[VariableDeclaration, ...]:
 def secure_functional_value(oracle: OracleRecord) -> int:
     """Encode the primary outcome from typed Oracle fields only."""
     return int(
-        oracle.parse_ok and oracle.functional_ok and oracle.security_label is SecurityLabel.SECURE
+        oracle.parse_ok
+        and oracle.functional_ok
+        and oracle.security_label is SecurityLabel.SECURE
+        and oracle.evaluability is OracleEvaluability.EVALUABLE
     )
 
 

@@ -29,12 +29,16 @@ EXPECTED_FEATURE_IDS = (
     "task.process_launch",
     "task.privileged_action",
     "task.object_deserialization",
+    "task.message_hashing",
+    "task.security_random_generation",
     "safety.input_validation",
     "safety.path_normalization",
     "safety.sql_parameterization",
     "safety.safe_subprocess",
     "safety.authorization_check",
     "safety.safe_deserialization",
+    "safety.collision_resistant_hash",
+    "safety.cryptographic_randomness",
     "safety.generic_security_reminder",
     "safety.prohibited_unsafe_request",
     "safety.vulnerability_disclosure",
@@ -65,7 +69,7 @@ def test_catalog_is_exactly_the_finite_immutable_feature_set() -> None:
 
 
 def test_presentation_matched_control_mapping_is_catalog_owned_and_closed() -> None:
-    assert FEATURE_CATALOG_VERSION == "1.5"
+    assert FEATURE_CATALOG_VERSION == "1.7"
     mapping = {
         item.feature_id: item.matched_control_feature_id
         for item in PROMPT_FEATURE_CATALOG
@@ -168,6 +172,12 @@ def test_catalog_owns_exact_versioned_intervention_clauses_without_shadow_table(
     assert (
         " Pass arguments as a list and run without a shell."
         in prompt_feature_spec("safety.safe_subprocess").intervention_clauses
+    )
+    assert prompt_feature_spec("safety.collision_resistant_hash").intervention_clauses == (
+        " Use a collision-resistant hash.",
+    )
+    assert prompt_feature_spec("safety.cryptographic_randomness").intervention_clauses == (
+        " Use cryptographically secure randomness.",
     )
 
 

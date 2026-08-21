@@ -1,10 +1,10 @@
-from dataclasses import FrozenInstanceError
 import inspect
 import json
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
 import sys
 import traceback
+from dataclasses import FrozenInstanceError
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -16,8 +16,10 @@ from secaware.generation.openai_compatible_provider import (
     OpenAICompatibleGenerationResult,
     OpenAICompatibleProvider,
     create_openai_compatible_provider,
+    create_replay_openai_compatible_provider,
 )
 from secaware.generation.request_planner import plan_observed_requests
+from secaware.generation.source_extraction import SOURCE_EXTRACTION_POLICY_SHA256
 from secaware.io.jsonl import write_jsonl
 from secaware.pipeline.preflight import run_preflight
 from secaware.schema.common import SCHEMA_VERSION
@@ -26,16 +28,17 @@ from secaware.schema.generation import (
     GenerationParameters,
     GenerationProvenance,
     GenerationRequestRecord,
+    sha256_text,
 )
 from secaware.schema.records import PromptRecord
-
 
 _BASE_URL = "https://provider.invalid/v1"
 _ENV_NAME = "SECAWARE_TEST_OPENAI_KEY"
 _API_KEY = "provider-api-key-secret"
 _PROMPT = "Return a path helper and preserve this sensitive prompt exactly."
 _SYSTEM = "Return code only."
-_CODE = "```python\ndef helper(path):\n    return path\n```"
+_RAW_CODE = "def helper(path):\n    return path"
+_CODE = f"```python\n{_RAW_CODE}\n```"
 _DEFAULT_USAGE = object()
 
 
@@ -122,17 +125,19 @@ def _request(
     system_template: str = _SYSTEM,
     parameters: dict[str, object] | None = None,
     include_default_max_tokens: bool = True,
+    system_template_version: str = "system-v1",
 ) -> GenerationRequestRecord:
     prompt = PromptRecord(
         prompt_id="prompt-api",
         task_id="task-prompt-api",
-        split="confirm",
+        split="discover",
         language="python",
         task_family="path_handling",
         cwe="CWE-22",
         prompt=_PROMPT,
         prompt_role="neutral_baseline",
         counterpart_prompt_id=None,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
     )
     parameter_values: dict[str, object] = {
         "temperature": 0.2,
@@ -150,7 +155,7 @@ def _request(
         endpoint_identity=_BASE_URL if endpoint_type == "chat_completions" else None,
         parameters=GenerationParameters(values=parameter_values),
         system_template=system_template,
-        system_template_version="system-v1",
+        system_template_version=system_template_version,
     )[0]
 
 
@@ -463,6 +468,7 @@ def _write_prompt_config(
                 prompt="Write a safe path helper.",
                 prompt_role="neutral_baseline",
                 counterpart_prompt_id=None,
+                oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
             )
         ],
     )
@@ -549,6 +555,7 @@ def test_preflight_checks_credentials_before_retaining_prompt_inputs(
                 prompt=prompt_secret,
                 prompt_role="neutral_baseline",
                 counterpart_prompt_id=None,
+                oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
             )
         ],
     )
@@ -582,7 +589,7 @@ def test_preflight_does_not_require_openai_credentials_for_other_providers(
     assert report.model_count == 1
 
 
-def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_code() -> None:
+def test_provider_sends_only_canonical_chat_completion_payload_and_decodes_code() -> None:
     request = _request()
     usage = SimpleNamespace(prompt_tokens=11, completion_tokens=13, total_tokens=24)
     client = FakeClient([_response(usage=usage)])
@@ -604,10 +611,11 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_cod
         }
     ]
     assert isinstance(result, OpenAICompatibleGenerationResult)
-    assert result.code == _CODE
+    assert result.code == _RAW_CODE
     assert isinstance(result.provenance, GenerationProvenance)
     assert result.provenance.producer == "openai_compatible"
-    assert result.provenance.producer_version == "chat_completions-v1"
+    assert result.provenance.producer_version == "chat_completions-python-envelope-v2"
+    assert result.provenance.source_batch_id == f"python_fence:{sha256_text(_CODE)}"
     assert result.attempts == (
         GenerationAttemptRecord(
             schema_version=SCHEMA_VERSION,
@@ -623,6 +631,173 @@ def test_provider_sends_only_canonical_chat_completion_payload_and_preserves_cod
     assert request.request_id not in repr(result)
     with pytest.raises(FrozenInstanceError):
         result.code = "mutated"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (_RAW_CODE, _RAW_CODE),
+        (f"```python\n{_RAW_CODE}\n```", _RAW_CODE),
+        (f"```py\n{_RAW_CODE}\n```", _RAW_CODE),
+        (f"```python\n{_RAW_CODE}\n```\nGenerated implementation.", _RAW_CODE),
+        (f"```python\n{_RAW_CODE}\n``` \nGenerated implementation.", _RAW_CODE),
+        (
+            f"```python\n{_RAW_CODE}\n```\nRun it with:\n```\npython generated.py\n```",
+            _RAW_CODE,
+        ),
+    ],
+)
+def test_provider_accepts_only_raw_or_single_python_source_envelope(
+    content: str,
+    expected: str,
+) -> None:
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    result = provider.generate(_request(), system_template=_SYSTEM)
+
+    assert result.code == expected
+    envelope = "raw"
+    if content.startswith("```"):
+        lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        closing_index = next(
+            index for index, line in enumerate(lines[1:], start=1) if line.rstrip(" \t") == "```"
+        )
+        envelope = (
+            "python_fence_trailing_text"
+            if "\n".join(lines[closing_index + 1 :]).strip()
+            else "python_fence"
+        )
+    assert result.provenance.source_batch_id == f"{envelope}:{sha256_text(content)}"
+
+
+def test_replay_provider_parses_one_persisted_response_without_network() -> None:
+    response = {
+        "model": "org/model-api",
+        "choices": [
+            {
+                "message": {"content": f"```python\n{_RAW_CODE}\n``` "},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 13, "total_tokens": 24},
+    }
+    provider = create_replay_openai_compatible_provider(_config(), response)
+
+    result = provider.generate(_request(), system_template=_SYSTEM)
+
+    assert result.code == _RAW_CODE
+    assert len(result.attempts) == 1
+    assert result.attempts[0].outcome == "success"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        f"prose\n```python\n{_RAW_CODE}\n```",
+        f"```javascript\n{_RAW_CODE}\n```",
+        f"```python\n{_RAW_CODE}",
+        f"```python\n{_RAW_CODE}\n```\n```python\npass\n```",
+    ],
+)
+def test_provider_rejects_ambiguous_or_non_python_source_envelopes(content: str) -> None:
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(_request(), system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+
+
+@pytest.mark.parametrize(
+    ("content", "expected", "envelope"),
+    [
+        ("```java\nclass Main {}\n```", "class Main {}", "single_markdown_fence"),
+        (
+            "<result><code><path>Main.go</path><content>package main</content></code></result>",
+            "package main",
+            "result_code_xml",
+        ),
+    ],
+)
+def test_provider_uses_frozen_multilingual_requested_artifact_policy(
+    content: str,
+    expected: str,
+    envelope: str,
+) -> None:
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    result = provider.generate(
+        _request(system_template_version="multilingual-requested-artifact-v1"),
+        system_template=_SYSTEM,
+    )
+
+    assert result.code == expected
+    assert result.provenance.source_batch_id == (
+        f"requested_artifact_v1.{envelope}.{SOURCE_EXTRACTION_POLICY_SHA256}:{sha256_text(content)}"
+    )
+
+
+def test_multilingual_requested_artifact_policy_rejects_external_commentary() -> None:
+    content = "Implementation:\n```java\nclass Main {}\n```"
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([_response(code=content)]),
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(
+            _request(system_template_version="multilingual-requested-artifact-v1"),
+            system_template=_SYSTEM,
+        )
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+
+
+def test_provider_records_exact_request_and_raw_response_before_validation() -> None:
+    response = _response(code=f"```javascript\n{_RAW_CODE}\n```")
+    calls: list[tuple[str, int, dict[str, object], object | None, BaseException | None]] = []
+
+    def recorder(
+        request_id: str,
+        attempt: int,
+        payload: dict[str, object],
+        raw_response: object | None,
+        error: BaseException | None,
+    ) -> None:
+        calls.append((request_id, attempt, payload, raw_response, error))
+
+    request = _request()
+    provider = OpenAICompatibleProvider(
+        _config(),
+        client=FakeClient([response]),
+        sleeper=lambda _: None,
+        attempt_recorder=recorder,
+    )
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(request, system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+    assert len(calls) == 1
+    request_id, attempt, payload, raw_response, error = calls[0]
+    assert request_id == request.request_id
+    assert attempt == 1
+    assert payload["messages"][-1] == {"role": "user", "content": _PROMPT}
+    assert raw_response is response
+    assert error is None
 
 
 def test_compatibility_parameters_use_extra_body_and_translate_max_output_tokens() -> None:
@@ -666,7 +841,7 @@ def test_compatibility_parameters_use_extra_body_and_translate_max_output_tokens
         system_template=_SYSTEM,
     )
 
-    assert result.code == _CODE
+    assert result.code == _RAW_CODE
     assert completions.call == {
         "model": "org/model-api",
         "messages": [
@@ -1387,7 +1562,7 @@ def test_malformed_success_responses_are_rejected_without_retry(response: object
     )
 
 
-def test_content_filter_is_the_only_valid_terminal_no_code_response() -> None:
+def test_content_filter_is_a_valid_terminal_no_code_response() -> None:
     client = FakeClient([_response(code=None, finish_reason="content_filter")])
     provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
 
@@ -1396,6 +1571,55 @@ def test_content_filter_is_the_only_valid_terminal_no_code_response() -> None:
     assert result.finish_reason == "content_filter"
     assert result.code is None
     assert len(client.completions.calls) == 1
+
+
+def test_exact_token_limit_is_a_valid_terminal_no_code_response() -> None:
+    partial = "def unfinished():\n    while True:\n        pass"
+    client = FakeClient(
+        [
+            _response(
+                code=partial,
+                finish_reason="length",
+                usage=SimpleNamespace(
+                    prompt_tokens=11,
+                    completion_tokens=128,
+                    total_tokens=139,
+                ),
+            )
+        ]
+    )
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    result = provider.generate(_request(), system_template=_SYSTEM)
+
+    assert result.finish_reason == "length"
+    assert result.code is None
+    assert result.provenance.source_batch_id == f"token_limit:{sha256_text(partial)}"
+    assert len(client.completions.calls) == 1
+
+
+def test_length_finish_requires_usage_at_the_frozen_token_limit() -> None:
+    client = FakeClient(
+        [
+            _response(
+                code="partial-response-secret",
+                finish_reason="length",
+                usage=SimpleNamespace(
+                    prompt_tokens=11,
+                    completion_tokens=127,
+                    total_tokens=138,
+                ),
+            )
+        ]
+    )
+    provider = OpenAICompatibleProvider(_config(), client=client, sleeper=lambda _: None)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        provider.generate(_request(), system_template=_SYSTEM)
+
+    assert exc_info.value.code is ErrorCode.API_INVALID_RESPONSE
+    assert len(client.completions.calls) == 1
+    _assert_safe_provider_error(exc_info.value, "partial-response-secret")
 
 
 def test_hostile_client_exception_is_wrapped_without_rendering_it() -> None:
@@ -1580,13 +1804,14 @@ def test_provider_rejects_wrong_endpoint_system_hash_and_n_before_calling_client
                     PromptRecord(
                         prompt_id="wrong-endpoint",
                         task_id="task-wrong-endpoint",
-                        split="confirm",
+                        split="discover",
                         language="python",
                         task_family="path_handling",
                         cwe="CWE-22",
                         prompt=_PROMPT,
                         prompt_role="neutral_baseline",
                         counterpart_prompt_id=None,
+                        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
                     )
                 ],
                 ["org/model-api"],

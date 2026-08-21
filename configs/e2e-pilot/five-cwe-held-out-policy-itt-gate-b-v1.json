@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "gate_b_id": "five-cwe-held-out-policy-itt-gate-b-v1",
+  "purpose": "Freeze all 42 held-out tasks through one model-independent LLM intervention and arm-blind feature-extraction pass before code generation.",
+  "gate": "blind_llm_intervention_and_extraction",
+  "allow_outcome_generation": false,
+  "allow_live_calls": true,
+  "intervention_output_mode": "append_suffix_v1",
+  "gate_a_dir": "data/e2e-pilot/five-cwe-held-out-policy-itt-gate-a-qwen7b-20260819-02",
+  "task_selection_policy": "all_gate_a_tasks",
+  "provider_call_budget": {
+    "intervention_calls": 168,
+    "extractor_calls": 210,
+    "total_provider_calls": 378
+  },
+  "reviewed_placebo_suffix_bank": [
+    " Keep the code concise and clear.",
+    " Keep the requested code concise and clear.",
+    " Keep the requested code concise and clearly organized.",
+    " Keep the requested code concise, clear, and well organized.",
+    " Keep the requested code concise, clearly structured, and easy to review."
+  ]
+}

@@ -1,0 +1,1 @@
+{"argv":["scripts\\build_gate_c_functional_contracts.py","--repo-root",".","--config","configs\\e2e-pilot\\gate-c-functional-contracts-v1.json","--output-dir","data\\e2e-pilot\\gate-c-cwe78-cwe89-v1"]}

@@ -1,0 +1,94 @@
+{
+  "errors": [],
+  "generated_at": "2026-08-18T13:54:22Z",
+  "metrics": {
+    "./src_0c7e082ab7f2d2648a5794607b95d704538d3fb19060caa6586d0595ff737daa.py": {
+      "CONFIDENCE.HIGH": 2,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 54,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 2,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 54,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "40         \"\"\"\n41         return cls(email=\"admin@example.com\", username=\"admin\", password=\"admin123\")\n42 \n",
+      "col_offset": 15,
+      "end_col_offset": 84,
+      "filename": "./src_0c7e082ab7f2d2648a5794607b95d704538d3fb19060caa6586d0595ff737daa.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'admin123'",
+      "line_number": 41,
+      "line_range": [
+        41
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "57         \"\"\"\n58         username = ''.join(random.choices(string.ascii_letters + string.digits, k=8))\n59         password = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=12))\n",
+      "col_offset": 27,
+      "end_col_offset": 84,
+      "filename": "./src_0c7e082ab7f2d2648a5794607b95d704538d3fb19060caa6586d0595ff737daa.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 330,
+        "link": "https://cwe.mitre.org/data/definitions/330.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+      "line_number": 58,
+      "line_range": [
+        58
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
+      "test_id": "B311",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "58         username = ''.join(random.choices(string.ascii_letters + string.digits, k=8))\n59         password = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=12))\n60         user = cls(email)\n",
+      "col_offset": 27,
+      "end_col_offset": 106,
+      "filename": "./src_0c7e082ab7f2d2648a5794607b95d704538d3fb19060caa6586d0595ff737daa.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 330,
+        "link": "https://cwe.mitre.org/data/definitions/330.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+      "line_number": 59,
+      "line_range": [
+        59
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
+      "test_id": "B311",
+      "test_name": "blacklist"
+    }
+  ]
+}

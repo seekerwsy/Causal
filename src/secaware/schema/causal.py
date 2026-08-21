@@ -31,8 +31,9 @@ _BOOTSTRAP_PAG_ID_PATTERN = r"^bootstrap_pag_[0-9a-f]{64}$"
 _PATH_ID_PATTERN = r"^path_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
-_VARIABLE_ID_PATTERN = re.compile(r"^[wxyc]\.[a-z0-9][a-z0-9_.-]{0,126}$")
+_VARIABLE_ID_PATTERN = re.compile(r"^[pwxycz]\.[a-z0-9][a-z0-9_.-]{0,126}$")
 _CWE_PATTERN = re.compile(r"^CWE-[1-9][0-9]*$")
+_CAUSAL_TABLE_CWE_PATTERN = re.compile(r"^(?:CWE-[1-9][0-9]*|CWE-POOLED)$")
 _MAX_VARIABLES = 64
 _MAX_ROWS = 100_000
 _MAX_PAG_EDGES = _MAX_VARIABLES * (_MAX_VARIABLES - 1) // 2
@@ -152,8 +153,10 @@ class _CausalVersionedContract(_CausalContract):
 
 
 class VariableRole(str, Enum):
+    P = "p"
     W = "w"
     X = "x"
+    Z = "z"
     Y = "y"
     C = "c"
 
@@ -288,7 +291,7 @@ class CausalVariableSpec(_CausalVersionedContract):
     states: tuple[str, ...] = Field(min_length=2, max_length=256)
     source_query_id: str
     scope_id: str
-    temporal_tier: int = Field(ge=0, le=2)
+    temporal_tier: int = Field(ge=0, le=3)
     adjacency_type: str
     producer_sha256: str = Field(pattern=_SHA256_PATTERN)
 
@@ -509,7 +512,7 @@ class CausalTableRecord(_CausalVersionedContract):
         variable_ids = tuple(item.variable_id for item in self.variables)
         if (
             not _valid_identifier(self.scope_id)
-            or not _CWE_PATTERN.fullmatch(self.cwe)
+            or not _CAUSAL_TABLE_CWE_PATTERN.fullmatch(self.cwe)
             or not _valid_identifier(self.model_id)
             or not 2 <= len(self.variables) <= _MAX_VARIABLES
             or variable_ids != tuple(sorted(variable_ids))
@@ -813,7 +816,7 @@ class BackgroundKnowledgeRecord(_CausalVersionedContract):
         if (
             self.tiers != tuple(sorted(self.tiers))
             or len(tier_variables) != len(set(tier_variables))
-            or any(not 0 <= tier <= 2 for _variable, tier in self.tiers)
+            or any(not 0 <= tier <= 3 for _variable, tier in self.tiers)
             or self.unconstrained_variable_ids != tuple(sorted(self.unconstrained_variable_ids))
             or len(self.unconstrained_variable_ids) != len(set(self.unconstrained_variable_ids))
             or set(tier_variables) & set(self.unconstrained_variable_ids)

@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "gate_c_id": "randomized-exploratory-gate-c-cwe78-cwe89-phi4-14b-v2",
+  "purpose": "Bounded Oracle-v2 measurement canary only; no scientific effect or scale-up claim.",
+  "gate_a_dir": "runs/e2e-pilot/randomized-exploratory-discovery-phi14b-v2-20260818-01",
+  "gate_b_dir": "runs/e2e-pilot/gate-b-extractor-revalidation-measurement-v2-live-20260818-01",
+  "functional_contracts_path": "data/e2e-pilot/cyberseceval-v2-measurement-canary-v2/task-functional-contracts.jsonl",
+  "selected_task_ids": [
+    "cluster-2ee6c126c7b6024731de",
+    "cluster-7dfad77191063efeb621"
+  ],
+  "expected_blocks": 2,
+  "expected_assignments": 8,
+  "expected_generation_requests": 8,
+  "maximum_generation_provider_attempts": 8,
+  "maximum_functional_judge_provider_attempts": 8,
+  "inherit_gate_a_seed_slots": true,
+  "require_gate_b_pass": true,
+  "oracle_decision_policy": "profile_scoped_decision",
+  "scientific_claim_allowed": false,
+  "scale_up_allowed": false
+}

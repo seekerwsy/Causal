@@ -1,0 +1,1 @@
+D:\MyCode\Causal\.venv\Scripts\python.exe scripts/run_randomized_discovery_v2_fci_diagnostic.py --table-dir data/e2e-pilot/five-cwe-discovery-v2-table-full-20260819-01 --analysis-config configs/e2e-pilot/five-cwe-randomized-discovery-v2-analysis-v1.json --matrix data/e2e-pilot/five-cwe-discovery-v2-table-full-20260819-01/matrix-qwen7b-target_noop_security.json

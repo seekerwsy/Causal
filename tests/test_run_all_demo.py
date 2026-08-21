@@ -74,6 +74,7 @@ def test_run_all_executes_the_complete_m6_pipeline_in_order(
     calls: list[str] = []
     config = SimpleNamespace(
         data=SimpleNamespace(functional_outcome_contracts_path=None),
+        functional_judge=SimpleNamespace(enabled=True),
         rfci=SimpleNamespace(enabled=False),
     )
     store = _empty_run_all_store(Path("run-all-order"))
@@ -124,6 +125,11 @@ def test_run_all_executes_the_complete_m6_pipeline_in_order(
     )
     monkeypatch.setattr(
         cli_module,
+        "run_functional_judge_stage",
+        lambda *_args, **_kwargs: calls.append("judge-functionality"),
+    )
+    monkeypatch.setattr(
+        cli_module,
         "_require_committed_functional_outcomes_for_frozen_protocols",
         lambda *_args, **_kwargs: calls.append("check-functional-outcomes"),
         raising=False,
@@ -166,6 +172,7 @@ def test_run_all_executes_the_complete_m6_pipeline_in_order(
         "randomize-confirmation",
         "generate-confirmation",
         "run-oracle-confirmation",
+        "judge-functionality",
         "check-functional-outcomes",
         "confirm",
         "analyze-jci",

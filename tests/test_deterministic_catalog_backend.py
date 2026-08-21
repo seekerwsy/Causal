@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, fields
 import hashlib
 import json
 import traceback
+from dataclasses import FrozenInstanceError, fields
 
 import pytest
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy, PromptExtractor
-from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
+from secaware.extractors.deterministic_catalog import (
+    DeterministicCatalogExtractor,
+    MultilingualDeterministicCatalogExtractor,
+)
 from secaware.schema.features import FeatureState, PromptExtractorBackend
 from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import (
@@ -17,7 +20,6 @@ from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG_SHA256,
     prompt_feature_spec,
 )
-
 
 _POLICY_SHA256 = hashlib.sha256(b"deterministic_catalog_v1").hexdigest()
 
@@ -67,6 +69,8 @@ _SAFETY_PREREQUISITE = {
     "safety.safe_subprocess": "task.process_launch",
     "safety.authorization_check": "task.privileged_action",
     "safety.safe_deserialization": "task.object_deserialization",
+    "safety.collision_resistant_hash": "task.message_hashing",
+    "safety.cryptographic_randomness": "task.security_random_generation",
 }
 _INTERVENTION_CLAUSE_CASES = tuple(
     (spec.feature_id, clause)
@@ -208,6 +212,28 @@ def test_unknown_language_marks_resolvable_in_scope_features_unresolved() -> Non
     assert states["task.file_read"] is FeatureState.UNRESOLVED
     assert states["safety.path_normalization"] is FeatureState.UNRESOLVED
     assert states["task.database_query"] is FeatureState.NOT_APPLICABLE
+
+
+@pytest.mark.parametrize("language", ("c", "c++", "cpp", "go", "java"))
+def test_multilingual_backend_reuses_the_exact_reviewed_prompt_terms(language: str) -> None:
+    baseline = _prompt(language=language)
+    policy = _policy(backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V2)
+    proposal = MultilingualDeterministicCatalogExtractor().extract(baseline, policy)
+    states = _states(proposal)
+
+    assert proposal.backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V2
+    assert states["task.file_read"] is FeatureState.PRESENT
+    assert states["safety.path_normalization"] is FeatureState.PRESENT
+
+
+def test_multilingual_backend_keeps_unknown_languages_unresolved() -> None:
+    policy = _policy(backend=PromptExtractorBackend.DETERMINISTIC_CATALOG_V2)
+    proposal = MultilingualDeterministicCatalogExtractor().extract(
+        _prompt(language="brainfuck"),
+        policy,
+    )
+
+    assert _states(proposal)["task.file_read"] is FeatureState.UNRESOLVED
 
 
 def test_unicode_prefix_uses_character_offsets_not_encoded_byte_offsets() -> None:

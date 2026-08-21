@@ -54,6 +54,7 @@ class StageManifest(VersionedModel):
         policy_stage = self.stage.startswith("run-oracle-") or self.stage in {
             "extract-prompt-tsg",
             "build-confirmation-variants",
+            "judge-functionality",
         }
         if policy_stage != (self.policy_sha256 is not None):
             raise ValueError("stage manifest policy binding is invalid")

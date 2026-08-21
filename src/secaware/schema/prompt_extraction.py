@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from enum import Enum
 import hashlib
 import json
+from collections.abc import Mapping
+from enum import Enum
 from typing import Literal, cast
 
 from pydantic import (
@@ -19,7 +19,6 @@ from pydantic import (
 from secaware.schema.common import SafeValidationMixin, StrictModel, VersionedModel
 from secaware.schema.features import FeatureState, PromptExtractorBackend
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
-
 
 MAX_RAW_RESPONSE_CHARS = 262_144
 MAX_PROPOSAL_FACTS = 64
@@ -422,6 +421,7 @@ class PromptExtractionProposalRecord(SafeValidationMixin, VersionedModel):
         facts_backend = self.backend in {
             PromptExtractorBackend.LLM_FACTS_V1,
             PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+            PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
         }
         if facts_backend:
             if self.direct_nodes or self.direct_edges:

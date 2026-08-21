@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "gate_c_id": "minimal-validation-dev-canary-micro-python-comment-qwen7b-v2",
+  "purpose": "Two-task, two-arm D_DEV engineering canary for the content-addressed task selection, authenticated Gate-A randomization, exact Gate-B reuse, native live-root closure, and root-first analysis contracts; no scientific claim is allowed.",
+  "gate_a_dir": "data/e2e-pilot/five-cwe-held-out-policy-itt-gate-a-qwen7b-20260819-02",
+  "gate_b_dir": "runs/minimal-validation/dev-canary-micro-python-comment-gate-b-v2",
+  "gate_b_artifact_schema": "direct_exploratory_v1",
+  "gate_b_variant_mapping_policy": "exact_variant_id_v1",
+  "functional_contracts_path": "data/e2e-pilot/five-cwe-held-out-policy-itt-inputs-20260819-02/task-functional-contracts.jsonl",
+  "task_selection_policy": "explicit_dev_canary",
+  "task_selection_binding_policy": "exact_content_addressed_v1",
+  "task_selection_path": "configs/minimal-validation/dev-canary-micro-task-selection-v2.json",
+  "task_selection_sha256": "fd9239e40cba80af1c2c2af870a79672b5b8fc69ac0a718d68316979b911193a",
+  "task_selection_authoritative_source_sha256": "12c6b723ffe8402720bd8cfae34a1098da3cfd9cea537eda8e39409febf064bf",
+  "arm_roles": ["target_patch", "noop_rewrite"],
+  "selected_task_ids": [
+    "secaware_main_task_36e19d8ba909bc0c2f29d571f895131c8df202c871c6c8bd299a60453ed2466c",
+    "secaware_main_task_ed5a17583cdd34105343f56cb0bd3a269f849cff3dd5c73b9fe40b54bd59c8cb"
+  ],
+  "expected_blocks": 2,
+  "expected_assignments": 4,
+  "expected_generation_requests": 4,
+  "maximum_generation_provider_attempts": 4,
+  "maximum_functional_judge_provider_attempts": 4,
+  "inherit_gate_a_seed_slots": true,
+  "seed_assignment_policy": "inherited_gate_a_randomization_v1",
+  "require_gate_b_pass": true,
+  "oracle_decision_policy": "profile_scoped_decision",
+  "scientific_claim_allowed": false,
+  "scale_up_allowed": false
+}

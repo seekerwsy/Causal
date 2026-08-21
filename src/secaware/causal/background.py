@@ -22,10 +22,12 @@ from secaware.schema.causal import (
 
 
 _MAX_VARIABLES = 64
-_TEMPORAL_TIER_BY_ROLE = {
-    VariableRole.W: 0,
-    VariableRole.X: 1,
-    VariableRole.Y: 2,
+_TEMPORAL_TIERS_BY_ROLE = {
+    VariableRole.P: frozenset({1}),
+    VariableRole.W: frozenset({0}),
+    VariableRole.X: frozenset({1}),
+    VariableRole.Z: frozenset({2}),
+    VariableRole.Y: frozenset({2, 3}),
 }
 _OBSERVATIONAL_RUN_KINDS = frozenset(
     {
@@ -224,9 +226,10 @@ def _validate_knowledge_structure(
         (declaration_by_id(variable_id), tier) for variable_id, tier in knowledge.tiers
     )
     tiers_match_roles = all(
-        declaration.role in _TEMPORAL_TIER_BY_ROLE
+        declaration.role in _TEMPORAL_TIERS_BY_ROLE
         and declaration.variable_id.startswith(f"{declaration.role.value}.")
-        and tier == declaration.tier == _TEMPORAL_TIER_BY_ROLE[declaration.role]
+        and tier == declaration.tier
+        and tier in _TEMPORAL_TIERS_BY_ROLE[declaration.role]
         for declaration, tier in tier_declarations
     )
     expected_directions = _tier_reversals(knowledge)

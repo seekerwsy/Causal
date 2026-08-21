@@ -167,6 +167,47 @@ def _safety_arms(feature_id: str, operation: _Operation) -> tuple[_ArmSpec, ...]
     )
 
 
+def materialize_safety_arm_specs(
+    feature_id: str,
+    operation: _Operation,
+) -> tuple[_ArmSpec, ...]:
+    """Materialize the finite safety-arm deltas without requiring a frozen hypothesis.
+
+    Exploratory prompt construction needs the same reviewed arm semantics as confirmation, but it
+    occurs before a hypothesis exists. This narrow interface exposes only the existing finite
+    safety arm catalog; it does not materialize contrasts or a confirmation protocol.
+    """
+
+    result: tuple[_ArmSpec, ...] = ()
+    failed = False
+    try:
+        if type(feature_id) is not str or type(operation) is not _Operation:
+            raise ValueError
+        spec = prompt_feature_spec(feature_id)
+        if (
+            spec.feature_family is not _Family.SAFETY_CONTROL
+            or not spec.intervenable
+            or operation not in spec.operations
+            or not is_confirmation_target_feature(feature_id, operation)
+        ):
+            raise ValueError
+        result = tuple(
+            _ArmSpec.model_validate(item.model_dump(mode="python"))
+            for item in _safety_arms(feature_id, operation)
+        )
+        expected = 4
+        if len(result) != expected or len({item.role for item in result}) != expected:
+            raise ValueError
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        failed = True
+    if failed:
+        result = ()
+        _raise_materialization_error()
+    return result
+
+
 def _task_arms(
     feature_id: str,
     operation: _Operation,
@@ -866,6 +907,7 @@ __all__ = [
     "CONFIRMATION_TARGET_FEATURE_IDS",
     "is_confirmation_target_feature",
     "materialize_arm_protocol",
+    "materialize_safety_arm_specs",
     "revalidate_arm_protocol",
     "target_feature_from_protocol",
 ]

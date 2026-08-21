@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "repair_id": "five-cwe-gate-b-cwe502-placebo-repair-v1",
+  "purpose": "Replace only the empty CWE-502 placebo with one reviewed presentation-only suffix; reuse all accepted non-placebo interventions.",
+  "gate_a_dir": "data/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2",
+  "prior_attempt_dir": "runs/e2e-pilot/five-cwe-cwe502-micro-20260818-01",
+  "selected_task_ids": ["cluster-1e2a17897e23902efef4"],
+  "placebo_length_policy_version": "unicode-chars-relative-10pct-min5-v1",
+  "reviewed_placebo_suffix": " Keep the requested code concise and clearly organized.",
+  "expected_placebo_variants": 1,
+  "provider_call_budget": 1,
+  "semantic_retry_allowed": false,
+  "allow_outcome_generation": false,
+  "scientific_claim_allowed": false
+}

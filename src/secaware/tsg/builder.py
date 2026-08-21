@@ -23,7 +23,6 @@ from secaware.tsg.proposal_validator import (
 )
 from secaware.tsg.queries import feature_state_vector
 
-
 _EDGE_ENDPOINT_TYPES = {
     EdgeType.OPERATES_ON: (NodeType.TASK_OPERATION, NodeType.DATA_OBJECT),
     EdgeType.SOURCE_OF: (NodeType.SOURCE, NodeType.DATA_OBJECT),
@@ -242,10 +241,12 @@ def _build_structural_graph(
     if trusted.backend in {
         PromptExtractorBackend.LLM_FACTS_V1,
         PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
     }:
-        materializes_reviewed_ontology = (
-            trusted.backend is PromptExtractorBackend.DETERMINISTIC_CATALOG_V1
-        )
+        materializes_reviewed_ontology = trusted.backend in {
+            PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+            PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
+        }
         for fact in trusted.facts:
             states[fact.feature_id] = fact.state
             if fact.state is FeatureState.PRESENT:
@@ -322,6 +323,7 @@ def _add_fact_relations(
     if trusted.backend not in {
         PromptExtractorBackend.LLM_FACTS_V1,
         PromptExtractorBackend.DETERMINISTIC_CATALOG_V1,
+        PromptExtractorBackend.DETERMINISTIC_CATALOG_V2,
     }:
         return
     for fact in trusted.facts:

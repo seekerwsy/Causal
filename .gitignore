@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.tmp/
 .ruff_cache/
 .mypy_cache/
 
@@ -26,6 +27,7 @@ htmlcov/
 
 # Generated experiment outputs
 runs/
+datasets/
 
 # Editor and OS files
 .idea/

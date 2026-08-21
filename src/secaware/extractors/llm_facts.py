@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import hashlib
-from importlib import resources
 import json
 import re
+from collections.abc import Mapping
+from importlib import resources
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
@@ -25,13 +25,21 @@ from secaware.schema.records import PromptRecord
 from secaware.tsg.feature_catalog import (
     PROMPT_FEATURE_CATALOG,
     PROMPT_FEATURE_CATALOG_SHA256,
+    FeatureSpec,
 )
-from secaware.tsg.proposal_validator import _snapshot_prompt, validate_proposal
-
+from secaware.tsg.proposal_validator import (
+    _snapshot_prompt,
+    feature_is_applicable,
+    validate_proposal,
+)
 
 _STAGE = "tsg.extract_prompt.llm_facts"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FACT_RESPONSE_KEYS = frozenset({"facts"})
+_FACT_KEYS = frozenset({"evidence", "feature_id", "relation_feature_ids", "semantic_role", "state"})
+_MODEL_EVIDENCE_KEYS = frozenset({"text"})
+LLM_FACTS_CRITERIA_PROJECTION_VERSION = "feature-spec-criteria-v1"
+LLM_FACTS_RESPONSE_NORMALIZATION_VERSION = "absent-empty-relations-default-v1"
 _OUTPUT_SCHEMA = {
     "schema_version": "1.0",
     "top_level_keys": ["facts"],
@@ -42,8 +50,9 @@ _OUTPUT_SCHEMA = {
         "semantic_role",
         "state",
     ],
+    "evidence_keys": ["text"],
     "semantic_role": "feature_state",
-    "states": [state.value for state in FeatureState],
+    "states": [FeatureState.ABSENT.value, FeatureState.PRESENT.value],
 }
 
 
@@ -70,6 +79,17 @@ def _error(code: ErrorCode = ErrorCode.TSG_INVALID) -> SecAwareError:
     )
 
 
+def _semantic_criteria(spec: FeatureSpec) -> dict[str, object]:
+    return {
+        "positive_indicators": list(spec.deterministic_terms),
+        "reviewed_requirement_clauses": [item.strip() for item in spec.intervention_clauses],
+        "state_rule": (
+            "present only when prompt_text explicitly requests this feature or a "
+            "semantically equivalent requirement"
+        ),
+    }
+
+
 def catalog_prompt_view() -> list[dict[str, object]]:
     """Return the finite, outcome-blind catalog projection supplied to the model."""
     by_family = {
@@ -88,9 +108,32 @@ def catalog_prompt_view() -> list[dict[str, object]]:
             "applicable_task_families": list(spec.applicable_task_families),
             "allowed_states": [state.value for state in FeatureState],
             "allowed_relation_feature_ids": list(by_family[spec.feature_family]),
+            "semantic_criteria": _semantic_criteria(spec),
         }
         for spec in PROMPT_FEATURE_CATALOG
     ]
+
+
+def _applicable_catalog_prompt_view(prompt: PromptRecord) -> list[dict[str, object]]:
+    applicable = {
+        spec.feature_id for spec in PROMPT_FEATURE_CATALOG if feature_is_applicable(spec, prompt)
+    }
+    result: list[dict[str, object]] = []
+    for item in catalog_prompt_view():
+        if item["feature_id"] not in applicable:
+            continue
+        projected = dict(item)
+        projected["allowed_states"] = [
+            FeatureState.ABSENT.value,
+            FeatureState.PRESENT.value,
+        ]
+        projected["allowed_relation_feature_ids"] = [
+            feature_id
+            for feature_id in item["allowed_relation_feature_ids"]
+            if feature_id in applicable
+        ]
+        result.append(projected)
+    return result
 
 
 def _structured_policy_payload(policy: StructuredLLMPolicy) -> dict[str, object]:
@@ -112,8 +155,22 @@ def llm_facts_policy_sha256(
     payload = {
         "backend": PromptExtractorBackend.LLM_FACTS_V1.value,
         "catalog_sha256": catalog_sha256,
+        "criteria_projection_version": LLM_FACTS_CRITERIA_PROJECTION_VERSION,
         "max_response_chars": max_response_chars,
         "structured_llm_policy": _structured_policy_payload(policy),
+    }
+    return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
+
+
+def llm_facts_response_normalization_sha256() -> str:
+    """Identify the bounded local response default separately from request identity."""
+
+    payload = {
+        "policy_version": LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
+        "defaulted_field": "relation_feature_ids",
+        "eligible_state": FeatureState.ABSENT.value,
+        "required_evidence": [],
+        "default_value": [],
     }
     return hashlib.sha256(canonical_request_bytes(payload)).hexdigest()
 
@@ -168,8 +225,14 @@ def facts_request_payload(
         "task_id": source.task_id,
         "prompt_sha256": hashlib.sha256(source.prompt.encode("utf-8")).hexdigest(),
         "prompt_text": source.prompt,
+        "prompt_context": {
+            "language": source.language,
+            "cwe": source.cwe,
+            "task_family": source.task_family,
+        },
         "catalog_sha256": trusted.catalog_sha256,
-        "allowed_features": catalog_prompt_view(),
+        "criteria_projection_version": LLM_FACTS_CRITERIA_PROJECTION_VERSION,
+        "allowed_features": _applicable_catalog_prompt_view(source),
         "output_kind": "semantic_facts",
     }
 
@@ -194,6 +257,83 @@ def _json_payload(raw_text: str) -> Mapping[str, object]:
     if type(payload["facts"]) is not list:
         raise ValueError("invalid facts response collection")
     return payload
+
+
+def _normalized_facts(
+    value: object,
+    prompt: PromptRecord,
+) -> list[dict[str, object]]:
+    """Validate model-authored spans, then derive cryptographic digests locally."""
+    if type(value) is not list:
+        raise ValueError("invalid facts response collection")
+    prompt_text = prompt.prompt
+    applicable_ids = {
+        spec.feature_id for spec in PROMPT_FEATURE_CATALOG if feature_is_applicable(spec, prompt)
+    }
+    result: list[dict[str, object]] = []
+    returned_ids: list[object] = []
+    for fact in value:
+        if type(fact) is not dict:
+            raise ValueError("invalid fact response")
+        fact_keys = frozenset(fact)
+        if (
+            fact_keys == _FACT_KEYS - {"relation_feature_ids"}
+            and fact.get("state") == FeatureState.ABSENT.value
+            and fact.get("evidence") == []
+        ):
+            fact = {**fact, "relation_feature_ids": []}
+            fact_keys = frozenset(fact)
+        if fact_keys != _FACT_KEYS:
+            raise ValueError("invalid fact response")
+        feature_id = fact["feature_id"]
+        returned_ids.append(feature_id)
+        if feature_id not in applicable_ids or fact["state"] not in {
+            FeatureState.ABSENT.value,
+            FeatureState.PRESENT.value,
+        }:
+            raise ValueError("invalid applicable fact response")
+        evidence = fact["evidence"]
+        if type(evidence) is not list:
+            raise ValueError("invalid fact evidence collection")
+        normalized_evidence: list[dict[str, object]] = []
+        for span in evidence:
+            if type(span) is not dict or frozenset(span) != _MODEL_EVIDENCE_KEYS:
+                raise ValueError("invalid fact evidence")
+            text = span["text"]
+            if (
+                type(text) is not str
+                or not text
+                or len(text) > 4096
+                or prompt_text.count(text) != 1
+            ):
+                raise ValueError("invalid fact evidence")
+            start = prompt_text.index(text)
+            end = start + len(text)
+            normalized_evidence.append(
+                {
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                    "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                }
+            )
+        normalized = dict(fact)
+        normalized["evidence"] = normalized_evidence
+        result.append(normalized)
+    if len(returned_ids) != len(set(returned_ids)) or set(returned_ids) != applicable_ids:
+        raise ValueError("incomplete applicable fact response")
+    for spec in PROMPT_FEATURE_CATALOG:
+        if spec.feature_id not in applicable_ids:
+            result.append(
+                {
+                    "feature_id": spec.feature_id,
+                    "state": FeatureState.NOT_APPLICABLE.value,
+                    "semantic_role": "feature_state",
+                    "evidence": [],
+                    "relation_feature_ids": [],
+                }
+            )
+    return result
 
 
 def parse_facts_response(
@@ -228,7 +368,7 @@ def parse_facts_response(
             "policy_sha256": trusted.policy_sha256,
             "response_sha256": hashlib.sha256(raw).hexdigest(),
             "raw_response": raw_text,
-            "facts": response["facts"],
+            "facts": _normalized_facts(response["facts"], source),
             "direct_nodes": [],
             "direct_edges": [],
         }
@@ -330,12 +470,15 @@ class LLMFactsExtractor:
 
 
 __all__ = [
+    "LLM_FACTS_CRITERIA_PROJECTION_VERSION",
     "LLM_FACTS_OUTPUT_SCHEMA_SHA256",
+    "LLM_FACTS_RESPONSE_NORMALIZATION_VERSION",
     "LLM_FACTS_SYSTEM_TEMPLATE",
     "LLM_FACTS_SYSTEM_TEMPLATE_SHA256",
     "LLMFactsExtractor",
     "catalog_prompt_view",
     "facts_request_payload",
     "llm_facts_policy_sha256",
+    "llm_facts_response_normalization_sha256",
     "parse_facts_response",
 ]

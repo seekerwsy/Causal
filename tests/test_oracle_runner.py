@@ -4,10 +4,9 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
-from functools import partial
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -15,6 +14,8 @@ import threading
 import time
 import traceback
 from collections.abc import Iterator, Sequence
+from functools import partial
+from pathlib import Path
 
 import pytest
 
@@ -26,7 +27,6 @@ from secaware.oracle.runner import (
     run_analyzer_process,
     validate_analyzer_runtime,
 )
-
 
 _POPEN_TYPE = subprocess.Popen
 
@@ -336,17 +336,136 @@ def test_linux_runtime_probe_source_requires_sealed_memfd_and_proc_fd() -> None:
     source = runner_module._LINUX_RUNTIME_PROBE_SOURCE
 
     for required in (
-        "os.memfd_create",
+        'getattr(os, "memfd_create", None)',
+        'getattr(libc, "memfd_create", None)',
         "MFD_ALLOW_SEALING",
-        "fcntl.F_ADD_SEALS",
-        "fcntl.F_SEAL_WRITE",
-        "fcntl.F_SEAL_GROW",
-        "fcntl.F_SEAL_SHRINK",
-        "fcntl.F_SEAL_SEAL",
+        'getattr(fcntl, "F_ADD_SEALS", F_ADD_SEALS)',
+        'getattr(fcntl, "F_GET_SEALS", F_GET_SEALS)',
+        'getattr(fcntl, "F_SEAL_WRITE", F_SEAL_WRITE)',
+        'getattr(fcntl, "F_SEAL_GROW", F_SEAL_GROW)',
+        'getattr(fcntl, "F_SEAL_SHRINK", F_SEAL_SHRINK)',
+        'getattr(fcntl, "F_SEAL_SEAL", F_SEAL_SEAL)',
         'f"/proc/self/fd/{sealed_fd}"',
         "hashlib.sha256",
     ):
         assert required in source
+
+
+def test_linux_memfd_helper_prefers_stdlib_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    descriptor = os.open(os.devnull, os.O_RDONLY)
+    calls: list[tuple[str, int]] = []
+
+    def stdlib_memfd_create(name: str, flags: int) -> int:
+        calls.append((name, flags))
+        return descriptor
+
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(
+        runner_module.os,
+        "memfd_create",
+        stdlib_memfd_create,
+        raising=False,
+    )
+
+    try:
+        assert runner_module._linux_memfd_create("secaware-test") == descriptor
+        assert calls == [("secaware-test", 0x3)]
+    finally:
+        os.close(descriptor)
+
+
+def test_linux_memfd_helper_uses_libc_when_stdlib_api_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+
+    descriptor = os.open(os.devnull, os.O_RDONLY)
+    calls: list[tuple[bytes, int]] = []
+
+    class LibcMemfdCreate:
+        argtypes: object = None
+        restype: object = None
+
+        def __call__(self, name: bytes, flags: int) -> int:
+            calls.append((name, flags))
+            return descriptor
+
+    class Libc:
+        memfd_create = LibcMemfdCreate()
+
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.delattr(runner_module.os, "memfd_create", raising=False)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: Libc())
+
+    try:
+        assert runner_module._linux_memfd_create("secaware-test") == descriptor
+        assert calls == [(b"secaware-test", 0x3)]
+        assert Libc.memfd_create.argtypes == (ctypes.c_char_p, ctypes.c_uint)
+        assert Libc.memfd_create.restype is ctypes.c_int
+    finally:
+        os.close(descriptor)
+
+
+def test_linux_seal_helper_uses_uapi_constants_when_stdlib_constants_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, ...]] = []
+
+    class FcntlWithoutConstants:
+        @staticmethod
+        def fcntl(*args: int) -> int:
+            calls.append(args)
+            return 0xF if len(args) == 2 else 0
+
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setitem(sys.modules, "fcntl", FcntlWithoutConstants())
+
+    runner_module._seal_linux_memfd(42)
+
+    assert calls == [(42, 1033, 0xF), (42, 1034)]
+
+
+def test_linux_seal_helper_prefers_stdlib_constants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, ...]] = []
+
+    class FcntlWithConstants:
+        F_ADD_SEALS = 2001
+        F_GET_SEALS = 2002
+        F_SEAL_WRITE = 0x10
+        F_SEAL_GROW = 0x20
+        F_SEAL_SHRINK = 0x40
+        F_SEAL_SEAL = 0x80
+
+        @staticmethod
+        def fcntl(*args: int) -> int:
+            calls.append(args)
+            return 0xF0 if len(args) == 2 else 0
+
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setitem(sys.modules, "fcntl", FcntlWithConstants())
+
+    runner_module._seal_linux_memfd(42)
+
+    assert calls == [(42, 2001, 0xF0), (42, 2002)]
+
+
+def test_linux_memfd_helper_fails_closed_off_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
+    monkeypatch.setattr(
+        runner_module.os,
+        "memfd_create",
+        lambda name, flags: calls.append((name, flags)),
+        raising=False,
+    )
+
+    with pytest.raises(runner_module._RunnerFailure) as exc_info:
+        runner_module._linux_memfd_create("secaware-test")
+
+    assert exc_info.value.code is ErrorCode.ANALYZER_FAILED
+    assert calls == []
 
 
 def test_linux_seal_probe_failure_is_safe_and_reaps_without_analyzer(
@@ -380,7 +499,7 @@ def test_linux_seal_probe_failure_is_safe_and_reaps_without_analyzer(
 
     _assert_safe_error(exc_info.value, ErrorCode.ANALYZER_FAILED)
     assert launched_source == [runner_module._LINUX_RUNTIME_PROBE_SOURCE]
-    assert "fcntl.F_ADD_SEALS" in launched_source[0]
+    assert 'getattr(fcntl, "F_ADD_SEALS", F_ADD_SEALS)' in launched_source[0]
 
 
 def test_runtime_preflight_reports_linux_namespace_capabilities(
@@ -631,6 +750,111 @@ def test_runner_passes_safe_popen_contract_and_minimal_environment(
         "USERPROFILE",
         "WINDIR",
     }
+
+
+def test_linux_minimal_environment_adds_only_audited_tools_after_analyzer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "analyzer-bin" / "semgrep"
+    executable.parent.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    private_ambient = str(tmp_path / "private-ambient-bin")
+    trusted_tools = (str(tmp_path / "trusted-tools"), "/usr/bin")
+    monkeypatch.setenv("PATH", private_ambient)
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(
+        runner_module,
+        "_trusted_linux_tool_directories",
+        lambda: trusted_tools,
+    )
+
+    environment = runner_module._minimal_environment(executable, cwd)
+
+    assert environment["PATH"].split(os.pathsep) == [
+        str(executable.parent),
+        *trusted_tools,
+    ]
+    assert private_ambient not in environment["PATH"]
+
+
+def test_linux_trusted_tools_reject_unsafe_relative_and_non_root_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe = tmp_path / "safe"
+    group_writable = tmp_path / "group-writable"
+    non_root = tmp_path / "non-root"
+    for directory in (safe, group_writable, non_root):
+        directory.mkdir()
+    safe = safe.resolve()
+    group_writable = group_writable.resolve()
+    non_root = non_root.resolve()
+    real_stat = Path.stat
+
+    class Metadata:
+        def __init__(self, *, mode: int, uid: int) -> None:
+            self.st_mode = mode
+            self.st_uid = uid
+
+    metadata = {
+        safe: Metadata(mode=stat.S_IFDIR | 0o755, uid=0),
+        group_writable: Metadata(mode=stat.S_IFDIR | 0o775, uid=0),
+        non_root: Metadata(mode=stat.S_IFDIR | 0o755, uid=1000),
+    }
+
+    def audited_stat(path: Path, *args: object, **kwargs: object) -> object:
+        if path in metadata:
+            return metadata[path]
+        return real_stat(path, *args, **kwargs)
+
+    configured = os.pathsep.join(
+        (str(safe), str(safe), str(group_writable), str(non_root), "relative/bin")
+    )
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "linux")
+    monkeypatch.setattr(runner_module.os, "confstr", lambda name: configured, raising=False)
+    monkeypatch.setattr(runner_module.Path, "stat", audited_stat)
+
+    assert runner_module._trusted_linux_tool_directories() == (str(safe),)
+
+
+def test_trusted_linux_tools_and_extra_path_are_not_used_off_linux(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "analyzer-bin" / "analyzer"
+    cwd = tmp_path / "cwd"
+    executable.parent.mkdir()
+    cwd.mkdir()
+    monkeypatch.setattr(runner_module, "_detect_runtime_platform", lambda: "windows")
+    monkeypatch.setattr(
+        runner_module,
+        "_trusted_linux_tool_directories",
+        lambda: (_ for _ in ()).throw(AssertionError("Linux tools must not be queried")),
+    )
+
+    environment = runner_module._minimal_environment(executable, cwd)
+
+    assert environment["PATH"] == str(executable.parent)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux Semgrep isolation smoke")
+def test_linux_semgrep_version_runs_with_audited_standard_tool_path(tmp_path: Path) -> None:
+    executable = shutil.which("semgrep")
+    if executable is None:
+        pytest.skip("Semgrep is unavailable")
+
+    result = run_analyzer_process(
+        (executable, "--version"),
+        cwd=tmp_path,
+        timeout_seconds=30,
+        max_stdout_bytes=4096,
+        max_stderr_bytes=4096,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip()
 
 
 def test_runner_does_not_use_communicate_even_when_descendant_inherits_handles(

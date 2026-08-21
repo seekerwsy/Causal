@@ -91,7 +91,21 @@ class _DeterministicFactsTransport:
             self.policy,
         )
         assert proposal.raw_response is not None
-        return proposal.raw_response.encode("utf-8")
+        response = json.loads(proposal.raw_response)
+        response["facts"] = [
+            fact for fact in response["facts"] if fact["state"] != "not_applicable"
+        ]
+        for fact in response["facts"]:
+            for span in fact["evidence"]:
+                span.pop("start")
+                span.pop("end")
+                span.pop("text_sha256")
+        return json.dumps(
+            response,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 
 class _FailingTransport:

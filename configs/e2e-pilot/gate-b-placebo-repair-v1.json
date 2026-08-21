@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "repair_id": "gate-b-placebo-repair-cwe78-cwe89-v1",
+  "purpose": "Regenerate only the two invalid length-matched placebo variants under the frozen Unicode-character length contract.",
+  "gate_a_dir": "runs/e2e-pilot/randomized-exploratory-discovery-canary-v1-20260815-01",
+  "prior_attempt_dir": "runs/e2e-pilot/gate-b-v4-resume-live-20260815-02",
+  "selected_task_ids": [
+    "cluster-22d97b466b5d2c737129",
+    "cluster-b80c034159e718b8bbc9"
+  ],
+  "placebo_length_policy_version": "unicode-chars-relative-10pct-min5-v1",
+  "expected_placebo_variants": 2,
+  "provider_call_budget": 2,
+  "semantic_retry_allowed": false,
+  "allow_outcome_generation": false,
+  "scientific_claim_allowed": false
+}

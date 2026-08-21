@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "revalidation_id": "gate-b-extractor-revalidation-cwe78-cwe89-measurement-v2",
+  "purpose": "Revalidate both sources and all eight final measurement-canary variants without repeating accepted non-placebo intervention calls.",
+  "gate_a_dir": "runs/e2e-pilot/randomized-exploratory-discovery-qwen7b-v2-20260818-01",
+  "intervention_attempt_dir": "runs/e2e-pilot/gate-b-measurement-v2-live-20260818-01",
+  "placebo_repair_dir": "runs/e2e-pilot/gate-b-placebo-repair-measurement-v2-live-20260818-01",
+  "expected_prior_failure_message": "exploratory Gate B placebo length validation failed",
+  "selected_task_ids": [
+    "cluster-2ee6c126c7b6024731de",
+    "cluster-7dfad77191063efeb621"
+  ],
+  "expected_source_prompts": 2,
+  "expected_variant_prompts": 8,
+  "provider_call_budget": 10,
+  "semantic_retry_allowed": false,
+  "allow_outcome_generation": false,
+  "scientific_claim_allowed": false
+}

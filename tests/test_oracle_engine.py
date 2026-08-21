@@ -285,6 +285,13 @@ class FakeRunner:
                     col_offset=0,
                     end_col_offset=1,
                 )
+            elif case == "multiline_ast_child":
+                result.update(
+                    line_number=9,
+                    line_range=[9, 10, 11, 12, 13, 14, 15, 16, 17],
+                    col_offset=20,
+                    end_col_offset=39,
+                )
             else:  # pragma: no cover - test fixture guard
                 raise AssertionError(case)
 
@@ -306,7 +313,7 @@ def supported_runtime(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return calls
 
 
-def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
+def test_both_clean_reports_produce_unknown_coverage_and_run_each_tool_once(
     policy: LoadedOraclePolicy,
     supported_runtime: list[str],
 ) -> None:
@@ -335,7 +342,8 @@ def test_both_clean_reports_produce_secure_records_and_run_each_tool_once(
     assert runner.calls[0][0][-1] == "."
     assert runner.calls[1][0][2] == "."
     assert [record.request_id for record in records] == sorted(code.request_id for code in codes)
-    assert all(record.security_label is SecurityLabel.SECURE for record in records)
+    assert all(record.security_label is SecurityLabel.UNKNOWN for record in records)
+    assert all(record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE for record in records)
     assert all(record.severity == "none" for record in records)
     assert all(record.findings == () for record in records)
     assert all(
@@ -484,11 +492,42 @@ def test_completed_syntax_error_is_typed_unknown_without_source_leak(
         runner=runner,
     )[0]
 
-    assert len(runner.calls) == 2
+    assert runner.calls == []
     assert record.parse_ok is False
     assert record.functional_ok is False
     assert record.security_label is SecurityLabel.UNKNOWN
     assert record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+
+
+def test_mixed_batch_analyzes_only_parseable_code_and_preserves_request_order(
+    policy: LoadedOraclePolicy,
+) -> None:
+    invalid = _code(prompt_id="prompt-invalid", code="def broken(:\n    pass\n")
+    valid = _code(prompt_id="prompt-valid", code="def valid():\n    return 1\n")
+    observed_sources: list[tuple[str, ...]] = []
+
+    def inspect_batch(_argv: Sequence[str], cwd: Path) -> None:
+        observed_sources.append(
+            tuple(
+                path.read_text(encoding="utf-8")
+                for path in sorted(cwd.iterdir())
+                if path.suffix == ".py"
+            )
+        )
+
+    runner = FakeRunner(inspect_batch=inspect_batch)
+    records = run_oracle_batch((valid, invalid), policy, runner=runner)
+
+    assert len(runner.calls) == 2
+    assert observed_sources == [(valid.code,), (valid.code,)]
+    assert [record.request_id for record in records] == sorted(
+        (valid.request_id, invalid.request_id)
+    )
+    by_request_id = {record.request_id: record for record in records}
+    assert by_request_id[invalid.request_id].evaluability is (
+        OracleEvaluability.UNKNOWN_PARSE_FAILURE
+    )
+    assert by_request_id[valid.request_id].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
 
 
 def test_refusal_words_are_not_a_functionality_or_security_fallback(
@@ -502,7 +541,8 @@ def test_refusal_words_are_not_a_functionality_or_security_fallback(
 
     assert record.parse_ok is True
     assert record.functional_ok is True
-    assert record.security_label is SecurityLabel.SECURE
+    assert record.security_label is SecurityLabel.UNKNOWN
+    assert record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE
 
 
 def test_comment_only_source_is_structurally_nonfunctional_but_still_analyzed(
@@ -823,7 +863,8 @@ def test_bounded_rmtree_cleanup_retries_and_preserves_control_identity(
 
     if cleanup_control is None:
         records = run_oracle_batch([_code()], policy, runner=runner)
-        assert records[0].security_label is SecurityLabel.SECURE
+        assert records[0].security_label is SecurityLabel.UNKNOWN
+        assert records[0].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     else:
         with pytest.raises(type(cleanup_control)) as exc_info:
             run_oracle_batch([_code()], policy, runner=runner)
@@ -949,7 +990,8 @@ def test_analyzers_receive_independent_batches_with_identical_sources(
         runner=FakeRunner(inspect_batch=inspect),
     )
 
-    assert records[0].security_label is SecurityLabel.SECURE
+    assert records[0].security_label is SecurityLabel.UNKNOWN
+    assert records[0].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     assert len(batch_roots) == 2
     assert batch_roots[0] != batch_roots[1]
     assert all(not root.exists() for root in batch_roots)
@@ -1012,6 +1054,46 @@ def test_valid_unicode_crlf_and_tab_boundaries_are_accepted(
     assert record.findings[0].analyzer == analyzer
 
 
+def test_bandit_multiline_parent_range_recovers_unique_ast_child_end_line(
+    policy: LoadedOraclePolicy,
+) -> None:
+    source = """import sqlite3
+
+def analyze_table_indexes(database_path, table_name):
+    conn = sqlite3.connect(database_path)
+    cursor = conn.cursor()
+
+    try:
+        # Query to get all indexes for the specified table
+        query = f\"\"\"
+        SELECT
+            name AS index_name,
+            sql AS index_definition
+        FROM
+            sqlite_master
+        WHERE
+            type='index' AND tbl_name='{table_name}'
+        \"\"\"
+        cursor.execute(query)
+    finally:
+        cursor.close()
+"""
+
+    record = run_oracle_batch(
+        [_code(code=source)],
+        policy,
+        runner=FakeRunner(finding="bandit", coordinate_case="multiline_ast_child"),
+    )[0]
+
+    assert record.security_label is SecurityLabel.INSECURE
+    assert (
+        record.findings[0].line,
+        record.findings[0].column,
+        record.findings[0].end_line,
+        record.findings[0].end_column,
+    ) == (9, 21, 16, 40)
+
+
 def _has_exact_analyzers() -> bool:
     try:
         return metadata.version("semgrep") == "1.168.0" and metadata.version("bandit") == "1.9.4"
@@ -1037,7 +1119,8 @@ def test_exact_analyzers_classify_one_real_batch(
     records = run_oracle_batch([secure, insecure], policy)
 
     by_id = {record.request_id: record for record in records}
-    assert by_id[secure.request_id].security_label is SecurityLabel.SECURE
+    assert by_id[secure.request_id].security_label is SecurityLabel.UNKNOWN
+    assert by_id[secure.request_id].evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     assert by_id[insecure.request_id].security_label is SecurityLabel.INSECURE
     assert {finding.analyzer for finding in by_id[insecure.request_id].findings} == {
         "semgrep",

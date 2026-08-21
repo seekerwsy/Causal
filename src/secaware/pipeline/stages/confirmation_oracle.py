@@ -17,6 +17,7 @@ from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.io.run_store import RunStore
 from secaware.oracle import aggregator as oracle_aggregator
+from secaware.oracle.coverage import apply_negative_coverage, validate_prompt_coverage_profiles
 from secaware.oracle.aggregator import (
     AnalyzerRunner,
     OracleCodeAnalysis,
@@ -24,6 +25,12 @@ from secaware.oracle.aggregator import (
 )
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.oracle.policy import load_policy_bundle
+from secaware.oracle.profile_decision import (
+    decide_oracle_profile,
+    extract_python_mechanism_trace,
+    mechanism_trace_sha256,
+    validate_python_mechanism_trace,
+)
 from secaware.oracle.strict_json import load_strict_json_bytes
 from secaware.pipeline.bounded_traversal import BoundedTraversalError, iter_bounded_tree
 from secaware.pipeline.artifact import canonical_sha256
@@ -92,6 +99,7 @@ _FUTURE_DIRS = frozenset({"analysis", "effects", "reports", "report", "jci", "rf
 _FUTURE_STAGE_NAMES = frozenset(
     {
         "import-functional-outcomes",
+        "judge-functionality",
         "estimate-confirmation-effects",
         "confirm",
         "analyze-jci",
@@ -388,6 +396,8 @@ def validate_confirmation_oracle_coverage(
 def _bind_oracle_analyses(
     codes: Sequence[CanonicalGeneratedCodeRecord],
     analyses: Sequence[OracleCodeAnalysis],
+    profiles_by_source_prompt: Mapping[str, object] | None = None,
+    source_prompt_by_variant: Mapping[str, str] | None = None,
 ) -> tuple[OracleRecord, ...]:
     try:
         code_by_request = {item.request_id: item for item in codes}
@@ -397,6 +407,8 @@ def _bind_oracle_analyses(
             or len(analysis_by_request) != len(analyses)
             or set(code_by_request) != set(analysis_by_request)
         ):
+            raise ValueError
+        if (profiles_by_source_prompt is None) != (source_prompt_by_variant is None):
             raise ValueError
         records: list[OracleRecord] = []
         for request_id in sorted(code_by_request):
@@ -410,9 +422,22 @@ def _bind_oracle_analyses(
                 or analysis.seed_id != code.seed_id
             ):
                 raise ValueError
-            records.append(
-                OracleRecord(
-                    schema_version="1.2",
+            profile = None
+            if profiles_by_source_prompt is not None and source_prompt_by_variant is not None:
+                source_prompt_id = source_prompt_by_variant.get(code.variant_id or "")
+                profile = profiles_by_source_prompt.get(source_prompt_id or "")
+                if profile is None:
+                    raise ValueError
+            if profile is not None and getattr(profile, "decision_backend", None) == (
+                "python_ast_mechanism_v1"
+            ):
+                decision = decide_oracle_profile(
+                    analysis.mechanism_trace,
+                    analysis.findings,
+                    profile,
+                )
+                oracle = OracleRecord(
+                    schema_version="1.3",
                     request_id=code.request_id,
                     code_id=code.code_id,
                     code_sha256=code.code_sha256,
@@ -430,13 +455,51 @@ def _bind_oracle_analyses(
                     arm_role=code.arm_role,
                     parse_ok=analysis.parse_ok,
                     functional_ok=analysis.functional_ok,
-                    security_label=analysis.security_label,
-                    evaluability=analysis.evaluability,
-                    severity=analysis.severity,
-                    findings=analysis.findings,
+                    security_label=decision.security_label,
+                    evaluability=decision.evaluability,
+                    severity=decision.severity,
+                    findings=decision.findings,
+                    raw_findings=decision.raw_findings,
                     analyzers=analysis.analyzers,
+                    decision_profile_id=decision.profile_id,
+                    decision_engine_version=decision.decision_version,
+                    decision_reason_code=decision.reason_code,
+                    mechanism_evidence_sha256=mechanism_trace_sha256(decision.mechanism_trace),
                 )
+                records.append(oracle)
+                continue
+            oracle = OracleRecord(
+                schema_version="1.2",
+                request_id=code.request_id,
+                code_id=code.code_id,
+                code_sha256=code.code_sha256,
+                prompt_id=code.prompt_id,
+                condition="confirm_arm",
+                model_id=code.model_id,
+                seed_id=code.seed_id,
+                hypothesis_id=code.hypothesis_id,
+                assignment_id=code.assignment_id,
+                target_spec_id=code.target_spec_id,
+                target_instance_id=code.target_instance_id,
+                arm_protocol_id=code.arm_protocol_id,
+                protocol_instance_id=code.protocol_instance_id,
+                variant_id=code.variant_id,
+                arm_role=code.arm_role,
+                parse_ok=analysis.parse_ok,
+                functional_ok=analysis.functional_ok,
+                security_label=analysis.security_label,
+                evaluability=analysis.evaluability,
+                severity=analysis.severity,
+                findings=analysis.findings,
+                analyzers=analysis.analyzers,
             )
+            if profile is not None and oracle.evaluability.value == "unknown_coverage":
+                if getattr(profile, "zero_finding_supported", None):
+                    payload = oracle.model_dump(mode="python", round_trip=True, warnings=False)
+                    payload["security_label"] = "secure"
+                    payload["evaluability"] = "evaluable"
+                    oracle = OracleRecord.model_validate(payload)
+            records.append(oracle)
         return tuple(records)
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
@@ -733,6 +796,7 @@ def _run_confirmation_oracle_stage(
             runtime_validator=analyzer_runtime.validator,
         )
     )
+    profile_by_source_prompt: dict[str, object] = {}
     verify_runtime_bundle()
     effective_policy_sha256 = canonical_sha256(
         {
@@ -750,6 +814,7 @@ def _run_confirmation_oracle_stage(
         initial_policy.semgrep_rules_path,
         initial_policy.bandit_config_path,
         initial_policy.bandit_metadata_path,
+        initial_policy.coverage_contract_path,
     )
     inputs = (
         prompt_path,
@@ -779,7 +844,7 @@ def _run_confirmation_oracle_stage(
     snapshot: _InputSnapshot | None = None
 
     def capture_input_snapshot() -> tuple[str, ...]:
-        nonlocal snapshot
+        nonlocal profile_by_source_prompt, snapshot
         verify_runtime_bundle()
         if snapshot is not None:
             raise _error("confirmation Oracle input snapshot failed validation")
@@ -829,6 +894,9 @@ def _run_confirmation_oracle_stage(
             )
             parser = runtime_callables["input.parse_jsonl"]
             prompts = parser(payload_by_path[prompt_path], PromptRecord, allow_empty=False)
+            profile_by_source_prompt = runtime_callables["coverage.validate_prompt_profiles"](
+                prompts, initial_policy
+            )
             attestations = parser(
                 payload_by_path[attestation_path],
                 PromptRoleAttestationRecord,
@@ -1051,7 +1119,15 @@ def _run_confirmation_oracle_stage(
             )
             verify_runtime_bundle()
             analyses = runtime_callables["aggregate.validate_code_analyses"](analyses)
-            records = runtime_callables["aggregate.bind_oracle_analyses"](snapshot.codes, analyses)
+            source_prompt_by_variant = {
+                variant.variant_id: variant.source_prompt_id for variant in snapshot.variants
+            }
+            records = runtime_callables["aggregate.bind_oracle_analyses"](
+                snapshot.codes,
+                analyses,
+                profile_by_source_prompt,
+                source_prompt_by_variant,
+            )
         runtime_callables["relation.validate_confirmation_oracle_coverage"](
             snapshot.assignments, snapshot.executions, snapshot.codes, records
         )
@@ -1274,6 +1350,12 @@ def _confirmation_oracle_runtime_callables(
         "aggregate.run_oracle_code_batch": oracle_aggregator.run_oracle_code_batch,
         "aggregate.snapshot_code_inputs": oracle_aggregator._snapshot_oracle_code_inputs,
         "aggregate.validate_code_analyses": oracle_aggregator.validate_oracle_code_analyses,
+        "aggregate.extract_mechanism_trace": extract_python_mechanism_trace,
+        "aggregate.validate_mechanism_trace": validate_python_mechanism_trace,
+        "aggregate.decide_oracle_profile": decide_oracle_profile,
+        "aggregate.mechanism_trace_sha256": mechanism_trace_sha256,
+        "coverage.apply_negative_coverage": apply_negative_coverage,
+        "coverage.validate_prompt_profiles": validate_prompt_coverage_profiles,
         "aggregate.validate_report_coordinates": oracle_aggregator._validate_report_coordinates,
         "input.bounded_tree": iter_bounded_tree,
         "input.guard_no_future_artifacts": _guard_no_future_artifacts,

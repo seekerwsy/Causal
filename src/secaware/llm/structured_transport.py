@@ -75,6 +75,7 @@ class StructuredLLMPolicy:
     timeout_seconds: float
     max_attempts: int
     max_response_bytes: int
+    enable_thinking: bool | None = None
 
     def __post_init__(self) -> None:
         hashes = (
@@ -99,6 +100,8 @@ class StructuredLLMPolicy:
         if self.seed is not None and (
             type(self.seed) is not int or not _MIN_SEED <= self.seed <= _MAX_SEED
         ):
+            raise ValueError("structured LLM policy validation failed")
+        if self.enable_thinking is not None and type(self.enable_thinking) is not bool:
             raise ValueError("structured LLM policy validation failed")
         if type(self.max_attempts) is not int or not 1 <= self.max_attempts <= _MAX_ATTEMPTS:
             raise ValueError("structured LLM policy validation failed")
@@ -472,6 +475,10 @@ class OpenAICompatibleStructuredTransport:
                     "response_format": {"type": "json_object"},
                     "timeout": trusted.timeout_seconds,
                 }
+                if trusted.enable_thinking is not None:
+                    payload["extra_body"] = {
+                        "enable_thinking": trusted.enable_thinking,
+                    }
                 response = None
                 classification = None
                 try:

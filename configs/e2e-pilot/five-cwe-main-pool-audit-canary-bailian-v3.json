@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "run_id": "five-cwe-main-pool-audit-canary-bailian-v3",
+  "allow_provider_calls": true,
+  "authorization_id": "user-approved-main-pool-audit-schema-repair-20260818",
+  "max_candidates_per_cwe": 1,
+  "maximum_provider_calls": 5,
+  "llm": {
+    "provider": "openai_compatible",
+    "model_id": "qwen3.5-flash-2026-02-23",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key_env": "ALI_BAILIAN_API_KEY",
+    "timeout_seconds": 60.0,
+    "max_attempts": 1,
+    "max_response_bytes": 65536,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 2026081827,
+    "enable_thinking": false
+  }
+}

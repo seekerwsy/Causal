@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/home/ubuntu/secaware-deployments/five-cwe-gate-b-resume-20260818-16/scripts/run_randomized_exploratory_gate_b.py", line 45, in <module>
+    main()
+  File "/home/ubuntu/secaware-deployments/five-cwe-gate-b-resume-20260818-16/scripts/run_randomized_exploratory_gate_b.py", line 34, in main
+    report = run_exploratory_gate_b(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/secaware-deployments/five-cwe-gate-b-resume-20260818-16/src/secaware/exploratory/gate_b.py", line 735, in run_exploratory_gate_b
+    raise ValueError("exploratory Gate B source prefix failed validation")
+ValueError: exploratory Gate B source prefix failed validation

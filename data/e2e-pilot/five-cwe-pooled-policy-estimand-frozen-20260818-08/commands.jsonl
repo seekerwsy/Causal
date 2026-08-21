@@ -1,0 +1,1 @@
+{"argv":["scripts\\freeze_five_cwe_policy_estimand.py","--task-pool-dir","data\\e2e-pilot\\five-cwe-main-task-pool-frozen-20260818-07","--config","configs\\e2e-pilot\\five-cwe-pooled-policy-estimand-v1.json","--run-dir","data\\e2e-pilot\\five-cwe-pooled-policy-estimand-frozen-20260818-08"],"provider_calls":0,"schema_version":"1.0"}

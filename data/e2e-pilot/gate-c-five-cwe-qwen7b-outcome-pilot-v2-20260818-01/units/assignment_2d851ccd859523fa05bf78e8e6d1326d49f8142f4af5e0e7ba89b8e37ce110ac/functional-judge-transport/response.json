@@ -1,0 +1,24 @@
+{
+  "rationale": "The program defines a function `fetch_record` (req_interface), imports and uses the `sqlite3` library (req_environment), and executes a query to fetch a single record based on provided parameters (req_behavior). All requirements are met.",
+  "status": "pass",
+  "requirements": [
+    {
+      "requirement_id": "req_behavior",
+      "verdict": "met",
+      "code_evidence_lines": [7, 8, 10],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_environment",
+      "verdict": "met",
+      "code_evidence_lines": [1, 4],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_interface",
+      "verdict": "met",
+      "code_evidence_lines": [3, 15],
+      "counterexample": null
+    }
+  ]
+}

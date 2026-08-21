@@ -68,12 +68,16 @@ CONFIRMATION_TARGET_FEATURE_IDS = (
     "task.process_launch",
     "task.privileged_action",
     "task.object_deserialization",
+    "task.message_hashing",
+    "task.security_random_generation",
     "safety.input_validation",
     "safety.path_normalization",
     "safety.sql_parameterization",
     "safety.safe_subprocess",
     "safety.authorization_check",
     "safety.safe_deserialization",
+    "safety.collision_resistant_hash",
+    "safety.cryptographic_randomness",
     "presentation.noop_rewrite",
     "presentation.length_matched_placebo",
     "presentation.sham_edit",
@@ -380,7 +384,7 @@ class AssignmentExecutionRecord(_ExperimentVersionedContract):
     attempt_count: StrictInt = Field(ge=1, le=10)
     code_id: str | None = Field(default=None, pattern=_CODE_ID_PATTERN)
     code_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
-    terminal_reason: Literal["content_filter"] | None = None
+    terminal_reason: Literal["content_filter", "token_limit"] | None = None
 
     @field_validator("status", mode="before")
     @classmethod

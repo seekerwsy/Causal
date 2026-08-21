@@ -177,6 +177,7 @@ def test_canonical_request_mapping_iteration_failure_is_normalized_without_conte
         ("seed", True),
         ("seed", -(2**63) - 1),
         ("seed", 2**63),
+        ("enable_thinking", 0),
         ("timeout_seconds", 0.0),
         ("max_attempts", 0),
         ("max_response_bytes", 0),
@@ -206,6 +207,22 @@ def test_retry_resends_identical_locked_payload_and_uses_deterministic_backoff()
     assert transport.complete(request, _policy()) == b'{"facts":[]}'
     assert client.completions.requests[0] == client.completions.requests[1]
     assert sleeps == [1.0]
+
+
+def test_transport_sends_frozen_non_thinking_parameter_only_when_configured() -> None:
+    without_switch = _Client([_response()])
+    with_switch = _Client([_response()])
+
+    assert _transport(without_switch).complete(b"{}", _policy()) == b'{"facts":[]}'
+    assert _transport(with_switch).complete(
+        b"{}",
+        _policy(enable_thinking=False),
+    ) == b'{"facts":[]}'
+
+    assert "extra_body" not in without_switch.completions.requests[0]
+    assert with_switch.completions.requests[0]["extra_body"] == {
+        "enable_thinking": False,
+    }
 
 
 def test_retry_rebuilds_isolated_sdk_containers_after_client_mutation() -> None:

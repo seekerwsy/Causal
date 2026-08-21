@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import fields, replace
 import math
+from dataclasses import fields, replace
 
 import pytest
 from pydantic import ValidationError
 
 from secaware.config import AppConfig, PromptExtractorLLMConfig, TSGConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
-from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
+from secaware.extractors.deterministic_catalog import (
+    DeterministicCatalogExtractor,
+    MultilingualDeterministicCatalogExtractor,
+)
 from secaware.extractors.factory import (
     extraction_policy,
     extractor_for_config,
@@ -19,9 +22,9 @@ from secaware.extractors.llm_direct_graph import (
     llm_direct_graph_policy_sha256,
 )
 from secaware.extractors.llm_facts import LLMFactsExtractor, llm_facts_policy_sha256
-from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 from secaware.schema.features import PromptExtractorBackend
 from secaware.schema.prompt_extraction import MAX_RAW_RESPONSE_CHARS
+from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 
 def _llm_payload(**overrides: object) -> dict[str, object]:
@@ -80,6 +83,7 @@ def test_prompt_extractor_llm_config_is_the_exact_strict_contract() -> None:
         "temperature",
         "top_p",
         "seed",
+        "enable_thinking",
     }
     config = PromptExtractorLLMConfig.model_validate(_llm_payload())
     assert config.provider == "openai_compatible"
@@ -147,15 +151,20 @@ def test_app_config_requires_backend_specific_llm_coordinates() -> None:
 
 def test_factory_mapping_is_exhaustive_and_never_uses_transport_for_deterministic() -> None:
     deterministic = _tsg(PromptExtractorBackend.DETERMINISTIC_CATALOG_V1)
+    multilingual = _tsg(PromptExtractorBackend.DETERMINISTIC_CATALOG_V2)
     facts = _tsg(PromptExtractorBackend.LLM_FACTS_V1, llm=_llm_payload())
     direct = _tsg(PromptExtractorBackend.LLM_DIRECT_GRAPH_V1, llm=_llm_payload())
     transport = CapturingTransport()
 
     assert type(extractor_for_config(deterministic)) is DeterministicCatalogExtractor
+    assert type(extractor_for_config(multilingual)) is MultilingualDeterministicCatalogExtractor
     assert type(extractor_for_config(facts, transport=transport)) is LLMFactsExtractor
     assert type(extractor_for_config(direct, transport=transport)) is LLMDirectGraphExtractor
     with pytest.raises(SecAwareError) as exc_info:
         extractor_for_config(deterministic, transport=transport)
+    assert exc_info.value.code is ErrorCode.CONFIG
+    with pytest.raises(SecAwareError) as exc_info:
+        extractor_for_config(multilingual, transport=transport)
     assert exc_info.value.code is ErrorCode.CONFIG
 
 
@@ -217,6 +226,7 @@ def test_facts_and_direct_backends_select_distinct_template_and_schema_policies(
         "timeout_seconds",
         "max_attempts",
         "max_response_bytes",
+        "enable_thinking",
     }
 
 

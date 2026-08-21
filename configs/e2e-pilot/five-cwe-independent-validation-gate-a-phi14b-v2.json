@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "canary_id": "five-cwe-independent-validation-gate-a-phi14b-v2",
+  "purpose": "Freeze all 55 multilingual independent-validation tasks into deterministic four-arm Prompt variants before any outcome generation.",
+  "gate": "zero_provider_contract",
+  "allowed_source_split": "confirm",
+  "single_split_selection_allowed": true,
+  "allow_outcome_generation": false,
+  "selection_path": "data/e2e-pilot/five-cwe-independent-validation-gate-a-inputs-20260819-01/selection.json",
+  "prompts_path": "runs/restricted/five-cwe-independent-validation-functional-contracts-20260819-02/source-prompts.jsonl",
+  "expected_confirm_tasks": 55,
+  "diagnostic_prompt_extractor": "deterministic_catalog_v2",
+  "candidates": [
+    {
+      "cwe": "CWE-78",
+      "task_family": "command_execution",
+      "target_feature_id": "safety.safe_subprocess",
+      "operation": "add"
+    },
+    {
+      "cwe": "CWE-89",
+      "task_family": "sql_query",
+      "target_feature_id": "safety.sql_parameterization",
+      "operation": "add"
+    },
+    {
+      "cwe": "CWE-502",
+      "task_family": "deserialization",
+      "target_feature_id": "safety.safe_deserialization",
+      "operation": "add"
+    },
+    {
+      "cwe": "CWE-328",
+      "task_family": "message_hashing",
+      "target_feature_id": "safety.collision_resistant_hash",
+      "operation": "add"
+    },
+    {
+      "cwe": "CWE-338",
+      "task_family": "security_random_generation",
+      "target_feature_id": "safety.cryptographic_randomness",
+      "operation": "add"
+    }
+  ],
+  "arm_roles": [
+    "target_patch",
+    "noop_rewrite",
+    "length_matched_placebo",
+    "generic_security_reminder"
+  ],
+  "renderer": {
+    "id": "exploratory-deterministic-catalog-adapter-v1",
+    "base_renderer": "catalog-clause-attested-range-v2",
+    "outcome_generation_approved": false
+  },
+  "rng_version": "sha256-rejection-fisher-yates-v1",
+  "global_seed": 2026081931,
+  "model_id": "phi-4-14b",
+  "seed_ids": [
+    2026081951,
+    2026081952,
+    2026081953,
+    2026081954
+  ],
+  "next_gate": "independent_validation_generation_canary"
+}

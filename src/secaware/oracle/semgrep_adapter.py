@@ -23,6 +23,8 @@ _RULE_METADATA = {
     "secaware.python.command-injection": ("CWE-78", "ERROR"),
     "secaware.python.sql-injection": ("CWE-89", "ERROR"),
     "secaware.python.unsafe-deserialization": ("CWE-502", "ERROR"),
+    "secaware.python.weak-hash": ("CWE-328", "WARNING"),
+    "secaware.python.weak-random": ("CWE-338", "WARNING"),
     "secaware.python.path-traversal": ("CWE-22", "WARNING"),
 }
 _SEVERITY = {"INFO": "low", "WARNING": "medium", "ERROR": "high"}

@@ -8,12 +8,12 @@
   boundary/.style={densely dashed,semithick}
 ]
   \node[stage] (repr) {\textbf{Security-Aware}\\Prompt Representation};
-  \node[stage,right=8mm of repr] (discover) {\textbf{Stability-Guided}\\Causal Discovery};
-  \node[stage,right=13mm of discover] (confirm) {\textbf{Causal Effect}\\Confirmation};
+  \node[stage,right=8mm of repr] (discover) {\textbf{Stability-Guided}\\Prioritization};
+  \node[stage,right=13mm of discover] (confirm) {\textbf{Randomized Policy}\\Confirmation};
 
   \node[artifact,below=5mm of repr] (tsg) {Prompt TSG\\local variables};
-  \node[artifact,below=5mm of discover] (hyp) {FCI + task bootstrap\\frozen hypotheses};
-  \node[artifact,below=5mm of confirm] (itt) {typed variants + assignment\\Oracle outcomes + ITT};
+  \node[artifact,below=5mm of discover] (hyp) {FCI + semantic-cluster bootstrap\\frozen policies};
+  \node[artifact,below=5mm of confirm] (itt) {multi-realization arms\\secure-yield ITT};
 
   \draw[flow] (repr) -- (discover);
   \draw[flow] (discover) -- (confirm);
@@ -27,7 +27,7 @@
     ([xshift=6mm,yshift=5mm]discover.north east) --
     ([xshift=6mm,yshift=-17mm]discover.south east)
     node[midway,rotate=90,fill=white,inner sep=1pt]
-    {\scriptsize hypothesis freeze};
+    {\scriptsize policy freeze};
 
   \node[
     fit=(repr)(discover)(tsg)(hyp),

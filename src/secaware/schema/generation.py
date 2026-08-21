@@ -332,7 +332,7 @@ class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
     result_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN, repr=False)
     model_id: str = Field(min_length=1, max_length=MAX_MODEL_ID_CHARS, strict=True)
-    finish_reason: Literal["stop", "content_filter"]
+    finish_reason: Literal["stop", "content_filter", "length"]
     code: str | None = Field(default=None, repr=False)
     usage: ProviderUsageRecord
     attempts: tuple[GenerationAttemptRecord, ...] = Field(min_length=1, max_length=10)
@@ -399,7 +399,7 @@ class ProviderResultEnvelope(SafeValidationMixin, StrictModel):
         )
         code_valid = (
             self.finish_reason == "stop" and type(self.code) is str and bool(self.code.strip())
-        ) or (self.finish_reason == "content_filter" and self.code is None)
+        ) or (self.finish_reason in {"content_filter", "length"} and self.code is None)
         if (
             not code_valid
             or any(item.request_id != self.request_id for item in self.attempts)

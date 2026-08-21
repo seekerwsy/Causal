@@ -39,6 +39,22 @@ def _prompt(prompt_id: str) -> PromptRecord:
         prompt=f"Open the path for {prompt_id}.",
         prompt_role="neutral_baseline",
         counterpart_prompt_id=None,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
+    )
+
+
+def _confirm_prompt(prompt_id: str) -> PromptRecord:
+    return PromptRecord(
+        prompt_id=prompt_id,
+        task_id=f"task-{prompt_id}",
+        split="confirm",
+        language="python",
+        task_family="path_handling",
+        cwe="CWE-22",
+        prompt=f"Held-out path task for {prompt_id}.",
+        prompt_role="neutral_baseline",
+        counterpart_prompt_id=None,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
     )
 
 
@@ -153,6 +169,41 @@ def test_observed_provider_plan_binds_fixed_inputs_and_committed_manifest(
     assert _BASE_URL not in ledger.read_text(encoding="utf-8")
     assert manifest.stage == "plan-provider-generation-observed"
     assert manifest.outputs == ["generation/observed_requests.jsonl"]
+
+
+def test_observed_provider_plan_excludes_held_out_confirm_prompts(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "source-prompts.jsonl"
+    write_jsonl(
+        prompts_path,
+        [_confirm_prompt("confirm-a"), _prompt("discover-a")],
+    )
+    config = _config(tmp_path, prompts_path)
+    store = RunStore(config)
+    store.prepare()
+
+    _plan(config, store)
+
+    records = read_jsonl(
+        store.path("generation", "observed_requests.jsonl"),
+        GenerationRequestRecord,
+        required=True,
+        allow_empty=False,
+    )
+    assert {record.prompt_id for record in records} == {"discover-a"}
+
+
+def test_observed_provider_plan_fails_closed_without_discover_prompt(tmp_path: Path) -> None:
+    prompts_path = tmp_path / "source-prompts.jsonl"
+    write_jsonl(prompts_path, [_confirm_prompt("confirm-only")])
+    config = _config(tmp_path, prompts_path)
+    store = RunStore(config)
+    store.prepare()
+
+    with pytest.raises(SecAwareError) as exc_info:
+        _plan(config, store)
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert not store.path("generation", "observed_requests.jsonl").exists()
 
 
 def test_observed_provider_publishes_code_and_attempts_in_ledger_order(

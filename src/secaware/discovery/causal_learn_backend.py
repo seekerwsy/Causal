@@ -199,6 +199,7 @@ def _validate_pinned_backend_stdout(
     output: str,
     table: CausalTableRecord,
     knowledge: BackgroundKnowledgeRecord,
+    library_edges: object = (),
 ) -> None:
     lines = output.splitlines(keepends=True)
     if not lines or any(not line.endswith("\n") or "\r" in line for line in lines):
@@ -235,7 +236,12 @@ def _validate_pinned_backend_stdout(
         if index >= len(lines) or lines[index] != _BK_FINISH_LINE:
             raise ValueError
         index += 1
-    if index != len(lines):
+    if type(library_edges) not in {list, tuple}:
+        raise ValueError
+    expected_visible_edge_lines = tuple(
+        f"{edge}\n" for edge in library_edges if Edge.Property.nl in getattr(edge, "properties", ())
+    )
+    if tuple(lines[index:]) != expected_visible_edge_lines:
         raise ValueError
 
 
@@ -275,8 +281,13 @@ def run_causal_learn_fci(
                 )
         if captured_warnings or stderr.getvalue():
             raise ValueError
-        _validate_pinned_backend_stdout(stdout.getvalue(), checked_table, checked_knowledge)
         _validate_library_edges(graph, library_edges)
+        _validate_pinned_backend_stdout(
+            stdout.getvalue(),
+            checked_table,
+            checked_knowledge,
+            library_edges,
+        )
         pag = pag_from_causal_learn(
             graph,
             checked_table,

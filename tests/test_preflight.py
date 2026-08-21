@@ -39,6 +39,7 @@ CLI_COMMANDS = [
     "build-confirmation-variants",
     "randomize-confirmation",
     "generate-confirmation",
+    "judge-functionality",
     "import-functional-outcomes",
     "confirm",
     "analyze-jci",
@@ -59,11 +60,35 @@ def _prompt(prompt_id: str, split: str, prompt: str) -> PromptRecord:
         prompt=prompt,
         prompt_role=PromptRole.NEUTRAL_BASELINE,
         counterpart_prompt_id=None,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
     )
 
 
 def test_preflight_report_allows_model_count_without_namespace_warning() -> None:
     assert PreflightReport.model_config["protected_namespaces"] == ()
+
+
+@pytest.mark.parametrize("mutation", ("missing", "wrong_cwe", "wrong_task_family"))
+def test_preflight_rejects_invalid_oracle_coverage_binding_before_generation(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    prompts_path = tmp_path / "prompts.jsonl"
+    prompt = _prompt("prompt-coverage", "discover", "write a safe helper")
+    payload = prompt.model_dump(mode="json")
+    if mutation == "missing":
+        payload["oracle_profile_id"] = None
+    elif mutation == "wrong_cwe":
+        payload["oracle_profile_id"] = "python.cwe89.function_parameter_sqlite_direct_query.v1"
+    else:
+        payload["task_family"] = "sql_query"
+    write_jsonl(prompts_path, (payload,))
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(_config(tmp_path, prompts_path))
+
+    assert exc_info.value.code is ErrorCode.CONTRACT
+    assert exc_info.value.stage == "oracle_coverage"
 
 
 def _config(
@@ -108,6 +133,65 @@ def _write_valid_prompts(path: Path) -> None:
     write_jsonl(path, [_prompt("prompt-1", "discover", "write a safe helper")])
 
 
+def test_preflight_fails_early_when_functional_judge_credential_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from secaware.functional_judge.schema import (
+        FunctionalAuditStatus,
+        FunctionalJudgeability,
+        FunctionalRequirementRecord,
+        TaskFunctionalContractRecord,
+    )
+
+    prompts_path = tmp_path / "prompts.jsonl"
+    _write_valid_prompts(prompts_path)
+    base = _config(tmp_path, prompts_path)
+    contract_path = tmp_path / "task-functional-contracts.jsonl"
+    contract = TaskFunctionalContractRecord.from_content(
+        task_id="task-prompt-1",
+        source_prompt_id="prompt-1",
+        source_prompt_sha256="a" * 64,
+        language="python",
+        judgeability=FunctionalJudgeability.SEMANTIC_ONLY,
+        requirements=(
+            FunctionalRequirementRecord(
+                requirement_id="req_behavior",
+                kind="behavior",
+                criterion="Return the requested value.",
+                prompt_evidence_quote="safe helper",
+            ),
+        ),
+        environment_dependencies=(),
+        audit_pass_ids=("A", "B"),
+        audit_status=FunctionalAuditStatus.CONSISTENT,
+        auditor_kind="CODEX",
+        audit_evidence_sha256="b" * 64,
+    )
+    write_jsonl(contract_path, (contract,))
+    payload = base.model_dump(mode="python")
+    payload["data"]["task_functional_contracts_path"] = str(contract_path)
+    payload["functional_judge"] = {
+        "enabled": True,
+        "llm": {
+            "model_id": "judge-placeholder",
+            "base_url": "https://example.invalid/v1",
+            "api_key_env": "ALI_BAILIAN_API_KEY",
+            "timeout_seconds": 30.0,
+            "max_attempts": 2,
+            "max_response_bytes": 65536,
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "seed": None,
+        },
+        "pass_seeds": [73001, 73002],
+    }
+    monkeypatch.delenv("ALI_BAILIAN_API_KEY", raising=False)
+
+    with pytest.raises(SecAwareError) as exc_info:
+        run_preflight(AppConfig.model_validate(payload))
+    assert exc_info.value.code is ErrorCode.API_AUTH
+
+
 def _write_attested_confirm_pair(
     prompts_path: Path,
     attestations_path: Path,
@@ -127,6 +211,7 @@ def _write_attested_confirm_pair(
         prompt=baseline_text,
         prompt_role=PromptRole.NEUTRAL_BASELINE,
         counterpart_prompt_id=None,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
     )
     variant = PromptRecord(
         prompt_id=f"{task_id}-variant",
@@ -138,6 +223,7 @@ def _write_attested_confirm_pair(
         prompt=baseline_text + clause,
         prompt_role=PromptRole.POSITIVE_SAFETY_CONTROL,
         counterpart_prompt_id=baseline.prompt_id,
+        oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
     )
     start = len(baseline.prompt.encode("utf-8"))
     clause_bytes = clause.encode("utf-8")

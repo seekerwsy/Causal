@@ -6,6 +6,13 @@ import json
 import pytest
 
 from secaware.outcomes.assembler import assemble_assignment_outcomes
+from secaware.functional_judge.schema import (
+    FunctionalAuditStatus,
+    FunctionalJudgeability,
+    FunctionalRequirementRecord,
+    ProgramFunctionalOutcomeRecord,
+    TaskFunctionalContractRecord,
+)
 from secaware.schema.experiments import (
     AssignmentExecutionRecord,
     AssignmentExecutionStatus,
@@ -426,6 +433,56 @@ def test_functional_status_is_independent_and_only_bound_as_provenance() -> None
     )[0]
     assert base.secure_functional_success == changed.secure_functional_success == 1
     assert base.source_digests_sha256 != changed.source_digests_sha256
+
+
+def test_program_functional_judge_controls_secure_and_functional_primary() -> None:
+    assignment, execution, oracle, delta = _generated_case()
+    requirement = FunctionalRequirementRecord(
+        requirement_id="req_answer",
+        kind="behavior",
+        criterion="The generated program defines answer and returns 42.",
+        prompt_evidence_quote="answer",
+    )
+    contract = TaskFunctionalContractRecord.from_content(
+        task_id=assignment.experimental_unit.task_id,
+        source_prompt_id="prompt-source",
+        source_prompt_sha256="a" * 64,
+        language="python",
+        judgeability=FunctionalJudgeability.SEMANTIC_ONLY,
+        requirements=(requirement,),
+        environment_dependencies=(),
+        audit_pass_ids=("A", "B"),
+        audit_status=FunctionalAuditStatus.CONSISTENT,
+        auditor_kind="CODEX",
+        audit_evidence_sha256="b" * 64,
+    )
+    policy = "c" * 64
+
+    def assembled(status: FunctionalOutcomeStatus):
+        program = ProgramFunctionalOutcomeRecord.from_content(
+            assignment_id=assignment.assignment_id,
+            contract_id=contract.contract_id,
+            evaluator_policy_sha256=policy,
+            status=status,
+            evidence_sha256="d" * 64,
+        )
+        return assemble_assignment_outcomes(
+            (assignment,),
+            (execution,),
+            (oracle,),
+            (delta,),
+            task_functional_contracts=(contract,),
+            program_functional_outcomes=(program,),
+            program_functional_policy_sha256=policy,
+        )[0]
+
+    passed = assembled(FunctionalOutcomeStatus.PASS)
+    failed = assembled(FunctionalOutcomeStatus.FAIL)
+    unknown = assembled(FunctionalOutcomeStatus.UNKNOWN)
+    assert passed.schema_version == "1.1"
+    assert passed.secure_functional_success == 1
+    assert failed.secure_functional_success == unknown.secure_functional_success == 0
+    assert unknown.functional_outcome_status is FunctionalOutcomeStatus.UNKNOWN
 
 
 def test_source_digest_is_hash_of_complete_sorted_labeled_producer_digest_mapping() -> None:

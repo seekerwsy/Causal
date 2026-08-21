@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "model_id": "qwen2.5-coder-7b-instruct",
+  "deployment_commit": "17a2da6",
+  "source_run_directory": "/home/ubuntu/secaware-experiments/runs/randomized-discovery-gate-c-main-live-qwen7b-recovered-bandit-coordinate-20260819-03",
+  "archive_file": "randomized-discovery-gate-c-main-live-qwen7b-complete-20260819-03.tar.gz",
+  "archive_sha256": "561b797639c7669bb3745a2e73b79543733635caaf86c1cac3ff3759439cced1",
+  "source_plan_manifest_sha256": "1c23b0408f0e037edc61d0a878b81fcd8cdcd7f8770c901d0339a3acf246c15e",
+  "final_report_file": "report-remaining-002.json",
+  "final_report_sha256": "daf3b12f627058248dca21cb5ce85ee6a4a3e06c268785ea6b369a166c3e6529",
+  "counts": {
+    "expected_assignments": 204,
+    "completed": 204,
+    "errors": 0,
+    "pending": 0,
+    "generated": 204,
+    "generation_provider_attempts": 204,
+    "functional_judge_provider_attempts": 204,
+    "oracle_results": 204,
+    "terminal_no_code": 0,
+    "functional_pass": 143,
+    "functional_fail": 51,
+    "functional_unknown": 10,
+    "secure": 103,
+    "insecure": 47,
+    "oracle_unknown": 54,
+    "secure_and_functional": 81
+  },
+  "verification": {
+    "server_plan_assignment_ids": 204,
+    "server_run_assignment_ids": 204,
+    "server_assignment_set_difference": 0,
+    "local_archive_sha256_matches_server": true,
+    "local_unit_manifests_verified": 204,
+    "local_unit_manifest_errors": 0,
+    "post_assignment_filtering": false
+  }
+}

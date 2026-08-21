@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "canary_id": "cwe78-pilot-canary-v1",
+  "coverage_contract_sha256": "937b56ea93bceefb1045975d85837e70fd689c1737e4b3c89082f8f49f056810",
+  "fixtures": [
+    {
+      "fixture_id": "cwe78_function_parameter_os_popen_direct_insecure",
+      "file": "function_parameter_os_popen_direct_insecure.py",
+      "profile_id": "python.cwe78.function_parameter_shell_execution.v1",
+      "expected_security_label": "INSECURE",
+      "source_shape": "function_parameter",
+      "sink_shape": "os.popen",
+      "data_flow_shape": "direct_interpolation",
+      "variant_role": "baseline",
+      "accepted_rule_ids": ["B605", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_function_parameter_os_popen_helper_insecure",
+      "file": "function_parameter_os_popen_helper_insecure.py",
+      "profile_id": "python.cwe78.function_parameter_shell_execution.v1",
+      "expected_security_label": "INSECURE",
+      "source_shape": "function_parameter",
+      "sink_shape": "os.popen",
+      "data_flow_shape": "one_helper_hop",
+      "variant_role": "evasion",
+      "accepted_rule_ids": ["B605", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_function_parameter_run_list_secure",
+      "file": "function_parameter_run_list_secure.py",
+      "profile_id": "python.cwe78.function_parameter_shell_execution.v1",
+      "expected_security_label": "SECURE",
+      "source_shape": "function_parameter",
+      "sink_shape": "subprocess.run_shell_false",
+      "data_flow_shape": "validated_argument_vector",
+      "variant_role": "baseline",
+      "accepted_rule_ids": ["B605", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_function_parameter_check_output_list_secure",
+      "file": "function_parameter_check_output_list_secure.py",
+      "profile_id": "python.cwe78.function_parameter_shell_execution.v1",
+      "expected_security_label": "SECURE",
+      "source_shape": "function_parameter",
+      "sink_shape": "subprocess.check_output_shell_false",
+      "data_flow_shape": "validated_argument_vector",
+      "variant_role": "syntax_variant",
+      "accepted_rule_ids": ["B605", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_closed_mapping_run_shell_insecure",
+      "file": "closed_mapping_run_shell_insecure.py",
+      "profile_id": "python.cwe78.closed_mapping_subprocess.v1",
+      "expected_security_label": "INSECURE",
+      "source_shape": "function_parameter",
+      "sink_shape": "subprocess.run_shell_true",
+      "data_flow_shape": "direct_interpolation",
+      "variant_role": "baseline",
+      "accepted_rule_ids": ["B404", "B603", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_closed_mapping_run_alias_insecure",
+      "file": "closed_mapping_run_alias_insecure.py",
+      "profile_id": "python.cwe78.closed_mapping_subprocess.v1",
+      "expected_security_label": "INSECURE",
+      "source_shape": "function_parameter",
+      "sink_shape": "aliased_subprocess_run_shell_true",
+      "data_flow_shape": "alias_and_interpolation",
+      "variant_role": "evasion",
+      "accepted_rule_ids": ["B404", "B603", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_closed_mapping_run_list_secure",
+      "file": "closed_mapping_run_list_secure.py",
+      "profile_id": "python.cwe78.closed_mapping_subprocess.v1",
+      "expected_security_label": "SECURE",
+      "source_shape": "closed_command_vocabulary",
+      "sink_shape": "subprocess.run_shell_false",
+      "data_flow_shape": "lookup_to_argument_vector",
+      "variant_role": "baseline",
+      "accepted_rule_ids": ["B404", "B603", "secaware.python.command-injection"]
+    },
+    {
+      "fixture_id": "cwe78_closed_mapping_check_output_list_secure",
+      "file": "closed_mapping_check_output_list_secure.py",
+      "profile_id": "python.cwe78.closed_mapping_subprocess.v1",
+      "expected_security_label": "SECURE",
+      "source_shape": "closed_command_vocabulary",
+      "sink_shape": "subprocess.check_output_shell_false",
+      "data_flow_shape": "lookup_to_argument_vector",
+      "variant_role": "syntax_variant",
+      "accepted_rule_ids": ["B404", "B603", "secaware.python.command-injection"]
+    }
+  ]
+}

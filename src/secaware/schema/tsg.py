@@ -77,6 +77,8 @@ class MotifId(str, Enum):
     USER_INPUT_TO_SHELL_WITHOUT_GUARD = "user_input_to_shell_without_guard"
     SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD = "sensitive_operation_without_auth_guard"
     UNTRUSTED_DATA_TO_DESERIALIZATION_SINK = "untrusted_data_to_deserialization_sink"
+    MESSAGE_HASH_WITHOUT_COLLISION_RESISTANCE = "message_hash_without_collision_resistance"
+    SECURITY_RANDOM_WITHOUT_CRYPTO_SOURCE = "security_random_without_crypto_source"
     UNTRUSTED_SOURCE_TO_SENSITIVE_SINK_WITHOUT_GUARD = (
         "untrusted_source_to_sensitive_sink_without_guard"
     )

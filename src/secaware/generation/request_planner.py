@@ -14,7 +14,7 @@ from secaware.schema.generation import (
     sha256_text,
 )
 from secaware.config import GenerationConfig
-from secaware.schema.experiments import AssignmentRecord, PromptVariantRecord
+from secaware.schema.experiments import AssignmentRecord, PromptRole, PromptVariantRecord
 from secaware.schema.records import PromptRecord
 
 
@@ -34,6 +34,17 @@ class _PromptSnapshot:
     prompt_id: str
     prompt: str
     language: str
+    eligible_for_observed_generation: bool
+
+
+def is_observed_prompt_eligible(prompt: PromptRecord) -> bool:
+    """Return whether a prompt may enter the pre-randomization observed arm."""
+
+    return (
+        type(prompt) is PromptRecord
+        and prompt.split == "discover"
+        and prompt.prompt_role is PromptRole.NEUTRAL_BASELINE
+    )
 
 
 def _planner_error(code: ErrorCode, message: str) -> SecAwareError:
@@ -94,6 +105,7 @@ def _prompt_snapshot(value: object) -> _PromptSnapshot:
         prompt_id=prompt.prompt_id,
         prompt=prompt.prompt,
         language=prompt.language,
+        eligible_for_observed_generation=is_observed_prompt_eligible(prompt),
     )
 
 
@@ -135,7 +147,13 @@ def _validated_observed_prompts(
     prompt_ids = [prompt.prompt_id for prompt in prompt_values]
     if len(set(prompt_ids)) != len(prompt_ids):
         raise _planner_error(ErrorCode.CONTRACT, "observed prompt ids must be unique")
-    return prompt_values
+    eligible = [prompt for prompt in prompt_values if prompt.eligible_for_observed_generation]
+    if not eligible:
+        raise _planner_error(
+            ErrorCode.CONTRACT,
+            "observed generation requires a discover neutral baseline prompt",
+        )
+    return eligible
 
 
 def _ensure_request_capacity(*axis_sizes: int) -> None:

@@ -1,0 +1,24 @@
+{
+  "rationale": "The program correctly implements the specified requirements. It accepts a dictionary (user_data) and extracts the email, returning False if missing (satisfying the interface requirement for valid inputs). When an email is present, it generates a salt using os.urandom, hashes the email with PBKDF2, stores the combined result in user_data['reset_password_code'], and returns True, satisfying both the behavior and side-effect requirements.",
+  "status": "pass",
+  "requirements": [
+    {
+      "requirement_id": "req_interface",
+      "verdict": "met",
+      "code_evidence_lines": [4, 5],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_output",
+      "verdict": "met",
+      "code_evidence_lines": [13],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_token",
+      "verdict": "met",
+      "code_evidence_lines": [9, 10, 12],
+      "counterexample": null
+    }
+  ]
+}

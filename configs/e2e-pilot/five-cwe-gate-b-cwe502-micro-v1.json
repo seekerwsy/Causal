@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "gate_b_id": "five-cwe-gate-b-cwe502-micro-v1",
+  "purpose": "One-task live API check for the corrected CWE-502 intervention and blind LLM fact extraction; no outcome claim is allowed.",
+  "gate": "blind_llm_intervention_and_extraction",
+  "allow_outcome_generation": false,
+  "gate_a_dir": "data/e2e-pilot/five-cwe-discovery-gate-a-qwen7b-v2",
+  "selected_task_ids": ["cluster-1e2a17897e23902efef4"]
+}

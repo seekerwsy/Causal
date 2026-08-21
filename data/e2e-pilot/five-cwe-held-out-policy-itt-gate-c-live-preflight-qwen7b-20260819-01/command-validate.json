@@ -1,0 +1,1 @@
+{"argv":["scripts/run_gate_c_live_canary.py","--repo-root",".","--live-config","configs/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-live-qwen7b-v1.json","--app-config","configs/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-qwen7b-bailian-v1.yaml","--output-dir","data/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-live-preflight-qwen7b-20260819-01","--mode","validate"]}

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "bundle_id": "gate-c-functional-contracts-cwe78-cwe89-v1",
+  "gate_b_dir": "runs/e2e-pilot/gate-b-extractor-revalidation-v1-live-20260815-01",
+  "existing_contracts_path": "data/functional-audit/pilot-v1/contracts.jsonl",
+  "selected_task_ids": [
+    "cluster-22d97b466b5d2c737129",
+    "cluster-b80c034159e718b8bbc9"
+  ],
+  "expected_existing_contracts": 1,
+  "expected_new_contracts": 1,
+  "auditor_kind": "CODEX",
+  "rubric_version": "functional-contract-audit-v1",
+  "generated_code_allowed": false,
+  "oracle_input_allowed": false
+}

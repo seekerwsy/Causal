@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "audit_version": "audit-v1",
+  "legacy_snapshot_id": "legacy-2026-08-10",
+  "neutrality_rule_version": "neutrality-prescreen-v1",
+  "prompt_normalization_version": "prompt-normalization-v1",
+  "cluster_version": "task-cluster-v1",
+  "split_version": "cluster-split-v1",
+  "split_ratios": [0.5, 0.6, 0.7],
+  "seed": 20260810,
+  "smoke_records_per_dataset": 5,
+  "minimum_cluster_floor": 20
+}

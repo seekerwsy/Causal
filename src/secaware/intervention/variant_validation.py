@@ -887,6 +887,70 @@ def validate_graph_delta_record(
         raise _error("graph delta record failed recomputation") from None
 
 
+def recompute_graph_delta_record(
+    *,
+    before_graph: PromptTSGRecord,
+    after_graph: PromptTSGRecord,
+    target: TargetSpecRecord,
+    arm: ArmSpecRecord,
+    target_instance_id: str,
+    arm_protocol_id: str,
+    protocol_instance_id: str,
+    expected_length_match_id: str | None,
+) -> GraphDeltaRecord:
+    """Create and read back one delta through the canonical v1 validator.
+
+    The original API exposed only readback validation, which forced downstream
+    provenance layers either to duplicate ``AllowedDelta`` semantics or to
+    depend on private helpers.  This narrow constructor reuses the same
+    catalog-closed transition and projection logic as ``validate_variant``.
+    """
+
+    try:
+        checked_before = _snapshot_model(PromptTSGRecord, before_graph)
+        checked_after = _snapshot_model(PromptTSGRecord, after_graph)
+        checked_target = _snapshot_model(TargetSpecRecord, target)
+        checked_arm = _snapshot_model(ArmSpecRecord, arm)
+        before_live = record_to_multidigraph(checked_before)
+        after_live = record_to_multidigraph(checked_after)
+        transitions = actual_feature_transitions(before_live, after_live)
+        target_changed, semantic_compliance, permissible = _validate_actual_delta(
+            before=before_live,
+            after=after_live,
+            target=checked_target,
+            arm=checked_arm,
+            transitions=transitions,
+        )
+        record = GraphDeltaRecord.from_content(
+            target_spec_id=checked_target.target_spec_id,
+            target_instance_id=target_instance_id,
+            arm_protocol_id=arm_protocol_id,
+            protocol_instance_id=protocol_instance_id,
+            arm_role=checked_arm.role,
+            before_graph_sha256=checked_before.graph_sha256,
+            after_graph_sha256=checked_after.graph_sha256,
+            actual_transitions=transitions,
+            target_changed=target_changed,
+            semantic_compliance=semantic_compliance,
+            permissible_non_target_drift=permissible,
+            length_match_id=expected_length_match_id,
+        )
+        return validate_graph_delta_record(
+            record,
+            before_graph=checked_before,
+            after_graph=checked_after,
+            target=checked_target,
+            arm=checked_arm,
+            expected_length_match_id=expected_length_match_id,
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except SecAwareError:
+        raise
+    except Exception:
+        raise _error("graph delta recomputation failed") from None
+
+
 def validate_variant(
     *,
     candidate: PromptCandidate,
@@ -1314,6 +1378,7 @@ __all__ = [
     "make_length_match_record",
     "prepare_blind_extractions",
     "preflight_protocol_variant_inputs",
+    "recompute_graph_delta_record",
     "security_neutral_prompt_invariant",
     "validate_length_match_record",
     "validate_graph_delta_record",

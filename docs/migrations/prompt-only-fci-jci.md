@@ -42,6 +42,8 @@ FCI operates on the declared Prompt-side causal-variable table. Frozen hypothese
 before confirmation variants or assignments exist. Complete-block randomization fixes the ITT
 universe. The primary effect stage therefore keeps terminal-no-code, Oracle failure, and functional
 non-evaluation records in the denominator and reports the declared sensitivity bounds.
+Authenticated content filtering and exact token-limit exhaustion are both terminal-no-code model
+outcomes. Neither is retried, replaced, or treated as an Oracle execution failure.
 
 JCI consumes the already frozen experiment and emits raw PAGs, declared background knowledge,
 constrained PAGs, and assumption-set orientation deltas. JCI orientation deltas are attributed only to the complete declared assumption set; they cannot be attributed to any individual assumption.

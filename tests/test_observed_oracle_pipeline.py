@@ -20,7 +20,7 @@ from secaware.oracle.policy import load_policy_bundle
 from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.artifact import sha256_path
 from secaware.pipeline.manifest import read_stage_manifest
-from secaware.schema.oracle import OracleRecord, SecurityLabel
+from secaware.schema.oracle import OracleEvaluability, OracleRecord, SecurityLabel
 from secaware.schema.records import PromptRecord
 
 
@@ -44,6 +44,7 @@ def _config(tmp_path: Path) -> AppConfig:
                 prompt="Return one Python function.",
                 prompt_role="neutral_baseline",
                 counterpart_prompt_id=None,
+                oracle_profile_id="python.cwe22.function_parameter_file_read.v1",
             )
         ],
     )
@@ -186,7 +187,10 @@ def test_observed_oracle_binds_policy_and_publishes_canonical_records(
         allow_empty=False,
     )
     assert manifest.policy_sha256 == policy.combined_sha256
-    assert all(record.security_label is SecurityLabel.SECURE for record in records)
+    assert all(record.security_label is SecurityLabel.UNKNOWN for record in records)
+    assert all(
+        record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE for record in records
+    )
     assert len([call for call in runner.calls if call[1:] != ("--version",)]) == 2
 
 

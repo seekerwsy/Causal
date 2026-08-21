@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
-from dataclasses import dataclass
 import functools
 import hashlib
 import inspect
 import json
 import os
-from pathlib import Path
 import stat
-from typing import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import ExitStack
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
@@ -21,8 +22,11 @@ from secaware.generation.confirmation import (
     CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256,
     execute_confirmation_requests,
 )
-from secaware.generation.openai_compatible_provider import create_openai_compatible_provider
-from secaware.generation.openai_compatible_provider import OpenAICompatibleGenerationResult
+from secaware.generation.openai_compatible_provider import (
+    OpenAICompatibleGenerationResult,
+    create_openai_compatible_provider,
+    create_replay_openai_compatible_provider,
+)
 from secaware.generation.request_planner import plan_confirmation_requests
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
@@ -51,7 +55,6 @@ from secaware.schema.generation import (
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
-
 _STAGE = "generate-confirmation"
 CONFIRMATION_PROVIDER_POLICY_VERSION = "assignment-bound-generation-provider-v1"
 CONFIRMATION_PROVIDER_FACTORY_VERSION = "frozen-app-config-provider-factory-v1"
@@ -70,6 +73,7 @@ _MAX_NAME_CHARS = 255
 _FUTURE_STAGE_NAMES = frozenset(
     {
         "run-oracle-confirmation",
+        "judge-functionality",
         "import-functional-outcomes",
         "estimate-confirmation-effects",
         "analyze-jci",
@@ -292,6 +296,10 @@ def _provider_from_frozen_config(
     mock_factory=_LockedMockProvider,
     envelope_factory=_PROVIDER_RESULT_ENVELOPE_FACTORY,
     result_type=OpenAICompatibleGenerationResult,
+    attempt_recorder: Callable[
+        [str, int, dict[str, Any], object | None, BaseException | None], None
+    ]
+    | None = None,
 ) -> object:
     """Construct the only production provider path from the validated frozen config."""
 
@@ -302,8 +310,13 @@ def _provider_from_frozen_config(
         provider_config = generation.openai_compatible
         if provider_config is None:
             raise _stage_error("confirmation provider is unavailable", code=ErrorCode.CONFIG)
+        provider = (
+            openai_factory(provider_config)
+            if attempt_recorder is None
+            else openai_factory(provider_config, attempt_recorder=attempt_recorder)
+        )
         return adapter_factory(
-            openai_factory(provider_config),
+            provider,
             provider_config.system_template,
             envelope_factory,
             result_type,
@@ -311,6 +324,41 @@ def _provider_from_frozen_config(
     raise _stage_error(
         "confirmation provider is unavailable",
         code=ErrorCode.EXTERNAL_INPUT_REQUIRED,
+    )
+
+
+def create_confirmation_provider(
+    config: AppConfig,
+    *,
+    attempt_recorder: Callable[
+        [str, int, dict[str, Any], object | None, BaseException | None], None
+    ]
+    | None = None,
+) -> object:
+    """Create the production confirmation provider from one validated config."""
+
+    if type(config) is not AppConfig or not model_shape_is_intact(config):
+        raise _stage_error("confirmation provider configuration failed validation")
+    return _provider_from_frozen_config(config, attempt_recorder=attempt_recorder)
+
+
+def create_confirmation_replay_provider(
+    config: AppConfig,
+    response: dict[str, Any],
+) -> object:
+    """Create the normal confirmation adapter over one persisted response, without I/O."""
+
+    if type(config) is not AppConfig or not model_shape_is_intact(config):
+        raise _stage_error("confirmation replay configuration failed validation")
+    provider_config = config.generation.openai_compatible
+    if config.generation.provider != "openai_compatible" or provider_config is None:
+        raise _stage_error("confirmation replay provider is unavailable")
+    provider = create_replay_openai_compatible_provider(provider_config, response)
+    return _SingleRequestProviderAdapter(
+        provider,
+        provider_config.system_template,
+        _PROVIDER_RESULT_ENVELOPE_FACTORY,
+        OpenAICompatibleGenerationResult,
     )
 
 
@@ -1293,6 +1341,8 @@ __all__ = [
     "CONFIRMATION_GENERATION_OUTPUTS",
     "CONFIRMATION_PROVIDER_POLICY_VERSION",
     "ConfirmationGenerationStageResult",
+    "create_confirmation_provider",
+    "create_confirmation_replay_provider",
     "run_confirmation_generation_stage",
     "validate_confirmation_generation_bundle",
 ]

@@ -1,0 +1,36 @@
+{
+  "rationale": "The program defines a function `create_hashed_zip` (req_01 met). It uses `zipfile.ZipFile` to create an archive and adds the file using `zipf.write` (req_02 met, req_04 met). However, the filename inside the ZIP archive is set to `os.path.basename(file_path)` (line 20), which is the original filename, not a hash. The requirement for the internal filename to be derived from a hash (req_03) is not met. The code uses `os.makedirs` to ensure the directory exists (req_05 met).",
+  "status": "fail",
+  "requirements": [
+    {
+      "requirement_id": "req_01",
+      "verdict": "met",
+      "code_evidence_lines": [5],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_02",
+      "verdict": "met",
+      "code_evidence_lines": [19, 20],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_03",
+      "verdict": "not_met",
+      "code_evidence_lines": [20],
+      "counterexample": "Input: 'test.txt'. The resulting zip contains 'test.txt', but the requirement states the filename inside must be derived from a hash."
+    },
+    {
+      "requirement_id": "req_04",
+      "verdict": "met",
+      "code_evidence_lines": [2, 19],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_05",
+      "verdict": "met",
+      "code_evidence_lines": [1, 13],
+      "counterexample": null
+    }
+  ]
+}

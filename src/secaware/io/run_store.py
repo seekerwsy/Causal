@@ -27,6 +27,7 @@ from secaware.pipeline.stage_contracts import (
     discovery_stage_contract_sha256,
     effect_stage_contract_sha256,
     functional_outcome_import_stage_contract_sha256,
+    functional_judge_stage_contract_sha256,
     jci_stage_contract_sha256,
     prompt_variant_stage_contract_sha256,
     randomization_stage_contract_sha256,
@@ -80,6 +81,10 @@ _CONFIRMATION_GENERATION_OUTPUTS = (
     "generation/confirmation_code.jsonl",
 )
 _FUNCTIONAL_OUTCOME_IMPORT_OUTPUTS = ("analysis/functional_outcomes.jsonl",)
+_FUNCTIONAL_JUDGE_OUTPUTS = (
+    "analysis/functional_judge_passes.jsonl",
+    "analysis/program_functional_outcomes.jsonl",
+)
 _EFFECT_STAGE_OUTPUTS = (
     "analysis/assignment_outcomes.jsonl",
     "analysis/contrast_specs.jsonl",
@@ -520,6 +525,7 @@ class RunStore:
         if stage.startswith("run-oracle-") or stage in {
             "extract-prompt-tsg",
             "build-confirmation-variants",
+            "judge-functionality",
         }:
             if not valid_digest:
                 raise self._manifest_conflict(stage, "stage policy binding is invalid")
@@ -559,6 +565,10 @@ class RunStore:
         if (
             stage == "import-functional-outcomes"
             and tuple(relative_outputs) != _FUNCTIONAL_OUTCOME_IMPORT_OUTPUTS
+        ):
+            raise self._manifest_conflict(stage, "stage output contract is invalid")
+        if stage == "judge-functionality" and tuple(relative_outputs) != (
+            _FUNCTIONAL_JUDGE_OUTPUTS
         ):
             raise self._manifest_conflict(stage, "stage output contract is invalid")
         if (
@@ -708,6 +718,7 @@ class RunStore:
                     or confirmation_generation_stage_contract_sha256(stage, self.config.generation)
                     or confirmation_oracle_stage_contract_sha256(stage)
                     or functional_outcome_import_stage_contract_sha256(stage)
+                    or functional_judge_stage_contract_sha256(stage)
                     or effect_stage_contract_sha256(stage)
                     or jci_stage_contract_sha256(stage)
                     or rfci_stage_contract_sha256(stage)

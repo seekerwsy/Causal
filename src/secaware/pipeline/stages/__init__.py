@@ -24,6 +24,11 @@ from secaware.pipeline.stages.functional_outcomes import (
     FunctionalOutcomeImportStageResult,
     import_functional_outcomes_stage,
 )
+from secaware.pipeline.stages.functional_judge import (
+    FUNCTIONAL_JUDGE_OUTPUTS,
+    FunctionalJudgeStageResult,
+    run_functional_judge_stage,
+)
 from secaware.pipeline.stages.prompt_variants import (
     PromptVariantStageResult,
     run_prompt_variant_freeze_stage,
@@ -58,6 +63,8 @@ __all__ = [
     "FCIDiscoveryStageResult",
     "FCIDiscoveryTerminalStatus",
     "FunctionalOutcomeImportStageResult",
+    "FunctionalJudgeStageResult",
+    "FUNCTIONAL_JUDGE_OUTPUTS",
     "EFFECT_STAGE_INPUTS",
     "EFFECT_STAGE_OUTPUTS",
     "EffectsStageResult",
@@ -77,6 +84,7 @@ __all__ = [
     "fci_discovery_stage",
     "effects_stage",
     "import_functional_outcomes_stage",
+    "run_functional_judge_stage",
     "run_confirmation_generation_stage",
     "run_confirmation_oracle_stage",
     "run_confirmation_randomization_stage",

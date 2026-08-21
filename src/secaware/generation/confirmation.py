@@ -31,7 +31,7 @@ MAX_CONFIRMATION_TOTAL_CODE_BYTES = 1_000_000_000
 CONFIRMATION_JSONL_MAX_LINE_CHARS = 4_000_000
 CONFIRMATION_JSONL_MAX_TOTAL_CHARS = 240 * 1024 * 1024
 CONFIRMATION_PROVIDER_RESULT_POLICY_SHA256 = hashlib.sha256(
-    b"secaware-confirmation-provider-result-envelope-v1"
+    b"secaware-confirmation-provider-result-envelope-v2-token-limit-terminal"
 ).hexdigest()
 _JSONL_STAGE_LIMIT_BYTES = 256 * 1024 * 1024
 _JSONL_SAFETY_MARGIN_BYTES = 16 * 1024 * 1024
@@ -494,7 +494,7 @@ def execute_confirmation_requests(
                 usage_sha256=usage_sha256,
                 attempt_count=len(raw_result.attempts),
             )
-            if raw_result.finish_reason == "content_filter":
+            if raw_result.finish_reason in {"content_filter", "length"}:
                 executions.append(
                     AssignmentExecutionRecord.from_content(
                         assignment_id=request.assignment_id,
@@ -502,7 +502,11 @@ def execute_confirmation_requests(
                         status=AssignmentExecutionStatus.TERMINAL_NO_CODE,
                         code_id=None,
                         code_sha256=None,
-                        terminal_reason="content_filter",
+                        terminal_reason=(
+                            "content_filter"
+                            if raw_result.finish_reason == "content_filter"
+                            else "token_limit"
+                        ),
                         **execution_coordinates,
                     )
                 )

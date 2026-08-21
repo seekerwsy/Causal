@@ -8,6 +8,13 @@ from typing import Literal, Optional, TypeVar, cast
 import typer
 
 from secaware.commands.common import cli_action
+from secaware.commands.dataset_audit import audit_datasets_command
+from secaware.commands.dataset_adjudication import (
+    prepare_dataset_adjudication_command,
+    reconcile_dataset_adjudication_command,
+)
+from secaware.commands.functional_audit import prepare_functional_audit_command
+from secaware.commands.oracle_calibration import audit_oracle_calibration_command
 from secaware.config import AppConfig, OpenAICompatibleConfig, load_config
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.generation.providers import get_provider
@@ -35,6 +42,7 @@ from secaware.io.transaction import (
 )
 from secaware.logging_utils import console
 from secaware.oracle.aggregator import AnalyzerRunner, run_oracle_batch
+from secaware.oracle.coverage import apply_negative_coverage, validate_prompt_coverage_profiles
 from secaware.oracle.runner import run_analyzer_process, validate_analyzer_runtime
 from secaware.pipeline.artifact import sha256_path
 from secaware.pipeline.preflight import run_oracle_preflight, run_preflight
@@ -47,6 +55,7 @@ from secaware.pipeline.stages.fci_discovery import (
 )
 from secaware.pipeline.stages.effects import effects_stage
 from secaware.pipeline.stages.functional_outcomes import import_functional_outcomes_stage
+from secaware.pipeline.stages.functional_judge import run_functional_judge_stage
 from secaware.pipeline.stages.jci import jci_stage
 from secaware.pipeline.stages.prompt_extraction import (
     run_prompt_extraction_stage as extract_prompt_tsg_stage,
@@ -77,6 +86,11 @@ from secaware.schema.oracle import OracleRecord
 from secaware.tsg.feature_catalog import PROMPT_FEATURE_CATALOG_SHA256
 
 app = typer.Typer(help="SecAware reproducible prompt-side security mechanism pipeline.")
+app.command("audit-datasets")(audit_datasets_command)
+app.command("prepare-dataset-adjudication")(prepare_dataset_adjudication_command)
+app.command("reconcile-dataset-adjudication")(reconcile_dataset_adjudication_command)
+app.command("prepare-functional-audit")(prepare_functional_audit_command)
+app.command("audit-oracle-calibration")(audit_oracle_calibration_command)
 GenerationCondition = Literal["observed"]
 
 
@@ -953,7 +967,8 @@ def _run_oracle_stage(
     stage = f"run-oracle-{validated_condition}"
     source_name = f"{validated_condition}_code.jsonl"
     output_name = f"{validated_condition}_oracle.jsonl"
-    inputs = [store.path("generation", source_name)]
+    prompt_input = store.path("inputs", "prompts.jsonl")
+    inputs = [store.path("generation", source_name), prompt_input]
     output = store.path("oracle", output_name)
     outputs = [output]
     candidate_output: Path | None = None
@@ -1024,6 +1039,8 @@ def _run_oracle_stage(
                     "Oracle output transaction could not be started",
                 ) from None
             codes = _read_canonical_oracle_input(inputs[0], stage=stage)
+            prompts = _prompt_records(store)
+            validate_prompt_coverage_profiles(prompts, initial_policy)
             if any(code.condition != validated_condition for code in codes):
                 raise _oracle_stage_error(
                     ErrorCode.CONTRACT,
@@ -1061,6 +1078,7 @@ def _run_oracle_stage(
                 max_stderr_bytes=config.oracle.max_stderr_bytes,
                 runner=runner,
             )
+            records = list(apply_negative_coverage(records, prompts, execution_policy))
             if sha256_path(inputs[0]) != input_digest:
                 raise _oracle_stage_error(
                     ErrorCode.MANIFEST_CONFLICT,
@@ -1395,6 +1413,17 @@ def import_functional_outcomes_command(
     import_functional_outcomes_stage(cfg, store, results_path=results, force=force)
 
 
+@app.command("judge-functionality")
+@cli_action
+def judge_functionality_command(
+    config: Path = typer.Option(..., "--config"),
+    run_dir: Optional[Path] = typer.Option(None, "--run-dir"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    cfg, store = _load(config, run_dir)
+    run_functional_judge_stage(cfg, store, force=force)
+
+
 @app.command("confirm")
 @cli_action
 def confirm_command(
@@ -1468,6 +1497,8 @@ def run_all_command(
     run_confirmation_randomization_stage(cfg, store, force=force)
     run_confirmation_generation_stage(cfg, store, force=force)
     run_confirmation_oracle_stage(cfg, store, force=force)
+    if getattr(getattr(cfg, "functional_judge", None), "enabled", False):
+        run_functional_judge_stage(cfg, store, force=force)
     _require_committed_functional_outcomes_for_frozen_protocols(store)
     effects_stage(cfg, store, force=force)
     jci_stage(cfg, store, force=force)

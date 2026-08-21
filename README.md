@@ -19,8 +19,12 @@ compatibility path.
 
 The Oracle is fail closed. An unavailable, mismatched, incomplete, malformed, or otherwise invalid
 static analyzer run publishes no security result; SecAware has no handwritten or reduced-security
-fallback. Prompt TSG validation also fails closed: an invalid graph, digest, schema, catalog, or
-shadow prevents downstream publication rather than falling back to v1 data or flat projections.
+fallback. A valid run with zero findings is not automatically `secure`: it is
+`unknown_coverage` unless the prompt's frozen `oracle_profile_id` names a hash-locked task/CWE
+coverage profile whose negative-verdict calibration has been approved. Findings still produce an
+`insecure` result. Prompt TSG validation also fails closed: an invalid graph, digest, schema,
+catalog, or shadow prevents downstream publication rather than falling back to v1 data or flat
+projections.
 
 See [Prompt TSG v2 migration](docs/migrations/prompt-tsg-v2.md) before opening or rerunning an
 existing run directory.
@@ -89,7 +93,33 @@ secaware build-confirmation-variants --config configs/demo.yaml --run-dir runs/d
 secaware randomize-confirmation --config configs/demo.yaml --run-dir runs/demo
 secaware generate-confirmation --config configs/demo.yaml --run-dir runs/demo
 secaware run-oracle --config configs/demo.yaml --run-dir runs/demo --condition confirmation
+secaware judge-functionality --config configs/experiment.yaml --run-dir runs/experiment
 ```
+
+`judge-functionality` is enabled only when `data.task_functional_contracts_path` points to a
+pre-treatment contract bundle and `functional_judge` freezes an independent OpenAI-compatible
+endpoint, model, two distinct seeds, and an API-key environment variable. The request withholds
+arm, CWE, security outcome, and generator identity. Two passes are retained; exact status
+disagreement becomes `unknown`. Terminal no-code and invalid Python are local fail-closed gates and
+do not call the judge. The stage writes `analysis/functional_judge_passes.jsonl` and
+`analysis/program_functional_outcomes.jsonl`; effects consume the latter for
+`secure_functional_success`. `unknown` is a conservative zero in the primary assigned-arm ITT and
+also expands the registered best/worst-case sensitivity bounds. It never filters an assignment.
+
+The checked-in `configs/paper_v0.yaml` freezes the independent evaluator to Ali Bailian's Beijing
+pay-as-you-go OpenAI-compatible endpoint and the dated `qwen3.5-flash-2026-02-23` snapshot, with
+thinking disabled and two distinct seeds. The credential is read only from
+`ALI_BAILIAN_API_KEY`; it must never be committed or persisted in run artifacts. The stage becomes
+runnable only after a derived experiment config enables it and supplies a task-functional-contract
+path covering every assigned task. No mock judge result may be reported as a commercial-model
+result.
+
+The frozen coordinates passed a real two-case compatibility canary on 2026-08-12: the correct
+fixture received two `pass` judgments and the known-wrong fixture received two `fail` judgments.
+The strict parser rejected an earlier scalar `code_evidence` response, so the prompt now states the
+array invariant explicitly rather than relaxing the schema. This validates provider compatibility,
+not research-task accuracy; the full experiment still requires the frozen task contracts and a new
+immutable run directory.
 
 `run-all` executes observed generation and Oracle evaluation, local-table assembly, frozen FCI
 hypothesis discovery, variant construction, complete-block randomization, confirmation generation,
@@ -116,10 +146,30 @@ the primary result. PAG circle endpoints remain circles unless a declared, separ
 constraint supplies an orientation.
 
 Generated code is used only by the independent Oracle and an explicitly configured functional
-evaluator. Missing or invalid functional evidence is unknown/non-evaluable, not a negative
-outcome; best/worst-case sensitivity bounds retain all randomized assignments. Pre-randomization
+evaluator. Unknown functional evidence is a conservative zero in the primary ITT, while
+best/worst-case sensitivity bounds retain all randomized assignments. Pre-randomization
 exclusions are committed before assignment, while post-assignment generation, Oracle, or evaluator
 failures remain in their assigned ITT arms.
+
+## Functional contract pilot
+
+The reproducible 48-task pilot is selected as three cluster-distinct candidate-neutral
+CyberSecEval Instruct v2 tasks for each of 16 frozen CWE scopes:
+
+```bash
+secaware prepare-functional-audit \
+  --config configs/functional-audit/pilot-v1.json \
+  --source-record-audit runs/dataset-audit/stage0-combined-20260810-08/record-audit.jsonl \
+  --run-dir runs/functional-audit/a-new-run-id
+```
+
+The published audit retains 48 packets, 96 Codex A/B decisions, 48 consistent task contracts, the
+exact command, environment, configuration, source digest, and bundle digests under the immutable
+run `runs/functional-audit/pilot-contracts-20260812-01` and the versioned snapshot
+`data/functional-audit/pilot-v1`. The selector refuses to overwrite an existing run directory. All
+48 contracts are currently `semantic_only`; 30 record explicit external
+environment dependencies. This supports code-level semantic judging but does not claim 48 local
+executable test harnesses.
 
 See the [Prompt-only FCI/JCI migration](docs/migrations/prompt-only-fci-jci.md) for the exact
 artifact inventory, digest bindings, regeneration procedure, and upgrade boundary.
@@ -145,9 +195,11 @@ uv sync --extra dev --extra oracle
 # Equivalent editable pip install: pip install -e ".[dev,oracle]"
 ```
 
-The finite Semgrep rules, Bandit configuration, Bandit metadata, and their authenticated lock are
-checked into `policies/oracle/python/`. Semgrep metrics and version checks are disabled, and no
-remote rule registry or network policy lookup participates in a run.
+The finite Semgrep rules, Bandit configuration, Bandit metadata, task/CWE coverage contract, and
+their authenticated lock are checked into `policies/oracle/python/`. Semgrep metrics and version
+checks are disabled, and no remote rule registry or network policy lookup participates in a run.
+Every prompt must bind one coverage profile before generation. `preflight` authenticates that
+profile against the prompt CWE and task family without invoking either analyzer.
 
 Validate the general experiment inputs, then run the observed Oracle stage:
 
@@ -156,9 +208,10 @@ secaware preflight --config configs/demo.yaml
 secaware run-oracle --config configs/demo.yaml --condition observed
 ```
 
-`preflight` validates the general pipeline configuration. `run-oracle` additionally performs the
-Oracle capability check, authenticates the policy bundle, resolves both executables, requires
-Semgrep 1.168.0 and Bandit 1.9.4, and reruns the capability check immediately before analysis.
+`preflight` validates the general pipeline configuration and the locked prompt-to-coverage-profile
+binding. `run-oracle` additionally performs the Oracle capability check, authenticates the policy
+bundle, resolves both executables, requires Semgrep 1.168.0 and Bandit 1.9.4, and reruns the
+capability check immediately before analysis.
 
 The same engine is available as a standalone command for canonical generated-code JSONL:
 
@@ -170,6 +223,10 @@ secaware-oracle run \
   --semgrep semgrep \
   --bandit bandit
 ```
+
+Because this standalone interface has no prompt artifact, a parseable zero-finding program is
+reported as `unknown_coverage`; it cannot publish a task-scoped `secure` verdict. Use the pipeline
+Oracle stage when authenticated negative-verdict coverage is required.
 
 Run the checked-in real-tool release gate with:
 

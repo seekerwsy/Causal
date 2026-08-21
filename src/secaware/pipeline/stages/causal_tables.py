@@ -11,6 +11,7 @@ from secaware.causal.variable_catalog import PROMPT_CAUSAL_VARIABLES
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.factory import extraction_policy
+from secaware.generation.request_planner import is_observed_prompt_eligible
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.pipeline.artifact import sha256_path
@@ -97,13 +98,16 @@ def _validate_exact_observed_chain(
             or len(seeds) != len(set(seeds))
         ):
             raise ValueError
+        observed_prompts = tuple(prompt for prompt in prompts if is_observed_prompt_eligible(prompt))
+        if not observed_prompts:
+            raise ValueError
         expected = {
             (prompt.prompt_id, model_id, seed_id)
-            for prompt in prompts
+            for prompt in observed_prompts
             for model_id in models
             for seed_id in seeds
         }
-        prompt_by_id = {item.prompt_id: item for item in prompts}
+        prompt_by_id = {item.prompt_id: item for item in observed_prompts}
         code_by_coordinate: dict[tuple[str, str, int], CanonicalGeneratedCodeRecord] = {}
         code_request_ids: set[str] = set()
         code_ids: set[str] = set()
@@ -271,7 +275,7 @@ def _assemble_causal_tables_under_leases(
     )
     store.require_committed_stage(
         "run-oracle-observed",
-        (code_input,),
+        (code_input, prompt_input),
         (oracle_input,),
     )
     generation_manifest = store.path(".stages", f"{generation_stage}.json")

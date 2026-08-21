@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "recovery_id": "five_cwe_independent_validation_invalid_judge_recovery_v1",
+  "purpose": "Reuse the preserved generation and invalid one-pass Judge response, assign provenance-bound functional unknown, and execute only the missing mechanism measurement.",
+  "assignment_id": "assignment_1469419cb28d8e5abb97a19d91e1c46c0a05cd41a17d699a944825db16b15754",
+  "source_run_manifest_sha256": "c25c28c903d6a5cd0b234c8978e70ccccdf0b0a292fd6e308350b350a20c629e",
+  "inputs": {
+    "runtime_freeze_manifest": {
+      "path": "data/e2e-pilot/five-cwe-independent-validation-runtime-analysis-freeze-20260819-03/artifact-manifest.json",
+      "sha256": "dfa397d05cc9231df87a1260b142907aafe1eff50fc7c2a821a08bc75c6daa74"
+    },
+    "mechanism_config": {
+      "path": "configs/e2e-pilot/code-mechanism-multilingual-calibration-full-bailian-v2.json",
+      "sha256": "41bf1b6f4e060e51ff98f655a83720a13c381d5b67701944d3bedf33ff3c4c3d",
+      "digest_mode": "lf_normalized_text_v1"
+    }
+  },
+  "new_generation_calls": 0,
+  "new_functional_judge_calls": 0,
+  "maximum_new_mechanism_calls": 1,
+  "oracle_calls_allowed": false
+}

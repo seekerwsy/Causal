@@ -48,6 +48,8 @@ _MOTIF_BY_TARGET_FEATURE = {
     "safety.safe_subprocess": MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD,
     "safety.authorization_check": MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD,
     "safety.safe_deserialization": MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK,
+    "safety.collision_resistant_hash": MotifId.MESSAGE_HASH_WITHOUT_COLLISION_RESISTANCE,
+    "safety.cryptographic_randomness": MotifId.SECURITY_RANDOM_WITHOUT_CRYPTO_SOURCE,
 }
 
 
@@ -75,7 +77,7 @@ def _build_specs() -> MappingProxyType[MotifId, MotifSpec]:
         )
     if (
         tuple(specs) != tuple(MotifId)
-        or len(specs) != 6
+        or len(specs) != 8
         or {spec.target_feature_id for spec in specs.values()}
         != {entry.target_feature_id for entry in PROMPT_TSG_CATALOG}
         or {spec.task_feature_id for spec in specs.values()}

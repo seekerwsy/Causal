@@ -69,6 +69,7 @@ class CWESecurityOutcome(str, Enum):
 class AssignmentEvaluability(str, Enum):
     EVALUABLE = "evaluable"
     UNKNOWN_PARSE_FAILURE = "unknown_parse_failure"
+    UNKNOWN_COVERAGE = "unknown_coverage"
     NOT_REQUIRED_NO_CODE = "not_required_no_code"
 
 
@@ -479,7 +480,7 @@ class AnalysisFailureRecord(_OutcomeContract):
 class AssignmentOutcomeRecord(_OutcomeContract):
     """One exact conservative primary outcome per randomized assignment."""
 
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.0", "1.1"]
     outcome_id: str = Field(pattern=_OUTCOME_ID_PATTERN)
     assignment_id: str = Field(pattern=_ASSIGNMENT_ID_PATTERN)
     task_id: str
@@ -498,6 +499,7 @@ class AssignmentOutcomeRecord(_OutcomeContract):
     oracle_evaluability: AssignmentEvaluability
     parse_ok: StrictBool
     functional_ok: StrictBool
+    functional_outcome_status: FunctionalOutcomeStatus | None = None
     target_changed: StrictBool | None
     semantic_compliance: StrictBool | None
     source_digests_sha256: str = Field(pattern=_SHA256_PATTERN)
@@ -507,6 +509,7 @@ class AssignmentOutcomeRecord(_OutcomeContract):
         "execution_status",
         "cwe_security_outcome",
         "oracle_evaluability",
+        "functional_outcome_status",
         mode="before",
     )
     @classmethod
@@ -516,6 +519,7 @@ class AssignmentOutcomeRecord(_OutcomeContract):
             "execution_status": AssignmentExecutionStatus,
             "cwe_security_outcome": CWESecurityOutcome,
             "oracle_evaluability": AssignmentEvaluability,
+            "functional_outcome_status": FunctionalOutcomeStatus,
         }[info.field_name]  # type: ignore[attr-defined]
         return _exact_enum(value, enum_type)
 
@@ -525,7 +529,12 @@ class AssignmentOutcomeRecord(_OutcomeContract):
         result: Self | None = None
         failed = False
         try:
-            payload = {"schema_version": "1.0", **content}
+            status = content.get("functional_outcome_status")
+            if status is None:
+                content.pop("functional_outcome_status", None)
+                payload = {"schema_version": "1.0", **content}
+            else:
+                payload = {"schema_version": "1.1", **content}
             result = cls(
                 **payload,
                 outcome_id=f"assignment_outcome_{_canonical_sha256(payload)}",
@@ -554,6 +563,9 @@ class AssignmentOutcomeRecord(_OutcomeContract):
             raise ValueError(self._safe_validation_message)
 
         terminal = self.execution_status is AssignmentExecutionStatus.TERMINAL_NO_CODE
+        status_coherent = self.functional_outcome_status is None or (
+            self.functional_ok is (self.functional_outcome_status is FunctionalOutcomeStatus.PASS)
+        )
         if terminal:
             coherent = (
                 self.secure_functional_success == 0
@@ -561,6 +573,7 @@ class AssignmentOutcomeRecord(_OutcomeContract):
                 and self.oracle_evaluability is AssignmentEvaluability.NOT_REQUIRED_NO_CODE
                 and not self.parse_ok
                 and not self.functional_ok
+                and self.functional_outcome_status in {None, FunctionalOutcomeStatus.FAIL}
             )
         elif self.oracle_evaluability is AssignmentEvaluability.UNKNOWN_PARSE_FAILURE:
             coherent = (
@@ -568,6 +581,13 @@ class AssignmentOutcomeRecord(_OutcomeContract):
                 and self.cwe_security_outcome is CWESecurityOutcome.UNKNOWN
                 and not self.parse_ok
                 and not self.functional_ok
+                and self.functional_outcome_status in {None, FunctionalOutcomeStatus.FAIL}
+            )
+        elif self.oracle_evaluability is AssignmentEvaluability.UNKNOWN_COVERAGE:
+            coherent = (
+                self.secure_functional_success == 0
+                and self.cwe_security_outcome is CWESecurityOutcome.UNKNOWN
+                and self.parse_ok
             )
         else:
             expected_primary = int(
@@ -582,10 +602,18 @@ class AssignmentOutcomeRecord(_OutcomeContract):
                 and (not self.functional_ok or self.parse_ok)
                 and self.secure_functional_success == expected_primary
             )
+        digest_content = self.model_dump(
+            mode="json",
+            exclude={
+                "outcome_id",
+                *(("functional_outcome_status",) if self.schema_version == "1.0" else ()),
+            },
+        )
         if (
-            not coherent
-            or self.outcome_id
-            != f"assignment_outcome_{_canonical_sha256(_content(self, 'outcome_id'))}"
+            (self.schema_version == "1.0") != (self.functional_outcome_status is None)
+            or not coherent
+            or not status_coherent
+            or self.outcome_id != f"assignment_outcome_{_canonical_sha256(digest_content)}"
         ):
             raise ValueError(self._safe_validation_message)
         return self

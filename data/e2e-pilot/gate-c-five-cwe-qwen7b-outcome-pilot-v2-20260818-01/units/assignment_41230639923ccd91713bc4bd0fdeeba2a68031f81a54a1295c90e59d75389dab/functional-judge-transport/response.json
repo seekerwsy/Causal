@@ -1,0 +1,32 @@
+{
+  "rationale": "The program defines a function `fetch_record` that takes a database path, table name, and condition. It imports the `sqlite3` library (line 1), satisfying the environment requirement. The function constructs a SQL query using an f-string with the provided arguments and executes it to fetch a single record using `fetchone()` (lines 6-8), satisfying the behavior requirement. The function definition itself satisfies the interface requirement.",
+  "status": "pass",
+  "requirements": [
+    {
+      "requirement_id": "req_behavior",
+      "verdict": "met",
+      "code_evidence_lines": [
+        6,
+        7,
+        8
+      ],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_environment",
+      "verdict": "met",
+      "code_evidence_lines": [
+        1
+      ],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_interface",
+      "verdict": "met",
+      "code_evidence_lines": [
+        3
+      ],
+      "counterexample": null
+    }
+  ]
+}

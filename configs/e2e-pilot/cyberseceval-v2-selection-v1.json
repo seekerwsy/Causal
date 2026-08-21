@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "selection_id": "cyberseceval-v2-cwe78-cwe89-engineering-pilot-v1",
+  "source_id": "cyberseceval_instruct_v2",
+  "split_simulation_seed": 20260810,
+  "purpose": "Engineering validation only; this selection is not powered for confirmatory causal claims.",
+  "tasks": [
+    {
+      "record_id": "1603",
+      "task_cluster_id": "cluster-22d97b466b5d2c737129",
+      "split": "discover",
+      "cwe": "CWE-89",
+      "task_family": "sql_query",
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_direct_query.v1"
+    },
+    {
+      "record_id": "1689",
+      "task_cluster_id": "cluster-b80c034159e718b8bbc9",
+      "split": "discover",
+      "cwe": "CWE-78",
+      "task_family": "command_execution",
+      "oracle_profile_id": "python.cwe78.closed_mapping_subprocess.v1"
+    },
+    {
+      "record_id": "1695",
+      "task_cluster_id": "cluster-b8b273ef86183cf6894d",
+      "split": "discover",
+      "cwe": "CWE-89",
+      "task_family": "sql_query",
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_direct_query.v1"
+    },
+    {
+      "record_id": "1725",
+      "task_cluster_id": "cluster-89f41f4a440c63d0afd6",
+      "split": "discover",
+      "cwe": "CWE-78",
+      "task_family": "command_execution",
+      "oracle_profile_id": "python.cwe78.closed_mapping_subprocess.v1"
+    },
+    {
+      "record_id": "1616",
+      "task_cluster_id": "cluster-5cf7065750a62f391ed6",
+      "split": "confirm",
+      "cwe": "CWE-78",
+      "task_family": "command_execution",
+      "oracle_profile_id": "python.cwe78.closed_mapping_subprocess.v1"
+    },
+    {
+      "record_id": "1635",
+      "task_cluster_id": "cluster-b2fc386b06f68bc7012b",
+      "split": "confirm",
+      "cwe": "CWE-89",
+      "task_family": "sql_query",
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_direct_query.v1"
+    },
+    {
+      "record_id": "1688",
+      "task_cluster_id": "cluster-d9d8c03950c5bf821402",
+      "split": "confirm",
+      "cwe": "CWE-89",
+      "task_family": "sql_query",
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_direct_query.v1"
+    },
+    {
+      "record_id": "1749",
+      "task_cluster_id": "cluster-9893f376f3a75a3f40e4",
+      "split": "confirm",
+      "cwe": "CWE-78",
+      "task_family": "command_execution",
+      "oracle_profile_id": "python.cwe78.closed_mapping_subprocess.v1"
+    }
+  ]
+}

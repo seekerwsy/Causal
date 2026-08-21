@@ -23,8 +23,8 @@ of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
 
 \begin{document}
 
-\title{Discovering and Confirming Prompt-Side Security Mechanisms in LLM Code
-Generation}
+\title{Prioritizing and Confirming Prompt-Side Security Interventions in LLM
+Code Generation}
 
 \author{Anonymous Author(s)}
 \affiliation{%
@@ -39,16 +39,16 @@ authorization, trust boundaries, or safe-API constraints implicit. Existing
 attribution and perturbation methods can expose influential text, yet they do
 not by themselves turn that evidence into a task-preserving prompt
 intervention with a confirmatory effect estimate. We present \model, a
-three-stage framework that constructs a security-aware prompt representation,
-discovers stable prompt-side hypotheses with structure-constrained FCI, and
-tests frozen hypotheses through held-out prompt interventions. The discovery
-stage combines graph-derived variables, typed background knowledge, and
-task-cluster bootstrap stability while preserving PAG uncertainty. The
-confirmation stage freezes family-specific prompt variants before blocked
-random assignment and estimates task-clustered assigned-arm intent-to-treat
-effects on secure-and-functional outcomes. A fixed-budget evidence funnel
-connects native candidates, target mappings, valid protocols, randomized
-hypotheses, and confirmed effects across methods. \resultslot
+three-stage framework that represents guard-independent task/security context,
+prioritizes one-feature intervention hypotheses with structure-constrained
+FCI, and tests frozen multi-realization prompt policies on held-out tasks. The
+discovery stage combines graph-derived variables, typed background knowledge,
+and semantic-task-cluster bootstrap stability while preserving PAG
+uncertainty. The confirmation stage freezes complete four-arm prompt bundles
+before blocked random assignment and estimates semantic-task-clustered
+assigned-arm intent-to-treat effects on oracle-evaluable secure-code yield. A
+shared candidate universe supports controlled comparisons among causal,
+associational, predictive, expert, and random selectors. \resultslot
 \end{abstract}
 
 \begin{CCSXML}
@@ -72,6 +72,7 @@ hypotheses, and confirmed effects across methods. \resultslot
 discovery, randomized experiments, prompt analysis}
 
 \maketitle
+\raggedbottom
 
 \section{Introduction}
 
@@ -105,32 +106,32 @@ effect of assignment rather than selecting cases in which the intended edit
 happened to succeed.
 
 \model provides this progression in three stages.
-\textbf{Security-Aware Prompt Representation} converts prompt requirements
-into catalog-bound factors and relational motifs.
-\textbf{Stability-Guided Causal Discovery} combines structure-derived
-constraints, FCI, and task-cluster bootstrap stability to prioritize and
-freeze reproducible prompt-side hypotheses.
-\textbf{Causal Effect Confirmation} constructs family-specific prompt
-variants, randomizes them on held-out tasks, and estimates task-clustered
-assigned-arm intent-to-treat effects. A fixed-budget evidence funnel makes the
-full path auditable, from native candidates through target mapping and valid
-protocols to randomized hypotheses and confirmed effects.
+\textbf{Security-Aware Prompt Representation} separates an immutable
+task/security context query from one catalog-bound editable feature.
+\textbf{Stability-Guided Causal Prioritization} combines structure-derived
+constraints, FCI, and semantic-task-cluster stability to rank candidates while
+preserving PAG uncertainty.
+\textbf{Randomized Policy Confirmation} freezes a finite distribution of
+task-independent realizations, constructs complete task-specific four-arm
+bundles, randomizes them on held-out tasks, and estimates assigned-arm
+intent-to-treat effects. A shared-universe selector comparison and an explicit
+candidate-to-policy bridge make both prioritization and confirmation auditable.
 
 This paper makes the following contributions:
 
 \begin{itemize}
   \item \textbf{Security-aware prompt representation.} A typed, catalog-bound
-  representation converts free-form requirements into scoped, editable
-  security factors and relational motifs.
-  \item \textbf{Stable causal hypothesis discovery.} Structure-derived
-  constraints, FCI, and task-cluster stability analysis prioritize
-  reproducible prompt-side hypotheses and freeze them before confirmation.
-  \item \textbf{Causal effect confirmation.} Family-specific prompt
-  interventions and held-out blocked randomization produce hypothesis-specific
+  representation converts free-form requirements into guard-independent
+  contexts and scoped, editable security features.
+  \item \textbf{Budgeted intervention prioritization.} Typed background
+  knowledge, FCI, and semantic-task-cluster stability rank a frozen candidate
+  universe alongside associational, predictive, expert, and random selectors.
+  \item \textbf{Randomized policy confirmation.} Multi-realization prompt
+  policies and held-out blocked randomization produce hypothesis-specific
   assigned-arm ITT evidence without conditioning on realized edit success.
-  \item \textbf{End-to-end evidence accounting.} A fixed-budget funnel exposes
-  whether candidate generation, target mapping, protocolization, randomization,
-  or confirmation limits each method.
+  \item \textbf{Provenance-complete evidence accounting.} An explicit bridge
+  records context eligibility, policy realization, protocolization,
+  randomization, and confirmation without upgrading exploratory artifacts.
 \end{itemize}
 
 \section{Motivating Example and Problem Formulation}
@@ -151,31 +152,37 @@ does not report a generated program or an effect.
 
 \subsection{Units, Outcomes, and Claim Scope}
 
-Let a generation unit be indexed by task $t$, prompt variant $v$, model $m$,
-and randomized seed slot $s$:
+Let a generation unit be indexed by semantic task cluster $c$, task instance
+$i$, hypothesis $h$, realization $r$, prompt arm $a$, model $m$, and request
+randomness slot $s$:
 
 \[
-  u = (t, v, m, s).
+  u = (c,i,h,r,a,m,s).
 \]
 
 Tasks are partitioned before model-based discovery into disjoint discovery and
 confirmation pools. The discovery pool supports observational hypothesis
 formation; the held-out confirmation pool supports prompt construction,
-randomized assignment, code generation, and effect estimation. No task crosses
-this boundary. Task identity is the clustering unit because prompt variants,
-arm assignments, and seed slots derived from the same programming request are
-not independent.
+randomized assignment, code generation, and effect estimation. No semantic
+task cluster crosses this boundary. The highest resampling unit is
+\texttt{semantic\_task\_cluster\_id}; every descendant task instance,
+hypothesis, model, arm, realization, and request slot moves with its cluster.
 
-The primary analysis estimates task-clustered assigned-arm ITT on a
-prespecified \emph{secure-and-functional} outcome for every committed
-assignment. Valid terminal non-successes remain in the assigned-arm
-denominator; a missing or corrupt required producer instead blocks publication
-and requires deterministic replay of the same assignment manifest.
+The primary analysis estimates semantic-task-clustered assigned-arm ITT on
+\emph{oracle-evaluable secure-code yield} for every committed assignment.
+Secure-and-functional joint success is a key practical secondary outcome, not
+a condition for the primary security effect. Valid terminal non-successes
+remain in the assigned-arm denominator; a missing or corrupt required producer
+instead blocks publication and requires deterministic replay of the same
+assignment manifest.
 
-$W$ contains approved pre-treatment task metadata, $X$ contains direct and
-relational Prompt TSG queries, and $Y$ contains independently committed
-outcomes. The secondary JCI table adds one categorical arm-context variable
-$C$; model identity remains an analysis coordinate and provenance field.
+$W$ contains approved pre-treatment task metadata, $X^0$ contains natural
+Prompt TSG feature queries, and $Y^0$ contains independently committed
+discovery outcomes. A non-editable context query $C_q$ scopes one actionable
+feature $f$. Randomized arm $A$ is the confirmation treatment;
+post-intervention $X^{A,R}$ is a separately extracted projection diagnostic
+and never replaces $A$ in the ITT estimator. Model identity remains an analysis
+coordinate and provenance field.
 
 The \prompttsg defines typed prompt structure and the editable queries supplied
 to discovery, while the PAG preserves FCI uncertainty over learned relations.
@@ -200,16 +207,16 @@ separated by a pre-confirmation freeze.
   \resizebox{\linewidth}{!}{%
     \input{figures/secaware-overview}
   }
-  \caption{\model converts prompt semantics into stable, frozen hypotheses and
-  evaluates their security effects on held-out tasks. Prompt TSG edges provide
+  \caption{\model converts prompt semantics into frozen intervention policies
+  and evaluates their security effects on held-out tasks. Prompt TSG edges provide
   typed structure rather than causal conclusions; generated code enters only
   the independent Oracle and functional-evaluation path in the confirmation
   stage.}
   \Description{Three-stage \model workflow. The discover split contains
-  security-aware prompt representation and stability-guided causal discovery.
-  A hypothesis-freeze boundary separates it from causal effect confirmation on
-  held-out tasks using typed prompt variants, block randomization,
-  generated-code evaluation, and assigned-arm ITT estimation.}
+  security-aware prompt representation and stability-guided observational
+  prioritization. A policy-freeze boundary separates it from randomized
+  confirmation on held-out tasks using multi-realization prompt arms, block
+  randomization, generated-code evaluation, and assigned-arm ITT estimation.}
   \label{fig:overview}
 \end{figure}
 
@@ -234,6 +241,15 @@ node/edge identification, ordering, serialization, round-trip validation, and
 digesting. The states \textsc{present}, \textsc{absent},
 \textsc{not-applicable}, and \textsc{unresolved} remain distinct.
 
+The intervention language distinguishes a non-editable context-query
+specification $C_q$ from an actionable-feature specification $f$.
+The former expresses guard-independent applicability, such as an untrusted
+input reaching a shell operation; the latter names exactly one actionable
+feature that an ADD or REMOVE policy may edit. A confirmable composite maps one
+$C_q$ to exactly one actionable feature. Task operations, sources, sinks, APIs,
+trust boundaries, and flow motifs remain context or effect-modifier
+coordinates and are never silently edited to make a candidate actionable.
+
 \subsection{Run-Locked Extraction}
 
 \model supports three ways to build the same catalog-bound representation. An
@@ -256,21 +272,22 @@ candidates for a favorable output.
 \subsection{Local Causal Variables}
 
 \model builds a local table for each configured CWE/security scope and model.
-$W$ contains approved pre-treatment task metadata, $X$ finite Prompt TSG
-features or motifs, and $Y$ independently committed Oracle or functional
-outcomes. $C$ is admitted only in secondary JCI, where it is instantiated as
-the single categorical context variable \texttt{C\_arm}. Model identity remains
-an analysis coordinate and provenance field. Raw text, generated code, code
-structure, Oracle finding text, and intervention diagnostics are not
-causal-table variables: generated code enters only the independent Oracle and
-functional evaluator that produce $Y$.
+$W$ contains an approved minimal set of pre-treatment task metadata, $X^0$
+contains non-deterministic natural-Prompt TSG queries, and $Y^0$ contains
+independently committed discovery outcomes. Model identity remains an analysis
+coordinate and provenance field. Raw text, generated code, code structure,
+Oracle finding text, assigned arm $A$, and post-intervention $X^{A,R}$ are not
+observational-table variables: generated code enters only the independent
+Oracle and functional evaluator that produce $Y^0$.
 
-\section{Stability-Guided Causal Discovery}
+\section{Stability-Guided Observational Prioritization}
 
 The second stage converts prompt-side variables into a bounded set of
-intervenable hypotheses. It combines type-derived exclusions with discovery
-that preserves endpoint uncertainty, then tests whether possible paths remain
-stable when whole tasks are resampled.
+intervention candidates. It combines type-derived exclusions with FCI evidence
+that preserves endpoint uncertainty, then tests whether candidate relations
+remain stable when whole semantic task clusters are resampled. FCI is one
+budgeted selector; held-out randomization, not a PAG endpoint, identifies the
+prompt-policy effect.
 
 \subsection{TSG-Derived Constraints}
 
@@ -285,7 +302,7 @@ persists the exact tiers, forbidden pairs, typed adjacency matrix, variable
 order, and background-knowledge digest and validates every learned PAG against
 them.
 
-\subsection{FCI and Task-Cluster Stability}
+\subsection{FCI and Semantic-Cluster Stability}
 
 The minimum backend is the established causal-learn implementation of
 FCI~\cite{spirtes1995fci,zheng2024causallearn}. Its PAG output preserves
@@ -294,32 +311,38 @@ single convenient orientation~\cite{zhang2008ancestral}. The run locks the
 G-square conditional-independence test, variable order, significance level,
 depth and path bounds, backend version, and background knowledge.
 
-The reference draw selects exactly one configured generation seed per task
-using a frozen pre-outcome random policy. Each stability replicate resamples
-task IDs with replacement and selects one seed for each sampled task occurrence
-before rerunning the identical FCI configuration. This task-cluster bootstrap
-does not treat repeated generations from one programming request as independent
-evidence.
+The fixed-reference analysis selects one frozen request-randomness slot per
+task. The two-level analysis resamples \texttt{semantic\_task\_cluster\_id}
+and then selects one frozen request slot inside each sampled task occurrence.
+A separately frozen multi-slot sensitivity aggregates slots at task level
+without passing fractional pseudo-categories to G-square. None treats repeated
+generations, task instances, or rows as independent clusters.
 
-Path extraction retains PAG endpoint marks. A candidate begins at a
-catalog-bound intervenable Prompt TSG feature, ends at a preregistered outcome,
-and may traverse only other prompt-side features, motifs, or pre-treatment
-variables. It qualifies only when its canonical variable sequence and
-endpoint-compatible pattern meet the frozen stability rule. \model applies a
-fixed top-$K$ budget and deterministic ordering; it selects stable possible
-paths rather than claiming recovery of a unique DAG.
+Candidate extraction retains PAG endpoint marks and scores permitted
+feature--outcome adjacency, endpoint-compatible possible ancestry, or the same
+relation within the frozen $C_q$-eligible population. Simultaneously authored
+Prompt features occupy one temporal tier: their within-tier endpoints are not
+interpreted as security mechanisms or mediation. \model applies a fixed
+top-$K$ budget and deterministic ordering rather than claiming recovery of a
+unique DAG.
 
 \subsection{Hypothesis Freeze}
 
-For each selected path, the frozen record binds hypothesis and target
-coordinates, feature family and operation, outcome/CWE/model scope, reference
-PAG endpoints, task-bootstrap support, expected contrast direction, mapping,
-and the relevant table, catalog, extractor, FCI, CI-test, and
-background-knowledge digests.
+Before any selector runs, one \texttt{CandidateUniverseManifest} freezes
+skeletons $\widetilde h=(C_q,f,a,\mathcal Q_h,Y)$ and their common information
+budget. After all rankings are frozen, the unique top-$K$ union crosses one
+selector-invariant, outcome-blind bridge. A successful bridge produces
+$h=(C_q,f,a,Q_h,Y)$, binding one non-actionable context, one actionable
+feature, one atomic operation, a finite realization distribution, and one
+outcome. Its record also binds CWE/model scope, reference PAG endpoints,
+semantic-cluster support, expected direction, and the table, catalog,
+extractor, selector, CI-test, and background-knowledge provenance.
 
 This hypothesis freeze is committed before any confirmation variant,
 assignment, generated code, or outcome exists. Held-out evidence may classify
 a frozen hypothesis, but it cannot add, remove, rerank, remap, or rewrite one.
+An empty, bridge-failed, or protocolization-failed selector slot remains a zero
+in the original budget denominator.
 
 \section{Causal Effect Confirmation}
 
@@ -331,9 +354,12 @@ without selecting cases by realized edit success.
 \subsection{Typed Intervention Protocols}
 
 A \texttt{TargetSpec} binds the feature family and catalog identity, ADD or
-REMOVE, source prompt role, and exact counterpart requirements. Execution is
-text-native or graph-native and uses either a deterministic renderer or a
-locked LLM executor; the run fixes this choice and its complete provenance.
+REMOVE, source prompt role, and exact counterpart requirements. ADD requires
+an applicable, resolved \textsc{absent} source state. REMOVE requires a
+provenance-bound \textsc{present} clause and a pre-attested, task-preserving
+neutral counterpart. Execution is text-native or graph-native and uses either
+a deterministic renderer or a locked LLM executor; the run fixes this choice
+and its complete provenance.
 
 Four-arm protocols are specific to Safety ADD and Safety REMOVE:
 
@@ -346,9 +372,10 @@ Four-arm protocols are specific to Safety ADD and Safety REMOVE:
   \path{GENERIC_SECURITY_REPLACEMENT}.
 \end{itemize}
 
-ADD and REMOVE remain distinct protocols, blocks, and estimands; REMOVE may
-only restore an attested neutral counterpart and never inserts an unsafe
-request.
+ADD and REMOVE remain separate candidate slots, hypotheses, protocols,
+contrasts, multiplicity coordinates, and evidence. REMOVE may only restore an
+attested neutral counterpart and never inserts an unsafe request; ADD and
+REMOVE therefore cannot be combined in one confirmable hypothesis.
 
 Other families retain family-specific protocols. Task-function ADD/REMOVE
 requires target, no-op, and length-matched placebo roles; a fourth active
@@ -365,37 +392,48 @@ or effect direction.
 
 \subsection{Variant Freeze and Block Randomization}
 
-Every candidate arm is independently re-extracted with the run-locked Prompt
+For each $h$, the protocol first freezes a finite task-independent realization
+set and probabilities $Q_h$. For every eligible task and every realization,
+one task-specific bundle contains all four arm texts and exact digests. Every
+candidate arm is independently re-extracted with the run-locked Prompt
 extractor while it is blind to the arm role and target. Before assignment, hard
 gates validate schema and catalog integrity, exact evidence and provenance,
-canonical round trips, security-neutral task preservation, the arm-specific
-\texttt{AllowedDelta}, and absence of downstream information. Only after every
-arm for a task/hypothesis/TargetSpec/protocol/model block passes is the complete
-block frozen.
+canonical round trips, security-neutral task preservation, context/task/non-
+target invariance, the arm-specific \texttt{AllowedDelta}, and absence of
+downstream information. A task enters the common-support population only when
+every required arm and realization passes before outcomes exist; failed
+realizations are never deleted or renormalized.
 
 Target change, semantic compliance, and permissible non-target drift are
-recorded during this arm-blind validation as treatment-fidelity diagnostics.
-They do not decide the hard-gate result, and \texttt{target\_changed}, semantic
+recorded during this arm-blind validation as intervention-realization
+diagnostics. They
+do not decide the hard-gate result, and \texttt{target\_changed}, semantic
 compliance, and non-target drift never filter the primary assigned-arm ITT
-denominator. If one arm fails a hard gate, the complete block is reported as a
-pre-randomization exclusion and receives no assignment.
+denominator. If one arm fails a hard gate, the complete task--hypothesis bundle
+is reported as a pre-randomization exclusion and receives no assignment.
 
 Within each complete frozen block, a manifested deterministic RNG assigns
-configured seed slots to a balanced permutation of the protocol's finite arm
-roles. The assignment manifest binds block order, prompt variants, model
-parameters, RNG identity and seeds, and request IDs before generation, so
-provider execution order cannot alter treatment.
+request-randomness slots to a balanced permutation of the protocol's finite arm
+roles. The canonical block binds semantic cluster, task instance, hypothesis,
+target, global realization specification, task realization bundle, model, and
+arm protocol. The assignment manifest additionally binds prompt variant,
+nullable provider seed, model parameters, RNG identity, request order, and
+request ID before generation. Mutation of any canonical coordinate changes the
+block identity, and provider execution order cannot alter treatment.
 
 \subsection{Outcomes and Assigned-Arm ITT}
 
 Generated code enters only the independent, versioned security Oracle and
-functional evaluator. The primary secure-and-functional outcome equals one
-exactly when generation produces a candidate, parsing succeeds, the committed
-functional check passes, and the Oracle labels the result secure. A valid
-terminal generation failure, parse or functional failure, or valid Oracle
-unknown is retained as an observed non-success. Missing, corrupt, or
-unavailable required producer evidence is not encoded as an outcome; it blocks
-publication and triggers deterministic replay of the same manifest.
+functional evaluator. We decompose code production and Oracle support as
+$Y_C$ and $Y_E$. The primary oracle-evaluable secure-code yield is
+$Y_CY_E I(\text{Oracle secure})$; secure-and-functional joint success further
+requires the frozen functional check to pass and is the key practical
+secondary outcome. A valid terminal generation failure or syntactically
+invalid result has $Y_C=0,Y_E=0$; valid but Oracle-unsupported or unknown code
+has $Y_C=1,Y_E=0$. These remain observed assigned-arm outcomes under the
+frozen encoding. Missing, corrupt, or unavailable required producer evidence
+is not encoded as an outcome; it blocks publication and triggers deterministic
+replay of the same manifest.
 
 For frozen hypothesis $h$, target $q$, operation $o$, model $m$, and outcome
 $Y$, the primary contrast is the hypothesis-specific target-minus-no-op
@@ -408,28 +446,35 @@ assigned-arm ITT risk difference
 \]
 
 Every committed randomized assignment enters the denominator under its
-assigned role. Uncertainty is resampled by task cluster, and confidence
-intervals and multiplicity adjustment follow the frozen hypothesis/contrast
-family. Target-minus-placebo and, where family-valid,
+assigned role. Point estimates average over the frozen task population and
+realization distribution $Q_h$. Uncertainty resamples semantic task clusters
+and carries all descendant hypotheses, models, arms, realizations, and request
+slots together. Simultaneous intervals follow the frozen hypothesis/model/
+contrast family. Target-minus-placebo and, where family-valid,
 target-minus-generic-control contrasts assess specificity. Effects remain
 separate by hypothesis, target, operation, model, and CWE unless another
 estimand was approved in advance. Task improvement, harm, and tie rates remain
 descriptive diagnostics, not individual causal flips or substitutes for ITT.
 
-\subsection{Evidence Levels and Secondary Structural Analysis}
+\subsection{Evidence Levels}
 
-\model uses six approved evidence levels:
+\model uses the prospective evidence levels below:
 
 \begin{enumerate}
   \item \textbf{Observational Candidate}: a discover-split stable possible path
   frozen before confirmation, without a causal confirmation claim.
-  \item \textbf{Confirmed Intervention Effect}: the preregistered
+  \item \textbf{Randomized Policy Effect}: the preregistered
   target-minus-no-op ITT follows the frozen expected direction, meets the
   independent-task requirement, and has a multiplicity-adjusted interval
   excluding zero with complete provenance.
-  \item \textbf{Target-Specific Effect}: a confirmed effect also supported by
+  \item \textbf{Target-Specific Policy Effect}: a randomized effect also supported by
   the preregistered target-minus-placebo and, where family-valid,
   target-minus-generic contrasts.
+  \item \textbf{Realization-Robust Policy Effect}: the average policy effect
+  is confirmed and all frozen direction, equivalence, interaction, and
+  leave-one-realization-out conditions hold simultaneously.
+  \item \textbf{Cross-Model Replication}: separately estimated model effects
+  meet the frozen replication rule without creating a pooled universal effect.
   \item \textbf{Bidirectional Support}: separate ADD and REMOVE protocols
   independently confirm opposite expected directions for the same feature.
   \item \textbf{Directionally Consistent but Inconclusive}: the point estimate
@@ -445,26 +490,21 @@ Valid post-assignment terminal non-successes remain assigned data and do not
 create a non-evaluable result. Discovery, demo, and smoke-test artifacts cannot
 be promoted to confirmatory evidence.
 
-JCI treats the finite randomized arm role as one categorical context variable
-and evaluates structural changes under explicit assumptions~\cite{mooij2020jci}.
-It is secondary to the assigned-arm ITT estimate. The context column is
-\texttt{C\_arm}; analyses remain separated by scope, model, frozen hypothesis,
-TargetSpec, and arm protocol. \model preserves the raw augmented PAG and the
-JCI-constrained PAG with its orientation deltas. Optional py-tetrad RFCI is a
-sensitivity backend. Neither JCI nor RFCI may alter frozen hypotheses,
-assignments, outcomes, primary contrasts, or ITT evidence status.
-
 \section{Evaluation Design and Results}
 
 All computational methods receive the same discover and confirm task
-manifests, model and seed policy, independent Oracle and functional contract,
-candidate budget, family-valid intervention protocol, randomization, outcome
-encoding, task-cluster uncertainty, and multiplicity policy. Native candidates,
-mappings, directions, and ranks are frozen before confirm outcomes exist.
+manifests, model and request-randomness policy, independent Oracle and
+functional contract, candidate budget, family-valid intervention protocol,
+randomization, outcome encoding, semantic-cluster uncertainty, and
+multiplicity policy. Candidate universes, selector scores and ranks, native
+candidates, mappings, expected directions, and realization policies are frozen
+before confirm outcomes exist.
 
 Discovery uses the discover split, and randomized confirmation uses held-out
-confirm tasks. The primary confirmatory analysis is hypothesis-specific,
-task-clustered assigned-arm ITT on secure-and-functional success. Every
+confirm tasks. The primary confirmatory analysis is hypothesis- and
+model-specific semantic-task-clustered assigned-arm ITT on oracle-evaluable
+secure-code yield. Secure-and-functional joint success is the key practical
+secondary outcome. Every
 committed assignment remains in its assigned-arm denominator;
 \texttt{target\_changed}, semantic compliance, and non-target drift are
 diagnostics rather than filters.
@@ -473,13 +513,25 @@ Throughout the tables, \texttt{--} marks a result slot awaiting
 provenance-verified frozen-run or study backfill; it denotes neither zero, not
 applicable, nor observed missingness.
 
-\subsection{RQ1: Discovery and Confirmation}
+\subsection{RQ1: Held-Out Intervention Prioritization}
 
-\textbf{RQ1. How effectively can different methods discover and confirm
-security-relevant prompt-side mechanisms in LLM code generation?}
+\textbf{RQ1. How effectively can different methods prioritize prompt
+interventions that generalize to held-out tasks?}
 
-RQ1 measures how much confirmable mechanism evidence each method produces from
-the same fixed candidate budget. Its discovery-to-confirmation funnel is:
+The primary selector-only comparison gives TSG-constrained FCI,
+preregistered association, regularized prediction, blinded expert ranking, and
+seeded random ranking the same shared candidate universe, information budget,
+and $K$ slots. The unique union of their top-$K$ skeletons crosses the common
+bridge once and each resulting hypothesis is randomized once; duplicate
+selector references reuse that evidence. Empty, bridge-failed, and
+protocolization-failed slots remain zeroes in denominator $K$. The primary
+endpoint is strict confirmed yield at $K$, accompanied by simultaneous paired
+selector-utility differences. Rankings remain conditional on the frozen
+discover split; held-out outcomes neither rerank selectors nor replace failed
+slots.
+
+A separate native-system track provides secondary end-to-end evidence using
+the fixed funnel
 
 \[
 K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
@@ -487,37 +539,34 @@ K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
 \rightarrow N_{\mathrm{confirmed}}.
 \]
 
-Across methods, confirmed yield at $K$ is the primary endpoint. Candidate-slot
-utilization, conditional mapping coverage, mapped yield at $K$,
-protocolization, block-freeze coverage, randomized yield, and conditional
-confirmation diagnose where candidates leave the pipeline; they do not replace
-hypothesis-specific ITT evidence. Exact implementations, versions, native
-output contracts, ranking policies, and mappings are bound only by the RQ1
-manifest frozen before the final run. For every frozen method/rank hypothesis,
-the evidence report retains its target and operation, target-minus-no-op ITT
-estimate and interval, multiplicity-adjusted status, independent-task and arm
-counts, and preregistered secondary contrasts.
+That track measures system compatibility rather than pure selector
+superiority. Conditional mapping coverage and mapped yield at $K$ are bridge
+diagnostics; native funnel results cannot replace the shared-universe primary
+comparison. For every frozen method/slot hypothesis, the evidence report
+retains target and operation, target-minus-no-op ITT, simultaneous status,
+independent semantic-cluster and arm counts, and preregistered specificity
+contrasts.
 
-\begin{table}[!htbp]
+\begin{table}[H]
   \centering
   \small
-  \caption{RQ1 fixed-budget discovery-to-confirmation results. Panel A reports
-  funnel counts. Panel B reports derived yields for the same method families:
-  \model is the proposed method, Attr.\ is prompt attribution, Concepts is causal prompt
-  concepts, Perturb.\ is prompt perturbation, and Judge is LLM-judge
-  explanation. Confirmed yield at $K$ is the primary method-level endpoint.}
+  \caption{RQ1 shared-universe selector results. Panel A retains every frozen
+  budget slot through confirmation. Panel B reports the corresponding yields;
+  strict confirmed yield at $K$ is primary. FCI, association, prediction,
+  expert, and random rankings use identical candidate and information
+  budgets.}
   \label{tab:rq1}
   \begin{tabular}{lrrrrrr}
     \toprule
-    \multicolumn{7}{l}{\textit{Panel A: Funnel counts}} \\
+    \multicolumn{7}{l}{\textit{Panel A: Frozen-slot funnel}} \\
     \midrule
-    Method family & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
+    Selector & $K$ & Selected & Bridged & Protocol & Rand. & Conf. \\
     \midrule
-    \model & -- & -- & -- & -- & -- & -- \\
-    Prompt attribution & -- & -- & -- & -- & -- & -- \\
-    Causal prompt concepts & -- & -- & -- & -- & -- & -- \\
-    Prompt perturbation & -- & -- & -- & -- & -- & -- \\
-    LLM-judge explanation & -- & -- & -- & -- & -- & -- \\
+    TSG-constrained FCI & -- & -- & -- & -- & -- & -- \\
+    Association & -- & -- & -- & -- & -- & -- \\
+    Regularized prediction & -- & -- & -- & -- & -- & -- \\
+    Blinded expert & -- & -- & -- & -- & -- & -- \\
+    Seeded random & -- & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 
@@ -526,31 +575,31 @@ counts, and preregistered secondary contrasts.
     \toprule
     \multicolumn{6}{l}{\textit{Panel B: Derived yields}} \\
     \midrule
-    Metric & Model & Attr. & Concepts & Perturb. & Judge \\
+    Metric & FCI & Assoc. & Predict. & Expert & Random \\
     \midrule
-    Native / $K$ & -- & -- & -- & -- & -- \\
-    Mapped / Native & -- & -- & -- & -- & -- \\
-    Mapped / $K$ & -- & -- & -- & -- & -- \\
-    Protocol / Mapped & -- & -- & -- & -- & -- \\
+    Selected / $K$ & -- & -- & -- & -- & -- \\
+    Bridged / $K$ & -- & -- & -- & -- & -- \\
+    Protocol / $K$ & -- & -- & -- & -- & -- \\
+    Unique-union share & -- & -- & -- & -- & -- \\
     Block-freeze coverage & -- & -- & -- & -- & -- \\
     Randomized / $K$ & -- & -- & -- & -- & -- \\
-    Confirmed / $K$ & -- & -- & -- & -- & -- \\
+    Strict confirmed yield / $K$ & -- & -- & -- & -- & -- \\
     Confirmed / Randomized & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\begin{table}[!htbp]
+\begin{table}[H]
   \centering
   \small
-  \caption{RQ1 hypothesis-specific confirmation evidence. The frozen RQ1
-  manifest binds method/rank, target/operation, target-minus-no-op ITT,
-  task-clustered interval, multiplicity-adjusted status, independent-task and
-  assigned-arm counts, and preregistered secondary contrasts.}
+  \caption{RQ1 hypothesis and paired-selector evidence. The frozen RQ1
+  manifest binds selector/slot references to one shared randomized hypothesis
+  estimate. Paired utility intervals resample top-level semantic clusters and
+  never rerun discovery.}
   \label{tab:rq1-evidence}
   \begin{tabular}{llllrr}
     \toprule
-    Method/rank & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    Selector/slot & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
     \midrule
     \multicolumn{6}{c}{\emph{Rows are populated only from the
     provenance-verified frozen RQ1 manifest}} \\
@@ -560,95 +609,82 @@ counts, and preregistered secondary contrasts.
   \medskip
   \begin{tabular}{llrrl}
     \toprule
-    Hyp.\ ID & Adj.\ status & Indep.\ tasks & Arm counts & Secondary contrasts \\
+    Selector pair & Utility diff. & Simult.\ interval & Status & Shared slots \\
     \midrule
     \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\subsection{RQ2: Representation and Causal Analysis}
+\subsection{RQ2: Representation and Prioritization Contribution}
 
-\textbf{RQ2. How do \model's structured representation and causal analysis
-components contribute to mechanism discovery and confirmation?}
+\textbf{RQ2. How do \model's structured representation and causal
+prioritization contribute to successful intervention selection?}
 
-RQ2 uses the preregistered two-by-two design to separate the contribution of
-relational Prompt TSG queries from FCI-based selection. All variants retain the
-same fixed budget and confirmation protocol. The representation comparison is
-Full versus Reduced representation; the selection comparison is Full versus
-Association selection; Double ablation exposes their interaction. Different
-variants can select different hypotheses, so their hypothesis-specific
-estimands are not exchangeable and must not be reduced to any pooled
-cross-hypothesis ATE. To localize where a component contributes, every
-configuration reports the complete RQ1 count funnel and the same eight derived
-yields. Its hypothesis-specific evidence retains the same assigned-arm ITT and
-inferential fields as RQ1.
+RQ2 separates two questions that require different controls. The selector-only
+track reuses RQ1's direct-plus-context universe and holds every candidate,
+eligibility rule, outcome, realization policy, and information budget fixed
+while changing only the selector. Its FCI-versus-baseline comparisons therefore
+isolate prioritization under a shared universe.
 
-\begin{table}[!htbp]
+The representation comparison contrasts a direct-actionable-feature universe
+with a direct-plus-context universe. Because the candidate identities and
+eligible populations can differ, this is an end-to-end comparison, not a pure
+selector comparison. Both universes use the same frozen budget, bridge,
+confirmation protocol, and outcome construction, and report candidate
+coverage, protocolization, strict confirmed yield at $K$, and the distribution
+of hypothesis-specific effects. No selected hypotheses are pooled into an
+unapproved cross-hypothesis ATE.
+
+\begin{table}[H]
   \centering
   \small
-  \caption{RQ2 representation-and-selection ablations and their
-  discovery-to-confirmation results. Panel A gives the preregistered two-by-two
-  design, Panel B reports the complete fixed-budget funnel for every
-  configuration, and Panel C reports the corresponding derived yields.}
+  \caption{RQ2 separates selector-only and representation evidence. Panel A
+  reports shared direct-plus-context-universe selector yields. Panel B compares
+  direct and direct-plus-context universes end-to-end without interpreting the
+  result as pure selector superiority.}
   \label{tab:rq2}
-  \begin{tabular}{lll}
+  \begin{tabular}{lrrrrr}
     \toprule
-    \multicolumn{3}{l}{\textit{Panel A: Two-by-two design}} \\
+    \multicolumn{6}{l}{\textit{Panel A: Selector-only outcomes}} \\
     \midrule
-    Variant & Representation & Selection \\
+    Metric & FCI & Assoc. & Predict. & Expert & Random \\
     \midrule
-    Full & direct + relational & FCI \\
-    Reduced representation & direct only & FCI \\
-    Association selection & direct + relational & G-square \\
-    Double ablation & direct only & G-square \\
+    Selected / $K$ & -- & -- & -- & -- & -- \\
+    Bridged / $K$ & -- & -- & -- & -- & -- \\
+    Protocol / $K$ & -- & -- & -- & -- & -- \\
+    Block-freeze coverage & -- & -- & -- & -- & -- \\
+    Randomized / $K$ & -- & -- & -- & -- & -- \\
+    Strict confirmed yield / $K$ & -- & -- & -- & -- & -- \\
+    Paired utility vs. FCI & -- & -- & -- & -- & -- \\
+    Simultaneous status & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 
   \medskip
-  \begin{tabular}{lrrrrrr}
+  \begin{tabular}{lrrrrr}
     \toprule
-    \multicolumn{7}{l}{\textit{Panel B: Funnel counts}} \\
+    \multicolumn{6}{l}{\textit{Panel B: Representation end-to-end outcomes}} \\
     \midrule
-    Variant & $K$ & Native & Mapped & Protocol & Rand. & Conf. \\
+    Universe & Candidates & Coverage & Protocol & Rand. & Strict yield / $K$ \\
     \midrule
-    Full & -- & -- & -- & -- & -- & -- \\
-    Reduced representation & -- & -- & -- & -- & -- & -- \\
-    Association selection & -- & -- & -- & -- & -- & -- \\
-    Double ablation & -- & -- & -- & -- & -- & -- \\
-    \bottomrule
-  \end{tabular}
-
-  \medskip
-  \begin{tabular}{lrrrr}
-    \toprule
-    \multicolumn{5}{l}{\textit{Panel C: Derived yields}} \\
-    \midrule
-    Metric & Full & Reduced & Assoc. & Double \\
-    \midrule
-    Native / $K$ & -- & -- & -- & -- \\
-    Mapped / Native & -- & -- & -- & -- \\
-    Mapped / $K$ & -- & -- & -- & -- \\
-    Protocol / Mapped & -- & -- & -- & -- \\
-    Block-freeze coverage & -- & -- & -- & -- \\
-    Randomized / $K$ & -- & -- & -- & -- \\
-    Confirmed / $K$ & -- & -- & -- & -- \\
-    Confirmed / Randomized & -- & -- & -- & -- \\
+    Direct features & -- & -- & -- & -- & -- \\
+    Direct + context & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\begin{table}[!htbp]
+\begin{table}[H]
   \centering
   \small
-  \caption{RQ2 hypothesis-specific confirmation evidence. Each configuration
-  reports its frozen hypothesis and target/operation with target-minus-no-op
-  ITT, task-clustered interval, multiplicity-adjusted status, independent-task
-  and assigned-arm counts, and preregistered secondary contrasts.}
+  \caption{RQ2 hypothesis-specific evidence. Selector-only rows retain one
+  shared-universe identity; representation rows retain their distinct universe
+  identity. Every row reports target-minus-no-op ITT and its simultaneous
+  status without cross-hypothesis pooling.}
   \label{tab:rq2-evidence}
   \begin{tabular}{llllrr}
     \toprule
-    Variant & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    Track/universe & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
     \midrule
     \multicolumn{6}{c}{\emph{Rows are populated only from the
     provenance-verified frozen RQ2 manifest}} \\
@@ -658,7 +694,7 @@ inferential fields as RQ1.
   \medskip
   \begin{tabular}{llrrl}
     \toprule
-    Hyp.\ ID & Adj.\ status & Indep.\ tasks & Arm counts & Secondary contrasts \\
+    Hyp.\ ID & Adj.\ status & Indep.\ clusters & Arm counts & Specificity contrasts \\
     \midrule
     \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
     \bottomrule
@@ -666,25 +702,32 @@ inferential fields as RQ1.
 \end{table}
 
 \Needspace{8\baselineskip}
-\subsection{RQ3: Defensive Interventions}
+\subsection{RQ3: Security Intervention Effects}
 
-\textbf{RQ3. Which prompt-side defensive interventions effectively reduce
-insecure code generation?}
+\textbf{RQ3. Which prompt-side security interventions reliably improve secure
+code generation?}
 
-RQ3 estimates target-versus-operation-matched-no-op assigned-arm effects for
-the defensive targets in the frozen TargetSpec manifest. ADD and REMOVE remain
-separate protocols, blocks, multiplicity coordinates, and estimands. Observed
-baseline or no-op insecurity is not an eligibility condition or an ITT
-denominator filter. Placebo and generic-arm contrasts test whether evidence is
-target-specific. Each row reports the primary secure-and-functional risk
-difference, task-clustered interval, and evidence level.
+RQ3 estimates context-conditioned, model-specific, multi-realization policy
+effects for the frozen security targets. The primary outcome is
+oracle-evaluable secure-code yield; secure-and-functional joint success is the
+key practical secondary outcome. Code validity, Oracle support, unknowns,
+terminal no-code rates, and secure-yield bounds remain separate so that a
+coverage or production shift cannot masquerade as safer generated code.
 
-\begin{table}[!htbp]
+ADD and REMOVE remain separate candidate slots, hypotheses, protocols,
+contrasts, multiplicity coordinates, and evidence. Observed baseline or no-op
+insecurity is neither an eligibility condition nor an ITT denominator filter.
+Target-versus-placebo and, when family-valid, target-versus-generic contrasts
+test specificity. Bidirectional support is awarded only when separately
+randomized ADD and REMOVE policies support opposite expected directions.
+
+\begin{table}[H]
   \centering
   \small
   \caption{RQ3 reports hypothesis-specific target-versus-no-op assigned-arm
-  effects. ADD and REMOVE remain separate estimands; placebo and generic-arm
-  contrasts assess specificity.}
+  effects on oracle-evaluable secure-code yield. ADD and REMOVE remain separate
+  policies; joint success and placebo/generic contrasts provide practical and
+  specificity evidence.}
   \label{tab:rq3}
   \begin{tabular}{lllrrl}
     \toprule
@@ -699,57 +742,6 @@ difference, task-clustered interval, and evidence level.
 Target-change, semantic-compliance, non-target-drift, task improvement, harm,
 and tie rates are descriptive diagnostics. They neither filter the assigned-arm
 ITT denominator nor replace the primary ITT estimates.
-
-\subsection{RQ4: Expert-Perceived Explanation Utility}
-
-\textbf{RQ4. How do security experts rate and rank the perceived quality and
-usefulness of explanations produced by different methods?}
-
-RQ4 compares anonymous, neutrally wrapped method outputs using ordinal expert
-ratings. Each native output uses the same frozen wrapper: Finding, Evidence,
-Expected direction, Experimental support or uncertainty, and Suggested audit
-or repair action. Overall usefulness is the only primary RQ4 outcome. Its
-preregistered primary analysis is an ordinal mixed-effects model with method as
-a fixed effect and participant and case as random effects. Methods are ranked
-by preregistered adjusted overall usefulness, reported with an interval, rank,
-and multiplicity-adjusted pairwise contrasts. Raw means and per-dimension
-distributions for clarity, evidence sufficiency, credibility, actionability,
-and usefulness are descriptive; the four nonprimary dimensions are secondary.
-Accordingly, RQ4 supports claims about perceived utility, not actual security
-effects, objective mechanism-identification accuracy, or repair effectiveness.
-
-\begin{table}[!htbp]
-  \centering
-  \small
-  \caption{RQ4 expert-rating results. Panel A reports descriptive
-  per-dimension ratings. Panel B reports the primary adjusted
-  overall-usefulness ranking and pairwise contrasts for methods bound by the
-  frozen human-study manifest.}
-  \label{tab:rq4}
-  \begin{tabular}{lrrrrr}
-    \toprule
-    \multicolumn{6}{l}{\textit{Panel A: Descriptive ratings}} \\
-    \midrule
-    Method & Clarity & \shortstack{Evidence\\sufficiency} & Credibility &
-    Actionability & Usefulness \\
-    \midrule
-    \multicolumn{6}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen human-study manifest}} \\
-    \bottomrule
-  \end{tabular}
-
-  \medskip
-  \begin{tabular}{lrrrl}
-    \toprule
-    \multicolumn{5}{l}{\textit{Panel B: Primary adjusted ranking}} \\
-    \midrule
-    Method & Adj.\ usefulness & Interval & Rank & Adjusted contrasts \\
-    \midrule
-    \multicolumn{5}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen human-study manifest}} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
 
 \section{Related Work}
 
@@ -768,37 +760,38 @@ improve secure generation through model-side training or inference
 \cite{he2024safecoder,zhang2024seccoder}. With the generator locked, \model asks
 which editable prompt-side requirements have supported effects.
 
-\paragraph{Causal discovery and heterogeneous contexts.}
+\paragraph{Causal discovery under latent uncertainty.}
 FCI represents latent-variable uncertainty through PAGs
 \cite{spirtes1995fci,zhang2008ancestral}, with an implementation available in
-causal-learn \cite{zheng2024causallearn}; JCI formalizes causal discovery across
-heterogeneous contexts \cite{mooij2020jci}. \model combines them with
-prompt-derived constraints, task-cluster stability, a pre-confirmation freeze,
-and held-out assigned-arm effects to turn possible paths into testable
-interventions.
+causal-learn \cite{zheng2024causallearn}. \model combines FCI with
+prompt-derived constraints, semantic-cluster stability, a pre-confirmation
+freeze, and held-out assigned-arm effects to turn uncertain observational
+relations into testable interventions.
 
 \section{Synthetic Validation}
 
 Synthetic structural causal models exercise the analysis contract independently
-of the paper dataset. Chain, latent-confounding, null-factor, and deterministic
-JCI cases check PAG/path compatibility, task-cluster stability, raw and
-constrained JCI outputs, and fail-visible backend behavior. This is engineering
-validation, not confirmatory evidence or input to the paper's result tables.
+of the paper dataset. Chain, latent-confounding, null-factor, deterministic-
+context, and background-knowledge perturbation cases check PAG compatibility,
+semantic-cluster stability, provenance closure, and fail-visible backend
+behavior. This is engineering validation, not confirmatory evidence or input
+to the paper's result tables.
 
 \section{Threats to Validity}
 
 \paragraph{Construct validity.}
-The secure-and-functional outcome is defined by locked Oracle and functional
-checks. Evaluator versions, evaluability, terminal-status denominators,
-calibration audits, and sensitivity bounds scope effects to that contract;
+Oracle-evaluable secure-code yield is defined by locked code-validity and
+independent-Oracle contracts, while joint success additionally uses the frozen
+functional evaluator. Evaluator versions, support, terminal-status
+denominators, calibration audits, and bounds scope effects to those contracts;
 unknown or unsupported cases do not establish comprehensive program security.
 
 \paragraph{Discovery validity.}
 Finite task samples, sparse local tables, latent common causes, and FCI's
 equivalence classes leave paths and endpoint marks uncertain. We use
 prompt-derived knowledge only as prohibitions and retain raw PAG marks and
-task-cluster bootstrap support. Claims concern stable possible paths within
-each frozen candidate, model, and CWE scope.
+semantic-cluster bootstrap support. Claims concern prioritized uncertain
+relations within each frozen candidate, model, and CWE scope.
 
 \paragraph{Internal validity.}
 Prompt executors can miss the target or alter non-target semantics, generation
@@ -823,37 +816,53 @@ evaluator, prompt styles, and generation settings. Versioned manifests bind
 these coordinates. Claims are scoped accordingly; broader settings require
 separately reported replications.
 
-\paragraph{Human-study validity.}
-Perceived utility can depend on the participant sample, selected cases, sample
-size, wrapper, and order. Standardized wrappers, balanced assignment, recorded
-eligibility and exclusions, and participant and case random effects address
-these dependencies. RQ4 concerns perceived utility, not objective security or
-repair effectiveness.
-
 \section{Reproducibility}
 
-Frozen computational and human-study manifests define splits, schemas,
-configurations, and code revisions. Parent-digested artifacts connect Prompt
-TSGs, local tables, background-knowledge digests, raw and JCI-constrained PAGs,
-orientation deltas, bootstrap support, and frozen hypotheses and mappings to
-validated variants, assignments, code digests, Oracle and functional producer
-provenance, outcomes, failure artifacts, effects, and table builders. Demo runs
-remain outside this chain.
+Frozen computational manifests define splits, semantic-cluster membership,
+schemas, configurations, candidate universes, selector ranks, and code
+revisions. Parent-digested artifacts connect Prompt TSGs, natural-query tables,
+background-knowledge audits, raw/full PAGs, bootstrap support, and frozen
+skeleton-to-policy mappings to realization bundles, assignments, code digests,
+Oracle and functional producer provenance, decomposed outcomes, failure
+artifacts, simultaneous inference, and table builders. Demo runs remain
+outside this chain.
 
 \section{Conclusion}
 
-\model represents editable prompt-side security factors and turns method outputs
-into frozen directional hypotheses. It discovers stable possible paths and
-confirms those hypotheses on held-out tasks with task-clustered assigned-arm
-evidence. Its fixed-budget comparison also identifies where each method's
-evidence pipeline succeeds or stops. Together, these stages support auditable
-claims while preserving uncertainty, failures, and provenance.
+\model binds immutable task/security context to one editable prompt feature,
+compares budgeted selectors on a shared universe, and turns their frozen
+candidates into multi-realization intervention policies. Held-out blocked
+randomization supplies semantic-clustered assigned-arm evidence on
+oracle-evaluable secure-code yield. The result is a traceable route from
+uncertain observational prioritization to scoped policy effects without
+conditioning on realized edit success.
 
 \section{Data Availability}
 
 The final result dataset has not yet been frozen. The anonymous replication
-package will provide frozen computational and human-study provenance, access
-conditions, and a persistent location once they exist.
+package will provide frozen computational provenance, access conditions, and a
+persistent location once they exist.
+
+\appendix
+
+\section{Optional, Non-Promoting Analyses}
+
+The main evidence path is observational FCI followed by randomized assigned-arm
+ITT. JCI is an exploratory analysis of randomized contexts that, when run,
+preserves separate raw and constrained PAGs plus explicit assumption-linked
+orientation deltas~\cite{mooij2020jci}. RFCI is an optional py-tetrad
+sensitivity backend; its availability or failure does not block the no-Java
+causal-learn path. Neither JCI nor RFCI may change the candidate universe,
+selector ranks, bridge, assignment, outcomes, ITT, or evidence status.
+
+Separately provenanced implementation markers, treatment fidelity, and
+per-protocol summaries are optional diagnostics. They cannot promote an
+evidence level, substitute for the independent Oracle, enter the primary PAG,
+or support a mediation claim. The separately versioned optional expert study
+is outside the three main RQs; if pursued, it requires its own ethics decision,
+preregistration, case and randomization manifests, and analysis plan, and it
+cannot validate either observational prioritization or randomized security
+effects.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}

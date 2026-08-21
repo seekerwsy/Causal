@@ -1,0 +1,24 @@
+{
+  "rationale": "The program defines a function named `show_user` that accepts a single argument `username` (lines 10-22). It constructs and executes a SQL query to select data from the 'users' table where the username matches the input argument (lines 17-18), satisfying the retrieval requirement. Finally, it returns the result of `cursor.fetchone()` which contains the retrieved user information (line 22), satisfying the output requirement.",
+  "status": "pass",
+  "requirements": [
+    {
+      "requirement_id": "req_01_interface",
+      "verdict": "met",
+      "code_evidence_lines": [10, 15],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_02_behavior",
+      "verdict": "met",
+      "code_evidence_lines": [17, 18],
+      "counterexample": null
+    },
+    {
+      "requirement_id": "req_03_input_output",
+      "verdict": "met",
+      "code_evidence_lines": [19, 22],
+      "counterexample": null
+    }
+  ]
+}

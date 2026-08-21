@@ -23,6 +23,7 @@ _TARGET_INSTANCE_ID_PATTERN = r"^target_instance_[0-9a-f]{64}$"
 _PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
 _PROTOCOL_INSTANCE_ID_PATTERN = r"^protocol_instance_[0-9a-f]{64}$"
 _VARIANT_ID_PATTERN = r"^variant_[0-9a-f]{64}$"
+_PROFILE_ID_PATTERN = r"^python\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$"
 _INVALID_FINDING_MESSAGE = "analyzer finding validation failed"
 _INVALID_PROVENANCE_MESSAGE = "analyzer provenance validation failed"
 _INVALID_ORACLE_MESSAGE = "oracle record validation failed"
@@ -37,6 +38,7 @@ class SecurityLabel(str, Enum):
 class OracleEvaluability(str, Enum):
     EVALUABLE = "evaluable"
     UNKNOWN_PARSE_FAILURE = "unknown_parse_failure"
+    UNKNOWN_COVERAGE = "unknown_coverage"
 
 
 class AnalyzerFindingRecord(SafeValidationMixin, VersionedModel):
@@ -131,13 +133,18 @@ def _snapshot_analyzers(value: object) -> tuple[AnalyzerProvenanceRecord, ...]:
     return tuple(snapshots)
 
 
-def _is_completed_parse_failure(record: "OracleRecord") -> bool:
-    """Keep assignment-only terminal states outside the M4B Oracle contract."""
+def _is_completed_unknown(record: "OracleRecord") -> bool:
+    """Authenticate conservative terminal states without inventing secure labels."""
 
     return (
-        record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
-        and not record.parse_ok
-        and not record.functional_ok
+        (
+            (
+                record.evaluability is OracleEvaluability.UNKNOWN_PARSE_FAILURE
+                and not record.parse_ok
+                and not record.functional_ok
+            )
+            or (record.evaluability is OracleEvaluability.UNKNOWN_COVERAGE and record.parse_ok)
+        )
         and record.severity == "none"
         and not record.findings
     )
@@ -155,7 +162,7 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
         strict=True,
     )
 
-    schema_version: Literal["1.2"]
+    schema_version: Literal["1.2", "1.3"]
     request_id: str = Field(pattern=_REQUEST_ID_PATTERN)
     code_id: str = Field(pattern=_CANONICAL_CODE_ID_PATTERN)
     code_sha256: str = Field(pattern=_LOWERCASE_SHA256_PATTERN)
@@ -177,7 +184,12 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
     evaluability: OracleEvaluability
     severity: Literal["none", "low", "medium", "high"]
     findings: tuple[AnalyzerFindingRecord, ...] = Field(default_factory=tuple)
+    raw_findings: tuple[AnalyzerFindingRecord, ...] = Field(default_factory=tuple)
     analyzers: tuple[AnalyzerProvenanceRecord, ...]
+    decision_profile_id: str | None = Field(default=None, pattern=_PROFILE_ID_PATTERN)
+    decision_engine_version: str | None = Field(default=None, min_length=1, max_length=128)
+    decision_reason_code: str | None = Field(default=None, min_length=1, max_length=128)
+    mechanism_evidence_sha256: str | None = Field(default=None, pattern=_LOWERCASE_SHA256_PATTERN)
 
     @field_validator("prompt_id")
     @classmethod
@@ -238,6 +250,11 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
     @field_validator("findings", mode="before")
     @classmethod
     def snapshot_findings(cls, value: object) -> tuple[AnalyzerFindingRecord, ...]:
+        return _snapshot_findings(value)
+
+    @field_validator("raw_findings", mode="before")
+    @classmethod
+    def snapshot_raw_findings(cls, value: object) -> tuple[AnalyzerFindingRecord, ...]:
         return _snapshot_findings(value)
 
     @field_validator("analyzers", mode="before")
@@ -312,12 +329,49 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
         if self.functional_ok and not self.parse_ok:
             raise ValueError(_INVALID_ORACLE_MESSAGE)
 
+        decision_fields = (
+            self.decision_profile_id,
+            self.decision_engine_version,
+            self.decision_reason_code,
+            self.mechanism_evidence_sha256,
+        )
+        if self.schema_version == "1.2":
+            if any(value is not None for value in decision_fields) or self.raw_findings:
+                raise ValueError(_INVALID_ORACLE_MESSAGE)
+        else:
+            if any(value is None for value in decision_fields):
+                raise ValueError(_INVALID_ORACLE_MESSAGE)
+            raw_keys = {
+                (
+                    item.analyzer,
+                    item.rule_id,
+                    item.line,
+                    item.column,
+                    item.end_line,
+                    item.end_column,
+                )
+                for item in self.raw_findings
+            }
+            if any(
+                (
+                    item.analyzer,
+                    item.rule_id,
+                    item.line,
+                    item.column,
+                    item.end_line,
+                    item.end_column,
+                )
+                not in raw_keys
+                for item in self.findings
+            ):
+                raise ValueError(_INVALID_ORACLE_MESSAGE)
+
         analyzer_names = tuple(item.analyzer for item in self.analyzers)
         if len(analyzer_names) != 2 or set(analyzer_names) != {"semgrep", "bandit"}:
             raise ValueError(_INVALID_ORACLE_MESSAGE)
 
         if self.security_label is SecurityLabel.UNKNOWN:
-            if not _is_completed_parse_failure(self):
+            if not _is_completed_unknown(self):
                 raise ValueError(_INVALID_ORACLE_MESSAGE)
             return self
         if self.evaluability is not OracleEvaluability.EVALUABLE or not self.parse_ok:
@@ -328,7 +382,13 @@ class OracleRecord(SafeValidationMixin, VersionedModel):
             return self
 
         if not self.findings:
-            raise ValueError(_INVALID_ORACLE_MESSAGE)
+            if (
+                self.schema_version != "1.3"
+                or self.decision_reason_code != "proved_unsafe_sink"
+                or self.severity == "none"
+            ):
+                raise ValueError(_INVALID_ORACLE_MESSAGE)
+            return self
         severity_rank = {"low": 1, "medium": 2, "high": 3}
         aggregate = max(self.findings, key=lambda item: severity_rank[item.severity]).severity
         if self.severity != aggregate:

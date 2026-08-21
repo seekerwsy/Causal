@@ -1,15 +1,19 @@
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 import hashlib
 import importlib.metadata
 import inspect
 import json
 import os
 import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from secaware.config import OpenAICompatibleConfig
 from secaware.errors import ErrorCode, JSONValue, SecAwareError
+from secaware.generation.source_extraction import (
+    SOURCE_EXTRACTION_POLICY_SHA256,
+    extract_generated_source,
+)
 from secaware.schema.common import SCHEMA_VERSION
 from secaware.schema.generation import (
     GenerationAttemptRecord,
@@ -20,14 +24,17 @@ from secaware.schema.generation import (
     sha256_text,
 )
 
-
 _STAGE = "generation"
 _PRODUCER = "openai_compatible"
-_PRODUCER_VERSION = "chat_completions-v1"
+_PRODUCER_VERSION = "chat_completions-python-envelope-v2"
 _MISSING = object()
 _NO_DEFAULT = object()
 _MAX_TOKEN_PARAMETER_KEYS = frozenset({"max_tokens", "max_completion_tokens", "max_output_tokens"})
 _EXTRA_BODY_PARAMETER_KEYS = frozenset({"max_completion_tokens", "reasoning_effort", "verbosity"})
+GenerationAttemptRecorder = Callable[
+    [str, int, dict[str, Any], object | None, BaseException | None],
+    None,
+]
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -41,12 +48,12 @@ class OpenAICompatibleGenerationResult:
 
     def __post_init__(self) -> None:
         if (
-            self.finish_reason not in {"stop", "content_filter"}
+            self.finish_reason not in {"stop", "content_filter", "length"}
             or (
                 self.finish_reason == "stop"
                 and (type(self.code) is not str or not self.code.strip())
             )
-            or (self.finish_reason == "content_filter" and self.code is not None)
+            or (self.finish_reason in {"content_filter", "length"} and self.code is not None)
         ):
             raise ValueError("provider result code failed validation")
         metadata_failed = False
@@ -205,14 +212,59 @@ def _validate_usage(usage: object) -> ProviderUsageRecord:
         values = {}
 
 
+def _decode_python_source_envelope(content: str) -> tuple[str, str]:
+    """Accept raw source or the first and only fenced Python source block."""
+
+    closing_index: int | None = None
+    decoded = ""
+    lines: list[str] = []
+    trailing = ""
+    try:
+        if type(content) is not str or not content.strip():
+            raise ValueError("invalid message content")
+        normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized.startswith("```"):
+            if "```" in normalized:
+                raise ValueError("invalid Python source envelope")
+            return content, "raw"
+        lines = normalized.split("\n")
+        if lines[0].lower() not in {"```python", "```py"} or len(lines) < 3:
+            raise ValueError("invalid Python source envelope")
+        closing_index = next(
+            (index for index, line in enumerate(lines[1:], start=1) if line.rstrip(" \t") == "```"),
+            None,
+        )
+        if closing_index is None or any(line.startswith("```") for line in lines[1:closing_index]):
+            raise ValueError("invalid Python source envelope")
+        decoded = "\n".join(lines[1:closing_index])
+        if not decoded.strip():
+            raise ValueError("invalid Python source envelope")
+        trailing_lines = lines[closing_index + 1 :]
+        if any(line.strip().lower() in {"```python", "```py"} for line in trailing_lines):
+            raise ValueError("invalid Python source envelope")
+        trailing = "\n".join(trailing_lines)
+        envelope = "python_fence_trailing_text" if trailing.strip() else "python_fence"
+        return decoded, envelope
+    finally:
+        content = ""
+        closing_index = None
+        decoded = ""
+        lines.clear()
+        lines = []
+        trailing = ""
+        trailing_lines = []
+
+
 def _response_code(
-    response: object, *, expected_model: str
-) -> tuple[str | None, str, ProviderUsageRecord]:
+    response: object, *, expected_model: str, system_template_version: str
+) -> tuple[str | None, str, ProviderUsageRecord, str | None, str]:
     choices: object = None
     choice: object = None
     finish_reason: object = None
     message: object = None
     content: object = None
+    raw_content_sha256: str | None = None
+    source_envelope = ""
     actual_model: object = None
     try:
         actual_model = _member(response, "model")
@@ -233,16 +285,46 @@ def _response_code(
             raise ValueError("invalid choices")
         choice = choices[0]
         finish_reason = _member(choice, "finish_reason")
-        if type(finish_reason) is not str or finish_reason not in {"stop", "content_filter"}:
+        if type(finish_reason) is not str or finish_reason not in {
+            "stop",
+            "content_filter",
+            "length",
+        }:
             raise ValueError("invalid finish reason")
         message = _member(choice, "message")
         content = _member(message, "content")
-        if finish_reason == "stop" and (type(content) is not str or not content.strip()):
-            raise ValueError("invalid message content")
+        if finish_reason == "stop":
+            if type(content) is not str:
+                raise ValueError("invalid message content")
+            raw_content_sha256 = sha256_text(content)
+            if system_template_version == "multilingual-requested-artifact-v1":
+                extraction = extract_generated_source(content)
+                content = extraction.source
+                source_envelope = (
+                    f"requested_artifact_v1.{extraction.envelope}.{SOURCE_EXTRACTION_POLICY_SHA256}"
+                )
+            else:
+                content, source_envelope = _decode_python_source_envelope(content)
         if finish_reason == "content_filter" and content not in {None, ""}:
             raise ValueError("invalid filtered content")
+        if finish_reason == "length":
+            if type(content) is not str:
+                raise ValueError("invalid length-limited content")
+            raw_content_sha256 = sha256_text(content)
         usage = _validate_usage(_member(response, "usage", default=_MISSING))
-        return (content if finish_reason == "stop" else None, finish_reason, usage)
+        return (
+            content if finish_reason == "stop" else None,
+            finish_reason,
+            usage,
+            raw_content_sha256,
+            (
+                source_envelope
+                if finish_reason == "stop"
+                else "content_filter"
+                if finish_reason == "content_filter"
+                else "token_limit"
+            ),
+        )
     finally:
         response = None
         expected_model = ""
@@ -252,6 +334,8 @@ def _response_code(
         finish_reason = None
         message = None
         content = None
+        raw_content_sha256 = None
+        source_envelope = ""
         usage = None
 
 
@@ -274,13 +358,14 @@ def _wire_parameters(parameters: Mapping[str, JSONValue]) -> dict[str, Any]:
 
 class OpenAICompatibleProvider:
     __slots__ = (
+        "_attempt_recorder",
         "_client",
         "_endpoint_sha256",
         "_initial_backoff_seconds",
         "_max_attempts",
         "_max_backoff_seconds",
-        "_sleeper",
         "_runtime_fingerprint_sha256",
+        "_sleeper",
     )
 
     def __init__(
@@ -290,6 +375,7 @@ class OpenAICompatibleProvider:
         client: object,
         sleeper: Callable[[float], None] = time.sleep,
         runtime_fingerprint_sha256: str | None = None,
+        attempt_recorder: GenerationAttemptRecorder | None = None,
     ) -> None:
         trusted: OpenAICompatibleConfig | None = None
         initialization_error: SecAwareError | None = None
@@ -318,11 +404,17 @@ class OpenAICompatibleProvider:
             client = None
             sleeper = None  # type: ignore[assignment]
             raise initialization_error
+        if attempt_recorder is not None and not callable(attempt_recorder):
+            raise _provider_error(
+                ErrorCode.CONFIG,
+                "OpenAI-compatible provider configuration is unavailable",
+            )
         self._client = client
         self._endpoint_sha256 = sha256_text(trusted.base_url)
         self._max_attempts = trusted.max_attempts
         self._initial_backoff_seconds = trusted.initial_backoff_seconds
         self._max_backoff_seconds = trusted.max_backoff_seconds
+        self._attempt_recorder = attempt_recorder
         self._sleeper = sleeper
         self._runtime_fingerprint_sha256 = (
             openai_provider_runtime_fingerprint()
@@ -407,10 +499,13 @@ class OpenAICompatibleProvider:
         attempts: list[GenerationAttemptRecord] = []
         payload: dict[str, Any] = {}
         response: object = None
+        transport_error: BaseException | None = None
         classification: _FailureClassification | None = None
         code: str | None = None
         finish_reason = ""
         usage: ProviderUsageRecord | None = None
+        raw_content_sha256: str | None = None
+        source_envelope = ""
         try:
             trusted = self._request(request, system_template)
             if trusted is None:
@@ -423,10 +518,42 @@ class OpenAICompatibleProvider:
                 payload = self._payload(trusted, system_template)
                 response = _MISSING
                 classification = None
+                transport_error = None
                 try:
                     response = self._client.chat.completions.create(**payload)  # type: ignore[attr-defined]
                 except Exception as error:
+                    transport_error = error
                     classification = _classify_failure(error)
+                if self._attempt_recorder is not None:
+                    recording_failed = False
+                    try:
+                        self._attempt_recorder(
+                            trusted.request_id,
+                            attempt_number,
+                            dict(payload),
+                            None if response is _MISSING else response,
+                            transport_error,
+                        )
+                    except Exception:
+                        recording_failed = True
+                    finally:
+                        transport_error = None
+                    if recording_failed:
+                        attempts.append(
+                            self._attempt(
+                                trusted.request_id,
+                                attempt_number,
+                                "failure",
+                                error_code=ErrorCode.API_INVALID_RESPONSE,
+                                retryable=False,
+                                backoff_seconds=0.0,
+                            )
+                        )
+                        return _provider_error(
+                            ErrorCode.API_INVALID_RESPONSE,
+                            "provider attempt recording failed",
+                            attempts=attempts,
+                        )
                 if classification is not None:
                     if not classification.retryable:
                         attempts.append(
@@ -492,12 +619,35 @@ class OpenAICompatibleProvider:
                 finish_reason = ""
                 response_invalid = False
                 try:
-                    code, finish_reason, usage = _response_code(
-                        response, expected_model=trusted.model_id
+                    (
+                        code,
+                        finish_reason,
+                        usage,
+                        raw_content_sha256,
+                        source_envelope,
+                    ) = _response_code(
+                        response,
+                        expected_model=trusted.model_id,
+                        system_template_version=trusted.system_template_version,
                     )
                 except Exception:
                     response_invalid = True
-                if response_invalid or (code is None and finish_reason != "content_filter"):
+                if not response_invalid and finish_reason == "length":
+                    token_limits = [
+                        value
+                        for key, value in trusted.parameters.values.items()
+                        if key in _MAX_TOKEN_PARAMETER_KEYS
+                    ]
+                    if (
+                        len(token_limits) != 1
+                        or type(token_limits[0]) is not int
+                        or usage is None
+                        or usage.completion_tokens != token_limits[0]
+                    ):
+                        response_invalid = True
+                if response_invalid or (
+                    code is None and finish_reason not in {"content_filter", "length"}
+                ):
                     attempts.append(
                         self._attempt(
                             trusted.request_id,
@@ -529,6 +679,11 @@ class OpenAICompatibleProvider:
                     provenance=GenerationProvenance(
                         producer=_PRODUCER,
                         producer_version=_PRODUCER_VERSION,
+                        source_batch_id=(
+                            source_envelope
+                            if raw_content_sha256 is None
+                            else f"{source_envelope}:{raw_content_sha256}"
+                        ),
                     ),
                     attempts=tuple(attempts),
                     usage=usage,
@@ -546,10 +701,13 @@ class OpenAICompatibleProvider:
             attempts = []
             payload = {}
             response = None
+            transport_error = None
             classification = None
             code = None
             finish_reason = ""
             usage = None
+            raw_content_sha256 = None
+            source_envelope = ""
             request = None  # type: ignore[assignment]
             system_template = ""
             self = None  # type: ignore[assignment]
@@ -572,6 +730,44 @@ class OpenAICompatibleProvider:
             system_template = ""
 
 
+class _ReplayCompletions:
+    def __init__(self, response: dict[str, Any]) -> None:
+        self._response = response
+        self._used = False
+
+    def create(self, **_payload: object) -> dict[str, Any]:
+        if self._used:
+            raise RuntimeError("persisted generation response was replayed more than once")
+        self._used = True
+        return self._response
+
+
+class _ReplayClient:
+    def __init__(self, response: dict[str, Any]) -> None:
+        completions = _ReplayCompletions(response)
+        self.chat = type("ReplayChat", (), {"completions": completions})()
+
+
+def create_replay_openai_compatible_provider(
+    config: OpenAICompatibleConfig,
+    response: dict[str, Any],
+) -> OpenAICompatibleProvider:
+    """Create a no-network provider over one persisted raw Chat Completions response."""
+
+    trusted = _trusted_config(config)
+    if type(response) is not dict:
+        raise _provider_error(ErrorCode.CONTRACT, "persisted provider response is unavailable")
+    snapshot = json.loads(json.dumps(response, ensure_ascii=False, allow_nan=False))
+    if type(snapshot) is not dict:
+        raise _provider_error(ErrorCode.CONTRACT, "persisted provider response is unavailable")
+    return OpenAICompatibleProvider(
+        trusted,
+        client=_ReplayClient(snapshot),
+        sleeper=lambda _seconds: None,
+        runtime_fingerprint_sha256=openai_provider_runtime_fingerprint(),
+    )
+
+
 def openai_provider_runtime_payload() -> dict[str, str]:
     try:
         sdk_version = importlib.metadata.version("openai")
@@ -590,7 +786,7 @@ def openai_provider_runtime_payload() -> dict[str, str]:
         "factory_source_sha256": hashlib.sha256(factory_source.encode("utf-8")).hexdigest(),
         "response_source_sha256": hashlib.sha256(response_source.encode("utf-8")).hexdigest(),
         "usage_source_sha256": hashlib.sha256(usage_source.encode("utf-8")).hexdigest(),
-        "response_policy": "strict-provider-result-envelope-v1",
+        "response_policy": "versioned-python-v2-or-multilingual-requested-artifact-v1",
     }
 
 
@@ -608,6 +804,7 @@ def create_openai_compatible_provider(
     *,
     environ: Mapping[str, str] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
+    attempt_recorder: GenerationAttemptRecorder | None = None,
 ) -> OpenAICompatibleProvider:
     trusted: OpenAICompatibleConfig | None = None
     config_error: SecAwareError | None = None
@@ -688,6 +885,7 @@ def create_openai_compatible_provider(
                 client=client,
                 sleeper=sleeper,
                 runtime_fingerprint_sha256=runtime_fingerprint_sha256,
+                attempt_recorder=attempt_recorder,
             )
         except SecAwareError as error:
             provider_error = error
@@ -720,12 +918,14 @@ def create_openai_compatible_provider(
         factory_error = None
         provider_error = None
         runtime_fingerprint_sha256 = None
+        attempt_recorder = None
 
 
 __all__ = [
     "OpenAICompatibleGenerationResult",
     "OpenAICompatibleProvider",
     "create_openai_compatible_provider",
+    "create_replay_openai_compatible_provider",
     "openai_provider_runtime_fingerprint",
     "openai_provider_runtime_payload",
 ]

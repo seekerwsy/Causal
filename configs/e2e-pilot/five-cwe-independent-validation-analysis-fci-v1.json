@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "analysis_id": "five_cwe_independent_validation_mechanism_function_fci_v1",
+  "model_id": "phi-4-14b",
+  "view_id": "full_jci_functional",
+  "expected_tasks": 55,
+  "expected_rows": 220,
+  "source_variable": "z.target_mechanism_realized",
+  "target_variable": "y.discovery_functional",
+  "reference_marks": ["tail", "arrow"],
+  "jci_assumption": "jci.randomized_context_exogeneity.v1",
+  "required_directions": [],
+  "required_adjacencies": [],
+  "inherited_fci_config": {
+    "path": "configs/e2e-pilot/five-cwe-randomized-discovery-v3-functional-fci-v1.json",
+    "sha256": "9c848d7182ebc86db12f875c9d8ff26a3d1d78d5a59eca832da0f8aec96a1130"
+  },
+  "runtime_freeze": {
+    "path": "data/e2e-pilot/five-cwe-independent-validation-runtime-analysis-freeze-20260819-03",
+    "sha256": "dfa397d05cc9231df87a1260b142907aafe1eff50fc7c2a821a08bc75c6daa74"
+  }
+}

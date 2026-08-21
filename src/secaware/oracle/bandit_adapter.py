@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
-from typing import AbstractSet, Any
+from collections.abc import Set as AbstractSet
+from itertools import pairwise
+from pathlib import Path
+from typing import Any
 
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.oracle.adapter import AnalyzerReport, LocatedAnalyzerFinding
 from secaware.oracle.policy import BANDIT_VERSION, BanditFindingConstraint
 from secaware.oracle.strict_json import load_strict_json_bytes
 from secaware.schema.oracle import AnalyzerFindingRecord, AnalyzerProvenanceRecord
-
 
 MAX_ANALYZER_OUTPUT_BYTES = 256 * 1024 * 1024
 _STAGE = "oracle_bandit"
@@ -64,7 +65,7 @@ def _opaque_file(value: object) -> str | None:
     text = _strict_text(value, maximum=255)
     if text is None:
         return None
-    if text.startswith("./") or text.startswith(".\\"):
+    if text.startswith(("./", ".\\")):
         text = text[2:]
     if not text or "/" in text or "\\" in text or text in {".", ".."} or not text.endswith(".py"):
         return None
@@ -115,9 +116,9 @@ def _line_range(value: object, line_number: int) -> tuple[int, int] | None:
         if line is None:
             return None
         lines.append(line)
-    if lines[0] != line_number or any(right <= left for left, right in zip(lines, lines[1:])):
+    if line_number not in lines or any(right <= left for left, right in pairwise(lines)):
         return None
-    return lines[0], lines[-1]
+    return line_number, lines[-1]
 
 
 def _finding(

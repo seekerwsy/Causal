@@ -182,6 +182,7 @@ def structured_policy_from_config(config: InterventionLLMConfig) -> StructuredLL
             timeout_seconds=checked.timeout_seconds,
             max_attempts=checked.max_attempts,
             max_response_bytes=checked.max_response_bytes,
+            enable_thinking=checked.enable_thinking,
         )
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise

@@ -1,0 +1,7 @@
+2026-08-18T06:22:45+08:00
+ubuntu
+/home/ubuntu/secaware-deployments/five-cwe-gate-b-reuse-exclusion-20260818-18
+Python 3.12.13
+0c1b0b1e7ec15d030358de5bde1a018edaaf0e7e672912399addd94445ff28e4  /home/ubuntu/secaware-experiments/deploy-inputs/five-cwe-gate-b-reuse-exclusion-d2e5d1f.tar
+文件系统        大小  已用  可用 已用% 挂载点
+/dev/nvme0n1p3  901G  296G  560G   35% /

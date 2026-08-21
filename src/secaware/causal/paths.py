@@ -34,7 +34,15 @@ from secaware.tsg.feature_catalog import prompt_feature_spec
 
 _MAX_PATH_LENGTH = 16
 _MAX_CANDIDATE_PATHS = 4096
-_PREREGISTERED_OUTCOMES = frozenset({PRIMARY_OUTCOME.variable_id, CWE_SECURITY_OUTCOME.variable_id})
+_PREREGISTERED_OUTCOMES = frozenset(
+    {
+        PRIMARY_OUTCOME.variable_id,
+        CWE_SECURITY_OUTCOME.variable_id,
+        "y.discovery_cwe_secure",
+        "y.discovery_secure_functional",
+        "y.discovery_functional",
+    }
+)
 
 
 def _path_error(message: str) -> SecAwareError:
@@ -90,7 +98,11 @@ def _is_intervenable_feature(variable_id: str) -> bool:
 
 def _is_allowed_internal(variable_id: str) -> bool:
     try:
-        return declaration_by_id(variable_id).role in {VariableRole.W, VariableRole.X}
+        return declaration_by_id(variable_id).role in {
+            VariableRole.W,
+            VariableRole.X,
+            VariableRole.Z,
+        }
     except KeyError:
         return False
 

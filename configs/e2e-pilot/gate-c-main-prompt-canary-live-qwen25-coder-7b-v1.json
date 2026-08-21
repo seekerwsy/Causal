@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "gate_c_live_id": "gate-c-main-prompt-canary-live-qwen25-coder-7b-v1",
+  "source_plan_dir": "data/e2e-pilot/gate-c-main-prompt-canary-qwen25-coder-7b-plan-20260818-12",
+  "pilot_assignment_id": "assignment_f7af098a4998130d51919bb9a48ce43af51c4a374494dd4d8b6eda5f5edc0a50",
+  "expected_assignments": 20,
+  "maximum_generation_provider_attempts": 20,
+  "maximum_functional_judge_provider_attempts": 20,
+  "require_pilot_before_remaining": true,
+  "fail_fast": true,
+  "oracle_coordinate_blinding": true,
+  "zero_finding_interpretation": "profile_scoped_decision",
+  "scientific_claim_allowed": false,
+  "scale_up_allowed": false
+}

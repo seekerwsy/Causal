@@ -148,6 +148,7 @@ def _base_store(
     hypothesis_records: tuple[FrozenHypothesisRecord, ...] | None = None,
     discovery_min_independent_tasks: int = 20,
     randomization_min_independent_tasks: int = 20,
+    task_functional_contracts_path: Path | None = None,
 ) -> tuple[AppConfig, RunStore]:
     config, store = _stage_store(
         root,
@@ -157,6 +158,7 @@ def _base_store(
         rfci_enabled=rfci_enabled,
         discovery_min_independent_tasks=discovery_min_independent_tasks,
         randomization_min_independent_tasks=randomization_min_independent_tasks,
+        task_functional_contracts_path=task_functional_contracts_path,
     )
     run_prompt_variant_freeze_stage(config, store, force=False)
     run_confirmation_randomization_stage(config, store, force=False)
@@ -395,6 +397,21 @@ def test_effect_stage_publishes_complete_atomic_artifact(committed_base, tmp_pat
     manifest = read_stage_manifest(store.path(".stages", "estimate-confirmation-effects.json"))
     assert tuple(manifest.outputs) == EXPECTED_OUTPUTS
     assert set(manifest.output_sha256) == set(EXPECTED_OUTPUTS)
+
+
+def test_disabled_judge_does_not_consume_audit_only_task_contract_path(
+    tmp_path: Path,
+) -> None:
+    audit_only_path = tmp_path / "audit-only-contracts.jsonl"
+    audit_only_path.write_text("not-json\n", encoding="utf-8")
+    config, store = _base_store(
+        tmp_path / "run-base",
+        task_functional_contracts_path=audit_only_path,
+    )
+
+    effects_stage(config, store, force=False)
+
+    assert store.path("analysis", "assignment_outcomes.jsonl").exists()
 
 
 def test_effect_stage_holds_exact_full_producer_bundles(
@@ -659,6 +676,7 @@ def test_optional_functional_candidate_is_in_total_ordered_dependency_lease(
             "randomize-confirmation",
             "generate-confirmation",
             "run-oracle-confirmation",
+            "judge-functionality",
             "import-functional-outcomes",
         )
     ]

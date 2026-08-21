@@ -45,6 +45,8 @@ _MOTIF_BY_TARGET_FEATURE = {
     "safety.safe_subprocess": MotifId.USER_INPUT_TO_SHELL_WITHOUT_GUARD,
     "safety.authorization_check": MotifId.SENSITIVE_OPERATION_WITHOUT_AUTH_GUARD,
     "safety.safe_deserialization": MotifId.UNTRUSTED_DATA_TO_DESERIALIZATION_SINK,
+    "safety.collision_resistant_hash": MotifId.MESSAGE_HASH_WITHOUT_COLLISION_RESISTANCE,
+    "safety.cryptographic_randomness": MotifId.SECURITY_RANDOM_WITHOUT_CRYPTO_SOURCE,
 }
 
 
@@ -585,12 +587,12 @@ def test_invalid_motif_and_noncanonical_graph_fail_closed() -> None:
         assert exc_info.value.code is ErrorCode.TSG_INVALID
 
 
-def test_catalog_mapping_is_total_unique_and_all_six_features_query() -> None:
+def test_catalog_mapping_is_total_unique_and_all_eight_features_query() -> None:
     assert tuple(MOTIF_SPECS) == tuple(MotifId)
     assert {spec.target_feature_id for spec in MOTIF_SPECS.values()} == {
         entry.target_feature_id for entry in PROMPT_TSG_CATALOG
     }
-    assert len(MOTIF_SPECS) == 6
+    assert len(MOTIF_SPECS) == 8
 
     for target_feature_id, motif_id in _MOTIF_BY_TARGET_FEATURE.items():
         graph = _unsafe_flow(target_feature_id)

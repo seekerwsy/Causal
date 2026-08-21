@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
+import secaware.extractors.llm_facts as llm_facts_module
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.llm_facts import (
+    LLM_FACTS_CRITERIA_PROJECTION_VERSION,
     LLM_FACTS_OUTPUT_SCHEMA_SHA256,
+    LLM_FACTS_RESPONSE_NORMALIZATION_VERSION,
     LLM_FACTS_SYSTEM_TEMPLATE_SHA256,
     LLMFactsExtractor,
     facts_request_payload,
     llm_facts_policy_sha256,
+    llm_facts_response_normalization_sha256,
 )
 from secaware.llm.structured_transport import StructuredLLMPolicy
 from secaware.schema.features import FeatureState, PromptExtractorBackend
@@ -72,33 +76,23 @@ def _policy(structured: StructuredLLMPolicy | None = None) -> ExtractionPolicy:
 
 def _facts(prompt: PromptRecord) -> list[dict[str, object]]:
     needle = "user path"
-    start = prompt.prompt.index(needle)
     facts = []
     for spec in PROMPT_FEATURE_CATALOG:
         applicable = feature_is_applicable(spec, prompt)
+        if not applicable:
+            continue
         present = spec.feature_id == "task.file_read"
         evidence = []
         if present:
             evidence = [
                 {
-                    "start": start,
-                    "end": start + len(needle),
                     "text": needle,
-                    "text_sha256": hashlib.sha256(needle.encode()).hexdigest(),
                 }
             ]
         facts.append(
             {
                 "feature_id": spec.feature_id,
-                "state": (
-                    FeatureState.PRESENT.value
-                    if present
-                    else (
-                        FeatureState.ABSENT.value
-                        if applicable
-                        else FeatureState.NOT_APPLICABLE.value
-                    )
-                ),
+                "state": (FeatureState.PRESENT.value if present else FeatureState.ABSENT.value),
                 "semantic_role": "feature_state",
                 "evidence": evidence,
                 "relation_feature_ids": [],
@@ -146,15 +140,29 @@ def test_llm_facts_request_contains_only_inert_prompt_and_catalog() -> None:
         "task_id",
         "prompt_sha256",
         "prompt_text",
+        "prompt_context",
         "catalog_sha256",
+        "criteria_projection_version",
         "allowed_features",
         "output_kind",
     }
     assert not {"arm", "target", "oracle", "generated_code", "outcome"} & set(request)
     assert request["prompt_text"] == prompt.prompt
+    assert request["prompt_context"] == {
+        "language": prompt.language,
+        "cwe": prompt.cwe,
+        "task_family": prompt.task_family,
+    }
+    assert request["criteria_projection_version"] == LLM_FACTS_CRITERIA_PROJECTION_VERSION
+    assert all("semantic_criteria" in item for item in request["allowed_features"])
     assert proposal.backend is PromptExtractorBackend.LLM_FACTS_V1
     assert proposal.raw_response == transport.response.decode("utf-8")
     assert proposal.response_sha256 == hashlib.sha256(transport.response).hexdigest()
+    present = next(item for item in proposal.facts if item.state is FeatureState.PRESENT)
+    assert (
+        present.evidence[0].text_sha256
+        == hashlib.sha256(present.evidence[0].text.encode("utf-8")).hexdigest()
+    )
 
 
 def test_request_payload_is_exact_and_contains_only_catalog_prompt_view() -> None:
@@ -162,8 +170,16 @@ def test_request_payload_is_exact_and_contains_only_catalog_prompt_view() -> Non
     payload = facts_request_payload(prompt, _policy())
     assert payload["prompt_sha256"] == hashlib.sha256(prompt.prompt.encode()).hexdigest()
     assert {item["feature_id"] for item in payload["allowed_features"]} == {
-        spec.feature_id for spec in PROMPT_FEATURE_CATALOG
+        spec.feature_id for spec in PROMPT_FEATURE_CATALOG if feature_is_applicable(spec, prompt)
     }
+    assert all(
+        item["allowed_states"] == ["absent", "present"] for item in payload["allowed_features"]
+    )
+    assert all(
+        set(item["semantic_criteria"])
+        == {"positive_indicators", "reviewed_requirement_clauses", "state_rule"}
+        for item in payload["allowed_features"]
+    )
     serialized = json.dumps(payload).casefold()
     assert "generated_code" not in serialized
     assert "experiment_arm" not in serialized
@@ -174,6 +190,117 @@ def test_semantic_parse_failure_is_not_retried() -> None:
     transport = CapturingTransport(b'{"facts":"invalid"}')
     with pytest.raises(SecAwareError):
         _extractor(transport).extract(_prompt(), _policy())
+    assert len(transport.requests) == 1
+
+
+def test_applicable_feature_coverage_and_states_fail_closed() -> None:
+    prompt = _prompt()
+    missing = json.loads(_response(prompt))
+    missing["facts"].pop()
+    transport = CapturingTransport(json.dumps(missing).encode())
+    with pytest.raises(SecAwareError):
+        _extractor(transport).extract(prompt, _policy())
+
+    wrong_state = json.loads(_response(prompt))
+    wrong_state["facts"][0]["state"] = "not_applicable"
+    transport = CapturingTransport(json.dumps(wrong_state).encode())
+    with pytest.raises(SecAwareError):
+        _extractor(transport).extract(prompt, _policy())
+
+
+def test_absent_fact_may_omit_only_an_empty_relation_collection() -> None:
+    prompt = _prompt()
+    response = json.loads(_response(prompt))
+    absent = next(item for item in response["facts"] if item["state"] == "absent")
+    absent.pop("relation_feature_ids")
+
+    proposal = _extractor(CapturingTransport(json.dumps(response).encode())).extract(
+        prompt,
+        _policy(),
+    )
+
+    normalized = next(item for item in proposal.facts if item.feature_id == absent["feature_id"])
+    assert normalized.state is FeatureState.ABSENT
+    assert normalized.evidence == ()
+    assert normalized.relation_feature_ids == ()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["present", "absent_with_evidence", "other_key", "extra_key"],
+)
+def test_missing_empty_relation_default_does_not_relax_other_schema_errors(case: str) -> None:
+    prompt = _prompt()
+    response = json.loads(_response(prompt))
+    absent = next(item for item in response["facts"] if item["state"] == "absent")
+    present = next(item for item in response["facts"] if item["state"] == "present")
+    if case == "present":
+        present.pop("relation_feature_ids")
+    elif case == "absent_with_evidence":
+        absent.pop("relation_feature_ids")
+        absent["evidence"] = [{"text": "user path"}]
+    elif case == "other_key":
+        absent.pop("evidence")
+    else:
+        absent["unexpected"] = []
+
+    with pytest.raises(SecAwareError):
+        _extractor(CapturingTransport(json.dumps(response).encode())).extract(
+            prompt,
+            _policy(),
+        )
+
+
+def test_response_normalization_has_separate_provenance_without_request_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert LLM_FACTS_RESPONSE_NORMALIZATION_VERSION == "absent-empty-relations-default-v1"
+    prompt = _prompt()
+    baseline_request = facts_request_payload(prompt, _policy())
+    baseline = llm_facts_policy_sha256(
+        _structured(),
+        PROMPT_FEATURE_CATALOG_SHA256,
+        262_144,
+    )
+    baseline_normalization = llm_facts_response_normalization_sha256()
+    monkeypatch.setattr(
+        llm_facts_module,
+        "LLM_FACTS_RESPONSE_NORMALIZATION_VERSION",
+        "absent-empty-relations-default-v2",
+    )
+    changed = llm_facts_policy_sha256(
+        _structured(),
+        PROMPT_FEATURE_CATALOG_SHA256,
+        262_144,
+    )
+    changed_normalization = llm_facts_response_normalization_sha256()
+    assert changed == baseline
+    assert changed_normalization != baseline_normalization
+    assert facts_request_payload(prompt, _policy()) == baseline_request
+
+
+def test_model_evidence_mechanics_or_non_unique_quote_are_rejected_without_retry() -> None:
+    prompt = _prompt()
+    with_digest = json.loads(_response(prompt))
+    present = next(item for item in with_digest["facts"] if item["state"] == "present")
+    present["evidence"][0]["text_sha256"] = "0" * 64
+    transport = CapturingTransport(json.dumps(with_digest).encode())
+    with pytest.raises(SecAwareError):
+        _extractor(transport).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+    fabricated = json.loads(_response(prompt))
+    present = next(item for item in fabricated["facts"] if item["state"] == "present")
+    present["evidence"][0]["text"] = "not in the source prompt"
+    transport = CapturingTransport(json.dumps(fabricated).encode())
+    with pytest.raises(SecAwareError):
+        _extractor(transport).extract(prompt, _policy())
+    assert len(transport.requests) == 1
+
+    repeated_prompt = _prompt("Read the user path, then log the user path.")
+    transport = CapturingTransport(_response(repeated_prompt))
+    with pytest.raises(SecAwareError):
+        _extractor(transport).extract(repeated_prompt, _policy())
     assert len(transport.requests) == 1
 
 

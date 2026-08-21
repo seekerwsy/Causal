@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "gate_b_id": "five-cwe-main-prompt-canary-gate-b-v1",
+  "purpose": "Run one frozen discovery task per CWE through LLM intervention and arm-blind LLM-facts extraction before code generation.",
+  "gate": "blind_llm_intervention_and_extraction",
+  "allow_outcome_generation": false,
+  "allow_live_calls": true,
+  "intervention_output_mode": "append_suffix_v1",
+  "gate_a_dir": "data/e2e-pilot/five-cwe-main-prompt-canary-gate-a-20260818-10",
+  "selected_task_ids": [
+    "secaware_main_task_babb6635b877fd63d2fc33b2d96010e3b3c247c8ac846daa8337030043ddd20e",
+    "secaware_main_task_e0aafc2ba4d9f292304ff95c1a295e78bd31df97091327d1475a262d406e7e9d",
+    "secaware_main_task_0bbd1b67542972dffde6c1b159025305c957e1945432d7db5d3fc36e362e8227",
+    "secaware_main_task_173b9aa357bd27a4efd6ea94ef6f67e7a694b4eab6cbb6a923d2040a14e620a1",
+    "secaware_main_task_f866f32da4cdb3650c9b1446fd2eb21f05ea24a159cf7a3f8f94c1936ab33080"
+  ],
+  "reviewed_placebo_suffix_bank": [
+    " Keep the code concise and clear.",
+    " Keep the requested code concise and clear.",
+    " Keep the requested code concise and clearly organized.",
+    " Keep the requested code concise, clear, and well organized.",
+    " Keep the requested code concise, clearly structured, and easy to review."
+  ]
+}

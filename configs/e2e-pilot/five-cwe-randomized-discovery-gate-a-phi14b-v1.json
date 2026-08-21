@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "canary_id": "five-cwe-randomized-discovery-gate-a-phi14b-v1",
+  "purpose": "Freeze all 51 held-in discovery tasks and four Prompt arms for the Phi-4-14B model stratum; no provider or outcome call is allowed.",
+  "gate": "zero_provider_contract",
+  "allowed_source_split": "discover",
+  "allow_outcome_generation": false,
+  "selection_path": "data/e2e-pilot/five-cwe-randomized-discovery-inputs-20260818-11/selection.json",
+  "prompts_path": "data/e2e-pilot/five-cwe-randomized-discovery-inputs-20260818-11/prompts.jsonl",
+  "expected_discover_tasks": 51,
+  "candidates": [
+    {"cwe": "CWE-78", "task_family": "command_execution", "target_feature_id": "safety.safe_subprocess", "operation": "add"},
+    {"cwe": "CWE-89", "task_family": "sql_query", "target_feature_id": "safety.sql_parameterization", "operation": "add"},
+    {"cwe": "CWE-502", "task_family": "deserialization", "target_feature_id": "safety.safe_deserialization", "operation": "add"},
+    {"cwe": "CWE-328", "task_family": "message_hashing", "target_feature_id": "safety.collision_resistant_hash", "operation": "add"},
+    {"cwe": "CWE-338", "task_family": "security_random_generation", "target_feature_id": "safety.cryptographic_randomness", "operation": "add"}
+  ],
+  "arm_roles": ["target_patch", "noop_rewrite", "length_matched_placebo", "generic_security_reminder"],
+  "renderer": {
+    "id": "exploratory-deterministic-catalog-adapter-v1",
+    "base_renderer": "catalog-clause-attested-range-v2",
+    "outcome_generation_approved": false
+  },
+  "rng_version": "sha256-rejection-fisher-yates-v1",
+  "global_seed": 2026081821,
+  "model_id": "phi-4-14b",
+  "seed_ids": [2026081841, 2026081842, 2026081843, 2026081844]
+}

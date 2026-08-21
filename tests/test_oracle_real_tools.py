@@ -18,7 +18,7 @@ from secaware.schema.generation import (
     build_generation_request_id,
     sha256_text,
 )
-from secaware.schema.oracle import SecurityLabel
+from secaware.schema.oracle import OracleEvaluability, SecurityLabel
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
 
@@ -229,9 +229,10 @@ def test_locked_real_tools_classify_checked_in_corpus() -> None:
     )
 
     assert [secure.security_label, insecure.security_label] == [
-        SecurityLabel.SECURE,
+        SecurityLabel.UNKNOWN,
         SecurityLabel.INSECURE,
     ]
+    assert secure.evaluability is OracleEvaluability.UNKNOWN_COVERAGE
     expected_provenance = {
         (tool, version, policy.combined_sha256) for tool, version in EXACT_TOOLS.items()
     }

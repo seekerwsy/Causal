@@ -1,0 +1,17 @@
+functional_judge:
+  enabled: true
+  mode: single_pass
+  llm:
+    provider: openai_compatible
+    model_id: qwen3.5-flash-2026-02-23
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: ALI_BAILIAN_API_KEY
+    timeout_seconds: 60.0
+    max_attempts: 3
+    max_response_bytes: 65536
+    temperature: 0.0
+    top_p: 1.0
+    seed: null
+    enable_thinking: false
+  pass_seeds:
+    - 73001

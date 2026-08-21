@@ -11,7 +11,7 @@ from secaware.schema.features import FeatureFamily, FeatureOperation
 from secaware.schema.tsg import MAX_TSG_STRING_BYTES, EdgeType, NodeType
 
 
-FEATURE_CATALOG_VERSION = "1.5"
+FEATURE_CATALOG_VERSION = "1.7"
 _FEATURE_ID_RE = re.compile(r"^(task|safety|presentation)\.[a-z][a-z0-9_]*$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]{0,5}$")
 _MAX_TEXT_BYTES = 128
@@ -35,12 +35,16 @@ _EXPECTED_FEATURE_IDS = (
     "task.process_launch",
     "task.privileged_action",
     "task.object_deserialization",
+    "task.message_hashing",
+    "task.security_random_generation",
     "safety.input_validation",
     "safety.path_normalization",
     "safety.sql_parameterization",
     "safety.safe_subprocess",
     "safety.authorization_check",
     "safety.safe_deserialization",
+    "safety.collision_resistant_hash",
+    "safety.cryptographic_randomness",
     "safety.generic_security_reminder",
     "safety.prohibited_unsafe_request",
     "safety.vulnerability_disclosure",
@@ -179,6 +183,30 @@ PROMPT_FEATURE_CATALOG = (
         clauses=(" Deserialize data.",),
     ),
     _feature(
+        "task.message_hashing",
+        FeatureFamily.TASK_FUNCTION,
+        cwes=("CWE-328",),
+        task_families=("message_hashing",),
+        nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
+        edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
+        terms=("hash a message", "compute a digest", "generate a checksum"),
+        clauses=(" Compute a digest for the message.",),
+    ),
+    _feature(
+        "task.security_random_generation",
+        FeatureFamily.TASK_FUNCTION,
+        cwes=("CWE-338",),
+        task_families=("security_random_generation",),
+        nodes=(NodeType.TASK_OPERATION, NodeType.DATA_OBJECT, NodeType.SINK),
+        edges=(EdgeType.OPERATES_ON, EdgeType.FLOWS_TO),
+        terms=(
+            "generate a security token",
+            "generate a password reset token",
+            "generate a cryptographic nonce",
+        ),
+        clauses=(" Generate a security token.",),
+    ),
+    _feature(
         "safety.input_validation",
         FeatureFamily.SAFETY_CONTROL,
         cwes=("CWE-20",),
@@ -237,8 +265,28 @@ PROMPT_FEATURE_CATALOG = (
         task_families=("deserialization",),
         nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
         edges=(EdgeType.REQUIRES,),
-        terms=("safe object loading", "allowlisted types", "trusted serializer"),
-        clauses=(" Use allowlisted types during deserialization.",),
+        terms=("data-only parser", "json or yaml safe_load", "safe object loading"),
+        clauses=(" Use a data-only parser such as JSON or YAML safe_load.",),
+    ),
+    _feature(
+        "safety.collision_resistant_hash",
+        FeatureFamily.SAFETY_CONTROL,
+        cwes=("CWE-328",),
+        task_families=("message_hashing",),
+        nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
+        edges=(EdgeType.REQUIRES,),
+        terms=("collision-resistant hash", "sha-256", "strong hash"),
+        clauses=(" Use a collision-resistant hash.",),
+    ),
+    _feature(
+        "safety.cryptographic_randomness",
+        FeatureFamily.SAFETY_CONTROL,
+        cwes=("CWE-338",),
+        task_families=("security_random_generation",),
+        nodes=(NodeType.PROMPT_REQUIREMENT, NodeType.GUARD),
+        edges=(EdgeType.REQUIRES,),
+        terms=("cryptographically secure randomness", "secrets module", "secure random generator"),
+        clauses=(" Use cryptographically secure randomness.",),
     ),
     _feature(
         "safety.generic_security_reminder",
@@ -372,7 +420,7 @@ _PROMPT_FEATURE_EDGE_SLOTS = {
 
 
 def _validate_feature_catalog(catalog: tuple[FeatureSpec, ...]) -> None:
-    if type(catalog) is not tuple or len(catalog) != 20:
+    if type(catalog) is not tuple or len(catalog) != 24:
         raise RuntimeError("invalid prompt feature catalog shape")
     if any(type(item) is not FeatureSpec for item in catalog):
         raise RuntimeError("invalid prompt feature catalog entry")

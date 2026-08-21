@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
@@ -17,6 +18,11 @@ from secaware.oracle.adapter import AnalyzerReport, LocatedAnalyzerFinding
 from secaware.oracle.bandit_adapter import bandit_argv, parse_bandit_report
 from secaware.oracle.functionality import evaluate_functionality
 from secaware.oracle.policy import LoadedOraclePolicy
+from secaware.oracle.profile_decision import (
+    OracleMechanismTrace,
+    extract_python_mechanism_trace,
+    validate_python_mechanism_trace,
+)
 from secaware.oracle.runner import (
     AnalyzerProcessResult,
     run_analyzer_process,
@@ -140,6 +146,7 @@ class OracleCodeAnalysis:
     severity: str
     findings: tuple[AnalyzerFindingRecord, ...]
     analyzers: tuple[AnalyzerProvenanceRecord, ...]
+    mechanism_trace: OracleMechanismTrace
 
 
 _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE = OracleCodeAnalysis
@@ -1271,6 +1278,133 @@ def _validate_report_coordinates(
         ) from None
 
 
+def _normalize_bandit_end_lines(
+    codes: tuple[_ValidatedCode, ...],
+    report: AnalyzerReport,
+) -> AnalyzerReport:
+    """Recover Bandit's AST end line only when its mixed coordinate tuple proves it.
+
+    Bandit 1.9.4 can report a parent ``line_range`` together with the start/end
+    columns of the child AST node that triggered a plugin. The JSON format does
+    not expose that child's ``end_lineno``. A multiline finding can therefore
+    place a valid child ``end_col_offset`` on the final parent line, where the
+    column is out of bounds. Keep every already valid coordinate unchanged and
+    repair only an invalid Bandit endpoint that maps to one unique AST endpoint
+    inside the reported line envelope.
+    """
+
+    by_file: dict[str, _ValidatedCode] = {item.opaque_file: item for item in codes}
+    source_lines: dict[str, tuple[_SourceLine, ...]] = {}
+    normalized: list[LocatedAnalyzerFinding] = []
+    try:
+        if report.analyzer != "bandit" or len(by_file) != len(codes):
+            raise ValueError(_ENGINE_MESSAGE)
+        for opaque_file, code in by_file.items():
+            lines = _source_lines(code.record.code)
+            if lines is None:
+                raise ValueError(_COORDINATE_MESSAGE)
+            source_lines[opaque_file] = lines
+
+        for finding in report.findings:
+            lines = source_lines.get(finding.opaque_file)
+            code = by_file.get(finding.opaque_file)
+            if lines is None or code is None:
+                raise ValueError(_COORDINATE_MESSAGE)
+            if _finding_matches_source(finding, lines):
+                normalized.append(finding)
+                continue
+
+            record = finding.record
+            start_index = record.column - 1
+            end_index = record.end_column - 1
+            if (
+                not 1 <= record.line <= len(lines)
+                or not record.line <= record.end_line <= len(lines)
+                or start_index < 0
+                or start_index > lines[record.line - 1].byte_length
+                or start_index not in lines[record.line - 1].boundaries
+                or end_index < 0
+            ):
+                normalized.append(finding)
+                continue
+
+            tree = ast.parse(code.record.code, mode="exec")
+            endpoint_lines: set[int] = set()
+            for node in ast.walk(tree):
+                node_line = getattr(node, "lineno", None)
+                node_column = getattr(node, "col_offset", None)
+                node_end_line = getattr(node, "end_lineno", None)
+                node_end_column = getattr(node, "end_col_offset", None)
+                if (
+                    type(node_line) is int
+                    and type(node_column) is int
+                    and type(node_end_line) is int
+                    and type(node_end_column) is int
+                    and node_line == record.line
+                    and node_column == start_index
+                    and node_end_column == end_index
+                    and record.line <= node_end_line <= record.end_line
+                    and node_end_line <= len(lines)
+                    and end_index <= lines[node_end_line - 1].byte_length
+                    and end_index in lines[node_end_line - 1].boundaries
+                ):
+                    endpoint_lines.add(node_end_line)
+
+            if len(endpoint_lines) != 1:
+                normalized.append(finding)
+                continue
+            resolved_end_line = endpoint_lines.pop()
+            payload = record.model_dump(mode="python", round_trip=True, warnings=False)
+            payload["end_line"] = resolved_end_line
+            normalized_record = _TRUSTED_ANALYZER_FINDING_TYPE.model_validate(payload)
+            normalized.append(
+                _TRUSTED_LOCATED_FINDING_TYPE(
+                    opaque_file=finding.opaque_file,
+                    record=normalized_record,
+                )
+            )
+
+        return _TRUSTED_ANALYZER_REPORT_TYPE(
+            analyzer="bandit",
+            provenance=report.provenance,
+            covered_files=report.covered_files,
+            findings=tuple(normalized),
+        )
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise _safe_error(
+            ErrorCode.ANALYZER_INVALID_OUTPUT,
+            _COORDINATE_MESSAGE,
+        ) from None
+    finally:
+        codes = ()
+        report = None  # type: ignore[assignment]
+        by_file.clear()
+        by_file = {}
+        source_lines.clear()
+        source_lines = {}
+        normalized.clear()
+        normalized = []
+        opaque_file = ""
+        code = None
+        lines = None
+        finding = None
+        record = None
+        start_index = -1
+        end_index = -1
+        tree = None
+        endpoint_lines = set()
+        node = None
+        node_line = None
+        node_column = None
+        node_end_line = None
+        node_end_column = None
+        resolved_end_line = -1
+        payload = {}
+        normalized_record = None
+
+
 def _snapshot_analyzer_report(
     report: AnalyzerReport,
     *,
@@ -1380,6 +1514,7 @@ def validate_oracle_code_analyses(
                 or type(analysis.findings) is not tuple
                 or type(analysis.analyzers) is not tuple
                 or len(analysis.analyzers) != 2
+                or type(analysis.mechanism_trace) is not OracleMechanismTrace
             ):
                 raise ValueError
             provenances = tuple(
@@ -1414,12 +1549,14 @@ def validate_oracle_code_analyses(
                 if not analysis.parse_ok
                 else SecurityLabel.INSECURE
                 if findings
-                else SecurityLabel.SECURE
+                else SecurityLabel.UNKNOWN
             )
             expected_evaluability = (
                 OracleEvaluability.UNKNOWN_PARSE_FAILURE
                 if not analysis.parse_ok
                 else OracleEvaluability.EVALUABLE
+                if findings
+                else OracleEvaluability.UNKNOWN_COVERAGE
             )
             if (
                 (not analysis.parse_ok and findings)
@@ -1428,6 +1565,11 @@ def validate_oracle_code_analyses(
                 or analysis.evaluability is not expected_evaluability
             ):
                 raise ValueError
+            mechanism_trace = validate_python_mechanism_trace(
+                analysis.mechanism_trace,
+                code_sha256=analysis.code_sha256,
+                parse_ok=analysis.parse_ok,
+            )
             trusted.append(
                 _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
                     request_id=analysis.request_id,
@@ -1443,6 +1585,7 @@ def validate_oracle_code_analyses(
                     severity=expected_severity,
                     findings=findings,
                     analyzers=provenances,
+                    mechanism_trace=mechanism_trace,
                 )
             )
             if len(trusted) > _MAX_BATCH_RECORDS:
@@ -1456,6 +1599,89 @@ def validate_oracle_code_analyses(
         raise _safe_error(ErrorCode.ANALYZER_INVALID_OUTPUT, _ENGINE_MESSAGE) from None
     finally:
         analyses = ()
+
+
+def _policy_analyzer_provenance(
+    policy: LoadedOraclePolicy,
+) -> tuple[AnalyzerProvenanceRecord, AnalyzerProvenanceRecord]:
+    """Bind terminal non-analyzed states to the authenticated analyzer policy."""
+
+    return (
+        _TRUSTED_ANALYZER_PROVENANCE_TYPE(
+            schema_version="1.0",
+            analyzer="semgrep",
+            version=policy.semgrep_version,
+            policy_sha256=policy.combined_sha256,
+        ),
+        _TRUSTED_ANALYZER_PROVENANCE_TYPE(
+            schema_version="1.0",
+            analyzer="bandit",
+            version=policy.bandit_version,
+            policy_sha256=policy.combined_sha256,
+        ),
+    )
+
+
+def _parse_failure_record(
+    validated: _ValidatedCode,
+    analyzers: tuple[AnalyzerProvenanceRecord, AnalyzerProvenanceRecord],
+) -> OracleRecord:
+    record = validated.record
+    if type(record) is not CanonicalGeneratedCodeRecord or validated.parse_ok:
+        raise ValueError(_ENGINE_MESSAGE)
+    return OracleRecord(
+        schema_version="1.2",
+        request_id=record.request_id,
+        code_id=record.code_id,
+        code_sha256=record.code_sha256,
+        prompt_id=record.prompt_id,
+        condition=record.condition,
+        model_id=record.model_id,
+        seed_id=record.seed_id,
+        hypothesis_id=record.hypothesis_id,
+        assignment_id=record.assignment_id,
+        target_spec_id=record.target_spec_id,
+        target_instance_id=record.target_instance_id,
+        arm_protocol_id=record.arm_protocol_id,
+        protocol_instance_id=record.protocol_instance_id,
+        variant_id=record.variant_id,
+        arm_role=record.arm_role,
+        parse_ok=False,
+        functional_ok=False,
+        security_label=SecurityLabel.UNKNOWN,
+        evaluability=OracleEvaluability.UNKNOWN_PARSE_FAILURE,
+        severity="none",
+        findings=(),
+        analyzers=analyzers,
+    )
+
+
+def _parse_failure_analysis(
+    validated: _ValidatedCode,
+    analyzers: tuple[AnalyzerProvenanceRecord, AnalyzerProvenanceRecord],
+) -> OracleCodeAnalysis:
+    record = validated.record
+    if type(record) is not OracleCodeInput or validated.parse_ok:
+        raise ValueError(_ENGINE_MESSAGE)
+    mechanism_trace = extract_python_mechanism_trace(record.code)
+    if mechanism_trace.code_sha256 != record.code_sha256 or mechanism_trace.parse_ok:
+        raise ValueError(_ENGINE_MESSAGE)
+    return _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
+        request_id=record.request_id,
+        code_id=record.code_id,
+        code_sha256=record.code_sha256,
+        prompt_id=record.prompt_id,
+        model_id=record.model_id,
+        seed_id=record.seed_id,
+        parse_ok=False,
+        functional_ok=False,
+        security_label=SecurityLabel.UNKNOWN,
+        evaluability=OracleEvaluability.UNKNOWN_PARSE_FAILURE,
+        severity="none",
+        findings=(),
+        analyzers=analyzers,
+        mechanism_trace=mechanism_trace,
+    )
 
 
 def _aggregate(
@@ -1477,6 +1703,7 @@ def _aggregate(
             or bandit_report.covered_files != tuple(sorted(by_file))
         ):
             raise ValueError(_ENGINE_MESSAGE)
+        bandit_report = _normalize_bandit_end_lines(codes, bandit_report)
         _validate_report_coordinates(codes, (semgrep_report, bandit_report))
         located.extend(semgrep_report.findings)
         located.extend(bandit_report.findings)
@@ -1522,12 +1749,14 @@ def _aggregate(
                         if not code.parse_ok
                         else SecurityLabel.INSECURE
                         if canonical_findings
-                        else SecurityLabel.SECURE
+                        else SecurityLabel.UNKNOWN
                     ),
                     evaluability=(
                         OracleEvaluability.UNKNOWN_PARSE_FAILURE
                         if not code.parse_ok
                         else OracleEvaluability.EVALUABLE
+                        if canonical_findings
+                        else OracleEvaluability.UNKNOWN_COVERAGE
                     ),
                     severity=severity,
                     findings=canonical_findings,
@@ -1571,6 +1800,7 @@ def _aggregate_code_analyses(
             or bandit_report.covered_files != tuple(sorted(by_file))
         ):
             raise ValueError(_ENGINE_MESSAGE)
+        bandit_report = _normalize_bandit_end_lines(codes, bandit_report)
         _validate_report_coordinates(codes, (semgrep_report, bandit_report))
         located.extend(semgrep_report.findings)
         located.extend(bandit_report.findings)
@@ -1593,6 +1823,12 @@ def _aggregate_code_analyses(
                 if canonical_findings
                 else "none"
             )
+            mechanism_trace = extract_python_mechanism_trace(record.code)
+            if (
+                mechanism_trace.code_sha256 != record.code_sha256
+                or mechanism_trace.parse_ok is not validated.parse_ok
+            ):
+                raise ValueError(_ENGINE_MESSAGE)
             analyses.append(
                 _TRUSTED_ORACLE_CODE_ANALYSIS_TYPE(
                     request_id=record.request_id,
@@ -1608,16 +1844,19 @@ def _aggregate_code_analyses(
                         if not validated.parse_ok
                         else SecurityLabel.INSECURE
                         if canonical_findings
-                        else SecurityLabel.SECURE
+                        else SecurityLabel.UNKNOWN
                     ),
                     evaluability=(
                         OracleEvaluability.UNKNOWN_PARSE_FAILURE
                         if not validated.parse_ok
                         else OracleEvaluability.EVALUABLE
+                        if canonical_findings
+                        else OracleEvaluability.UNKNOWN_COVERAGE
                     ),
                     severity=severity,
                     findings=canonical_findings,
                     analyzers=analyzers,
+                    mechanism_trace=mechanism_trace,
                 )
             )
         return analyses
@@ -1634,6 +1873,7 @@ def _aggregate_code_analyses(
         canonical_findings = ()
         analyzers = ()
         severity = ""
+        mechanism_trace = None
 
 
 def run_oracle_batch(
@@ -1650,6 +1890,7 @@ def run_oracle_batch(
     """Run the two required analyzers over one authenticated canonical batch."""
 
     validated: tuple[_ValidatedCode, ...] = ()
+    parseable: tuple[_ValidatedCode, ...] = ()
     trusted_policy: LoadedOraclePolicy | None = None
     expected_files: frozenset[str] = frozenset()
     semgrep_process: AnalyzerProcessResult | None = None
@@ -1676,47 +1917,58 @@ def run_oracle_batch(
             max_stderr_bytes,
         )
         validate_analyzer_runtime()
-        expected_files = frozenset(item.opaque_file for item in validated)
-        semgrep_process = _run_private_analyzer_batch(
-            "semgrep",
-            validated,
-            trusted_policy,
-            semgrep_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
+        parseable = tuple(item for item in validated if item.parse_ok)
+        records = []
+        if parseable:
+            expected_files = frozenset(item.opaque_file for item in parseable)
+            semgrep_process = _run_private_analyzer_batch(
+                "semgrep",
+                parseable,
+                trusted_policy,
+                semgrep_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            semgrep_report = parse_semgrep_report(
+                semgrep_process.stdout,
+                returncode=semgrep_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.semgrep_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                max_output_bytes=max_stdout_bytes,
+            )
+            semgrep_process = None
+            bandit_process = _run_private_analyzer_batch(
+                "bandit",
+                parseable,
+                trusted_policy,
+                bandit_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            bandit_report = parse_bandit_report(
+                bandit_process.stdout,
+                returncode=bandit_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.bandit_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                constraints=trusted_policy.bandit_constraints,
+                max_output_bytes=max_stdout_bytes,
+            )
+            bandit_process = None
+            records.extend(_aggregate(parseable, semgrep_report, bandit_report))
+        analyzers = _policy_analyzer_provenance(trusted_policy)
+        records.extend(
+            _parse_failure_record(item, analyzers) for item in validated if not item.parse_ok
         )
-        semgrep_report = parse_semgrep_report(
-            semgrep_process.stdout,
-            returncode=semgrep_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.semgrep_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            max_output_bytes=max_stdout_bytes,
-        )
-        semgrep_process = None
-        bandit_process = _run_private_analyzer_batch(
-            "bandit",
-            validated,
-            trusted_policy,
-            bandit_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
-        )
-        bandit_report = parse_bandit_report(
-            bandit_process.stdout,
-            returncode=bandit_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.bandit_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            constraints=trusted_policy.bandit_constraints,
-            max_output_bytes=max_stdout_bytes,
-        )
-        bandit_process = None
-        records = _aggregate(validated, semgrep_report, bandit_report)
+        by_request_id = {record.request_id: record for record in records}
+        if len(by_request_id) != len(validated):
+            raise ValueError(_ENGINE_MESSAGE)
+        records = [by_request_id[item.record.request_id] for item in validated]
     except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
     except SecAwareError as error:
@@ -1730,12 +1982,15 @@ def run_oracle_batch(
         bandit_executable = ""
         runner = None  # type: ignore[assignment]
         validated = ()
+        parseable = ()
         trusted_policy = None
         expected_files = frozenset()
         semgrep_process = None
         bandit_process = None
         semgrep_report = None
         bandit_report = None
+        analyzers = ()
+        by_request_id = {}
     if control is not None:
         records = None
         failure = None
@@ -1766,6 +2021,7 @@ def run_oracle_code_batch(
     """Analyze a randomized-coordinate-blind canonical code batch."""
 
     validated: tuple[_ValidatedCode, ...] = ()
+    parseable: tuple[_ValidatedCode, ...] = ()
     trusted_policy: LoadedOraclePolicy | None = None
     analyses: list[OracleCodeAnalysis] | None = None
     failure: SecAwareError | None = None
@@ -1787,57 +2043,68 @@ def run_oracle_code_batch(
             max_stderr_bytes,
         )
         runtime_validator()
-        expected_files = frozenset(item.opaque_file for item in validated)
-        semgrep_process = _run_private_analyzer_batch(
-            "semgrep",
-            validated,
-            trusted_policy,
-            semgrep_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
+        parseable = tuple(item for item in validated if item.parse_ok)
+        analyses = []
+        if parseable:
+            expected_files = frozenset(item.opaque_file for item in parseable)
+            semgrep_process = _run_private_analyzer_batch(
+                "semgrep",
+                parseable,
+                trusted_policy,
+                semgrep_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            semgrep_report = parse_semgrep_report(
+                semgrep_process.stdout,
+                returncode=semgrep_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.semgrep_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                max_output_bytes=max_stdout_bytes,
+            )
+            semgrep_process = None
+            bandit_process = _run_private_analyzer_batch(
+                "bandit",
+                parseable,
+                trusted_policy,
+                bandit_executable,
+                timeout_seconds=timeout_seconds,
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+                runner=runner,
+            )
+            bandit_report = parse_bandit_report(
+                bandit_process.stdout,
+                returncode=bandit_process.returncode,
+                expected_files=expected_files,
+                version=trusted_policy.bandit_version,
+                policy_sha256=trusted_policy.combined_sha256,
+                constraints=trusted_policy.bandit_constraints,
+                max_output_bytes=max_stdout_bytes,
+            )
+            bandit_process = None
+            semgrep_report = _snapshot_analyzer_report(
+                semgrep_report,
+                analyzer="semgrep",
+                expected_files=expected_files,
+            )
+            bandit_report = _snapshot_analyzer_report(
+                bandit_report,
+                analyzer="bandit",
+                expected_files=expected_files,
+            )
+            analyses.extend(_aggregate_code_analyses(parseable, semgrep_report, bandit_report))
+        analyzers = _policy_analyzer_provenance(trusted_policy)
+        analyses.extend(
+            _parse_failure_analysis(item, analyzers) for item in validated if not item.parse_ok
         )
-        semgrep_report = parse_semgrep_report(
-            semgrep_process.stdout,
-            returncode=semgrep_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.semgrep_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            max_output_bytes=max_stdout_bytes,
-        )
-        semgrep_process = None
-        bandit_process = _run_private_analyzer_batch(
-            "bandit",
-            validated,
-            trusted_policy,
-            bandit_executable,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-            runner=runner,
-        )
-        bandit_report = parse_bandit_report(
-            bandit_process.stdout,
-            returncode=bandit_process.returncode,
-            expected_files=expected_files,
-            version=trusted_policy.bandit_version,
-            policy_sha256=trusted_policy.combined_sha256,
-            constraints=trusted_policy.bandit_constraints,
-            max_output_bytes=max_stdout_bytes,
-        )
-        bandit_process = None
-        semgrep_report = _snapshot_analyzer_report(
-            semgrep_report,
-            analyzer="semgrep",
-            expected_files=expected_files,
-        )
-        bandit_report = _snapshot_analyzer_report(
-            bandit_report,
-            analyzer="bandit",
-            expected_files=expected_files,
-        )
-        analyses = _aggregate_code_analyses(validated, semgrep_report, bandit_report)
+        by_request_id = {analysis.request_id: analysis for analysis in analyses}
+        if len(by_request_id) != len(validated):
+            raise ValueError(_ENGINE_MESSAGE)
+        analyses = [by_request_id[item.record.request_id] for item in validated]
         analyses = list(validate_oracle_code_analyses(analyses))
     except (MemoryError, KeyboardInterrupt, SystemExit) as error:
         control = error
@@ -1856,12 +2123,15 @@ def run_oracle_code_batch(
         runner = None  # type: ignore[assignment]
         runtime_validator = None  # type: ignore[assignment]
         validated = ()
+        parseable = ()
         trusted_policy = None
         expected_files = frozenset()
         semgrep_process = None
         bandit_process = None
         semgrep_report = None
         bandit_report = None
+        analyzers = ()
+        by_request_id = {}
     if control is not None:
         analyses = None
         failure = None

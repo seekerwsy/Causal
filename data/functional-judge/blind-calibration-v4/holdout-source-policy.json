@@ -1,0 +1,237 @@
+{
+  "active_validation": {
+    "case_source_bindings_path": "data/functional-judge/blind-calibration-v4/case-source-bindings.jsonl",
+    "case_source_bindings_sha256": "f43ef37a72689833fa89425aa3c746c89a6a474099c7f481353534182b240f3e",
+    "cases": 16,
+    "expected_fail": 8,
+    "expected_pass": 8,
+    "families": [
+      "gtf_fasta_append",
+      "pdf_bag_of_words",
+      "slurm_exit_code",
+      "sqlite_metadata"
+    ],
+    "per_family_expected_fail": 2,
+    "per_family_expected_pass": 2,
+    "validation_cases_path": "data/functional-judge/blind-calibration-v4/validation-cases.jsonl",
+    "validation_cases_sha256": "4ee3353cc601b96be79a879fcedb6f36cffcfc56b0737d4db12e1f4bb3787195"
+  },
+  "candidate_cutoff": {
+    "candidate_config_path": "data/functional-judge/blind-calibration-v3/evaluator-qwen35flash-v3.json",
+    "candidate_config_sha256_before_holdout_creation": "fe7434f9ef2c1d84ef00901de8234ed424eec42a57257fa5a9a6d59aa5338125",
+    "candidate_id": "qwen35flash-requirement-aggregate-v3",
+    "candidate_prompt_path": "src/secaware/functional_judge/prompts/functional_judge_v3.txt",
+    "candidate_prompt_sha256_before_holdout_creation": "5aecb580cba8b241da4108aca61465781de5d7e7fbd2662072a84b28eac2eecf",
+    "invalidation_rule": "Any later candidate prompt or evaluator-config byte change invalidates this holdout as fresh validation for that changed candidate.",
+    "provider_calls_on_fresh_holdout_before_freeze": 0
+  },
+  "contamination_audit": {
+    "exposed_tune": {
+      "cases": 8,
+      "role": "engineering_regression_gate_not_accuracy_estimate_not_ranking",
+      "source_path": "/home/ubuntu/secaware-experiments/summaries/executable-functional-sensitivity-6af285a-20260821-04/judge-tune-cases.jsonl",
+      "source_sha256": "b36b52bccd6f1eafd4f11321f234e230186fe3c3b3bd943333fb62b9e7489dac"
+    },
+    "fresh_holdout_selection_read_forbidden": [
+      "functional_judge_request",
+      "functional_judge_response",
+      "functional_judge_status",
+      "candidate_accuracy",
+      "candidate_false_pass_count",
+      "security_oracle_output",
+      "generation_model_output"
+    ],
+    "historical_validation": {
+      "cases": 16,
+      "downgraded_role": "exposed_historical_regression_only_not_fresh_validation_not_ranking",
+      "path": "data/functional-judge/blind-calibration-v3/validation-cases.jsonl",
+      "sha256": "8e62c17753dd09c352a89571429aec5ecd4dc2b41280cdaeb8d3835fa9a8dca6"
+    },
+    "known_feedback_boundary": "The exposed tune set, the historical 16-case validation set, and prior v1/v2/v2b traces may have informed v3 engineering. None may estimate fresh v3 validation accuracy.",
+    "model_output_dependent_case_selection": false
+  },
+  "derivation": {
+    "case_kind": "static_contract_and_adapter_fixture_projection",
+    "gold_aggregate_rule": "fail_if_any_requirement_not_met_else_pass",
+    "gold_source": "frozen_task_contract_requirement_closure_plus_preexisting_executable_adapter_fixture_semantics",
+    "case_text_construction": "codex_static_projection_of_frozen_contract_and_adapter_semantics",
+    "llm_output_conditioned_case_selection": false,
+    "runtime_test_reauthored_per_task": false,
+    "selection_policy": "In the frozen family sequence gtf_fasta_append, sqlite_metadata, pdf_bag_of_words, slurm_exit_code, retain exactly the two predeclared all-requirements-met projections and the two predeclared single-axis or paired-axis adapter counterexample projections; order by the frozen selection_rank. No reserve pool, replacement, reranking, or outcome-conditioned filtering exists.",
+    "selection_policy_id": "four_family_two_pass_two_fail_contract_adapter_projection_v1"
+  },
+  "operational_incidents": [
+    {
+      "case_and_selection_state": "validation bytes, requirement-gold bindings, selection ranks, and calibration spec were already frozen",
+      "excluded_new_signals": [
+        "functional_judge_request_or_response_or_status",
+        "candidate_accuracy_or_false_pass_metrics",
+        "security_oracle_label_or_output",
+        "generation_model_candidate_code",
+        "fresh_holdout_execution_result"
+      ],
+      "incident_id": "local_rg_scope_overreach_20260821_1839_cst",
+      "incident_pre_policy_sha256_reconstructed": "1e36b37c38ab2baaa22b1dd5a59fc4e1857413049303f6696a76bbc8ac7207c5",
+      "occurred_at_approx": "2026-08-21T18:39:00+08:00",
+      "remote_or_provider_call_made": false,
+      "resolution": "Stopped repository-wide search; subsequent reads are path-directed hashes and tests only. No case, gold binding, selection rank, or calibration-spec byte changed because of the output.",
+      "scope": "One local repository-wide text search over Python, JSONL, and JSON files for four adapter source-symbol patterns.",
+      "status": "resolved_no_outcome_contamination",
+      "unexpected_output_category": "A locally stored historical task-eligibility and functional-contract audit provider-response fragment; the same output also echoed already-frozen v4 files.",
+      "unchanged_frozen_hashes": {
+        "case_source_bindings_sha256": "f43ef37a72689833fa89425aa3c746c89a6a474099c7f481353534182b240f3e",
+        "calibration_spec_sha256": "e6d9b9fecb219250dd5a1bce6c30135954b10ada9efdef05b83c5f2ef42cb56a",
+        "validation_cases_sha256": "4ee3353cc601b96be79a879fcedb6f36cffcfc56b0737d4db12e1f4bb3787195"
+      }
+    }
+  ],
+  "official_artifact_replacement_allowed": false,
+  "purpose": "Fresh engineering-only validation of Functional Judge v3 after v2/v2b feedback exposure.",
+  "schema_version": "1.0",
+  "scientific_claim_allowed": false,
+  "source_basis_catalog": [
+    {
+      "basis_id": "gtf_adapter_frozen_paths_v1",
+      "derivation_kind": "adapter_fixture_input",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "GtfFastaAppendCliAdapter._predefined_gtf_path/_predefined_fasta_path"
+    },
+    {
+      "basis_id": "gtf_adapter_exact_append_checks_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "GtfFastaAppendCliAdapter.evaluate:fasta_exact_byte_append/gtf_exact_byte_append"
+    },
+    {
+      "basis_id": "gtf_adapter_virtual_cat_v1",
+      "derivation_kind": "adapter_fixture_input",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "GtfFastaAppendCliAdapter.evaluate:VirtualCommandSpec(cat_gtf/cat_fasta)"
+    },
+    {
+      "basis_id": "gtf_attack_truncate_mode_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "GtfFastaAppendCliAdapter.evaluate:initial_plus_append_digest_invariant"
+    },
+    {
+      "basis_id": "gtf_attack_swapped_sources_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "GtfFastaAppendCliAdapter.evaluate:per_destination_digest_invariant"
+    },
+    {
+      "basis_id": "sqlite_adapter_fixture_schema_v1",
+      "derivation_kind": "adapter_fixture_input",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "SQLiteMetadataPragmaAdapter._expected/evaluate"
+    },
+    {
+      "basis_id": "sqlite_adapter_metadata_normalizer_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "_normalize_sqlite_metadata"
+    },
+    {
+      "basis_id": "sqlite_adapter_observed_api_checks_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "SQLiteMetadataPragmaAdapter.evaluate:sqlite_api_observed/metadata_matches"
+    },
+    {
+      "basis_id": "sqlite_attack_count_projection_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "_normalize_sqlite_metadata:columns/indexes shape closure"
+    },
+    {
+      "basis_id": "sqlite_attack_table_rows_projection_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "SQLiteMetadataPragmaAdapter.evaluate:metadata_matches"
+    },
+    {
+      "basis_id": "pdf_adapter_stdout_fixture_v1",
+      "derivation_kind": "adapter_fixture_input",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "PdfPdftotextBagOfWordsAdapter.evaluate:pdftotext_stdout"
+    },
+    {
+      "basis_id": "pdf_adapter_expected_bag_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "PdfPdftotextBagOfWordsAdapter._expected/bag_of_words_matches"
+    },
+    {
+      "basis_id": "pdf_adapter_frozen_reader_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "read_frozen_bag_of_words"
+    },
+    {
+      "basis_id": "pdf_attack_missing_output_sink_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "PdfPdftotextBagOfWordsAdapter.evaluate:frozen_reader_accepts_output"
+    },
+    {
+      "basis_id": "pdf_attack_character_counts_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "PdfPdftotextBagOfWordsAdapter.evaluate:bag_of_words_matches"
+    },
+    {
+      "basis_id": "slurm_adapter_accounting_fixture_v1",
+      "derivation_kind": "adapter_fixture_input",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "SlurmSacctSqueueAdapter.evaluate:sacct_state_exit"
+    },
+    {
+      "basis_id": "slurm_adapter_job_state_log_check_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "SlurmSacctSqueueAdapter.evaluate:job_state_logged"
+    },
+    {
+      "basis_id": "slurm_adapter_exit_code_normalizer_v1",
+      "derivation_kind": "adapter_functional_case",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "_slurm_exit_code"
+    },
+    {
+      "basis_id": "slurm_attack_signal_component_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "SlurmSacctSqueueAdapter._exit_code/_slurm_exit_code"
+    },
+    {
+      "basis_id": "slurm_attack_completion_boolean_v1",
+      "derivation_kind": "fixed_counterexample_projection",
+      "source_path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "source_symbol": "_slurm_exit_code:type(value) is int"
+    }
+  ],
+  "source_authorities": [
+    {
+      "path": "data/e2e-pilot/five-cwe-held-out-policy-itt-inputs-20260819-02/task-functional-contracts.jsonl",
+      "role": "frozen_task_functional_contracts",
+      "sha256": "3a1010aa7bcb17b83f08254271d52a356d6272d06ceb2c1464e77dceb6aa3a67"
+    },
+    {
+      "path": "data/functional-judge/executable-sensitivity-v1/source-spec.json",
+      "role": "frozen_four_family_adapter_and_contract_binding",
+      "sha256": "5b4dec14de3de2aa730a3bfb9ce0cdce3443e1c00c9b1acb212b2a0fe9f89ec7"
+    },
+    {
+      "path": "src/secaware/exploratory/executable_functional_sensitivity.py",
+      "role": "preexisting_adapter_fixture_check_and_normalization_semantics",
+      "sha256": "8ccd616238a78f554933e8c61f30bdf988d15192fd49ef81577d9755676ce414"
+    },
+    {
+      "path": "tests/test_executable_functional_sensitivity.py",
+      "role": "preexisting_adapter_attack_and_integration_semantics",
+      "sha256": "b91f7d9a0678268408b2e251faa96afdc26584c240c79a4c85629774b5542ef6"
+    }
+  ],
+  "status": "FRESH_HOLDOUT_FROZEN_NO_PROVIDER_CALLS"
+}

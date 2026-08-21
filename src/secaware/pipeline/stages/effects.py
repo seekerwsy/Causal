@@ -18,12 +18,18 @@ from secaware.analysis.itt import (
 from secaware.causal.freeze import revalidate_frozen_hypothesis
 from secaware.config import AppConfig
 from secaware.errors import ErrorCode, SecAwareError
+from secaware.functional_judge.schema import (
+    ProgramFunctionalOutcomeRecord,
+    TaskFunctionalContractRecord,
+)
+from secaware.functional_judge.validation import validate_program_functional_outcomes
 from secaware.intervention.attestation import PromptRoleAttestationRecord
 from secaware.io.jsonl import read_jsonl
 from secaware.io.run_store import RunStore
 from secaware.outcomes.assembler import assemble_assignment_outcomes
 from secaware.pipeline.artifact import canonical_sha256, sha256_path
 from secaware.pipeline.jsonl_stage import JsonlOutputSpec, execute_jsonl_stage_transaction
+from secaware.pipeline.manifest import read_stage_manifest
 from secaware.pipeline.stages.confirmation_generation import (
     CONFIRMATION_GENERATION_OUTPUTS,
     validate_confirmation_generation_bundle,
@@ -72,6 +78,7 @@ _PRODUCER_STAGES = (
     "randomize-confirmation",
     "generate-confirmation",
     "run-oracle-confirmation",
+    "judge-functionality",
     "import-functional-outcomes",
 )
 
@@ -85,6 +92,7 @@ EFFECT_STAGE_INPUTS = (
     *(Path("generation") / name for name, _model in CONFIRMATION_GENERATION_OUTPUTS),
     Path("oracle/confirmation_oracle.jsonl"),
     Path("analysis/functional_outcomes.jsonl"),
+    Path("analysis/program_functional_outcomes.jsonl"),
     *(Path(".stages") / f"{stage}.json" for stage in _PRODUCER_STAGES),
 )
 
@@ -179,6 +187,9 @@ class _Snapshot:
     codes: tuple[CanonicalGeneratedCodeRecord, ...]
     oracles: tuple[OracleRecord, ...]
     functional_outcomes: tuple[FunctionalOutcomeRecord, ...]
+    task_functional_contracts: tuple[TaskFunctionalContractRecord, ...]
+    program_functional_outcomes: tuple[ProgramFunctionalOutcomeRecord, ...]
+    program_functional_policy_sha256: str | None
     prompts: tuple[PromptRecord, ...]
     attestations: tuple[PromptRoleAttestationRecord, ...]
     contracts: tuple[FunctionalOutcomeContractRecord, ...]
@@ -248,6 +259,10 @@ def _producer_paths(store: RunStore) -> dict[str, tuple[Path, ...]]:
         ),
         "run-oracle-confirmation": (store.path("oracle", "confirmation_oracle.jsonl"),),
         "import-functional-outcomes": (store.path("analysis", "functional_outcomes.jsonl"),),
+        "judge-functionality": (
+            store.path("analysis", "functional_judge_passes.jsonl"),
+            store.path("analysis", "program_functional_outcomes.jsonl"),
+        ),
     }
 
 
@@ -371,13 +386,15 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
     producer_paths = _producer_paths(store)
     optional_path = producer_paths["import-functional-outcomes"][0]
     optional_manifest = store.path(".stages", "import-functional-outcomes.json")
+    judge_paths = producer_paths["judge-functionality"]
+    judge_manifest = store.path(".stages", "judge-functionality.json")
     snapshot: _Snapshot | None = None
     built: tuple[tuple[BaseModel, ...], ...] | None = None
 
     with store.hold_dependency_stages(_PRODUCER_STAGES):
         try:
             held_sha256: dict[str, dict[str, str]] = {}
-            for stage in _PRODUCER_STAGES[:-1]:
+            for stage in _PRODUCER_STAGES[:-2]:
                 held_sha256[stage] = store.require_committed_output(
                     stage,
                     producer_paths[stage],
@@ -397,6 +414,18 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                 )
             else:
                 raise _error("functional outcome producer commitment failed validation")
+            judge_state = tuple(path.exists() for path in (*judge_paths, judge_manifest))
+            if judge_state == (False, False, False):
+                judge_present = False
+            elif judge_state == (True, True, True):
+                judge_present = True
+                held_sha256["judge-functionality"] = store.require_committed_output(
+                    "judge-functionality", judge_paths
+                )
+            else:
+                raise _error("program functional outcome producer commitment failed validation")
+            if config.functional_judge.enabled != judge_present:
+                raise _error("program functional outcome producer is required by configuration")
 
             prompt_path = store.path("inputs", "prompts.jsonl")
             attestation_path = Path(config.data.prompt_attestations_path)
@@ -405,21 +434,28 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                 if config.data.functional_outcome_contracts_path is not None
                 else None
             )
+            task_contract_path = (
+                Path(config.data.task_functional_contracts_path)
+                if (judge_present and config.data.task_functional_contracts_path is not None)
+                else None
+            )
             source_paths = (
                 store.path("tsg", "prompt_extraction_proposals.jsonl"),
                 store.path("tsg", "prompt_tsg.jsonl"),
             )
             producer_manifests = tuple(
-                store.path(".stages", f"{stage}.json") for stage in _PRODUCER_STAGES[:-1]
+                store.path(".stages", f"{stage}.json") for stage in _PRODUCER_STAGES[:-2]
             )
             input_paths = (
                 prompt_path,
                 attestation_path,
                 *((contract_path,) if contract_path is not None else ()),
+                *((task_contract_path,) if task_contract_path is not None else ()),
                 *source_paths,
-                *(path for stage in _PRODUCER_STAGES[:-1] for path in producer_paths[stage]),
+                *(path for stage in _PRODUCER_STAGES[:-2] for path in producer_paths[stage]),
                 *producer_manifests,
                 *((optional_path, optional_manifest) if optional_present else ()),
+                *((*judge_paths, judge_manifest) if judge_present else ()),
             )
 
             def capture_input_snapshot() -> tuple[str, ...]:
@@ -476,6 +512,11 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                     if contract_path is not None
                     else ()
                 )
+                task_contracts = (
+                    _read(task_contract_path, TaskFunctionalContractRecord, allow_empty=False)
+                    if task_contract_path is not None
+                    else ()
+                )
                 source_proposals = _read(
                     source_paths[0], PromptExtractionProposalRecord, allow_empty=False
                 )
@@ -490,6 +531,22 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                     if optional_present
                     else ()
                 )
+                program_functional = (
+                    _read(judge_paths[1], ProgramFunctionalOutcomeRecord, allow_empty=False)
+                    if judge_present
+                    else ()
+                )
+                judge_policy_sha256 = None
+                if judge_present:
+                    judge_policy_sha256 = read_stage_manifest(judge_manifest).policy_sha256
+                    if judge_policy_sha256 is None:
+                        raise _error("program functional policy binding failed validation")
+                    validate_program_functional_outcomes(
+                        randomization_groups[1],
+                        task_contracts,
+                        program_functional,
+                        evaluator_policy_sha256=judge_policy_sha256,
+                    )
                 _validate_fci_public_bundle(fci_groups)
                 validate_prompt_variant_artifact_bundle(
                     config,
@@ -542,6 +599,9 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                     codes=generation_groups[2],
                     oracles=oracles,
                     functional_outcomes=functional,
+                    task_functional_contracts=task_contracts,
+                    program_functional_outcomes=program_functional,
+                    program_functional_policy_sha256=judge_policy_sha256,
                     prompts=prompts,
                     attestations=attestations,
                     contracts=contracts,
@@ -603,6 +663,9 @@ def effects_stage(config: AppConfig, store: RunStore, force: bool = False) -> Ef
                     protocols=protocols,
                     functional_contracts=contracts,
                     functional_outcomes=snapshot.functional_outcomes,
+                    task_functional_contracts=snapshot.task_functional_contracts,
+                    program_functional_outcomes=snapshot.program_functional_outcomes,
+                    program_functional_policy_sha256=(snapshot.program_functional_policy_sha256),
                 )
                 result = calculate_itt(
                     outcomes,

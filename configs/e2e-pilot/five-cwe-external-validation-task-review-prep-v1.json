@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "review_id": "five_cwe_external_validation_task_review_v1",
+  "purpose": "Freeze 75 outcome-blind language-neutral eligibility packets before any external validation code or outcome is generated.",
+  "target_cwes": [
+    "CWE-78",
+    "CWE-89",
+    "CWE-502",
+    "CWE-328",
+    "CWE-338"
+  ],
+  "expected_packets": 75,
+  "inputs": {
+    "review_queue": {
+      "path": "data/e2e-pilot/five-cwe-external-validation-source-audit-20260819-01/five-cwe-review-queue.jsonl",
+      "sha256": "83072370ee0e709a92b1d2a67ea655245a0d1dfe5e7ce3d1f0a1d935ecc67ee2"
+    },
+    "source_audit_report": {
+      "path": "data/e2e-pilot/five-cwe-external-validation-source-audit-20260819-01/report.json",
+      "sha256": "88c0e86869c1a27181330a14e48e4fc70e242fa3cfbb7d1da9fcdb7130dfee2d"
+    }
+  },
+  "provider_calls_allowed": false,
+  "outcomes_allowed": false
+}
