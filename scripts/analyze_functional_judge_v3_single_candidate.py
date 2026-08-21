@@ -118,20 +118,21 @@ def _pilot_rows(run: dict[str, object], pilot_ids: set[str]) -> list[dict[str, o
         raise ValueError("pilot case partition failed validation")
     for case in run["cases"]:
         result = run["result_by_case"].get(case["case_id"])
-        valid = (
+        closure_valid = (
             type(result) is dict
             and result.get("expected_status") == case["expected_status"]
-            and result.get("actual_status") == case["expected_status"]
+            and result.get("actual_status") in {"pass", "fail", "unknown"}
             and result.get("consistent") is True
         )
+        correct = closure_valid and result.get("actual_status") == case["expected_status"]
         rows.append(
             {
                 "schema_version": "1.0",
                 "case_id": case["case_id"],
                 "expected_status": case["expected_status"],
                 "actual_status": result.get("actual_status") if type(result) is dict else "invalid",
-                "correct": valid,
-                "closure_valid": valid,
+                "correct": correct,
+                "closure_valid": closure_valid,
             }
         )
     return sorted(rows, key=lambda row: row["case_id"])

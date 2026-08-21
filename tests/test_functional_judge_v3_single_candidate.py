@@ -320,6 +320,26 @@ def test_one_analyzer_handles_pilot_transition_and_final_absolute_gate(
     assert report["comparison_or_ranking_performed"] is False
 
 
+def test_pilot_rows_keep_accuracy_separate_from_artifact_validity() -> None:
+    case = {"case_id": "pilot-fail", "expected_status": "fail"}
+    run = {
+        "cases": [case],
+        "result_by_case": {
+            "pilot-fail": {
+                "expected_status": "fail",
+                "actual_status": "unknown",
+                "consistent": True,
+            }
+        },
+    }
+
+    rows = analysis._pilot_rows(run, {"pilot-fail"})
+
+    assert rows[0]["closure_valid"] is True
+    assert rows[0]["correct"] is False
+    assert rows[0]["actual_status"] == "unknown"
+
+
 def test_single_candidate_plan_freezes_only_one_candidate() -> None:
     assert plan_module._EVALUATION_DESIGN == {
         "analysis_kind": "single_candidate_absolute_holdout",

@@ -344,3 +344,27 @@ def test_external_preflight_is_credential_independent_closed_and_zero_call(
         assert config["aggregate_status_rule"] == "requirement-verdict-aggregate-v1"
         assert config["top_level_status_role"] == ("optional_non_authoritative_advisory_ignored")
     assert not (output_dir / "llm_exchange_trace.jsonl").exists()
+
+
+def test_qwen37max_v3_tune_only_evaluator_config_is_frozen() -> None:
+    module = _load_canary_module()
+    evaluator_config = (
+        Path(__file__).parents[1]
+        / "data"
+        / "functional-judge"
+        / "evaluator-candidates"
+        / "qwen37max-requirement-aggregate-v3-tune-only.json"
+    )
+
+    evaluator = module._load_evaluator_config(evaluator_config)
+
+    assert evaluator.candidate_id == "qwen37max-requirement-aggregate-v3-tune-only"
+    assert evaluator.candidate_role == "new_candidate"
+    assert evaluator.model_id == "qwen3.7-max-2026-05-20"
+    assert evaluator.protocol_version == "v3"
+    assert evaluator.mode == "single_pass"
+    assert evaluator.max_attempts == 1
+    assert evaluator.enable_thinking is False
+    assert evaluator.source_sha256 == (
+        "425875a66c455a6871fea93ff28da22076133676bd1d21b833eaad819bb9b68f"
+    )
