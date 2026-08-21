@@ -15,6 +15,7 @@ from secaware.functional_judge.schema import (
     FunctionalJudgePassRecord,
     FunctionalRequirementDecision,
     ProgramFunctionalOutcomeRecord,
+    RequirementVerdict,
     TaskFunctionalContractRecord,
 )
 from secaware.llm.structured_transport import (
@@ -32,7 +33,7 @@ from secaware.schema.experiments import (
 from secaware.schema.outcomes import FunctionalOutcomeStatus
 from secaware.schema.records import CanonicalGeneratedCodeRecord
 
-FunctionalJudgeProtocolVersion = Literal["v1", "v2"]
+FunctionalJudgeProtocolVersion = Literal["v1", "v2", "v3"]
 
 
 def _template_text(protocol_version: FunctionalJudgeProtocolVersion) -> str:
@@ -50,6 +51,10 @@ FUNCTIONAL_JUDGE_V1_SYSTEM_TEMPLATE_SHA256 = hashlib.sha256(
 FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE = _template_text("v2")
 FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256 = hashlib.sha256(
     FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE.encode("utf-8")
+).hexdigest()
+FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE = _template_text("v3")
+FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE_SHA256 = hashlib.sha256(
+    FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE.encode("utf-8")
 ).hexdigest()
 
 # These aliases are the byte-for-byte v1 policy artifacts. Keep them stable for callers and
@@ -153,8 +158,45 @@ _OUTPUT_SCHEMA_V2 = {
         "rationale": {"type": "string"},
     },
 }
+_V3_MEASUREMENT_METHOD = "blind_static_llm_v3_requirement_aggregate"
+FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE = "optional_non_authoritative_advisory_ignored"
+FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE = "requirement-verdict-aggregate-v1"
+_V3_AGGREGATE_RULE_PAYLOAD = {
+    "rule_id": FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
+    "authoritative_source": "requirements[].verdict",
+    "precedence": ["not_met", "unknown", "met"],
+    "not_met_result": "fail",
+    "unknown_result": "unknown",
+    "empty_result": "unknown",
+    "all_met_result": "pass",
+    "top_level_status_role": FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
+}
+FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256 = canonical_sha256(_V3_AGGREGATE_RULE_PAYLOAD)
+_OUTPUT_SCHEMA_V3 = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "measurement_method",
+        "execution_performed",
+        "requirements",
+        "rationale",
+    ],
+    "properties": {
+        "measurement_method": {"const": _V3_MEASUREMENT_METHOD},
+        "execution_performed": {"const": False},
+        "status": {
+            "description": (
+                "Optional non-authoritative advisory ignored by the local aggregate rule."
+            ),
+            "enum": ["pass", "fail", "unknown"],
+        },
+        "requirements": _OUTPUT_SCHEMA_V2["properties"]["requirements"],
+        "rationale": {"type": "string"},
+    },
+}
 FUNCTIONAL_JUDGE_V1_OUTPUT_SCHEMA_SHA256 = canonical_sha256(_OUTPUT_SCHEMA_V1)
 FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256 = canonical_sha256(_OUTPUT_SCHEMA_V2)
+FUNCTIONAL_JUDGE_V3_OUTPUT_SCHEMA_SHA256 = canonical_sha256(_OUTPUT_SCHEMA_V3)
 FUNCTIONAL_JUDGE_OUTPUT_SCHEMA_SHA256 = FUNCTIONAL_JUDGE_V1_OUTPUT_SCHEMA_SHA256
 _RESPONSE_KEYS_V1 = frozenset({"status", "requirements", "rationale"})
 _REQUIREMENT_KEYS_V1 = frozenset(
@@ -172,6 +214,9 @@ _REQUIREMENT_KEYS_V2 = frozenset(
         "counterexample",
         "unknown_reason",
     }
+)
+_RESPONSE_KEYS_V3 = frozenset(
+    {"measurement_method", "execution_performed", "requirements", "rationale"}
 )
 _EVIDENCE_RESOLUTION_VERSION = "valid-range-nonblank-lines-v3"
 _V1_MEASUREMENT_METHOD = "ast_validated_single_shot_llm"
@@ -199,7 +244,7 @@ def functional_judge_policy_sha256(
     mode: Literal["single_pass", "two_pass_consensus"] = "two_pass_consensus",
     protocol_version: FunctionalJudgeProtocolVersion = "v1",
 ) -> str:
-    if protocol_version not in {"v1", "v2"}:
+    if protocol_version not in {"v1", "v2", "v3"}:
         raise _error(ErrorCode.CONFIG)
     if protocol_version == "v1":
         if mode == "single_pass":
@@ -226,34 +271,66 @@ def functional_judge_policy_sha256(
                 "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
             }
         )
+    if protocol_version == "v2":
+        if mode == "single_pass":
+            if pass_b is not None:
+                raise _error(ErrorCode.CONFIG)
+            return canonical_sha256(
+                {
+                    "schema_version": "1.0",
+                    "evaluator": "blind-single-pass-functional-judge-v2-static",
+                    "protocol_version": "v2",
+                    "measurement_method": _V2_MEASUREMENT_METHOD,
+                    "execution_performed": False,
+                    "pass_a": _policy_payload(pass_a),
+                    "consensus": "single-validated-status-v1",
+                    "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
+                }
+            )
+        if pass_b is None:
+            raise _error(ErrorCode.CONFIG)
+        return canonical_sha256(
+            {
+                "schema_version": "1.0",
+                "evaluator": "blind-two-pass-functional-judge-v2-static",
+                "protocol_version": "v2",
+                "measurement_method": _V2_MEASUREMENT_METHOD,
+                "execution_performed": False,
+                "pass_a": _policy_payload(pass_a),
+                "pass_b": _policy_payload(pass_b),
+                "consensus": "exact-status-agreement-else-unknown-v1",
+                "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
+            }
+        )
+    common_v3 = {
+        "schema_version": "1.0",
+        "protocol_version": "v3",
+        "measurement_method": _V3_MEASUREMENT_METHOD,
+        "execution_performed": False,
+        "aggregate_status_rule": FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
+        "aggregate_status_rule_sha256": FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256,
+        "top_level_status_role": FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
+        "pass_a": _policy_payload(pass_a),
+        "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
+    }
     if mode == "single_pass":
         if pass_b is not None:
             raise _error(ErrorCode.CONFIG)
         return canonical_sha256(
             {
-                "schema_version": "1.0",
-                "evaluator": "blind-single-pass-functional-judge-v2-static",
-                "protocol_version": "v2",
-                "measurement_method": _V2_MEASUREMENT_METHOD,
-                "execution_performed": False,
-                "pass_a": _policy_payload(pass_a),
-                "consensus": "single-validated-status-v1",
-                "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
+                **common_v3,
+                "evaluator": "blind-single-pass-functional-judge-v3-static",
+                "consensus": "single-derived-requirement-status-v1",
             }
         )
     if pass_b is None:
         raise _error(ErrorCode.CONFIG)
     return canonical_sha256(
         {
-            "schema_version": "1.0",
-            "evaluator": "blind-two-pass-functional-judge-v2-static",
-            "protocol_version": "v2",
-            "measurement_method": _V2_MEASUREMENT_METHOD,
-            "execution_performed": False,
-            "pass_a": _policy_payload(pass_a),
+            **common_v3,
+            "evaluator": "blind-two-pass-functional-judge-v3-static",
             "pass_b": _policy_payload(pass_b),
-            "consensus": "exact-status-agreement-else-unknown-v1",
-            "evidence_resolution": _EVIDENCE_RESOLUTION_VERSION,
+            "consensus": "exact-derived-status-agreement-else-unknown-v1",
         }
     )
 
@@ -265,6 +342,17 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
             raise ValueError
         result[key] = value
     return result
+
+
+def _derive_requirement_aggregate_status(
+    decisions: tuple[FunctionalRequirementDecision, ...],
+) -> FunctionalOutcomeStatus:
+    verdicts = tuple(item.verdict for item in decisions)
+    if RequirementVerdict.NOT_MET in verdicts:
+        return FunctionalOutcomeStatus.FAIL
+    if not verdicts or RequirementVerdict.UNKNOWN in verdicts:
+        return FunctionalOutcomeStatus.UNKNOWN
+    return FunctionalOutcomeStatus.PASS
 
 
 def _parse_response(
@@ -280,19 +368,42 @@ def _parse_response(
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-        response_keys = _RESPONSE_KEYS_V1 if protocol_version == "v1" else _RESPONSE_KEYS_V2
-        requirement_keys = (
-            _REQUIREMENT_KEYS_V1 if protocol_version == "v1" else _REQUIREMENT_KEYS_V2
-        )
+        if protocol_version == "v1":
+            response_keys = _RESPONSE_KEYS_V1
+            valid_response_keys = {response_keys}
+            requirement_keys = _REQUIREMENT_KEYS_V1
+        elif protocol_version == "v2":
+            response_keys = _RESPONSE_KEYS_V2
+            valid_response_keys = {response_keys}
+            requirement_keys = _REQUIREMENT_KEYS_V2
+        elif protocol_version == "v3":
+            response_keys = _RESPONSE_KEYS_V3
+            valid_response_keys = {response_keys, response_keys | {"status"}}
+            requirement_keys = _REQUIREMENT_KEYS_V2
+        else:
+            raise ValueError
         if (
-            protocol_version not in {"v1", "v2"}
-            or not isinstance(payload, Mapping)
-            or frozenset(payload) != response_keys
+            not isinstance(payload, Mapping)
+            or frozenset(payload) not in valid_response_keys
             or (
                 protocol_version == "v2"
                 and (
                     payload["measurement_method"] != _V2_MEASUREMENT_METHOD
                     or payload["execution_performed"] is not False
+                )
+            )
+            or (
+                protocol_version == "v3"
+                and (
+                    payload["measurement_method"] != _V3_MEASUREMENT_METHOD
+                    or payload["execution_performed"] is not False
+                    or (
+                        "status" in payload
+                        and (
+                            type(payload["status"]) is not str
+                            or payload["status"] not in {"pass", "fail", "unknown"}
+                        )
+                    )
                 )
             )
         ):
@@ -322,7 +433,7 @@ def _parse_response(
                 if line not in evidence:
                     evidence.append(line)
             counterexample = raw_item["counterexample"]
-            if protocol_version == "v2":
+            if protocol_version in {"v2", "v3"}:
                 verdict = raw_item["verdict"]
                 behavior_trace = raw_item["behavior_trace"]
                 unknown_reason = raw_item["unknown_reason"]
@@ -393,7 +504,11 @@ def _parse_response(
         expected_ids = tuple(item.requirement_id for item in contract.requirements)
         if tuple(item.requirement_id for item in decisions) != expected_ids:
             raise ValueError
-        status = FunctionalOutcomeStatus(payload["status"])
+        status = (
+            _derive_requirement_aggregate_status(tuple(decisions))
+            if protocol_version == "v3"
+            else FunctionalOutcomeStatus(payload["status"])
+        )
         rationale = payload["rationale"]
         if type(rationale) is not str:
             raise ValueError
@@ -456,6 +571,17 @@ def _request_payload(
                 "output_schema": _OUTPUT_SCHEMA_V2,
             }
         )
+    elif protocol_version == "v3":
+        payload.update(
+            {
+                "protocol_version": "v3",
+                "measurement_method": _V3_MEASUREMENT_METHOD,
+                "execution_performed": False,
+                "aggregate_status_rule": FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
+                "aggregate_status_rule_sha256": FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256,
+                "output_schema": _OUTPUT_SCHEMA_V3,
+            }
+        )
     elif protocol_version != "v1":
         raise _error(ErrorCode.CONFIG)
     return payload
@@ -498,6 +624,9 @@ class LLMFunctionalJudge:
             elif protocol_version == "v2":
                 expected_template_sha256 = FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256
                 expected_schema_sha256 = FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256
+            elif protocol_version == "v3":
+                expected_template_sha256 = FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE_SHA256
+                expected_schema_sha256 = FUNCTIONAL_JUDGE_V3_OUTPUT_SCHEMA_SHA256
             else:
                 raise ValueError
             checked_a = StructuredLLMPolicy(**_policy_payload(pass_a))
@@ -553,6 +682,8 @@ class LLMFunctionalJudge:
 
     @property
     def measurement_method(self) -> str:
+        if self._protocol_version == "v3":
+            return _V3_MEASUREMENT_METHOD
         return _V2_MEASUREMENT_METHOD if self._protocol_version == "v2" else _V1_MEASUREMENT_METHOD
 
     @property
@@ -735,6 +866,12 @@ __all__ = [
     "FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256",
     "FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE",
     "FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256",
+    "FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE",
+    "FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256",
+    "FUNCTIONAL_JUDGE_V3_OUTPUT_SCHEMA_SHA256",
+    "FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE",
+    "FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE_SHA256",
+    "FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE",
     "FunctionalJudgeProtocolVersion",
     "LLMFunctionalJudge",
     "functional_judge_policy_sha256",

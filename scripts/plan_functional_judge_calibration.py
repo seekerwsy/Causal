@@ -1472,6 +1472,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--tune-overlay-dir", type=Path, required=True)
     parser.add_argument("--validation-cases", type=Path, required=True)
     parser.add_argument("--contracts", type=Path)
+    parser.add_argument(
+        "--new-candidate-protocol-version",
+        choices=("v2", "v3"),
+        default="v2",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -1627,7 +1632,7 @@ def main() -> int:
             "functional_contract_set_sha256": spec["functional_contract_set_sha256"],
             "comparison_design": {
                 "baseline_protocol_version": "v1",
-                "new_candidate_protocol_version": "v2",
+                "new_candidate_protocol_version": args.new_candidate_protocol_version,
                 "same_model_required": True,
                 "expected_candidates": 2,
                 "expected_single_pass_attempts_per_candidate": 24,

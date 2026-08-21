@@ -25,7 +25,13 @@ from secaware.functional_judge.judge import (
     FUNCTIONAL_JUDGE_V1_SYSTEM_TEMPLATE_SHA256,
     FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256,
     FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256,
+    FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
+    FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256,
+    FUNCTIONAL_JUDGE_V3_OUTPUT_SCHEMA_SHA256,
+    FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE_SHA256,
+    FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
     _parse_response,
+    _reject_duplicate_keys,
     functional_judge_policy_sha256,
 )
 from secaware.functional_judge.schema import (
@@ -95,6 +101,7 @@ _CANDIDATE_ROLES = {
 _MEASUREMENT_METHOD = {
     "v1": "ast_validated_single_shot_llm",
     "v2": "blind_static_llm_v2",
+    "v3": "blind_static_llm_v3_requirement_aggregate",
 }
 _SHA256_CHARS = frozenset("0123456789abcdef")
 _POLICY_ARTIFACTS = {
@@ -105,6 +112,10 @@ _POLICY_ARTIFACTS = {
     "v2": (
         FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256,
         FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256,
+    ),
+    "v3": (
+        FUNCTIONAL_JUDGE_V3_SYSTEM_TEMPLATE_SHA256,
+        FUNCTIONAL_JUDGE_V3_OUTPUT_SCHEMA_SHA256,
     ),
 }
 
@@ -215,10 +226,11 @@ def _load_plan(
         or plan.get("contracts_sha256") != canonical_sha256(contract_rows)
         or plan.get("candidate_roles") != _CANDIDATE_ROLES
         or type(comparison) is not dict
+        or comparison.get("new_candidate_protocol_version") not in {"v2", "v3"}
         or comparison
         != {
             "baseline_protocol_version": "v1",
-            "new_candidate_protocol_version": "v2",
+            "new_candidate_protocol_version": comparison.get("new_candidate_protocol_version"),
             "same_model_required": True,
             "expected_candidates": 2,
             "expected_single_pass_attempts_per_candidate": 24,
@@ -395,6 +407,19 @@ def _validated_evaluator_coordinates(config: dict[str, object]) -> dict[str, obj
     protocol = config["protocol_version"]
     pass_seeds = config.get("pass_seeds")
     base_url = config.get("base_url")
+    v3_metadata_valid = (
+        config.get("aggregate_status_rule") == FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE
+        and config.get("aggregate_status_rule_sha256") == FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256
+        and config.get("top_level_status_role") == FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE
+    )
+    legacy_metadata_absent = not any(
+        key in config
+        for key in (
+            "aggregate_status_rule",
+            "aggregate_status_rule_sha256",
+            "top_level_status_role",
+        )
+    )
     if (
         protocol not in _POLICY_ARTIFACTS
         or type(pass_seeds) is not list
@@ -409,6 +434,8 @@ def _validated_evaluator_coordinates(config: dict[str, object]) -> dict[str, obj
         != _POLICY_ARTIFACTS[protocol]
         or config.get("response_format") != {"type": "json_object"}
         or config.get("validation_only_raw_exchange_capture") is not True
+        or (protocol == "v3" and not v3_metadata_valid)
+        or (protocol != "v3" and not legacy_metadata_absent)
     ):
         raise ValueError("candidate frozen policy artifacts failed validation")
     try:
@@ -600,8 +627,10 @@ def _request_matches_case(
         "requirements",
         "schema_version",
     }
-    if protocol_version == "v2":
+    if protocol_version in {"v2", "v3"}:
         expected_keys |= {"execution_performed", "measurement_method", "protocol_version"}
+    if protocol_version == "v3":
+        expected_keys |= {"aggregate_status_rule", "aggregate_status_rule_sha256"}
     if set(request) != expected_keys:
         return False
     expected_program_lines = [
@@ -636,11 +665,54 @@ def _request_matches_case(
         return False
     if protocol_version == "v1":
         return True
+    if protocol_version == "v2":
+        return (
+            request.get("protocol_version") == "v2"
+            and request.get("measurement_method") == "blind_static_llm_v2"
+            and request.get("execution_performed") is False
+        )
     return (
-        request.get("protocol_version") == "v2"
-        and request.get("measurement_method") == "blind_static_llm_v2"
+        request.get("protocol_version") == "v3"
+        and request.get("measurement_method") == "blind_static_llm_v3_requirement_aggregate"
         and request.get("execution_performed") is False
+        and request.get("aggregate_status_rule") == FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE
+        and request.get("aggregate_status_rule_sha256") == FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256
     )
+
+
+def _v3_advisory_status_diagnostic(
+    response_text: str,
+    derived_status: str,
+) -> dict[str, object]:
+    if type(response_text) is not str or derived_status not in {"pass", "fail", "unknown"}:
+        raise ValueError("v3 advisory diagnostic input failed validation")
+    payload = json.loads(
+        response_text,
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+    )
+    if type(payload) is not dict:
+        raise ValueError("v3 advisory diagnostic response failed validation")
+    present = "status" in payload
+    advisory_status = payload.get("status") if present else None
+    if present and (
+        type(advisory_status) is not str or advisory_status not in {"pass", "fail", "unknown"}
+    ):
+        raise ValueError("v3 advisory diagnostic status failed validation")
+    return {
+        "schema_version": "1.0",
+        "available": True,
+        "source": "closed_raw_response_text_bytes",
+        "raw_response_sha256": hashlib.sha256(response_text.encode("utf-8")).hexdigest(),
+        "status_role": FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
+        "status_present": present,
+        "advisory_status": advisory_status,
+        "derived_status": derived_status,
+        "agrees_with_derived": (advisory_status == derived_status if present else None),
+        "diagnostic_only": True,
+        "used_by_gate": False,
+        "used_by_ranking": False,
+    }
 
 
 def _metrics(rows: list[dict[str, object]]) -> dict[str, object]:
@@ -801,6 +873,7 @@ def _candidate_summary(
             assignment_id: str | None = None
             judge_pass: FunctionalJudgePassRecord | None = None
             outcome: ProgramFunctionalOutcomeRecord | None = None
+            v3_advisory_diagnostic: dict[str, object] | None = None
             if report_result is None:
                 errors.append("missing_report_result")
             else:
@@ -913,6 +986,27 @@ def _candidate_summary(
                                 mode="json"
                             ):
                                 errors.append("raw_response_pass_rebuild_mismatch")
+                            if item["protocol_version"] == "v3":
+                                try:
+                                    v3_advisory_diagnostic = _v3_advisory_status_diagnostic(
+                                        trace["response_text"],
+                                        parsed_status.value,
+                                    )
+                                except Exception:  # noqa: BLE001 - diagnostic never gates
+                                    v3_advisory_diagnostic = {
+                                        "schema_version": "1.0",
+                                        "available": False,
+                                        "source": "closed_raw_response_text_bytes",
+                                        "raw_response_sha256": trace.get("response_sha256"),
+                                        "status_role": (FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE),
+                                        "status_present": None,
+                                        "advisory_status": None,
+                                        "derived_status": parsed_status.value,
+                                        "agrees_with_derived": None,
+                                        "diagnostic_only": True,
+                                        "used_by_gate": False,
+                                        "used_by_ranking": False,
+                                    }
                 used_pass_ids.add(judge_pass.judge_pass_id)
                 used_outcome_ids.add(outcome.program_functional_outcome_id)
 
@@ -937,6 +1031,7 @@ def _candidate_summary(
                     "correct": actual_status == case["expected_status"],
                     "closure_valid": not errors,
                     "closure_errors": errors,
+                    "v3_advisory_status_diagnostic": v3_advisory_diagnostic,
                 }
             )
             seen_cases.add(case_id)
@@ -964,6 +1059,28 @@ def _candidate_summary(
     validation_rows = [row for row in case_rows if row["split"] == "validation"]
     tune = _metrics(tune_rows)
     validation = _metrics(validation_rows)
+    v3_diagnostics = [
+        row["v3_advisory_status_diagnostic"]
+        for row in case_rows
+        if type(row["v3_advisory_status_diagnostic"]) is dict
+    ]
+    v3_available = [row for row in v3_diagnostics if row["available"] is True]
+    v3_case_count = len(case_rows) if next(iter(protocols)) == "v3" else 0
+    v3_advisory_summary = {
+        "schema_version": "1.0",
+        "applicable": next(iter(protocols)) == "v3",
+        "status_role": FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
+        "case_count": v3_case_count,
+        "available": len(v3_available),
+        "unavailable": v3_case_count - len(v3_available),
+        "present": sum(row["status_present"] is True for row in v3_available),
+        "absent": sum(row["status_present"] is False for row in v3_available),
+        "agrees_with_derived": sum(row["agrees_with_derived"] is True for row in v3_available),
+        "disagrees_with_derived": sum(row["agrees_with_derived"] is False for row in v3_available),
+        "diagnostic_only": True,
+        "used_by_gate": False,
+        "used_by_ranking": False,
+    }
     validation_by_family = {
         family: _metrics([row for row in validation_rows if row["family"] == family])
         for family in sorted({row["family"] for row in validation_rows})
@@ -1074,6 +1191,7 @@ def _candidate_summary(
             "outcome_records": outcome_count,
             "global_closure_errors": global_closure_errors,
         },
+        "v3_advisory_status_diagnostic": v3_advisory_summary,
         "tune_engineering_regression_gate_not_ranking": tune,
         "tune_by_family": tune_by_family,
         "tune_by_arm": tune_by_arm,
@@ -1098,7 +1216,7 @@ def _comparison(summaries: list[dict[str, object]]) -> dict[str, object]:
     candidate = next(row for row in summaries if row["candidate_role"] == "new_candidate")
     return {
         "schema_version": "1.0",
-        "comparison_kind": "same_model_prompt_protocol_v1_vs_v2",
+        "comparison_kind": ("same_model_prompt_protocol_v1_vs_" + candidate["protocol_version"]),
         "baseline_candidate_id": baseline["candidate_id"],
         "new_candidate_id": candidate["candidate_id"],
         "same_model": baseline["model_id"] == candidate["model_id"],
@@ -1211,7 +1329,10 @@ def main() -> int:
                 args.plan_dir.resolve() / "artifact-manifest.json"
             ),
             "functional_variable": "Y_F^J",
-            "measurement_method": "blind_static_llm_protocol_comparison_v1_v2",
+            "measurement_method": (
+                "blind_static_llm_protocol_comparison_v1_"
+                + comparison_design["new_candidate_protocol_version"]
+            ),
             "execution_performed": False,
             "gold_variable": "Y_F^E",
             "gold_label_domain": ["fail", "pass"],

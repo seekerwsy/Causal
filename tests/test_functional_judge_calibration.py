@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from secaware.exploratory.artifact_integrity import write_closed_manifest_atomic
+from secaware.functional_judge.judge import _parse_response
 from secaware.functional_judge.schema import (
     FunctionalJudgePassRecord,
     ProgramFunctionalOutcomeRecord,
@@ -596,7 +597,12 @@ def _build_overlay(
     write_closed_manifest_atomic(root, label="synthetic calibration overlay")
 
 
-def _build_plan(tmp_path: Path, monkeypatch) -> tuple[Path, object, Path]:
+def _build_plan(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    new_candidate_protocol_version: str = "v2",
+) -> tuple[Path, object, Path]:
     planner = _load_script("plan_functional_judge_calibration")
     canary = _load_script("validate_bailian_functional_judge")
     spec = json.loads((CALIBRATION_DATA / "calibration-spec.json").read_text(encoding="utf-8"))
@@ -630,6 +636,8 @@ def _build_plan(tmp_path: Path, monkeypatch) -> tuple[Path, object, Path]:
             str(overlay_dir),
             "--validation-cases",
             str(CALIBRATION_DATA / "validation-cases.jsonl"),
+            "--new-candidate-protocol-version",
+            new_candidate_protocol_version,
             "--output-dir",
             str(plan_dir),
         ],
@@ -680,12 +688,17 @@ def _response(request: dict[str, object], status: str, protocol: str) -> bytes:
             for row in request["requirements"]
         ]
         payload = {
-            "measurement_method": "blind_static_llm_v2",
+            "measurement_method": (
+                "blind_static_llm_v3_requirement_aggregate"
+                if protocol == "v3"
+                else "blind_static_llm_v2"
+            ),
             "execution_performed": False,
-            "status": status,
             "requirements": requirements,
             "rationale": "Frozen calibration response.",
         }
+        if protocol == "v2":
+            payload["status"] = status
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
@@ -695,8 +708,11 @@ def _run_candidate(
     plan_dir: Path,
     root: Path,
     config_name: str,
+    *,
+    v3_advisory_status: str | None = None,
 ) -> list[Path]:
-    protocol = "v1" if config_name.endswith("v1.json") else "v2"
+    config = json.loads((CALIBRATION_DATA / config_name).read_text(encoding="utf-8"))
+    protocol = config["protocol_version"]
     expected_by_code = {
         "\n".join(row["code_text"].splitlines()): row["expected_status"]
         for row in (
@@ -709,7 +725,12 @@ def _run_candidate(
         def complete(self, request_bytes: bytes, _policy: object) -> bytes:
             request = json.loads(request_bytes)
             code = "\n".join(row["text"] for row in request["program_lines"])
-            return _response(request, expected_by_code[code], protocol)
+            response = _response(request, expected_by_code[code], protocol)
+            if protocol == "v3" and v3_advisory_status is not None:
+                payload = json.loads(response)
+                payload["status"] = v3_advisory_status
+                return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            return response
 
     monkeypatch.setenv("ALI_BAILIAN_API_KEY", "offline-calibration-key")
     monkeypatch.setattr(
@@ -910,6 +931,157 @@ def test_planner_rejects_reclosed_same_task_forged_contracts(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="contract artifact digest"):
         planner._load_tune_rows(overlay, spec, family_specs)
+
+
+def test_v3_plan_and_analyzer_close_requirement_aggregate_candidate(
+    monkeypatch, tmp_path: Path
+) -> None:
+    plan_dir, canary, calibration_spec_path = _build_plan(
+        tmp_path,
+        monkeypatch,
+        new_candidate_protocol_version="v3",
+    )
+    analyzer = _load_script("analyze_functional_judge_calibration")
+    plan_record = json.loads((plan_dir / "plan.json").read_text(encoding="utf-8"))
+    assert plan_record["comparison_design"]["new_candidate_protocol_version"] == "v3"
+    baseline_runs = _run_candidate(
+        canary,
+        monkeypatch,
+        plan_dir,
+        tmp_path / "baseline-v3-plan",
+        "evaluator-qwen35flash-v1.json",
+    )
+    candidate_runs = _run_candidate(
+        canary,
+        monkeypatch,
+        plan_dir,
+        tmp_path / "candidate-v3",
+        "evaluator-qwen35flash-v3.json",
+        v3_advisory_status="pass",
+    )
+    output_dir = tmp_path / "analysis-v3"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(Path(analyzer.__file__).resolve()),
+            "--plan-dir",
+            str(plan_dir),
+            "--calibration-spec",
+            str(calibration_spec_path),
+            "--expected-plan-id",
+            plan_record["plan_id"],
+            "--expected-plan-root-manifest-sha256",
+            _sha256_file(plan_dir / "artifact-manifest.json"),
+            *[
+                value
+                for path in [*baseline_runs, *candidate_runs]
+                for value in ("--candidate-run-dir", str(path))
+            ],
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert analyzer.main() == 0
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["selected_candidate_id"] == "qwen35flash-requirement-aggregate-v3"
+    assert report["prompt_engineering_comparison"]["comparison_kind"] == (
+        "same_model_prompt_protocol_v1_vs_v3"
+    )
+    candidate = next(
+        row for row in report["candidate_summaries"] if row["candidate_role"] == "new_candidate"
+    )
+    assert candidate["protocol_version"] == "v3"
+    assert candidate["provider_evidence"]["structurally_valid_traces"] == 24
+    assert candidate["gate_passed"] is True
+    advisory = candidate["v3_advisory_status_diagnostic"]
+    assert advisory == {
+        "schema_version": "1.0",
+        "applicable": True,
+        "status_role": "optional_non_authoritative_advisory_ignored",
+        "case_count": 24,
+        "available": 24,
+        "unavailable": 0,
+        "present": 24,
+        "absent": 0,
+        "agrees_with_derived": 16,
+        "disagrees_with_derived": 8,
+        "diagnostic_only": True,
+        "used_by_gate": False,
+        "used_by_ranking": False,
+    }
+    assert "v3_advisory_status_diagnostic" not in candidate["gates"]
+
+
+def test_v3_advisory_change_only_changes_offline_diagnostic_and_raw_bound_ids() -> None:
+    analyzer = _load_script("analyze_functional_judge_calibration")
+    canary = _load_script("validate_bailian_functional_judge")
+    contract = canary._contract("v3-advisory-diagnostic")
+    code = "def answer():\n    return 7\n"
+    request = {
+        "program_lines": [
+            {"line_number": 1, "text": "def answer():"},
+            {"line_number": 2, "text": "    return 7"},
+        ],
+        "requirements": [{"requirement_id": item.requirement_id} for item in contract.requirements],
+    }
+    base = json.loads(_response(request, "fail", "v3"))
+    advisory_pass = {**base, "status": "pass"}
+    advisory_fail = {**base, "status": "fail"}
+    raw_pass = json.dumps(advisory_pass, sort_keys=True, separators=(",", ":")).encode()
+    raw_fail = json.dumps(advisory_fail, sort_keys=True, separators=(",", ":")).encode()
+    parsed_pass = _parse_response(raw_pass, contract=contract, code=code, protocol_version="v3")
+    parsed_fail = _parse_response(raw_fail, contract=contract, code=code, protocol_version="v3")
+
+    def build_records(raw: bytes, parsed):
+        status, requirements, rationale = parsed
+        judge_pass = FunctionalJudgePassRecord.from_content(
+            assignment_id="assignment_" + "1" * 64,
+            contract_id=contract.contract_id,
+            pass_id="A",
+            evaluator_policy_sha256="2" * 64,
+            request_sha256="3" * 64,
+            response_sha256=hashlib.sha256(raw).hexdigest(),
+            status=status,
+            requirements=requirements,
+            rationale=rationale,
+        )
+        evidence = canonical_sha256(
+            {
+                "schema_version": "1.0",
+                "pass_ids": [judge_pass.judge_pass_id],
+                "decision": judge_pass.status.value,
+                "mode": "single_pass",
+            }
+        )
+        outcome = ProgramFunctionalOutcomeRecord.from_content(
+            assignment_id=judge_pass.assignment_id,
+            contract_id=contract.contract_id,
+            evaluator_policy_sha256=judge_pass.evaluator_policy_sha256,
+            status=judge_pass.status,
+            evidence_sha256=evidence,
+        )
+        return judge_pass, outcome
+
+    pass_advisory_pass, outcome_advisory_pass = build_records(raw_pass, parsed_pass)
+    pass_advisory_fail, outcome_advisory_fail = build_records(raw_fail, parsed_fail)
+    diagnostic_pass = analyzer._v3_advisory_status_diagnostic(
+        raw_pass.decode(), parsed_pass[0].value
+    )
+    diagnostic_fail = analyzer._v3_advisory_status_diagnostic(
+        raw_fail.decode(), parsed_fail[0].value
+    )
+
+    assert pass_advisory_pass.status.value == pass_advisory_fail.status.value == "fail"
+    assert outcome_advisory_pass.status.value == outcome_advisory_fail.status.value == "fail"
+    assert pass_advisory_pass.response_sha256 != pass_advisory_fail.response_sha256
+    assert diagnostic_pass["advisory_status"] == "pass"
+    assert diagnostic_pass["agrees_with_derived"] is False
+    assert diagnostic_fail["advisory_status"] == "fail"
+    assert diagnostic_fail["agrees_with_derived"] is True
+    assert diagnostic_pass["used_by_gate"] is diagnostic_fail["used_by_gate"] is False
+    assert diagnostic_pass["used_by_ranking"] is diagnostic_fail["used_by_ranking"] is False
 
 
 def test_analyzer_rejects_reclosed_plan_gold_rewrite(monkeypatch, tmp_path: Path) -> None:

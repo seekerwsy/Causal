@@ -263,6 +263,13 @@ def test_external_research_case_uses_contract_task_id_in_single_pass(
             "new_candidate",
             "qwen35flash-prompt-v2b",
         ),
+        (
+            "evaluator-qwen35flash-v3.json",
+            "v3",
+            "blind_static_llm_v3_requirement_aggregate",
+            "new_candidate",
+            "qwen35flash-requirement-aggregate-v3",
+        ),
     ),
 )
 def test_external_preflight_is_credential_independent_closed_and_zero_call(
@@ -333,4 +340,7 @@ def test_external_preflight_is_credential_independent_closed_and_zero_call(
     assert report["measurement_method"] == measurement_method
     assert config["candidate_role"] == candidate_role
     assert config["candidate_id"] == candidate_id
+    if protocol_version == "v3":
+        assert config["aggregate_status_rule"] == "requirement-verdict-aggregate-v1"
+        assert config["top_level_status_role"] == ("optional_non_authoritative_advisory_ignored")
     assert not (output_dir / "llm_exchange_trace.jsonl").exists()

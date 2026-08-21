@@ -347,7 +347,7 @@ class FunctionalJudgeConfig(StrictModel):
 
     enabled: bool = False
     llm: FunctionalJudgeLLMConfig | None = None
-    protocol_version: Literal["v1", "v2"] = "v1"
+    protocol_version: Literal["v1", "v2", "v3"] = "v1"
     mode: Literal["single_pass", "two_pass_consensus"] = "two_pass_consensus"
     pass_seeds: tuple[StrictInt, ...] = Field(
         default=(73_001, 73_002), min_length=1, max_length=2

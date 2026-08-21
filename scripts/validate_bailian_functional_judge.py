@@ -19,6 +19,9 @@ from secaware.config import FunctionalJudgeLLMConfig, GenerationConfig
 from secaware.exploratory.artifact_integrity import write_closed_manifest_atomic
 from secaware.functional_judge.factory import _artifacts, _policy
 from secaware.functional_judge.judge import (
+    FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
+    FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256,
+    FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
     LLMFunctionalJudge,
     functional_judge_policy_sha256,
 )
@@ -92,7 +95,11 @@ def _utc_now() -> str:
 
 
 def _measurement_method(protocol_version: str) -> str:
-    return "blind_static_llm_v2" if protocol_version == "v2" else "ast_validated_single_shot_llm"
+    return {
+        "v1": "ast_validated_single_shot_llm",
+        "v2": "blind_static_llm_v2",
+        "v3": "blind_static_llm_v3_requirement_aggregate",
+    }[protocol_version]
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -202,7 +209,7 @@ def _load_evaluator_config(path: Path) -> _EvaluatorCoordinates:
         or type(seed) is not int
         or not 0 <= seed <= 2_147_483_647
         or type(enable_thinking) is not bool
-        or protocol_version not in {"v1", "v2"}
+        or protocol_version not in {"v1", "v2", "v3"}
         or mode != "single_pass"
     ):
         raise SystemExit("evaluator config failed validation")
@@ -805,6 +812,14 @@ def main() -> int:
         "provider_usage_capture": "unavailable_in_structured_transport_v1",
         "validation_only_raw_exchange_capture": True,
     }
+    if evaluator.protocol_version == "v3":
+        config_payload.update(
+            {
+                "aggregate_status_rule": FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
+                "aggregate_status_rule_sha256": (FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE_SHA256),
+                "top_level_status_role": FUNCTIONAL_JUDGE_V3_TOP_LEVEL_STATUS_ROLE,
+            }
+        )
     environment_payload = {
         "schema_version": "1.0",
         "captured_at_utc": started_at_utc,
