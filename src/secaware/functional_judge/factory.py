@@ -8,9 +8,13 @@ from collections.abc import Callable
 from secaware.config import AppConfig, FunctionalJudgeLLMConfig
 from secaware.errors import ErrorCode, SecAwareError
 from secaware.functional_judge.judge import (
-    FUNCTIONAL_JUDGE_OUTPUT_SCHEMA_SHA256,
-    FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE,
-    FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256,
+    FUNCTIONAL_JUDGE_V1_OUTPUT_SCHEMA_SHA256,
+    FUNCTIONAL_JUDGE_V1_SYSTEM_TEMPLATE,
+    FUNCTIONAL_JUDGE_V1_SYSTEM_TEMPLATE_SHA256,
+    FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256,
+    FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE,
+    FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256,
+    FunctionalJudgeProtocolVersion,
     LLMFunctionalJudge,
 )
 from secaware.llm.structured_transport import (
@@ -28,12 +32,36 @@ def _error() -> SecAwareError:
     )
 
 
-def _policy(config: FunctionalJudgeLLMConfig, seed: int) -> StructuredLLMPolicy:
+def _artifacts(
+    protocol_version: FunctionalJudgeProtocolVersion,
+) -> tuple[str, str, str]:
+    if protocol_version == "v1":
+        return (
+            FUNCTIONAL_JUDGE_V1_SYSTEM_TEMPLATE,
+            FUNCTIONAL_JUDGE_V1_SYSTEM_TEMPLATE_SHA256,
+            FUNCTIONAL_JUDGE_V1_OUTPUT_SCHEMA_SHA256,
+        )
+    if protocol_version == "v2":
+        return (
+            FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE,
+            FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256,
+            FUNCTIONAL_JUDGE_V2_OUTPUT_SCHEMA_SHA256,
+        )
+    raise _error()
+
+
+def _policy(
+    config: FunctionalJudgeLLMConfig,
+    seed: int,
+    *,
+    protocol_version: FunctionalJudgeProtocolVersion = "v1",
+) -> StructuredLLMPolicy:
+    _system_template, system_template_sha256, output_schema_sha256 = _artifacts(protocol_version)
     return StructuredLLMPolicy(
         endpoint_sha256=hashlib.sha256(config.base_url.encode("utf-8")).hexdigest(),
         model_id=config.model_id,
-        system_template_sha256=FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE_SHA256,
-        output_schema_sha256=FUNCTIONAL_JUDGE_OUTPUT_SCHEMA_SHA256,
+        system_template_sha256=system_template_sha256,
+        output_schema_sha256=output_schema_sha256,
         temperature=config.temperature,
         top_p=config.top_p,
         seed=seed,
@@ -55,14 +83,25 @@ def create_functional_judge(
         if not judge_config.enabled or type(llm) is not FunctionalJudgeLLMConfig:
             raise ValueError
         checked = FunctionalJudgeLLMConfig.model_validate(llm.model_dump(mode="python"))
+        system_template, _template_sha256, _schema_sha256 = _artifacts(
+            judge_config.protocol_version
+        )
         transport = transport_factory(
             base_url=checked.base_url,
             api_key_env=checked.api_key_env,
-            system_template=FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE,
+            system_template=system_template,
         )
-        pass_a = _policy(checked, judge_config.pass_seeds[0])
+        pass_a = _policy(
+            checked,
+            judge_config.pass_seeds[0],
+            protocol_version=judge_config.protocol_version,
+        )
         pass_b = (
-            _policy(checked, judge_config.pass_seeds[1])
+            _policy(
+                checked,
+                judge_config.pass_seeds[1],
+                protocol_version=judge_config.protocol_version,
+            )
             if judge_config.mode == "two_pass_consensus"
             else None
         )
@@ -71,6 +110,7 @@ def create_functional_judge(
             pass_a,
             pass_b,
             mode=judge_config.mode,
+            protocol_version=judge_config.protocol_version,
         )
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise

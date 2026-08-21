@@ -5,6 +5,10 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
+from secaware.exploratory.artifact_integrity import verify_closed_manifest
+
 
 def _load_canary_module():
     script = Path(__file__).parents[1] / "scripts" / "validate_bailian_functional_judge.py"
@@ -228,11 +232,95 @@ def test_external_research_case_uses_contract_task_id_in_single_pass(
 
     assert module.main() == 0
     report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
-    persisted_case = json.loads(
-        (output_dir / "canary_cases.jsonl").read_text(encoding="utf-8")
-    )
+    persisted_case = json.loads((output_dir / "canary_cases.jsonl").read_text(encoding="utf-8"))
     assert report["status"] == "PASS"
     assert report["completed_case_count"] == 1
     assert report["case_results"][0]["case_id"] == "research-task-human-pass"
     assert report["case_results"][0]["task_id"] == contract.task_id
     assert persisted_case["case_id"] != persisted_case["task_id"]
+
+
+@pytest.mark.parametrize(
+    ("config_name", "protocol_version", "measurement_method", "candidate_role"),
+    (
+        (
+            "evaluator-qwen35flash-v1.json",
+            "v1",
+            "ast_validated_single_shot_llm",
+            "baseline",
+        ),
+        (
+            "evaluator-qwen35flash-v2.json",
+            "v2",
+            "blind_static_llm_v2",
+            "new_candidate",
+        ),
+    ),
+)
+def test_external_preflight_is_credential_independent_closed_and_zero_call(
+    monkeypatch,
+    tmp_path: Path,
+    config_name: str,
+    protocol_version: str,
+    measurement_method: str,
+    candidate_role: str,
+) -> None:
+    module = _load_canary_module()
+    root = Path(__file__).parents[1]
+    output_dir = tmp_path / f"preflight-{protocol_version}"
+    cases_path = tmp_path / f"cases-{protocol_version}.jsonl"
+    contracts_path = tmp_path / f"contracts-{protocol_version}.jsonl"
+    contract = module._contract(f"preflight-{protocol_version}")
+    cases_path.write_text(
+        json.dumps(
+            {
+                "case_id": f"preflight-case-{protocol_version}",
+                "task_id": contract.task_id,
+                "seed_id": 93001,
+                "code_text": "def answer():\n    return 42\n",
+                "expected_status": "pass",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    contracts_path.write_text(json.dumps(contract.model_dump(mode="json")) + "\n", encoding="utf-8")
+    evaluator_config = root / "data" / "functional-judge" / "blind-calibration-v3" / config_name
+    payload = json.loads(evaluator_config.read_text(encoding="utf-8"))
+    monkeypatch.delenv(payload["api_key_env"], raising=False)
+    monkeypatch.setattr(
+        module,
+        "OpenAICompatibleStructuredTransport",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("provider transport created")),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(Path(module.__file__).resolve()),
+            "--output-dir",
+            str(output_dir),
+            "--cases-path",
+            str(cases_path),
+            "--contracts-path",
+            str(contracts_path),
+            "--evaluator-config",
+            str(evaluator_config),
+            "--preflight",
+        ],
+    )
+
+    assert module.main() == 0
+    verify_closed_manifest(
+        output_dir / "artifact-manifest.json", label="functional judge preflight test"
+    )
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    config = json.loads((output_dir / "config.json").read_text(encoding="utf-8"))
+    assert report["status"] == "FUNCTIONAL_JUDGE_PREFLIGHT_COMPLETE"
+    assert report["credential_present"] is False
+    assert report["live_ready"] is False
+    assert report["new_calls"]["functional_judge_provider_attempts"] == 0
+    assert report["protocol_version"] == protocol_version
+    assert report["measurement_method"] == measurement_method
+    assert config["candidate_role"] == candidate_role
+    assert not (output_dir / "llm_exchange_trace.jsonl").exists()

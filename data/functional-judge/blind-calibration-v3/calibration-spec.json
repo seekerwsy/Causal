@@ -1,0 +1,71 @@
+{
+  "calibration_id": "functional-judge-blind-calibration-v3",
+  "candidate_roles": {"baseline": "comparison_only_never_selected", "new_candidate": "eligible_after_all_gates"},
+  "executable_source_spec_id": "executable_sensitivity_source_spec_5cf0b16e130ef5f6a73318059fe37be111dbd777218f37da962e56076f2f7c81",
+  "executable_source_spec_sha256": "5b4dec14de3de2aa730a3bfb9ce0cdce3443e1c00c9b1acb212b2a0fe9f89ec7",
+  "families": [
+    {
+      "family": "gtf_fasta_append",
+      "functional_contract_id": "functional_contract_41ec36a499266cbcfc4e5776aac1c247bad5437a45e6630b4a1391fd4d75ad95",
+      "functional_contract_record_sha256": "15b77fe72c73a1048393919c321dcdc752d16059aa285287ae91591a5d0f4f7c",
+      "functional_contract_source_artifact_sha256": "b82408c2dc65c457fe7aafcd19ee0d4440836caaa03437ecedc9c4dcf9627d43",
+      "functional_contract_source_path": "units/assignment_0c0af84cf93222c3a6d25e3ed52726829035f4683f8a077705f9818f81858752/functional-contract.jsonl",
+      "functional_requirement_ids": ["req_1", "req_2", "req_3", "req_4"],
+      "functional_requirement_ids_sha256": "e7396acae6a9f58c6a6c59cb65bc9349e170204816bc301b5b19c6b175293ace",
+      "task_id": "secaware_main_task_87155394d648ddcdf9957d5638f3eb7cbe822eec6a34f6ab8c11d7aedab09768",
+      "tune_assignment_ids": ["assignment_0c0af84cf93222c3a6d25e3ed52726829035f4683f8a077705f9818f81858752", "assignment_f9e8b4bbceb5269158f9f68d2928ea78729470ef78536a2276d5f4e197faecfd"],
+      "validation_expected_fail": 2,
+      "validation_expected_pass": 2
+    },
+    {
+      "family": "pdf_bag_of_words",
+      "functional_contract_id": "functional_contract_ee080317165a905c67ba135b7fc7010b83a19d5af1cf905e5cff8151a6bc29e0",
+      "functional_contract_record_sha256": "236d65bec5bbee407686393a4debf53ed1734ab84c3ae8fc3bc984831665fdf6",
+      "functional_contract_source_artifact_sha256": "a52ddd8c60d40e55cc102bbb76a8ec207cfb606f145aaa1d1310ce2c78420fde",
+      "functional_contract_source_path": "units/assignment_72ad5ff2f642bec27b63eb8c3a2383a638500dcf55790234046eeee95da1ce07/functional-contract.jsonl",
+      "functional_requirement_ids": ["req_1", "req_2", "req_3", "req_4", "req_5"],
+      "functional_requirement_ids_sha256": "5d47f4309bd0e99240950162ddd0d1451e7e203227f4a88480a09c4cb1214298",
+      "task_id": "secaware_main_task_fcc7dc6d818af319d3f769a861ebdae90d26518b46e4680095d91ce2221ea466",
+      "tune_assignment_ids": ["assignment_27abf2e280bc87ad7aca5d0500d46300054866b5b44e7e764fbfcfa34b194445", "assignment_72ad5ff2f642bec27b63eb8c3a2383a638500dcf55790234046eeee95da1ce07"],
+      "validation_expected_fail": 2,
+      "validation_expected_pass": 2
+    },
+    {
+      "family": "slurm_exit_code",
+      "functional_contract_id": "functional_contract_048f7f7fb2b645342251a9cdd16a90fe0cafb8fa22bff32e44f1c21fc1639944",
+      "functional_contract_record_sha256": "e81240e2a8bdb592860660a7898ecd31cb1e1356f74777558b5f834778b7c9c6",
+      "functional_contract_source_artifact_sha256": "c5f167a86ce94e70bf5084254c1c65b4ab0037c31117fd4feafd5fed18ef92e1",
+      "functional_contract_source_path": "units/assignment_8ffb29d7a9a93159100b9e827079e4e80454d3ec19fe54d8466200c76b115b95/functional-contract.jsonl",
+      "functional_requirement_ids": ["req_01", "req_02", "req_03", "req_04", "req_05"],
+      "functional_requirement_ids_sha256": "fcc69f62c915ebebbb3e45915ba61daa667072af8a3c6141a6048313c71d1839",
+      "task_id": "secaware_main_task_5f9a092952b854cb9087bdfc480d04a402906f6e2bd5569e9d03bac6ec1d67f4",
+      "tune_assignment_ids": ["assignment_4f23b180485858444a864a95a647b566069663316e0a45e02250cc571081fbbc", "assignment_8ffb29d7a9a93159100b9e827079e4e80454d3ec19fe54d8466200c76b115b95"],
+      "validation_expected_fail": 2,
+      "validation_expected_pass": 2
+    },
+    {
+      "family": "sqlite_metadata",
+      "functional_contract_id": "functional_contract_91c8fcf728fd8a591f9b8f5b0b9f1018d081988603d57d2184d2b07397c3a67c",
+      "functional_contract_record_sha256": "d70f444536a74872385cd4189ed025ed5ea24e92f9520f029dee64f2f00278fe",
+      "functional_contract_source_artifact_sha256": "e8edce5e172b020bc9d934c3847152abe744a9334a5129a320b8959fcae094cb",
+      "functional_contract_source_path": "units/assignment_5a19d3342233a00456cc60864107616288b623c7f679ac30ad0368bf53b8b092/functional-contract.jsonl",
+      "functional_requirement_ids": ["req_01", "req_02", "req_03"],
+      "functional_requirement_ids_sha256": "cde1ed6ffc44b0784dc69477d273f5864be6c7033538a4b4cf0876f28c707afa",
+      "task_id": "secaware_main_task_dc45e1970f89c030e6494b1f76c399a680a7a98fc8021847fd7e6beca4368836",
+      "tune_assignment_ids": ["assignment_5a19d3342233a00456cc60864107616288b623c7f679ac30ad0368bf53b8b092", "assignment_7c1322caaa05f170a60feb3cc49eab29d9d7d65f91c809abcaa9765a87b520c6"],
+      "validation_expected_fail": 2,
+      "validation_expected_pass": 2
+    }
+  ],
+  "frozen_functional_contracts_sha256": "998e69241d0dd7c33498e4798edcf264a5e5810a9267caea0584bc7648eb033a",
+  "functional_contract_set_sha256": "c0e8af2f90ce6f2f9e611eb1778b6092957a371ab45eb9d54b4c187f18552d41",
+  "purpose": "Blind engineering calibration of Y_F^J against frozen executable and clear semantic gold; exposed tune cases are regression gates but never estimate validation accuracy or rank candidates; no scientific claim is allowed.",
+  "schema_version": "1.0",
+  "source_final_delivery_sha256": "0119ceb7c5f66b514c771db8755c964233cc4dc4c849152678e5bded3262a57b",
+  "source_live_root_manifest_sha256": "c2e750f0b422e9b87030931438d9bf4784092c6f51a4612733083ebb59a53687",
+  "source_live_root_provenance_sha256": "fc012c1bf654453503084512b833f4fee93389b588e575dfe71a6c4fadbc57cb",
+  "thresholds": {"selection_rule": "validation_correct_desc_false_fail_asc_candidate_id_asc", "tune_cases": 8, "tune_max_equivalence_inconsistency": 0, "tune_max_false_pass": 0, "tune_min_correct": 8, "tune_role": "engineering_regression_gate_not_ranking", "validation_cases": 16, "validation_max_equivalence_inconsistency": 0, "validation_max_false_pass": 0, "validation_max_invalid": 0, "validation_min_correct": 15},
+  "tune_expected_cases": 8,
+  "validation_cases_sha256": "8e62c17753dd09c352a89571429aec5ecd4dc2b41280cdaeb8d3835fa9a8dca6",
+  "validation_expected_cases": 16
+}

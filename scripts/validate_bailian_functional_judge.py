@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.metadata
 import json
 import os
 import platform
+import re
 import sys
-from datetime import datetime, timezone
+from collections import namedtuple
+from datetime import UTC, datetime
 from pathlib import Path
 
 from secaware.config import FunctionalJudgeLLMConfig, GenerationConfig
-from secaware.functional_judge.factory import _policy
+from secaware.exploratory.artifact_integrity import write_closed_manifest_atomic
+from secaware.functional_judge.factory import _artifacts, _policy
 from secaware.functional_judge.judge import (
-    FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE,
     LLMFunctionalJudge,
     functional_judge_policy_sha256,
 )
@@ -41,11 +44,43 @@ from secaware.schema.experiments import (
 )
 from secaware.schema.generation import GenerationProvenance, provider_provenance_sha256
 
-
 MODEL_ID = "qwen3.5-flash-2026-02-23"
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 API_KEY_ENV = "ALI_BAILIAN_API_KEY"
 PASS_SEEDS = (73_001, 73_002)
+MAX_CALIBRATION_CASES = 24
+_CANDIDATE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+_ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+_EVALUATOR_CONFIG_KEYS = frozenset(
+    {
+        "api_key_env",
+        "base_url",
+        "candidate_id",
+        "candidate_role",
+        "enable_thinking",
+        "max_attempts",
+        "max_response_bytes",
+        "mode",
+        "model_id",
+        "protocol_version",
+        "provider",
+        "schema_version",
+        "seed",
+        "temperature",
+        "timeout_seconds",
+        "top_p",
+    }
+)
+
+
+_EvaluatorCoordinates = namedtuple(
+    "_EvaluatorCoordinates",
+    (
+        "candidate_id candidate_role provider model_id base_url api_key_env "
+        "timeout_seconds max_attempts max_response_bytes temperature top_p seed "
+        "enable_thinking protocol_version mode source_sha256"
+    ),
+)
 
 
 def _sha(value: str) -> str:
@@ -53,7 +88,11 @@ def _sha(value: str) -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
+
+
+def _measurement_method(protocol_version: str) -> str:
+    return "blind_static_llm_v2" if protocol_version == "v2" else "ast_validated_single_shot_llm"
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -89,6 +128,108 @@ def _read_json(path: Path) -> dict[str, object]:
     return payload
 
 
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _legacy_evaluator(mode: str) -> _EvaluatorCoordinates:
+    return _EvaluatorCoordinates(
+        candidate_id="legacy-qwen35flash-v1",
+        candidate_role="legacy",
+        provider="ali_bailian_pay_as_you_go",
+        model_id=MODEL_ID,
+        base_url=BASE_URL,
+        api_key_env=API_KEY_ENV,
+        timeout_seconds=60.0,
+        max_attempts=3,
+        max_response_bytes=65_536,
+        temperature=0.0,
+        top_p=1.0,
+        seed=PASS_SEEDS[0],
+        enable_thinking=False,
+        protocol_version="v1",
+        mode=mode,
+        source_sha256=None,
+    )
+
+
+def _load_evaluator_config(path: Path) -> _EvaluatorCoordinates:
+    resolved = path.resolve()
+    payload = _read_json(resolved)
+    if frozenset(payload) != _EVALUATOR_CONFIG_KEYS:
+        raise SystemExit("evaluator config schema is invalid")
+
+    candidate_id = payload["candidate_id"]
+    candidate_role = payload["candidate_role"]
+    provider = payload["provider"]
+    model_id = payload["model_id"]
+    base_url = payload["base_url"]
+    api_key_env = payload["api_key_env"]
+    timeout_seconds = payload["timeout_seconds"]
+    max_attempts = payload["max_attempts"]
+    max_response_bytes = payload["max_response_bytes"]
+    temperature = payload["temperature"]
+    top_p = payload["top_p"]
+    seed = payload["seed"]
+    enable_thinking = payload["enable_thinking"]
+    protocol_version = payload["protocol_version"]
+    mode = payload["mode"]
+    if (
+        payload["schema_version"] != "1.0"
+        or type(candidate_id) is not str
+        or _CANDIDATE_ID.fullmatch(candidate_id) is None
+        or type(provider) is not str
+        or provider not in {"ali_bailian_pay_as_you_go", "openai_compatible"}
+        or candidate_role not in {"baseline", "new_candidate"}
+        or type(model_id) is not str
+        or not model_id.strip()
+        or len(model_id) > 256
+        or type(base_url) is not str
+        or not base_url.startswith("https://")
+        or len(base_url) > 2048
+        or type(api_key_env) is not str
+        or _ENV_NAME.fullmatch(api_key_env) is None
+        or type(timeout_seconds) not in {int, float}
+        or not 1.0 <= float(timeout_seconds) <= 600.0
+        or type(max_attempts) is not int
+        or max_attempts != 1
+        or type(max_response_bytes) is not int
+        or not 1_024 <= max_response_bytes <= 1_048_576
+        or type(temperature) not in {int, float}
+        or float(temperature) != 0.0
+        or type(top_p) not in {int, float}
+        or float(top_p) != 1.0
+        or type(seed) is not int
+        or not 0 <= seed <= 2_147_483_647
+        or type(enable_thinking) is not bool
+        or protocol_version not in {"v1", "v2"}
+        or mode != "single_pass"
+    ):
+        raise SystemExit("evaluator config failed validation")
+    return _EvaluatorCoordinates(
+        candidate_id=candidate_id,
+        candidate_role=candidate_role,
+        provider=provider,
+        model_id=model_id,
+        base_url=base_url,
+        api_key_env=api_key_env,
+        timeout_seconds=float(timeout_seconds),
+        max_attempts=max_attempts,
+        max_response_bytes=max_response_bytes,
+        temperature=float(temperature),
+        top_p=float(top_p),
+        seed=seed,
+        enable_thinking=enable_thinking,
+        protocol_version=protocol_version,
+        mode=mode,
+        source_sha256=_file_sha256(resolved),
+    )
+
+
+def _seal_output_dir(output_dir: Path) -> dict[str, object]:
+    return write_closed_manifest_atomic(output_dir, label="functional judge canary")
+
+
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
     payloads: list[dict[str, object]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -97,6 +238,24 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
             raise ValueError(f"expected JSON objects: {path}")
         payloads.append(payload)
     return payloads
+
+
+def _included_trace_attempts(output_dir: Path) -> int:
+    trace_path = output_dir / "llm_exchange_trace.jsonl"
+    return len(_read_jsonl(trace_path)) if trace_path.exists() else 0
+
+
+def _attempt_accounting(output_dir: Path) -> dict[str, object]:
+    attempts = _included_trace_attempts(output_dir)
+    return {
+        "provider_attempts": attempts,
+        "provider_attempt_scope": "included_closed_run_trace_records",
+        "new_calls": {
+            "functional_judge_provider_attempts": attempts,
+            "generation_provider_attempts": 0,
+            "oracle_executions": 0,
+        },
+    }
 
 
 def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
@@ -117,9 +276,13 @@ def _package_version(package: str) -> str | None:
         return None
 
 
-def _sanitized_failure(exc: Exception) -> dict[str, object]:
+def _sanitized_failure(
+    exc: Exception,
+    *,
+    api_key_env: str = API_KEY_ENV,
+) -> dict[str, object]:
     message = str(exc)
-    secret = os.environ.get(API_KEY_ENV, "")
+    secret = os.environ.get(api_key_env, "")
     if secret:
         message = message.replace(secret, "<redacted>")
     return {
@@ -134,9 +297,17 @@ def _sanitized_failure(exc: Exception) -> dict[str, object]:
 class _RecordingTransport:
     """Persist validation-only request/response evidence around the locked transport."""
 
-    def __init__(self, delegate: object, trace_path: Path) -> None:
+    def __init__(
+        self,
+        delegate: object,
+        trace_path: Path,
+        api_key_env: str = API_KEY_ENV,
+        evaluator_policy_sha256: str | None = None,
+    ) -> None:
         self._delegate = delegate
         self._trace_path = trace_path
+        self._api_key_env = api_key_env
+        self._evaluator_policy_sha256 = evaluator_policy_sha256
         self._call_index = 0
 
     def complete(self, request_bytes: bytes, policy: object) -> bytes:
@@ -152,8 +323,9 @@ class _RecordingTransport:
                     "call_index": self._call_index,
                     "request": request_payload,
                     "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
+                    "evaluator_policy_sha256": self._evaluator_policy_sha256,
                     "response_status": "transport_error",
-                    "failure": _sanitized_failure(exc),
+                    "failure": _sanitized_failure(exc, api_key_env=self._api_key_env),
                 },
             )
             raise
@@ -164,6 +336,7 @@ class _RecordingTransport:
                 "call_index": self._call_index,
                 "request": request_payload,
                 "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
+                "evaluator_policy_sha256": self._evaluator_policy_sha256,
                 "response_status": "received",
                 "response_text": response_bytes.decode("utf-8", errors="replace"),
                 "response_sha256": hashlib.sha256(response_bytes).hexdigest(),
@@ -301,10 +474,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=("single_pass", "two_pass_consensus"),
-        default="two_pass_consensus",
+        default=None,
     )
     parser.add_argument("--cases-path", type=Path)
     parser.add_argument("--contracts-path", type=Path)
+    parser.add_argument("--evaluator-config", type=Path)
+    parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--finalize-existing", action="store_true")
     return parser.parse_args()
 
@@ -365,6 +540,48 @@ def _load_cases(
     if not loaded:
         raise SystemExit("research canary cases are empty")
     return tuple(loaded)
+
+
+def _validate_calibration_cases(
+    cases: tuple[tuple[str, int, str, str, TaskFunctionalContractRecord], ...],
+) -> None:
+    if len(cases) > MAX_CALIBRATION_CASES:
+        raise SystemExit("calibration case budget exceeded")
+    coordinates: set[tuple[str, int]] = set()
+    for _case_id, seed_id, code_text, expected, contract in cases:
+        coordinate = (contract.task_id, seed_id)
+        try:
+            parsed = ast.parse(code_text)
+        except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+            raise SystemExit("calibration cases must contain AST-valid Python") from None
+        if (
+            expected not in {"pass", "fail"}
+            or contract.language.casefold() != "python"
+            or contract.judgeability is FunctionalJudgeability.UNJUDGEABLE
+            or not parsed.body
+            or coordinate in coordinates
+        ):
+            raise SystemExit("calibration case contract failed validation")
+        coordinates.add(coordinate)
+
+
+def _planned_evaluations(
+    cases: tuple[tuple[str, int, str, str, TaskFunctionalContractRecord], ...],
+) -> list[dict[str, object]]:
+    planned: list[dict[str, object]] = []
+    for case_id, seed_id, code_text, expected, contract in cases:
+        assignment, _variant = _assignment_and_variant(contract.task_id, seed_id)
+        planned.append(
+            {
+                "case_id": case_id,
+                "task_id": contract.task_id,
+                "assignment_id": assignment.assignment_id,
+                "contract_id": contract.contract_id,
+                "code_sha256": _sha(code_text),
+                "expected_status": expected,
+            }
+        )
+    return planned
 
 
 def _artifact_sha256s(
@@ -500,49 +717,91 @@ def main() -> int:
     started_at_utc = _utc_now()
     output_dir = args.output_dir.resolve()
     if args.finalize_existing:
-        if args.mode != "two_pass_consensus":
+        if args.preflight or args.evaluator_config is not None:
+            raise SystemExit("historical recovery does not accept calibration options")
+        if (args.mode or "two_pass_consensus") != "two_pass_consensus":
             raise SystemExit("single-pass recovery is not supported by the historical finalizer")
         return _finalize_existing(output_dir)
+    if args.preflight and args.evaluator_config is None:
+        raise SystemExit("--preflight requires --evaluator-config")
+
+    mode = args.mode or "two_pass_consensus"
+    evaluator = (
+        _load_evaluator_config(args.evaluator_config)
+        if args.evaluator_config is not None
+        else _legacy_evaluator(mode)
+    )
+    if args.evaluator_config is not None:
+        if args.mode is not None and args.mode != evaluator.mode:
+            raise SystemExit("CLI mode conflicts with evaluator config")
+        mode = evaluator.mode
+
+    cases = _load_cases(args.cases_path, args.contracts_path)
+    if args.evaluator_config is not None:
+        _validate_calibration_cases(cases)
     if output_dir.exists():
         raise SystemExit("refusing to overwrite an existing canary run")
-    output_dir.mkdir(parents=True, exist_ok=False)
 
     llm = FunctionalJudgeLLMConfig(
-        model_id=MODEL_ID,
-        base_url=BASE_URL,
-        api_key_env=API_KEY_ENV,
-        timeout_seconds=60.0,
-        max_attempts=3,
-        max_response_bytes=65_536,
-        temperature=0.0,
-        top_p=1.0,
+        model_id=evaluator.model_id,
+        base_url=evaluator.base_url,
+        api_key_env=evaluator.api_key_env,
+        timeout_seconds=evaluator.timeout_seconds,
+        max_attempts=evaluator.max_attempts,
+        max_response_bytes=evaluator.max_response_bytes,
+        temperature=evaluator.temperature,
+        top_p=evaluator.top_p,
         seed=None,
-        enable_thinking=False,
+        enable_thinking=evaluator.enable_thinking,
     )
-    pass_a_policy = _policy(llm, PASS_SEEDS[0])
+    system_template, system_template_sha256, output_schema_sha256 = _artifacts(
+        evaluator.protocol_version
+    )
+    pass_a_policy = _policy(
+        llm,
+        evaluator.seed,
+        protocol_version=evaluator.protocol_version,
+    )
     pass_b_policy = (
-        _policy(llm, PASS_SEEDS[1]) if args.mode == "two_pass_consensus" else None
+        _policy(llm, PASS_SEEDS[1], protocol_version=evaluator.protocol_version)
+        if mode == "two_pass_consensus"
+        else None
     )
     evaluator_policy_sha256 = functional_judge_policy_sha256(
         pass_a_policy,
         pass_b_policy,
-        mode=args.mode,
+        mode=mode,
+        protocol_version=evaluator.protocol_version,
     )
     config_payload = {
         "schema_version": "1.0",
-        "provider": "ali_bailian_pay_as_you_go",
+        "candidate_id": evaluator.candidate_id,
+        "candidate_role": evaluator.candidate_role,
+        "provider": evaluator.provider,
         "region": "cn-beijing",
-        "model_id": MODEL_ID,
-        "base_url": BASE_URL,
-        "endpoint_sha256": _sha(BASE_URL),
-        "api_key_env": API_KEY_ENV,
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "judge_mode": args.mode,
-        "pass_seeds": list(PASS_SEEDS if pass_b_policy is not None else PASS_SEEDS[:1]),
-        "enable_thinking": False,
+        "model_id": evaluator.model_id,
+        "base_url": evaluator.base_url,
+        "endpoint_sha256": _sha(evaluator.base_url),
+        "api_key_env": evaluator.api_key_env,
+        "timeout_seconds": evaluator.timeout_seconds,
+        "max_attempts": evaluator.max_attempts,
+        "max_response_bytes": evaluator.max_response_bytes,
+        "temperature": evaluator.temperature,
+        "top_p": evaluator.top_p,
+        "judge_mode": mode,
+        "pass_seeds": [
+            evaluator.seed,
+            *([PASS_SEEDS[1]] if pass_b_policy is not None else []),
+        ],
+        "enable_thinking": evaluator.enable_thinking,
+        "protocol_version": evaluator.protocol_version,
+        "measurement_method": _measurement_method(evaluator.protocol_version),
+        "execution_performed": False,
+        "system_template_sha256": system_template_sha256,
+        "output_schema_sha256": output_schema_sha256,
         "response_format": {"type": "json_object"},
         "evaluator_policy_sha256": evaluator_policy_sha256,
+        "evaluator_config_sha256": evaluator.source_sha256,
         "provider_usage_capture": "unavailable_in_structured_transport_v1",
         "validation_only_raw_exchange_capture": True,
     }
@@ -560,12 +819,11 @@ def main() -> int:
             "secaware": _package_version("secaware"),
         },
         "credential": {
-            "environment_variable": API_KEY_ENV,
-            "present": bool(os.environ.get(API_KEY_ENV, "").strip()),
+            "environment_variable": evaluator.api_key_env,
+            "present": bool(os.environ.get(evaluator.api_key_env, "").strip()),
             "value_recorded": False,
         },
     }
-    cases = _load_cases(args.cases_path, args.contracts_path)
     case_inputs = [
         {
             "case_id": case_id,
@@ -577,6 +835,7 @@ def main() -> int:
         }
         for case_id, seed_id, code_text, expected, contract in cases
     ]
+    output_dir.mkdir(parents=True, exist_ok=False)
     _write_json(output_dir / "config.json", config_payload)
     _write_json(output_dir / "environment.json", environment_payload)
     _write_jsonl(output_dir / "canary_cases.jsonl", tuple(case_inputs))
@@ -587,7 +846,7 @@ def main() -> int:
                 "started_at_utc": started_at_utc,
                 "working_directory": str(Path.cwd().resolve()),
                 "argv": [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-            "secret_in_argv": False,
+                "secret_in_argv": False,
             },
         ),
     )
@@ -596,17 +855,59 @@ def main() -> int:
         events_path,
         {
             "at_utc": _utc_now(),
-            "event": "canary_started",
+            "event": "preflight_started" if args.preflight else "canary_started",
             "case_count": len(cases),
         },
     )
-    if not os.environ.get(API_KEY_ENV, "").strip():
+    credential_present = bool(os.environ.get(evaluator.api_key_env, "").strip())
+    if args.preflight:
+        planned = _planned_evaluations(cases)
+        _write_jsonl(output_dir / "planned-evaluations.jsonl", tuple(planned))
+        _append_jsonl(
+            events_path,
+            {
+                "at_utc": _utc_now(),
+                "event": "preflight_completed",
+                "status": "FUNCTIONAL_JUDGE_PREFLIGHT_COMPLETE",
+                "provider_attempts": 0,
+                "live_ready": credential_present,
+            },
+        )
+        _write_json(
+            output_dir / "report.json",
+            {
+                "schema_version": "1.0",
+                "status": "FUNCTIONAL_JUDGE_PREFLIGHT_COMPLETE",
+                "started_at_utc": started_at_utc,
+                "completed_at_utc": _utc_now(),
+                "validated_case_count": len(cases),
+                "candidate_id": evaluator.candidate_id,
+                "evaluator_policy_sha256": evaluator_policy_sha256,
+                "protocol_version": evaluator.protocol_version,
+                "measurement_method": _measurement_method(evaluator.protocol_version),
+                "execution_performed": False,
+                "credential_present": credential_present,
+                "live_ready": credential_present,
+                "provider_attempts": 0,
+                "provider_attempt_scope": "included_closed_run_trace_records",
+                "new_calls": {
+                    "functional_judge_provider_attempts": 0,
+                    "generation_provider_attempts": 0,
+                    "oracle_executions": 0,
+                },
+                "planned_evaluations_sha256": canonical_sha256(planned),
+            },
+        )
+        _seal_output_dir(output_dir)
+        return 0
+
+    if not credential_present:
         failure = {
             "exception_type": "MissingCredential",
             "error_code": "MISSING_API_KEY_ENV",
             "error_stage": "preflight",
             "retryable": False,
-            "message": f"{API_KEY_ENV} is unavailable",
+            "message": f"{evaluator.api_key_env} is unavailable",
         }
         _append_jsonl(
             events_path,
@@ -621,25 +922,34 @@ def main() -> int:
                 "completed_at_utc": _utc_now(),
                 "completed_case_count": 0,
                 "total_case_count": len(cases),
+                **_attempt_accounting(output_dir),
                 "failure": failure,
             },
         )
+        if args.evaluator_config is not None:
+            _seal_output_dir(output_dir)
         return 2
 
     try:
         transport = OpenAICompatibleStructuredTransport(
             base_url=llm.base_url,
             api_key_env=llm.api_key_env,
-            system_template=FUNCTIONAL_JUDGE_SYSTEM_TEMPLATE,
+            system_template=system_template,
         )
         judge = LLMFunctionalJudge(
-            _RecordingTransport(transport, output_dir / "llm_exchange_trace.jsonl"),
+            _RecordingTransport(
+                transport,
+                output_dir / "llm_exchange_trace.jsonl",
+                evaluator.api_key_env,
+                evaluator_policy_sha256,
+            ),
             pass_a_policy,
             pass_b_policy,
-            mode=args.mode,
+            mode=mode,
+            protocol_version=evaluator.protocol_version,
         )
     except Exception as exc:  # noqa: BLE001 - boundary must persist provider failure
-        failure = _sanitized_failure(exc)
+        failure = _sanitized_failure(exc, api_key_env=evaluator.api_key_env)
         _append_jsonl(
             events_path,
             {"at_utc": _utc_now(), "event": "canary_failed", "failure": failure},
@@ -653,9 +963,12 @@ def main() -> int:
                 "completed_at_utc": _utc_now(),
                 "completed_case_count": 0,
                 "total_case_count": len(cases),
+                **_attempt_accounting(output_dir),
                 "failure": failure,
             },
         )
+        if args.evaluator_config is not None:
+            _seal_output_dir(output_dir)
         return 2
     pass_payloads: list[dict[str, object]] = []
     outcome_payloads: list[dict[str, object]] = []
@@ -674,12 +987,14 @@ def main() -> int:
             case_result = {
                 "case_id": case_id,
                 "task_id": contract.task_id,
+                "assignment_id": assignment.assignment_id,
+                "contract_id": contract.contract_id,
                 "expected_status": expected,
                 "actual_status": outcome.status.value,
                 "pass_statuses": [item.status.value for item in passes],
                 "consistent": (
                     len(passes) == 1
-                    if args.mode == "single_pass"
+                    if mode == "single_pass"
                     else len(passes) == 2 and passes[0].status is passes[1].status
                 ),
             }
@@ -693,7 +1008,7 @@ def main() -> int:
                 },
             )
     except Exception as exc:  # noqa: BLE001 - boundary must persist provider failure
-        failure = _sanitized_failure(exc)
+        failure = _sanitized_failure(exc, api_key_env=evaluator.api_key_env)
         _append_jsonl(
             events_path,
             {"at_utc": _utc_now(), "event": "canary_failed", "failure": failure},
@@ -718,9 +1033,12 @@ def main() -> int:
                 "completed_case_count": len(case_results),
                 "total_case_count": len(cases),
                 "case_results": case_results,
+                **_attempt_accounting(output_dir),
                 "failure": failure,
             },
         )
+        if args.evaluator_config is not None:
+            _seal_output_dir(output_dir)
         return 2
 
     success = all(
@@ -747,6 +1065,11 @@ def main() -> int:
             "completed_case_count": len(case_results),
             "total_case_count": len(cases),
             "case_results": case_results,
+            "candidate_id": evaluator.candidate_id,
+            "protocol_version": evaluator.protocol_version,
+            "measurement_method": judge.measurement_method,
+            "execution_performed": judge.execution_performed,
+            **_attempt_accounting(output_dir),
             "artifact_sha256": _artifact_sha256s(
                 config_payload,
                 environment_payload,
@@ -756,6 +1079,8 @@ def main() -> int:
             ),
         },
     )
+    if args.evaluator_config is not None:
+        _seal_output_dir(output_dir)
     return 0 if success else 1
 
 
