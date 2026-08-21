@@ -8,17 +8,29 @@ than being reinterpreted as request slots.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from enum import Enum
-from typing import Any, ClassVar, Literal, NoReturn, Self
+from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.records import (
+    FrozenResearchRecord,
+    parse_exact_enum,
+)
+from secaware.records import (
+    raise_record_validation_error as _raise_contract_error,
+)
+from secaware.records import (
+    record_sha256 as _digest,
+)
+from secaware.records import (
+    snapshot_json_arrays as _snapshot_arrays,
+)
+from secaware.records import (
+    valid_identifier as _valid_identifier,
+)
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
 from secaware.schema.outcomes_v2 import AssignmentOutcomeRecordV2
@@ -33,7 +45,6 @@ from secaware.schema.runtime_v2 import ConfirmationAssignmentRecordV2
 RANDOMIZATION_V2_SCHEMA_VERSION = "2.0"
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
 _RANDOMIZATION_ID_PATTERN = r"^randomization_manifest_v2_[0-9a-f]{64}$"
 _COVERAGE_ID_PATTERN = r"^assignment_coverage_v2_[0-9a-f]{64}$"
@@ -52,84 +63,21 @@ _REMOVE_ARMS = (
 )
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    return value
-
-
-def _digest(value: object) -> str:
-    payload = json.dumps(
-        _jsonable(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _snapshot_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_arrays(item) for item in value)
-    return value
-
-
-def _valid_identifier(value: object) -> bool:
-    return (
-        type(value) is str
-        and _IDENTIFIER_RE.fullmatch(value) is not None
-        and value == value.strip()
-        and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-    )
-
-
-def _raise_contract_error(model_type: type[SafeValidationMixin]) -> NoReturn:
-    raise model_type._safe_error()
-
-
 def _exact_arm(value: object) -> object:
-    if type(value) is ArmRole:
-        return value
-    if type(value) is str:
-        return next((item for item in ArmRole if item.value == value), value)
-    return value
+    return parse_exact_enum(value, ArmRole)
 
 
 def _arm_roles(operation: FeatureOperation) -> tuple[ArmRole, ...]:
     return _ADD_ARMS if operation is FeatureOperation.ADD else _REMOVE_ARMS
 
 
-class _RandomizationV2Contract(SafeValidationMixin, StrictModel):
+class _RandomizationV2Contract(FrozenResearchRecord):
     _safe_validation_message: ClassVar[str] = "randomization v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
 
     @model_validator(mode="before")
     @classmethod
     def snapshot_arrays(cls, value: object) -> object:
         return _snapshot_arrays(value)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
 
 
 class _ContentAddressedRandomizationV2(_RandomizationV2Contract):

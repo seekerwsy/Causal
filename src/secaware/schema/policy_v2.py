@@ -9,22 +9,38 @@ framework.  They do not encode generated-code outcomes or post-assignment diagno
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from collections.abc import Mapping, Sequence
-from enum import Enum, StrEnum
-from typing import Any, ClassVar, Literal, NoReturn, Self
+from collections.abc import Sequence
+from enum import StrEnum
+from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.records import (
+    FrozenResearchRecord,
+)
+from secaware.records import (
+    parse_exact_enum as _exact_enum,
+)
+from secaware.records import (
+    raise_record_validation_error as _raise_contract_error,
+)
+from secaware.records import (
+    record_sha256 as _digest,
+)
+from secaware.records import (
+    snapshot_json_arrays as _snapshot_json_arrays,
+)
+from secaware.records import (
+    valid_identifier as _valid_identifier,
+)
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
 
 POLICY_V2_SCHEMA_VERSION = "2.0"
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _CWE_RE = re.compile(r"^CWE-[1-9][0-9]*$")
 _OUTCOME_RE = re.compile(r"^y_[a-z0-9][a-z0-9_]{0,126}$")
 
@@ -65,83 +81,13 @@ _REMOVE_ARM_ORDER = (
 )
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, Mapping):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    encoded = json.dumps(
-        _jsonable(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _snapshot_json_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_json_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_json_arrays(item) for item in value)
-    return value
-
-
-def _exact_enum(value: object, enum_type: type[Enum]) -> object:
-    if isinstance(value, enum_type):
-        return value
-    if type(value) is str:
-        return next((item for item in enum_type if item.value == value), value)
-    return value
-
-
-def _valid_identifier(value: object) -> bool:
-    return (
-        type(value) is str
-        and bool(_IDENTIFIER_RE.fullmatch(value))
-        and value == value.strip()
-        and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-    )
-
-
-def _content(model: StrictModel, *derived_fields: str) -> dict[str, Any]:
-    return model.model_dump(mode="json", exclude=set(derived_fields))
-
-
-def _raise_contract_error(model_type: type[SafeValidationMixin]) -> NoReturn:
-    raise model_type._safe_error()
-
-
-class _PolicyV2Contract(SafeValidationMixin, StrictModel):
+class _PolicyV2Contract(FrozenResearchRecord):
     _safe_validation_message: ClassVar[str] = "policy v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        revalidate_instances="always",
-        strict=True,
-    )
 
     @model_validator(mode="before")
     @classmethod
     def snapshot_json_arrays(cls, value: object) -> object:
         return _snapshot_json_arrays(value)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
 
 
 class _PolicyV2VersionedContract(_PolicyV2Contract):
@@ -159,7 +105,10 @@ class _ContentAddressedV2Contract(_PolicyV2VersionedContract):
             if "schema_version" in content or cls._id_field in content:
                 raise ValueError
             payload = {"schema_version": POLICY_V2_SCHEMA_VERSION, **content}
-            return cls(**payload, **{cls._id_field: f"{cls._id_prefix}{_digest(payload)}"})
+            return cls(
+                **payload,
+                **{cls._id_field: f"{cls._id_prefix}{_digest(payload)}"},
+            )
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except Exception:  # noqa: BLE001 - sanitize the fail-closed contract boundary
@@ -170,7 +119,8 @@ class _ContentAddressedV2Contract(_PolicyV2VersionedContract):
 
     @model_validator(mode="after")
     def validate_content_address(self) -> Self:
-        expected = self._id_prefix + _digest(_content(self, self._id_field))
+        content = self.model_dump(mode="json", exclude={self._id_field})
+        expected = self._id_prefix + _digest(content)
         if getattr(self, self._id_field) != expected:
             raise ValueError(self._safe_validation_message)
         return self
@@ -1072,7 +1022,7 @@ class TaskArmVariantBinding(_ContentAddressedV2Contract):
         try:
             prompt_sha256 = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
             variant_prompt_id = "variant_prompt_" + _digest(
-                {"arm_role": _jsonable(arm_role), "prompt_sha256": prompt_sha256}
+                {"arm_role": arm_role.value, "prompt_sha256": prompt_sha256}
             )
             return cls.from_content(
                 variant_prompt_id=variant_prompt_id,

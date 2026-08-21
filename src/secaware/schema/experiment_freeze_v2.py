@@ -8,17 +8,23 @@ results.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import Counter
-from enum import Enum
 from fractions import Fraction
 from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 
 from secaware.experiments.execution_v2 import ExecutionPolicyFreezeManifestV2
-from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.records import (
+    FrozenResearchRecord,
+)
+from secaware.records import (
+    record_sha256 as _digest,
+)
+from secaware.records import (
+    snapshot_json_arrays as _snapshot_json_arrays,
+)
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
 from secaware.schema.features import FeatureOperation
 from secaware.schema.policy_v2 import (
@@ -48,49 +54,8 @@ _REMOVE_ARM_ORDER = (
 )
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _snapshot_json_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_json_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_json_arrays(item) for item in value)
-    return value
-
-
-class _ExperimentFreezeV2Contract(SafeValidationMixin, StrictModel):
+class _ExperimentFreezeV2Contract(FrozenResearchRecord):
     _safe_validation_message: ClassVar[str] = "experiment freeze v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
 
     schema_version: Literal["2.0"] = EXPERIMENT_FREEZE_V2_SCHEMA_VERSION
 
@@ -98,12 +63,6 @@ class _ExperimentFreezeV2Contract(SafeValidationMixin, StrictModel):
     @classmethod
     def snapshot_json_arrays(cls, value: object) -> object:
         return _snapshot_json_arrays(value)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
 
 
 class _ContentAddressedExperimentFreezeV2(_ExperimentFreezeV2Contract):

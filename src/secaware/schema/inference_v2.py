@@ -9,16 +9,26 @@ generalization of these records.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.randomness import RNG_VERSION
-from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.records import (
+    FrozenResearchRecord,
+)
+from secaware.records import (
+    parse_exact_enum as _exact_enum,
+)
+from secaware.records import (
+    record_sha256 as _digest,
+)
+from secaware.records import (
+    valid_identifier as _valid_identifier,
+)
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
 
 INFERENCE_V2_SCHEMA_VERSION = "2.0"
@@ -26,7 +36,6 @@ FORMAL_MIN_BOOTSTRAP_SAMPLES_V2 = 999
 FORMAL_MIN_VALID_BOOTSTRAP_DRAWS_V2 = 999
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _HYPOTHESIS_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
 _TARGET_PATTERN = r"^target_[0-9a-f]{64}$"
 _ARM_PROTOCOL_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
@@ -38,66 +47,10 @@ _ROBUSTNESS_PLAN_PATTERN = r"^realization_robustness_plan_[0-9a-f]{64}$"
 _REALIZATION_SPEC_PATTERN = r"^realization_spec_[0-9a-f]{64}$"
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _valid_identifier(value: object) -> bool:
-    return (
-        type(value) is str
-        and _IDENTIFIER_RE.fullmatch(value) is not None
-        and value == value.strip()
-        and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-    )
-
-
-def _exact_enum(value: object, enum_type: type[Enum]) -> object:
-    if type(value) is enum_type:
-        return value
-    if type(value) is str:
-        return next((member for member in enum_type if member.value == value), value)
-    return value
-
-
-class _InferenceV2Contract(SafeValidationMixin, StrictModel):
+class _InferenceV2Contract(FrozenResearchRecord):
     _safe_validation_message = "simultaneous inference v2 contract failed validation"
 
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
     schema_version: Literal["2.0"] = INFERENCE_V2_SCHEMA_VERSION
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
 
 
 class _ContentAddressedInferenceV2(_InferenceV2Contract):

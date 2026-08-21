@@ -7,20 +7,27 @@ clusters, task instances, realizations, and request-randomness slots.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import re
 from enum import Enum
 from typing import Any, Literal, Self
 
-from pydantic import ConfigDict, Field, StrictInt, ValidationError, field_validator, model_validator
+from pydantic import Field, StrictInt, ValidationError, field_validator, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.records import (
+    FrozenResearchRecord,
+    parse_exact_enum,
+)
+from secaware.records import (
+    record_sha256 as _canonical_sha256,
+)
+from secaware.records import (
+    valid_identifier as _valid_identifier,
+)
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
 from secaware.schema.policy_v2 import ConfirmationBlockKeyV2
 
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _OUTCOME_ID = re.compile(r"^assignment_outcome_v2_[0-9a-f]{64}$")
 _BLOCK_ID = re.compile(r"^block_[0-9a-f]{64}$")
@@ -44,27 +51,6 @@ class FunctionalStatusV2(str, Enum):
     PASS = "pass"
     FAIL = "fail"
     UNKNOWN = "unknown"
-
-
-def _canonical_sha256(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _valid_identifier(value: object) -> bool:
-    return (
-        type(value) is str
-        and _IDENTIFIER.fullmatch(value) is not None
-        and value == value.strip()
-        and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-    )
 
 
 def block_id_v2(
@@ -124,19 +110,10 @@ def _project_state(
     return y_c, y_e, secure_yield, y_joint
 
 
-class AssignmentOutcomeRecordV2(SafeValidationMixin, StrictModel):
+class AssignmentOutcomeRecordV2(FrozenResearchRecord):
     """One total, assignment-bound v2 outcome with exact derived projections."""
 
     _safe_validation_message = "v2 assignment outcome failed validation"
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
     schema_version: Literal["2.0"]
     outcome_id: str = Field(pattern=_OUTCOME_ID.pattern)
     assignment_id: str
@@ -169,11 +146,7 @@ class AssignmentOutcomeRecordV2(SafeValidationMixin, StrictModel):
             "state": AssignmentOutcomeStateV2,
             "functional_status": FunctionalStatusV2,
         }[info.field_name]  # type: ignore[attr-defined]
-        if type(value) is enum_type:
-            return value
-        if type(value) is str:
-            return next((member for member in enum_type if member.value == value), value)
-        return value
+        return parse_exact_enum(value, enum_type)
 
     @classmethod
     def from_content(cls, **content: Any) -> Self:
@@ -266,12 +239,6 @@ class AssignmentOutcomeRecordV2(SafeValidationMixin, StrictModel):
         ):
             raise ValueError(self._safe_validation_message)
         return self
-
-    def __repr__(self) -> str:
-        return "AssignmentOutcomeRecordV2()"
-
-    def __str__(self) -> str:
-        return "AssignmentOutcomeRecordV2()"
 
 
 __all__ = [

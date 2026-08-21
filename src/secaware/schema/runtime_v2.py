@@ -9,14 +9,24 @@ post-intervention diagnostic projection (``XAR``) in distinct record types.
 from __future__ import annotations
 
 import hashlib
-import json
-import re
 from collections.abc import Sequence
-from typing import Any, ClassVar, Literal, NoReturn, Self
+from typing import Any, ClassVar, Literal, Self
 
-from pydantic import ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel, is_valid_model_id
+from secaware.records import (
+    FrozenResearchRecord,
+)
+from secaware.records import (
+    raise_record_validation_error as _raise_contract_error,
+)
+from secaware.records import (
+    record_sha256 as _digest,
+)
+from secaware.records import (
+    valid_identifier as _valid_identifier,
+)
+from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
 from secaware.schema.policy_v2 import ConfirmationBlockKeyV2
 
@@ -26,7 +36,6 @@ ConfirmationRegimeId = Literal["randomized_confirmation"]
 RuntimeRegimeId = DiscoveryRegimeId | ConfirmationRegimeId
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _CONTENT_ID_PATTERN = r"^[a-z][a-z0-9_]*_[0-9a-f]{64}$"
 _ASSIGNMENT_ID_PATTERN = r"^assignment_[0-9a-f]{64}$"
 _HYPOTHESIS_ID_PATTERN = r"^hypothesis_[0-9a-f]{64}$"
@@ -38,54 +47,8 @@ _ARM_PROTOCOL_ID_PATTERN = r"^arm_protocol_[0-9a-f]{64}$"
 _BLOCK_ID_PATTERN = r"^block_[0-9a-f]{64}$"
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, StrictModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, tuple):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, list):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    return getattr(value, "value", value)
-
-
-def _digest(value: object) -> str:
-    payload = json.dumps(
-        _jsonable(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _valid_identifier(value: object) -> bool:
-    return type(value) is str and bool(_IDENTIFIER_RE.fullmatch(value))
-
-
-def _raise_contract_error(model_type: type[SafeValidationMixin]) -> NoReturn:
-    raise model_type._safe_error()
-
-
-class _RuntimeV2Contract(SafeValidationMixin, StrictModel):
+class _RuntimeV2Contract(FrozenResearchRecord):
     _safe_validation_message: ClassVar[str] = "runtime v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
 
 
 class NaturalX0ValueV2(_RuntimeV2Contract):
