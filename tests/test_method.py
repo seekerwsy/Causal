@@ -5,10 +5,10 @@ from dataclasses import fields, replace
 import pytest
 
 from helpers import changed_spec, example_study, protocol_spec
-from secaware.cli import build_study
-from secaware.intervention import ARM_ORDER
-from secaware.randomization import verify_randomization
-from secaware.representation import Task
+from prompt_mechanism_study.cli import build_study
+from prompt_mechanism_study.intervention import ARM_ORDER
+from prompt_mechanism_study.randomization import verify_randomization
+from prompt_mechanism_study.representation import Task
 
 
 @pytest.mark.reviewer

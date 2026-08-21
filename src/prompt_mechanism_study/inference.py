@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable, Mapping
 
-from secaware.intervention import Arm, InterventionPolicy
-from secaware.outcomes import Outcome
-from secaware.randomization import Assignment, Randomization
-from secaware.records import content_id
-from secaware.representation import Task
+from prompt_mechanism_study.intervention import Arm, InterventionPolicy
+from prompt_mechanism_study.outcomes import Outcome
+from prompt_mechanism_study.randomization import Assignment, Randomization
+from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.representation import Task
 
 
 class Metric(StrEnum):

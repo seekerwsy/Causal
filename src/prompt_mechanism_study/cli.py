@@ -7,30 +7,36 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from secaware.adapters import AdapterBundle, AdapterKind, AdapterSpec
-from secaware.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
-from secaware.inference import AnalysisPlan, Metric
-from secaware.intervention import (
+from prompt_mechanism_study.adapters import AdapterBundle, AdapterKind, AdapterSpec
+from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.inference import AnalysisPlan, Metric
+from prompt_mechanism_study.intervention import (
     ARM_ORDER,
     RealizationSpec,
     VariantValidation,
     freeze_bundle,
     freeze_policy,
 )
-from secaware.measurement import (
+from prompt_mechanism_study.measurement import (
     CodeStatus,
     FunctionalStatus,
     InfrastructureFailure,
     Measurement,
     OracleStatus,
 )
-from secaware.records import canonical_value
-from secaware.representation import Candidate, ExpectedDirection, Operation, Split, Task
-from secaware.workflow import StudyFreeze, analyze, freeze_study
+from prompt_mechanism_study.records import canonical_value
+from prompt_mechanism_study.representation import (
+    Candidate,
+    ExpectedDirection,
+    Operation,
+    Split,
+    Task,
+)
+from prompt_mechanism_study.workflow import StudyFreeze, analyze, freeze_study
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="secaware")
+    parser = argparse.ArgumentParser(prog="prompt-mechanism-study")
     commands = parser.add_subparsers(dest="command", required=True)
 
     freeze = commands.add_parser("freeze", help="freeze the pre-outcome study protocol")

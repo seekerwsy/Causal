@@ -1,4 +1,4 @@
-# SecAware Paper-Specific Instructions
+# Prompt Mechanism Study Paper-Specific Instructions
 
 The repository-root `AGENTS.md` applies to every file under `paper/`. This file
 adds only paper-local requirements and must remain concise.

@@ -1,19 +1,21 @@
-# SecAware reviewer guide
+# Prompt Mechanism Study reviewer guide
 
-SecAware is a research artifact, not a provider or deployment service. Review
+Prompt Mechanism Study is a research artifact, not a provider or deployment service. Review
 the scientific path in this order:
 
-1. src/secaware/representation.py
-2. src/secaware/prioritization.py
-3. src/secaware/intervention.py
-4. src/secaware/randomization.py
-5. src/secaware/adapters.py
-6. src/secaware/measurement.py
-7. src/secaware/outcomes.py
-8. src/secaware/inference.py
-9. src/secaware/workflow.py
-10. src/secaware/artifact_io.py
-11. src/secaware/cli.py
+1. src/prompt_mechanism_study/representation.py
+2. src/prompt_mechanism_study/prioritization.py
+3. src/prompt_mechanism_study/intervention.py
+4. src/prompt_mechanism_study/randomization.py
+5. src/prompt_mechanism_study/adapters.py
+6. src/prompt_mechanism_study/measurement.py
+7. src/prompt_mechanism_study/outcomes.py
+8. src/prompt_mechanism_study/inference.py
+9. src/prompt_mechanism_study/workflow.py
+10. src/prompt_mechanism_study/cli.py
+
+`artifact_io.py` and `records.py` are shared serialization support, not
+additional scientific stages.
 
 The normative prospective design remains the
 [context-conditioned intervention policy framework](superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md).

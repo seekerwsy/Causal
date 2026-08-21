@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable
 
-from secaware.records import content_hash, content_id, require_text, require_unique
+from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
 
 
 class Split(StrEnum):

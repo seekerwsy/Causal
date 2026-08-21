@@ -7,8 +7,13 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
 
-from secaware.intervention import ARM_ORDER, Arm, InterventionPolicy, TaskRealizationBundle
-from secaware.records import content_hash, content_id, require_text, require_unique
+from prompt_mechanism_study.intervention import (
+    ARM_ORDER,
+    Arm,
+    InterventionPolicy,
+    TaskRealizationBundle,
+)
+from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
 
 
 @dataclass(frozen=True, slots=True)

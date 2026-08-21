@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable
 
-from secaware.adapters import AdapterBundle
-from secaware.randomization import Randomization
-from secaware.records import content_id, require_text, require_unique
+from prompt_mechanism_study.adapters import AdapterBundle
+from prompt_mechanism_study.randomization import Randomization
+from prompt_mechanism_study.records import content_id, require_text, require_unique
 
 
 class CodeStatus(StrEnum):

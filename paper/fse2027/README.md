@@ -1,6 +1,6 @@
 # FSE 2027 Draft
 
-This directory contains the FSE 2027 paper draft for SecAware-Causal.
+This directory contains the FSE 2027 paper draft for Prompt Mechanism Study.
 
 ## Template
 
@@ -12,25 +12,19 @@ This directory contains the FSE 2027 paper draft for SecAware-Causal.
 
 ## Main Files
 
-- `secaware-fse2027-draft.tex`: current anonymous manuscript draft.
+- `prompt-mechanism-study-fse2027-draft.tex`: current anonymous manuscript draft.
 
 ## Compile
 
 The draft is verified with TeX Live 2026. From this directory, compile with:
 
 ```powershell
-latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out secaware-fse2027-draft.tex
+latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out prompt-mechanism-study-fse2027-draft.tex
 ```
 
-The generated manuscript is `out/secaware-fse2027-draft.pdf`. The source can
-also be uploaded to Overleaf and compiled with `secaware-fse2027-draft.tex` as
+The generated manuscript is `out/prompt-mechanism-study-fse2027-draft.pdf`. The source can
+also be uploaded to Overleaf and compiled with `prompt-mechanism-study-fse2027-draft.tex` as
 the main file.
-
-From the repository root, run the project paper contract with:
-
-```powershell
-.venv\Scripts\python.exe -m unittest tests.paper.test_secaware_fse_paper_contract -v
-```
 
 ## Current Scope
 
@@ -42,8 +36,9 @@ requirements.
 
 The 2026-07-29 narrative revision organizes the method as Security-Aware
 Prompt Representation, Stability-Guided Causal Discovery, and Causal Effect
-Confirmation. Its evidence ledger is the
-[revision evidence ledger](revision-evidence-ledger.md).
+Confirmation. Its original commands and identifiers are preserved in the
+[historical revision evidence ledger](revision-evidence-ledger.md); they are
+not current project names or invocation instructions.
 
 The manuscript may describe verified core capabilities in the present tense,
 but unfinished RQ1--RQ3 experiments and the frozen final paper run remain

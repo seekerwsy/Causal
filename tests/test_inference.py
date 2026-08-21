@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 
 from helpers import complete_measurements, example_study
-from secaware.measurement import (
+from prompt_mechanism_study.measurement import (
     CodeStatus,
     FunctionalStatus,
     InfrastructureFailure,
     OracleStatus,
 )
-from secaware.workflow import analyze
+from prompt_mechanism_study.workflow import analyze
 
 
 @pytest.mark.reviewer

@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from helpers import complete_measurements, example_study, measurement_document, protocol_spec
-from secaware.artifact_io import verify_bundle
-from secaware.cli import main
-from secaware.workflow import analyze
+from prompt_mechanism_study.artifact_io import verify_bundle
+from prompt_mechanism_study.cli import main
+from prompt_mechanism_study.workflow import analyze
 
 
 @pytest.mark.reviewer

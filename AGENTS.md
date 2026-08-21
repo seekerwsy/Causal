@@ -9,7 +9,7 @@ before proceeding.
 
 ## Core Objective: A Reviewable Research Artifact
 
-SecAware is an academic research prototype and a peer-review artifact, not a
+Prompt Mechanism Study is an academic research prototype and a peer-review artifact, not a
 production service platform. Optimize for scientific clarity, inspectability,
 and reproducibility. The project owner and reviewers must be able to understand
 the complete active method without reconstructing it from development history,

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from secaware.records import canonical_json
+from prompt_mechanism_study.records import canonical_json
 
 
 MANIFEST = "manifest.json"

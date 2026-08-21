@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from secaware.measurement import (
+from prompt_mechanism_study.measurement import (
     CodeStatus,
     FunctionalStatus,
     MeasurementLedger,
     OracleStatus,
 )
-from secaware.records import content_id
+from prompt_mechanism_study.records import content_id
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,11 +3,16 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Callable
 
-from secaware.cli import build_study
-from secaware.measurement import CodeStatus, FunctionalStatus, Measurement, OracleStatus
-from secaware.randomization import Assignment
-from secaware.records import content_hash
-from secaware.workflow import StudyFreeze
+from prompt_mechanism_study.cli import build_study
+from prompt_mechanism_study.measurement import (
+    CodeStatus,
+    FunctionalStatus,
+    Measurement,
+    OracleStatus,
+)
+from prompt_mechanism_study.randomization import Assignment
+from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.workflow import StudyFreeze
 
 
 def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:

@@ -1,6 +1,6 @@
-# SecAware research artifact
+# Prompt Mechanism Study research artifact
 
-SecAware is a compact, auditable framework for testing whether a frozen prompt
+Prompt Mechanism Study is a compact, auditable framework for testing whether a frozen prompt
 intervention policy changes oracle-evaluable secure-code yield while preserving
 functionality.
 
@@ -82,17 +82,17 @@ and the complete pre-outcome analysis plan.
 
 Freeze a protocol before measurement:
 
-    secaware freeze protocol.json freeze-artifact
+    prompt-mechanism-study freeze protocol.json freeze-artifact
 
 After external generators and evaluators produce a complete measurement file:
 
-    secaware analyze freeze-artifact measurements.json analysis-artifact
+    prompt-mechanism-study analyze freeze-artifact measurements.json analysis-artifact
 
 Verify or inspect a bundle:
 
-    secaware verify freeze-artifact
-    secaware verify analysis-artifact
-    secaware summarize analysis-artifact
+    prompt-mechanism-study verify freeze-artifact
+    prompt-mechanism-study verify analysis-artifact
+    prompt-mechanism-study summarize analysis-artifact
 
 The freeze command rejects outcome fields. The analyze command replays the
 study from the frozen protocol, verifies the exact-byte bundle, checks study

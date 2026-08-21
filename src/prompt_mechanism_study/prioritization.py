@@ -6,8 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import Mapping
 
-from secaware.records import content_id, require_text
-from secaware.representation import CandidateUniverse
+from prompt_mechanism_study.records import content_id, require_text
+from prompt_mechanism_study.representation import CandidateUniverse
 
 
 @dataclass(frozen=True, slots=True)

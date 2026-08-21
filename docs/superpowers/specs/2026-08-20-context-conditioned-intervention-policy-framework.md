@@ -1,4 +1,4 @@
-# SecAware Context-Conditioned Intervention-Policy Framework
+# Prompt Mechanism Study Context-Conditioned Intervention-Policy Framework
 
 **Date:** 2026-08-20
 
@@ -33,7 +33,7 @@ silently mix their hypotheses, estimands, schemas, or evidence labels.
 
 ## 2. Scientific Positioning
 
-SecAware is not a new general-purpose causal-discovery algorithm and does not claim that FCI recovers
+Prompt Mechanism Study is not a new general-purpose causal-discovery algorithm and does not claim that FCI recovers
 the unique causal mechanism of Prompt authoring. It is a method for:
 
 ```text
@@ -950,7 +950,7 @@ sections rather than the RQ sentences.
 RQ1's primary comparison is the shared-universe selector track. Native-system funnels are secondary
 end-to-end evidence.
 
-> **RQ2. How do SecAware's structured representation and causal prioritization contribute to
+> **RQ2. How do Prompt Mechanism Study's structured representation and causal prioritization contribute to
 > successful intervention selection?**
 
 RQ2 separates representation comparison from selector comparison and reports the complete

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from secaware.records import content_id, require_text
+from prompt_mechanism_study.records import content_id, require_text
 
 
 class AdapterKind(StrEnum):

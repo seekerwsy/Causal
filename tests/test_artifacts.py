@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from secaware.artifact_io import verify_bundle, write_bundle
-from secaware.records import canonical_json, content_hash
+from prompt_mechanism_study.artifact_io import verify_bundle, write_bundle
+from prompt_mechanism_study.records import canonical_json, content_hash
 
 
 @pytest.mark.reviewer

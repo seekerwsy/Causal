@@ -5,20 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from secaware.adapters import AdapterBundle
-from secaware.inference import AnalysisPlan, InferenceResult, estimate_policy_effects
-from secaware.intervention import InterventionPolicy
-from secaware.measurement import (
+from prompt_mechanism_study.adapters import AdapterBundle
+from prompt_mechanism_study.inference import AnalysisPlan, InferenceResult, estimate_policy_effects
+from prompt_mechanism_study.intervention import InterventionPolicy
+from prompt_mechanism_study.measurement import (
     InfrastructureFailure,
     Measurement,
     MeasurementLedger,
     close_measurements,
 )
-from secaware.outcomes import Outcome, derive_outcomes
-from secaware.prioritization import SelectionFreeze, freeze_selection
-from secaware.randomization import Randomization, randomize
-from secaware.records import content_id
-from secaware.representation import (
+from prompt_mechanism_study.outcomes import Outcome, derive_outcomes
+from prompt_mechanism_study.prioritization import SelectionFreeze, freeze_selection
+from prompt_mechanism_study.randomization import Randomization, randomize
+from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.representation import (
     Candidate,
     CandidateUniverse,
     Population,
@@ -27,7 +27,7 @@ from secaware.representation import (
     freeze_universe,
 )
 
-METHOD_VERSION = "secaware-method-1.1.0"
+METHOD_VERSION = "prompt-mechanism-study-method-1.1.0"
 
 
 @dataclass(frozen=True, slots=True)
