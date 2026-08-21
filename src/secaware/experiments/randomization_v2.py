@@ -10,24 +10,16 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Any, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 
 from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.records import (
-    FrozenResearchRecord,
+    ContentAddressedResearchRecord,
+    SnapshotResearchRecord,
     parse_exact_enum,
-)
-from secaware.records import (
     raise_record_validation_error as _raise_contract_error,
-)
-from secaware.records import (
     record_sha256 as _digest,
-)
-from secaware.records import (
-    snapshot_json_arrays as _snapshot_arrays,
-)
-from secaware.records import (
     valid_identifier as _valid_identifier,
 )
 from secaware.schema.common import is_valid_model_id
@@ -71,42 +63,13 @@ def _arm_roles(operation: FeatureOperation) -> tuple[ArmRole, ...]:
     return _ADD_ARMS if operation is FeatureOperation.ADD else _REMOVE_ARMS
 
 
-class _RandomizationV2Contract(FrozenResearchRecord):
+class _RandomizationV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "randomization v2 contract failed validation"
 
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_arrays(cls, value: object) -> object:
-        return _snapshot_arrays(value)
 
-
-class _ContentAddressedRandomizationV2(_RandomizationV2Contract):
-    _id_field: ClassVar[str]
-    _id_prefix: ClassVar[str]
-
-    @classmethod
-    def from_content(cls, **content: Any) -> Self:
-        payload: dict[str, Any] | None = None
-        try:
-            if "schema_version" in content or cls._id_field in content:
-                raise ValueError
-            payload = {"schema_version": RANDOMIZATION_V2_SCHEMA_VERSION, **content}
-            record_id = cls._id_prefix + _digest(payload)
-            return cls(**payload, **{cls._id_field: record_id})
-        except (MemoryError, KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:  # noqa: BLE001 - sanitize the fail-closed boundary
-            content.clear()
-            if payload is not None:
-                payload.clear()
-            _raise_contract_error(cls)
-
-    @model_validator(mode="after")
-    def validate_content_address(self) -> Self:
-        content = self.model_dump(mode="json", exclude={self._id_field})
-        if getattr(self, self._id_field) != self._id_prefix + _digest(content):
-            raise ValueError(self._safe_validation_message)
-        return self
+class _ContentAddressedRandomizationV2(ContentAddressedResearchRecord):
+    _safe_validation_message: ClassVar[str] = "randomization v2 contract failed validation"
+    _schema_version = RANDOMIZATION_V2_SCHEMA_VERSION
 
 
 class ModelGenerationParametersV2(_RandomizationV2Contract):

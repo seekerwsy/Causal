@@ -248,7 +248,6 @@ def test_x0_assignment_and_xar_have_non_interchangeable_schemas() -> None:
         ConfirmationAssignmentRecordV2.from_content(**assignment_payload)
 
 
-@pytest.mark.reviewer
 def test_records_are_immutable_and_content_addressed() -> None:
     request, *_ = _chain(_discovery_coordinates())
     with pytest.raises(ValidationError):

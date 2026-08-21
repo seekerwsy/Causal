@@ -12,26 +12,17 @@ import hashlib
 import re
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import Any, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 
 from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.records import (
-    FrozenResearchRecord,
-)
-from secaware.records import (
+    ContentAddressedResearchRecord,
+    SnapshotResearchRecord,
     parse_exact_enum as _exact_enum,
-)
-from secaware.records import (
     raise_record_validation_error as _raise_contract_error,
-)
-from secaware.records import (
     record_sha256 as _digest,
-)
-from secaware.records import (
     snapshot_json_arrays as _snapshot_json_arrays,
-)
-from secaware.records import (
     valid_identifier as _valid_identifier,
 )
 from secaware.schema.common import is_valid_model_id
@@ -81,49 +72,14 @@ _REMOVE_ARM_ORDER = (
 )
 
 
-class _PolicyV2Contract(FrozenResearchRecord):
+class _PolicyV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "policy v2 contract failed validation"
 
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_json_arrays(cls, value: object) -> object:
-        return _snapshot_json_arrays(value)
 
-
-class _PolicyV2VersionedContract(_PolicyV2Contract):
+class _ContentAddressedV2Contract(ContentAddressedResearchRecord):
+    _safe_validation_message: ClassVar[str] = "policy v2 contract failed validation"
+    _schema_version = POLICY_V2_SCHEMA_VERSION
     schema_version: Literal["2.0"]
-
-
-class _ContentAddressedV2Contract(_PolicyV2VersionedContract):
-    _id_field: ClassVar[str]
-    _id_prefix: ClassVar[str]
-
-    @classmethod
-    def from_content(cls, **content: Any) -> Self:
-        payload: dict[str, Any] | None = None
-        try:
-            if "schema_version" in content or cls._id_field in content:
-                raise ValueError
-            payload = {"schema_version": POLICY_V2_SCHEMA_VERSION, **content}
-            return cls(
-                **payload,
-                **{cls._id_field: f"{cls._id_prefix}{_digest(payload)}"},
-            )
-        except (MemoryError, KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:  # noqa: BLE001 - sanitize the fail-closed contract boundary
-            content.clear()
-            if payload is not None:
-                payload.clear()
-            _raise_contract_error(cls)
-
-    @model_validator(mode="after")
-    def validate_content_address(self) -> Self:
-        content = self.model_dump(mode="json", exclude={self._id_field})
-        expected = self._id_prefix + _digest(content)
-        if getattr(self, self._id_field) != expected:
-            raise ValueError(self._safe_validation_message)
-        return self
 
 
 class QueryState(StrEnum):

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import ClassVar, NoReturn
+from typing import Any, ClassVar, NoReturn, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from secaware.canonical import canonical_sha256
 from secaware.schema.common import SafeValidationMixin, StrictModel
@@ -96,8 +96,53 @@ class FrozenResearchRecord(SafeValidationMixin, StrictModel):
         return f"{type(self).__name__}()"
 
 
+class SnapshotResearchRecord(FrozenResearchRecord):
+    """Immutable record that snapshots caller-owned JSON arrays before validation."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def snapshot_arrays(cls, value: object) -> object:
+        return snapshot_json_arrays(value)
+
+
+class ContentAddressedResearchRecord(SnapshotResearchRecord):
+    """Shared constructor and verifier for ordinary content-addressed records."""
+
+    _schema_version: ClassVar[str]
+    _id_field: ClassVar[str]
+    _id_prefix: ClassVar[str]
+
+    @classmethod
+    def from_content(cls, **content: Any) -> Self:
+        payload: dict[str, Any] | None = None
+        try:
+            if "schema_version" in content or cls._id_field in content:
+                raise ValueError
+            payload = {"schema_version": cls._schema_version, **content}
+            return cls(
+                **payload,
+                **{cls._id_field: cls._id_prefix + record_sha256(payload)},
+            )
+        except (MemoryError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:  # noqa: BLE001 - sanitize the public record boundary
+            content.clear()
+            if payload is not None:
+                payload.clear()
+            raise_record_validation_error(cls)
+
+    @model_validator(mode="after")
+    def validate_content_address(self) -> Self:
+        content = self.model_dump(mode="json", exclude={self._id_field})
+        if getattr(self, self._id_field) != self._id_prefix + record_sha256(content):
+            raise ValueError(self._safe_validation_message)
+        return self
+
+
 __all__ = [
+    "ContentAddressedResearchRecord",
     "FrozenResearchRecord",
+    "SnapshotResearchRecord",
     "parse_exact_enum",
     "raise_record_validation_error",
     "record_sha256",

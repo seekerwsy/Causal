@@ -10,19 +10,13 @@ from __future__ import annotations
 
 from collections import Counter
 from fractions import Fraction
-from typing import Any, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 
 from pydantic import Field, StrictInt, model_validator
 
 from secaware.experiments.execution_v2 import ExecutionPolicyFreezeManifestV2
 from secaware.records import (
-    FrozenResearchRecord,
-)
-from secaware.records import (
-    record_sha256 as _digest,
-)
-from secaware.records import (
-    snapshot_json_arrays as _snapshot_json_arrays,
+    ContentAddressedResearchRecord,
 )
 from secaware.schema.common import is_valid_model_id
 from secaware.schema.experiments import ArmRole
@@ -54,43 +48,10 @@ _REMOVE_ARM_ORDER = (
 )
 
 
-class _ExperimentFreezeV2Contract(FrozenResearchRecord):
+class _ContentAddressedExperimentFreezeV2(ContentAddressedResearchRecord):
     _safe_validation_message: ClassVar[str] = "experiment freeze v2 contract failed validation"
-
+    _schema_version = EXPERIMENT_FREEZE_V2_SCHEMA_VERSION
     schema_version: Literal["2.0"] = EXPERIMENT_FREEZE_V2_SCHEMA_VERSION
-
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_json_arrays(cls, value: object) -> object:
-        return _snapshot_json_arrays(value)
-
-
-class _ContentAddressedExperimentFreezeV2(_ExperimentFreezeV2Contract):
-    _id_field: ClassVar[str]
-    _id_prefix: ClassVar[str]
-
-    @classmethod
-    def from_content(cls, **content: Any) -> Self:
-        payload: dict[str, Any] | None = None
-        try:
-            if "schema_version" in content or cls._id_field in content:
-                raise ValueError
-            payload = {"schema_version": EXPERIMENT_FREEZE_V2_SCHEMA_VERSION, **content}
-            return cls(**payload, **{cls._id_field: cls._id_prefix + _digest(payload)})
-        except (MemoryError, KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:  # noqa: BLE001 - sanitize the public trust boundary
-            content.clear()
-            if payload is not None:
-                payload.clear()
-            raise cls._safe_error() from None
-
-    @model_validator(mode="after")
-    def validate_content_address(self) -> Self:
-        content = self.model_dump(mode="json", exclude={self._id_field})
-        if getattr(self, self._id_field) != self._id_prefix + _digest(content):
-            raise ValueError(self._safe_validation_message)
-        return self
 
 
 class ConfirmatoryHypothesisModelCoordinateV2(_ContentAddressedExperimentFreezeV2):
