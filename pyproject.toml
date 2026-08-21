@@ -4,66 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secaware"
-version = "0.2.0"
-description = "TSG-driven prompt-side security mechanism discovery and confirmation."
+version = "1.0.0"
+description = "Compact reproducible artifact for randomized security-intervention studies."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = [
-  "causal-learn==0.1.4.7",
-  "pydantic>=2.5,<3",
-  "typer>=0.9",
-  "pandas>=2",
-  "numpy>=1.24",
-  "networkx>=3",
-  "pyyaml>=6",
-  "rich>=13",
-]
+dependencies = []
 
 [project.scripts]
-secaware = "secaware.cli:app"
-secaware-oracle = "secaware.oracle.cli:app"
+secaware = "secaware.cli:main"
 
 [project.optional-dependencies]
-api = ["openai>=1.55.3,<3"]
-dev = [
-  "pip==25.0.1",
-  "pytest>=8",
-  "setuptools==83.0.0",
-  "wheel==0.47.0",
-]
-oracle = [
-  "semgrep==1.168.0",
-  "bandit==1.9.4",
-]
-rfci = [
-  "JPype1==1.7.1; python_version >= '3.12'",
-  "py-tetrad @ git+https://github.com/cmu-phil/py-tetrad.git@a30707264aa4363a23ac5f136a70bbdd62212f07 ; python_version >= '3.12'",
-]
+dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"secaware.extractors" = ["prompts/*.txt"]
-"secaware.intervention" = ["prompts/*.txt"]
-"secaware.functional_judge" = ["prompts/*.txt"]
-
-[tool.setuptools.data-files]
-"share/doc/secaware/migrations" = [
-  "docs/migrations/prompt-tsg-v2.md",
-  "docs/migrations/fci-discovery.md",
-  "docs/migrations/randomized-confirmation.md",
-  "docs/migrations/prompt-only-fci-jci.md",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m reviewer"
 markers = [
   "reviewer: fast reviewer-facing scientific invariant suite",
-  "milestone: structural end-to-end and tamper-resistance checks",
-  "oracle_tools: requires the exact locked Semgrep and Bandit executables",
-  "rfci_real: requires the pinned optional py-tetrad, JPype, and JDK RFCI runtime",
+  "milestone: minimal end-to-end reproduction checks",
 ]
 
 [tool.ruff]

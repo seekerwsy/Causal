@@ -1,253 +1,80 @@
-"""Canonical artifact I/O shared by the reviewer-facing research path."""
+"""Small exact-closure artifact store used by the reproducibility CLI."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import tempfile
-import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-from secaware.canonical import canonical_sha256
-
-_CLOSURE_SCHEMA_VERSION = "1.0"
-_MANIFEST_NAME = "artifact-manifest.json"
+from secaware.records import canonical_json, canonical_value, content_hash
 
 
-def sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+MANIFEST = "manifest.json"
 
 
-def sha256_path(path: str | Path) -> str:
-    """Hash a file or a deterministic, symlink-free directory snapshot."""
+def write_bundle(root: Path, artifacts: Mapping[str, Any]) -> Path:
+    """Write a new immutable bundle and its exact file manifest."""
 
-    target = Path(path)
-    if target.is_symlink():
-        raise ValueError("symbolic links are not supported in stage inputs")
-    if target.is_file():
-        return sha256_file(target)
-    if not target.is_dir():
-        raise FileNotFoundError("stage input path does not exist")
-
-    resolved_root = target.resolve()
-    files: list[dict[str, str]] = []
-    children = sorted(target.rglob("*"), key=lambda item: item.relative_to(target).as_posix())
-    for child in children:
-        if child.is_symlink():
-            raise ValueError("symbolic links are not supported in stage inputs")
-        try:
-            child.resolve().relative_to(resolved_root)
-        except (OSError, ValueError):
-            raise ValueError("stage input directory entry escapes its root") from None
-        if child.is_dir():
-            continue
-        if not child.is_file():
-            raise ValueError("stage input directories may contain only files and directories")
-        files.append(
-            {
-                "path": child.relative_to(target).as_posix(),
-                "sha256": sha256_file(child),
-            }
-        )
-    return canonical_sha256({"type": "directory", "files": files})
-
-
-def atomic_write_text(path: str | Path, content: str) -> None:
-    """Atomically replace a UTF-8 text artifact after flushing its temporary file."""
-
-    target = Path(path)
-    temporary: Path | None = None
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
-            prefix=f".{target.name}.",
-            suffix=".tmp",
-            dir=target.parent,
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
-    except BaseException:
-        if temporary is not None:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-
-
-def canonical_json_bytes(value: object) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-
-
-def write_json_atomic_exclusive(path: Path, value: object) -> None:
-    """Publish canonical JSON atomically without replacing an existing file."""
-
-    if path.exists():
-        raise FileExistsError(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = canonical_json_bytes(value) + b"\n"
-    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
-    descriptor: int | None = None
-    try:
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "wb") as handle:
-            descriptor = None
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.link(temporary, path)
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-        if temporary.exists():
-            temporary.unlink()
-
-
-def _resolved_manifest(root: Path, manifest_path: Path | None) -> tuple[Path, Path]:
-    resolved_root = root.resolve()
-    resolved_manifest = (
-        (resolved_root / _MANIFEST_NAME) if manifest_path is None else manifest_path.resolve()
+    root = root.resolve()
+    if root.exists():
+        raise FileExistsError(root)
+    root.mkdir(parents=True)
+    hashes: dict[str, str] = {}
+    for name, value in sorted(artifacts.items()):
+        _valid_name(name)
+        payload = canonical_json(value) + "\n"
+        (root / name).write_text(payload, encoding="utf-8", newline="\n")
+        hashes[name] = content_hash(canonical_value(value))
+    manifest = {"schema_version": "1.0", "files": hashes}
+    (root / MANIFEST).write_text(
+        canonical_json(manifest) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
-    try:
-        relative = resolved_manifest.relative_to(resolved_root)
-    except ValueError:
-        raise ValueError("closure manifest escaped root") from None
-    if relative.as_posix() != _MANIFEST_NAME:
-        raise ValueError("closure manifest must be the exact root artifact-manifest.json")
-    return resolved_root, resolved_manifest
+    return root
 
 
-def build_closed_manifest(
-    root: Path,
-    *,
-    manifest_path: Path | None = None,
-) -> dict[str, object]:
-    """Describe every file below *root*, excluding only the root manifest."""
-
-    resolved_root, resolved_manifest = _resolved_manifest(root, manifest_path)
-    if not resolved_root.is_dir():
-        raise FileNotFoundError(resolved_root)
-    files: list[tuple[str, Path]] = []
-    for candidate in resolved_root.rglob("*"):
-        if not candidate.is_file() or candidate.resolve() == resolved_manifest:
-            continue
-        resolved = candidate.resolve()
-        try:
-            resolved.relative_to(resolved_root)
-        except ValueError:
-            raise ValueError("closure manifest input escaped root") from None
-        files.append((candidate.relative_to(resolved_root).as_posix(), candidate))
-    return {
-        "schema_version": _CLOSURE_SCHEMA_VERSION,
-        "files": [
-            {"path": relative, "sha256": sha256_file(path)}
-            for relative, path in sorted(files, key=lambda item: item[0])
-        ],
-    }
-
-
-def verify_closed_manifest(
-    manifest_path: Path,
-    *,
-    label: str = "artifact",
-) -> dict[str, object]:
-    """Verify manifest schema, digests, paths, and exact file-set closure."""
-
-    manifest_path = manifest_path.resolve()
-    root = manifest_path.parent.resolve()
-    try:
-        manifest: Any = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"{label} manifest failed validation") from error
-    if (
-        type(manifest) is not dict
-        or set(manifest) != {"schema_version", "files"}
-        or manifest.get("schema_version") != _CLOSURE_SCHEMA_VERSION
-        or type(manifest.get("files")) is not list
-    ):
-        raise ValueError(f"{label} manifest failed validation")
-
-    expected: set[str] = set()
-    for item in manifest["files"]:
-        if type(item) is not dict or set(item) != {"path", "sha256"}:
-            raise ValueError(f"{label} manifest failed validation")
-        raw_path = item.get("path")
-        digest = item.get("sha256")
-        if type(raw_path) is not str or type(digest) is not str:
-            raise ValueError(f"{label} manifest failed validation")
-        relative = Path(raw_path)
-        normalized = relative.as_posix()
-        resolved = (root / relative).resolve()
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            raise ValueError(f"{label} manifest escaped root") from None
+def verify_bundle(root: Path) -> dict[str, Any]:
+    root = root.resolve()
+    manifest_path = root / MANIFEST
+    if not manifest_path.is_file():
+        raise ValueError("bundle manifest is missing")
+    manifest = read_json(manifest_path)
+    if set(manifest) != {"schema_version", "files"} or manifest["schema_version"] != "1.0":
+        raise ValueError("invalid bundle manifest")
+    expected = manifest["files"]
+    if not isinstance(expected, dict):
+        raise ValueError("invalid bundle file map")
+    for name, digest in expected.items():
+        _valid_name(name)
         if (
-            not raw_path
-            or relative.is_absolute()
-            or normalized != raw_path
-            or any(part in {".", ".."} for part in relative.parts)
-            or normalized in expected
-            or resolved == manifest_path
-            or not resolved.is_file()
-            or sha256_file(resolved) != digest
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
         ):
-            raise ValueError(f"{label} manifest failed validation")
-        expected.add(normalized)
-
+            raise ValueError("invalid bundle digest")
     actual = {
-        item.relative_to(root).as_posix()
-        for item in root.rglob("*")
-        if item.is_file() and item.resolve() != manifest_path
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.name != MANIFEST
     }
-    if actual != expected:
-        raise ValueError(f"{label} manifest closure failed validation")
+    if actual != set(expected):
+        raise ValueError("bundle file set is not exact")
+    for name, digest in expected.items():
+        value = read_json(root / name)
+        if content_hash(value) != digest:
+            raise ValueError(f"artifact digest mismatch: {name}")
     return manifest
 
 
-def write_closed_manifest_atomic(
-    root: Path,
-    *,
-    manifest_path: Path | None = None,
-    label: str = "artifact",
-) -> dict[str, object]:
-    """Exclusively publish and verify a closed root manifest."""
-
-    root, target = _resolved_manifest(root, manifest_path)
-    if target.exists():
-        raise FileExistsError(target)
-    payload = build_closed_manifest(root, manifest_path=target)
-    write_json_atomic_exclusive(target, payload)
-    return verify_closed_manifest(target, label=label)
+def read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-__all__ = [
-    "atomic_write_text",
-    "build_closed_manifest",
-    "canonical_json_bytes",
-    "canonical_sha256",
-    "sha256_file",
-    "sha256_path",
-    "verify_closed_manifest",
-    "write_closed_manifest_atomic",
-    "write_json_atomic_exclusive",
-]
+def _valid_name(name: str) -> None:
+    path = Path(name)
+    if path.is_absolute() or len(path.parts) != 1 or path.name in {"", MANIFEST}:
+        raise ValueError("artifact names must be simple relative filenames")
+
+
+__all__ = ["MANIFEST", "read_json", "verify_bundle", "write_bundle"]

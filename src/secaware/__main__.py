@@ -1,5 +1,3 @@
-from secaware.cli import app
+from secaware.cli import main
 
-
-if __name__ == "__main__":
-    app()
+raise SystemExit(main())
