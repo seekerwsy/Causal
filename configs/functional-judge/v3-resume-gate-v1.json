@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Pre-outcome engineering gate for resuming the paired Target/Noop experiment without further Judge prompt tuning.",
+  "candidate": {
+    "candidate_id": "qwen35flash-requirement-aggregate-v3",
+    "protocol_version": "v3",
+    "model_id": "qwen3.5-flash-2026-02-23",
+    "evaluator_config_sha256": "fe7434f9ef2c1d84ef00901de8234ed424eec42a57257fa5a9a6d59aa5338125",
+    "prompt_sha256": "5aecb580cba8b241da4108aca61465781de5d7e7fbd2662072a84b28eac2eecf",
+    "aggregate_rule": "derive_pass_fail_unknown_from_requirement_verdicts_and_ignore_advisory_top_status"
+  },
+  "holdout": {
+    "cases": 16,
+    "cases_sha256": "4ee3353cc601b96be79a879fcedb6f36cffcfc56b0737d4db12e1f4bb3787195",
+    "calibration_spec_sha256": "e6d9b9fecb219250dd5a1bce6c30135954b10ada9efdef05b83c5f2ef42cb56a",
+    "pilot_cases": 4,
+    "remaining_cases": 12
+  },
+  "acceptance": {
+    "minimum_correct": 14,
+    "maximum_false_pass": 1,
+    "maximum_invalid": 0,
+    "minimum_correct_per_family": 3,
+    "families": 4
+  },
+  "execution": {
+    "maximum_candidate_policies": 2,
+    "retry_failed_case": false,
+    "continue_after_failed_gate": false,
+    "python_dont_write_bytecode": true
+  },
+  "use_in_experiment": {
+    "role": "functional_guardrail_not_security_oracle",
+    "executable_audit_fraction": 0.25,
+    "primary_security_measurement": "static_profile_security_oracle",
+    "formal_arms": ["target", "noop"]
+  },
+  "scientific_claim_allowed": false
+}

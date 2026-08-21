@@ -13,11 +13,9 @@ from prompt_mechanism_study.representation import Candidate, Operation
 class Arm(StrEnum):
     TARGET = "target"
     NOOP = "noop"
-    PLACEBO = "placebo"
-    GENERIC = "generic"
 
 
-ARM_ORDER = (Arm.TARGET, Arm.NOOP, Arm.PLACEBO, Arm.GENERIC)
+ARM_ORDER = (Arm.TARGET, Arm.NOOP)
 APPEND_SEPARATOR = "\n\n"
 
 
@@ -40,7 +38,7 @@ class InterventionSpec:
         if type(self.operation) is not Operation:
             raise TypeError("operation must be an Operation")
         if tuple(arm for arm, _ in self.arm_instructions) != ARM_ORDER:
-            raise ValueError("intervention spec must contain four canonical arms")
+            raise ValueError("intervention spec must contain target and noop")
         for _, instruction in self.arm_instructions:
             require_text(instruction, "arm instruction")
 
@@ -208,7 +206,7 @@ def intervention_spec(
     arm_instructions: Mapping[Arm, str],
 ) -> InterventionSpec:
     if set(arm_instructions) != set(ARM_ORDER):
-        raise ValueError("all and only four registered arm instructions are required")
+        raise ValueError("target and noop instructions are required")
     return InterventionSpec(
         candidate.candidate_id,
         candidate.actionable_feature_id,
@@ -229,7 +227,7 @@ def freeze_bundle(
     validations: Mapping[Arm, SemanticValidation],
 ) -> TaskRealizationBundle:
     if any(set(values) != set(ARM_ORDER) for values in (executions, validations)):
-        raise ValueError("all and only four registered arms are required")
+        raise ValueError("target and noop executions and validations are required")
     if spec.candidate_id != candidate.candidate_id or spec.operation is not candidate.operation:
         raise ValueError("intervention spec drifts from its candidate")
     require_text(source_prompt, "source_prompt")

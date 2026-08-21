@@ -43,7 +43,7 @@ def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
                     "realization_label": realization,
                     "arms": {
                         arm: _arm_record(task["task_id"], realization, arm)
-                        for arm in ("target", "noop", "placebo", "generic")
+                        for arm in ("target", "noop")
                     },
                 }
             )
@@ -60,8 +60,6 @@ def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
                 "arm_instructions": {
                     "target": "Add SQL value parameterization.",
                     "noop": "Add neutral guidance without changing SQL construction.",
-                    "placebo": "Add unrelated length-matched engineering guidance.",
-                    "generic": "Add a generic security reminder without the target mechanism.",
                 },
                 "realizations": [
                     {"label": "direct", "weight": 1},
@@ -92,7 +90,7 @@ def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
             "alpha": 0.05,
         },
         "models": list(models),
-        "slots": [0, 1, 2, 3],
+        "slots": [0, 1],
         "randomization_seed": 41021,
     }
 

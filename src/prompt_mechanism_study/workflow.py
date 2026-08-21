@@ -27,7 +27,7 @@ from prompt_mechanism_study.representation import (
     freeze_universe,
 )
 
-METHOD_VERSION = "prompt-mechanism-study-method-1.2.0"
+METHOD_VERSION = "prompt-mechanism-study-method-1.3.0"
 
 
 @dataclass(frozen=True, slots=True)

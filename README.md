@@ -30,7 +30,7 @@ its name, version, and policy digest remain part of the study identity.
 ### 2. Intervention and randomization
 
 - Freeze one `InterventionSpec` containing the mechanism, ADD/REMOVE operation,
-  and natural-language instruction for each target, no-op, placebo, and generic arm.
+  and natural-language instruction for the Target and Noop arms.
 - Require every intervention text to come from the frozen LLM-executor adapter;
   the core applies the sole active edit rule by appending that text to the
   unchanged source prompt.
@@ -40,9 +40,9 @@ its name, version, and policy digest remain part of the study identity.
 - Freeze a finite realization distribution using positive integer weights.
 - Materialize one complete task-realization bundle for every confirm task.
 - Bind cluster, task, candidate, policy, realization, task bundle, model, and
-  arm protocol into every complete-block identity.
-- Balance all four arms inside every block using a replayable randomization
-  seed and request-randomness slots.
+  intervention spec into every complete-block identity.
+- Pair Target and Noop inside every block using a replayable randomization seed
+  and request-randomness slots.
 
 ### 3. Measurement and cluster-aware inference
 
@@ -104,6 +104,12 @@ The freeze command rejects outcome fields. The analyze command replays the
 study from the frozen protocol, verifies the exact-byte bundle, checks study
 and adapter identities, and requires one measurement for every randomized
 assignment.
+
+The bounded Functional Judge resume rule is frozen in
+`configs/functional-judge/v3-resume-gate-v1.json`: v3 requirement-level
+aggregation, at least 14/16 fresh-holdout cases correct, at most one
+false-pass, zero invalid responses, and a 25% executable audit. It is a
+functionality guardrail and never replaces the static Security Oracle.
 
 ## Code map
 

@@ -10,7 +10,7 @@ Each test owns a scientific invariant:
 
 - discover/confirm and semantic-cluster separation;
 - exact candidate-universe, score, rank, and top-K freeze;
-- operation-specific intervention instructions and LLM execution evidence;
+- operation-specific Target/Noop instructions and LLM execution evidence;
 - outcome-blind semantic validation before randomization;
 - replayable complete-block randomization;
 - frozen adapter identities;

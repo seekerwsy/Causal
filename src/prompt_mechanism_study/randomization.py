@@ -1,4 +1,4 @@
-"""Replayable four-arm randomization over complete policy blocks."""
+"""Replayable paired Target/Noop assignment over complete policy blocks."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def randomize(
     if not frozen_policies or not frozen_models or not frozen_slots:
         raise ValueError("policies, models, and slots cannot be empty")
     if len(frozen_slots) % len(ARM_ORDER):
-        raise ValueError("slots must form complete four-arm blocks")
+        raise ValueError("slots must form complete Target/Noop pairs")
     if any(type(slot) is not int or slot < 0 for slot in frozen_slots):
         raise ValueError("slots must be non-negative integers")
 
