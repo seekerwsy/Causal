@@ -185,6 +185,23 @@ def _stage_map(rows: object, *, label: str) -> dict[str, dict[str, object]]:
     return mapped
 
 
+def _case_closure_digest(case_rows: list[dict[str, object]]) -> str:
+    """Rebuild the compatibility probe's frozen four-field case projection."""
+    projected = sorted(
+        (
+            {
+                "case_id": row["case_id"],
+                "split": row["split"],
+                "closure_valid": row["closure_valid"],
+                "closure_errors": row["closure_errors"],
+            }
+            for row in case_rows
+        ),
+        key=lambda row: row["case_id"],
+    )
+    return canonical_sha256(projected)
+
+
 def _validate_closed_error_run(
     root: Path,
     *,
@@ -840,7 +857,7 @@ def _validate_baseline_reuse_compatibility(
                 "read_only_attempt_06_baseline_roots_not_new_calls"
             ),
         }
-        or report.get("case_closure_digest") != canonical_sha256(baseline_case_rows)
+        or report.get("case_closure_digest") != _case_closure_digest(baseline_case_rows)
     ):
         raise ValueError("baseline reuse compatibility decision failed validation")
 

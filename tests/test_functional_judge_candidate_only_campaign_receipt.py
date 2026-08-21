@@ -431,7 +431,7 @@ def candidate_only_fixture(tmp_path_factory):
         ),
         "purpose": "Read-only zero-call test compatibility diagnostic.",
         "deployed_commit": deployment["commit"],
-        "case_closure_digest": canonical_sha256(baseline_case_rows),
+        "case_closure_digest": module._case_closure_digest(baseline_case_rows),
         "compatibility": {name: True for name in sorted(module._COMPATIBILITY_FLAGS)},
         "new_calls": {
             "analyzer_provider_attempts": 0,
@@ -565,6 +565,7 @@ def candidate_only_fixture(tmp_path_factory):
         "baseline_pilot": baseline_pilot,
         "baseline_remaining": baseline_remaining,
         "expected_constants": expected_constants,
+        "baseline_case_rows": baseline_case_rows,
     }
 
 
@@ -673,6 +674,11 @@ def test_candidate_only_receipt_reuses_closed_baseline_and_authorizes_only_24_ne
     assert receipt["cross_campaign_baseline_reuse"]["reused_closed_trace_records"] == 24
     assert receipt["cross_campaign_baseline_reuse"]["new_provider_calls_for_reuse"] == 0
     compatibility = receipt["cross_campaign_baseline_reuse"]["read_only_compatibility_authority"]
+    baseline_case_rows = candidate_only_fixture["baseline_case_rows"]
+    assert isinstance(baseline_case_rows, list)
+    projected_digest = module._case_closure_digest(baseline_case_rows)
+    assert projected_digest != canonical_sha256(baseline_case_rows)
+    assert compatibility["case_closure_digest"] == projected_digest
     assert compatibility["compatibility_flags"] == 20
     assert compatibility["reuse_authorized_by_this_diagnostic"] is False
     excluded_old_v2 = receipt["cross_campaign_baseline_reuse"]["excluded_old_candidate_error_run"]
@@ -747,6 +753,7 @@ def test_candidate_only_archive_script_starts_without_editable_source_path(
         "superseded_trace_ledger",
         "superseded_error_root",
         "compatibility",
+        "compatibility_case_digest",
         "compatibility_authority",
         "new_config",
     ),
@@ -865,6 +872,36 @@ def test_candidate_only_receipt_rejects_cross_campaign_and_tampered_authorities(
             tmp_path / "compatibility-attack",
             mutate_compatibility,
         )
+    elif attack == "compatibility_case_digest":
+
+        def mutate_case_digest(root: Path) -> None:
+            report = json.loads((root / "report.json").read_text(encoding="utf-8"))
+            report["case_closure_digest"] = canonical_sha256(
+                candidate_only_fixture["baseline_case_rows"]
+            )
+            core = {key: value for key, value in report.items() if key != "diagnostic_id"}
+            report["diagnostic_id"] = (
+                "functional_judge_baseline_reuse_compatibility_" + canonical_sha256(core)
+            )
+            _write_json(root / "report.json", report)
+
+        attacked = _copy_reclosed(
+            Path(candidate_only_fixture["compatibility"]),
+            tmp_path / "compatibility-case-digest-attack",
+            mutate_case_digest,
+        )
+        attacked_report = json.loads((attacked / "report.json").read_text(encoding="utf-8"))
+        monkeypatch.setattr(
+            module,
+            "_EXPECTED_COMPATIBILITY_MANIFEST_SHA256",
+            _sha256_file(attacked / "artifact-manifest.json"),
+        )
+        monkeypatch.setattr(
+            module,
+            "_EXPECTED_COMPATIBILITY_ID",
+            attacked_report["diagnostic_id"],
+        )
+        overrides["baseline-reuse-compatibility-dir"] = attacked
     elif attack == "compatibility_authority":
 
         def mutate_compatibility_authority(root: Path) -> None:
