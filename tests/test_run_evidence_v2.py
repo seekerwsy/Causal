@@ -309,6 +309,7 @@ def _with_one_terminal_failure(
     return evidence, failing_accounting
 
 
+@pytest.mark.milestone
 def test_run_evidence_closes_every_hypothesis_assignment_and_model_coordinate() -> None:
     fixture = _fixture()
     evidence = fixture.evidence
@@ -397,6 +398,7 @@ def test_terminal_failure_is_preserved_and_disables_formal_point_estimation() ->
         )
 
 
+@pytest.mark.milestone
 def test_missing_duplicate_or_closed_coverage_substitution_is_rejected() -> None:
     fixture = _fixture()
 

@@ -131,6 +131,7 @@ def _chain(
     return request, code, oracle, functional
 
 
+@pytest.mark.reviewer
 @pytest.mark.parametrize("coordinates", [_discovery_coordinates(), _confirmation_coordinates()])
 def test_exact_chain_preserves_slot_when_provider_seed_is_null(
     coordinates: dict[str, object],
@@ -152,6 +153,7 @@ def test_exact_chain_preserves_slot_when_provider_seed_is_null(
     assert chain.generated_code_id == code.generated_code_id
 
 
+@pytest.mark.reviewer
 def test_exact_chain_rejects_slot_or_producer_reference_drift() -> None:
     request, code, oracle, functional = _chain(_discovery_coordinates())
     drifted_oracle = OracleResultRecordV2.from_content(
@@ -205,6 +207,7 @@ def test_confirmation_requires_all_assignment_coordinates() -> None:
         _chain(incomplete)
 
 
+@pytest.mark.reviewer
 def test_x0_assignment_and_xar_have_non_interchangeable_schemas() -> None:
     request, code, oracle, functional = _chain(_discovery_coordinates())
     chain = validate_runtime_producer_chain_v2(request, code, oracle, functional)
@@ -245,6 +248,7 @@ def test_x0_assignment_and_xar_have_non_interchangeable_schemas() -> None:
         ConfirmationAssignmentRecordV2.from_content(**assignment_payload)
 
 
+@pytest.mark.reviewer
 def test_records_are_immutable_and_content_addressed() -> None:
     request, *_ = _chain(_discovery_coordinates())
     with pytest.raises(ValidationError):

@@ -159,6 +159,7 @@ TASK_WEIGHTS = {("c1", "t1"): 0.75, ("c1", "t2"): 0.25, ("c2", "t3"): 1.0}
 REALIZATION_WEIGHTS = {R1: 0.25, R2: 0.75}
 
 
+@pytest.mark.reviewer
 def test_v2_total_state_projects_outcomes_and_preserves_nullable_provider_seed() -> None:
     no_code = _row(
         cluster="c1",
@@ -208,6 +209,7 @@ def test_v2_total_state_projects_outcomes_and_preserves_nullable_provider_seed()
         AssignmentOutcomeRecordV2.model_validate(corrupted)
 
 
+@pytest.mark.reviewer
 def test_invalid_code_and_valid_oracle_unknown_cannot_be_conflated() -> None:
     invalid = _row(
         cluster="c1",
@@ -234,6 +236,7 @@ def test_invalid_code_and_valid_oracle_unknown_cannot_be_conflated() -> None:
     assert unknown.manski_upper == 1
 
 
+@pytest.mark.reviewer
 def test_coverage_reports_both_required_denominators() -> None:
     rows = (
         _row(
@@ -271,6 +274,7 @@ def test_coverage_reports_both_required_denominators() -> None:
     assert summary.all_assignment_evaluable_yield == pytest.approx(1 / 3)
 
 
+@pytest.mark.reviewer
 def test_hand_calculated_block_task_realization_cluster_itt() -> None:
     result = estimate_cluster_itt_v2(
         _crossed_rows(),
@@ -295,6 +299,7 @@ def test_hand_calculated_block_task_realization_cluster_itt() -> None:
     assert result.treatment_n == result.control_n == 6
 
 
+@pytest.mark.reviewer
 def test_functionality_does_not_enter_primary_safety_outcome() -> None:
     rows = _crossed_rows()
     safety = estimate_cluster_itt_v2(
@@ -322,6 +327,7 @@ def test_functionality_does_not_enter_primary_safety_outcome() -> None:
     assert joint.estimate != safety.estimate
 
 
+@pytest.mark.reviewer
 def test_hand_calculated_manski_unit_and_contrast_bounds() -> None:
     rows = (
         _row(

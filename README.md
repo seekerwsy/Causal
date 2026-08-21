@@ -4,6 +4,8 @@ SecAware is a reproducible Python CLI prototype for TSG-driven prompt-side
 security mechanism discovery and confirmation.
 
 For a compact review order, start with the [reviewer guide](docs/reviewer-guide.md).
+The routine reviewer test command is documented in [tests/README.md](tests/README.md);
+multi-minute evidence-chain tests are reserved for structural milestones.
 
 ## Architecture and causal boundary
 

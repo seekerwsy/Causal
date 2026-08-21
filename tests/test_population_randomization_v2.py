@@ -711,6 +711,7 @@ def _without_content_id(model: object, id_field: str) -> dict[str, object]:
     return payload
 
 
+@pytest.mark.reviewer
 def test_population_freezes_hand_checkable_common_support_and_weights() -> None:
     population = _synthetic_population().manifest
 
@@ -749,6 +750,7 @@ def test_population_freezes_hand_checkable_common_support_and_weights() -> None:
     )
 
 
+@pytest.mark.reviewer
 def test_population_rejects_task_or_cluster_deletion_with_synchronized_reweighting() -> None:
     fixture = _synthetic_population()
     population = fixture.manifest
@@ -832,6 +834,7 @@ def test_population_rejects_task_or_cluster_deletion_with_synchronized_reweighti
         )
 
 
+@pytest.mark.reviewer
 def test_randomization_covers_full_grid_and_balances_slots_with_nullable_provider_seed() -> None:
     population = _synthetic_population().manifest
     randomization = _randomization(population)
@@ -914,6 +917,7 @@ def test_randomization_rejects_realization_subset_variant_drift_and_missing_slot
         RandomizationManifestV2.from_content(**missing_slot_attack)
 
 
+@pytest.mark.reviewer
 def test_assignment_coverage_is_exact_and_rejects_missing_duplicate_or_drift() -> None:
     randomization = _randomization(_synthetic_population().manifest)
     committed = tuple(
@@ -1009,6 +1013,7 @@ def test_public_itt_entrypoint_rejects_rehashed_population_not_bound_to_coverage
         )
 
 
+@pytest.mark.milestone
 def test_randomization_runtime_outcome_coverage_and_itt_replay_end_to_end() -> None:
     population = _synthetic_population().manifest
     randomization = _randomization(population)
@@ -1118,6 +1123,7 @@ def test_randomization_runtime_outcome_coverage_and_itt_replay_end_to_end() -> N
     assert result.control_coverage.all_assignment_evaluable_yield == 1.0
 
 
+@pytest.mark.reviewer
 def test_execution_receipts_close_generation_policy_and_outcome_provenance() -> None:
     experiment = _authenticated_experiment()
     closed = experiment.closed_coverage
@@ -1239,6 +1245,7 @@ def test_non_null_provider_seed_survives_the_authenticated_chain() -> None:
     assert receipt.outcome.provider_seed == unit.provider_seed
 
 
+@pytest.mark.reviewer
 def test_total_accounting_preserves_terminal_infrastructure_failure_without_regeneration() -> None:
     experiment = _authenticated_experiment()
     failed = experiment.receipts[-1]

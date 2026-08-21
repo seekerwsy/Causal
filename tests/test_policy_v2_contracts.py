@@ -265,6 +265,7 @@ def _bundle(
     )
 
 
+@pytest.mark.reviewer
 def test_query_states_are_exact_total_and_natural_prompt_only() -> None:
     assert tuple(item.value for item in QueryState) == (
         "present",
@@ -398,6 +399,7 @@ def test_remove_gate_requires_present_evidence_and_attested_neutral_counterpart(
     assert absent.exclusion_reason is EligibilityExclusionReason.REMOVE_SOURCE_ABSENT
 
 
+@pytest.mark.reviewer
 def test_eligibility_rejects_cross_prompt_query_join_and_has_no_outcome_or_arm_fields() -> None:
     payload = _feature_result(QueryState.ABSENT).model_dump(mode="json")
     payload.pop("actionable_query_result_id")
@@ -524,6 +526,7 @@ def test_task_bundle_and_full_policy_support_reject_subsets_and_renormalization(
         TaskPolicySupportRecord.from_content(**renormalized)
 
 
+@pytest.mark.reviewer
 def test_shared_universe_slots_and_selection_freeze_do_not_mutate_policy_identity() -> None:
     policy = _policy()
     add = _skeleton(FeatureOperation.ADD, policy=policy)
@@ -675,6 +678,7 @@ def _membership(
     )
 
 
+@pytest.mark.reviewer
 def test_semantic_cluster_membership_is_unique_and_never_crosses_splits() -> None:
     memberships = (
         _membership(task="task.1", cluster="cluster.same", split=PolicySplit.DISCOVER),

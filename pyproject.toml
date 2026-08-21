@@ -59,6 +59,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+  "reviewer: fast reviewer-facing scientific invariant suite",
+  "milestone: structural end-to-end and tamper-resistance checks",
   "oracle_tools: requires the exact locked Semgrep and Bandit executables",
   "rfci_real: requires the pinned optional py-tetrad, JPype, and JDK RFCI runtime",
 ]

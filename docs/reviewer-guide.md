@@ -49,3 +49,7 @@ Tests should be read by the invariant they protect: assignment and treatment
 integrity, measurement independence, missingness, and estimator/reporting
 semantics. Historical deployment hardening and superseded campaign machinery
 are not part of the reviewer-facing execution path.
+
+For routine review, run only `python -m pytest -q -m reviewer`. The milestone
+and archival layers are documented in [`tests/README.md`](../tests/README.md);
+they are not a default tax on mechanical refactoring.

@@ -481,6 +481,7 @@ def test_experiment_rejects_nonuniform_four_arm_protocol() -> None:
         _freeze(components)
 
 
+@pytest.mark.milestone
 def test_post_hoc_protocol_root_replacement_cannot_impersonate_frozen_experiment() -> None:
     original_components = _standard_components()
     original = _freeze(original_components)

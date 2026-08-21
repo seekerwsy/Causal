@@ -132,6 +132,7 @@ def _contributions(
     return tuple(rows)
 
 
+@pytest.mark.reviewer
 def test_hand_calculated_stratified_cluster_se_and_simultaneous_intervals() -> None:
     family = _family("a", "b")
     plan = _plan(family)
@@ -193,6 +194,7 @@ def test_one_common_stratified_sample_is_committed_for_the_whole_family() -> Non
     )
 
 
+@pytest.mark.reviewer
 def test_fixed_family_and_common_support_reject_omission_duplicate_and_extra() -> None:
     family = _family("a", "b")
     plan = _plan(family)
@@ -297,6 +299,7 @@ def test_result_artifact_and_contribution_range_fail_closed() -> None:
         )
 
 
+@pytest.mark.reviewer
 def test_family_and_plan_content_addresses_reject_post_freeze_tampering() -> None:
     family = _family("a", "b")
     plan = _plan(family)
