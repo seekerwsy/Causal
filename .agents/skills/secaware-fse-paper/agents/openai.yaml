@@ -1,4 +1,0 @@
-interface:
-  display_name: "SecAware FSE Paper"
-  short_description: "Write and verify SecAware FSE manuscript artifacts"
-  default_prompt: "Use $secaware-fse-paper to write, revise, or verify the SecAware manuscript and its LaTeX submission artifacts against approved specifications."

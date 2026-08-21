@@ -2,41 +2,118 @@
 
 ## Scope and Precedence
 
-These instructions apply to the entire repository. More specific descendant
-`AGENTS.md` files may add directory-scoped requirements, but they must not
-silently weaken or contradict these repository-wide constraints. When a
-descendant instruction appears to conflict with this file, preserve the
-stricter requirement and make the conflict explicit before proceeding.
+These instructions apply to the entire repository. Descendant `AGENTS.md`
+files may add narrowly scoped requirements, but they must not weaken or
+contradict these repository-wide constraints. Make any conflict explicit
+before proceeding.
 
-## Code Implementation Requirements
+## Core Objective: A Reviewable Research Artifact
 
-1. 动手前必须先理解需求，存在歧义时先讨论，不能擅自实现。
-2. 实现方式必须说清楚，不能只用版本号或抽象名称代替解释。
-3. 每次执行前，都要确认最新要求已经完整对齐，避免跑到一半才发现缺少设置。
-4. 先在少量案例上验证实现和实际行为，确认正确后再扩大规模。
-5. 所有配置、命令、日志、中间产物和结果都必须保存，不能过段时间忘记跑过什么。
-6. 历史结果不能丢失或覆盖；新设置与旧设置必须清楚区分。
-7. 环境、机器、工作目录和输出路径必须明确，不能把文件散落到不同位置。
-8. 出错后不能直接停止或忽略，要定位原因、修复问题并补齐失败任务。
-9. 提高并发前要观察机器、网络和接口状态，不能为了加速把整个环境拖垮。
-10. 进度汇报要覆盖所有任务，说明完成、运行、错误、待运行数量，以及当前速度和预计耗时。
-11. 结果异常时必须检查具体执行过程，不能直接用“随机性”或模型差异解释。
-12. 已经实现过的功能应先找到原实现并复用，不能反复重写一套新的东西。
-13. 每次犯过的错误都应记录下来，避免在后续任务中重复发生。
-14. 实现必须形成可复现的完整流程。
+SecAware is an academic research prototype and a peer-review artifact, not a
+production service platform. Optimize for scientific clarity, inspectability,
+and reproducibility. The project owner and reviewers must be able to understand
+the complete active method without reconstructing it from development history,
+deployment machinery, or several competing execution paths.
 
-## General Paper-Writing Requirements
+1. Maintain exactly one active, documented path from frozen inputs to the
+   reported RQ outputs. New-protocol work uses the prospective successor in
+   `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
+   unless the user explicitly selects another frozen protocol.
+2. Keep the active method legible as seven stages: representation,
+   prioritization, hypothesis freeze, intervention/randomization, measurement,
+   outcome assembly, and inference/reporting.
+3. Keep Prompt TSG semantics distinct from causal structure. Prompt TSG edges
+   are not causal edges. Generated code supplies independently measured
+   security and functionality outcomes; it is not a primary-PAG variable or a
+   causal mediator.
+4. Use assigned-arm, semantic-task-clustered ITT as the primary confirmatory
+   analysis. Post-assignment fidelity, semantic compliance, generation
+   success, and non-target drift are diagnostics, never denominator filters.
+5. Keep the prospective primary safety outcome, oracle-evaluable secure-code
+   yield, separate from code validity, Oracle support, unknown coverage,
+   functionality, and secure-and-functional joint success.
+6. Map every scientific claim and RQ output to the exact frozen input,
+   configuration, implementation function, result field, and table builder.
+   Demo, smoke, calibration, and development-canary results cannot be promoted
+   to confirmatory evidence.
 
-1. 先把论文真正要回答的问题和整体故事讲清楚，再开始润色文字。
-2. 写作要从研究问题出发，不能把工程实现过程直接搬进论文。
-3. 用词必须清晰、稳定、专业，避免内部命名和随意创造的术语。
-4. 摘要和引言需要有连贯的推进关系，不能一句话没讲完整就切换到下一点。
-5. 写作应参考高质量论文的结构、叙事方式和表达习惯，而不是只做表面润色；应给出相应参考论文。
-6. 实验部分必须有足够的信息量，不能只罗列少量结果，也不能只堆数字。
-7. 每个实验都要说明它回答什么问题、结果是什么、说明了什么。
-8. 图表必须服务于论证，并放在对应文字附近，不能全部堆在文章后面。
-9. 图表需要反复检查尺寸、位置、字体、留白、对齐和可读性。
-10. 正文写核心发现和关键实验，完整提示词、交互轨迹、案例和实现细节放入附录。
-11. 已提出的写作要求不能因为审稿意见或后续改写而被悄悄删除。
-12. 每轮修改后都要重新编译并做视觉检查，不能只确认 LaTeX 没报错。
-13. 审稿反馈用于发现问题；最终仍要服从论文自身的研究目标。
+## Minimal Implementation Rules
+
+1. Implement the smallest mechanism that directly supports the approved method
+   or its reproducibility. Do not add production-grade orchestration,
+   deployment, authorization, recovery, or compatibility machinery unless it
+   is required for scientific validity or safe reviewer execution.
+2. Do not create another framework, freezer, receipt, campaign type, schema
+   generation, or wrapper script to repair a local defect. Fix the common cause
+   in the existing active path.
+3. Keep scripts thin. Put reusable scientific logic in importable modules and
+   consolidate mechanical JSON, JSONL, hashing, atomic-write, environment, and
+   manifest operations in a small shared artifact layer.
+4. Preserve protocol versions only where they protect the interpretation of a
+   frozen artifact. Mark non-active code as archival or migration-only and keep
+   it out of default imports, commands, documentation, and tests.
+5. Preserve history through Git and explicit archival bundles, not through
+   parallel live code paths. Never overwrite a frozen run or reinterpret an old
+   artifact under a new schema or policy.
+6. State implementation choices concretely. A version label or abstract name
+   is not an explanation of behavior.
+7. Before scaling an experiment, validate the implementation and actual
+   behavior on the smallest representative case. Record the exact environment,
+   command, configuration, input identity, and output location needed to
+   reproduce the run.
+8. Diagnose unexpected results at the exact request, transformation,
+   measurement, and aggregation steps. Do not explain anomalies as randomness
+   or model differences without evidence, and do not permanently expand the
+   architecture merely to preserve an operational incident.
+
+## Reviewability Requirements
+
+1. Provide a short review guide that identifies the single active entry point,
+   stage inputs and outputs, scientific invariants, and a reading order of no
+   more than ten core files.
+2. A reviewer must be able to run a small smoke reproduction, the frozen full
+   reproduction, and the result verifier without understanding internal
+   deployment history.
+3. Separate the reviewer artifact from the development archive. Exclude
+   historical attempts, server administration, calibration exploration,
+   temporary checkpoints, and unrelated frozen corpora from the default
+   artifact package.
+4. Prefer a transparent linear call graph over configuration-driven generic
+   frameworks. Do not trade a few repeated declarative values for an abstraction
+   that obscures the scientific procedure.
+
+## Testing Requirements
+
+1. Organize the default suite around scientific stages and invariants rather
+   than historical incidents or implementation versions.
+2. Retain tests that protect causal boundaries, randomization replay,
+   task/arm/seed binding, outcome independence, unknown handling, total
+   assignment accounting, estimator correctness, and one end-to-end smoke run.
+3. Consolidate repeated fixture construction and artifact-tree helpers. Keep an
+   independent result verifier where sharing production code would make the
+   same error self-validating.
+4. Put platform-hardening, legacy migration, historical policy-hash, deployment
+   recovery, and exhaustive adversarial tests outside the default reviewer
+   suite unless they support a stated claim or reviewer-safety boundary.
+5. Run focused tests while editing. Before declaring the reviewer artifact
+   complete, validate it from a clean supported environment and reproduce the
+   frozen reference outputs.
+
+## Research and Reporting Integrity
+
+1. Distinguish `specified`, `implemented`, `tested`, `executed`, and `reported`.
+   Passing a unit test does not prove that an experiment ran, and an engineering
+   canary does not establish a scientific effect.
+2. Never invent or infer a missing result. Preserve zero, harmful, conflicting,
+   failed-backend, unknown, and non-evaluable outcomes required by the frozen
+   protocol.
+3. Do not change an RQ, estimand, arm family, denominator, multiplicity family,
+   evidence level, task population, or model policy after examining its outcome.
+   Post-hoc work must remain explicitly exploratory or start a new prospectively
+   frozen study.
+4. Paper prose must follow the research questions and verified evidence, not
+   the implementation chronology. It may emphasize supported contributions but
+   must not hide material limitations or adverse results.
+5. When editing LaTeX or paper-facing figures and tables, compile after changes
+   and visually inspect the rendered output. Quantitative claims require a
+   traceable frozen artifact and table-building path.

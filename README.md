@@ -3,6 +3,8 @@
 SecAware is a reproducible Python CLI prototype for TSG-driven prompt-side
 security mechanism discovery and confirmation.
 
+For a compact review order, start with the [reviewer guide](docs/reviewer-guide.md).
+
 ## Architecture and causal boundary
 
 Prompt TSG supplies semantic task-feature and target-feature relationships for extraction and

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import platform
 import sys
 from datetime import UTC, datetime
@@ -18,15 +19,14 @@ for _source_root in (_REPOSITORY_ROOT / "src", _REPOSITORY_ROOT):
         sys.path.insert(0, str(_source_root))
 
 from scripts import analyze_functional_judge_calibration as analyzer_core
-from scripts import freeze_functional_judge_calibration_campaign as campaign
-from scripts import freeze_functional_judge_v3_single_candidate_campaign as freezer
 from scripts import plan_functional_judge_v3_single_candidate as plan_module
 
-from secaware.pipeline.artifact import canonical_sha256
-
-verify_closed_manifest = campaign.verify_closed_manifest
-write_closed_manifest_atomic = campaign.write_closed_manifest_atomic
-write_json_atomic_exclusive = campaign.write_json_atomic_exclusive
+from secaware.exploratory.artifact_integrity import (
+    verify_closed_manifest,
+    write_closed_manifest_atomic,
+    write_json_atomic_exclusive,
+)
+from secaware.pipeline.artifact import canonical_sha256, sha256_file
 
 _OUTPUT_FILES = {"case-results.jsonl", "command.json", "environment.json", "report.json"}
 _PILOT_PASS = "FUNCTIONAL_JUDGE_V3_PILOT_GATE_PASSED"
@@ -39,6 +39,13 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _read_json(path: Path) -> dict[str, object]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if type(value) is not dict:
+        raise ValueError(f"expected JSON object: {path.name}")
+    return value
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Gate or analyze the frozen v3 campaign.")
     parser.add_argument("--mode", choices=("pilot-gate", "final"), required=True)
@@ -46,9 +53,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--calibration-spec", type=Path, required=True)
     parser.add_argument("--expected-plan-id", required=True)
     parser.add_argument("--expected-plan-root-manifest-sha256", required=True)
-    parser.add_argument("--campaign-receipt-dir", type=Path, required=True)
-    parser.add_argument("--expected-campaign-receipt-id", required=True)
-    parser.add_argument("--expected-campaign-receipt-root-manifest-sha256", required=True)
     parser.add_argument("--pilot-run-dir", type=Path, required=True)
     parser.add_argument("--remaining-run-dir", type=Path)
     parser.add_argument("--pilot-transition-dir", type=Path)
@@ -56,53 +60,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _load_receipt(args: argparse.Namespace, plan: dict[str, object]) -> dict[str, object]:
-    root = args.campaign_receipt_dir.resolve()
-    manifest_path = root / "artifact-manifest.json"
-    if campaign._sha256_file(manifest_path) != args.expected_campaign_receipt_root_manifest_sha256:
-        raise ValueError("campaign receipt manifest identity failed validation")
-    manifest = verify_closed_manifest(manifest_path, label="minimal v3 campaign receipt")
-    if {str(row["path"]) for row in manifest["files"]} != freezer._RECEIPT_FILES:
-        raise ValueError("campaign receipt file closure failed validation")
-    receipt = campaign._read_json(root / "campaign-receipt.json")
-    core = {key: value for key, value in receipt.items() if key != "receipt_id"}
-    if (
-        set(receipt) != freezer._RECEIPT_KEYS
-        or receipt.get("receipt_id") != args.expected_campaign_receipt_id
-        or receipt.get("receipt_id")
-        != "functional_judge_v3_single_candidate_campaign_receipt_" + canonical_sha256(core)
-        or receipt.get("status") != freezer._STATUS
-        or receipt.get("claim") is not False
-        or receipt.get("scientific_claim_allowed") is not False
-        or receipt.get("plan", {}).get("plan_id") != plan["plan_id"]
-        or receipt.get("plan", {}).get("root_manifest_sha256")
-        != args.expected_plan_root_manifest_sha256
-        or receipt.get("candidate", {}).get("candidate_id")
-        != "qwen35flash-requirement-aggregate-v3"
-        or receipt.get("candidate", {}).get("protocol_version") != "v3"
-        or receipt.get("budget")
-        != {
-            "provider_attempt_scope": "included_closed_run_trace_records",
-            "functional_judge_provider_attempts": 24,
-            "by_phase": {"pilot": 2, "remaining": 22},
-            "generation_provider_attempts": 0,
-            "security_oracle_executions": 0,
-        }
-        or receipt.get("history", {}).get("runtime_dependency") is not False
-        or receipt.get("history", {}).get("included_in_analysis") is not False
-    ):
-        raise ValueError("campaign receipt failed validation")
-    return receipt
-
-
-def _candidate_matches_receipt(
-    run: dict[str, object], receipt: dict[str, object], expected_cases: int
+def _candidate_matches_plan(
+    run: dict[str, object], plan: dict[str, object], expected_cases: int
 ) -> bool:
-    candidate = receipt["candidate"]
+    candidate = plan["candidate"]
     return (
         run["candidate_id"] == candidate["candidate_id"]
-        and run["candidate_role"] == "new_candidate"
-        and run["protocol_version"] == "v3"
+        and run["candidate_role"] == candidate["candidate_role"]
+        and run["protocol_version"] == candidate["protocol_version"]
         and run["model_id"] == candidate["model_id"]
         and run["evaluator_config_sha256"] == candidate["evaluator_config_sha256"]
         and run["evaluator_policy_sha256"] == candidate["evaluator_policy_sha256"]
@@ -180,33 +145,23 @@ def _write_output(
     )
     if {str(row["path"]) for row in manifest["files"]} != _OUTPUT_FILES:
         raise ValueError("published v3 analysis file closure failed validation")
-    return campaign._sha256_file(output_dir / "artifact-manifest.json")
+    return sha256_file(output_dir / "artifact-manifest.json")
 
 
 def _pilot_gate(
     args: argparse.Namespace,
     *,
     plan: dict[str, object],
-    receipt: dict[str, object],
     raw_argv: list[str],
 ) -> bool:
     output_dir = args.output_dir.resolve()
-    if str(output_dir) != receipt["outputs"]["pilot_transition"]:
-        raise ValueError("pilot transition output differs from the frozen receipt")
     if args.remaining_run_dir is not None or args.pilot_transition_dir is not None:
         raise ValueError("pilot gate received final-analysis inputs")
-    if (
-        Path(receipt["phases"][1]["output_root"]).exists()
-        or Path(receipt["outputs"]["analysis"]).exists()
-    ):
-        raise ValueError("remaining or final analysis started before the pilot gate")
 
     pilot_root = args.pilot_run_dir.resolve()
-    if str(pilot_root) != receipt["phases"][0]["output_root"]:
-        raise ValueError("pilot root differs from the frozen receipt")
     run = analyzer_core._run_slice(pilot_root)
-    if not _candidate_matches_receipt(run, receipt, 2):
-        raise ValueError("pilot candidate differs from the frozen receipt")
+    if not _candidate_matches_plan(run, plan, 2):
+        raise ValueError("pilot candidate differs from the frozen plan")
     rows = _pilot_rows(run, set(plan["pilot_case_ids"]))
     passed = (
         len(run["traces"]) == 2
@@ -224,8 +179,7 @@ def _pilot_gate(
         "analysis_kind": "single_candidate_v3_pilot_transition",
         "completed_at_utc": completed_at,
         "plan_id": plan["plan_id"],
-        "campaign_receipt_id": receipt["receipt_id"],
-        "candidate_id": receipt["candidate"]["candidate_id"],
+        "candidate_id": plan["candidate"]["candidate_id"],
         "pilot_root": str(pilot_root),
         "pilot_root_manifest_sha256": run["root_manifest_sha256"],
         "provider_evidence": {
@@ -255,26 +209,24 @@ def _pilot_gate(
 def _load_pilot_transition(
     root: Path,
     *,
-    receipt: dict[str, object],
+    plan_id: str,
     pilot_manifest_sha256: str,
 ) -> dict[str, object]:
     resolved = root.resolve()
-    if str(resolved) != receipt["outputs"]["pilot_transition"]:
-        raise ValueError("pilot transition root differs from the frozen receipt")
     manifest = verify_closed_manifest(
         resolved / "artifact-manifest.json",
         label="v3 pilot transition",
     )
     if {str(row["path"]) for row in manifest["files"]} != _OUTPUT_FILES:
         raise ValueError("pilot transition file closure failed validation")
-    report = campaign._read_json(resolved / "report.json")
+    report = _read_json(resolved / "report.json")
     core = {key: value for key, value in report.items() if key != "transition_id"}
     if (
         report.get("transition_id")
         != "functional_judge_v3_pilot_transition_" + canonical_sha256(core)
         or report.get("status") != _PILOT_PASS
         or report.get("remaining_authorized") is not True
-        or report.get("campaign_receipt_id") != receipt["receipt_id"]
+        or report.get("plan_id") != plan_id
         or report.get("pilot_root_manifest_sha256") != pilot_manifest_sha256
         or report.get("correct") != 2
         or report.get("invalid") != 0
@@ -289,27 +241,19 @@ def _final_analysis(
     plan: dict[str, object],
     metadata: dict[str, dict[str, object]],
     contracts: dict[str, object],
-    receipt: dict[str, object],
     raw_argv: list[str],
 ) -> bool:
     if args.remaining_run_dir is None or args.pilot_transition_dir is None:
         raise ValueError("final analysis requires remaining and pilot-transition roots")
     output_dir = args.output_dir.resolve()
-    if str(output_dir) != receipt["outputs"]["analysis"]:
-        raise ValueError("analysis output differs from the frozen receipt")
 
     pilot_root = args.pilot_run_dir.resolve()
     remaining_root = args.remaining_run_dir.resolve()
-    if (
-        str(pilot_root) != receipt["phases"][0]["output_root"]
-        or str(remaining_root) != receipt["phases"][1]["output_root"]
-    ):
-        raise ValueError("candidate roots differ from the frozen receipt")
     pilot = analyzer_core._run_slice(pilot_root)
     remaining = analyzer_core._run_slice(remaining_root)
     transition = _load_pilot_transition(
         args.pilot_transition_dir,
-        receipt=receipt,
+        plan_id=plan["plan_id"],
         pilot_manifest_sha256=pilot["root_manifest_sha256"],
     )
     try:
@@ -321,7 +265,7 @@ def _final_analysis(
         raise ValueError("remaining started before the pilot transition")
 
     summary, rows = analyzer_core._candidate_summary(
-        receipt["candidate"]["candidate_id"],
+        plan["candidate"]["candidate_id"],
         [pilot, remaining],
         metadata,
         contracts,
@@ -329,13 +273,13 @@ def _final_analysis(
         plan["thresholds"],
     )
     if (
-        not _candidate_matches_receipt(pilot, receipt, 2)
-        or not _candidate_matches_receipt(remaining, receipt, 22)
+        not _candidate_matches_plan(pilot, plan, 2)
+        or not _candidate_matches_plan(remaining, plan, 22)
         or summary["protocol_version"] != "v3"
         or summary["candidate_role"] != "new_candidate"
         or summary["provider_evidence"]["trace_records"] != 24
     ):
-        raise ValueError("final candidate evidence differs from the frozen receipt")
+        raise ValueError("final candidate evidence differs from the frozen plan")
     eligible = summary["gate_passed"] is True
     report_core = {
         "schema_version": "1.0",
@@ -345,7 +289,6 @@ def _final_analysis(
         "analysis_kind": "single_candidate_absolute_holdout",
         "completed_at_utc": _utc_now(),
         "plan_id": plan["plan_id"],
-        "campaign_receipt_id": receipt["receipt_id"],
         "candidate_summary": summary,
         "eligible_as_engineering_guardrail": eligible,
         "historical_runs_included": False,
@@ -375,16 +318,14 @@ def main(argv: list[str] | None = None) -> int:
             expected_plan_id=args.expected_plan_id,
             expected_root_manifest_sha256=args.expected_plan_root_manifest_sha256,
         )
-        receipt = _load_receipt(args, plan)
         if args.mode == "pilot-gate":
-            passed = _pilot_gate(args, plan=plan, receipt=receipt, raw_argv=raw_argv)
+            passed = _pilot_gate(args, plan=plan, raw_argv=raw_argv)
         else:
             passed = _final_analysis(
                 args,
                 plan=plan,
                 metadata=metadata,
                 contracts=contracts,
-                receipt=receipt,
                 raw_argv=raw_argv,
             )
     except (MemoryError, KeyboardInterrupt, SystemExit):

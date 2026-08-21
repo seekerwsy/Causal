@@ -6,9 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PAPER = ROOT / "paper" / "fse2027" / "secaware-fse2027-draft.tex"
+ROOT_AGENTS = ROOT / "AGENTS.md"
 PAPER_AGENTS = ROOT / "paper" / "AGENTS.md"
-SKILL = ROOT / ".agents" / "skills" / "secaware-fse-paper" / "SKILL.md"
-SKILL_ROOT = SKILL.parent
 
 
 def _normalized(path: Path) -> str:
@@ -16,22 +15,20 @@ def _normalized(path: Path) -> str:
 
 
 class SecAwareFsePaperContractTest(unittest.TestCase):
-    def test_project_paper_guidance_and_skill_are_discoverable(self) -> None:
+    def test_project_and_paper_guidance_are_discoverable(self) -> None:
+        self.assertTrue(ROOT_AGENTS.is_file())
         self.assertTrue(PAPER_AGENTS.is_file())
-        self.assertTrue(SKILL.is_file())
-        self.assertTrue((SKILL_ROOT / "agents" / "openai.yaml").is_file())
-        self.assertTrue((SKILL_ROOT / "references" / "causal-boundaries.md").is_file())
-        self.assertTrue((SKILL_ROOT / "references" / "fse-2027-checklist.md").is_file())
 
-        skill = SKILL.read_text(encoding="utf-8")
-        self.assertTrue(skill.startswith("---\nname: secaware-fse-paper\n"))
-        self.assertIn("description: Use only when", skill)
-        self.assertIn("## Trigger Boundary", skill)
-        self.assertIn("2026-07-22-paper-research-questions-design.md", skill)
-        self.assertIn("audit", skill)
-        self.assertIn("revise", skill)
-        self.assertIn("results-backfill", skill)
-        self.assertIn("presubmit", skill)
+        project_guidance = ROOT_AGENTS.read_text(encoding="utf-8")
+        paper_guidance = PAPER_AGENTS.read_text(encoding="utf-8")
+        self.assertIn("A Reviewable Research Artifact", project_guidance)
+        self.assertIn("exactly one active, documented path", project_guidance)
+        self.assertIn("Research and Reporting Integrity", project_guidance)
+        self.assertIn(
+            "2026-08-20-context-conditioned-intervention-policy-framework.md",
+            paper_guidance,
+        )
+        self.assertIn("assigned-arm ITT", paper_guidance)
 
     def test_manuscript_uses_approved_research_questions(self) -> None:
         manuscript = _normalized(PAPER)

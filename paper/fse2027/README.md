@@ -35,13 +35,10 @@ From the repository root, run the project paper contract with:
 ## Current Scope
 
 The draft intentionally focuses on method and research-question design.
-Computational result tables must be populated only from one frozen
-computational run directory and manifest through a traceable table builder.
-RQ4 human-study results instead require separately frozen protocol,
-participant-data, randomization, and analysis artifacts plus a traceable
-analysis/table-building step. Use the project-local `secaware-fse-paper` skill
-for manuscript audits, revisions, verified result backfilling, and
-pre-submission checks.
+Computational result tables must be populated only from frozen artifacts
+through a traceable table builder. Follow the repository-root `AGENTS.md` and
+the concise paper-local `paper/AGENTS.md` for research-integrity and manuscript
+requirements.
 
 The 2026-07-29 narrative revision organizes the method as Security-Aware
 Prompt Representation, Stability-Guided Causal Discovery, and Causal Effect
@@ -49,6 +46,6 @@ Confirmation. Its evidence ledger is the
 [revision evidence ledger](revision-evidence-ledger.md).
 
 The manuscript may describe verified core capabilities in the present tense,
-but external RQ1 adapters, paper RQ2 runs, the RQ4 study, and the frozen final
-paper run remain future work. Every numerical result stays `--` until a frozen
-manifest and table builder supply exact provenance.
+but unfinished RQ1--RQ3 experiments and the frozen final paper run remain
+future work. Every numerical result stays `--` until a frozen manifest and
+table builder supply exact provenance.

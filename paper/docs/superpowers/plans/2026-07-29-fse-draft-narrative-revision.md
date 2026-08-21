@@ -27,7 +27,7 @@ Conclusion:
 - `paper/docs/superpowers/specs/2026-07-29-fse-draft-narrative-revision-design.md`
 - `docs/superpowers/specs/2026-07-13-prompt-only-fci-jci-randomized-confirmation-design.md`
 - `docs/superpowers/specs/2026-07-22-paper-research-questions-design.md`
-- `.agents/skills/secaware-fse-paper/references/causal-boundaries.md`
+- `AGENTS.md` and `paper/AGENTS.md`
 
 Do not stage or modify the unrelated repository-root `uv.lock`.
 

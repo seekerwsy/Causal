@@ -7,9 +7,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md"
+ROOT_AGENTS = ROOT / "AGENTS.md"
 PAPER_AGENTS = ROOT / "paper/AGENTS.md"
-SKILL = ROOT / ".agents/skills/secaware-fse-paper/SKILL.md"
-BOUNDARIES = ROOT / ".agents/skills/secaware-fse-paper/references/causal-boundaries.md"
 
 
 class SecAwareV3FrameworkContractTest(unittest.TestCase):
@@ -107,12 +106,13 @@ class SecAwareV3FrameworkContractTest(unittest.TestCase):
 
     def test_project_paper_guidance_points_to_the_successor(self) -> None:
         successor = SPEC.name
-        self.assertIn(successor, SKILL.read_text(encoding="utf-8"))
-        self.assertIn(successor, BOUNDARIES.read_text(encoding="utf-8"))
+        project_guidance = ROOT_AGENTS.read_text(encoding="utf-8")
         guidance = PAPER_AGENTS.read_text(encoding="utf-8")
-        self.assertIn("2026-08-20 context-conditioned intervention-policy successor", guidance)
+        self.assertIn(successor, project_guidance)
+        self.assertIn(successor, guidance)
+        self.assertIn("single active artifact path", guidance)
         self.assertIn("semantic_task_cluster_id", guidance)
-        self.assertIn("oracle-evaluable secure-code yield", guidance)
+        self.assertIn("assigned-arm ITT", guidance)
 
 
 if __name__ == "__main__":

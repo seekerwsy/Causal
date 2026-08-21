@@ -27,15 +27,18 @@ for _source_root in (_REPOSITORY_ROOT / "src", _REPOSITORY_ROOT):
         sys.path.insert(0, str(_source_root))
 
 from scripts import analyze_functional_judge_calibration as paired_analyzer
-from scripts import freeze_functional_judge_calibration_campaign as full_campaign
 from scripts import plan_functional_judge_calibration as paired_planner
+from scripts import validate_bailian_functional_judge as judge_runner
 
 from secaware.exploratory.artifact_integrity import (
     verify_closed_manifest,
     write_closed_manifest_atomic,
 )
+from secaware.config import FunctionalJudgeLLMConfig
+from secaware.functional_judge.factory import _policy
+from secaware.functional_judge.judge import functional_judge_policy_sha256
 from secaware.functional_judge.schema import TaskFunctionalContractRecord
-from secaware.pipeline.artifact import canonical_sha256
+from secaware.pipeline.artifact import canonical_sha256, sha256_file
 
 _ANALYSIS_KIND = "single_candidate_absolute_holdout"
 _CANDIDATE_ID = "qwen35flash-requirement-aggregate-v3"
@@ -82,14 +85,6 @@ _EVALUATION_DESIGN = {
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _is_sha256(value: object) -> bool:
@@ -158,6 +153,53 @@ def _expected_authority_hashes() -> dict[str, str]:
     return expected
 
 
+def _candidate_identity(evaluator: object) -> dict[str, object]:
+    llm = FunctionalJudgeLLMConfig(
+        model_id=evaluator.model_id,
+        base_url=evaluator.base_url,
+        api_key_env=evaluator.api_key_env,
+        timeout_seconds=evaluator.timeout_seconds,
+        max_attempts=evaluator.max_attempts,
+        max_response_bytes=evaluator.max_response_bytes,
+        temperature=evaluator.temperature,
+        top_p=evaluator.top_p,
+        seed=None,
+        enable_thinking=evaluator.enable_thinking,
+    )
+    judge_policy = _policy(llm, evaluator.seed, protocol_version="v3")
+    coordinates = {
+        "provider": evaluator.provider,
+        "region": "cn-beijing",
+        "model_id": evaluator.model_id,
+        "base_url": evaluator.base_url,
+        "endpoint_sha256": hashlib.sha256(evaluator.base_url.encode("utf-8")).hexdigest(),
+        "api_key_env": evaluator.api_key_env,
+        "timeout_seconds": evaluator.timeout_seconds,
+        "max_attempts": evaluator.max_attempts,
+        "max_response_bytes": evaluator.max_response_bytes,
+        "temperature": evaluator.temperature,
+        "top_p": evaluator.top_p,
+        "pass_seeds": [evaluator.seed],
+        "enable_thinking": evaluator.enable_thinking,
+        "judge_mode": evaluator.mode,
+        "response_format": {"type": "json_object"},
+    }
+    return {
+        "candidate_id": evaluator.candidate_id,
+        "candidate_role": evaluator.candidate_role,
+        "protocol_version": evaluator.protocol_version,
+        "model_id": evaluator.model_id,
+        "evaluator_config_sha256": evaluator.source_sha256,
+        "evaluator_policy_sha256": functional_judge_policy_sha256(
+            judge_policy,
+            None,
+            mode="single_pass",
+            protocol_version="v3",
+        ),
+        "shared_evaluator_coordinates_sha256": canonical_sha256(coordinates),
+    }
+
+
 def _validate_holdout_authorities(
     *,
     spec_path: Path,
@@ -178,17 +220,19 @@ def _validate_holdout_authorities(
     if any(not path.is_file() for path in paths.values()):
         raise ValueError("fresh-holdout authority file is unavailable")
     expected = _expected_authority_hashes()
-    actual = {name: _sha256_file(path) for name, path in paths.items()}
+    actual = {name: sha256_file(path) for name, path in paths.items()}
     if actual != expected:
         raise ValueError("fresh-holdout authority digest failed validation")
 
-    evaluator = full_campaign._load_evaluator(
-        paths["evaluator_config"],
-        role="new_candidate",
-        protocol="v3",
-    )
+    try:
+        evaluator = judge_runner._load_evaluator_config(paths["evaluator_config"])
+    except SystemExit as error:
+        raise ValueError("v3 evaluator config failed validation") from error
     if (
         evaluator.candidate_id != _CANDIDATE_ID
+        or evaluator.candidate_role != "new_candidate"
+        or evaluator.protocol_version != "v3"
+        or evaluator.mode != "single_pass"
         or evaluator.model_id != "qwen3.5-flash-2026-02-23"
         or evaluator.max_attempts != 1
         or evaluator.source_sha256 != expected["evaluator_config"]
@@ -343,6 +387,7 @@ def _validate_holdout_authorities(
         "sha256": actual,
         "policy": policy,
         "bindings": bindings,
+        "candidate": _candidate_identity(evaluator),
     }
 
 
@@ -372,7 +417,7 @@ def _plan_artifacts(
     authoritative_contracts = tune_overlay_dir / "frozen-functional-contracts.jsonl"
     if contracts_path is not None and contracts_path.resolve() != authoritative_contracts.resolve():
         raise ValueError("contracts must be the tune overlay frozen functional contracts")
-    if _sha256_file(validation_path) != spec["validation_cases_sha256"]:
+    if sha256_file(validation_path) != spec["validation_cases_sha256"]:
         raise ValueError("validation fixture artifact digest mismatch")
     validation_rows = paired_planner._load_validation_rows(validation_path, spec, family_specs)
 
@@ -423,7 +468,7 @@ def _plan_artifacts(
             }
         )
 
-    validation_sha256 = _sha256_file(validation_path)
+    validation_sha256 = sha256_file(validation_path)
     for row in validation_rows:
         code_sha256 = hashlib.sha256(row["code_text"].encode("utf-8")).hexdigest()
         provider_cases.append(
@@ -510,7 +555,7 @@ def _load_closed_plan(
     manifest_path = root / "artifact-manifest.json"
     if (
         not _is_sha256(expected_root_manifest_sha256)
-        or _sha256_file(manifest_path) != expected_root_manifest_sha256
+        or sha256_file(manifest_path) != expected_root_manifest_sha256
         or type(expected_plan_id) is not str
         or not expected_plan_id.startswith("functional_judge_v3_single_candidate_plan_")
     ):
@@ -536,7 +581,7 @@ def _load_closed_plan(
         or plan.get("plan_id")
         != "functional_judge_v3_single_candidate_plan_" + canonical_sha256(plan_content)
         or plan.get("calibration_id") != spec["calibration_id"]
-        or plan.get("calibration_spec_sha256") != _sha256_file(spec_path)
+        or plan.get("calibration_spec_sha256") != sha256_file(spec_path)
         or plan.get("candidate_roles") != spec["candidate_roles"]
         or plan.get("evaluation_design") != _EVALUATION_DESIGN
         or plan.get("validation_cases_sha256") != spec["validation_cases_sha256"]
@@ -544,6 +589,25 @@ def _load_closed_plan(
         or plan.get("case_metadata_sha256") != canonical_sha256(metadata_rows)
         or plan.get("contracts_sha256") != canonical_sha256(contract_rows)
         or plan.get("fresh_holdout_authorities", {}).get("sha256") != _expected_authority_hashes()
+        or type(plan.get("candidate")) is not dict
+        or set(plan["candidate"])
+        != {
+            "candidate_id",
+            "candidate_role",
+            "protocol_version",
+            "model_id",
+            "evaluator_config_sha256",
+            "evaluator_policy_sha256",
+            "shared_evaluator_coordinates_sha256",
+        }
+        or plan["candidate"].get("candidate_id") != _CANDIDATE_ID
+        or plan["candidate"].get("candidate_role") != "new_candidate"
+        or plan["candidate"].get("protocol_version") != "v3"
+        or plan["candidate"].get("model_id") != "qwen3.5-flash-2026-02-23"
+        or plan["candidate"].get("evaluator_config_sha256")
+        != _EXPECTED_EVALUATOR_CONFIG_SHA256
+        or not _is_sha256(plan["candidate"].get("evaluator_policy_sha256"))
+        or not _is_sha256(plan["candidate"].get("shared_evaluator_coordinates_sha256"))
         or plan.get("case_counts")
         != {
             "total": 24,
@@ -733,7 +797,7 @@ def _build_plan(
         "claim": False,
         "scientific_claim_allowed": False,
         "calibration_id": spec["calibration_id"],
-        "calibration_spec_sha256": _sha256_file(spec_path),
+        "calibration_spec_sha256": sha256_file(spec_path),
         "candidate_roles": spec["candidate_roles"],
         "evaluation_design": _EVALUATION_DESIGN,
         "purpose": spec["purpose"],
@@ -760,12 +824,13 @@ def _build_plan(
         "functional_contract_set_sha256": spec["functional_contract_set_sha256"],
         "tune_overlay_root_manifest_sha256": overlay_manifest,
         "tune_overlay_evidence_manifest_sha256": evidence_manifest,
-        "validation_cases_sha256": _sha256_file(validation_path),
+        "validation_cases_sha256": sha256_file(validation_path),
         "provider_cases_sha256": canonical_sha256(cases),
         "case_metadata_sha256": canonical_sha256(metadata),
         "contracts_sha256": canonical_sha256(contracts),
         "pilot_case_ids": sorted(pilot_ids),
         "thresholds": spec["thresholds"],
+        "candidate": holdout["candidate"],
         "fresh_holdout_authorities": {
             "paths": holdout["paths"],
             "sha256": holdout["sha256"],
