@@ -92,8 +92,8 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "thresholds": thresholds,
         "fresh_holdout_authorities": {
             "sha256": {
-                "v3_evaluator_config": config_sha,
-                "v3_system_prompt": prompt_sha,
+                "evaluator_config": config_sha,
+                "system_prompt": prompt_sha,
             }
         },
     }

@@ -131,8 +131,8 @@ def _freeze(args: argparse.Namespace, *, raw_argv: list[str]) -> dict[str, objec
     if (
         evaluator.candidate_id != "qwen35flash-requirement-aggregate-v3"
         or evaluator.model_id != "qwen3.5-flash-2026-02-23"
-        or evaluator.source_sha256 != authority_hashes["v3_evaluator_config"]
-        or campaign._sha256_file(prompt_path) != authority_hashes["v3_system_prompt"]
+        or evaluator.source_sha256 != authority_hashes["evaluator_config"]
+        or campaign._sha256_file(prompt_path) != authority_hashes["system_prompt"]
     ):
         raise ValueError("v3 candidate identity failed validation")
 
