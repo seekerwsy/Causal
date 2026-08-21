@@ -241,19 +241,27 @@ def test_external_research_case_uses_contract_task_id_in_single_pass(
 
 
 @pytest.mark.parametrize(
-    ("config_name", "protocol_version", "measurement_method", "candidate_role"),
+    (
+        "config_name",
+        "protocol_version",
+        "measurement_method",
+        "candidate_role",
+        "candidate_id",
+    ),
     (
         (
             "evaluator-qwen35flash-v1.json",
             "v1",
             "ast_validated_single_shot_llm",
             "baseline",
+            "qwen35flash-prompt-v1",
         ),
         (
-            "evaluator-qwen35flash-v2.json",
+            "evaluator-qwen35flash-v2b.json",
             "v2",
             "blind_static_llm_v2",
             "new_candidate",
+            "qwen35flash-prompt-v2b",
         ),
     ),
 )
@@ -264,6 +272,7 @@ def test_external_preflight_is_credential_independent_closed_and_zero_call(
     protocol_version: str,
     measurement_method: str,
     candidate_role: str,
+    candidate_id: str,
 ) -> None:
     module = _load_canary_module()
     root = Path(__file__).parents[1]
@@ -323,4 +332,5 @@ def test_external_preflight_is_credential_independent_closed_and_zero_call(
     assert report["protocol_version"] == protocol_version
     assert report["measurement_method"] == measurement_method
     assert config["candidate_role"] == candidate_role
+    assert config["candidate_id"] == candidate_id
     assert not (output_dir / "llm_exchange_trace.jsonl").exists()

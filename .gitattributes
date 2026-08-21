@@ -8,6 +8,7 @@ data/e2e-pilot/**/*.json text eol=lf
 data/e2e-pilot/**/*.jsonl text eol=lf
 data/functional-judge/**/*.json text eol=lf
 data/functional-judge/**/*.jsonl text eol=lf
+data/functional-judge/**/*.txt text eol=lf
 configs/minimal-validation/*.json text eol=lf
 src/secaware/extractors/prompts/*.txt text eol=lf
 src/secaware/intervention/prompts/*.txt text eol=lf

@@ -62,6 +62,33 @@ def test_v2_system_template_requires_semantic_and_side_effect_tracing() -> None:
     )
     assert "blind_static_llm_v2" in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
     assert "structured counterexample" in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
+    assert "pdftotext INPUT.pdf" in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
+    assert "queue-presence or lifecycle status" in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
+    assert "exact per-verdict field matrix" in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
+    assert '"behavior_trace":null' in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
+    assert "never put it in `behavior_trace`" in FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE
+
+
+def test_v2b_lineage_snapshots_are_byte_frozen() -> None:
+    root = Path(__file__).parents[1]
+    calibration = root / "data" / "functional-judge" / "blind-calibration-v3"
+    history = calibration / "history" / "qwen35flash-prompt-v2"
+    expected = {
+        history / "functional_judge_v2.txt": (
+            "dffe6d72f957182946a9195a7d46b0e10a510ed484fa9f191c3908719db1d54e"
+        ),
+        history / "evaluator.json": (
+            "a44c1891eabd27f5c03593f673ab8bc0ef0996726584381d6783b974833fc2fe"
+        ),
+        calibration / "evaluator-qwen35flash-v2b.json": (
+            "263a59443d602bc12ede47fc585dd969b4c1d60aab594aced7a1e250878fe43b"
+        ),
+    }
+    for path, expected_sha256 in expected.items():
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected_sha256
+    assert FUNCTIONAL_JUDGE_V2_SYSTEM_TEMPLATE_SHA256 == (
+        "980427722b1fda988b25423987d722264aa5c74fa76ed015872ccda21fbb4bc5"
+    )
 
 
 def _contract(task_id: str = "task-confirmation") -> TaskFunctionalContractRecord:

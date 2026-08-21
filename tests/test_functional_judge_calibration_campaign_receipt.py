@@ -70,7 +70,7 @@ def _build_deployment(
     deployed_spec.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(spec_path, deployed_spec)
     deployed_baseline = deployed_spec.parent / "evaluator-qwen35flash-v1.json"
-    deployed_new = deployed_spec.parent / "evaluator-qwen35flash-v2.json"
+    deployed_new = deployed_spec.parent / "evaluator-qwen35flash-v2b.json"
     shutil.copy2(CALIBRATION_DATA / deployed_baseline.name, deployed_baseline)
     shutil.copy2(CALIBRATION_DATA / deployed_new.name, deployed_new)
 

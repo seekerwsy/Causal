@@ -982,7 +982,7 @@ def test_analyzer_closes_artifacts_excludes_baseline_and_rejects_trace_attack(
         monkeypatch,
         plan_dir,
         tmp_path / "new",
-        "evaluator-qwen35flash-v2.json",
+        "evaluator-qwen35flash-v2b.json",
     )
     analysis_dir = tmp_path / "analysis"
     plan_record = json.loads((plan_dir / "plan.json").read_text(encoding="utf-8"))
@@ -1011,7 +1011,7 @@ def test_analyzer_closes_artifacts_excludes_baseline_and_rejects_trace_attack(
     assert analyzer.main() == 0
     report = json.loads((analysis_dir / "report.json").read_text(encoding="utf-8"))
     summaries = {row["candidate_role"]: row for row in report["candidate_summaries"]}
-    assert report["selected_candidate_id"] == "qwen35flash-prompt-v2"
+    assert report["selected_candidate_id"] == "qwen35flash-prompt-v2b"
     assert summaries["baseline"]["eligible_for_selection"] is False
     assert summaries["baseline"]["selection_exclusion_reason"] == "baseline_comparison_only"
     assert summaries["new_candidate"]["eligible_for_selection"] is True
