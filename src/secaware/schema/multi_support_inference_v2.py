@@ -9,17 +9,20 @@ coupled through the union of semantic task clusters.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import re
-from enum import Enum, StrEnum
+from enum import StrEnum
 from fractions import Fraction
-from typing import Any, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
 from secaware.randomness import RNG_VERSION
-from secaware.schema.common import SafeValidationMixin, StrictModel, model_shape_is_intact
+from secaware.records import (
+    ContentAddressedResearchRecord,
+    SnapshotResearchRecord,
+    record_sha256 as _digest,
+    valid_identifier as _valid_identifier,
+)
+from secaware.schema.common import model_shape_is_intact
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.experiments import ArmRole
 from secaware.schema.inference_v2 import (
@@ -36,7 +39,6 @@ MULTI_SUPPORT_VALID_DRAW_FRACTION_NUMERATOR_V2 = 19
 MULTI_SUPPORT_VALID_DRAW_FRACTION_DENOMINATOR_V2 = 20
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _PLAN_PATTERN = r"^multi_support_simultaneous_plan_v2_[0-9a-f]{64}$"
 _SUPPORT_PATTERN = r"^multi_support_coordinate_v2_[0-9a-f]{64}$"
 
@@ -48,104 +50,20 @@ _CHECKED_FORMAL_PLAN_ACCESS = object()
 _FORMAL_CONTEXT_PLAN_ACCESS = object()
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _snapshot_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_arrays(item) for item in value)
-    return value
-
-
-def _valid_identifier(value: object) -> bool:
-    return (
-        type(value) is str
-        and _IDENTIFIER_RE.fullmatch(value) is not None
-        and value == value.strip()
-        and not any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-    )
-
-
-class _MultiSupportInferenceV2Contract(SafeValidationMixin, StrictModel):
+class _MultiSupportInferenceV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = (
         "multi-support simultaneous inference v2 contract failed validation"
     )
 
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
     schema_version: Literal["2.1"] = MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION
 
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_json_arrays(cls, value: object) -> object:
-        return _snapshot_arrays(value)
 
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
-
-
-class _ContentAddressedMultiSupportInferenceV2(_MultiSupportInferenceV2Contract):
-    _id_field: ClassVar[str]
-    _id_prefix: ClassVar[str]
-
-    @classmethod
-    def from_content(cls, **content: Any) -> Self:
-        payload: dict[str, Any] | None = None
-        try:
-            if "schema_version" in content or cls._id_field in content:
-                raise ValueError
-            payload = {
-                "schema_version": MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION,
-                **content,
-            }
-            return cls(**payload, **{cls._id_field: cls._id_prefix + _digest(payload)})
-        except (MemoryError, KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:  # noqa: BLE001 - sanitize the public trust boundary
-            content.clear()
-            if payload is not None:
-                payload.clear()
-            raise cls._safe_error() from None
-
-    @model_validator(mode="after")
-    def validate_content_address(self) -> Self:
-        content = self.model_dump(mode="json", exclude={self._id_field})
-        if getattr(self, self._id_field) != self._id_prefix + _digest(content):
-            raise ValueError(self._safe_validation_message)
-        return self
+class _ContentAddressedMultiSupportInferenceV2(ContentAddressedResearchRecord):
+    _safe_validation_message: ClassVar[str] = (
+        "multi-support simultaneous inference v2 contract failed validation"
+    )
+    _schema_version = MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION
+    schema_version: Literal["2.1"] = MULTI_SUPPORT_INFERENCE_V2_SCHEMA_VERSION
 
 
 class CoordinateSpecificStratumSupportV2(_MultiSupportInferenceV2Contract):

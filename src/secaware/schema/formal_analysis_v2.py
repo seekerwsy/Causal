@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-from secaware.schema.common import SafeValidationMixin, StrictModel, model_shape_is_intact
+from secaware.records import SnapshotResearchRecord, record_sha256 as _digest
+from secaware.schema.common import model_shape_is_intact
 from secaware.schema.experiment_freeze_v2 import ConfirmatoryExperimentFreezeV2
 from secaware.schema.multi_support_inference_v2 import (
     _CHECKED_FORMAL_PLAN_ACCESS,
@@ -47,62 +46,9 @@ class FormalJointInterpretationV2(StrEnum):
     INCONCLUSIVE = "inconclusive"
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _snapshot_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_arrays(item) for item in value)
-    return value
-
-
-class _FormalAnalysisV2Contract(SafeValidationMixin, StrictModel):
+class _FormalAnalysisV2Contract(SnapshotResearchRecord):
     _safe_validation_message: ClassVar[str] = "formal analysis v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
     schema_version: Literal["2.0"] = FORMAL_ANALYSIS_V2_SCHEMA_VERSION
-
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_json_arrays(cls, value: object) -> object:
-        return _snapshot_arrays(value)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
 
 
 class FormalAnalysisProtocolV2(_FormalAnalysisV2Contract):

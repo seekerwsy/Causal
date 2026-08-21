@@ -14,15 +14,12 @@ No execution, runtime, or outcome artifact points back to this wrapper.
 
 from __future__ import annotations
 
-import hashlib
-import json
-from enum import Enum
 from typing import ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 
 from secaware.experiments.run_evidence_v2 import ConfirmatoryRunEvidenceManifestV2
-from secaware.schema.common import SafeValidationMixin, StrictModel
+from secaware.records import ContentAddressedResearchRecord
 from secaware.schema.pre_generation_closure_v2 import ConfirmatoryPreGenerationClosureV2
 
 CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION = "2.0"
@@ -30,66 +27,14 @@ CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION = "2.0"
 _CLOSED_RUN_ID_PATTERN = r"^confirmatory_closed_run_evidence_v2_[0-9a-f]{64}$"
 
 
-def _jsonable(value: object) -> object:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            _jsonable(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _snapshot_arrays(value: object) -> object:
-    if type(value) is dict:
-        return {key: _snapshot_arrays(item) for key, item in value.items()}
-    if type(value) in {list, tuple}:
-        return tuple(_snapshot_arrays(item) for item in value)
-    return value
-
-
-class _ClosedRunEvidenceV2Contract(SafeValidationMixin, StrictModel):
-    _safe_validation_message: ClassVar[str] = "closed run evidence v2 contract failed validation"
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        hide_input_in_errors=True,
-        protected_namespaces=(),
-        revalidate_instances="always",
-        strict=True,
-    )
-
-    schema_version: Literal["2.0"] = CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION
-
-    @model_validator(mode="before")
-    @classmethod
-    def snapshot_json_arrays(cls, value: object) -> object:
-        return _snapshot_arrays(value)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def __str__(self) -> str:
-        return f"{type(self).__name__}()"
-
-
-class ConfirmatoryClosedRunEvidenceV2(_ClosedRunEvidenceV2Contract):
+class ConfirmatoryClosedRunEvidenceV2(ContentAddressedResearchRecord):
     """Complete formal-analysis input root for one confirmatory run."""
+
+    _safe_validation_message: ClassVar[str] = "closed run evidence v2 contract failed validation"
+    _schema_version = CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION
+    _id_field = "confirmatory_closed_run_evidence_id"
+    _id_prefix = "confirmatory_closed_run_evidence_v2_"
+    schema_version: Literal["2.0"] = CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION
 
     confirmatory_closed_run_evidence_id: str = Field(pattern=_CLOSED_RUN_ID_PATTERN)
     pre_generation_closure: ConfirmatoryPreGenerationClosureV2
@@ -133,8 +78,7 @@ class ConfirmatoryClosedRunEvidenceV2(_ClosedRunEvidenceV2Contract):
             evidence = ConfirmatoryRunEvidenceManifestV2.model_validate(run_evidence, strict=True)
             if evidence.experiment_freeze != closure.experiment_freeze:
                 raise ValueError
-            payload = {
-                "schema_version": CLOSED_RUN_EVIDENCE_V2_SCHEMA_VERSION,
+            content = {
                 "pre_generation_closure": closure,
                 "run_evidence": evidence,
                 "confirmatory_pre_generation_closure_id": (
@@ -176,12 +120,7 @@ class ConfirmatoryClosedRunEvidenceV2(_ClosedRunEvidenceV2Contract):
                 "formal_analysis_requires_this_root": True,
                 "downstream_analysis_records_excluded": True,
             }
-            return cls(
-                **payload,
-                confirmatory_closed_run_evidence_id=(
-                    "confirmatory_closed_run_evidence_v2_" + _digest(payload)
-                ),
-            )
+            return cls.from_content(**content)
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except Exception:  # noqa: BLE001 - sanitize the public trust boundary
@@ -233,11 +172,6 @@ class ConfirmatoryClosedRunEvidenceV2(_ClosedRunEvidenceV2Contract):
             or actual != expected
             or self.runtime_terminally_accounted_assignment_count
             != self.runtime_expected_assignment_count
-        ):
-            raise ValueError(self._safe_validation_message)
-        content = self.model_dump(mode="json", exclude={"confirmatory_closed_run_evidence_id"})
-        if self.confirmatory_closed_run_evidence_id != (
-            "confirmatory_closed_run_evidence_v2_" + _digest(content)
         ):
             raise ValueError(self._safe_validation_message)
         return self
