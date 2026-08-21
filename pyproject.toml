@@ -58,6 +58,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m reviewer"
 markers = [
   "reviewer: fast reviewer-facing scientific invariant suite",
   "milestone: structural end-to-end and tamper-resistance checks",

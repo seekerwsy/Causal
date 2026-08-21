@@ -32,7 +32,7 @@ from secaware.schema.policy_v2 import (
     SelectorSlotStatus,
 )
 from secaware.schema.protocol_freeze_v2 import ProtocolFreezeRootV2
-from test_protocol_freeze_v2 import (
+from fixtures_v2 import (
     MODELS,
     SHA_A,
     SHA_B,

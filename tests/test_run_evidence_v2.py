@@ -35,7 +35,7 @@ from test_experiment_freeze_v2 import (
     _execution_for_root,
     _freeze,
 )
-from test_protocol_freeze_v2 import _bridge, _inventory, _population_parts, _sha
+from fixtures_v2 import _bridge, _inventory, _population_parts, _sha
 
 
 def _committed_assignment(

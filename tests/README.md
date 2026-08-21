@@ -1,42 +1,32 @@
-# Test layers
+# Test suite
 
-The test suite is organized by review value rather than by historical feature count.
+The checked-in tests cover the scientific artifact, not every historical runtime
+implementation. Git history preserves retired deployment, migration, provider, and
+incident-regression tests when a specialized audit needs them.
 
-## Reviewer suite
-
-Run after ordinary implementation changes:
-
-```bash
-python -m pytest -q -m reviewer
-```
-
-This suite contains 15–25 focused tests and should finish within two minutes. Each
-scientific invariant has one primary test: frozen-input separation, replayable
-randomization, task/arm/seed binding, independent security and functionality,
-explicit unknown states, total assignment accounting, hand-calculated ITT, and the
-shared content-addressing mechanism.
-
-## Milestone suite
-
-Run after changes to the experiment structure or before a review checkpoint:
-
-```bash
-python -m pytest -q -m milestone
-```
-
-It contains the minimal end-to-end replay, synchronized root tampering, missing or
-replaced assignment evidence, and run-level evidence verification. Some tests take
-several minutes; they are deliberately excluded from the reviewer suite.
-
-## Extended and archival suite
-
-Run only for releases, migrations, or targeted audits:
+Ordinary review uses the default command:
 
 ```bash
 python -m pytest -q
 ```
 
-Unmarked tests preserve field-level tampering, historical protocol compatibility,
-deployment/recovery behavior, platform isolation, and incident regressions. New
-tests should enter this layer only when they protect a distinct failure mode; do not
-duplicate a scientific invariant already owned by the reviewer suite.
+It checks frozen-input separation, replayable randomization, exact task/arm/seed
+binding, independent security and functionality, explicit unknown states, total
+assignment accounting, hand-calculated ITT, simultaneous inference, and shared
+content-addressing mechanics.
+
+After a structural change, run the small end-to-end and tamper-resistance layer:
+
+```bash
+python -m pytest -q -m milestone
+```
+
+To inspect every retained adjacent contract test, override the default marker:
+
+```bash
+python -m pytest -q -o addopts=""
+```
+
+Add a test only when it owns a distinct scientific invariant or a minimal
+reproduction boundary. Field-by-field mutation matrices and historical operational
+incidents belong in version history, not in the reviewer-facing suite.

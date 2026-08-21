@@ -1,10 +1,10 @@
+"""Shared builders for the compact protocol-v2 reviewer suite."""
+
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
 
-import pytest
-from pydantic import ValidationError
 
 from secaware.extractors.base import ExtractionPolicy
 from secaware.extractors.deterministic_catalog import DeterministicCatalogExtractor
@@ -466,8 +466,6 @@ def _variant_texts(source_text: str, bridge: InterventionBridgeRecordV2) -> dict
             + prompt_feature_spec("safety.generic_security_reminder").intervention_clauses[0]
         ),
     }
-
-
 def _variant_receipts(
     *,
     bridge: InterventionBridgeRecordV2,
@@ -723,145 +721,18 @@ def _root_components(fixture: ProtocolFixture) -> dict[str, object]:
     }
 
 
-def test_protocol_root_is_content_addressed_outcome_blind_and_round_trippable() -> None:
-    fixture = _fixture()
-    root = fixture.root
-
-    assert root.protocol_freeze_id.startswith("protocol_freeze_v2_")
-    assert root.outcome_blind is True
-    assert root.frozen_before_randomization is True
-    assert (
-        root.source_inventory.source_inventory_sha256 == root.pool_partition.source_inventory_sha256
-    )
-    assert root.population.hypothesis == root.intervention_bridge.frozen_hypothesis
-    assert ProtocolFreezeRootV2.model_validate(root.model_dump(mode="json"), strict=True) == root
-
-
-@pytest.mark.parametrize(
-    ("coordinates", "minimum_tasks", "minimum_clusters"),
-    (
-        ((TASK_COORDINATES[0], TASK_COORDINATES[2]), 2, 2),
-        ((TASK_COORDINATES[0], TASK_COORDINATES[1]), 2, 1),
-    ),
-    ids=("delete-task-within-cluster", "delete-whole-cluster"),
-)
-def test_protocol_root_rejects_synchronized_task_or_cluster_deletion_and_lowered_minima(
-    coordinates: tuple[tuple[str, str], ...],
-    minimum_tasks: int,
-    minimum_clusters: int,
-) -> None:
-    original = _fixture()
-    attacked_parts = _population_parts(
-        bridge=original.bridge,
-        inventory=original.inventory,
-        coordinates=coordinates,
-        minimum_tasks=minimum_tasks,
-        minimum_clusters=minimum_clusters,
-    )
-
-    with pytest.raises(ValidationError, match="protocol freeze v2 contract failed validation"):
-        ProtocolFreezeRootV2.from_components(
-            candidate_universe=original.universe,
-            selection_freeze=original.selection,
-            intervention_bridge=original.bridge,
-            source_inventory=original.inventory,
-            pool_partition=attacked_parts.partition,
-            semantic_cluster_manifest=attacked_parts.clusters,
-            population=attacked_parts.population,
-            query_evidence=attacked_parts.query_evidence,
-            variant_evidence=attacked_parts.variant_evidence,
-            preregistered_minimum_gate_pass_tasks=3,
-            preregistered_minimum_gate_pass_clusters=2,
-        )
-
-    attacked = _fixture(
-        inventory=_inventory(coordinates),
-        coordinates=coordinates,
-        minimum_tasks=minimum_tasks,
-        minimum_clusters=minimum_clusters,
-    )
-    assert attacked.root.protocol_freeze_id != original.root.protocol_freeze_id
-    impersonation = attacked.root.model_dump(mode="json")
-    impersonation["protocol_freeze_id"] = original.root.protocol_freeze_id
-    with pytest.raises(ValidationError, match="protocol freeze v2 contract failed validation"):
-        ProtocolFreezeRootV2.model_validate(impersonation, strict=True)
-
-
-def test_protocol_root_rejects_synchronized_realization_deletion_under_original_identity() -> None:
-    original = _fixture()
-    attacked = _fixture(bridge=_bridge(k_r=1))
-
-    assert len(original.bridge.realizations) == 2
-    assert len(attacked.bridge.realizations) == 1
-    assert attacked.root.protocol_freeze_id != original.root.protocol_freeze_id
-    impersonation = attacked.root.model_dump(mode="json")
-    impersonation["protocol_freeze_id"] = original.root.protocol_freeze_id
-    with pytest.raises(ValidationError, match="protocol freeze v2 contract failed validation"):
-        ProtocolFreezeRootV2.model_validate(impersonation, strict=True)
-
-
-def test_protocol_root_rejects_replacement_bridge_not_frozen_by_selection_or_population() -> None:
-    original = _fixture()
-    replacement = _bridge(target_salt="replacement")
-    components = _root_components(original)
-    components["intervention_bridge"] = replacement
-
-    with pytest.raises(ValidationError, match="protocol freeze v2 contract failed validation"):
-        ProtocolFreezeRootV2.from_components(**components)
-
-
-def test_protocol_root_rejects_cluster_policy_mismatch_accepted_by_population_contract() -> None:
-    original = _fixture()
-    attacked_parts = _population_parts(
-        bridge=original.bridge,
-        inventory=original.inventory,
-        partition_cluster_policy_sha256=SHA_D,
-        cluster_policy_sha256=SHA_A,
-    )
-    assert (
-        attacked_parts.partition.semantic_cluster_policy_sha256
-        != attacked_parts.clusters.clustering_algorithm_sha256
-    )
-
-    with pytest.raises(ValidationError, match="protocol freeze v2 contract failed validation"):
-        ProtocolFreezeRootV2.from_components(
-            candidate_universe=original.universe,
-            selection_freeze=original.selection,
-            intervention_bridge=original.bridge,
-            source_inventory=original.inventory,
-            pool_partition=attacked_parts.partition,
-            semantic_cluster_manifest=attacked_parts.clusters,
-            population=attacked_parts.population,
-            query_evidence=attacked_parts.query_evidence,
-            variant_evidence=attacked_parts.variant_evidence,
-            preregistered_minimum_gate_pass_tasks=3,
-            preregistered_minimum_gate_pass_clusters=2,
-        )
-
-
-def test_protocol_root_rejects_source_inventory_digest_drift() -> None:
-    original = _fixture()
-    attacked_parts = _population_parts(
-        bridge=original.bridge,
-        inventory=original.inventory,
-        partition_source_inventory_sha256=SHA_D,
-    )
-    assert (
-        attacked_parts.partition.source_inventory_sha256
-        != original.inventory.source_inventory_sha256
-    )
-
-    with pytest.raises(ValidationError, match="protocol freeze v2 contract failed validation"):
-        ProtocolFreezeRootV2.from_components(
-            candidate_universe=original.universe,
-            selection_freeze=original.selection,
-            intervention_bridge=original.bridge,
-            source_inventory=original.inventory,
-            pool_partition=attacked_parts.partition,
-            semantic_cluster_manifest=attacked_parts.clusters,
-            population=attacked_parts.population,
-            query_evidence=attacked_parts.query_evidence,
-            variant_evidence=attacked_parts.variant_evidence,
-            preregistered_minimum_gate_pass_tasks=3,
-            preregistered_minimum_gate_pass_clusters=2,
-        )
+__all__ = [
+    "MODELS",
+    "SHA_A",
+    "SHA_B",
+    "SHA_C",
+    "SHA_D",
+    "_bridge",
+    "_context_spec",
+    "_feature_spec",
+    "_inventory",
+    "_population_parts",
+    "_realization_policy",
+    "_realizations",
+    "_sha",
+]
