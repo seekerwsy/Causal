@@ -85,11 +85,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         verify_bundle(args.root)
         print(json.dumps(read_json(args.root / "analysis.json"), indent=2, sort_keys=True))
     else:
-        _judge_gate(args)
+        return _judge_gate(args)
     return 0
 
 
-def _judge_gate(args: argparse.Namespace) -> None:
+def _judge_gate(args: argparse.Namespace) -> int:
     if args.phase == "preflight":
         report = judge_preflight(
             args.repository_root,
@@ -115,6 +115,12 @@ def _judge_gate(args: argparse.Namespace) -> None:
             gate_config=args.gate_config,
         )
     print(report["status"])
+    return 0 if report["status"] in {
+        "JUDGE_GATE_PREFLIGHT_COMPLETE",
+        "PILOT_PASSED",
+        "REMAINING_COMPLETE",
+        "JUDGE_GATE_PASSED",
+    } else 2
 
 
 def _freeze(protocol_path: Path, output: Path) -> None:
