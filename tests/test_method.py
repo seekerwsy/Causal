@@ -53,8 +53,9 @@ def test_policy_has_complete_task_by_realization_support() -> None:
 
     spec = changed_spec()
     duplicate = spec["policies"][0]["bundles"][0]
+    changed_target = {**duplicate["arms"]["target"], "intervention_text": "different target"}
     spec["policies"][0]["bundles"].append(
-        {**duplicate, "arms": {**duplicate["arms"], "target": "different target"}}
+        {**duplicate, "arms": {**duplicate["arms"], "target": changed_target}}
     )
     with pytest.raises(ValueError, match="complete confirm-task"):
         build_study(spec)
@@ -63,21 +64,32 @@ def test_policy_has_complete_task_by_realization_support() -> None:
 @pytest.mark.reviewer
 def test_invalid_intervention_bundle_cannot_enter_randomization() -> None:
     spec = changed_spec()
-    spec["policies"][0]["bundles"][0]["validation"]["allowed_delta"] = False
-    with pytest.raises(ValueError, match="fully validated"):
+    validation = spec["policies"][0]["bundles"][0]["arms"]["target"]["validation"]
+    validation["contract_satisfied"] = "no"
+    with pytest.raises(ValueError, match="semantically validated"):
         build_study(spec)
 
 
 @pytest.mark.reviewer
-def test_add_policy_uses_operation_specific_four_arm_semantics() -> None:
-    protocol = example_study().policies[0].protocol
-    assert tuple(item.arm for item in protocol.definitions) == ARM_ORDER
-    assert tuple(item.semantic_role for item in protocol.definitions) == (
-        "target_patch",
-        "noop_rewrite",
-        "length_matched_placebo",
-        "generic_security_reminder",
+def test_llm_intervention_is_assembled_and_binds_executor_and_validator() -> None:
+    study = example_study()
+    task = next(item for item in study.population.confirm_tasks if item.task_id == "confirm.1a")
+    bundle = next(item for item in study.policies[0].bundles if item.task_id == task.task_id)
+    target = bundle.variant(ARM_ORDER[0])
+    assert target.prompt_text == task.prompt + "\n\n" + target.execution.intervention_text
+    assert target.execution.executor_adapter_id == study.adapters.intervention_executor.adapter_id
+    assert (
+        target.validation.validator_adapter_id
+        == study.adapters.intervention_validator.adapter_id
     )
+
+
+@pytest.mark.reviewer
+def test_intervention_spec_defines_the_mechanism_and_each_arm_instruction() -> None:
+    spec = example_study().policies[0].spec
+    assert spec.mechanism == "sql.parameterized_query"
+    assert tuple(arm for arm, _ in spec.arm_instructions) == ARM_ORDER
+    assert "parameterization" in spec.instruction(ARM_ORDER[0])
 
 
 @pytest.mark.reviewer

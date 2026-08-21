@@ -27,7 +27,7 @@ from prompt_mechanism_study.representation import (
     freeze_universe,
 )
 
-METHOD_VERSION = "prompt-mechanism-study-method-1.1.0"
+METHOD_VERSION = "prompt-mechanism-study-method-1.2.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +55,7 @@ class StudyFreeze:
             raise ValueError("one intervention policy must bind every selected candidate")
         candidates = {item.candidate_id: item for item in self.universe.candidates}
         if any(
-            policy.protocol.operation is not candidates[policy.candidate_id].operation
+            policy.spec.operation is not candidates[policy.candidate_id].operation
             for policy in self.policies
         ):
             raise ValueError("intervention policy operation drifts from its candidate")
@@ -176,6 +176,13 @@ def _validate_policy_support(study: StudyFreeze) -> None:
             for realization in policy.realizations
         ):
             raise ValueError("intervention executor adapter drift")
+        if any(
+            variant.validation.validator_adapter_id
+            != study.adapters.intervention_validator.adapter_id
+            for bundle in policy.bundles
+            for variant in bundle.variants
+        ):
+            raise ValueError("intervention validator adapter drift")
 
 
 __all__ = ["Analysis", "METHOD_VERSION", "StudyFreeze", "analyze", "freeze_study"]

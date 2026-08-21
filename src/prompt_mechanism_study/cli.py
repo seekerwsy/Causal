@@ -12,10 +12,13 @@ from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_
 from prompt_mechanism_study.inference import AnalysisPlan, Metric
 from prompt_mechanism_study.intervention import (
     ARM_ORDER,
+    InterventionExecution,
     RealizationSpec,
-    VariantValidation,
+    SemanticValidation,
+    SemanticVerdict,
     freeze_bundle,
     freeze_policy,
+    intervention_spec,
 )
 from prompt_mechanism_study.measurement import (
     CodeStatus,
@@ -221,10 +224,15 @@ def _policy(
     tasks: Mapping[str, Task],
     adapters: AdapterBundle,
 ) -> object:
-    data = _exact(raw, {"candidate_key", "realizations", "bundles"})
+    data = _exact(raw, {"candidate_key", "arm_instructions", "realizations", "bundles"})
     candidate = candidates.get(data["candidate_key"])
     if candidate is None:
         raise ValueError("policy references an unknown candidate")
+    raw_instructions = _exact(data["arm_instructions"], {arm.value for arm in ARM_ORDER})
+    spec = intervention_spec(
+        candidate,
+        {arm: raw_instructions[arm.value] for arm in ARM_ORDER},
+    )
     realizations = tuple(
         RealizationSpec(
             item["label"],
@@ -241,35 +249,63 @@ def _policy(
         raise ValueError("realization labels must be unique")
     bundles = []
     for value in _list(data["bundles"], "bundles"):
-        item = _exact(value, {"task_id", "realization_label", "arms", "validation"})
+        item = _exact(value, {"task_id", "realization_label", "arms"})
         task = tasks.get(item["task_id"])
         realization = by_label.get(item["realization_label"])
         if task is None or realization is None or task.split is not Split.CONFIRM:
             raise ValueError("bundle references an invalid confirm task or realization")
         arm_values = _exact(item["arms"], {arm.value for arm in ARM_ORDER})
-        validation_values = _exact(
-            item["validation"],
-            {
-                "context_invariant",
-                "task_invariant",
-                "non_target_invariant",
-                "allowed_delta",
-                "controls_matched",
-                "evidence_sha256",
-            },
-        )
-        validation = VariantValidation(**validation_values)
+        arm_records = {
+            arm: _exact(
+                arm_values[arm.value],
+                {
+                    "intervention_text",
+                    "executor_evidence_sha256",
+                    "validation",
+                },
+            )
+            for arm in ARM_ORDER
+        }
+        validations = {}
+        for arm, record in arm_records.items():
+            values = _exact(
+                record["validation"],
+                {
+                    "task_preserved",
+                    "contract_satisfied",
+                    "unintended_changes",
+                    "contradiction",
+                    "evidence_sha256",
+                },
+            )
+            validations[arm] = SemanticValidation(
+                SemanticVerdict(values["task_preserved"]),
+                SemanticVerdict(values["contract_satisfied"]),
+                SemanticVerdict(values["unintended_changes"]),
+                SemanticVerdict(values["contradiction"]),
+                adapters.intervention_validator.adapter_id,
+                values["evidence_sha256"],
+            )
         bundles.append(
             freeze_bundle(
                 candidate,
+                spec=spec,
                 task_id=task.task_id,
                 semantic_cluster_id=task.semantic_cluster_id,
+                source_prompt=task.prompt,
                 realization=realization,
-                arm_texts={arm: arm_values[arm.value] for arm in ARM_ORDER},
-                validation=validation,
+                executions={
+                    arm: InterventionExecution(
+                        record["intervention_text"],
+                        adapters.intervention_executor.adapter_id,
+                        record["executor_evidence_sha256"],
+                    )
+                    for arm, record in arm_records.items()
+                },
+                validations=validations,
             )
         )
-    return freeze_policy(candidate, realizations, tuple(bundles))
+    return freeze_policy(candidate, spec, realizations, tuple(bundles))
 
 
 def _adapters(raw: object) -> AdapterBundle:
@@ -279,6 +315,7 @@ def _adapters(raw: object) -> AdapterBundle:
             "representation",
             "selector",
             "intervention_executor",
+            "intervention_validator",
             "generator",
             "security_oracle",
             "functional_evaluator",
@@ -288,6 +325,7 @@ def _adapters(raw: object) -> AdapterBundle:
         _adapter(AdapterKind.REPRESENTATION, values["representation"]),
         _adapter(AdapterKind.SELECTOR, values["selector"]),
         _adapter(AdapterKind.INTERVENTION_EXECUTOR, values["intervention_executor"]),
+        _adapter(AdapterKind.INTERVENTION_VALIDATOR, values["intervention_validator"]),
         _adapter(AdapterKind.GENERATOR, values["generator"]),
         _adapter(AdapterKind.SECURITY_ORACLE, values["security_oracle"]),
         _adapter(AdapterKind.FUNCTIONAL_EVALUATOR, values["functional_evaluator"]),

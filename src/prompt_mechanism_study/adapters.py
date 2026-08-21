@@ -12,6 +12,7 @@ class AdapterKind(StrEnum):
     REPRESENTATION = "representation"
     SELECTOR = "selector"
     INTERVENTION_EXECUTOR = "intervention_executor"
+    INTERVENTION_VALIDATOR = "intervention_validator"
     GENERATOR = "generator"
     SECURITY_ORACLE = "security_oracle"
     FUNCTIONAL_EVALUATOR = "functional_evaluator"
@@ -44,6 +45,7 @@ class AdapterBundle:
     representation: AdapterSpec
     selector: AdapterSpec
     intervention_executor: AdapterSpec
+    intervention_validator: AdapterSpec
     generator: AdapterSpec
     security_oracle: AdapterSpec
     functional_evaluator: AdapterSpec
@@ -53,6 +55,7 @@ class AdapterBundle:
             AdapterKind.REPRESENTATION,
             AdapterKind.SELECTOR,
             AdapterKind.INTERVENTION_EXECUTOR,
+            AdapterKind.INTERVENTION_VALIDATOR,
             AdapterKind.GENERATOR,
             AdapterKind.SECURITY_ORACLE,
             AdapterKind.FUNCTIONAL_EVALUATOR,
@@ -63,6 +66,7 @@ class AdapterBundle:
                 self.representation,
                 self.selector,
                 self.intervention_executor,
+                self.intervention_validator,
                 self.generator,
                 self.security_oracle,
                 self.functional_evaluator,

@@ -6,12 +6,12 @@ Default reviewer layer:
 
     python -m pytest -q
 
-Its 24 tests each own a scientific invariant:
+Each test owns a scientific invariant:
 
 - discover/confirm and semantic-cluster separation;
 - exact candidate-universe, score, rank, and top-K freeze;
-- operation-specific four-arm semantics;
-- complete multi-realization task support and validation;
+- operation-specific intervention instructions and LLM execution evidence;
+- outcome-blind semantic validation before randomization;
 - replayable complete-block randomization;
 - frozen adapter identities;
 - code/Oracle/functionality outcome decomposition;

@@ -25,7 +25,7 @@ class BlockKey:
     realization_id: str
     task_bundle_id: str
     model_id: str
-    arm_protocol_id: str
+    intervention_spec_id: str
 
     def __post_init__(self) -> None:
         for name in self.__dataclass_fields__:
@@ -184,7 +184,7 @@ def _block(
         bundle.realization_id,
         bundle.task_bundle_id,
         model_id,
-        policy.protocol.arm_protocol_id,
+        policy.spec.intervention_spec_id,
     )
 
 

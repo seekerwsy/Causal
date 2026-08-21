@@ -42,18 +42,8 @@ def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
                     "task_id": task["task_id"],
                     "realization_label": realization,
                     "arms": {
-                        "target": f"{task['task_id']} {realization} target",
-                        "noop": f"{task['task_id']} {realization} noop",
-                        "placebo": f"{task['task_id']} {realization} placebo",
-                        "generic": f"{task['task_id']} {realization} generic",
-                    },
-                    "validation": {
-                        "context_invariant": True,
-                        "task_invariant": True,
-                        "non_target_invariant": True,
-                        "allowed_delta": True,
-                        "controls_matched": True,
-                        "evidence_sha256": "e" * 64,
+                        arm: _arm_record(task["task_id"], realization, arm)
+                        for arm in ("target", "noop", "placebo", "generic")
                     },
                 }
             )
@@ -67,6 +57,12 @@ def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
         "policies": [
             {
                 "candidate_key": "sql.parameterization",
+                "arm_instructions": {
+                    "target": "Add SQL value parameterization.",
+                    "noop": "Add neutral guidance without changing SQL construction.",
+                    "placebo": "Add unrelated length-matched engineering guidance.",
+                    "generic": "Add a generic security reminder without the target mechanism.",
+                },
                 "realizations": [
                     {"label": "direct", "weight": 1},
                     {"label": "constraint", "weight": 3},
@@ -78,6 +74,7 @@ def protocol_spec(*, models: tuple[str, ...] = ("model.a",)) -> dict:
             "representation": _adapter("representation"),
             "selector": _adapter("selector"),
             "intervention_executor": _adapter("intervention"),
+            "intervention_validator": _adapter("intervention-validator"),
             "generator": _adapter("generator"),
             "security_oracle": _adapter("oracle"),
             "functional_evaluator": _adapter("functional"),
@@ -191,6 +188,24 @@ def _default_labels(
 
 def _adapter(name: str) -> dict[str, str]:
     return {"name": name, "version": "1", "policy_sha256": content_hash(name)}
+
+
+def _arm_record(task_id: str, realization: str, arm: str) -> dict:
+    return {
+        "intervention_text": f"{task_id} {realization} {arm}",
+        "executor_evidence_sha256": content_hash(
+            {"executor": task_id, "realization": realization, "arm": arm}
+        ),
+        "validation": {
+            "task_preserved": "yes",
+            "contract_satisfied": "yes",
+            "unintended_changes": "no",
+            "contradiction": "no",
+            "evidence_sha256": content_hash(
+                {"validator": task_id, "realization": realization, "arm": arm}
+            ),
+        },
+    }
 
 
 def _task(task_id: str, cluster: str, split: str, *, weight: int = 1) -> dict:

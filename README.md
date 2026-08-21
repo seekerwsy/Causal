@@ -29,11 +29,16 @@ its name, version, and policy digest remain part of the study identity.
 
 ### 2. Intervention and randomization
 
-- Use operation-specific target, no-op, placebo, and generic arm semantics.
+- Freeze one `InterventionSpec` containing the mechanism, ADD/REMOVE operation,
+  and natural-language instruction for each target, no-op, placebo, and generic arm.
+- Require every intervention text to come from the frozen LLM-executor adapter;
+  the core applies the sole active edit rule by appending that text to the
+  unchanged source prompt.
+- Require an independent, contract-aware and outcome-blind LLM validator to
+  record task preservation, contract satisfaction, unintended changes, and
+  contradictions for every arm. Only `yes/yes/no/no` enters randomization.
 - Freeze a finite realization distribution using positive integer weights.
 - Materialize one complete task-realization bundle for every confirm task.
-- Require context, task, non-target, AllowedDelta, and control-matching
-  validation before randomization.
 - Bind cluster, task, candidate, policy, realization, task bundle, model, and
   arm protocol into every complete-block identity.
 - Balance all four arms inside every block using a replayable randomization
@@ -62,13 +67,14 @@ No treatment-fidelity diagnostic filters an assigned unit.
 
 ## External adapter boundary
 
-Six adapter identities are frozen:
+Seven adapter identities are frozen:
 
 | Adapter | Artifact responsibility |
 | --- | --- |
 | representation | Candidate-universe evidence |
 | selector | Pre-outcome candidate scores |
-| intervention executor | Task-realization variant production |
+| intervention executor | LLM production of free-form intervention text |
+| intervention validator | Contract-aware, outcome-blind semantic validation |
 | generator | Generated-code production |
 | security oracle | Secure, insecure, or unknown decision |
 | functional evaluator | Pass, fail, or unknown decision |
@@ -106,7 +112,7 @@ assignment.
 | adapters.py | Frozen external-producer identities |
 | representation.py | Splits, semantic clusters, candidates, universe |
 | prioritization.py | Score, rank, and top-K freeze |
-| intervention.py | Four-arm multi-realization policies |
+| intervention.py | Intervention spec, LLM executions, semantic validation, prompt assembly |
 | randomization.py | Complete-block assignment |
 | measurement.py | External results and infrastructure boundary |
 | outcomes.py | Total outcome decomposition |
