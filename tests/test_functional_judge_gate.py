@@ -69,6 +69,13 @@ def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: 
     assert report["live_ready"] is False
     assert len(report["pilot_case_ids"]) == 4
     assert len(report["remaining_case_ids"]) == 12
+    fallback = load_gate_inputs(
+        ROOT,
+        Path("configs/functional-judge/v3-resume-gate-qwen37max-v1.json"),
+    )
+    assert fallback.evaluator["candidate_id"] == (
+        "qwen37max-requirement-aggregate-v3-tune-only"
+    )
 
 
 def test_v3_derives_failure_and_ignores_conflicting_advisory() -> None:

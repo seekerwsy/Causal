@@ -109,6 +109,7 @@ class JudgeGateError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class GateInputs:
     repository_root: Path
+    gate_path: Path
     gate: dict[str, Any]
     evaluator: dict[str, Any]
     prompt: str
@@ -125,9 +126,16 @@ class GateInputs:
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
 
-def load_gate_inputs(repository_root: Path) -> GateInputs:
+def load_gate_inputs(
+    repository_root: Path,
+    gate_config: Path | None = None,
+) -> GateInputs:
     root = repository_root.resolve()
-    gate_path = root / "configs/functional-judge/v3-resume-gate-v1.json"
+    gate_path = (
+        root / "configs/functional-judge/v3-resume-gate-v1.json"
+        if gate_config is None
+        else _inside(root, gate_config)
+    )
     gate = _object(read_json(gate_path), "gate")
     candidate = _object(gate.get("candidate"), "candidate")
     holdout = _object(gate.get("holdout"), "holdout")
@@ -184,7 +192,7 @@ def load_gate_inputs(repository_root: Path) -> GateInputs:
         or len(cases) - len(pilot_ids) != holdout.get("remaining_cases")
     ):
         raise JudgeGateError("pilot partition is not a four-family partition")
-    return GateInputs(root, gate, evaluator, prompt, cases, contracts, pilot_ids)
+    return GateInputs(root, gate_path, gate, evaluator, prompt, cases, contracts, pilot_ids)
 
 
 def request_for(case: Mapping[str, Any], contract: Mapping[str, Any]) -> dict[str, Any]:
@@ -279,8 +287,13 @@ def validate_response(
         raise JudgeGateError("provider response failed v3 validation") from None
 
 
-def preflight(repository_root: Path, output: Path) -> dict[str, Any]:
-    inputs = load_gate_inputs(repository_root)
+def preflight(
+    repository_root: Path,
+    output: Path,
+    *,
+    gate_config: Path | None = None,
+) -> dict[str, Any]:
+    inputs = load_gate_inputs(repository_root, gate_config)
     key_name = inputs.evaluator["api_key_env"]
     present = bool(os.environ.get(key_name, "").strip())
     report = {
@@ -311,9 +324,10 @@ def run_phase(
     output: Path,
     *,
     pilot_root: Path | None = None,
+    gate_config: Path | None = None,
     provider: Provider | None = None,
 ) -> dict[str, Any]:
-    inputs = load_gate_inputs(repository_root)
+    inputs = load_gate_inputs(repository_root, gate_config)
     if phase not in {"pilot", "remaining"}:
         raise JudgeGateError("phase must be pilot or remaining")
     if output.exists():
@@ -400,8 +414,10 @@ def finalize_gate(
     pilot_root: Path,
     remaining_root: Path,
     output: Path,
+    *,
+    gate_config: Path | None = None,
 ) -> dict[str, Any]:
-    inputs = load_gate_inputs(repository_root)
+    inputs = load_gate_inputs(repository_root, gate_config)
     pilot = load_phase(pilot_root)
     remaining = load_phase(remaining_root)
     if pilot.get("status") != "PILOT_PASSED" or remaining.get("status") != "REMAINING_COMPLETE":
@@ -666,6 +682,7 @@ def _input_hashes(inputs: GateInputs) -> dict[str, str]:
     candidate = inputs.gate["candidate"]
     holdout = inputs.gate["holdout"]
     return {
+        "gate_config_sha256": hashlib.sha256(inputs.gate_path.read_bytes()).hexdigest(),
         "evaluator_config_sha256": candidate["evaluator_config_sha256"],
         "prompt_sha256": candidate["prompt_sha256"],
         "cases_sha256": holdout["cases_sha256"],
@@ -701,7 +718,7 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _inside(root: Path, relative: object) -> Path:
-    if not isinstance(relative, str) or not relative:
+    if not isinstance(relative, (str, Path)) or not str(relative):
         raise JudgeGateError("artifact path is invalid")
     path = (root / relative).resolve()
     if not path.is_relative_to(root) or not path.is_file():

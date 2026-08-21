@@ -69,6 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     judge.add_argument("phase", choices=("preflight", "pilot", "remaining", "finalize"))
     judge.add_argument("output", type=Path)
     judge.add_argument("--repository-root", type=Path, default=Path.cwd())
+    judge.add_argument("--gate-config", type=Path)
     judge.add_argument("--pilot-root", type=Path)
     judge.add_argument("--remaining-root", type=Path)
 
@@ -90,13 +91,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _judge_gate(args: argparse.Namespace) -> None:
     if args.phase == "preflight":
-        report = judge_preflight(args.repository_root, args.output)
+        report = judge_preflight(
+            args.repository_root,
+            args.output,
+            gate_config=args.gate_config,
+        )
     elif args.phase in {"pilot", "remaining"}:
         report = run_judge_phase(
             args.repository_root,
             args.phase,
             args.output,
             pilot_root=args.pilot_root,
+            gate_config=args.gate_config,
         )
     else:
         if args.pilot_root is None or args.remaining_root is None:
@@ -106,6 +112,7 @@ def _judge_gate(args: argparse.Namespace) -> None:
             args.pilot_root,
             args.remaining_root,
             args.output,
+            gate_config=args.gate_config,
         )
     print(report["status"])
 
