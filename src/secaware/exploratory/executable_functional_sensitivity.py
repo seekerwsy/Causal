@@ -35,6 +35,32 @@ from secaware.schema.records import CanonicalGeneratedCodeRecord
 _SCHEMA_VERSION = "1.0"
 _MEASUREMENT_METHOD = "deterministic_local_executable_fixture_v1"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WORKER_RUNTIME_IMPORTS = (
+    "base64",
+    "contextlib",
+    "ctypes",
+    "errno",
+    "hashlib",
+    "inspect",
+    "io",
+    "json",
+    "logging",
+    "os",
+    "resource",
+    "socket",
+    "sqlite3",
+    "subprocess",
+    "sys",
+    "pathlib",
+    "typing",
+)
+# Static audit of the eight source-spec-v1 candidates found only these imports
+# beyond the worker's own top-level standard-library imports.
+_FROZEN_CANDIDATE_RUNTIME_IMPORTS = ("collections", "re")
+_FROZEN_RUNTIME_IMPORTS = (
+    *_WORKER_RUNTIME_IMPORTS,
+    *_FROZEN_CANDIDATE_RUNTIME_IMPORTS,
+)
 _WORKER_CONFIG_KEYS = frozenset(
     {
         "schema_version",
@@ -1429,17 +1455,143 @@ def _runtime_tree_sha256(root: Path) -> str:
     return canonical_sha256({"type": "frozen_python_runtime_v1", "files": files})
 
 
+def _runtime_extension_probe_source() -> str:
+    imports = repr(_FROZEN_RUNTIME_IMPORTS)
+    return f"""\
+import json
+import os
+import sys
+
+for module_name in {imports}:
+    __import__(module_name)
+
+runtime_root = os.path.realpath(sys.argv[1])
+extension_modules = sorted({{
+    os.path.realpath(module_file)
+    for module in tuple(sys.modules.values())
+    if isinstance((module_file := getattr(module, "__file__", None)), str)
+    and module_file.endswith(".so")
+}})
+payload = {{
+    "extension_modules": extension_modules,
+    "runtime_root": runtime_root,
+    "schema_version": "1.0",
+}}
+sys.stdout.write(json.dumps(
+    payload,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+))
+"""
+
+
+def _discover_runtime_extension_modules(
+    runtime: Path,
+    python_executable: Path,
+) -> tuple[Path, ...]:
+    resolved_runtime = runtime.resolve(strict=True)
+    resolved_python = python_executable.resolve(strict=True)
+    try:
+        resolved_python.relative_to(resolved_runtime)
+    except ValueError:
+        raise ValueError("Python executable escaped its frozen runtime") from None
+    result = run_analyzer_process(
+        (
+            str(resolved_python),
+            "-I",
+            "-B",
+            "-S",
+            "-c",
+            _runtime_extension_probe_source(),
+            str(resolved_runtime),
+        ),
+        cwd=resolved_runtime,
+        timeout_seconds=30,
+        max_stdout_bytes=256 * 1024,
+        max_stderr_bytes=256 * 1024,
+    )
+    if result.returncode != 0:
+        raise ValueError("frozen Python runtime import discovery failed")
+    try:
+        parsed = json.loads(result.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("runtime extension inventory is not canonical JSON") from None
+    if result.stdout != _canonical(parsed):
+        raise ValueError("runtime extension inventory is not canonical JSON")
+    if (
+        type(parsed) is not dict
+        or set(parsed) != {"extension_modules", "runtime_root", "schema_version"}
+        or parsed.get("schema_version") != "1.0"
+        or parsed.get("runtime_root") != str(resolved_runtime)
+        or type(parsed.get("extension_modules")) is not list
+    ):
+        raise ValueError("runtime extension inventory failed validation")
+    raw_modules = parsed["extension_modules"]
+    if (
+        any(type(item) is not str or not item for item in raw_modules)
+        or raw_modules != sorted(raw_modules)
+        or len(raw_modules) != len(set(raw_modules))
+    ):
+        raise ValueError("runtime extension inventory failed validation")
+    extension_modules: list[Path] = []
+    resolved_seen: set[Path] = set()
+    for item in raw_modules:
+        if not Path(item).is_absolute():
+            raise ValueError("runtime extension inventory failed validation")
+        raw = Path(item)
+        try:
+            resolved = raw.resolve(strict=True)
+            relative = resolved.relative_to(resolved_runtime)
+        except (OSError, ValueError):
+            raise ValueError("runtime extension inventory failed validation") from None
+        if (
+            str(resolved) != item
+            or not resolved.is_file()
+            or resolved.suffix != ".so"
+            or "lib-dynload" not in relative.parts[:-1]
+            or resolved in resolved_seen
+        ):
+            raise ValueError("runtime extension inventory failed validation")
+        resolved_seen.add(resolved)
+        extension_modules.append(resolved)
+    return tuple(extension_modules)
+
+
+def _dynamic_library_inspector_path() -> Path:
+    try:
+        inspector = Path("/usr/bin/ldd").resolve(strict=True)
+    except OSError:
+        raise ValueError("dynamic library inspector is unavailable") from None
+    if not inspector.is_file() or not os.access(inspector, os.X_OK):
+        raise ValueError("dynamic library inspector is unavailable")
+    return inspector
+
+
+def _external_dynamic_library_binding(
+    raw: Path,
+    runtime: Path,
+) -> tuple[str, str, str] | None:
+    resolved = raw.resolve(strict=True)
+    try:
+        resolved.relative_to(runtime)
+    except ValueError:
+        pass
+    else:
+        return None
+    target = raw.as_posix()
+    if not resolved.is_file() or not target.startswith(("/lib/", "/lib64/")):
+        raise ValueError("dynamic library closure failed validation")
+    return target, str(resolved), sha256_file(resolved)
+
+
 def _dynamic_library_closure(
     runtime: Path,
     python_executable: Path,
 ) -> tuple[Path, tuple[tuple[str, str, str], ...]]:
-    inspector = Path("/usr/bin/ldd").resolve(strict=True)
-    if not inspector.is_file() or not os.access(inspector, os.X_OK):
-        raise ValueError("dynamic library inspector is unavailable")
-    extension_modules = sorted(
-        (path for path in runtime.rglob("*.so") if "lib-dynload" in path.parts and path.is_file()),
-        key=lambda item: item.relative_to(runtime).as_posix(),
-    )
+    inspector = _dynamic_library_inspector_path()
+    extension_modules = _discover_runtime_extension_modules(runtime, python_executable)
     result = run_analyzer_process(
         (str(inspector), str(python_executable), *(str(path) for path in extension_modules)),
         cwd=runtime,
@@ -1447,25 +1599,24 @@ def _dynamic_library_closure(
         max_stdout_bytes=2 * 1024 * 1024,
         max_stderr_bytes=256 * 1024,
     )
+    if result.returncode != 0:
+        raise ValueError("dynamic library closure discovery failed")
     decoded = result.stdout.decode("utf-8")
+    if re.search(r"(?:=>\s+)?not found(?:\s|$)", decoded):
+        raise ValueError("dynamic library closure is incomplete")
     targets: dict[str, tuple[str, str, str]] = {}
     for match in re.finditer(r"(?:=>\s+)?(/[^\s]+)\s+\(0x[0-9a-fA-F]+\)", decoded):
         raw = Path(match.group(1))
-        resolved = raw.resolve(strict=True)
-        try:
-            resolved.relative_to(runtime)
-        except ValueError:
-            pass
-        else:
+        binding = _external_dynamic_library_binding(raw, runtime)
+        if binding is None:
             continue
-        target = raw.as_posix()
-        if (
-            not resolved.is_file()
-            or target in targets
-            or not target.startswith(("/lib/", "/lib64/"))
-        ):
-            raise ValueError("dynamic library closure failed validation")
-        targets[target] = (target, str(resolved), sha256_file(resolved))
+        target, _source, _digest = binding
+        existing = targets.get(target)
+        if existing is not None:
+            if existing != binding:
+                raise ValueError("dynamic library closure failed validation")
+            continue
+        targets[target] = binding
     if not targets or not any("ld-linux" in target for target in targets):
         raise ValueError("dynamic library closure is incomplete")
     return inspector, tuple(targets[key] for key in sorted(targets))

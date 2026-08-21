@@ -41,6 +41,7 @@ from secaware.functional_judge.schema import (
     FunctionalRequirementRecord,
     TaskFunctionalContractRecord,
 )
+from secaware.oracle.runner import AnalyzerProcessResult
 from secaware.pipeline.artifact import sha256_file
 
 ADAPTERS = (
@@ -674,6 +675,323 @@ def test_test_double_requires_explicit_authorization(tmp_path: Path) -> None:
         )
 
     assert not output.exists()
+
+
+def test_runtime_extension_inventory_excludes_unloaded_tkinter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"frozen-python")
+    dynload = runtime / "lib" / "python3.12" / "lib-dynload"
+    dynload.mkdir(parents=True)
+    needed = dynload / "_sqlite3.cpython-312-x86_64-linux-gnu.so"
+    needed.write_bytes(b"needed-extension")
+    irrelevant = dynload / "_tkinter.cpython-312-x86_64-linux-gnu.so"
+    irrelevant.write_bytes(b"would-have-a-missing-tcl-dependency")
+    calls: list[tuple[str, ...]] = []
+
+    def discover(argv: tuple[str, ...], **_kwargs: object) -> AnalyzerProcessResult:
+        calls.append(argv)
+        payload = {
+            "extension_modules": [str(needed.resolve())],
+            "runtime_root": str(runtime.resolve()),
+            "schema_version": "1.0",
+        }
+        return AnalyzerProcessResult(
+            returncode=0,
+            stdout=sensitivity_module._canonical(payload),
+            argv_sha256="0" * 64,
+        )
+
+    monkeypatch.setattr(sensitivity_module, "run_analyzer_process", discover)
+
+    selected = sensitivity_module._discover_runtime_extension_modules(runtime, python)
+
+    assert selected == (needed.resolve(),)
+    assert irrelevant.resolve() not in selected
+    assert len(calls) == 1
+    assert calls[0][1:5] == ("-I", "-B", "-S", "-c")
+    assert calls[0][-1] == str(runtime.resolve())
+    assert sensitivity_module._FROZEN_CANDIDATE_RUNTIME_IMPORTS == ("collections", "re")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "discovery_failed",
+        "invalid_json",
+        "noncanonical_json",
+        "relative",
+        "escaped",
+        "missing",
+        "outside_dynload",
+        "duplicate",
+    ),
+)
+def test_runtime_extension_inventory_rejects_invalid_or_missing_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"frozen-python")
+    dynload = runtime / "lib" / "python3.12" / "lib-dynload"
+    dynload.mkdir(parents=True)
+    needed = dynload / "_sqlite3.so"
+    needed.write_bytes(b"needed-extension")
+    escaped = tmp_path / "escaped.so"
+    escaped.write_bytes(b"escaped-extension")
+    outside_dynload = runtime / "lib" / "outside.so"
+    outside_dynload.write_bytes(b"outside-dynload")
+
+    modules = [str(needed.resolve())]
+    if failure == "relative":
+        modules = ["lib/python3.12/lib-dynload/_sqlite3.so"]
+    elif failure == "escaped":
+        modules = [str(escaped.resolve())]
+    elif failure == "missing":
+        modules = [str((dynload / "missing.so").resolve())]
+    elif failure == "outside_dynload":
+        modules = [str(outside_dynload.resolve())]
+    elif failure == "duplicate":
+        modules = [str(needed.resolve()), str(needed.resolve())]
+    payload = {
+        "extension_modules": modules,
+        "runtime_root": str(runtime.resolve()),
+        "schema_version": "1.0",
+    }
+    stdout = sensitivity_module._canonical(payload)
+    returncode = 0
+    if failure == "discovery_failed":
+        returncode = 1
+    elif failure == "invalid_json":
+        stdout = b"not-json"
+    elif failure == "noncanonical_json":
+        stdout = json.dumps(payload).encode("utf-8")
+
+    def discover(_argv: tuple[str, ...], **_kwargs: object) -> AnalyzerProcessResult:
+        return AnalyzerProcessResult(
+            returncode=returncode,
+            stdout=stdout,
+            argv_sha256="0" * 64,
+        )
+
+    monkeypatch.setattr(sensitivity_module, "run_analyzer_process", discover)
+
+    with pytest.raises(ValueError, match="runtime (?:extension|import)|frozen Python"):
+        sensitivity_module._discover_runtime_extension_modules(runtime, python)
+
+
+def test_runtime_extension_inventory_may_be_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"frozen-python")
+    payload = {
+        "extension_modules": [],
+        "runtime_root": str(runtime.resolve()),
+        "schema_version": "1.0",
+    }
+
+    monkeypatch.setattr(
+        sensitivity_module,
+        "run_analyzer_process",
+        lambda *_args, **_kwargs: AnalyzerProcessResult(
+            returncode=0,
+            stdout=sensitivity_module._canonical(payload),
+            argv_sha256="0" * 64,
+        ),
+    )
+
+    assert sensitivity_module._discover_runtime_extension_modules(runtime, python) == ()
+
+
+def test_dynamic_library_closure_inspects_only_selected_extensions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"frozen-python")
+    dynload = runtime / "lib" / "python3.12" / "lib-dynload"
+    dynload.mkdir(parents=True)
+    needed = dynload / "_sqlite3.so"
+    needed.write_bytes(b"needed-extension")
+    irrelevant = dynload / "_tkinter.so"
+    irrelevant.write_bytes(b"missing-tcl-if-inspected")
+    inspector = tmp_path / "ldd"
+    inspector.write_bytes(b"frozen-ldd")
+    loader = tmp_path / "ld-linux.so"
+    loader.write_bytes(b"frozen-loader")
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_dynamic_library_inspector_path",
+        lambda: inspector,
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_discover_runtime_extension_modules",
+        lambda _runtime, _python: (needed,),
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_external_dynamic_library_binding",
+        lambda raw, _runtime: (
+            raw.as_posix(),
+            str(loader),
+            sha256_file(loader),
+        ),
+    )
+
+    def inspect(argv: tuple[str, ...], **_kwargs: object) -> AnalyzerProcessResult:
+        calls.append(argv)
+        stdout = (
+            b"libtcl8.6.so => not found\n"
+            if str(irrelevant) in argv
+            else (
+                b"/runtime/bin/python3:\n"
+                b"/lib64/ld-linux-x86-64.so.2 (0x00007f00)\n"
+                b"/runtime/lib/python3.12/lib-dynload/_sqlite3.so:\n"
+                b"/lib64/ld-linux-x86-64.so.2 (0x00007f01)\n"
+            )
+        )
+        return AnalyzerProcessResult(
+            returncode=0,
+            stdout=stdout,
+            argv_sha256="0" * 64,
+        )
+
+    monkeypatch.setattr(sensitivity_module, "run_analyzer_process", inspect)
+
+    selected_inspector, bindings = sensitivity_module._dynamic_library_closure(
+        runtime,
+        python,
+    )
+
+    assert selected_inspector == inspector
+    assert calls == [(str(inspector), str(python), str(needed))]
+    assert irrelevant.as_posix() not in calls[0]
+    assert bindings == (("/lib64/ld-linux-x86-64.so.2", str(loader), sha256_file(loader)),)
+
+
+def test_dynamic_library_closure_rejects_conflicting_duplicate_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"frozen-python")
+    needed = runtime / "lib" / "python3.12" / "lib-dynload" / "_sqlite3.so"
+    needed.parent.mkdir(parents=True)
+    needed.write_bytes(b"needed-extension")
+    inspector = tmp_path / "ldd"
+    inspector.write_bytes(b"frozen-ldd")
+    first_loader = tmp_path / "first-ld-linux.so"
+    first_loader.write_bytes(b"first-loader")
+    second_loader = tmp_path / "second-ld-linux.so"
+    second_loader.write_bytes(b"second-loader")
+    bindings = iter(
+        (
+            (
+                "/lib64/ld-linux-x86-64.so.2",
+                str(first_loader),
+                sha256_file(first_loader),
+            ),
+            (
+                "/lib64/ld-linux-x86-64.so.2",
+                str(second_loader),
+                sha256_file(second_loader),
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_dynamic_library_inspector_path",
+        lambda: inspector,
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_discover_runtime_extension_modules",
+        lambda _runtime, _python: (needed,),
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_external_dynamic_library_binding",
+        lambda _raw, _runtime: next(bindings),
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "run_analyzer_process",
+        lambda *_args, **_kwargs: AnalyzerProcessResult(
+            returncode=0,
+            stdout=(
+                b"/lib64/ld-linux-x86-64.so.2 (0x00007f00)\n"
+                b"/lib64/ld-linux-x86-64.so.2 (0x00007f01)\n"
+            ),
+            argv_sha256="0" * 64,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="dynamic library closure failed validation"):
+        sensitivity_module._dynamic_library_closure(runtime, python)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    (
+        (1, b""),
+        (0, b"libsqlite3.so => not found\n"),
+    ),
+)
+def test_dynamic_library_closure_rejects_missing_selected_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: bytes,
+) -> None:
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"frozen-python")
+    needed = runtime / "lib" / "python3.12" / "lib-dynload" / "_sqlite3.so"
+    needed.parent.mkdir(parents=True)
+    needed.write_bytes(b"needed-extension")
+    inspector = tmp_path / "ldd"
+    inspector.write_bytes(b"frozen-ldd")
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_dynamic_library_inspector_path",
+        lambda: inspector,
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "_discover_runtime_extension_modules",
+        lambda _runtime, _python: (needed,),
+    )
+    monkeypatch.setattr(
+        sensitivity_module,
+        "run_analyzer_process",
+        lambda *_args, **_kwargs: AnalyzerProcessResult(
+            returncode=returncode,
+            stdout=stdout,
+            argv_sha256="0" * 64,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="dynamic library closure"):
+        sensitivity_module._dynamic_library_closure(runtime, python)
 
 
 @pytest.mark.parametrize("mutated_component", ("bwrap", "python", "runtime", "ldd", "library"))
