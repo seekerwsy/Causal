@@ -26,6 +26,18 @@ REAL_CONTRACTS_SOURCE = (
     / "five-cwe-held-out-policy-itt-inputs-20260819-02"
     / "task-functional-contracts.jsonl"
 )
+ADAPTER_ID_BY_FAMILY = {
+    "gtf_fasta_append": "gtf_fasta_byte_append_cli_v1",
+    "sqlite_metadata": "sqlite_metadata_pragma_v1",
+    "pdf_bag_of_words": "pdf_fake_pdftotext_frozen_bow_reader_v1",
+    "slurm_exit_code": "slurm_fake_sacct_squeue_v1",
+}
+REAL_EXECUTOR_ADAPTER_ORDER = [
+    ADAPTER_ID_BY_FAMILY["gtf_fasta_append"],
+    ADAPTER_ID_BY_FAMILY["sqlite_metadata"],
+    ADAPTER_ID_BY_FAMILY["pdf_bag_of_words"],
+    ADAPTER_ID_BY_FAMILY["slurm_exit_code"],
+]
 
 
 def _load_script(name: str):
@@ -74,6 +86,8 @@ def _build_overlay(
     measurement_binding_attack: bool = False,
     raw_evidence_attack: bool = False,
     weak_executor_attack: bool = False,
+    controlled_adapter_ids: list[object] | None = None,
+    supported_adapter_ids: list[object] | None = None,
 ) -> None:
     root.mkdir()
     source_content = {
@@ -94,7 +108,13 @@ def _build_overlay(
         _sha256_file(root / "frozen-functional-contracts.jsonl")
         == spec["frozen_functional_contracts_sha256"]
     )
-    adapter_ids = sorted(f"{item['family']}_adapter_v1" for item in spec["families"])
+    adapter_ids = sorted(ADAPTER_ID_BY_FAMILY[str(item["family"])] for item in spec["families"])
+    controlled_adapter_ids = (
+        adapter_ids if controlled_adapter_ids is None else controlled_adapter_ids
+    )
+    supported_adapter_ids = (
+        REAL_EXECUTOR_ADAPTER_ORDER if supported_adapter_ids is None else supported_adapter_ids
+    )
     executor_policy = {
         "executor_id": "isolated-bubblewrap-executor-v1-test",
         "mode": "isolated_subprocess_v1",
@@ -108,7 +128,7 @@ def _build_overlay(
         "old_root_exposed": False,
         "namespace_isolation_enforced": True,
         "network_isolation_enforced": True,
-        "supported_adapter_ids": adapter_ids,
+        "supported_adapter_ids": supported_adapter_ids,
         "sandbox_backend": "bubblewrap_v1",
         "sandbox_backend_path": "/usr/bin/bwrap",
         "sandbox_backend_sha256": "d" * 64,
@@ -173,7 +193,7 @@ def _build_overlay(
             code_path.write_text(code_text, encoding="utf-8")
             code_sha256 = _sha256_file(code_path)
             fixture_policy_sha256 = canonical_sha256(
-                {"family": family, "adapter": f"{family}_adapter_v1"}
+                {"family": family, "adapter": ADAPTER_ID_BY_FAMILY[family]}
             )
             completion_check = {
                 "check_id": "execution_completed",
@@ -269,7 +289,7 @@ def _build_overlay(
                 "assignment_id": assignment_id,
                 "arm_role": arm_role,
                 "family": family,
-                "adapter_id": f"{family}_adapter_v1",
+                "adapter_id": ADAPTER_ID_BY_FAMILY[family],
                 "fixture_policy_sha256": fixture_policy_sha256,
                 "fixture_instance_sha256": canonical_sha256(fixture),
                 "executor_policy_sha256": executor_policy_sha256,
@@ -339,7 +359,7 @@ def _build_overlay(
                     "assignment_id": assignment_id,
                     "arm_role": arm_role,
                     "family": family,
-                    "adapter_id": f"{family}_adapter_v1",
+                    "adapter_id": ADAPTER_ID_BY_FAMILY[family],
                     "code_path": code_path.relative_to(root).as_posix(),
                     "code_sha256": code_sha256,
                     "source_artifact_path": f"old/{assignment_id}.jsonl",
@@ -507,7 +527,7 @@ def _build_overlay(
             "execution_performed": True,
             "official_artifact_replacement_allowed": False,
             "scientific_claim_allowed": False,
-            "controlled_adapter_ids": adapter_ids,
+            "controlled_adapter_ids": controlled_adapter_ids,
             "executor_policy": executor_policy,
             "executor_policy_sha256": executor_policy_sha256,
             "sandbox_limitations": [],
@@ -738,6 +758,71 @@ def test_validation_fixtures_are_16_ast_valid_balanced_cases() -> None:
         family[row["expected_status"]] += 1
     assert len(counts) == 4
     assert all(value == {"pass": 2, "fail": 2} for value in counts.values())
+
+
+@pytest.mark.parametrize(
+    ("controlled_adapter_ids", "supported_adapter_ids"),
+    (
+        (sorted(REAL_EXECUTOR_ADAPTER_ORDER), REAL_EXECUTOR_ADAPTER_ORDER),
+        (
+            [
+                REAL_EXECUTOR_ADAPTER_ORDER[2],
+                REAL_EXECUTOR_ADAPTER_ORDER[0],
+                REAL_EXECUTOR_ADAPTER_ORDER[3],
+                REAL_EXECUTOR_ADAPTER_ORDER[1],
+            ],
+            list(reversed(REAL_EXECUTOR_ADAPTER_ORDER)),
+        ),
+    ),
+)
+def test_planner_accepts_exact_unique_adapter_sets_in_any_order(
+    tmp_path: Path,
+    controlled_adapter_ids: list[object],
+    supported_adapter_ids: list[object],
+) -> None:
+    planner = _load_script("plan_functional_judge_calibration")
+    spec_path = CALIBRATION_DATA / "calibration-spec.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    _spec, family_specs = planner._load_spec(spec_path)
+    overlay = tmp_path / "adapter-order-overlay"
+    _build_overlay(
+        overlay,
+        spec,
+        controlled_adapter_ids=controlled_adapter_ids,
+        supported_adapter_ids=supported_adapter_ids,
+    )
+
+    rows, _manifest, _evidence, _contracts = planner._load_tune_rows(overlay, spec, family_specs)
+
+    assert len(rows) == 8
+
+
+@pytest.mark.parametrize("field", ("controlled_adapter_ids", "supported_adapter_ids"))
+@pytest.mark.parametrize(
+    "invalid_adapter_ids",
+    (
+        REAL_EXECUTOR_ADAPTER_ORDER[:-1] + [REAL_EXECUTOR_ADAPTER_ORDER[0]],
+        REAL_EXECUTOR_ADAPTER_ORDER[:-1],
+        REAL_EXECUTOR_ADAPTER_ORDER + ["unexpected_adapter_v1"],
+        REAL_EXECUTOR_ADAPTER_ORDER[:-1] + [7],
+    ),
+    ids=("duplicate", "missing", "extra", "non-string"),
+)
+def test_planner_rejects_non_exact_or_non_unique_adapter_sets(
+    tmp_path: Path,
+    field: str,
+    invalid_adapter_ids: list[object],
+) -> None:
+    planner = _load_script("plan_functional_judge_calibration")
+    spec_path = CALIBRATION_DATA / "calibration-spec.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    _spec, family_specs = planner._load_spec(spec_path)
+    overlay = tmp_path / "o"
+    overrides = {field: invalid_adapter_ids}
+    _build_overlay(overlay, spec, **overrides)
+
+    with pytest.raises(ValueError, match="isolated executor protocol"):
+        planner._load_tune_rows(overlay, spec, family_specs)
 
 
 def test_planner_rejects_reclosed_measurement_semantic_binding_attack(tmp_path: Path) -> None:

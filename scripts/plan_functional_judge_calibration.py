@@ -453,6 +453,17 @@ def _is_posix_relative(value: object) -> bool:
     )
 
 
+def _is_exact_unique_string_set(value: object, expected: frozenset[str]) -> bool:
+    """Accept any sequence order while preserving exact set semantics."""
+    return (
+        type(value) is list
+        and all(type(item) is str and item for item in value)
+        and len(value) == len(expected)
+        and len(set(value)) == len(value)
+        and set(value) == expected
+    )
+
+
 def _read_json(path: Path) -> dict[str, object]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if type(value) is not dict:
@@ -801,7 +812,7 @@ def _load_overlay_root_provenance(
     protocol = _read_json(root / "protocol.json")
     executor_policy = protocol.get("executor_policy")
     executor_policy_sha256 = protocol.get("executor_policy_sha256")
-    adapter_ids = sorted({str(row["adapter_id"]) for row in rows})
+    adapter_ids = frozenset(str(row["adapter_id"]) for row in rows)
     dynamic_bindings = (
         executor_policy.get("dynamic_library_bindings") if type(executor_policy) is dict else None
     )
@@ -816,7 +827,7 @@ def _load_overlay_root_provenance(
         or protocol.get("execution_performed") is not True
         or protocol.get("official_artifact_replacement_allowed") is not False
         or protocol.get("scientific_claim_allowed") is not False
-        or protocol.get("controlled_adapter_ids") != adapter_ids
+        or not _is_exact_unique_string_set(protocol.get("controlled_adapter_ids"), adapter_ids)
         or protocol.get("sandbox_limitations") != []
         or protocol.get("frozen_functional_contracts_path") != "frozen-functional-contracts.jsonl"
         or protocol.get("frozen_functional_contracts_sha256")
@@ -842,7 +853,9 @@ def _load_overlay_root_provenance(
         or executor_policy.get("old_root_exposed") is not False
         or executor_policy.get("namespace_isolation_enforced") is not True
         or executor_policy.get("network_isolation_enforced") is not True
-        or executor_policy.get("supported_adapter_ids") != adapter_ids
+        or not _is_exact_unique_string_set(
+            executor_policy.get("supported_adapter_ids"), adapter_ids
+        )
         or executor_policy.get("sandbox_backend") != "bubblewrap_v1"
         or not _is_posix_absolute(executor_policy.get("sandbox_backend_path"))
         or not _is_sha256(executor_policy.get("sandbox_backend_sha256"))

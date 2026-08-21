@@ -297,6 +297,19 @@ def test_campaign_receipt_is_content_addressed_closed_and_zero_call(
     monkeypatch.setattr(sys, "argv", [str(Path(module.__file__).resolve()), *argv])
     monkeypatch.setattr(sys, "orig_argv", invocation)
 
+    sidecar_protocol = json.loads(
+        (Path(campaign_fixture["sidecar"]) / "protocol.json").read_text(encoding="utf-8")
+    )
+    assert sidecar_protocol["executor_policy"]["supported_adapter_ids"] == [
+        "gtf_fasta_byte_append_cli_v1",
+        "sqlite_metadata_pragma_v1",
+        "pdf_fake_pdftotext_frozen_bow_reader_v1",
+        "slurm_fake_sacct_squeue_v1",
+    ]
+    assert (
+        sidecar_protocol["controlled_adapter_ids"]
+        != sidecar_protocol["executor_policy"]["supported_adapter_ids"]
+    )
     assert module.main() == 0
     manifest = verify_closed_manifest(
         receipt_dir / "artifact-manifest.json", label="campaign receipt test"
