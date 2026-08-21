@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 from pydantic import Field, field_validator, model_validator
 
-from secaware.pipeline.artifact import _atomic_write_text, canonical_sha256, sha256_path
+from secaware.artifact_io import atomic_write_text, canonical_sha256, sha256_path
 from secaware.schema.common import VersionedModel
 
 
@@ -101,7 +101,7 @@ def write_stage_manifest(path: str | Path, manifest: StageManifest) -> None:
         sort_keys=True,
         indent=2,
     )
-    _atomic_write_text(path, content + "\n")
+    atomic_write_text(path, content + "\n")
 
 
 def read_stage_manifest(path: str | Path) -> StageManifest:

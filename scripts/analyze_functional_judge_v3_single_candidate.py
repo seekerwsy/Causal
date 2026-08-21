@@ -1,7 +1,5 @@
 """Gate and analyze the minimal v3 single-candidate fresh-holdout campaign."""
 
-# ruff: noqa: E402
-
 from __future__ import annotations
 
 import argparse
@@ -21,7 +19,7 @@ for _source_root in (_REPOSITORY_ROOT / "src", _REPOSITORY_ROOT):
 from scripts import analyze_functional_judge_calibration as analyzer_core
 from scripts import plan_functional_judge_v3_single_candidate as plan_module
 
-from secaware.exploratory.artifact_integrity import (
+from secaware.artifact_io import (
     verify_closed_manifest,
     write_closed_manifest_atomic,
     write_json_atomic_exclusive,

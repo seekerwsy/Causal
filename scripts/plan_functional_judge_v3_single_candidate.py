@@ -6,8 +6,6 @@ permits exactly one v3 candidate with a 2-case exposed-tune pilot followed by
 22 remaining cases.  It never reads a provider credential.
 """
 
-# ruff: noqa: E402
-
 from __future__ import annotations
 
 import argparse
@@ -30,7 +28,7 @@ from scripts import analyze_functional_judge_calibration as paired_analyzer
 from scripts import plan_functional_judge_calibration as paired_planner
 from scripts import validate_bailian_functional_judge as judge_runner
 
-from secaware.exploratory.artifact_integrity import (
+from secaware.artifact_io import (
     verify_closed_manifest,
     write_closed_manifest_atomic,
 )
@@ -604,8 +602,7 @@ def _load_closed_plan(
         or plan["candidate"].get("candidate_role") != "new_candidate"
         or plan["candidate"].get("protocol_version") != "v3"
         or plan["candidate"].get("model_id") != "qwen3.5-flash-2026-02-23"
-        or plan["candidate"].get("evaluator_config_sha256")
-        != _EXPECTED_EVALUATOR_CONFIG_SHA256
+        or plan["candidate"].get("evaluator_config_sha256") != _EXPECTED_EVALUATOR_CONFIG_SHA256
         or not _is_sha256(plan["candidate"].get("evaluator_policy_sha256"))
         or not _is_sha256(plan["candidate"].get("shared_evaluator_coordinates_sha256"))
         or plan.get("case_counts")

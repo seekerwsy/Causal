@@ -15,8 +15,8 @@ from collections import namedtuple
 from datetime import UTC, datetime
 from pathlib import Path
 
+from secaware.artifact_io import write_closed_manifest_atomic
 from secaware.config import FunctionalJudgeLLMConfig, GenerationConfig
-from secaware.exploratory.artifact_integrity import write_closed_manifest_atomic
 from secaware.functional_judge.factory import _artifacts, _policy
 from secaware.functional_judge.judge import (
     FUNCTIONAL_JUDGE_V3_AGGREGATE_RULE,
