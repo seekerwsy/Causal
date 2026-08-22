@@ -9,7 +9,6 @@ from prompt_mechanism_study.artifact_io import verify_bundle
 from prompt_mechanism_study.functional_judge import (
     JudgeGateError,
     MEASUREMENT_METHOD,
-    apply_deterministic_guardrail,
     load_gate_inputs,
     preflight,
     request_for,
@@ -70,13 +69,22 @@ def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: 
     assert report["live_ready"] is False
     assert len(report["pilot_case_ids"]) == 4
     assert len(report["remaining_case_ids"]) == 12
-    fallback = load_gate_inputs(
+    oracle = load_gate_inputs(
         ROOT,
-        Path("configs/functional-judge/v3-resume-gate-qwen37max-v1.json"),
+        Path("configs/functional-judge/software-engineer-qwen37max-v1.json"),
     )
-    assert fallback.evaluator["candidate_id"] == (
-        "qwen37max-requirement-aggregate-v3-tune-only"
+    assert oracle.evaluator["candidate_id"] == (
+        "qwen37max-software-engineer-functional-judge-v1"
     )
+    assert len(oracle.prompt.split()) < 300
+    assert not {"pdftotext", "slurm", "pragma"} & set(oracle.prompt.casefold().split())
+    case = oracle.cases[0]
+    projected = request_for(
+        case,
+        oracle.contracts[case["task_id"]],
+        include_prompt_evidence=True,
+    )
+    assert all("prompt_evidence_quote" in item for item in projected["requirements"])
 
 
 def test_v3_derives_failure_and_ignores_conflicting_advisory() -> None:
@@ -92,56 +100,6 @@ def test_v3_derives_failure_and_ignores_conflicting_advisory() -> None:
     malformed["requirements"][0]["counterexample"] = None
     with pytest.raises(JudgeGateError):
         validate_response(json.dumps(malformed).encode(), case, contract)
-
-
-def test_guardrail_only_overrides_definite_slurm_return_contradictions() -> None:
-    inputs = load_gate_inputs(
-        ROOT,
-        Path("configs/functional-judge/v3-hybrid-regression-qwen37max-v1.json"),
-    )
-    cases = {case["case_id"]: case for case in inputs.cases}
-    projected = request_for(
-        cases["fjcalv4-validation-slurm-fail-b"],
-        inputs.contracts[cases["fjcalv4-validation-slurm-fail-b"]["task_id"]],
-        include_prompt_evidence=True,
-    )
-    assert "returns the exit code" in projected["requirements"][0][
-        "prompt_evidence_quote"
-    ]
-    expected = {
-        "fjcalv4-validation-slurm-pass-a": ("pass", None),
-        "fjcalv4-validation-slurm-pass-b": ("pass", None),
-        "fjcalv4-validation-slurm-fail-a": (
-            "fail",
-            "slurm_signal_component_return",
-        ),
-        "fjcalv4-validation-slurm-fail-b": ("fail", "boolean_return"),
-    }
-
-    for case_id, (status, reason) in expected.items():
-        case = cases[case_id]
-        contract = inputs.contracts[case["task_id"]]
-        reviewed = apply_deterministic_guardrail({"status": "pass"}, case, contract)
-        findings = reviewed["deterministic_guardrail"]["findings"]
-        assert reviewed["status"] == status
-        assert ([item["reason_code"] for item in findings] or [None]) == [reason]
-
-    unseen_signal_variant = {
-        **cases["fjcalv4-validation-slurm-fail-a"],
-        "code_text": cases["fjcalv4-validation-slurm-fail-a"]["code_text"].replace(
-            'encoded_exit.partition(":")[2]',
-            'encoded_exit.rsplit(":", 1)[1]',
-        ),
-    }
-    reviewed = apply_deterministic_guardrail(
-        {"status": "pass"},
-        unseen_signal_variant,
-        inputs.contracts[unseen_signal_variant["task_id"]],
-    )
-    assert reviewed["status"] == "fail"
-    assert reviewed["deterministic_guardrail"]["findings"][0]["reason_code"] == (
-        "slurm_signal_component_return"
-    )
 
 
 def test_pilot_runs_four_closed_single_attempt_cases(tmp_path: Path) -> None:

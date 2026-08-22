@@ -32,14 +32,6 @@ AGGREGATE_RULE_RECORD = {
     "top_level_status_role": TOP_STATUS_ROLE,
 }
 AGGREGATE_RULE_SHA256 = content_hash(AGGREGATE_RULE_RECORD)
-HYBRID_POLICY = {
-    "policy_id": "source-evidence-and-definite-contradictions-v1",
-    "contract_projection": "criterion_with_prompt_evidence_quote",
-    "guardrail": "override_only_proved_slurm_return_contradictions",
-    "fallback": "retain_llm_requirement_aggregate",
-}
-HYBRID_POLICY_SHA256 = content_hash(HYBRID_POLICY)
-
 _COUNTEREXAMPLE_KEYS = {
     "contract_satisfying_scenario",
     "expected_behavior",
@@ -144,8 +136,8 @@ def load_gate_inputs(
         else _inside(root, gate_config)
     )
     gate = _object(read_json(gate_path), "gate")
-    if gate.get("hybrid_policy_id") not in {None, HYBRID_POLICY["policy_id"]}:
-        raise JudgeGateError("hybrid policy identity does not match the implementation")
+    if gate.get("include_prompt_evidence") not in {None, True}:
+        raise JudgeGateError("include_prompt_evidence must be true when specified")
     candidate = _object(gate.get("candidate"), "candidate")
     holdout = _object(gate.get("holdout"), "holdout")
     evaluator_path = _inside(root, candidate.get("evaluator_config_path"))
@@ -248,8 +240,7 @@ def request_for(
         "output_schema": _OUTPUT_SCHEMA,
     }
     if include_prompt_evidence:
-        request["contract_projection"] = HYBRID_POLICY["contract_projection"]
-        request["hybrid_policy_sha256"] = HYBRID_POLICY_SHA256
+        request["contract_projection"] = "criterion_with_prompt_evidence_quote"
     return request
 
 
@@ -311,27 +302,6 @@ def validate_response(
         raise JudgeGateError("provider response failed v3 validation") from None
 
 
-def apply_deterministic_guardrail(
-    result: Mapping[str, Any],
-    case: Mapping[str, Any],
-    contract: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Override only LLM conclusions contradicted by a narrow frozen contract check."""
-    reviewed = dict(result)
-    semantic_status = reviewed["status"]
-    findings = _definite_contract_contradictions(case, contract)
-    reviewed["semantic_judge_status"] = semantic_status
-    reviewed["deterministic_guardrail"] = {
-        "policy_id": HYBRID_POLICY["policy_id"],
-        "policy_sha256": HYBRID_POLICY_SHA256,
-        "findings": findings,
-        "overrode": bool(findings) and semantic_status != "fail",
-    }
-    if findings:
-        reviewed["status"] = "fail"
-    return reviewed
-
-
 def preflight(
     repository_root: Path,
     output: Path,
@@ -358,7 +328,6 @@ def preflight(
         "provider_attempts": 0,
         "input_hashes": _input_hashes(inputs),
         "aggregate_rule": AGGREGATE_RULE_RECORD,
-        "hybrid_policy": HYBRID_POLICY if _hybrid_enabled(inputs) else None,
     }
     write_bundle(output, {"report.json": report})
     return report
@@ -391,7 +360,7 @@ def run_phase(
         request_payload = request_for(
             case,
             contract,
-            include_prompt_evidence=_hybrid_enabled(inputs),
+            include_prompt_evidence=inputs.gate.get("include_prompt_evidence") is True,
         )
         raw: bytes | None = None
         result: dict[str, Any] | None = None
@@ -399,8 +368,6 @@ def run_phase(
         try:
             raw = provider(request_payload, inputs.evaluator, inputs.prompt)
             result = validate_response(raw, case, contract)
-            if _hybrid_enabled(inputs):
-                result = apply_deterministic_guardrail(result, case, contract)
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except Exception as failure:
@@ -413,13 +380,6 @@ def run_phase(
             "family": case["family"],
             "expected_status": expected,
             "actual_status": actual,
-            "semantic_judge_status": (
-                result.get("semantic_judge_status", actual) if result is not None else None
-            ),
-            "deterministic_guardrail_overrode": bool(
-                result
-                and result.get("deterministic_guardrail", {}).get("overrode") is True
-            ),
             "correct": actual == expected,
             "false_pass": expected == "fail" and actual == "pass",
             "invalid": result is None,
@@ -507,9 +467,6 @@ def finalize_gate(
         "totals": totals,
         "families": by_family,
         "acceptance": acceptance,
-        "deterministic_guardrail_overrides": sum(
-            row.get("deterministic_guardrail_overrode") is True for row in all_rows
-        ),
         "pilot_bundle_sha256": bundle_digest(pilot_root / "summary"),
         "remaining_bundle_sha256": bundle_digest(remaining_root / "summary"),
         "input_hashes": _input_hashes(inputs),
@@ -598,76 +555,15 @@ def _validate_cases(
         if family is None or case["task_id"] != family["task_id"]:
             raise JudgeGateError("holdout case family binding failed validation")
         try:
-            if not ast.parse(case["code_text"]).body:
+            tree = ast.parse(case["code_text"])
+            if not tree.body:
                 raise ValueError
+            compile(tree, f"<{case['case_id']}>", "exec")
         except (SyntaxError, TypeError, ValueError):
             raise JudgeGateError("holdout code is not valid Python") from None
         counts[(case["family"], case["expected_status"])] += 1
     if any(counts[(family, status)] != 2 for family in family_specs for status in ("pass", "fail")):
         raise JudgeGateError("holdout is not balanced within family")
-
-
-def _definite_contract_contradictions(
-    case: Mapping[str, Any],
-    contract: Mapping[str, Any],
-) -> list[dict[str, Any]]:
-    if case.get("family") != "slurm_exit_code":
-        return []
-    evidence = " ".join(
-        str(item.get("prompt_evidence_quote", ""))
-        for item in contract.get("requirements", [])
-        if isinstance(item, dict)
-    ).lower()
-    if "return" not in evidence or "exit code" not in evidence:
-        return []
-    tree = ast.parse(case["code_text"])
-    functions = [
-        item
-        for item in tree.body
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-    if len(functions) != 1:
-        return []
-    findings = []
-    for returned in (node for node in ast.walk(functions[0]) if isinstance(node, ast.Return)):
-        value = returned.value
-        if value is None:
-            continue
-        reason = None
-        if isinstance(value, ast.Compare) or (
-            isinstance(value, ast.Constant) and type(value.value) is bool
-        ):
-            reason = "boolean_return"
-        if (
-            isinstance(value, ast.Call)
-            and isinstance(value.func, ast.Name)
-            and value.func.id == "int"
-            and len(value.args) == 1
-        ):
-            value = value.args[0]
-        if isinstance(value, ast.Subscript) and isinstance(value.value, ast.Call):
-            call = value.value
-            attribute = call.func.attr if isinstance(call.func, ast.Attribute) else None
-            separator = (
-                call.args[0].value
-                if call.args and isinstance(call.args[0], ast.Constant)
-                else None
-            )
-            index = value.slice.value if isinstance(value.slice, ast.Constant) else None
-            if separator == ":" and (
-                (attribute == "partition" and index == 2)
-                or (attribute in {"split", "rsplit"} and index == 1)
-            ):
-                reason = "slurm_signal_component_return"
-        if reason:
-            findings.append(
-                {
-                    "requirement_id": "req_01",
-                    "reason_code": reason,
-                    "line_number": returned.lineno,
-                }
-            )
-    return findings
 
 
 def _load_contracts(
@@ -815,13 +711,7 @@ def _input_hashes(inputs: GateInputs) -> dict[str, str]:
         "aggregate_rule_sha256": AGGREGATE_RULE_SHA256,
         "output_schema_sha256": content_hash(_OUTPUT_SCHEMA),
     }
-    if _hybrid_enabled(inputs):
-        hashes["hybrid_policy_sha256"] = HYBRID_POLICY_SHA256
     return hashes
-
-
-def _hybrid_enabled(inputs: GateInputs) -> bool:
-    return inputs.gate.get("hybrid_policy_id") == HYBRID_POLICY["policy_id"]
 
 
 def _json_lines(path: Path) -> list[dict[str, Any]]:
@@ -896,12 +786,9 @@ def _strings(value: object, name: str) -> list[str]:
 __all__ = [
     "AGGREGATE_RULE",
     "AGGREGATE_RULE_SHA256",
-    "HYBRID_POLICY",
-    "HYBRID_POLICY_SHA256",
     "JudgeGateError",
     "MEASUREMENT_METHOD",
     "bailian_complete",
-    "apply_deterministic_guardrail",
     "finalize_gate",
     "load_gate_inputs",
     "load_phase",

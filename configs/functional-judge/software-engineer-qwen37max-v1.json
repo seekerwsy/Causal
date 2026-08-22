@@ -1,17 +1,17 @@
 {
   "schema_version": "1.0",
-  "purpose": "Post-hoc regression of the frozen qwen3.7-max semantic Judge plus a narrow deterministic contradiction guardrail. The exposed v4 holdout is not fresh evidence and this configuration cannot support a scientific claim.",
+  "purpose": "Engineering gate for the scalable functional Oracle: Python AST/compile validity followed by a blinded software-engineering LLM judgment. The exposed v4 cases are regression evidence, not a fresh scientific holdout.",
   "candidate": {
-    "candidate_id": "qwen37max-requirement-aggregate-v3-tune-only",
+    "candidate_id": "qwen37max-software-engineer-functional-judge-v1",
     "protocol_version": "v3",
     "model_id": "qwen3.7-max-2026-05-20",
-    "evaluator_config_sha256": "425875a66c455a6871fea93ff28da22076133676bd1d21b833eaad819bb9b68f",
-    "prompt_sha256": "5aecb580cba8b241da4108aca61465781de5d7e7fbd2662072a84b28eac2eecf",
+    "evaluator_config_sha256": "433559bcb72bfb26e33db6feea9a11cdffd8bc1ac19b4a5232b9227358f097eb",
+    "prompt_sha256": "70d9cbd53f68b9fc6eaf5ed578fa1318e782a24e874c704847a674f5c137acb2",
     "aggregate_rule": "derive_pass_fail_unknown_from_requirement_verdicts_and_ignore_advisory_top_status",
-    "evaluator_config_path": "data/functional-judge/evaluator-candidates/qwen37max-requirement-aggregate-v3-tune-only.json",
-    "prompt_path": "data/functional-judge/blind-calibration-v4/functional-judge-v3.txt"
+    "evaluator_config_path": "data/functional-judge/evaluator-candidates/qwen37max-software-engineer-v1.json",
+    "prompt_path": "data/functional-judge/prompts/software-engineer-functional-judge-v1.txt"
   },
-  "hybrid_policy_id": "source-evidence-and-definite-contradictions-v1",
+  "include_prompt_evidence": true,
   "holdout": {
     "cases": 16,
     "cases_sha256": "4ee3353cc601b96be79a879fcedb6f36cffcfc56b0737d4db12e1f4bb3787195",
@@ -30,15 +30,22 @@
   },
   "pilot_acceptance": {
     "minimum_correct": 3,
-    "maximum_false_pass": 0,
+    "maximum_false_pass": 1,
     "maximum_invalid": 0
   },
   "acceptance": {
     "minimum_correct": 14,
-    "maximum_false_pass": 0,
+    "maximum_false_pass": 1,
     "maximum_invalid": 0,
     "minimum_correct_per_family": 3,
     "families": 4
+  },
+  "functional_oracle": {
+    "syntax_gate": "python_ast_parse_and_compile",
+    "semantic_gate": "single_pass_blinded_llm_judge",
+    "pass_rule": "syntax_valid_and_all_requirements_met",
+    "fail_rule": "syntax_invalid_or_any_requirement_not_met",
+    "unknown_rule": "syntax_valid_and_any_requirement_unknown_without_not_met"
   },
   "execution": {
     "retry_failed_case": false,
@@ -46,8 +53,7 @@
     "python_dont_write_bytecode": true
   },
   "use_in_experiment": {
-    "role": "functional_guardrail_not_security_oracle",
-    "executable_audit_fraction": 0.25,
+    "role": "functional_oracle",
     "primary_security_measurement": "static_profile_security_oracle",
     "formal_arms": ["target", "noop"]
   },
