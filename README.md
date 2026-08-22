@@ -106,27 +106,27 @@ and adapter identities, and requires one measurement for every randomized
 assignment.
 
 The active functional Oracle is frozen in
-`configs/functional-judge/software-engineer-qwen37max-v1.json`. Generated
+`configs/functional-judge/functional-oracle-qwen37max.json`. Generated
 Python must first pass AST parsing and bytecode compilation. A blinded LLM,
-acting as a software-engineering reviewer, then judges every frozen functional
-requirement. Functionality passes only when syntax is valid and every
-requirement is met; a definite unmet requirement fails, and unresolved static
-evidence remains unknown. The functional Oracle is independent of and never
-replaces the static Security Oracle.
+acting as a software-engineering reviewer, then judges the code against the
+original functional task. Functionality passes only when both gates pass;
+definite non-compliance fails, and unresolved static evidence remains unknown.
+The functional Oracle is independent of and never replaces the static Security
+Oracle.
 
 Run the gate before the main experiment. The preflight makes no provider call;
 the pilot covers one frozen case from each task family, and the remaining phase
 is unavailable unless that pilot passes:
 
     prompt-mechanism-study judge-gate preflight judge-preflight \
-      --gate-config configs/functional-judge/software-engineer-qwen37max-v1.json
+      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
     prompt-mechanism-study judge-gate pilot judge-pilot \
-      --gate-config configs/functional-judge/software-engineer-qwen37max-v1.json
+      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
     prompt-mechanism-study judge-gate remaining judge-remaining --pilot-root judge-pilot \
-      --gate-config configs/functional-judge/software-engineer-qwen37max-v1.json
+      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
     prompt-mechanism-study judge-gate finalize judge-result \
       --pilot-root judge-pilot --remaining-root judge-remaining \
-      --gate-config configs/functional-judge/software-engineer-qwen37max-v1.json
+      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
 
 Every attempted case is closed as its own exact-byte bundle before the phase
 summary is written. Provider requests omit case identity, family, gold label,

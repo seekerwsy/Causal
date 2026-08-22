@@ -18,53 +18,21 @@ from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_
 from prompt_mechanism_study.records import canonical_json, content_hash
 
 
-MEASUREMENT_METHOD = "blind_llm_functional_review_v1"
-AGGREGATE_RULE = "any-not-met-else-unknown-else-pass-v1"
-AGGREGATE_RULE_RECORD = {
-    "rule_id": AGGREGATE_RULE,
-    "authoritative_source": "requirements[].verdict",
-    "rule": "fail if any not_met; otherwise unknown if any unknown; otherwise pass",
-}
-AGGREGATE_RULE_SHA256 = content_hash(AGGREGATE_RULE_RECORD)
-_REQUIREMENT_KEYS = {
-    "requirement_id",
-    "verdict",
-    "evidence_lines",
-    "reason",
-}
-_RESPONSE_KEYS = {
-    "measurement_method",
-    "requirements",
-}
+MEASUREMENT_METHOD = "ast_compile_plus_blind_llm_review_v1"
+_RESPONSE_KEYS = {"verdict", "evidence_lines", "reason"}
 _OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": [
-        "measurement_method",
-        "requirements",
-    ],
+    "required": sorted(_RESPONSE_KEYS),
     "properties": {
-        "measurement_method": {"const": MEASUREMENT_METHOD},
-        "requirements": {
+        "verdict": {"enum": ["pass", "fail", "unknown"]},
+        "evidence_lines": {
             "type": "array",
             "maxItems": 32,
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": sorted(_REQUIREMENT_KEYS),
-                "properties": {
-                    "requirement_id": {"type": "string"},
-                    "verdict": {"enum": ["met", "not_met", "unknown"]},
-                    "evidence_lines": {
-                        "type": "array",
-                        "maxItems": 32,
-                        "uniqueItems": True,
-                        "items": {"type": "integer", "minimum": 1},
-                    },
-                    "reason": {"type": "string"},
-                },
-            },
+            "uniqueItems": True,
+            "items": {"type": "integer", "minimum": 1},
         },
+        "reason": {"type": "string"},
     },
 }
 
@@ -99,13 +67,11 @@ def load_gate_inputs(
 ) -> GateInputs:
     root = repository_root.resolve()
     gate_path = (
-        root / "configs/functional-judge/software-engineer-qwen37max-v1.json"
+        root / "configs/functional-judge/functional-oracle-qwen37max.json"
         if gate_config is None
         else _inside(root, gate_config)
     )
     gate = _object(read_json(gate_path), "gate")
-    if gate.get("include_prompt_evidence") not in {None, True}:
-        raise JudgeGateError("include_prompt_evidence must be true when specified")
     candidate = _object(gate.get("candidate"), "candidate")
     holdout = _object(gate.get("holdout"), "holdout")
     evaluator_path = _inside(root, candidate.get("evaluator_config_path"))
@@ -121,7 +87,7 @@ def load_gate_inputs(
     evaluator = _object(read_json(evaluator_path), "evaluator")
     expected_evaluator = {
         "candidate_id": candidate.get("candidate_id"),
-        "protocol_version": "functional_oracle_v1",
+        "protocol_version": "functional_oracle_v2",
         "model_id": candidate.get("model_id"),
         "mode": "single_pass",
         "max_attempts": 1,
@@ -167,19 +133,16 @@ def load_gate_inputs(
 def request_for(
     case: Mapping[str, Any],
     contract: Mapping[str, Any],
-    *,
-    include_prompt_evidence: bool = False,
 ) -> dict[str, Any]:
+    task_prompts = tuple(
+        dict.fromkeys(item["prompt_evidence_quote"] for item in contract["requirements"])
+    )
+    if not task_prompts:
+        raise JudgeGateError("functional task prompt is unavailable")
     requirements = [
         {
             "requirement_id": item["requirement_id"],
-            "kind": item["kind"],
             "criterion": item["criterion"],
-            **(
-                {"prompt_evidence_quote": item["prompt_evidence_quote"]}
-                if include_prompt_evidence
-                else {}
-            ),
         }
         for item in contract["requirements"]
     ]
@@ -193,21 +156,16 @@ def request_for(
             "generator_identity_withheld": True,
         },
         "language": contract["language"],
-        "judgeability": contract["judgeability"],
+        "functional_task": "\n".join(task_prompts),
         "requirements": requirements,
         "environment_dependencies": list(contract["environment_dependencies"]),
         "program_lines": [
             {"line_number": number, "text": line}
             for number, line in enumerate(case["code_text"].splitlines(), start=1)
         ],
-        "protocol_version": "functional_oracle_v1",
         "measurement_method": MEASUREMENT_METHOD,
-        "aggregate_status_rule": AGGREGATE_RULE,
-        "aggregate_status_rule_sha256": AGGREGATE_RULE_SHA256,
         "output_schema": _OUTPUT_SCHEMA,
     }
-    if include_prompt_evidence:
-        request["contract_projection"] = "criterion_with_prompt_evidence_quote"
     return request
 
 
@@ -228,29 +186,28 @@ def validate_response(
         response = _object(response, "response")
         if set(response) != _RESPONSE_KEYS:
             raise ValueError
-        if response["measurement_method"] != MEASUREMENT_METHOD:
+        verdict = response["verdict"]
+        if verdict not in {"pass", "fail", "unknown"}:
             raise ValueError
-        raw_decisions = _list(response["requirements"])
-        if len(raw_decisions) > 32:
-            raise ValueError
+        line_numbers = response["evidence_lines"]
         program_lines = case["code_text"].splitlines()
-        decisions = [
-            _validate_decision(_object(item, "requirement decision"), program_lines)
-            for item in raw_decisions
-        ]
-        decisions.sort(key=lambda item: item["requirement_id"])
-        expected_ids = sorted(item["requirement_id"] for item in contract["requirements"])
-        if [item["requirement_id"] for item in decisions] != expected_ids:
+        if (
+            not isinstance(line_numbers, list)
+            or len(line_numbers) > 32
+            or any(
+                type(value) is not int or value < 1 or value > len(program_lines)
+                for value in line_numbers
+            )
+            or len(line_numbers) != len(set(line_numbers))
+            or (verdict != "unknown" and not line_numbers)
+        ):
             raise ValueError
-        verdicts = {item["verdict"] for item in decisions}
-        status = (
-            "fail"
-            if "not_met" in verdicts
-            else "unknown" if not decisions or "unknown" in verdicts else "pass"
-        )
+        _bounded_text(response["reason"], 3000)
         return {
-            "status": status,
-            "requirements": decisions,
+            "status": verdict,
+            "evidence_lines": line_numbers,
+            "resolved_code_evidence": [program_lines[number - 1] for number in line_numbers],
+            "reason": response["reason"],
         }
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
@@ -283,7 +240,7 @@ def preflight(
         "live_ready": present,
         "provider_attempts": 0,
         "input_hashes": _input_hashes(inputs),
-        "aggregate_rule": AGGREGATE_RULE_RECORD,
+        "functional_oracle": inputs.gate["functional_oracle"],
     }
     write_bundle(output, {"report.json": report})
     return report
@@ -313,11 +270,7 @@ def run_phase(
     case_summaries: list[dict[str, Any]] = []
     for index, case in enumerate(cases, start=1):
         contract = inputs.contracts[case["task_id"]]
-        request_payload = request_for(
-            case,
-            contract,
-            include_prompt_evidence=inputs.gate.get("include_prompt_evidence") is True,
-        )
+        request_payload = request_for(case, contract)
         raw: bytes | None = None
         result: dict[str, Any] | None = None
         error: str | None = None
@@ -548,38 +501,6 @@ def _load_contracts(
     return contracts
 
 
-def _validate_decision(item: dict[str, Any], program_lines: Sequence[str]) -> dict[str, Any]:
-    if set(item) != _REQUIREMENT_KEYS or item["verdict"] not in {"met", "not_met", "unknown"}:
-        raise ValueError
-    line_numbers = item["evidence_lines"]
-    if (
-        not isinstance(line_numbers, list)
-        or len(line_numbers) > 32
-        or any(
-            type(value) is not int or value < 1 or value > len(program_lines)
-            for value in line_numbers
-        )
-        or len(line_numbers) != len(set(line_numbers))
-    ):
-        raise ValueError
-    evidence = [
-        program_lines[number - 1]
-        for number in line_numbers
-        if program_lines[number - 1].strip()
-    ]
-    verdict = item["verdict"]
-    if verdict != "unknown" and not evidence:
-        raise ValueError
-    _bounded_text(item["reason"], 2000)
-    return {
-        "requirement_id": item["requirement_id"],
-        "verdict": verdict,
-        "evidence_lines": line_numbers,
-        "resolved_code_evidence": evidence,
-        "reason": item["reason"],
-    }
-
-
 def _phase_report(
     inputs: GateInputs,
     phase: str,
@@ -644,7 +565,6 @@ def _input_hashes(inputs: GateInputs) -> dict[str, str]:
         "prompt_sha256": candidate["prompt_sha256"],
         "cases_sha256": holdout["cases_sha256"],
         "calibration_spec_sha256": holdout["calibration_spec_sha256"],
-        "aggregate_rule_sha256": AGGREGATE_RULE_SHA256,
         "output_schema_sha256": content_hash(_OUTPUT_SCHEMA),
     }
     return hashes
@@ -720,8 +640,6 @@ def _strings(value: object, name: str) -> list[str]:
 
 
 __all__ = [
-    "AGGREGATE_RULE",
-    "AGGREGATE_RULE_SHA256",
     "JudgeGateError",
     "MEASUREMENT_METHOD",
     "bailian_complete",

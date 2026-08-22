@@ -22,21 +22,11 @@ pytestmark = pytest.mark.reviewer
 ROOT = Path(__file__).parents[1]
 
 
-def _response(contract: dict[str, object], status: str) -> bytes:
-    requirements = []
-    for index, requirement in enumerate(contract["requirements"]):
-        verdict = "not_met" if status == "fail" and index == 0 else "met"
-        requirements.append(
-            {
-                "requirement_id": requirement["requirement_id"],
-                "verdict": verdict,
-                "evidence_lines": [1],
-                "reason": "The cited line establishes or contradicts the required behavior.",
-            }
-        )
+def _response(_contract: dict[str, object], status: str) -> bytes:
     payload = {
-        "measurement_method": MEASUREMENT_METHOD,
-        "requirements": requirements,
+        "verdict": status,
+        "evidence_lines": [1],
+        "reason": "The cited line establishes or contradicts the requested behavior.",
     }
     return json.dumps(payload, separators=(",", ":")).encode()
 
@@ -55,20 +45,17 @@ def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: 
     assert len(report["remaining_case_ids"]) == 12
     oracle = load_gate_inputs(
         ROOT,
-        Path("configs/functional-judge/software-engineer-qwen37max-v1.json"),
+        Path("configs/functional-judge/functional-oracle-qwen37max.json"),
     )
     assert oracle.evaluator["candidate_id"] == (
-        "qwen37max-software-engineer-functional-judge-v1"
+        "qwen37max-software-engineer-functional-judge-v2"
     )
     assert len(oracle.prompt.split()) < 300
     assert not {"pdftotext", "slurm", "pragma"} & set(oracle.prompt.casefold().split())
     case = oracle.cases[0]
-    projected = request_for(
-        case,
-        oracle.contracts[case["task_id"]],
-        include_prompt_evidence=True,
-    )
-    assert all("prompt_evidence_quote" in item for item in projected["requirements"])
+    projected = request_for(case, oracle.contracts[case["task_id"]])
+    assert projected["functional_task"]
+    assert all(set(item) == {"requirement_id", "criterion"} for item in projected["requirements"])
 
 
 def test_functional_review_derives_failure_from_requirements() -> None:
@@ -80,7 +67,7 @@ def test_functional_review_derives_failure_from_requirements() -> None:
 
     assert result["status"] == "fail"
     malformed = json.loads(_response(contract, "fail"))
-    malformed["requirements"][0].pop("reason")
+    malformed.pop("reason")
     with pytest.raises(JudgeGateError):
         validate_response(json.dumps(malformed).encode(), case, contract)
 

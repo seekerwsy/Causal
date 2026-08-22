@@ -1,17 +1,15 @@
 {
   "schema_version": "1.0",
-  "purpose": "Engineering gate for the scalable functional Oracle: Python AST/compile validity followed by a blinded software-engineering LLM judgment. The exposed v4 cases are regression evidence, not a fresh scientific holdout.",
+  "purpose": "Engineering gate for the scalable functional Oracle: Python AST/compile validity followed by a blinded whole-task software-engineering LLM judgment. The exposed v4 cases are regression evidence, not a fresh scientific holdout.",
   "candidate": {
-    "candidate_id": "qwen37max-software-engineer-functional-judge-v1",
-    "protocol_version": "functional_oracle_v1",
+    "candidate_id": "qwen37max-software-engineer-functional-judge-v2",
+    "protocol_version": "functional_oracle_v2",
     "model_id": "qwen3.7-max-2026-05-20",
-    "evaluator_config_sha256": "2caaf27e0e63fba323ed8f094899301ff0ab6b321dee07c4a200df43388c69dc",
-    "prompt_sha256": "58cbbf8d3438216ed9938ca0fb44624c4e9522f8b4ed716461c50b64e247664f",
-    "aggregate_rule": "any-not-met-else-unknown-else-pass-v1",
-    "evaluator_config_path": "data/functional-judge/evaluator-candidates/qwen37max-software-engineer-v1.json",
-    "prompt_path": "data/functional-judge/prompts/software-engineer-functional-judge-v1.txt"
+    "evaluator_config_sha256": "9335fcf4661f42a38c125ee9cefde66eb2a27f234d6c007378cc84af13da2b63",
+    "prompt_sha256": "fc0b165024ba89f84e98e029e63e7015af1569b28076f509021733a92983c731",
+    "evaluator_config_path": "data/functional-judge/evaluator-candidates/functional-oracle-qwen37max.json",
+    "prompt_path": "data/functional-judge/prompts/functional-oracle.txt"
   },
-  "include_prompt_evidence": true,
   "holdout": {
     "cases": 16,
     "cases_sha256": "4ee3353cc601b96be79a879fcedb6f36cffcfc56b0737d4db12e1f4bb3787195",
@@ -42,10 +40,10 @@
   },
   "functional_oracle": {
     "syntax_gate": "python_ast_parse_and_compile",
-    "semantic_gate": "single_pass_blinded_llm_judge",
-    "pass_rule": "syntax_valid_and_all_requirements_met",
-    "fail_rule": "syntax_invalid_or_any_requirement_not_met",
-    "unknown_rule": "syntax_valid_and_any_requirement_unknown_without_not_met"
+    "semantic_gate": "single_pass_blinded_llm_whole_task_review",
+    "pass_rule": "syntax_valid_and_llm_whole_task_pass",
+    "fail_rule": "syntax_invalid_or_llm_whole_task_fail",
+    "unknown_rule": "syntax_valid_and_llm_whole_task_unknown"
   },
   "execution": {
     "retry_failed_case": false,
