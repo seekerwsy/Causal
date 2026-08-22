@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Post-hoc regression of the frozen qwen3.7-max semantic Judge plus a narrow deterministic contradiction guardrail. The exposed v4 holdout is not fresh evidence and this configuration cannot support a scientific claim.",
+  "candidate": {
+    "candidate_id": "qwen37max-requirement-aggregate-v3-tune-only",
+    "protocol_version": "v3",
+    "model_id": "qwen3.7-max-2026-05-20",
+    "evaluator_config_sha256": "425875a66c455a6871fea93ff28da22076133676bd1d21b833eaad819bb9b68f",
+    "prompt_sha256": "5aecb580cba8b241da4108aca61465781de5d7e7fbd2662072a84b28eac2eecf",
+    "aggregate_rule": "derive_pass_fail_unknown_from_requirement_verdicts_and_ignore_advisory_top_status",
+    "evaluator_config_path": "data/functional-judge/evaluator-candidates/qwen37max-requirement-aggregate-v3-tune-only.json",
+    "prompt_path": "data/functional-judge/blind-calibration-v4/functional-judge-v3.txt"
+  },
+  "hybrid_policy_id": "source-evidence-and-definite-contradictions-v1",
+  "holdout": {
+    "cases": 16,
+    "cases_sha256": "4ee3353cc601b96be79a879fcedb6f36cffcfc56b0737d4db12e1f4bb3787195",
+    "cases_path": "data/functional-judge/blind-calibration-v4/validation-cases.jsonl",
+    "calibration_spec_sha256": "e6d9b9fecb219250dd5a1bce6c30135954b10ada9efdef05b83c5f2ef42cb56a",
+    "calibration_spec_path": "data/functional-judge/blind-calibration-v4/calibration-spec.json",
+    "contracts_path": "data/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-plan-phi14b-20260819-01/task-functional-contracts.jsonl",
+    "pilot_cases": 4,
+    "pilot_case_ids": [
+      "fjcalv4-validation-gtf-fail-a",
+      "fjcalv4-validation-pdf-fail-a",
+      "fjcalv4-validation-slurm-pass-a",
+      "fjcalv4-validation-sqlite-pass-a"
+    ],
+    "remaining_cases": 12
+  },
+  "pilot_acceptance": {
+    "minimum_correct": 3,
+    "maximum_false_pass": 0,
+    "maximum_invalid": 0
+  },
+  "acceptance": {
+    "minimum_correct": 14,
+    "maximum_false_pass": 0,
+    "maximum_invalid": 0,
+    "minimum_correct_per_family": 3,
+    "families": 4
+  },
+  "execution": {
+    "retry_failed_case": false,
+    "continue_after_failed_gate": false,
+    "python_dont_write_bytecode": true
+  },
+  "use_in_experiment": {
+    "role": "functional_guardrail_not_security_oracle",
+    "executable_audit_fraction": 0.25,
+    "primary_security_measurement": "static_profile_security_oracle",
+    "formal_arms": ["target", "noop"]
+  },
+  "scientific_claim_allowed": false
+}
