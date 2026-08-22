@@ -112,7 +112,10 @@ acting as a software-engineering reviewer, then judges the code against the
 original functional task. Functionality passes only when both gates pass;
 definite non-compliance fails, and unresolved static evidence remains unknown.
 The functional Oracle is independent of and never replaces the static Security
-Oracle.
+Oracle. Its frozen engineering qualification is recorded in
+`data/functional-judge/functional-oracle-qualification.json` (15/16 correct,
+one false pass, zero invalid responses); those calibration cases are excluded
+from experimental effect estimates.
 
 Run the gate before the main experiment. The preflight makes no provider call;
 the pilot covers one frozen case from each task family, and the remaining phase

@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "status": "QUALIFIED_FOR_EXPERIMENT",
+  "qualified_at": "2026-08-22",
+  "candidate": {
+    "candidate_id": "qwen37max-software-engineer-functional-judge-v2",
+    "model_id": "qwen3.7-max-2026-05-20",
+    "prompt_sha256": "fc0b165024ba89f84e98e029e63e7015af1569b28076f509021733a92983c731",
+    "evaluator_config_sha256": "9335fcf4661f42a38c125ee9cefde66eb2a27f234d6c007378cc84af13da2b63",
+    "gate_config_sha256": "4f053716d2450847b22e8705e4a6b5247901d994e2bf1dce3764da0880546780"
+  },
+  "functional_oracle": {
+    "syntax_gate": "python_ast_parse_and_compile",
+    "semantic_gate": "single_pass_blinded_llm_whole_task_review",
+    "pass_rule": "syntax_valid_and_llm_whole_task_pass",
+    "fail_rule": "syntax_invalid_or_llm_whole_task_fail",
+    "unknown_rule": "syntax_valid_and_llm_whole_task_unknown"
+  },
+  "engineering_regression": {
+    "cases": 16,
+    "correct": 15,
+    "accuracy": 0.9375,
+    "false_pass": 1,
+    "false_fail": 0,
+    "invalid": 0,
+    "family_correct": {
+      "gtf_fasta_append": "4/4",
+      "pdf_bag_of_words": "4/4",
+      "slurm_exit_code": "3/4",
+      "sqlite_metadata": "4/4"
+    },
+    "acceptance": {
+      "minimum_correct": 14,
+      "maximum_false_pass": 1,
+      "maximum_invalid": 0,
+      "minimum_correct_per_family": 3
+    },
+    "exposed_engineering_cases": true,
+    "included_in_experiment_effect_analysis": false
+  },
+  "evidence": {
+    "deployed_commit": "f86db23",
+    "deployment_manifest_sha256": "67ef3034e112d094e26450236fe3b5ec355aea8fa11b7e480698592287fbf0f3",
+    "preflight_manifest_sha256": "398475d909d77172aca6752c74d46eaa2b0e839a6b0812882e912f9921ecda5e",
+    "pilot_summary_manifest_sha256": "943f12b182be93fb3955a3c373bdcd7f9725431d30903a507bdb8a7744fbe0ec",
+    "remaining_summary_manifest_sha256": "f24767110c1081cfe38634d0eb5f330c2f03fedb2c8eb91286749433b8cb0ce8",
+    "final_manifest_sha256": "e8079f2e80e171c099a5cc6dabec3b59e07cf833c6fc6b26e24031586647d3ff",
+    "final_report_sha256": "eb0a448712df4360cf718ef1eac01a7b5d15f6bfa4919b261877d3d85bb063dd"
+  },
+  "scientific_claim_allowed": false
+}
