@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import ast
-from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 import hashlib
 import json
 import os
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -16,7 +16,6 @@ from urllib.request import Request, urlopen
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.records import canonical_json, content_hash
-
 
 MEASUREMENT_METHOD = "ast_compile_plus_blind_llm_review_v1"
 _RESPONSE_KEYS = {"verdict", "evidence_lines", "reason"}
@@ -102,10 +101,9 @@ def load_gate_inputs(
         raise JudgeGateError("judge prompt is empty")
 
     spec = _object(read_json(spec_path), "calibration spec")
-    if (
-        spec.get("validation_cases_sha256") != holdout.get("cases_sha256")
-        or spec.get("validation_expected_cases") != holdout.get("cases")
-    ):
+    if spec.get("validation_cases_sha256") != holdout.get("cases_sha256") or spec.get(
+        "validation_expected_cases"
+    ) != holdout.get("cases"):
         raise JudgeGateError("holdout and calibration spec disagree")
     family_specs = {
         item["family"]: item
@@ -211,7 +209,7 @@ def validate_response(
         }
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001 - all malformed provider outputs fail closed
         raise JudgeGateError("provider response failed functional review validation") from None
 
 
@@ -260,9 +258,10 @@ def run_phase(
         raise JudgeGateError("phase must be pilot or remaining")
     if output.exists():
         raise FileExistsError(output)
-    if phase == "remaining":
-        if pilot_root is None or load_phase(pilot_root)["status"] != "PILOT_PASSED":
-            raise JudgeGateError("remaining cases require a passed pilot")
+    if phase == "remaining" and (
+        pilot_root is None or load_phase(pilot_root)["status"] != "PILOT_PASSED"
+    ):
+        raise JudgeGateError("remaining cases require a passed pilot")
     output.mkdir(parents=True)
     selected = set(inputs.pilot_ids if phase == "pilot" else inputs.remaining_ids)
     cases = [case for case in inputs.cases if case["case_id"] in selected]
@@ -279,7 +278,7 @@ def run_phase(
             result = validate_response(raw, case, contract)
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
-        except Exception as failure:
+        except Exception as failure:  # noqa: BLE001 - close the failed case before stopping
             error = type(failure).__name__
         expected = case["expected_status"]
         actual = result["status"] if result is not None else None
@@ -451,8 +450,16 @@ def _validate_cases(
     counts: Counter[tuple[str, str]] = Counter()
     for case in cases:
         required = {
-            "schema_version", "case_id", "code_text", "equivalence_group", "expected_status",
-            "family", "fixture_role", "seed_id", "split", "task_id",
+            "schema_version",
+            "case_id",
+            "code_text",
+            "equivalence_group",
+            "expected_status",
+            "family",
+            "fixture_role",
+            "seed_id",
+            "split",
+            "task_id",
         }
         if (
             set(case) != required
@@ -640,8 +647,8 @@ def _strings(value: object, name: str) -> list[str]:
 
 
 __all__ = [
-    "JudgeGateError",
     "MEASUREMENT_METHOD",
+    "JudgeGateError",
     "bailian_complete",
     "finalize_gate",
     "load_gate_inputs",

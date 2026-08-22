@@ -8,7 +8,6 @@ import pytest
 from prompt_mechanism_study.artifact_io import verify_bundle
 from prompt_mechanism_study.functional_judge import (
     JudgeGateError,
-    MEASUREMENT_METHOD,
     load_gate_inputs,
     preflight,
     request_for,
@@ -16,7 +15,6 @@ from prompt_mechanism_study.functional_judge import (
     validate_response,
 )
 from prompt_mechanism_study.records import content_hash
-
 
 pytestmark = pytest.mark.reviewer
 ROOT = Path(__file__).parents[1]
@@ -47,9 +45,7 @@ def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: 
         ROOT,
         Path("configs/functional-judge/functional-oracle-qwen37max.json"),
     )
-    assert oracle.evaluator["candidate_id"] == (
-        "qwen37max-software-engineer-functional-judge-v2"
-    )
+    assert oracle.evaluator["candidate_id"] == ("qwen37max-software-engineer-functional-judge-v2")
     assert len(oracle.prompt.split()) < 300
     assert not {"pdftotext", "slurm", "pragma"} & set(oracle.prompt.casefold().split())
     case = oracle.cases[0]
@@ -76,7 +72,8 @@ def test_pilot_runs_four_closed_single_attempt_cases(tmp_path: Path) -> None:
     inputs = load_gate_inputs(ROOT)
     expected_by_request = {
         content_hash(request_for(case, inputs.contracts[case["task_id"]])): (
-            case["expected_status"], inputs.contracts[case["task_id"]]
+            case["expected_status"],
+            inputs.contracts[case["task_id"]],
         )
         for case in inputs.cases
     }
