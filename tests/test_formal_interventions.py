@@ -14,8 +14,20 @@ from prompt_mechanism_study.formal import (
     validate_execution_response,
     validate_semantic_response,
 )
+from prompt_mechanism_study.formal_measurement import _normalize_python_source
 
 ROOT = Path(__file__).parents[1]
+
+
+@pytest.mark.reviewer
+def test_generated_python_normalizes_only_one_complete_outer_fence() -> None:
+    code = "print('ok')"
+    assert _normalize_python_source(code) == code
+    assert _normalize_python_source(f"```python\n{code}\n```") == code
+    assert _normalize_python_source(f"```py\n{code}\n```") == code
+    assert _normalize_python_source(f"```python\n{code}").startswith("```python")
+    mixed = f"Here is the code:\n```python\n{code}\n```"
+    assert _normalize_python_source(mixed) == mixed
 
 
 @pytest.mark.reviewer

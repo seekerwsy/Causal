@@ -277,7 +277,22 @@ def _generate(request_payload: dict[str, Any], config: dict[str, Any]) -> tuple[
     code = choice.get("message", {}).get("content")
     if choice.get("finish_reason") != "stop" or not isinstance(code, str):
         raise ValueError("generator response is incomplete")
-    return raw, code.strip()
+    return raw, _normalize_python_source(code)
+
+
+def _normalize_python_source(text: str) -> str:
+    """Remove one complete outer Python Markdown fence, and nothing else."""
+
+    stripped = text.strip()
+    lines = stripped.splitlines()
+    if (
+        len(lines) >= 3
+        and lines[0].strip().lower() in {"```python", "```py"}
+        and lines[-1].strip() == "```"
+        and not any(line.strip().startswith("```") for line in lines[1:-1])
+    ):
+        return "\n".join(lines[1:-1]).strip()
+    return stripped
 
 
 def _security_decision(
