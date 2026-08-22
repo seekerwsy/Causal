@@ -583,7 +583,7 @@ def _length_match_placebo(
 ) -> str:
     """Mechanically adjust presentation length; semantic validity remains an LLM decision."""
 
-    stem = placebo[:-1] if placebo.endswith(".") else placebo
+    stem = placebo.removesuffix(".")
     candidates = [stem + modifier + "." for modifier in _PLACEBO_MODIFIERS]
     candidates = [
         value for value in candidates if len(value) <= config["maximum_suffix_characters"]
