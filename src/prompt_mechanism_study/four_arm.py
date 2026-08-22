@@ -490,6 +490,9 @@ def _intervention_unit(
     try:
         calls += 1
         raw = provider(request, inputs["executor"], inputs["executor_prompt"])
+        artifacts["execution-response.json"] = {
+            "response_raw": raw.decode("utf-8", errors="replace")
+        }
         suffixes = _validate_suffixes(
             raw,
             inputs["config"]["intervention"],
@@ -515,7 +518,7 @@ def _intervention_unit(
         raise
     except Exception as error:  # noqa: BLE001 - preserve failed intervention evidence
         error_type = type(error).__name__
-        artifacts["error.json"] = {"error_type": error_type}
+        artifacts["error.json"] = {"error_type": error_type, "reason": str(error)}
     artifacts["result.json"] = {
         "task_id": task["task_id"],
         "passed": passed,
