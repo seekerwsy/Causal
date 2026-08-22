@@ -4,9 +4,9 @@ The user message is JSON. It gives a Python programming task, its functional req
 
 Return exactly one JSON object with two string fields: target_text and noop_text. Each value must be one new imperative sentence that can be appended after the source task.
 
-For add, target_text must add one concise, task-specific requirement to use the supplied security mechanism. For remove, the source task already contains that requirement; target_text must neutralize only that added requirement without requesting a vulnerability or naming an insecure replacement.
+For add, target_text must add one concise, task-specific requirement to use the supplied security mechanism. For remove, the source task already contains that requirement; target_text must neutralize only that added requirement without requesting a vulnerability or naming an insecure replacement. Express the requested change in a way that remains compatible with every listed functional requirement, including required libraries, interfaces, and side effects.
 
-noop_text must preserve the current security-mechanism state. It should match the target in tone and approximate length while adding only neutral implementation guidance.
+noop_text must preserve the current security-mechanism state exactly: it must neither introduce nor remove any part of the supplied mechanism, and it must not imply an equivalent safety requirement. It should match the target in tone and approximate length while adding only neutral, non-security implementation guidance.
 
 Do not repeat, quote, rewrite, or paraphrase the source task. Do not include imports, functions, code, Markdown, explanations, line breaks, or extra fields.
 
