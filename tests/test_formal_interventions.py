@@ -38,8 +38,27 @@ def test_formal_selection_and_free_text_boundaries(tmp_path: Path) -> None:
         maximum=100,
     )
     assert set(execution) == {"target_text", "noop_text"}
+    with pytest.raises(ValueError, match="format validation"):
+        validate_execution_response(
+            b'{"target_text":"Rewrite the task.\\nOnly return the code.",'
+            b'"noop_text":"Keep the task unchanged."}',
+            maximum=100,
+        )
     validation = validate_semantic_response(_semantic_response())
     assert validation["target"]["task_preserved"] == "yes"
+
+    failed_root = tmp_path / "source-rewrite"
+    failed = run_intervention_phase(
+        ROOT,
+        "pilot",
+        failed_root,
+        provider=_source_rewrite_provider,
+    )
+    assert failed["status"] == "PILOT_FAILED"
+    assert failed["provider_attempts"] == 1
+    add_evidence = json.loads((failed_root / "task-01/add.json").read_text(encoding="utf-8"))
+    assert add_evidence["execution_response_raw"]
+    assert add_evidence["error_type"] == "FormalStudyError"
 
 
 @pytest.mark.milestone
@@ -72,6 +91,16 @@ def _fake_provider(request: dict, _evaluator: object, _prompt: str) -> bytes:
     return json.dumps(
         {
             "target_text": f"Apply only the requested {operation} mechanism change.",
+            "noop_text": "Keep the current implementation constraints unchanged.",
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _source_rewrite_provider(request: dict, _evaluator: object, _prompt: str) -> bytes:
+    return json.dumps(
+        {
+            "target_text": request["source_prompt"],
             "noop_text": "Keep the current implementation constraints unchanged.",
         },
         separators=(",", ":"),

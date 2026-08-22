@@ -363,33 +363,49 @@ def _operation(
             for item in _list(functional.get("requirements"), "functional requirements")
         ],
     }
-    raw_execution = provider(request, inputs.executor, inputs.executor_prompt)
-    execution = validate_execution_response(
-        raw_execution,
-        maximum=inputs.config["intervention"]["maximum_suffix_characters"],
-    )
-    validation_request = {
-        **request,
-        "target_text": execution["target_text"],
-        "noop_text": execution["noop_text"],
-    }
-    raw_validation = provider(validation_request, inputs.validator, inputs.validator_prompt)
-    validation = validate_semantic_response(raw_validation)
-    return {
+    result: dict[str, Any] = {
         "schema_version": "1.0",
         "operation": operation,
         "source_prompt": source_prompt,
         "execution_request": request,
-        "execution_response_raw": raw_execution.decode("utf-8", errors="replace"),
-        "execution": execution,
-        "execution_evidence_sha256": hashlib.sha256(raw_execution).hexdigest(),
-        "validation_request": validation_request,
-        "validation_response_raw": raw_validation.decode("utf-8", errors="replace"),
-        "validation": validation,
-        "validation_evidence_sha256": hashlib.sha256(raw_validation).hexdigest(),
-        "passed": _semantic_passed(validation),
-        "provider_attempts": 2,
+        "provider_attempts": 0,
+        "passed": False,
+        "error_type": None,
     }
+    try:
+        result["provider_attempts"] += 1
+        raw_execution = provider(request, inputs.executor, inputs.executor_prompt)
+        result["execution_response_raw"] = raw_execution.decode("utf-8", errors="replace")
+        result["execution_evidence_sha256"] = hashlib.sha256(raw_execution).hexdigest()
+        execution = validate_execution_response(
+            raw_execution,
+            maximum=inputs.config["intervention"]["maximum_suffix_characters"],
+        )
+        normalized_source = " ".join(source_prompt.split()).casefold()
+        if any(
+            normalized_source in " ".join(execution[f"{arm}_text"].split()).casefold()
+            for arm in ("target", "noop")
+        ):
+            raise FormalStudyError("intervention text repeated the source task")
+        result["execution"] = execution
+        validation_request = {
+            **request,
+            "target_text": execution["target_text"],
+            "noop_text": execution["noop_text"],
+        }
+        result["validation_request"] = validation_request
+        result["provider_attempts"] += 1
+        raw_validation = provider(validation_request, inputs.validator, inputs.validator_prompt)
+        result["validation_response_raw"] = raw_validation.decode("utf-8", errors="replace")
+        result["validation_evidence_sha256"] = hashlib.sha256(raw_validation).hexdigest()
+        validation = validate_semantic_response(raw_validation)
+        result["validation"] = validation
+        result["passed"] = _semantic_passed(validation)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as error:  # noqa: BLE001 - preserve the failed provider evidence
+        result["error_type"] = type(error).__name__
+    return result
 
 
 def validate_execution_response(raw: bytes, *, maximum: int) -> dict[str, str]:
@@ -404,6 +420,9 @@ def validate_execution_response(raw: bytes, *, maximum: int) -> dict[str, str]:
             or text != text.strip()
             or len(text) > maximum
             or "```" in text
+            or "\n" in text
+            or "\r" in text
+            or "only return the code" in text.lower()
         ):
             raise FormalStudyError("intervention text failed format validation")
         result[name] = text
