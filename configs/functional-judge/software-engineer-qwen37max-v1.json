@@ -3,11 +3,11 @@
   "purpose": "Engineering gate for the scalable functional Oracle: Python AST/compile validity followed by a blinded software-engineering LLM judgment. The exposed v4 cases are regression evidence, not a fresh scientific holdout.",
   "candidate": {
     "candidate_id": "qwen37max-software-engineer-functional-judge-v1",
-    "protocol_version": "v3",
+    "protocol_version": "functional_oracle_v1",
     "model_id": "qwen3.7-max-2026-05-20",
-    "evaluator_config_sha256": "433559bcb72bfb26e33db6feea9a11cdffd8bc1ac19b4a5232b9227358f097eb",
-    "prompt_sha256": "70d9cbd53f68b9fc6eaf5ed578fa1318e782a24e874c704847a674f5c137acb2",
-    "aggregate_rule": "derive_pass_fail_unknown_from_requirement_verdicts_and_ignore_advisory_top_status",
+    "evaluator_config_sha256": "2caaf27e0e63fba323ed8f094899301ff0ab6b321dee07c4a200df43388c69dc",
+    "prompt_sha256": "58cbbf8d3438216ed9938ca0fb44624c4e9522f8b4ed716461c50b64e247664f",
+    "aggregate_rule": "any-not-met-else-unknown-else-pass-v1",
     "evaluator_config_path": "data/functional-judge/evaluator-candidates/qwen37max-software-engineer-v1.json",
     "prompt_path": "data/functional-judge/prompts/software-engineer-functional-judge-v1.txt"
   },

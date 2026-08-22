@@ -18,55 +18,33 @@ from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_
 from prompt_mechanism_study.records import canonical_json, content_hash
 
 
-MEASUREMENT_METHOD = "blind_static_llm_v3_requirement_aggregate"
-AGGREGATE_RULE = "requirement-verdict-aggregate-v1"
-TOP_STATUS_ROLE = "optional_non_authoritative_advisory_ignored"
+MEASUREMENT_METHOD = "blind_llm_functional_review_v1"
+AGGREGATE_RULE = "any-not-met-else-unknown-else-pass-v1"
 AGGREGATE_RULE_RECORD = {
     "rule_id": AGGREGATE_RULE,
     "authoritative_source": "requirements[].verdict",
-    "precedence": ["not_met", "unknown", "met"],
-    "not_met_result": "fail",
-    "unknown_result": "unknown",
-    "empty_result": "unknown",
-    "all_met_result": "pass",
-    "top_level_status_role": TOP_STATUS_ROLE,
+    "rule": "fail if any not_met; otherwise unknown if any unknown; otherwise pass",
 }
 AGGREGATE_RULE_SHA256 = content_hash(AGGREGATE_RULE_RECORD)
-_COUNTEREXAMPLE_KEYS = {
-    "contract_satisfying_scenario",
-    "expected_behavior",
-    "actual_behavior",
-}
 _REQUIREMENT_KEYS = {
     "requirement_id",
     "verdict",
-    "code_evidence_lines",
-    "behavior_trace",
-    "counterexample",
-    "unknown_reason",
+    "evidence_lines",
+    "reason",
 }
 _RESPONSE_KEYS = {
     "measurement_method",
-    "execution_performed",
     "requirements",
-    "rationale",
 }
 _OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": [
         "measurement_method",
-        "execution_performed",
         "requirements",
-        "rationale",
     ],
     "properties": {
         "measurement_method": {"const": MEASUREMENT_METHOD},
-        "execution_performed": {"const": False},
-        "status": {
-            "description": "Optional non-authoritative advisory ignored locally.",
-            "enum": ["pass", "fail", "unknown"],
-        },
         "requirements": {
             "type": "array",
             "maxItems": 32,
@@ -77,26 +55,16 @@ _OUTPUT_SCHEMA = {
                 "properties": {
                     "requirement_id": {"type": "string"},
                     "verdict": {"enum": ["met", "not_met", "unknown"]},
-                    "code_evidence_lines": {
+                    "evidence_lines": {
                         "type": "array",
                         "maxItems": 32,
                         "uniqueItems": True,
                         "items": {"type": "integer", "minimum": 1},
                     },
-                    "behavior_trace": {"type": ["string", "null"]},
-                    "counterexample": {
-                        "type": ["object", "null"],
-                        "additionalProperties": False,
-                        "required": sorted(_COUNTEREXAMPLE_KEYS),
-                        "properties": {
-                            key: {"type": "string"} for key in sorted(_COUNTEREXAMPLE_KEYS)
-                        },
-                    },
-                    "unknown_reason": {"type": ["string", "null"]},
+                    "reason": {"type": "string"},
                 },
             },
         },
-        "rationale": {"type": "string"},
     },
 }
 
@@ -131,7 +99,7 @@ def load_gate_inputs(
 ) -> GateInputs:
     root = repository_root.resolve()
     gate_path = (
-        root / "configs/functional-judge/v3-resume-gate-v1.json"
+        root / "configs/functional-judge/software-engineer-qwen37max-v1.json"
         if gate_config is None
         else _inside(root, gate_config)
     )
@@ -153,7 +121,7 @@ def load_gate_inputs(
     evaluator = _object(read_json(evaluator_path), "evaluator")
     expected_evaluator = {
         "candidate_id": candidate.get("candidate_id"),
-        "protocol_version": "v3",
+        "protocol_version": "functional_oracle_v1",
         "model_id": candidate.get("model_id"),
         "mode": "single_pass",
         "max_attempts": 1,
@@ -232,9 +200,8 @@ def request_for(
             {"line_number": number, "text": line}
             for number, line in enumerate(case["code_text"].splitlines(), start=1)
         ],
-        "protocol_version": "v3",
+        "protocol_version": "functional_oracle_v1",
         "measurement_method": MEASUREMENT_METHOD,
-        "execution_performed": False,
         "aggregate_status_rule": AGGREGATE_RULE,
         "aggregate_status_rule_sha256": AGGREGATE_RULE_SHA256,
         "output_schema": _OUTPUT_SCHEMA,
@@ -259,13 +226,9 @@ def validate_response(
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
         response = _object(response, "response")
-        if set(response) != _RESPONSE_KEYS and set(response) != _RESPONSE_KEYS | {"status"}:
+        if set(response) != _RESPONSE_KEYS:
             raise ValueError
-        if (
-            response["measurement_method"] != MEASUREMENT_METHOD
-            or response["execution_performed"] is not False
-            or ("status" in response and response["status"] not in {"pass", "fail", "unknown"})
-        ):
+        if response["measurement_method"] != MEASUREMENT_METHOD:
             raise ValueError
         raw_decisions = _list(response["requirements"])
         if len(raw_decisions) > 32:
@@ -285,21 +248,14 @@ def validate_response(
             if "not_met" in verdicts
             else "unknown" if not decisions or "unknown" in verdicts else "pass"
         )
-        rationale = response["rationale"]
-        _bounded_text(rationale, 8000)
-        advisory = response.get("status")
         return {
             "status": status,
             "requirements": decisions,
-            "rationale": rationale,
-            "advisory_status_present": advisory is not None,
-            "advisory_status": advisory,
-            "advisory_status_agrees": advisory is None or advisory == status,
         }
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        raise JudgeGateError("provider response failed v3 validation") from None
+        raise JudgeGateError("provider response failed functional review validation") from None
 
 
 def preflight(
@@ -595,7 +551,7 @@ def _load_contracts(
 def _validate_decision(item: dict[str, Any], program_lines: Sequence[str]) -> dict[str, Any]:
     if set(item) != _REQUIREMENT_KEYS or item["verdict"] not in {"met", "not_met", "unknown"}:
         raise ValueError
-    line_numbers = item["code_evidence_lines"]
+    line_numbers = item["evidence_lines"]
     if (
         not isinstance(line_numbers, list)
         or len(line_numbers) > 32
@@ -612,35 +568,15 @@ def _validate_decision(item: dict[str, Any], program_lines: Sequence[str]) -> di
         if program_lines[number - 1].strip()
     ]
     verdict = item["verdict"]
-    behavior = item["behavior_trace"]
-    counterexample = item["counterexample"]
-    unknown = item["unknown_reason"]
-    if verdict == "met":
-        if not evidence or counterexample is not None or unknown is not None:
-            raise ValueError
-        _bounded_text(behavior, 4000)
-    elif verdict == "not_met":
-        if (
-            behavior is not None
-            or unknown is not None
-            or not isinstance(counterexample, dict)
-            or set(counterexample) != _COUNTEREXAMPLE_KEYS
-        ):
-            raise ValueError
-        for value in counterexample.values():
-            _bounded_text(value, 1200)
-    elif behavior is not None or counterexample is not None:
+    if verdict != "unknown" and not evidence:
         raise ValueError
-    else:
-        _bounded_text(unknown, 4000)
+    _bounded_text(item["reason"], 2000)
     return {
         "requirement_id": item["requirement_id"],
         "verdict": verdict,
-        "code_evidence_lines": line_numbers,
+        "evidence_lines": line_numbers,
         "resolved_code_evidence": evidence,
-        "behavior_trace": behavior,
-        "counterexample": counterexample,
-        "unknown_reason": unknown,
+        "reason": item["reason"],
     }
 
 
