@@ -81,6 +81,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     formal.add_argument("--pilot-root", type=Path)
     formal.add_argument("--remaining-root", type=Path)
 
+    measurements = commands.add_parser(
+        "formal-measurements",
+        help="run frozen generator and Oracle adapters for formal assignments",
+    )
+    measurements.add_argument("phase", choices=("pilot", "remaining"))
+    measurements.add_argument("output", type=Path)
+    measurements.add_argument("--repository-root", type=Path, default=Path.cwd())
+    measurements.add_argument("--add-freeze", type=Path, required=True)
+    measurements.add_argument("--remove-freeze", type=Path, required=True)
+    measurements.add_argument("--interventions", type=Path, required=True)
+    measurements.add_argument("--oracle-source-root", type=Path, required=True)
+    measurements.add_argument("--semgrep", type=Path, required=True)
+    measurements.add_argument("--bandit", type=Path, required=True)
+    measurements.add_argument("--pilot-root", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "freeze":
         _freeze(args.protocol, args.output)
@@ -94,6 +109,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(read_json(args.root / "analysis.json"), indent=2, sort_keys=True))
     elif args.command == "formal-interventions":
         return _formal_interventions(args)
+    elif args.command == "formal-measurements":
+        from prompt_mechanism_study.formal_measurement import run_measurement_phase
+
+        report = run_measurement_phase(
+            args.repository_root,
+            args.phase,
+            args.output,
+            add_freeze=args.add_freeze,
+            remove_freeze=args.remove_freeze,
+            interventions=args.interventions,
+            oracle_source_root=args.oracle_source_root,
+            semgrep=args.semgrep,
+            bandit=args.bandit,
+            pilot_root=args.pilot_root,
+        )
+        print(report["status"])
+        return 0 if report["status"] in {"PILOT_COMPLETE", "REMAINING_COMPLETE"} else 2
     else:
         return _judge_gate(args)
     return 0
