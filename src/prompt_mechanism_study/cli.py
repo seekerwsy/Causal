@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
+from prompt_mechanism_study import functional_judge
 from prompt_mechanism_study.adapters import AdapterBundle, AdapterKind, AdapterSpec
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
-from prompt_mechanism_study.functional_judge import (
-    finalize_gate,
-    preflight as judge_preflight,
-    run_phase as run_judge_phase,
-)
 from prompt_mechanism_study.inference import AnalysisPlan, Metric
 from prompt_mechanism_study.intervention import (
     ARM_ORDER,
@@ -73,6 +70,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     judge.add_argument("--pilot-root", type=Path)
     judge.add_argument("--remaining-root", type=Path)
 
+    formal = commands.add_parser(
+        "formal-interventions",
+        help="freeze the formal ADD/REMOVE intervention policies before generation",
+    )
+    formal.add_argument("phase", choices=("preflight", "pilot", "remaining", "finalize"))
+    formal.add_argument("output", type=Path)
+    formal.add_argument("--repository-root", type=Path, default=Path.cwd())
+    formal.add_argument("--config", type=Path)
+    formal.add_argument("--pilot-root", type=Path)
+    formal.add_argument("--remaining-root", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "freeze":
         _freeze(args.protocol, args.output)
@@ -84,6 +92,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "summarize":
         verify_bundle(args.root)
         print(json.dumps(read_json(args.root / "analysis.json"), indent=2, sort_keys=True))
+    elif args.command == "formal-interventions":
+        return _formal_interventions(args)
     else:
         return _judge_gate(args)
     return 0
@@ -91,13 +101,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _judge_gate(args: argparse.Namespace) -> int:
     if args.phase == "preflight":
-        report = judge_preflight(
+        report = functional_judge.preflight(
             args.repository_root,
             args.output,
             gate_config=args.gate_config,
         )
     elif args.phase in {"pilot", "remaining"}:
-        report = run_judge_phase(
+        report = functional_judge.run_phase(
             args.repository_root,
             args.phase,
             args.output,
@@ -107,7 +117,7 @@ def _judge_gate(args: argparse.Namespace) -> int:
     else:
         if args.pilot_root is None or args.remaining_root is None:
             raise ValueError("finalize requires --pilot-root and --remaining-root")
-        report = finalize_gate(
+        report = functional_judge.finalize_gate(
             args.repository_root,
             args.pilot_root,
             args.remaining_root,
@@ -115,12 +125,62 @@ def _judge_gate(args: argparse.Namespace) -> int:
             gate_config=args.gate_config,
         )
     print(report["status"])
-    return 0 if report["status"] in {
-        "JUDGE_GATE_PREFLIGHT_COMPLETE",
-        "PILOT_PASSED",
-        "REMAINING_COMPLETE",
-        "JUDGE_GATE_PASSED",
-    } else 2
+    return (
+        0
+        if report["status"]
+        in {
+            "JUDGE_GATE_PREFLIGHT_COMPLETE",
+            "PILOT_PASSED",
+            "REMAINING_COMPLETE",
+            "JUDGE_GATE_PASSED",
+        }
+        else 2
+    )
+
+
+def _formal_interventions(args: argparse.Namespace) -> int:
+    from prompt_mechanism_study.formal import (
+        finalize_interventions,
+        preflight_interventions,
+        run_intervention_phase,
+    )
+
+    if args.phase == "preflight":
+        report = preflight_interventions(
+            args.repository_root,
+            args.output,
+            config_path=args.config,
+        )
+    elif args.phase in {"pilot", "remaining"}:
+        report = run_intervention_phase(
+            args.repository_root,
+            args.phase,
+            args.output,
+            pilot_root=args.pilot_root,
+            config_path=args.config,
+        )
+    else:
+        if args.pilot_root is None or args.remaining_root is None:
+            raise ValueError("finalize requires --pilot-root and --remaining-root")
+        report = finalize_interventions(
+            args.repository_root,
+            args.pilot_root,
+            args.remaining_root,
+            args.output,
+            config_path=args.config,
+        )
+    print(report["status"])
+    return (
+        0
+        if report["status"]
+        in {
+            "FORMAL_INTERVENTION_PREFLIGHT_COMPLETE",
+            "PILOT_PASSED",
+            "REMAINING_COMPLETE",
+            "FORMAL_INTERVENTIONS_FROZEN",
+        }
+        else 2
+    )
 
 
 def _freeze(protocol_path: Path, output: Path) -> None:
@@ -463,7 +523,7 @@ def _exact(
 
 def _list(raw: object, name: str) -> list[Any]:
     if not isinstance(raw, list):
-        raise ValueError(f"{name} must be a list")
+        raise TypeError(f"{name} must be a list")
     return raw
 
 

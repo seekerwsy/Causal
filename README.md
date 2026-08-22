@@ -117,6 +117,16 @@ Oracle. Its frozen engineering qualification is recorded in
 one false pass, zero invalid responses); those calibration cases are excluded
 from experimental effect estimates.
 
+The active formal study is frozen in
+`configs/formal/bidirectional-heldout-qwen7b-v1.json`. It runs two separate
+paired policies on the same 30 non-D_DEV semantic task clusters. ADD appends a
+task-specific CWE-aligned safety requirement to the original prompt. REMOVE
+starts from that validated safety-bearing prompt and neutralizes only that
+requirement; it never asks for a vulnerability or names an insecure
+replacement. Each policy compares Target with a matched task-preserving Noop.
+The task texts are produced by the frozen intervention LLM and accepted only
+after a separate outcome-blind LLM semantic review.
+
 Run the gate before the main experiment. The preflight makes no provider call;
 the pilot covers one frozen case from each task family, and the remaining phase
 is unavailable unless that pilot passes:
@@ -135,6 +145,19 @@ Every attempted case is closed as its own exact-byte bundle before the phase
 summary is written. Provider requests omit case identity, family, gold label,
 arm, security outcome, and generator identity.
 
+Freeze the intervention texts before any formal code generation:
+
+    prompt-mechanism-study formal-interventions preflight intervention-preflight
+    prompt-mechanism-study formal-interventions pilot intervention-pilot
+    prompt-mechanism-study formal-interventions remaining intervention-remaining \
+      --pilot-root intervention-pilot
+    prompt-mechanism-study formal-interventions finalize intervention-freeze \
+      --pilot-root intervention-pilot --remaining-root intervention-remaining
+
+The pilot contains one task from every included CWE and gates only semantic
+intervention validity. The later generation pilot gates only infrastructure and
+measurement completeness; neither gate may inspect the effect direction.
+
 ## Code map
 
 | Module | Responsibility |
@@ -143,6 +166,7 @@ arm, security outcome, and generator identity.
 | representation.py | Splits, semantic clusters, candidates, universe |
 | prioritization.py | Score, rank, and top-K freeze |
 | intervention.py | Intervention spec, LLM executions, semantic validation, prompt assembly |
+| formal.py | Frozen held-out task selection and ADD/REMOVE intervention preparation |
 | randomization.py | Complete-block assignment |
 | measurement.py | External results and infrastructure boundary |
 | outcomes.py | Total outcome decomposition |
@@ -154,12 +178,12 @@ arm, security outcome, and generator identity.
 
 ## Review
 
-The default suite contains 24 focused scientific-invariant tests:
+The default suite contains 29 focused scientific-invariant tests:
 
     python -m pytest -q
 
-Two additional milestone tests execute the separated freeze and analyze CLI
-path:
+Three additional milestone tests execute the separated freeze/analyze path and
+the complete intervention-freeze smoke:
 
     python -m pytest -q -m milestone
 
