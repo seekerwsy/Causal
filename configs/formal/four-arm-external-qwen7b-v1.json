@@ -40,7 +40,8 @@
     "validator_prompt_sha256": "51dd56fa5c904d095f8364ab9a6d699cfa21342fc328391013f77347a0574dc1",
     "maximum_suffix_characters": 320,
     "placebo_relative_tolerance": 0.25,
-    "placebo_minimum_tolerance_characters": 12
+    "placebo_minimum_tolerance_characters": 12,
+    "placebo_length_normalization": "append_frozen_security_neutral_modifier_v1"
   },
   "generation": {
     "model_id": "qwen2.5-coder-7b-instruct",

@@ -39,6 +39,12 @@ PROFILE_BY_CWE = {
     "CWE-89": "python.cwe89.function_parameter_sqlite_query.v2",
     "CWE-502": "python.cwe502.function_parameter_deserialization.v2",
 }
+_PLACEBO_MODIFIERS = (
+    "",
+    " with clear names",
+    " with clear names and straightforward organization",
+    " with clear names, straightforward organization, and concise comments",
+)
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
 
@@ -553,6 +559,11 @@ def _validate_suffixes(
         result[key.removesuffix("_text")] = text
     if len(set(result.values())) != 3:
         raise FormalStudyError("executor suffixes collided")
+    result["placebo"] = _length_match_placebo(
+        result["specific"],
+        result["placebo"],
+        config,
+    )
     normalized_source = " ".join(source_prompt.split()).casefold()
     if any(normalized_source in " ".join(text.split()).casefold() for text in result.values()):
         raise FormalStudyError("executor suffix repeated the source task")
@@ -563,6 +574,21 @@ def _validate_suffixes(
     if abs(len(result["specific"]) - len(result["placebo"])) > tolerance:
         raise FormalStudyError("placebo length is not comparable")
     return result
+
+
+def _length_match_placebo(
+    specific: str,
+    placebo: str,
+    config: Mapping[str, Any],
+) -> str:
+    """Mechanically adjust presentation length; semantic validity remains an LLM decision."""
+
+    stem = placebo[:-1] if placebo.endswith(".") else placebo
+    candidates = [stem + modifier + "." for modifier in _PLACEBO_MODIFIERS]
+    candidates = [
+        value for value in candidates if len(value) <= config["maximum_suffix_characters"]
+    ]
+    return min(candidates, key=lambda value: (abs(len(value) - len(specific)), len(value)))
 
 
 def _validate_semantics(raw: bytes) -> dict[str, Any]:

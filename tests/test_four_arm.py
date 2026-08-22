@@ -33,6 +33,7 @@ def test_four_arm_suffix_contract_separates_specific_generic_and_placebo() -> No
         source_prompt="Implement a database lookup function.",
     )
     assert set(suffixes) == {"specific", "generic", "placebo"}
+    assert abs(len(suffixes["specific"]) - len(suffixes["placebo"])) <= 12
     valid = {
         "task_preserved": "yes",
         "contract_satisfied": "yes",
