@@ -10,9 +10,10 @@ from prompt_mechanism_study.functional_judge import (
     JudgeGateError,
     load_gate_inputs,
     preflight,
+    python_syntax_valid,
     request_for,
     run_phase,
-    validate_response,
+    validate_review_response,
 )
 from prompt_mechanism_study.records import content_hash
 
@@ -59,13 +60,15 @@ def test_functional_review_derives_failure_from_requirements() -> None:
     case = next(item for item in inputs.cases if item["expected_status"] == "fail")
     contract = inputs.contracts[case["task_id"]]
 
-    result = validate_response(_response(contract, "fail"), case, contract)
+    result = validate_review_response(_response(contract, "fail"), case["code_text"])
 
     assert result["status"] == "fail"
     malformed = json.loads(_response(contract, "fail"))
     malformed.pop("reason")
     with pytest.raises(JudgeGateError):
-        validate_response(json.dumps(malformed).encode(), case, contract)
+        validate_review_response(json.dumps(malformed).encode(), case["code_text"])
+    assert python_syntax_valid(case["code_text"])
+    assert not python_syntax_valid("def broken(:\n")
 
 
 def test_pilot_runs_four_closed_single_attempt_cases(tmp_path: Path) -> None:

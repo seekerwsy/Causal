@@ -144,7 +144,28 @@ def request_for(
         }
         for item in contract["requirements"]
     ]
-    request = {
+    return build_review_request(
+        case["code_text"],
+        "\n".join(task_prompts),
+        requirements=requirements,
+        environment_dependencies=contract["environment_dependencies"],
+        language=contract["language"],
+    )
+
+
+def build_review_request(
+    code_text: str,
+    functional_task: str,
+    *,
+    requirements: Sequence[Mapping[str, Any]] = (),
+    environment_dependencies: Sequence[str] = (),
+    language: str = "python",
+) -> dict[str, Any]:
+    """Build the outcome-blind request used by formal measurement adapters."""
+
+    if not code_text.strip() or not functional_task.strip() or not language.strip():
+        raise JudgeGateError("functional review input is empty")
+    return {
         "schema_version": "1.0",
         "request_kind": "blind_functional_evaluation",
         "blindness": {
@@ -153,25 +174,22 @@ def request_for(
             "security_outcome_withheld": True,
             "generator_identity_withheld": True,
         },
-        "language": contract["language"],
-        "functional_task": "\n".join(task_prompts),
-        "requirements": requirements,
-        "environment_dependencies": list(contract["environment_dependencies"]),
+        "language": language,
+        "functional_task": functional_task,
+        "requirements": [dict(item) for item in requirements],
+        "environment_dependencies": list(environment_dependencies),
         "program_lines": [
             {"line_number": number, "text": line}
-            for number, line in enumerate(case["code_text"].splitlines(), start=1)
+            for number, line in enumerate(code_text.splitlines(), start=1)
         ],
         "measurement_method": MEASUREMENT_METHOD,
         "output_schema": _OUTPUT_SCHEMA,
     }
-    return request
 
 
-def validate_response(
-    raw: bytes,
-    case: Mapping[str, Any],
-    contract: Mapping[str, Any],
-) -> dict[str, Any]:
+def validate_review_response(raw: bytes, code_text: str) -> dict[str, Any]:
+    """Validate a provider response without consulting arm or security outcomes."""
+
     try:
         maximum = 65_536
         if not raw or len(raw) > maximum:
@@ -188,7 +206,7 @@ def validate_response(
         if verdict not in {"pass", "fail", "unknown"}:
             raise ValueError
         line_numbers = response["evidence_lines"]
-        program_lines = case["code_text"].splitlines()
+        program_lines = code_text.splitlines()
         if (
             not isinstance(line_numbers, list)
             or len(line_numbers) > 32
@@ -211,6 +229,19 @@ def validate_response(
         raise
     except Exception:  # noqa: BLE001 - all malformed provider outputs fail closed
         raise JudgeGateError("provider response failed functional review validation") from None
+
+
+def python_syntax_valid(code_text: str) -> bool:
+    """Return whether Python code is non-empty, parseable, and compilable."""
+
+    try:
+        tree = ast.parse(code_text)
+        if not tree.body:
+            return False
+        compile(tree, "<generated-code>", "exec")
+    except (SyntaxError, TypeError, ValueError):
+        return False
+    return True
 
 
 def preflight(
@@ -275,7 +306,7 @@ def run_phase(
         error: str | None = None
         try:
             raw = provider(request_payload, inputs.evaluator, inputs.prompt)
-            result = validate_response(raw, case, contract)
+            result = validate_review_response(raw, case["code_text"])
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
         except Exception as failure:  # noqa: BLE001 - close the failed case before stopping
@@ -470,12 +501,7 @@ def _validate_cases(
         family = family_specs.get(case["family"])
         if family is None or case["task_id"] != family["task_id"]:
             raise JudgeGateError("holdout case family binding failed validation")
-        try:
-            tree = ast.parse(case["code_text"])
-            if not tree.body:
-                raise ValueError
-            compile(tree, f"<{case['case_id']}>", "exec")
-        except (SyntaxError, TypeError, ValueError):
+        if not python_syntax_valid(case["code_text"]):
             raise JudgeGateError("holdout code is not valid Python") from None
         counts[(case["family"], case["expected_status"])] += 1
     if any(counts[(family, status)] != 2 for family in family_specs for status in ("pass", "fail")):
@@ -650,11 +676,13 @@ __all__ = [
     "MEASUREMENT_METHOD",
     "JudgeGateError",
     "bailian_complete",
+    "build_review_request",
     "finalize_gate",
     "load_gate_inputs",
     "load_phase",
     "preflight",
+    "python_syntax_valid",
     "request_for",
     "run_phase",
-    "validate_response",
+    "validate_review_response",
 ]
