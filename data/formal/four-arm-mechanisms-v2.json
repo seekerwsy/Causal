@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "mechanisms": [
+    {
+      "realization_id": "cwe78_command_execution",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "specific_contract": "Pass command arguments as a sequence, do not invoke a command shell with untrusted text, and restrict an input-selected executable to an explicit allowlist while preserving the requested command behavior.",
+      "must_preserve": ["command behavior", "arguments", "return value", "side effects", "required command-line tool"]
+    },
+    {
+      "realization_id": "cwe89_sqlite_dynamic_identifier_and_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_query.v2",
+      "specific_contract": "Bind untrusted SQL values with sqlite3 placeholders and map any dynamic table or column identifier through an explicit allowlist; do not attempt to bind identifiers as values.",
+      "must_preserve": ["database library", "CRUD operation", "table semantics", "query result", "function interface"]
+    },
+    {
+      "realization_id": "cwe502_yaml_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "prompt_markers": ["yaml"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse untrusted YAML with yaml.safe_load, never yaml.load or arbitrary object construction, and preserve the YAML input format and requested result schema.",
+      "must_preserve": ["YAML input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe502_json_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "prompt_markers": ["json"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse untrusted JSON with json.loads, never eval, pickle, or arbitrary object construction, and preserve the JSON input format and requested result schema.",
+      "must_preserve": ["JSON input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe502_python_literal_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "prompt_markers": ["literal"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse untrusted Python literal data with ast.literal_eval, never eval or arbitrary object construction, and preserve the input and result schemas.",
+      "must_preserve": ["literal input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe328_security_sensitive_hash",
+      "cwe_id": "CWE-328",
+      "task_family": "message_hashing",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe328.message_hashing.v1",
+      "specific_contract": "Use SHA-256 or a stronger current cryptographic hash for the requested integrity or identifier operation while preserving the exact input, output, encoding, and formatting contract.",
+      "must_preserve": ["input encoding", "output representation", "function interface", "identifier semantics", "error behavior"]
+    },
+    {
+      "realization_id": "cwe338_security_sensitive_randomness",
+      "cwe_id": "CWE-338",
+      "task_family": "security_random_generation",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe338.security_randomness.v1",
+      "specific_contract": "Use random.SystemRandom or the secrets module for security-sensitive randomness while preserving the requested alphabet, length, return type, public interface, and standard-library constraint.",
+      "must_preserve": ["alphabet", "length", "return type", "function interface", "standard-library constraint"]
+    }
+  ]
+}

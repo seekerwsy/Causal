@@ -13,6 +13,7 @@ def main() -> int:
     parser.add_argument(
         "action",
         choices=(
+            "prepare-registered",
             "preflight",
             "intervene-pilot",
             "intervene-remaining",
@@ -23,8 +24,11 @@ def main() -> int:
     )
     parser.add_argument("output", type=Path)
     parser.add_argument("--repository-root", type=Path, default=Path.cwd())
-    parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--tasks", type=Path, required=True)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--tasks", type=Path)
+    parser.add_argument("--source-tasks", type=Path)
+    parser.add_argument("--mechanism-registry", type=Path)
+    parser.add_argument("--selected-task-id", action="append", default=[])
     parser.add_argument("--intervention-pilot", type=Path)
     parser.add_argument("--intervention-remaining", type=Path)
     parser.add_argument("--measurement-pilot", type=Path)
@@ -33,6 +37,19 @@ def main() -> int:
     parser.add_argument("--semgrep", type=Path)
     parser.add_argument("--bandit", type=Path)
     args = parser.parse_args()
+    if args.action == "prepare-registered":
+        if args.source_tasks is None or args.mechanism_registry is None:
+            parser.error("preparation requires source-tasks and mechanism-registry")
+        report = four_arm.prepare_registered_tasks(
+            args.source_tasks,
+            args.mechanism_registry,
+            args.selected_task_id,
+            args.output,
+        )
+        print("FOUR_ARM_TASKS_PREPARED")
+        return 0
+    if args.config is None or args.tasks is None:
+        parser.error("this action requires config and tasks")
     if args.action == "preflight":
         report = four_arm.preflight(args.repository_root, args.config, args.tasks, args.output)
     elif args.action.startswith("intervene-"):

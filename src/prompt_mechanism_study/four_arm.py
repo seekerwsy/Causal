@@ -30,27 +30,18 @@ from prompt_mechanism_study.functional_judge import (
     python_syntax_valid,
     validate_review_response,
 )
+from prompt_mechanism_study.mechanisms import load_mechanism_registry, select_mechanism
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id
 
 ARMS = ("absent", "specific", "generic", "placebo")
-CONTRASTS = (("specific", "absent"), ("specific", "generic"), ("specific", "placebo"))
-PROFILE_BY_CWE = {
-    "CWE-78": "python.cwe78.function_parameter_subprocess.v2",
-    "CWE-89": "python.cwe89.function_parameter_sqlite_query.v2",
-    "CWE-502": "python.cwe502.function_parameter_deserialization.v2",
-}
-_PLACEBO_MODIFIERS = (
-    "",
-    " with clear names",
-    " with clear names and straightforward organization",
-    " with clear names, straightforward organization, and concise comments",
-)
+CONTRASTS = (("specific", "placebo"), ("specific", "absent"), ("specific", "generic"))
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
 
 def prepare_external_tasks(
     prompts_path: Path,
     contracts_path: Path,
+    registry_path: Path,
     output: Path,
     *,
     count: int = 30,
@@ -71,18 +62,23 @@ def prepare_external_tasks(
             f"four-arm-selection-v1:{selection_seed}:{row['task_id']}".encode()
         ).hexdigest(),
     )
+    registry = load_mechanism_registry(registry_path)
     rows = []
     for source in ordered[:count]:
         contract = contracts[source["task_id"]]
+        mechanism = select_mechanism(source, registry)
         rows.append(
             {
                 "task_id": source["task_id"],
                 "semantic_cluster_id": source["task_id"],
                 "cwe": source["cwe"],
+                "task_family": source["task_family"],
+                "realization_id": mechanism["realization_id"],
+                "generation_mode": "complete_python_source",
                 "language": "python",
                 "prompt": source["prompt"],
                 "source_prompt_sha256": content_hash(source["prompt"]),
-                "oracle_profile_id": PROFILE_BY_CWE[source["cwe"]],
+                "oracle_profile_id": mechanism["oracle_profile_id"],
                 "functional_contract": {
                     "contract_id": contract["contract_id"],
                     "environment_dependencies": contract["environment_dependencies"],
@@ -90,6 +86,55 @@ def prepare_external_tasks(
                 },
             }
         )
+    payload = "".join(canonical_json(row) + "\n" for row in rows).encode()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+    return {
+        "tasks": len(rows),
+        "cwe_counts": dict(sorted(Counter(row["cwe"] for row in rows).items())),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def prepare_registered_tasks(
+    source_path: Path,
+    registry_path: Path,
+    selected_task_ids: Sequence[str],
+    output: Path,
+) -> dict[str, Any]:
+    """Prepare a small input-only task set from an existing audited task pool."""
+
+    if output.exists():
+        raise FileExistsError(output)
+    source_by_id = {row["task_id"]: row for row in _json_lines(source_path)}
+    if len(selected_task_ids) != len(set(selected_task_ids)) or not set(selected_task_ids) <= set(
+        source_by_id
+    ):
+        raise FormalStudyError("registered task selection is invalid")
+    registry = load_mechanism_registry(registry_path)
+    rows = []
+    for task_id in selected_task_ids:
+        source = source_by_id[task_id]
+        mechanism = select_mechanism(source, registry)
+        rows.append(
+            {
+                "task_id": task_id,
+                "semantic_cluster_id": source.get(
+                    "semantic_cluster_id", source.get("task_cluster_id")
+                ),
+                "cwe": source["cwe"],
+                "task_family": source["task_family"],
+                "realization_id": mechanism["realization_id"],
+                "generation_mode": "complete_python_source",
+                "language": "python",
+                "prompt": source["prompt"],
+                "source_prompt_sha256": content_hash(source["prompt"]),
+                "oracle_profile_id": mechanism["oracle_profile_id"],
+                "functional_contract": source["functional_contract"],
+            }
+        )
+    if any(not row["semantic_cluster_id"] for row in rows):
+        raise FormalStudyError("registered task cluster binding is missing")
     payload = "".join(canonical_json(row) + "\n" for row in rows).encode()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(payload)
@@ -219,7 +264,9 @@ def run_measurements(
         error_type = None
         try:
             suffix = "" if arm == "absent" else suffixes[task["task_id"]][arm]
-            prompt = task["prompt"] if not suffix else task["prompt"] + "\n\n" + suffix
+            prompt = _generation_prompt(
+                task["prompt"], suffix, inputs["config"]["intervention"]
+            )
             seed = int(
                 content_hash(
                     {
@@ -284,6 +331,11 @@ def run_measurements(
                 "functional_status": "not_run" if functional is None else functional["status"],
                 "generator_evidence_sha256": hashlib.sha256(raw).hexdigest(),
                 "code_sha256": hashlib.sha256(code.encode()).hexdigest() if code else None,
+                "code_characters": len(code),
+                "code_lines": len(code.splitlines()),
+                "response_used_markdown_fence": "```" in raw.decode(
+                    "utf-8", errors="replace"
+                ),
             }
             artifacts["measurement.json"] = measurement
             complete = True
@@ -390,6 +442,24 @@ def analyze(
         record["metrics"]["secure_yield"]["statistically_distinguishable"] = (
             interval[0] > 0 or interval[1] < 0
         )
+        record["inferential_role"] = (
+            "primary"
+            if record["contrast"] == config["analysis"]["primary_contrast"]
+            else "secondary"
+        )
+    primary = next(record for record in effects if record["inferential_role"] == "primary")
+    functional_difference = primary["metrics"]["functionality"]["difference"]
+    noninferiority_margin = config["analysis"]["functionality_noninferiority_margin"]
+    primary_gate = {
+        "contrast": primary["contrast"],
+        "security_improved": primary["metrics"]["secure_yield"]["difference"] > 0,
+        "security_interval_excludes_zero": primary["metrics"]["secure_yield"][
+            "statistically_distinguishable"
+        ],
+        "functionality_noninferior": functional_difference >= -noninferiority_margin,
+        "joint_difference": primary["metrics"]["joint"]["difference"],
+        "claim_rule": "security_interval_excludes_zero_and_functionality_noninferior",
+    }
     report = {
         "schema_version": "1.0",
         "status": "FOUR_ARM_ANALYSIS_COMPLETE",
@@ -399,11 +469,14 @@ def analyze(
         "cwe_counts": dict(sorted(Counter(row["cwe"] for row in tasks).items())),
         "arms": arms,
         "contrasts": effects,
+        "primary_gate": primary_gate,
         "simultaneous_critical_value": critical,
         "analysis_scope": "single_generator_model_external_cluster_replication",
         "task_freshness": "new_assignments_on_clusters_previously_measured_with_another_generator",
         "functional_measurement": "ast_compile_plus_blind_llm_review_not_executable_correctness",
-        "scientific_claim_allowed": True,
+        "scientific_claim_allowed": bool(
+            config.get("scientific_claim_allowed_after_complete_analysis", False)
+        ),
     }
     write_bundle(output, {"report.json": report, "measurements.json": measurements})
     return report
@@ -412,6 +485,11 @@ def analyze(
 def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, Any]:
     root = root.resolve()
     config = read_json(config_path)
+    registry_config = config["mechanism_registry"]
+    registry_path = root / registry_config["path"]
+    if hashlib.sha256(registry_path.read_bytes()).hexdigest() != registry_config["sha256"]:
+        raise FormalStudyError("mechanism registry drifted")
+    registry = load_mechanism_registry(registry_path)
     tasks_payload = tasks_path.read_bytes()
     tasks = _json_lines(tasks_path)
     source = config["task_source"]
@@ -435,9 +513,11 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
     ):
         raise FormalStudyError("four-arm population binding drifted")
     for task in tasks:
+        mechanism = select_mechanism(task, registry)
         if (
             task.get("language") != "python"
-            or task.get("oracle_profile_id") != PROFILE_BY_CWE.get(task.get("cwe"))
+            or task.get("generation_mode") != "complete_python_source"
+            or task.get("oracle_profile_id") != mechanism["oracle_profile_id"]
             or task.get("source_prompt_sha256") != content_hash(task.get("prompt"))
             or not task.get("functional_contract", {}).get("requirements")
         ):
@@ -461,6 +541,7 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
         "root": root,
         "config": config,
         "tasks": tasks,
+        "registry": registry,
         "executor": read_json(root / config["intervention"]["executor_config_path"]),
         "validator": read_json(root / config["intervention"]["validator_config_path"]),
         "executor_prompt": (root / config["intervention"]["executor_prompt_path"]).read_text(
@@ -482,12 +563,14 @@ def _phase_tasks(inputs: Mapping[str, Any], phase: str) -> list[dict[str, Any]]:
 def _intervention_unit(
     inputs: Mapping[str, Any], task: dict[str, Any], provider: Provider
 ) -> tuple[dict[str, Any], bool]:
+    mechanism = select_mechanism(task, inputs["registry"])
     request = {
         "source_prompt": task["prompt"],
         "functional_requirements": [
             item["criterion"] for item in task["functional_contract"]["requirements"]
         ],
-        "security_mechanism": inputs["config"]["security_mechanisms"][task["cwe"]],
+        "mechanism_contract": mechanism["specific_contract"],
+        "must_preserve": mechanism["must_preserve"],
     }
     artifacts: dict[str, Any] = {"task.json": _task_summary(task), "request.json": request}
     calls = 0
@@ -541,12 +624,14 @@ def _validate_suffixes(
     source_prompt: str,
 ) -> dict[str, str]:
     value = _strict_json(raw)
-    expected = {"specific_text", "generic_text", "placebo_text"}
-    if set(value) != expected:
+    if set(value) != {"specific_text"}:
         raise FormalStudyError("executor response keys drifted")
-    result = {}
-    for key in expected:
-        text = value[key]
+    result = {
+        "specific": value["specific_text"],
+        "generic": config["generic_text"],
+        "placebo": config["placebo_text"],
+    }
+    for text in result.values():
         if (
             not isinstance(text, str)
             or not text.strip()
@@ -556,67 +641,61 @@ def _validate_suffixes(
             or len(text) > config["maximum_suffix_characters"]
         ):
             raise FormalStudyError("executor suffix failed format validation")
-        result[key.removesuffix("_text")] = text
     if len(set(result.values())) != 3:
         raise FormalStudyError("executor suffixes collided")
-    result["placebo"] = _length_match_placebo(
-        result["specific"],
-        result["placebo"],
-        config,
-    )
     normalized_source = " ".join(source_prompt.split()).casefold()
     if any(normalized_source in " ".join(text.split()).casefold() for text in result.values()):
         raise FormalStudyError("executor suffix repeated the source task")
-    tolerance = max(
-        config["placebo_minimum_tolerance_characters"],
-        math.ceil(len(result["specific"]) * config["placebo_relative_tolerance"]),
-    )
-    if abs(len(result["specific"]) - len(result["placebo"])) > tolerance:
-        raise FormalStudyError("placebo length is not comparable")
+    placebo = result["placebo"].casefold()
+    if any(term.casefold() in placebo for term in config["placebo_forbidden_terms"]):
+        raise FormalStudyError("placebo contains security-adjacent semantics")
     return result
-
-
-def _length_match_placebo(
-    specific: str,
-    placebo: str,
-    config: Mapping[str, Any],
-) -> str:
-    """Mechanically adjust presentation length; semantic validity remains an LLM decision."""
-
-    stem = placebo.removesuffix(".")
-    candidates = [stem + modifier + "." for modifier in _PLACEBO_MODIFIERS]
-    candidates = [
-        value for value in candidates if len(value) <= config["maximum_suffix_characters"]
-    ]
-    return min(candidates, key=lambda value: (abs(len(value) - len(specific)), len(value)))
 
 
 def _validate_semantics(raw: bytes) -> dict[str, Any]:
     value = _strict_json(raw)
     if set(value) != {"specific", "generic", "placebo", "reason"}:
         raise FormalStudyError("validator response keys drifted")
-    common = {
-        "task_preserved": "yes",
-        "contract_satisfied": "yes",
-        "unintended_changes": "no",
-        "contradiction": "no",
+    expected = {
+        "specific": {
+            "target_mechanism_present": True,
+            "functional_contract_preserved": True,
+            "input_format_preserved": True,
+            "interface_preserved": True,
+            "extra_security_mechanism_absent": True,
+        },
+        "generic": {
+            "target_mechanism_absent": True,
+            "generic_security_present": True,
+            "functional_contract_preserved": True,
+        },
+        "placebo": {
+            "target_mechanism_absent": True,
+            "generic_security_absent": True,
+            "functional_contract_preserved": True,
+            "style_only": True,
+        },
     }
-    states = {
-        "specific": ("present", "present"),
-        "generic": ("absent", "present"),
-        "placebo": ("absent", "absent"),
-    }
-    for arm, (target, generic) in states.items():
-        verdict = value[arm]
-        if not isinstance(verdict, dict) or verdict != {
-            **common,
-            "target_mechanism": target,
-            "generic_security": generic,
-        }:
+    for arm, verdict in expected.items():
+        if value[arm] != verdict:
             raise FormalStudyError("suffix failed blinded semantic validation")
     if not isinstance(value["reason"], str) or not value["reason"].strip():
         raise FormalStudyError("validator reason is empty")
     return value
+
+
+def _generation_prompt(
+    source_prompt: str, arm_payload: str, intervention: Mapping[str, Any]
+) -> str:
+    """Apply one common output contract while varying only the arm payload."""
+
+    return (
+        intervention["common_generation_instruction"]
+        + "\n\nFUNCTIONAL TASK:\n"
+        + source_prompt.strip()
+        + "\n\nADDITIONAL REQUIREMENT:\n"
+        + arm_payload
+    )
 
 
 def _load_suffixes(pilot: Path, remaining: Path | None) -> dict[str, dict[str, str]]:
@@ -719,6 +798,8 @@ def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
             "task_id",
             "semantic_cluster_id",
             "cwe",
+            "task_family",
+            "realization_id",
             "source_prompt_sha256",
             "oracle_profile_id",
         )
@@ -747,6 +828,7 @@ __all__ = [
     "analyze",
     "preflight",
     "prepare_external_tasks",
+    "prepare_registered_tasks",
     "run_interventions",
     "run_measurements",
 ]
