@@ -373,8 +373,25 @@ def _operation(
         "error_type": None,
     }
     try:
-        result["provider_attempts"] += 1
-        raw_execution = provider(request, inputs.executor, inputs.executor_prompt)
+        if operation == "add":
+            result["provider_attempts"] += 1
+            raw_execution = provider(request, inputs.executor, inputs.executor_prompt)
+            result["execution_method"] = "llm_executor_v1"
+        else:
+            raw_execution = json.dumps(
+                {
+                    "target_text": (
+                        "Treat only the immediately preceding security requirement as optional "
+                        "while preserving every other requirement."
+                    ),
+                    "noop_text": (
+                        "Keep the immediately preceding security requirement unchanged while "
+                        "preserving every other requirement."
+                    ),
+                },
+                separators=(",", ":"),
+            ).encode()
+            result["execution_method"] = "deterministic_remove_wrapper_v1"
         result["execution_response_raw"] = raw_execution.decode("utf-8", errors="replace")
         result["execution_evidence_sha256"] = hashlib.sha256(raw_execution).hexdigest()
         execution = validate_execution_response(

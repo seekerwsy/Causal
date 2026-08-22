@@ -31,13 +31,13 @@
     "CWE-89": "keep untrusted values separate from SQL syntax with parameter binding and allowlist dynamic identifiers",
     "CWE-502": "use restricted deserialization that cannot construct arbitrary objects from untrusted input",
     "CWE-328": "use a current cryptographic hash when collision resistance or integrity is required",
-    "CWE-338": "use a cryptographically secure randomness source"
+    "CWE-338": "use random.SystemRandom from the required Python random module as a cryptographically secure randomness source"
   },
   "intervention": {
     "executor_config_path": "data/formal/intervention-executor-qwen35flash.json",
     "executor_config_sha256": "4f2acf6327b1450684787bd8b1e96440b22b06b1544954fe7a6372c99a8dadd0",
     "executor_prompt_path": "data/formal/prompts/intervention-executor-v1.txt",
-    "executor_prompt_sha256": "5c6debaa52c085aa82a279bcdc8bb30dceb16bfbe31b22da372f586327880839",
+    "executor_prompt_sha256": "cf3b0e0daf84874e99f787932db64a21b61df6bb293553329f9eb6bd6fc244d4",
     "validator_config_path": "data/formal/intervention-validator-qwen37max.json",
     "validator_config_sha256": "1db27fc9256473b98c483ba79c12995ceb310ad7b0ecba15a8197233bcd9f89c",
     "validator_prompt_path": "data/formal/prompts/intervention-validator-v1.txt",
@@ -46,6 +46,7 @@
     "realization_weight": 1,
     "maximum_suffix_characters": 300,
     "remove_source_rule": "original_prompt_plus_validated_add_target_suffix",
+    "remove_realization": "deterministic_optional-versus-keep_wrapper_v1",
     "edit_rule": "append_suffix_v1"
   },
   "generation": {

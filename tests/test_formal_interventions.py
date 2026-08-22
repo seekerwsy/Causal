@@ -68,7 +68,7 @@ def test_formal_intervention_freeze_smoke(tmp_path: Path) -> None:
     frozen = tmp_path / "frozen"
     pilot_report = run_intervention_phase(ROOT, "pilot", pilot, provider=_fake_provider)
     assert pilot_report["status"] == "PILOT_PASSED"
-    assert pilot_report["provider_attempts"] == 20
+    assert pilot_report["provider_attempts"] == 15
     remaining_report = run_intervention_phase(
         ROOT,
         "remaining",
@@ -81,7 +81,7 @@ def test_formal_intervention_freeze_smoke(tmp_path: Path) -> None:
     report = finalize_interventions(ROOT, pilot, remaining, frozen)
     assert report["status"] == "FORMAL_INTERVENTIONS_FROZEN"
     assert report["tasks_per_study"] == 30
-    assert report["provider_attempts"] == 120
+    assert report["provider_attempts"] == 90
 
 
 def _fake_provider(request: dict, _evaluator: object, _prompt: str) -> bytes:
