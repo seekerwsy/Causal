@@ -1,4 +1,4 @@
-"""Minimal, blinded Functional Judge v3 calibration gate."""
+"""Minimal blinded functional-Oracle engineering gate."""
 
 from __future__ import annotations
 
