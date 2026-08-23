@@ -24,7 +24,7 @@ algorithm boundaries. It prospectively supersedes the following clauses:
 4. `task_id` being sufficient to express every independent sampling cluster;
 5. a randomization block that omits textual realization;
 6. JCI and RFCI occupying the main paper method narrative; and
-7. the expert-perception study being a main-paper research question.
+7. the expert-perception study being used to validate computational causal or repair claims.
 
 The previous files and every artifact produced under them remain immutable historical records. They
 must not be edited in place or represented as having been generated under this framework. Once this
@@ -941,7 +941,7 @@ evidence level.
 
 ## 16. Main-Paper Research Questions
 
-The main paper contains three concise RQs. Operational details belong in the methods and evaluation
+The main paper contains four concise RQs. Operational details belong in the methods and evaluation
 sections rather than the RQ sentences.
 
 > **RQ1. How effectively can different methods prioritize prompt interventions that generalize to
@@ -961,6 +961,12 @@ candidate-to-confirmation funnel.
 RQ3 reports context-conditioned, model-specific, multi-realization policy effects on
 oracle-evaluable secure-code yield, with joint functionality and specificity evidence.
 
+> **RQ4. How do security experts rate and rank the perceived quality and usefulness of explanations
+> produced by different methods?**
+
+RQ4 is a separately governed human study of perceived explanation utility. It does not measure
+objective mechanism identification, code repair accuracy, or the validity of RQ1--RQ3 causal claims.
+
 No RQ claims recovery of a unique Prompt mechanism, universal natural-language feature effects,
 code-side mediation, or individual causal flips.
 
@@ -971,10 +977,10 @@ appendix analysis of randomized contexts; it cannot affect candidate selection, 
 outcome, ITT, or evidence. RFCI remains an optional appendix sensitivity backend and never blocks the
 no-Java minimum pipeline.
 
-The former expert-perception RQ4 is removed from the main paper. Existing designs and materials are
-preserved as a separately versioned optional user study or future paper. If executed, it must retain
-its own ethics determination, preregistration, case manifest, randomization, and analysis plan; its
-results do not validate causal discovery or randomized security effects.
+RQ4 remains in the main paper but outside the computational causal-evidence path. It retains its own
+ethics determination, preregistration, participant and case manifests, blinded presentation,
+randomization, and analysis plan. Its results concern perceived explanation utility only and do not
+validate causal discovery, randomized security effects, or objective repair accuracy.
 
 ## 18. Artifacts and Provenance
 
@@ -1045,6 +1051,14 @@ sufficient distinct semantic task clusters, and calibrated Oracle support over s
 many sparse CWEs. Discover and confirm tasks are split by semantic cluster, not row or near-duplicate
 Prompt. Simulation code, assumptions, seeds, curves, and the selected design are frozen before the
 main run.
+
+The active prospective dataset design, source-lineage constraints, admission contract, replication
+boundaries, and freeze sequence are specified in
+[`docs/research-dataset-spec.md`](../../research-dataset-spec.md). Its counts are design targets until
+the gates in this section and that document produce a frozen task manifest. In particular, the
+planned 296 clusters belong to three inferentially separate layers, and the final assignment count is
+derived from the frozen hypothesis-specific eligible populations rather than from the task count
+alone.
 
 ## 20. Failure and Negative-Result Semantics
 
@@ -1132,7 +1146,7 @@ The revised framework is ready for implementation only when tests and spec audit
     combined-operation hypotheses are rejected rather than coerced;
 15. JCI, RFCI, implementation markers, fidelity, and per-protocol diagnostics cannot change primary
     evidence status;
-16. the three RQs, main-text scope, and appendix scope are enforced by paper contract tests; and
+16. the four RQs, main-text scope, and appendix scope are enforced by paper contract tests; and
 17. small synthetic and canary runs pass before any scale-up or final paper experiment.
 
 ## 23. Conflict-and-Decision Ledger
@@ -1149,7 +1163,7 @@ The revised framework is ready for implementation only when tests and spec audit
 | two-by-two representation/association table mixes questions | 2026-07-22 spec | separate selector-only and representation-universe experiments |
 | JCI is a main method subsection | both previous specs/manuscript | appendix exploratory analysis only |
 | RFCI appears in the main method | both previous specs/manuscript | appendix sensitivity backend only |
-| RQ4 is a main-paper RQ | 2026-07-22 spec | preserve as optional separate study, remove from main RQs |
+| RQ4 is a main-paper RQ | 2026-07-22 spec | retain as a separately governed perceived-utility study without causal or repair promotion |
 | code markers are forbidden from every analysis | 2026-07-13 spec | permit separately produced post-assignment diagnostics, never primary PAG or mediation |
 
 This ledger is prospective. It does not relabel or reinterpret completed legacy experiments.

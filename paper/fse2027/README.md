@@ -34,13 +34,13 @@ through a traceable table builder. Follow the repository-root `AGENTS.md` and
 the concise paper-local `paper/AGENTS.md` for research-integrity and manuscript
 requirements.
 
-The 2026-07-29 narrative revision organizes the method as Security-Aware
-Prompt Representation, Stability-Guided Causal Discovery, and Causal Effect
-Confirmation. Its original commands and identifiers are preserved in the
+The current narrative organizes the computational method as Security-Aware
+Prompt Representation, Stability-Guided Observational Prioritization, and
+Randomized Policy Confirmation. Earlier commands and identifiers are preserved in the
 [historical revision evidence ledger](revision-evidence-ledger.md); they are
 not current project names or invocation instructions.
 
 The manuscript may describe verified core capabilities in the present tense,
-but unfinished RQ1--RQ3 experiments and the frozen final paper run remain
+but unfinished RQ1--RQ4 studies and the frozen final paper evidence remain
 future work. Every numerical result stays `--` until a frozen manifest and
 table builder supply exact provenance.

@@ -7,9 +7,11 @@ adds only paper-local requirements and must remain concise.
   `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
   for new-protocol manuscript content. A legacy run remains governed by the
   exact protocol named by its frozen manifest.
-- Keep the manuscript's three RQs aligned with the single active artifact path:
+- Keep the manuscript's four RQs aligned with the single active artifact path:
   held-out intervention prioritization, representation/prioritization
-  contribution, and randomized security-intervention effects.
+  contribution, randomized security-intervention effects, and a separately
+  governed expert study of perceived explanation utility. RQ4 is a human-study
+  evaluation and cannot validate causal discovery or objective repair accuracy.
 - Keep Prompt TSG semantics separate from causal edges, preserve natural
   variables `X^0`, randomized arm `A`, and post-intervention diagnostics
   `X^{A,R}`, and use `semantic_task_cluster_id` as the highest resampling unit.

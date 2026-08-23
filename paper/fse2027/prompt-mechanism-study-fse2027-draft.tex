@@ -108,7 +108,7 @@ happened to succeed.
 \model provides this progression in three stages.
 \textbf{Security-Aware Prompt Representation} separates an immutable
 task/security context query from one catalog-bound editable feature.
-\textbf{Stability-Guided Causal Prioritization} combines structure-derived
+\textbf{Stability-Guided Observational Prioritization} combines structure-derived
 constraints, FCI, and semantic-task-cluster stability to rank candidates while
 preserving PAG uncertainty.
 \textbf{Randomized Policy Confirmation} freezes a finite distribution of
@@ -132,6 +132,9 @@ This paper makes the following contributions:
   \item \textbf{Provenance-complete evidence accounting.} An explicit bridge
   records context eligibility, policy realization, protocolization,
   randomization, and confirmation without upgrading exploratory artifacts.
+  \item \textbf{Expert-facing utility evaluation.} A separately governed,
+  blinded study evaluates how security experts perceive the usefulness of
+  method explanations without treating those ratings as causal or repair evidence.
 \end{itemize}
 
 \section{Motivating Example and Problem Formulation}
@@ -513,6 +516,15 @@ Throughout the tables, \texttt{--} marks a result slot awaiting
 provenance-verified frozen-run or study backfill; it denotes neither zero, not
 applicable, nor observed missingness.
 
+\subsection{Study Data}
+
+The task inventory draws from SecurityEval, LLMSecEval, SALLM, CWEval,
+CyberSecEval, and SeCodePLT, with BaxBench used for backend replication
+\cite{siddiq2022securityeval,tony2023llmseceval,siddiq2024sallm,
+peng2025cweval,bhatt2023cyberseceval,nie2025secodeplt,vero2025baxbench}.
+The frozen task manifest identifies the exact included records and preserves
+dataset provenance and semantic-cluster-disjoint study splits.
+
 \subsection{RQ1: Held-Out Intervention Prioritization}
 
 \textbf{RQ1. How effectively can different methods prioritize prompt
@@ -743,30 +755,97 @@ Target-change, semantic-compliance, non-target-drift, task improvement, harm,
 and tie rates are descriptive diagnostics. They neither filter the assigned-arm
 ITT denominator nor replace the primary ITT estimates.
 
+\subsection{RQ4: Expert-Perceived Explanation Utility}
+
+\textbf{RQ4. How do security experts rate and rank the perceived quality and
+usefulness of explanations produced by different methods?}
+
+Each method's explanation is placed in the same anonymous wrapper and presented
+under a balanced case--method assignment. Qualified experts rate clarity,
+evidence sufficiency, credibility, actionability, and overall usefulness on
+five-point ordinal scales. Overall usefulness is the preregistered primary
+human-study outcome; the other dimensions are secondary.
+
+The primary analysis uses an ordinal mixed-effects model with method as a fixed
+effect and participant and case as random effects, followed by
+multiplicity-adjusted comparisons. RQ4 concerns perceived utility only and
+does not claim objective mechanism identification, repair accuracy, or
+validation of the computational causal results.
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ4 expert-rating results. Entries report ordinal summaries and
+  model-based contrasts from the preregistered expert study.}
+  \label{tab:rq4}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Method & Clarity & Evidence & Credibility & Actionability & Usefulness \\
+    \midrule
+    \model & -- & -- & -- & -- & -- \\
+    Baseline 1 & -- & -- & -- & -- & -- \\
+    Baseline 2 & -- & -- & -- & -- & -- \\
+    Baseline 3 & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \section{Related Work}
 
-\paragraph{Prompt explanation and interpretation.}
-Integrated Gradients, TCAV, SHAP, and rationale benchmarks expose input
-features, concepts, or evidence associated with model predictions
-\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser}.
-Because plausible explanations need not be faithful \cite{lyu2024faithful},
-\model maps each method-native candidate to an editable prompt-side factor and
-tests a frozen, directional intervention on held-out tasks.
+\paragraph{Explanations for code-generation models.}
+Attribution, concept-based interpretation, and rationale methods expose input
+features, concepts, or evidence associated with model behavior
+\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,
+deyoung2020eraser}.
+CodeQ maps token-level rationales to higher-level programming categories and
+aggregates them into global explanations of code and test generation
+\cite{khati2026codeq}.
+\model uses such evidence only through an explicit bridge that resolves a
+confirmable candidate to one catalog-bound prompt feature and a frozen
+intervention policy.
 
-\paragraph{Security of LLM-generated code.}
-Empirical studies of generated and AI-assisted code identify security risks
-\cite{pearce2022copilot,perry2023assistants}, while SafeCoder and SecCoder
-improve secure generation through model-side training or inference
-\cite{he2024safecoder,zhang2024seccoder}. With the generator locked, \model asks
-which editable prompt-side requirements have supported effects.
+\paragraph{Security hardening and prompt interventions.}
+Prompt-level studies have compared security reminders, CWE-specific
+instructions, reasoning and refinement strategies, persona prompting, security
+prefixes, and iterative repair for secure code generation
+\cite{tony2025prompting,bruni2025promptbenchmark}.
+Broader hardening approaches include security-oriented instruction tuning
+(SafeCoder) and retrieved demonstrations (SecCoder)
+\cite{he2024safecoder,zhang2024seccoder}, learned continuous steering (SVEN),
+analyzer-guided prompt optimization (PromSec), constrained decoding evaluated
+with CodeGuard+, and inference-time representation intervention (Thea)
+\cite{he2023sven,nazzal2024promsec,fu2024codeguard,
+elhusseini2026thea}.
+These methods evaluate predefined or adaptively optimized hardening
+strategies. \model instead freezes context-conditioned prompt-policy
+hypotheses selected under a common budget and estimates their effects on
+held-out tasks using semantic-task-clustered assigned-arm ITT, retaining null
+or harmful effects and Oracle-unknown cases in protocol-defined reporting.
 
-\paragraph{Causal discovery under latent uncertainty.}
-FCI represents latent-variable uncertainty through PAGs
-\cite{spirtes1995fci,zhang2008ancestral}, with an implementation available in
-causal-learn \cite{zheng2024causallearn}. \model combines FCI with
-prompt-derived constraints, semantic-cluster stability, a pre-confirmation
-freeze, and held-out assigned-arm effects to turn uncertain observational
-relations into testable interventions.
+\paragraph{Security benchmarks and evaluation.}
+SecurityEval and LLMSecEval established CWE-indexed prompt suites evaluated
+primarily with static security analysis
+\cite{siddiq2022securityeval,tony2023llmseceval}.
+SALLM and CWEval add executable security and functionality checks on the same
+tasks, while BaxBench evaluates backend applications through functional tests
+and end-to-end exploits, and SeCodePLT expands dynamic evaluation across
+languages and security categories
+\cite{siddiq2024sallm,peng2025cweval,vero2025baxbench,
+nie2025secodeplt}.
+Recent evaluation work further shows that apparent security improvements can
+coincide with functional degradation and that individual static analyzers can
+miss relevant vulnerabilities \cite{dai2026rethinking}.
+Following this stricter evaluation line, \model records code validity, Oracle
+support and unknowns, oracle-evaluable security, functionality, and joint
+success separately before assigned-arm aggregation.
+
+\paragraph{Causality-based analysis of code-generation systems.}
+CAM categorizes intermediate outputs in multi-agent code-generation systems
+and simulates realistic errors to rank their contributions to correctness,
+supporting failure repair and feature pruning \cite{lyu2026cam}.
+Where CAM intervenes on intermediate system traces, \model prioritizes
+context-conditioned input-prompt policies and evaluates their security effects
+through held-out blocked randomization.
 
 \section{Synthetic Validation}
 
@@ -780,28 +859,15 @@ to the paper's result tables.
 \section{Threats to Validity}
 
 \paragraph{Construct validity.}
-Oracle-evaluable secure-code yield is defined by locked code-validity and
-independent-Oracle contracts, while joint success additionally uses the frozen
-functional evaluator. Evaluator versions, support, terminal-status
-denominators, calibration audits, and bounds scope effects to those contracts;
-unknown or unsupported cases do not establish comprehensive program security.
-
-\paragraph{Discovery validity.}
-Finite task samples, sparse local tables, latent common causes, and FCI's
-equivalence classes leave paths and endpoint marks uncertain. We use
-prompt-derived knowledge only as prohibitions and retain raw PAG marks and
-semantic-cluster bootstrap support. Claims concern prioritized uncertain
-relations within each frozen candidate, model, and CWE scope.
+Security and functional outcomes are limited by the coverage and accuracy of
+their frozen evaluators. Unsupported or unknown cases are reported separately,
+so the results do not establish comprehensive program security.
 
 \paragraph{Internal validity.}
-Prompt executors can miss the target or alter non-target semantics, generation
-or evaluation can end in a valid terminal non-success, and producer artifacts
-can be missing or corrupt. Terminal non-successes remain in assigned-arm ITT;
-a producer contract failure instead blocks publication and replays the same
-frozen assignment manifest. Variant freezing and balanced assignment make these
-cases visible.
-\texttt{target\_changed}, semantic-compliance, and non-target-drift diagnostics
-never filter the assigned-arm ITT denominator.
+FCI provides uncertain observational prioritization rather than unique causal
+recovery. Confirmatory claims therefore come from randomized assignment of
+frozen prompt policies, remain scoped to that policy, and do not rely on
+post-assignment fidelity diagnostics.
 
 \paragraph{Multiplicity and selection.}
 Candidate ranking, a top-$K$ budget, and multiple methods, hypotheses, outcomes,
@@ -813,8 +879,9 @@ frozen family.
 \paragraph{External validity.}
 Effects can vary with the locked models, tasks, CWE scopes, generator,
 evaluator, prompt styles, and generation settings. Versioned manifests bind
-these coordinates. Claims are scoped accordingly; broader settings require
-separately reported replications.
+these coordinates. RQ4 additionally measures perceived usefulness in its
+sample and presentation setting, not objective correctness. Broader claims
+require separately reported replications.
 
 \section{Reproducibility}
 
@@ -858,11 +925,10 @@ selector ranks, bridge, assignment, outcomes, ITT, or evidence status.
 Separately provenanced implementation markers, treatment fidelity, and
 per-protocol summaries are optional diagnostics. They cannot promote an
 evidence level, substitute for the independent Oracle, enter the primary PAG,
-or support a mediation claim. The separately versioned optional expert study
-is outside the three main RQs; if pursued, it requires its own ethics decision,
-preregistration, case and randomization manifests, and analysis plan, and it
-cannot validate either observational prioritization or randomized security
-effects.
+or support a mediation claim. The RQ4 expert study is separately governed by
+its ethics decision, preregistration, case and randomization manifests, and
+analysis plan; it cannot validate either observational prioritization or
+randomized security effects.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
