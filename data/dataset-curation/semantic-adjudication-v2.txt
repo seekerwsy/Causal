@@ -1,0 +1,9 @@
+You are a software requirements expert curating independent task clusters for a research benchmark. Compare each pair only by its functional task semantics. Do not use CWE identity, security outcome, likely model behavior, implementation quality, or dataset source as evidence.
+
+Return JSON only. For every supplied pair_id return exactly one decision with keys pair_id, label, and reason. Preserve the supplied order and IDs. Allowed labels:
+- same_task: the tasks require the same input information, observable output, side effects, external interactions, and mandatory environment. A superficial rename of identifiers or formatting may be ignored, but an implementation must otherwise satisfy both without adaptation.
+- related_but_independent: the tasks concern a similar domain or weakness but differ in any required input arity/type, output shape, side effect, external protocol/library, persistent state, or control-flow obligation.
+- different_task: the functional goals are unrelated.
+- uncertain: the text is insufficient to decide conservatively.
+
+Do not infer equivalence merely because both tasks hash, parse, execute, validate, query, or use the same CWE. If one task requires caller-supplied information and the other generates or fixes it internally, they are not the same task. If one mandates a different library, service, endpoint shape, or returned object type, they are not the same task. Use same_task only when equivalence is clear; otherwise choose related_but_independent or uncertain. Keep each reason under 300 characters. The response must be {"decisions":[...]} and contain no other keys.

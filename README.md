@@ -158,6 +158,38 @@ The pilot contains one task from every included CWE and gates only semantic
 intervention validity. The later generation pilot gates only infrastructure and
 measurement completeness; neither gate may inspect the effect direction.
 
+Prepare external benchmark candidates without executing their code:
+
+    prompt-mechanism-study dataset-prep dataset-prep-smoke \
+      --sallm-root datasets/source-inventory/SALLM-0159a63daed0a88f461bbd69dd1160893e394a67 \
+      --cweval-root datasets/source-inventory/CWEval-e9a2a124c8c53679b6d8d27adfd2f6c40e7576d7 \
+      --cyberseceval-path "datasets/Submission Code and Results/Data/Instruct Prime/instruct.json" \
+      --llmseceval-root datasets/source-inventory/LLMSecEval-39e97f046dbb2c4c604d31b86f2a4d3d27827388 \
+      --securityeval-root datasets/source-inventory/SecurityEval-6f4fb70f782c6d47b02ea24341e8ef8c1eb04a6a \
+      --codeseceval-root datasets/source-inventory/CodeSecEval-HF-c3ffce09269f2d7b092888efe05d070b6fcb97f5 \
+      --secodeplt-root datasets/source-inventory/SeCodePLT-1f3da9ee48e0046359903cba0cc48d03665f96d5 \
+      --limit-per-source 5
+
+The optional limit is only for parser smoke tests. The output closes normalized
+records, exact-prompt provisional clusters, source-test coordinates, exclusions,
+and a report in one immutable bundle. It does not execute source code, complete
+semantic clustering, freeze a population, or authorize a scientific claim.
+The CyberSecEval input is the submission-provided 1,404-row Instruct Prime
+snapshot; normalization starts from that frozen file and does not attempt to
+reconstruct its authors' earlier cleaning. Every candidate source follows the
+same admission and deduplication schema, with its citation, address, version,
+and content hash retained in the artifact.
+
+`contract-requests.json` is an outcome-blind input for an external requirements
+extractor. After those responses are produced, validate and freeze them with:
+
+    prompt-mechanism-study contract-freeze prepared responses.json contracts
+
+Lexical blocking only proposes pairs for later blind semantic adjudication; it
+does not declare semantic duplicates:
+
+    prompt-mechanism-study dedup-candidates prepared dedup-candidates
+
 ## Code map
 
 | Module | Responsibility |
@@ -174,11 +206,12 @@ measurement completeness; neither gate may inspect the effect direction.
 | workflow.py | Prospective freeze and post-measurement analysis |
 | records.py | Canonical content identities |
 | artifact_io.py | Exact-byte bundle closure |
+| datasets.py | External source normalization and provisional exact deduplication |
 | cli.py | Freeze, analyze, verify, and summarize |
 
 ## Review
 
-The default suite contains 29 focused scientific-invariant tests:
+The default suite contains 42 focused scientific-invariant tests:
 
     python -m pytest -q
 

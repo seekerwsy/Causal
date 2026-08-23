@@ -96,6 +96,102 @@ def main(argv: Sequence[str] | None = None) -> int:
     measurements.add_argument("--bandit", type=Path, required=True)
     measurements.add_argument("--pilot-root", type=Path)
 
+    dataset_prep = commands.add_parser(
+        "dataset-prep",
+        help="normalize external task sources without executing their code",
+    )
+    dataset_prep.add_argument("output", type=Path)
+    dataset_prep.add_argument("--sallm-root", type=Path)
+    dataset_prep.add_argument("--cweval-root", type=Path)
+    dataset_prep.add_argument("--cyberseceval-path", type=Path)
+    dataset_prep.add_argument("--llmseceval-root", type=Path)
+    dataset_prep.add_argument("--securityeval-root", type=Path)
+    dataset_prep.add_argument("--codeseceval-root", type=Path)
+    dataset_prep.add_argument("--secodeplt-root", type=Path)
+    dataset_prep.add_argument("--limit-per-source", type=int)
+
+    contracts = commands.add_parser(
+        "contract-freeze",
+        help="freeze externally extracted functional contracts",
+    )
+    contracts.add_argument("prepared_root", type=Path)
+    contracts.add_argument("responses", type=Path)
+    contracts.add_argument("output", type=Path)
+
+    dedup = commands.add_parser(
+        "dedup-candidates",
+        help="prepare lexical candidate pairs for semantic adjudication",
+    )
+    dedup.add_argument("prepared_root", type=Path)
+    dedup.add_argument("output", type=Path)
+    dedup.add_argument("--minimum-jaccard", type=float, default=0.35)
+    dedup.add_argument("--max-neighbors-per-record", type=int, default=3)
+
+    semantic = commands.add_parser(
+        "semantic-curation",
+        help="blindly adjudicate lexical pairs and freeze semantic clusters",
+    )
+    semantic.add_argument("prepared_root", type=Path)
+    semantic.add_argument("candidates_root", type=Path)
+    semantic.add_argument("output", type=Path)
+    semantic.add_argument("--repository-root", type=Path, default=Path.cwd())
+    semantic.add_argument("--max-new-batches", type=int)
+    semantic.add_argument("--workers", type=int, default=1)
+    semantic.add_argument("--reuse-root", type=Path)
+
+    assemble_clusters = commands.add_parser(
+        "assemble-semantic-clusters",
+        help="assemble exact/lineage clusters and retain pair decisions as diagnostics",
+    )
+    assemble_clusters.add_argument("prepared_root", type=Path)
+    assemble_clusters.add_argument("candidates_root", type=Path)
+    assemble_clusters.add_argument("adjudication_root", type=Path)
+    assemble_clusters.add_argument("output", type=Path)
+
+    curate_contracts = commands.add_parser(
+        "contract-curation",
+        help="extract one functional contract per semantic cluster",
+    )
+    curate_contracts.add_argument("prepared_root", type=Path)
+    curate_contracts.add_argument("clusters_root", type=Path)
+    curate_contracts.add_argument("output", type=Path)
+    curate_contracts.add_argument("--repository-root", type=Path, default=Path.cwd())
+    curate_contracts.add_argument("--max-new-batches", type=int)
+    curate_contracts.add_argument("--workers", type=int, default=1)
+    curate_contracts.add_argument("--reuse-root", type=Path)
+    curate_contracts.add_argument(
+        "--existing-contracts-root",
+        type=Path,
+        help="reuse contracts whose representative record and prompt hash still match",
+    )
+
+    eligibility = commands.add_parser(
+        "dataset-eligibility",
+        help="audit curated clusters for current experiment readiness",
+    )
+    eligibility.add_argument("prepared_root", type=Path)
+    eligibility.add_argument("clusters_root", type=Path)
+    eligibility.add_argument("contracts_root", type=Path)
+    eligibility.add_argument("output", type=Path)
+    eligibility.add_argument("--repository-root", type=Path, default=Path.cwd())
+    eligibility.add_argument("--policy", type=Path)
+    eligibility.add_argument(
+        "--bindings-root",
+        type=Path,
+        help="optional outcome-blind task-to-mechanism binding bundle",
+    )
+
+    study_design = commands.add_parser(
+        "study-design",
+        help="freeze the outcome-blind Python sample, power assumptions, and replication readiness",
+    )
+    study_design.add_argument("eligibility_root", type=Path)
+    study_design.add_argument("task_units_root", type=Path)
+    study_design.add_argument("output", type=Path)
+    study_design.add_argument("--repository-root", type=Path, default=Path.cwd())
+    study_design.add_argument("--seed", type=int, default=2026082301)
+    study_design.add_argument("--clusters-per-family", type=int, default=15)
+
     args = parser.parse_args(argv)
     if args.command == "freeze":
         _freeze(args.protocol, args.output)
@@ -126,6 +222,98 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] in {"PILOT_COMPLETE", "REMAINING_COMPLETE"} else 2
+    elif args.command == "dataset-prep":
+        from prompt_mechanism_study.datasets import prepare_datasets
+
+        report = prepare_datasets(
+            args.output,
+            sallm_root=args.sallm_root,
+            cweval_root=args.cweval_root,
+            cyberseceval_path=args.cyberseceval_path,
+            llmseceval_root=args.llmseceval_root,
+            securityeval_root=args.securityeval_root,
+            codeseceval_root=args.codeseceval_root,
+            secodeplt_root=args.secodeplt_root,
+            limit_per_source=args.limit_per_source,
+        )
+        print(report["status"])
+    elif args.command == "contract-freeze":
+        from prompt_mechanism_study.datasets import freeze_contracts
+
+        report = freeze_contracts(args.prepared_root, args.responses, args.output)
+        print(report["status"])
+    elif args.command == "dedup-candidates":
+        from prompt_mechanism_study.datasets import prepare_dedup_candidates
+
+        report = prepare_dedup_candidates(
+            args.prepared_root,
+            args.output,
+            minimum_jaccard=args.minimum_jaccard,
+            max_neighbors_per_record=args.max_neighbors_per_record,
+        )
+        print(report["status"])
+    elif args.command == "semantic-curation":
+        from prompt_mechanism_study.curation import run_semantic_curation
+
+        report = run_semantic_curation(
+            args.repository_root,
+            args.prepared_root,
+            args.candidates_root,
+            args.output,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
+            reuse_root=args.reuse_root,
+        )
+        print(report["status"])
+    elif args.command == "contract-curation":
+        from prompt_mechanism_study.curation import run_contract_curation
+
+        report = run_contract_curation(
+            args.repository_root,
+            args.prepared_root,
+            args.clusters_root,
+            args.output,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
+            reuse_root=args.reuse_root,
+            existing_contracts_root=args.existing_contracts_root,
+        )
+        print(report["status"])
+    elif args.command == "assemble-semantic-clusters":
+        from prompt_mechanism_study.curation import assemble_semantic_clusters
+
+        report = assemble_semantic_clusters(
+            args.prepared_root,
+            args.candidates_root,
+            args.adjudication_root,
+            args.output,
+        )
+        print(report["status"])
+    elif args.command == "dataset-eligibility":
+        from prompt_mechanism_study.eligibility import audit_dataset_eligibility
+
+        report = audit_dataset_eligibility(
+            args.repository_root,
+            args.prepared_root,
+            args.clusters_root,
+            args.contracts_root,
+            args.output,
+            policy_path=args.policy,
+            bindings_root=args.bindings_root,
+        )
+        print(report["status"])
+    elif args.command == "study-design":
+        from prompt_mechanism_study.study_design import freeze_study_design
+
+        report = freeze_study_design(
+            args.repository_root,
+            args.eligibility_root,
+            args.task_units_root,
+            args.output,
+            seed=args.seed,
+            clusters_per_family=args.clusters_per_family,
+        )
+        print(report["status"])
     else:
         return _judge_gate(args)
     return 0

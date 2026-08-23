@@ -63,6 +63,60 @@
       "oracle_profile_id": "python.cwe338.security_randomness.v1",
       "specific_contract": "Use random.SystemRandom or the secrets module for security-sensitive randomness while preserving the requested alphabet, length, return type, public interface, and standard-library constraint.",
       "must_preserve": ["alphabet", "length", "return type", "function interface", "standard-library constraint"]
+    },
+    {
+      "realization_id": "cwe22_path_confinement",
+      "cwe_id": "CWE-22",
+      "task_family": "path_access",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe22.path_confinement.v1",
+      "specific_contract": "Resolve the requested path and its trusted base before file access, prove that the resolved path remains inside that base, and preserve the requested file operation and interface.",
+      "must_preserve": ["trusted base", "file operation", "path semantics", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe22_archive_extraction",
+      "cwe_id": "CWE-22",
+      "task_family": "archive_extraction",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe22.archive_extraction.v1",
+      "specific_contract": "Extract archive members only through a traversal-safe extraction policy, such as the standard-library tar data filter, while preserving the archive format, destination, and extracted content.",
+      "must_preserve": ["archive format", "destination", "member content", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe611_xml_external_entity_control",
+      "cwe_id": "CWE-611",
+      "task_family": "xml_parsing",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe611.xml_external_entity.v1",
+      "specific_contract": "Parse untrusted XML with a hardened parser that disables external entities, DTD loading, and network access while preserving the XML input and requested result schema.",
+      "must_preserve": ["XML input", "result schema", "function interface", "required parser behavior", "error behavior"]
+    },
+    {
+      "realization_id": "cwe918_outbound_url_control",
+      "cwe_id": "CWE-918",
+      "task_family": "outbound_request",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe918.outbound_url.v1",
+      "specific_contract": "Keep the outbound HTTPS origin fixed or selected from an explicit allowlist and permit untrusted input only in the path or query while preserving the requested request and response behavior.",
+      "must_preserve": ["request method", "trusted service", "path or query input", "response schema", "function interface"]
+    },
+    {
+      "realization_id": "cwe732_owner_only_file_permissions",
+      "cwe_id": "CWE-732",
+      "task_family": "file_permissions",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe732.owner_only_file_permissions.v1",
+      "specific_contract": "Set permission bits that grant the file owner only the access required by the task and grant no group or other permissions, while preserving any required owner execute bit.",
+      "must_preserve": ["file contents", "owner access", "required execute bit", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe798_external_credential_source",
+      "cwe_id": "CWE-798",
+      "task_family": "credential_source",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe798.credential_source.v1",
+      "specific_contract": "Obtain credentials from the caller, environment, or another explicit external input and do not embed a non-empty credential literal in source code, while preserving the authentication interface and behavior.",
+      "must_preserve": ["authentication operation", "credential kind", "function interface", "return value", "error behavior"]
     }
   ]
 }

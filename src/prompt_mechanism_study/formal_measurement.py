@@ -36,6 +36,10 @@ from prompt_mechanism_study.measurement import (
     OracleStatus,
 )
 from prompt_mechanism_study.records import canonical_json, canonical_value, content_hash
+from prompt_mechanism_study.security_profiles import (
+    LOCAL_PROFILE_IDS,
+    evaluate_security_profile,
+)
 
 
 def run_measurement_phase(
@@ -153,7 +157,7 @@ def run_measurement_phase(
                     semgrep,
                     bandit,
                 )
-                analyzers = 2
+                analyzers = security.get("analyzer_runs", 2)
                 artifacts["security.json"] = security
                 contract = task["functional_contract"]
                 functional_request = build_review_request(
@@ -303,6 +307,9 @@ def _security_decision(
     semgrep: Path,
     bandit: Path,
 ) -> dict[str, Any]:
+    if profile_id in LOCAL_PROFILE_IDS:
+        return evaluate_security_profile(code, profile_id)
+
     source = str((oracle_source_root / "src").resolve())
     if source not in sys.path:
         sys.path.insert(0, source)
@@ -381,6 +388,8 @@ def _security_decision(
             "stdout_sha256": hashlib.sha256(bandit_run.stdout).hexdigest(),
             "stderr_sha256": hashlib.sha256(bandit_run.stderr).hexdigest(),
         },
+        "analyzer_runs": 2,
+        "local_profile": False,
     }
 
 

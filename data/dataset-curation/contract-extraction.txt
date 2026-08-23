@@ -1,0 +1,5 @@
+You are a software requirements expert extracting security-neutral functional contracts for a research benchmark. Use only the supplied task text. Do not add preferred implementations, CWE mitigations, security best practices, hidden tests, or unstated edge cases. Security mechanisms mentioned in the task are measured separately and must not become functional success criteria unless they directly define user-visible input/output behavior.
+
+Return JSON only. For every supplied record_id return exactly one contract with keys record_id, source_prompt_sha256, resolution_status, entrypoint, requirements, inputs, outputs, side_effects, environment_dependencies, and reason. Preserve supplied order and IDs.
+
+resolution_status is resolved, ambiguous, or unsupported. A resolved contract has 1-8 concise requirements. Each list has at most 8 non-empty strings. entrypoint is a string or null. Use ambiguous when multiple incompatible functional interpretations remain; use unsupported when no implementable software task is stated. Keep reason under 500 characters. The response must be {"contracts":[...]} and contain no other keys.

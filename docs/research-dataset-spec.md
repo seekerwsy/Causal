@@ -3,15 +3,14 @@
 ## Status and scope
 
 This document defines the prospective dataset design for the single active
-Prompt Mechanism Study path. It is a design target and an outcome-blind data
-gate, not a frozen task manifest and not evidence that the listed tasks are
-already available or eligible.
+Prompt Mechanism Study path. The 240-cluster Python population remains a
+coverage target. Section 8 records a smaller, outcome-blind 60-cluster sample
+for the next overall-effect validation; it is not evidence that an intervention
+effect exists.
 
-The final task IDs, sample size, hypothesis-specific eligible populations,
-request slots, realizations, models, and assignment count remain unfrozen until
-the inventory, deduplication, executable-contract, Oracle-calibration, and
-power-simulation gates below pass. No generated-code outcome, model score, or
-historical per-task result may influence admission or sampling.
+Generator identities, assignment records, and the pilot split remain unfrozen.
+No generated-code outcome, model score, or historical per-task result may
+influence admission or sampling.
 
 ## 1. Statistical units and study layers
 
@@ -263,35 +262,51 @@ decision, not a claim that lexical retrieval dominates embeddings generally.
 The frozen setup and hashes are recorded in
 `docs/experiments/2026-08-22-dedup-retrieval-benchmark.md`.
 
-When independence is uncertain, records are placed in the same semantic
-cluster. Discover, development, calibration, confirmatory, and replication
-boundaries are cluster-disjoint.
+Uncertain semantic similarity is not sufficient to merge confirmatory units.
+Only exact-prompt identity and frozen source-lineage identity currently have
+merge authority. LLM and retrieval similarities are retained as diagnostics.
+Discover, development, calibration, confirmatory, and replication boundaries
+are cluster-disjoint under this conservative rule.
 
 ### 6.1 Frozen seven-source curation artifact
 
-The current outcome-blind curation covers 2,283 normalized task records from
-the seven candidate datasets. Language-blocked lexical retrieval produced
-4,744 candidate pairs. A frozen blind adjudication with
-`qwen3.5-flash-2026-02-23` classified every pair; cluster assembly first
-applied exact and known-lineage must-links, then accepted LLM-positive edges
-only when no adjudicated negative edge crossed the proposed components. This
-blocked 121 contradictory single-link bridges and produced 1,844 semantic
-task clusters (largest cluster: 7 records).
+The outcome-blind curation covers 2,283 normalized task records from the seven
+candidate datasets. Language-blocked lexical retrieval produced 4,744
+candidate pairs, all classified by a frozen blind adjudication with
+`qwen3.5-flash-2026-02-23`. An independent stress-tail review later found that
+the LLM-positive edges were not precise enough to define confirmatory
+experimental units: only 8 of 30 lowest-similarity accepted edges were judged
+substitutable instances of the same task. That sample diagnoses over-merging;
+it is not a population precision estimate.
 
-One minimal, security-neutral functional contract was then extracted for the
-representative of every cluster. All 1,844 clusters have a contract, comprising
-8,122 explicit requirements in total. The frozen local bundles are:
+The active assembly therefore applies only exact-prompt and known-lineage
+must-links. It produces 2,165 conservative clusters: 2,047 singletons and 118
+pairs, with no LLM edge applied. The earlier 1,844-cluster result is retained
+only as an engineering/sensitivity artifact. Of the 2,165 conservative cluster
+representatives, 1,844 matched an existing security-neutral functional contract
+by record ID and prompt hash. The remaining 321 contracts were extracted in 17
+blinded batches and all resolved, so the active contract set now covers all
+2,165 representatives. The frozen local bundles are:
 
 - semantic pair decisions:
   `.codex-runtime/semantic-curation-seven-v9-strict-20260823-12/final`,
   SHA-256 `ecd11b14e55241aa5bf912e90abb1b1b65e09c1543d5ffd47b63efdba46dea26`;
-- conflict-constrained clusters:
+- historical conflict-constrained clusters (engineering/sensitivity only):
   `.codex-runtime/semantic-clusters-seven-v10-constrained-20260823-13`,
   SHA-256 `f592bfcaf77b3c86a1bc96c2f191b65afbb2f4f3c74b4a6c87dc46e4f0c179da`;
-- functional contracts:
+- active conservative clusters:
+  `.codex-runtime/semantic-clusters-seven-v11-conservative-20260823-29`,
+  SHA-256 `88c03c9dd609779d5301d03bcabdb80533b7d0aa84a3877a8c6933f758ea4e0e`;
+- independent outcome-blind review:
+  `.codex-runtime/semantic-cluster-independent-review-20260823-28`,
+  SHA-256 `3f663654595f342cf432f9ecebc357db0437c08285b5152c557a24d777a83d42`;
+- historical functional contracts available for exact representative reuse:
   `.codex-runtime/contract-curation-seven-v7-20260823-20/final`,
   SHA-256 `be661b9121830b4757eae86e766affba57aa59916347d1120b0bb3354b94b2ca`;
-- combined handoff:
+- active complete functional contracts:
+  `.codex-runtime/contract-curation-seven-v8-conservative-20260823-32/final`,
+  SHA-256 `daa6601152a76a20e8bd0fc82e0347c9a31fe0c103ba29754238706c88099fe4`;
+- historical combined handoff:
   `.codex-runtime/dataset-curation-seven-final-20260823-21`,
   SHA-256 `e4617233d5c2b805aadcc3f1fe9f2b67ce73c66959e382f0d526ac0b594898d1`.
 
@@ -299,19 +314,107 @@ No generated program, experimental arm, Security Oracle output, or experiment
 outcome was supplied to curation. The artifacts are preparation evidence and
 do not themselves support a scientific effect claim.
 
-### 6.2 Outcome-blind eligibility audit
+### 6.2 Active outcome-blind eligibility and under-merge audit
 
-The current implementation-readiness audit classifies all 1,844 clusters
+The active eligibility pass classifies all 2,165 conservative clusters. It
+finds 306 `eligible`, 497 `calibration_only`, and 1,362 `excluded` clusters.
+In addition to the original five CWE classes, an outcome-blind task-level
+audit binds 71 clusters to six bounded local profiles for path confinement,
+archive extraction, XML external entities, outbound URL origins, file
+permissions, and credential sources. The audit does not promote 29 clusters
+whose CWE label does not match the frozen functional contract, or 15 CWE-862
+clusters whose authorization correctness requires framework or caller
+context.
+
+At the family level, injection/interpreter has 144 eligible clusters,
+file/parser/external-resource has 79, identity/authorization/permissions has
+22, and cryptography/randomness/integrity has 61. Three families now meet the
+60-cluster target. The identity family remains below target, so the
+prospective four-family population gate remains closed rather than treating
+context-dependent authorization as locally proven.
+
+To check whether the conservative rule split paraphrases too aggressively, an
+outcome-blind requirements review examined every original eligible-pool
+LLM-positive diagnostic pair (44) and every BGE top-10 pair absent from the
+frozen lexical candidate set (123). A focused expansion then examined 19
+same-CWE TF-IDF nearest-neighbor pairs involving the 71 newly eligible
+clusters. Ten accepted duplicate edges form five components overall.
+Collapsing them reduces the 306 eligible clusters to 299 task units. Two
+borderline pairs remain separate but carry an
+`at_most_one_unit_may_be_selected` constraint. This review changes only the
+prospective sampling units; it does not retroactively give LLM or retrieval
+edges general merge authority.
+
+The active closed artifacts are:
+
+- task-to-profile binding audit:
+  `.codex-runtime/realization-binding-audit-seven-v1-20260823-38`,
+  SHA-256 `970efdf5d916dbf8256b2725b422d4396a54adcbaf2b50db8f092c0306fb1adf`;
+- eligibility:
+  `.codex-runtime/dataset-eligibility-seven-v6-realization-profiles-20260823-42`,
+  SHA-256 `208794e253ab91679ca2d27260d5bbf7042c02c35a9cb6eaaca26967584a588c`;
+- complete embedding-only candidate reconstruction:
+  `.codex-runtime/eligible-undermerge-embedding-complete-seven-v1-20260823-36`,
+  SHA-256 `42914bd58129ca442df48368433aa8886c6b508751654b359fa1c6dee15667ec`;
+- expanded eligible under-merge review and sampling-unit ledger:
+  `.codex-runtime/eligible-undermerge-review-seven-v4-profile-bound-20260823-43`,
+  SHA-256 `da61093463e252a3eb0c5dd040cab890381bcba9310bfd5abd8cf1736a19b96e`.
+
+The 1,362 excluded clusters have still been normalized, clustered, and given
+functional contracts. They are outside the current frozen Python mechanisms
+or language layers, so they are inventory for later extensions rather than
+part of the next formal denominator. Separately, 229 C/C++ memory-safety
+clusters are retained as replication candidates. The outcome-blind readiness
+audit selects four per target CWE (28 total), but only 6 currently carry a
+source functional test. The C/C++ replication therefore remains gated on 22
+frozen functional tests plus a compiler/sanitizer execution adapter.
+
+An outcome-blind quality screen now retains 201 of the 1,362 outside clusters
+as explicit priority-extension candidates. Admission to this pool requires a
+nonempty frozen functional contract and at least one source test reference; it
+uses no generated code, arm, Oracle output, or experiment outcome. The pool has
+two tiers:
+
+| Priority tier | Clusters | Scope | Remaining admission gate |
+| --- | ---: | --- | --- |
+| Python mechanism extension | 113 | 49 injection, 18 file/resource, 35 identity/permission, 11 crypto/transport | freeze a task-applicable MechanismSpec and Oracle profile |
+| Cross-language replication extension | 88 | C 25, C++ 21, Go 19, JavaScript 23 | freeze the language runtime, intervention realization, and Oracle |
+
+The Python tier covers source-tested adjacent mechanisms rather than arbitrary
+new CWE labels: CWE-74/77/95/113/117/643/943; CWE-377/379/601;
+CWE-250/259/269/276/352/522/863; and CWE-319/321/326/329/760. Every included
+CWE has at least two candidates. These tasks are the first pool to examine when
+the study prospectively expands its mechanism scope, but they remain excluded
+from the current 60-cluster denominator until their measurement gate passes.
+The remaining 1,161 outside clusters stay in the inventory at lower priority;
+most lack a source test, a supported language runtime, or a mechanism close to
+the frozen research question.
+
+The frozen selection policy is
+`data/dataset-curation/priority-extension-policy-v1.json`, SHA-256
+`b0f3439f07b7027e571f9cb34925b498c58bf467cd7bfc892525562f73a3b5fd`.
+The selected record IDs and blockers are published in
+`priority-extension-candidates.json` inside the active study-design bundle.
+
+The review used prompts and frozen functional contracts only. It did not use
+generated programs, assigned arms, Security Oracle outputs, or experiment
+outcomes. It is a Codex requirements audit rather than an independent human
+annotation study; that limitation is retained in the artifact report.
+
+### 6.3 Historical outcome-blind eligibility audit (superseded)
+
+The previous implementation-readiness audit classified all 1,844 historical
+clusters
 against the frozen study layers, mechanism registry, qualified Functional
-Oracle, and available Security Oracle profiles. It does not require a
+Oracle, and available Security Oracle profiles. It did not require a
 source-native executable test because the frozen Python functional outcome is
 AST/compile validity plus a blinded whole-task LLM review; source tests remain
 an independently recorded evidence attribute.
 
-The result is 204 `eligible`, 456 `calibration_only`, and 1,184 `excluded`
-clusters. The 204 currently runnable Python clusters cover only five registered
-CWEs: CWE-78 (84), CWE-89 (42), CWE-502 (22), CWE-328 (23), and CWE-338
-(33). Their family support is:
+Its result was 204 `eligible`, 456 `calibration_only`, and 1,184 `excluded`
+clusters. The 204 historically runnable Python clusters covered only five
+registered CWEs: CWE-78 (84), CWE-89 (42), CWE-502 (22), CWE-328 (23), and
+CWE-338 (33). Their family support is:
 
 | Python family | Eligible | Target | Gate |
 | --- | ---: | ---: | --- |
@@ -320,8 +423,9 @@ CWEs: CWE-78 (84), CWE-89 (42), CWE-502 (22), CWE-328 (23), and CWE-338
 | identity, authorization, permissions | 0 | 60 | count/lineage fail |
 | cryptography, randomness, integrity | 56 | 60 | count fail |
 
-The prospective 240-cluster Python population gate therefore **does not
-pass**. In addition, 148 of the 204 eligible representatives come from the
+These counts are not valid for sampling from the new 2,165-cluster population.
+Before the correction, the prospective 240-cluster Python population gate did
+**not pass**. In addition, 148 of the 204 eligible representatives came from the
 CyberSecEval Instruct Prime lineage. Under the frozen 25-percent per-lineage
 cap, at most 64 of the currently eligible clusters can be selected, even before
 family balancing. This is a corpus/method-coverage shortfall, not an experiment
@@ -335,11 +439,12 @@ the complete per-cluster decision ledger.
 
 ## 7. Arms and assignment budget
 
-Target and Noop are required arms in every feasible primary complete block.
-Generic and Placebo form a preplanned specificity panel over a target of 48
-Python-core semantic clusters, balanced across the four families and admitted
-only where the frozen hypothesis-specific arm protocol makes them meaningful.
-ADD and REMOVE operations remain separate.
+The next Python validation uses one complete four-arm block per sampled task:
+`absent`, `specific`, `generic`, and `placebo`. The frozen minimum sample has
+60 independent task units, 15 per mechanism family, for 240 assignments per
+generator model. The primary contrast is `specific - placebo`; family effects
+are descriptive heterogeneity estimates because 15 clusters per family are
+not separately powered confirmatory studies.
 
 The dataset size does **not** determine the final assignment count. Assignment
 count is computed only after the hypothesis freeze as the sum over frozen
@@ -368,6 +473,27 @@ must acquire more eligible clusters, reduce the prospectively selected
 hypothesis family, or report that confirmation is not supported. It cannot
 change the denominator, combine incompatible strata, or continue sampling in
 response to the observed effect.
+
+### 8.1 Frozen minimum validation design
+
+The active outcome-blind design bundle is
+`.codex-runtime/study-design-python-four-arm-v1-20260823-48`, SHA-256
+`f9df3a6ff55698914e9f515ab07249b8aea70c8c838be665544d9c2d36aeebe0`.
+It selects 60 unique task units with no co-selection violation, exactly 15 per
+family, at least three lineages per family, and a maximum lineage contribution
+of 15/60. Within each family, the deterministic selector also balances the
+available leaf CWEs before breaking ties by lineage and frozen hash order.
+Selection used only frozen task, contract, lineage, mechanism, and
+Oracle-profile fields.
+
+For the paired `specific - placebo` secure-yield contrast, the planning
+calculation uses a 20-percentage-point minimum effect, two-sided alpha 0.05,
+and a prospective discordant-pair probability of 0.30. The normal-approximation
+power is 0.807. This is an assumption-conditional planning result, not observed
+effect evidence: sensitivity power falls to 0.688 if discordance is 0.40.
+Confirmatory generation is not yet authorized. The next gate is limited to
+freezing the four arm texts, generator identity, 240 assignments, and a small
+pilot split.
 
 The simulation assumptions, code, seeds, candidate curves, chosen design, and
 maximum authorized sample are frozen before the first confirmatory generation.

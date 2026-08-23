@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "status": "OUTCOME_BLIND_PRIORITY_EXTENSION_POLICY",
+  "common_requirements": {
+    "functional_contract_required": true,
+    "minimum_requirements": 1,
+    "source_test_required": true,
+    "minimum_source_test_references": 1
+  },
+  "tiers": [
+    {
+      "tier_id": "priority_1_python_mechanism_extension",
+      "role": "prospective_python_scope_extension",
+      "language": "python",
+      "families": {
+        "injection_extension": [
+          "CWE-74",
+          "CWE-77",
+          "CWE-95",
+          "CWE-113",
+          "CWE-117",
+          "CWE-643",
+          "CWE-943"
+        ],
+        "file_resource_extension": ["CWE-377", "CWE-379", "CWE-601"],
+        "identity_permission_extension": [
+          "CWE-250",
+          "CWE-259",
+          "CWE-269",
+          "CWE-276",
+          "CWE-352",
+          "CWE-522",
+          "CWE-863"
+        ],
+        "crypto_transport_extension": [
+          "CWE-319",
+          "CWE-321",
+          "CWE-326",
+          "CWE-329",
+          "CWE-760"
+        ]
+      },
+      "minimum_candidates_per_cwe": 2,
+      "admission_blocker": "mechanism_spec_and_oracle_profile_not_frozen"
+    },
+    {
+      "tier_id": "priority_2_cross_language_replication_extension",
+      "role": "prospective_cross_language_extension",
+      "languages": ["c", "cpp", "go", "javascript"],
+      "admission_blocker": "language_runtime_intervention_and_oracle_not_frozen"
+    }
+  ],
+  "generated_code_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
