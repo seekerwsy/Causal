@@ -14,12 +14,16 @@ def main() -> int:
         "action",
         choices=(
             "prepare-registered",
+            "prepare-study-sample",
             "preflight",
             "intervene-pilot",
             "intervene-remaining",
+            "intervene-full",
             "measure-pilot",
             "measure-remaining",
+            "measure-full",
             "analyze",
+            "analyze-full",
         ),
     )
     parser.add_argument("output", type=Path)
@@ -27,12 +31,16 @@ def main() -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--tasks", type=Path)
     parser.add_argument("--source-tasks", type=Path)
+    parser.add_argument("--sample", type=Path)
+    parser.add_argument("--records", type=Path)
+    parser.add_argument("--contracts", type=Path)
     parser.add_argument("--mechanism-registry", type=Path)
     parser.add_argument("--selected-task-id", action="append", default=[])
     parser.add_argument("--intervention-pilot", type=Path)
     parser.add_argument("--intervention-remaining", type=Path)
     parser.add_argument("--measurement-pilot", type=Path)
     parser.add_argument("--measurement-remaining", type=Path)
+    parser.add_argument("--measurement-full", type=Path)
     parser.add_argument("--oracle-source-root", type=Path)
     parser.add_argument("--semgrep", type=Path)
     parser.add_argument("--bandit", type=Path)
@@ -47,6 +55,19 @@ def main() -> int:
             args.output,
         )
         print("FOUR_ARM_TASKS_PREPARED")
+        return 0
+    if args.action == "prepare-study-sample":
+        required = (args.sample, args.records, args.contracts, args.mechanism_registry)
+        if any(value is None for value in required):
+            parser.error("study preparation requires sample, records, contracts, and registry")
+        four_arm.prepare_study_sample_tasks(
+            args.sample,
+            args.records,
+            args.contracts,
+            args.mechanism_registry,
+            args.output,
+        )
+        print("FOUR_ARM_STUDY_TASKS_PREPARED")
         return 0
     if args.config is None or args.tasks is None:
         parser.error("this action requires config and tasks")
@@ -81,11 +102,22 @@ def main() -> int:
             measurement_pilot=args.measurement_pilot,
         )
     else:
-        if args.measurement_pilot is None or args.measurement_remaining is None:
-            parser.error("analysis requires measurement-pilot and measurement-remaining")
-        report = four_arm.analyze(
-            args.config, args.tasks, args.measurement_pilot, args.measurement_remaining, args.output
-        )
+        if args.action == "analyze-full":
+            if args.measurement_full is None:
+                parser.error("full analysis requires measurement-full")
+            report = four_arm.analyze_full(
+                args.config, args.tasks, args.measurement_full, args.output
+            )
+        else:
+            if args.measurement_pilot is None or args.measurement_remaining is None:
+                parser.error("analysis requires measurement-pilot and measurement-remaining")
+            report = four_arm.analyze(
+                args.config,
+                args.tasks,
+                args.measurement_pilot,
+                args.measurement_remaining,
+                args.output,
+            )
     print(report["status"])
     return 0 if report["status"] != "ERROR" else 2
 
