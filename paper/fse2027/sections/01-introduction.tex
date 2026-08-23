@@ -1,0 +1,62 @@
+\section{Introduction}
+
+Natural-language prompts now participate directly in the security boundary of
+code generation. They often specify what a program should do while leaving
+validation, authorization, trust boundaries, or safe-API constraints implicit.
+Studies of AI-assisted code generation show that functional-looking outputs
+can still contain security weaknesses and that developers may overestimate the
+security of assisted solutions~\cite{pearce2022copilot,perry2023assistants}.
+The practical question is therefore not only which prompt text matters, but
+which missing or weakly scoped requirement can be edited without changing the
+programming task.
+
+Feature attribution, concept-based interpretation, and rationale evaluation
+offer complementary views of model
+behavior~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser},
+but importance or plausibility alone does not identify the effect of an
+editable prompt requirement. Perturbations can further reveal behavioral
+sensitivity to changed text, yet an unconstrained change may alter task
+semantics, presentation, and security content together. These signals are
+valuable evidence sources, but they do not by themselves supply a
+task-preserving intervention or a confirmatory effect estimate.
+
+The missing link is a reproducible progression from \emph{representation}, to
+\emph{hypothesis}, to \emph{effect}. Free-form requirements must first become
+typed, scoped, and editable prompt-side factors. Observational relations among
+those factors must then retain their uncertainty and remain stable across task
+clusters. Finally, the selected hypothesis and its intervention protocol must
+be fixed before held-out outcomes exist, so that confirmation estimates the
+effect of assignment rather than selecting cases in which the intended edit
+happened to succeed.
+
+\model provides this progression in three stages.
+\textbf{Security-Aware Prompt Representation} separates an immutable
+task/security context query from one catalog-bound editable feature.
+\textbf{Stability-Guided Observational Prioritization} combines structure-derived
+constraints, FCI, and semantic-task-cluster stability to rank candidates while
+preserving PAG uncertainty.
+\textbf{Randomized Policy Confirmation} freezes a finite distribution of
+task-independent realizations, constructs complete task-specific four-arm
+bundles, randomizes them on held-out tasks, and estimates assigned-arm
+intent-to-treat effects. A shared-universe selector comparison and an explicit
+candidate-to-policy bridge make both prioritization and confirmation auditable.
+
+This paper makes the following contributions:
+
+\begin{itemize}
+  \item \textbf{Security-aware prompt representation.} A typed, catalog-bound
+  representation converts free-form requirements into guard-independent
+  contexts and scoped, editable security features.
+  \item \textbf{Budgeted intervention prioritization.} Typed background
+  knowledge, FCI, and semantic-task-cluster stability rank a frozen candidate
+  universe alongside associational, predictive, expert, and random selectors.
+  \item \textbf{Randomized policy confirmation.} Multi-realization prompt
+  policies and held-out blocked randomization produce hypothesis-specific
+  assigned-arm ITT evidence without conditioning on realized edit success.
+  \item \textbf{Provenance-complete evidence accounting.} An explicit bridge
+  records context eligibility, policy realization, protocolization,
+  randomization, and confirmation without upgrading exploratory artifacts.
+  \item \textbf{Expert-facing utility evaluation.} A separately governed,
+  blinded study evaluates how security experts perceive the usefulness of
+  method explanations without treating those ratings as causal or repair evidence.
+\end{itemize}

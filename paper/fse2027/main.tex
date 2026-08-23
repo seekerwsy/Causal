@@ -1,0 +1,108 @@
+\documentclass[acmsmall,screen,review,anonymous]{acmart}
+
+\settopmatter{printacmref=false}
+\setcopyright{none}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+
+\usepackage{booktabs}
+\usepackage{flafter}
+\usepackage{multirow}
+\usepackage{needspace}
+\usepackage{tikz}
+\usepackage{xspace}
+\usetikzlibrary{arrows.meta,fit,positioning}
+
+\newcommand{\model}{\textsc{Model}\xspace}
+\newcommand{\prompttsg}{Prompt TSG\xspace}
+\newcommand{\resultslot}{\mbox{\emph{Frozen-run results pending.}}}
+
+\acmConference[FSE 2027]{The ACM International Conference on the Foundations
+of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
+\acmYear{2027}
+\copyrightyear{2027}
+
+\begin{document}
+
+\title{Prioritizing and Confirming Prompt-Side Security Interventions in LLM
+Code Generation}
+
+\author{Anonymous Author(s)}
+\affiliation{%
+  \institution{Anonymous Institution}
+  \country{}
+}
+
+\begin{abstract}
+Natural-language prompts are part of the security boundary of LLM code
+generation: they can specify the required behavior while leaving validation,
+authorization, trust boundaries, or safe-API constraints implicit. Existing
+attribution and perturbation methods can expose influential text, yet they do
+not by themselves turn that evidence into a task-preserving prompt
+intervention with a confirmatory effect estimate. We present \model, a
+three-stage framework that represents guard-independent task/security context,
+prioritizes one-feature intervention hypotheses with structure-constrained
+FCI, and tests frozen multi-realization prompt policies on held-out tasks. The
+discovery stage combines graph-derived variables, typed background knowledge,
+and semantic-task-cluster bootstrap stability while preserving PAG
+uncertainty. The confirmation stage freezes complete four-arm prompt bundles
+before blocked random assignment and estimates semantic-task-clustered
+assigned-arm intent-to-treat effects on oracle-evaluable secure-code yield. A
+shared candidate universe supports controlled comparisons among causal,
+associational, predictive, expert, and random selectors. \resultslot
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10011007.10011074.10011099</concept_id>
+  <concept_desc>Software and its engineering~Software safety</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10002978.10003029.10011703</concept_id>
+  <concept_desc>Security and privacy~Software security engineering</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Software and its engineering~Software safety}
+\ccsdesc[500]{Security and privacy~Software security engineering}
+\keywords{large language models, code generation, software security, causal
+discovery, randomized experiments, prompt analysis}
+
+\maketitle
+\raggedbottom
+
+\input{sections/01-introduction}
+
+\input{sections/02-problem-formulation}
+
+\input{sections/03-representation}
+
+\input{sections/04-prioritization}
+
+\input{sections/05-confirmation}
+
+\input{sections/06-evaluation}
+
+\input{sections/07-related-work}
+
+\input{sections/08-synthetic-validation}
+
+\input{sections/09-threats-to-validity}
+
+\input{sections/10-reproducibility}
+
+\input{sections/11-conclusion}
+
+\input{sections/12-data-availability}
+
+\appendix
+
+\input{sections/appendix-a-optional-analyses}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}

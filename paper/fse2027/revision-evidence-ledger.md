@@ -1,7 +1,8 @@
 # Prompt Mechanism Study FSE Revision Evidence Ledger
 
 - **Revision:** 2026-08-22 related-work coverage revision
-- **Primary manuscript:** [`paper/fse2027/prompt-mechanism-study-fse2027-draft.tex`](prompt-mechanism-study-fse2027-draft.tex)
+- **Primary manuscript:** [`paper/fse2027/main.tex`](main.tex), with top-level
+  manuscript sections under [`paper/fse2027/sections/`](sections/)
 
 | Claim or manuscript element | Highest authority | Artifact path and field | Status | Revision action |
 | --- | --- | --- | --- | --- |

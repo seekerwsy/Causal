@@ -1,0 +1,145 @@
+\section{Causal Effect Confirmation}
+
+The third stage turns each frozen hypothesis into a family-valid randomized
+experiment on held-out tasks. Typed variants and their controls are completed
+before assignment, and analysis estimates the effect of assigned prompt roles
+without selecting cases by realized edit success.
+
+\subsection{Typed Intervention Protocols}
+
+A \texttt{TargetSpec} binds the feature family and catalog identity, ADD or
+REMOVE, source prompt role, and exact counterpart requirements. ADD requires
+an applicable, resolved \textsc{absent} source state. REMOVE requires a
+provenance-bound \textsc{present} clause and a pre-attested, task-preserving
+neutral counterpart. Execution is text-native or graph-native and uses either
+a deterministic renderer or a locked LLM executor; the run fixes this choice
+and its complete provenance.
+
+Four-arm protocols are specific to Safety ADD and Safety REMOVE:
+
+\begin{itemize}
+  \item Safety ADD uses \path{TARGET_PATCH}, \path{NOOP_REWRITE},
+  \path{LENGTH_MATCHED_PLACEBO}, and
+  \path{GENERIC_SECURITY_REMINDER}.
+  \item Safety REMOVE uses \path{TARGET_REMOVE}, \path{NOOP_RETAIN},
+  \path{LENGTH_MATCHED_SHAM_EDIT}, and
+  \path{GENERIC_SECURITY_REPLACEMENT}.
+\end{itemize}
+
+ADD and REMOVE remain separate candidate slots, hypotheses, protocols,
+contrasts, multiplicity coordinates, and evidence. REMOVE may only restore an
+attested neutral counterpart and never inserts an unsafe request; ADD and
+REMOVE therefore cannot be combined in one confirmable hypothesis.
+
+Other families retain family-specific protocols. Task-function ADD/REMOVE
+requires target, no-op, and length-matched placebo roles; a fourth active
+control is permitted only with a reviewed catalog entry and independent
+functional outcome. Presentation experiments use target and no-op plus an
+optional matched presentation control and serve as negative controls.
+
+Each arm has an explicit \texttt{AllowedDelta} that bounds its declared target
+or control change and fixes protected task, safety, and presentation
+projections. Exact source/counterpart provenance and the
+\texttt{SecurityNeutralPromptInvariant} ensure that no variant claims a
+vulnerability, requests unsafe behavior, or reveals an expected Oracle label
+or effect direction.
+
+\subsection{Variant Freeze and Block Randomization}
+
+For each $h$, the protocol first freezes a finite task-independent realization
+set and probabilities $Q_h$. For every eligible task and every realization,
+one task-specific bundle contains all four arm texts and exact digests. Every
+candidate arm is independently re-extracted with the run-locked Prompt
+extractor while it is blind to the arm role and target. Before assignment, hard
+gates validate schema and catalog integrity, exact evidence and provenance,
+canonical round trips, security-neutral task preservation, context/task/non-
+target invariance, the arm-specific \texttt{AllowedDelta}, and absence of
+downstream information. A task enters the common-support population only when
+every required arm and realization passes before outcomes exist; failed
+realizations are never deleted or renormalized.
+
+Target change, semantic compliance, and permissible non-target drift are
+recorded during this arm-blind validation as intervention-realization
+diagnostics. They
+do not decide the hard-gate result, and \texttt{target\_changed}, semantic
+compliance, and non-target drift never filter the primary assigned-arm ITT
+denominator. If one arm fails a hard gate, the complete task--hypothesis bundle
+is reported as a pre-randomization exclusion and receives no assignment.
+
+Within each complete frozen block, a manifested deterministic RNG assigns
+request-randomness slots to a balanced permutation of the protocol's finite arm
+roles. The canonical block binds semantic cluster, task instance, hypothesis,
+target, global realization specification, task realization bundle, model, and
+arm protocol. The assignment manifest additionally binds prompt variant,
+nullable provider seed, model parameters, RNG identity, request order, and
+request ID before generation. Mutation of any canonical coordinate changes the
+block identity, and provider execution order cannot alter treatment.
+
+\subsection{Outcomes and Assigned-Arm ITT}
+
+Generated code enters only the independent, versioned security Oracle and
+functional evaluator. We decompose code production and Oracle support as
+$Y_C$ and $Y_E$. The primary oracle-evaluable secure-code yield is
+$Y_CY_E I(\text{Oracle secure})$; secure-and-functional joint success further
+requires the frozen functional check to pass and is the key practical
+secondary outcome. A valid terminal generation failure or syntactically
+invalid result has $Y_C=0,Y_E=0$; valid but Oracle-unsupported or unknown code
+has $Y_C=1,Y_E=0$. These remain observed assigned-arm outcomes under the
+frozen encoding. Missing, corrupt, or unavailable required producer evidence
+is not encoded as an outcome; it blocks publication and triggers deterministic
+replay of the same manifest.
+
+For frozen hypothesis $h$, target $q$, operation $o$, model $m$, and outcome
+$Y$, the primary contrast is the hypothesis-specific target-minus-no-op
+assigned-arm ITT risk difference
+
+\[
+  \Delta^{\mathrm{ITT}}_{h,q,o,m}
+  = \mathbb{E}[Y \mid A=\mathrm{target}]
+  - \mathbb{E}[Y \mid A=\mathrm{no\mbox{-}op}].
+\]
+
+Every committed randomized assignment enters the denominator under its
+assigned role. Point estimates average over the frozen task population and
+realization distribution $Q_h$. Uncertainty resamples semantic task clusters
+and carries all descendant hypotheses, models, arms, realizations, and request
+slots together. Simultaneous intervals follow the frozen hypothesis/model/
+contrast family. Target-minus-placebo and, where family-valid,
+target-minus-generic-control contrasts assess specificity. Effects remain
+separate by hypothesis, target, operation, model, and CWE unless another
+estimand was approved in advance. Task improvement, harm, and tie rates remain
+descriptive diagnostics, not individual causal flips or substitutes for ITT.
+
+\subsection{Evidence Levels}
+
+\model uses the prospective evidence levels below:
+
+\begin{enumerate}
+  \item \textbf{Observational Candidate}: a discover-split stable possible path
+  frozen before confirmation, without a causal confirmation claim.
+  \item \textbf{Randomized Policy Effect}: the preregistered
+  target-minus-no-op ITT follows the frozen expected direction, meets the
+  independent-task requirement, and has a multiplicity-adjusted interval
+  excluding zero with complete provenance.
+  \item \textbf{Target-Specific Policy Effect}: a randomized effect also supported by
+  the preregistered target-minus-placebo and, where family-valid,
+  target-minus-generic contrasts.
+  \item \textbf{Realization-Robust Policy Effect}: the average policy effect
+  is confirmed and all frozen direction, equivalence, interaction, and
+  leave-one-realization-out conditions hold simultaneously.
+  \item \textbf{Cross-Model Replication}: separately estimated model effects
+  meet the frozen replication rule without creating a pooled universal effect.
+  \item \textbf{Bidirectional Support}: separate ADD and REMOVE protocols
+  independently confirm opposite expected directions for the same feature.
+  \item \textbf{Directionally Consistent but Inconclusive}: the point estimate
+  follows the frozen direction but its adjusted interval includes zero or
+  independent-task support is insufficient.
+  \item \textbf{Null / Conflicting / Non-Evaluable}: the preregistered analysis
+  respectively detects no effect, estimates the opposite direction, or cannot
+  publish an effect because no valid randomization universe or required
+  infrastructure/provenance exists.
+\end{enumerate}
+
+Valid post-assignment terminal non-successes remain assigned data and do not
+create a non-evaluable result. Discovery, demo, and smoke-test artifacts cannot
+be promoted to confirmatory evidence.

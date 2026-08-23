@@ -1,0 +1,295 @@
+\section{Evaluation Design and Results}
+
+All computational methods receive the same discover and confirm task
+manifests, model and request-randomness policy, independent Oracle and
+functional contract, candidate budget, family-valid intervention protocol,
+randomization, outcome encoding, semantic-cluster uncertainty, and
+multiplicity policy. Candidate universes, selector scores and ranks, native
+candidates, mappings, expected directions, and realization policies are frozen
+before confirm outcomes exist.
+
+Discovery uses the discover split, and randomized confirmation uses held-out
+confirm tasks. The primary confirmatory analysis is hypothesis- and
+model-specific semantic-task-clustered assigned-arm ITT on oracle-evaluable
+secure-code yield. Secure-and-functional joint success is the key practical
+secondary outcome. Every
+committed assignment remains in its assigned-arm denominator;
+\texttt{target\_changed}, semantic compliance, and non-target drift are
+diagnostics rather than filters.
+
+Throughout the tables, \texttt{--} marks a result slot awaiting
+provenance-verified frozen-run or study backfill; it denotes neither zero, not
+applicable, nor observed missingness.
+
+\subsection{Study Data}
+
+The task inventory draws from SecurityEval, LLMSecEval, SALLM, CWEval,
+CyberSecEval, and SeCodePLT, with BaxBench used for backend replication
+\cite{siddiq2022securityeval,tony2023llmseceval,siddiq2024sallm,
+peng2025cweval,bhatt2023cyberseceval,nie2025secodeplt,vero2025baxbench}.
+The frozen task manifest identifies the exact included records and preserves
+dataset provenance and semantic-cluster-disjoint study splits.
+
+\subsection{RQ1: Held-Out Intervention Prioritization}
+
+\textbf{RQ1. How effectively can different methods prioritize prompt
+interventions that generalize to held-out tasks?}
+
+The primary selector-only comparison gives TSG-constrained FCI,
+preregistered association, regularized prediction, blinded expert ranking, and
+seeded random ranking the same shared candidate universe, information budget,
+and $K$ slots. The unique union of their top-$K$ skeletons crosses the common
+bridge once and each resulting hypothesis is randomized once; duplicate
+selector references reuse that evidence. Empty, bridge-failed, and
+protocolization-failed slots remain zeroes in denominator $K$. The primary
+endpoint is strict confirmed yield at $K$, accompanied by simultaneous paired
+selector-utility differences. Rankings remain conditional on the frozen
+discover split; held-out outcomes neither rerank selectors nor replace failed
+slots.
+
+A separate native-system track provides secondary end-to-end evidence using
+the fixed funnel
+
+\[
+K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
+\rightarrow N_{\mathrm{protocol}} \rightarrow N_{\mathrm{randomized}}
+\rightarrow N_{\mathrm{confirmed}}.
+\]
+
+That track measures system compatibility rather than pure selector
+superiority. Conditional mapping coverage and mapped yield at $K$ are bridge
+diagnostics; native funnel results cannot replace the shared-universe primary
+comparison. For every frozen method/slot hypothesis, the evidence report
+retains target and operation, target-minus-no-op ITT, simultaneous status,
+independent semantic-cluster and arm counts, and preregistered specificity
+contrasts.
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ1 shared-universe selector results. Panel A retains every frozen
+  budget slot through confirmation. Panel B reports the corresponding yields;
+  strict confirmed yield at $K$ is primary. FCI, association, prediction,
+  expert, and random rankings use identical candidate and information
+  budgets.}
+  \label{tab:rq1}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    \multicolumn{7}{l}{\textit{Panel A: Frozen-slot funnel}} \\
+    \midrule
+    Selector & $K$ & Selected & Bridged & Protocol & Rand. & Conf. \\
+    \midrule
+    TSG-constrained FCI & -- & -- & -- & -- & -- & -- \\
+    Association & -- & -- & -- & -- & -- & -- \\
+    Regularized prediction & -- & -- & -- & -- & -- & -- \\
+    Blinded expert & -- & -- & -- & -- & -- & -- \\
+    Seeded random & -- & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{lrrrrr}
+    \toprule
+    \multicolumn{6}{l}{\textit{Panel B: Derived yields}} \\
+    \midrule
+    Metric & FCI & Assoc. & Predict. & Expert & Random \\
+    \midrule
+    Selected / $K$ & -- & -- & -- & -- & -- \\
+    Bridged / $K$ & -- & -- & -- & -- & -- \\
+    Protocol / $K$ & -- & -- & -- & -- & -- \\
+    Unique-union share & -- & -- & -- & -- & -- \\
+    Block-freeze coverage & -- & -- & -- & -- & -- \\
+    Randomized / $K$ & -- & -- & -- & -- & -- \\
+    Strict confirmed yield / $K$ & -- & -- & -- & -- & -- \\
+    Confirmed / Randomized & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ1 hypothesis and paired-selector evidence. The frozen RQ1
+  manifest binds selector/slot references to one shared randomized hypothesis
+  estimate. Paired utility intervals resample top-level semantic clusters and
+  never rerun discovery.}
+  \label{tab:rq1-evidence}
+  \begin{tabular}{llllrr}
+    \toprule
+    Selector/slot & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    \midrule
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen RQ1 manifest}} \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{llrrl}
+    \toprule
+    Selector pair & Utility diff. & Simult.\ interval & Status & Shared slots \\
+    \midrule
+    \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{RQ2: Representation and Prioritization Contribution}
+
+\textbf{RQ2. How do \model's structured representation and causal
+prioritization contribute to successful intervention selection?}
+
+RQ2 separates two questions that require different controls. The selector-only
+track reuses RQ1's direct-plus-context universe and holds every candidate,
+eligibility rule, outcome, realization policy, and information budget fixed
+while changing only the selector. Its FCI-versus-baseline comparisons therefore
+isolate prioritization under a shared universe.
+
+The representation comparison contrasts a direct-actionable-feature universe
+with a direct-plus-context universe. Because the candidate identities and
+eligible populations can differ, this is an end-to-end comparison, not a pure
+selector comparison. Both universes use the same frozen budget, bridge,
+confirmation protocol, and outcome construction, and report candidate
+coverage, protocolization, strict confirmed yield at $K$, and the distribution
+of hypothesis-specific effects. No selected hypotheses are pooled into an
+unapproved cross-hypothesis ATE.
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ2 separates selector-only and representation evidence. Panel A
+  reports shared direct-plus-context-universe selector yields. Panel B compares
+  direct and direct-plus-context universes end-to-end without interpreting the
+  result as pure selector superiority.}
+  \label{tab:rq2}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    \multicolumn{6}{l}{\textit{Panel A: Selector-only outcomes}} \\
+    \midrule
+    Metric & FCI & Assoc. & Predict. & Expert & Random \\
+    \midrule
+    Selected / $K$ & -- & -- & -- & -- & -- \\
+    Bridged / $K$ & -- & -- & -- & -- & -- \\
+    Protocol / $K$ & -- & -- & -- & -- & -- \\
+    Block-freeze coverage & -- & -- & -- & -- & -- \\
+    Randomized / $K$ & -- & -- & -- & -- & -- \\
+    Strict confirmed yield / $K$ & -- & -- & -- & -- & -- \\
+    Paired utility vs. FCI & -- & -- & -- & -- & -- \\
+    Simultaneous status & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{lrrrrr}
+    \toprule
+    \multicolumn{6}{l}{\textit{Panel B: Representation end-to-end outcomes}} \\
+    \midrule
+    Universe & Candidates & Coverage & Protocol & Rand. & Strict yield / $K$ \\
+    \midrule
+    Direct features & -- & -- & -- & -- & -- \\
+    Direct + context & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ2 hypothesis-specific evidence. Selector-only rows retain one
+  shared-universe identity; representation rows retain their distinct universe
+  identity. Every row reports target-minus-no-op ITT and its simultaneous
+  status without cross-hypothesis pooling.}
+  \label{tab:rq2-evidence}
+  \begin{tabular}{llllrr}
+    \toprule
+    Track/universe & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    \midrule
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen RQ2 manifest}} \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \begin{tabular}{llrrl}
+    \toprule
+    Hyp.\ ID & Adj.\ status & Indep.\ clusters & Arm counts & Specificity contrasts \\
+    \midrule
+    \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\Needspace{8\baselineskip}
+\subsection{RQ3: Security Intervention Effects}
+
+\textbf{RQ3. Which prompt-side security interventions reliably improve secure
+code generation?}
+
+RQ3 estimates context-conditioned, model-specific, multi-realization policy
+effects for the frozen security targets. The primary outcome is
+oracle-evaluable secure-code yield; secure-and-functional joint success is the
+key practical secondary outcome. Code validity, Oracle support, unknowns,
+terminal no-code rates, and secure-yield bounds remain separate so that a
+coverage or production shift cannot masquerade as safer generated code.
+
+ADD and REMOVE remain separate candidate slots, hypotheses, protocols,
+contrasts, multiplicity coordinates, and evidence. Observed baseline or no-op
+insecurity is neither an eligibility condition nor an ITT denominator filter.
+Target-versus-placebo and, when family-valid, target-versus-generic contrasts
+test specificity. Bidirectional support is awarded only when separately
+randomized ADD and REMOVE policies support opposite expected directions.
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ3 reports hypothesis-specific target-versus-no-op assigned-arm
+  effects on oracle-evaluable secure-code yield. ADD and REMOVE remain separate
+  policies; joint success and placebo/generic contrasts provide practical and
+  specificity evidence.}
+  \label{tab:rq3}
+  \begin{tabular}{lllrrl}
+    \toprule
+    Frozen target & Op. & Outcome & ITT RD & Interval & Evidence \\
+    \midrule
+    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    provenance-verified frozen TargetSpec manifest}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Target-change, semantic-compliance, non-target-drift, task improvement, harm,
+and tie rates are descriptive diagnostics. They neither filter the assigned-arm
+ITT denominator nor replace the primary ITT estimates.
+
+\subsection{RQ4: Expert-Perceived Explanation Utility}
+
+\textbf{RQ4. How do security experts rate and rank the perceived quality and
+usefulness of explanations produced by different methods?}
+
+Each method's explanation is placed in the same anonymous wrapper and presented
+under a balanced case--method assignment. Qualified experts rate clarity,
+evidence sufficiency, credibility, actionability, and overall usefulness on
+five-point ordinal scales. Overall usefulness is the preregistered primary
+human-study outcome; the other dimensions are secondary.
+
+The primary analysis uses an ordinal mixed-effects model with method as a fixed
+effect and participant and case as random effects, followed by
+multiplicity-adjusted comparisons. RQ4 concerns perceived utility only and
+does not claim objective mechanism identification, repair accuracy, or
+validation of the computational causal results.
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{RQ4 expert-rating results. Entries report ordinal summaries and
+  model-based contrasts from the preregistered expert study.}
+  \label{tab:rq4}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Method & Clarity & Evidence & Credibility & Actionability & Usefulness \\
+    \midrule
+    \model & -- & -- & -- & -- & -- \\
+    Baseline 1 & -- & -- & -- & -- & -- \\
+    Baseline 2 & -- & -- & -- & -- & -- \\
+    Baseline 3 & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}

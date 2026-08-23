@@ -1,0 +1,57 @@
+\section{Motivating Example and Problem Formulation}
+
+\subsection{An Editable Prompt-Side Security Factor}
+
+Consider a security-neutral request to implement
+\texttt{read\_report(base\_dir, user\_path)} and return the requested UTF-8
+report. The request fixes the task but leaves path confinement implicit. A
+target-specific variant can require resolving and normalizing the path under
+\texttt{base\_dir} and rejecting any resolution outside that directory. A
+no-op variant preserves the original security semantics, a length-matched
+placebo changes presentation only, and a generic-control variant requests
+secure coding without naming path confinement. Together, these controls
+isolate rewrite, presentation/length, and generic security-cue effects,
+respectively. This illustrative example defines an intervention question; it
+does not report a generated program or an effect.
+
+\subsection{Units, Outcomes, and Claim Scope}
+
+Let a generation unit be indexed by semantic task cluster $c$, task instance
+$i$, hypothesis $h$, realization $r$, prompt arm $a$, model $m$, and request
+randomness slot $s$:
+
+\[
+  u = (c,i,h,r,a,m,s).
+\]
+
+Tasks are partitioned before model-based discovery into disjoint discovery and
+confirmation pools. The discovery pool supports observational hypothesis
+formation; the held-out confirmation pool supports prompt construction,
+randomized assignment, code generation, and effect estimation. No semantic
+task cluster crosses this boundary. The highest resampling unit is
+\texttt{semantic\_task\_cluster\_id}; every descendant task instance,
+hypothesis, model, arm, realization, and request slot moves with its cluster.
+
+The primary analysis estimates semantic-task-clustered assigned-arm ITT on
+\emph{oracle-evaluable secure-code yield} for every committed assignment.
+Secure-and-functional joint success is a key practical secondary outcome, not
+a condition for the primary security effect. Valid terminal non-successes
+remain in the assigned-arm denominator; a missing or corrupt required producer
+instead blocks publication and requires deterministic replay of the same
+assignment manifest.
+
+$W$ contains approved pre-treatment task metadata, $X^0$ contains natural
+Prompt TSG feature queries, and $Y^0$ contains independently committed
+discovery outcomes. A non-editable context query $C_q$ scopes one actionable
+feature $f$. Randomized arm $A$ is the confirmation treatment;
+post-intervention $X^{A,R}$ is a separately extracted projection diagnostic
+and never replaces $A$ in the ITT estimator. Model identity remains an analysis
+coordinate and provenance field.
+
+The \prompttsg defines typed prompt structure and the editable queries supplied
+to discovery, while the PAG preserves FCI uncertainty over learned relations.
+Generated code is used only by the independent security Oracle and functional
+checker. Observational paths therefore form hypotheses, and confirmatory claims
+are limited to task-clustered assigned-arm effects of frozen prompt
+interventions on held-out tasks within their hypothesis, target, operation,
+model, and CWE scopes.

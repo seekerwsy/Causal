@@ -12,19 +12,21 @@ This directory contains the FSE 2027 paper draft for Prompt Mechanism Study.
 
 ## Main Files
 
-- `prompt-mechanism-study-fse2027-draft.tex`: current anonymous manuscript draft.
+- `main.tex`: current anonymous manuscript entry point.
+- `sections/`: one file per top-level manuscript section, imported by
+  `main.tex` in reading order.
+- `references.bib`: bibliography shared by the section files.
 
 ## Compile
 
 The draft is verified with TeX Live 2026. From this directory, compile with:
 
 ```powershell
-latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out prompt-mechanism-study-fse2027-draft.tex
+latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out main.tex
 ```
 
-The generated manuscript is `out/prompt-mechanism-study-fse2027-draft.pdf`. The source can
-also be uploaded to Overleaf and compiled with `prompt-mechanism-study-fse2027-draft.tex` as
-the main file.
+The generated manuscript is `out/main.pdf`. The source can also be uploaded to
+Overleaf and compiled with `main.tex` as the main file.
 
 ## Current Scope
 

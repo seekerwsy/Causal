@@ -1,0 +1,56 @@
+\section{Related Work}
+
+\paragraph{Explanations for code-generation models.}
+Attribution, concept-based interpretation, and rationale methods expose input
+features, concepts, or evidence associated with model behavior
+\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,
+deyoung2020eraser}.
+CodeQ maps token-level rationales to higher-level programming categories and
+aggregates them into global explanations of code and test generation
+\cite{khati2026codeq}.
+\model uses such evidence only through an explicit bridge that resolves a
+confirmable candidate to one catalog-bound prompt feature and a frozen
+intervention policy.
+
+\paragraph{Security hardening and prompt interventions.}
+Prompt-level studies have compared security reminders, CWE-specific
+instructions, reasoning and refinement strategies, persona prompting, security
+prefixes, and iterative repair for secure code generation
+\cite{tony2025prompting,bruni2025promptbenchmark}.
+Broader hardening approaches include security-oriented instruction tuning
+(SafeCoder) and retrieved demonstrations (SecCoder)
+\cite{he2024safecoder,zhang2024seccoder}, learned continuous steering (SVEN),
+analyzer-guided prompt optimization (PromSec), constrained decoding evaluated
+with CodeGuard+, and inference-time representation intervention (Thea)
+\cite{he2023sven,nazzal2024promsec,fu2024codeguard,
+elhusseini2026thea}.
+These methods evaluate predefined or adaptively optimized hardening
+strategies. \model instead freezes context-conditioned prompt-policy
+hypotheses selected under a common budget and estimates their effects on
+held-out tasks using semantic-task-clustered assigned-arm ITT, retaining null
+or harmful effects and Oracle-unknown cases in protocol-defined reporting.
+
+\paragraph{Security benchmarks and evaluation.}
+SecurityEval and LLMSecEval established CWE-indexed prompt suites evaluated
+primarily with static security analysis
+\cite{siddiq2022securityeval,tony2023llmseceval}.
+SALLM and CWEval add executable security and functionality checks on the same
+tasks, while BaxBench evaluates backend applications through functional tests
+and end-to-end exploits, and SeCodePLT expands dynamic evaluation across
+languages and security categories
+\cite{siddiq2024sallm,peng2025cweval,vero2025baxbench,
+nie2025secodeplt}.
+Recent evaluation work further shows that apparent security improvements can
+coincide with functional degradation and that individual static analyzers can
+miss relevant vulnerabilities \cite{dai2026rethinking}.
+Following this stricter evaluation line, \model records code validity, Oracle
+support and unknowns, oracle-evaluable security, functionality, and joint
+success separately before assigned-arm aggregation.
+
+\paragraph{Causality-based analysis of code-generation systems.}
+CAM categorizes intermediate outputs in multi-agent code-generation systems
+and simulates realistic errors to rank their contributions to correctness,
+supporting failure repair and feature pruning \cite{lyu2026cam}.
+Where CAM intervenes on intermediate system traces, \model prioritizes
+context-conditioned input-prompt policies and evaluates their security effects
+through held-out blocked randomization.
