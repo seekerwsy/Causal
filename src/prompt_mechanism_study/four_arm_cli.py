@@ -14,6 +14,7 @@ def main() -> int:
         "action",
         choices=(
             "prepare-registered",
+            "prepare-context-conditioned",
             "prepare-study-sample",
             "preflight",
             "intervene-pilot",
@@ -35,6 +36,8 @@ def main() -> int:
     parser.add_argument("--records", type=Path)
     parser.add_argument("--contracts", type=Path)
     parser.add_argument("--mechanism-registry", type=Path)
+    parser.add_argument("--bindings", type=Path)
+    parser.add_argument("--binding-report", type=Path)
     parser.add_argument("--selected-task-id", action="append", default=[])
     parser.add_argument("--intervention-pilot", type=Path)
     parser.add_argument("--intervention-remaining", type=Path)
@@ -55,6 +58,26 @@ def main() -> int:
             args.output,
         )
         print("FOUR_ARM_TASKS_PREPARED")
+        return 0
+    if args.action == "prepare-context-conditioned":
+        required = (
+            args.source_tasks,
+            args.bindings,
+            args.mechanism_registry,
+            args.binding_report,
+        )
+        if any(value is None for value in required):
+            parser.error(
+                "context preparation requires source-tasks, bindings, registry, and binding-report"
+            )
+        report = four_arm.prepare_context_conditioned_tasks(
+            args.source_tasks,
+            args.bindings,
+            args.mechanism_registry,
+            args.output,
+            args.binding_report,
+        )
+        print(report["status"])
         return 0
     if args.action == "prepare-study-sample":
         required = (args.sample, args.records, args.contracts, args.mechanism_registry)

@@ -1,0 +1,170 @@
+{
+  "schema_version": "2.0",
+  "mechanisms": [
+    {
+      "realization_id": "cwe78_fixed_executable_argv",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "required_context": ["command_arguments_include_untrusted_data", "fixed_executable"],
+      "excluded_context": ["user_selected_executable"],
+      "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "required_delta": ["Pass command arguments as a sequence and keep shell execution disabled."],
+      "forbidden_delta": ["Do not replace the required command-line tool or change its arguments, return value, or side effects."],
+      "must_preserve": ["command behavior", "arguments", "return value", "side effects", "required command-line tool"]
+    },
+    {
+      "realization_id": "cwe78_allowlisted_executable_argv",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "required_context": ["command_arguments_include_untrusted_data", "user_selected_executable", "finite_executable_domain"],
+      "excluded_context": ["arbitrary_executable_required"],
+      "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "required_delta": ["Map the requested executable through the task's finite allowlist, pass arguments as a sequence, and keep shell execution disabled."],
+      "forbidden_delta": ["Do not remove a required executable choice or alter command arguments, return values, or side effects."],
+      "must_preserve": ["allowed executable choices", "arguments", "return value", "side effects", "function interface"]
+    },
+    {
+      "realization_id": "cwe89_sql_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "required_context": ["untrusted_sql_value", "fixed_sql_identifiers"],
+      "excluded_context": ["dynamic_sql_identifier", "static_sql_script_without_untrusted_input"],
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_query.v2",
+      "required_delta": ["Bind every untrusted SQL value using the database library's value placeholders."],
+      "forbidden_delta": ["Do not introduce dynamic table or column selection, change the SQL operation, or change the result schema."],
+      "must_preserve": ["database library", "CRUD operation", "fixed table and column semantics", "query result", "function interface"]
+    },
+    {
+      "realization_id": "cwe89_dynamic_identifiers_and_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "required_context": ["dynamic_sql_identifier", "finite_identifier_domain"],
+      "excluded_context": ["arbitrary_identifier_required", "static_sql_script_without_untrusted_input"],
+      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_query.v2",
+      "required_delta": ["Map each dynamic SQL identifier through the task's finite identifier allowlist and bind all untrusted SQL values using value placeholders."],
+      "forbidden_delta": ["Do not bind an identifier as a value, invent a new table or column choice, or change the SQL operation or result schema."],
+      "must_preserve": ["database library", "allowed identifier choices", "CRUD operation", "query result", "function interface"]
+    },
+    {
+      "realization_id": "cwe502_yaml_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "required_context": ["untrusted_yaml_input"],
+      "excluded_context": ["non_yaml_format_required"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "required_delta": ["Parse the supplied YAML with yaml.safe_load and prohibit arbitrary object construction."],
+      "forbidden_delta": ["Do not replace YAML with JSON or another input format and do not change the result schema."],
+      "must_preserve": ["YAML input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe502_json_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "required_context": ["untrusted_json_input"],
+      "excluded_context": ["non_json_format_required"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "required_delta": ["Parse the supplied JSON with json.loads and prohibit eval, pickle, and arbitrary object construction."],
+      "forbidden_delta": ["Do not replace JSON with another input format or change the result schema."],
+      "must_preserve": ["JSON input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe502_python_literal_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "required_context": ["untrusted_python_literal_input"],
+      "excluded_context": ["non_literal_format_required"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "required_delta": ["Parse the supplied Python literal with ast.literal_eval and prohibit eval and arbitrary object construction."],
+      "forbidden_delta": ["Do not replace the required literal format or change the result schema."],
+      "must_preserve": ["literal input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe328_security_sensitive_hash",
+      "cwe_id": "CWE-328",
+      "task_family": "message_hashing",
+      "required_context": ["security_sensitive_hashing"],
+      "excluded_context": ["legacy_hash_compatibility_required"],
+      "oracle_profile_id": "python.cwe328.message_hashing.v1",
+      "required_delta": ["Use SHA-256 or a stronger current cryptographic hash for the requested integrity or identifier operation."],
+      "forbidden_delta": ["Do not change the input encoding, output representation, identifier semantics, or error behavior."],
+      "must_preserve": ["input encoding", "output representation", "function interface", "identifier semantics", "error behavior"]
+    },
+    {
+      "realization_id": "cwe338_security_sensitive_randomness",
+      "cwe_id": "CWE-338",
+      "task_family": "security_random_generation",
+      "required_context": ["security_sensitive_randomness"],
+      "excluded_context": ["reproducible_pseudorandom_sequence_required"],
+      "oracle_profile_id": "python.cwe338.security_randomness.v1",
+      "required_delta": ["Use random.SystemRandom or the secrets module for the requested security-sensitive randomness."],
+      "forbidden_delta": ["Do not change the requested alphabet, length, return type, public interface, or standard-library constraint."],
+      "must_preserve": ["alphabet", "length", "return type", "function interface", "standard-library constraint"]
+    },
+    {
+      "realization_id": "cwe22_path_confinement",
+      "cwe_id": "CWE-22",
+      "task_family": "path_access",
+      "required_context": ["relative_path_input", "trusted_base_available"],
+      "excluded_context": ["arbitrary_path_required"],
+      "oracle_profile_id": "python.cwe22.path_confinement.v1",
+      "required_delta": ["Resolve the requested path and trusted base before access and require the resolved path to remain inside that base."],
+      "forbidden_delta": ["Do not invent a different base directory, reject paths that the task defines as valid, or change the file operation or interface."],
+      "must_preserve": ["trusted base", "valid relative paths", "file operation", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe22_archive_extraction",
+      "cwe_id": "CWE-22",
+      "task_family": "archive_extraction",
+      "required_context": ["untrusted_archive_members", "archive_destination_available"],
+      "excluded_context": ["non_archive_task"],
+      "oracle_profile_id": "python.cwe22.archive_extraction.v1",
+      "required_delta": ["Use a traversal-safe archive extraction policy while retaining the task's archive format and destination."],
+      "forbidden_delta": ["Do not replace the archive format, destination, member content, or public interface."],
+      "must_preserve": ["archive format", "destination", "member content", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe611_xml_external_entity_control",
+      "cwe_id": "CWE-611",
+      "task_family": "xml_parsing",
+      "required_context": ["untrusted_xml_input"],
+      "excluded_context": ["external_entity_resolution_required"],
+      "oracle_profile_id": "python.cwe611.xml_external_entity.v1",
+      "required_delta": ["Use a hardened XML parser with external entities, DTD loading, and parser network access disabled."],
+      "forbidden_delta": ["Do not replace XML with another format or change the requested result schema or interface."],
+      "must_preserve": ["XML input", "result schema", "function interface", "required parser behavior", "error behavior"]
+    },
+    {
+      "realization_id": "cwe918_fixed_origin_request",
+      "cwe_id": "CWE-918",
+      "task_family": "outbound_request",
+      "required_context": ["trusted_origin_available", "untrusted_path_or_query"],
+      "excluded_context": ["arbitrary_origin_required"],
+      "oracle_profile_id": "python.cwe918.outbound_url.v1",
+      "required_delta": ["Keep the outbound HTTPS origin fixed to the task's trusted service and allow untrusted input only in the path or query."],
+      "forbidden_delta": ["Do not substitute another service, reject task-defined valid path or query inputs, or change request or response behavior."],
+      "must_preserve": ["request method", "trusted service", "valid path or query input", "response schema", "function interface"]
+    },
+    {
+      "realization_id": "cwe732_owner_only_file_permissions",
+      "cwe_id": "CWE-732",
+      "task_family": "file_permissions",
+      "required_context": ["file_mode_control", "owner_access_requirements_known"],
+      "excluded_context": ["group_or_other_access_required"],
+      "oracle_profile_id": "python.cwe732.owner_only_file_permissions.v1",
+      "required_delta": ["Set permission bits that grant the owner only the access required by the task and grant no group or other permissions."],
+      "forbidden_delta": ["Do not remove a required owner execute bit or change file contents, interface, or error behavior."],
+      "must_preserve": ["file contents", "owner access", "required execute bit", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe798_external_credential_source",
+      "cwe_id": "CWE-798",
+      "task_family": "credential_source",
+      "required_context": ["credential_required", "external_credential_input_permitted"],
+      "excluded_context": ["embedded_credential_literal_required", "authentication_interface_fixed_against_external_input"],
+      "oracle_profile_id": "python.cwe798.credential_source.v1",
+      "required_delta": ["Obtain the credential from the caller, environment, or another task-compatible external source and do not embed a non-empty credential literal."],
+      "forbidden_delta": ["Do not change the authentication operation, credential kind, public interface, return value, or error behavior."],
+      "must_preserve": ["authentication operation", "credential kind", "function interface", "return value", "error behavior"]
+    }
+  ]
+}

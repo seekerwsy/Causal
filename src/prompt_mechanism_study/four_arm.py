@@ -30,12 +30,114 @@ from prompt_mechanism_study.functional_judge import (
     python_syntax_valid,
     validate_review_response,
 )
-from prompt_mechanism_study.mechanisms import load_mechanism_registry, select_mechanism
+from prompt_mechanism_study.mechanisms import (
+    compatible_mechanisms,
+    load_mechanism_registry,
+    mechanism_binding_id,
+    select_mechanism,
+)
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id
 
 ARMS = ("absent", "specific", "generic", "placebo")
 CONTRASTS = (("specific", "placebo"), ("specific", "absent"), ("specific", "generic"))
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
+
+
+def prepare_context_conditioned_tasks(
+    source_path: Path,
+    bindings_path: Path,
+    registry_path: Path,
+    output: Path,
+    report_output: Path,
+) -> dict[str, Any]:
+    """Freeze input-only task context and materialize the applicable population."""
+
+    if output.exists() or report_output.exists():
+        raise FileExistsError(output if output.exists() else report_output)
+    tasks = _json_lines(source_path)
+    bindings = {row["task_id"]: row for row in _json_lines(bindings_path)}
+    if len(bindings) != len(tasks) or set(bindings) != {row["task_id"] for row in tasks}:
+        raise FormalStudyError("context binding population does not match source tasks")
+    registry = load_mechanism_registry(registry_path)
+    eligible = []
+    decisions = []
+    for task in tasks:
+        binding = bindings[task["task_id"]]
+        required = {
+            "task_id",
+            "source_prompt_sha256",
+            "functional_contract_id",
+            "decision",
+            "realization_id",
+            "context_facts",
+            "evidence",
+            "outcomes_or_arms_used",
+        }
+        if (
+            set(binding) != required
+            or binding["source_prompt_sha256"] != task["source_prompt_sha256"]
+            or binding["functional_contract_id"] != task["functional_contract"]["contract_id"]
+            or binding["outcomes_or_arms_used"] is not False
+            or binding["decision"] not in {"applicable", "not_applicable", "unresolved"}
+            or not isinstance(binding["evidence"], list)
+            or not binding["evidence"]
+        ):
+            raise FormalStudyError("context binding failed frozen-input validation")
+        matches = compatible_mechanisms(task, binding["context_facts"], registry)
+        expected_realization = matches[0]["realization_id"] if len(matches) == 1 else None
+        expected_decision = (
+            "applicable"
+            if len(matches) == 1
+            else "unresolved"
+            if len(matches) > 1
+            else "not_applicable"
+        )
+        if (
+            binding["decision"] != expected_decision
+            or binding["realization_id"] != expected_realization
+        ):
+            raise FormalStudyError("context binding disagrees with the mechanism registry")
+        decision = {
+            **binding,
+            "candidate_realization_ids": [row["realization_id"] for row in matches],
+        }
+        decisions.append(decision)
+        if expected_decision != "applicable":
+            continue
+        mechanism = matches[0]
+        core = {
+            "decision": "applicable",
+            "realization_id": mechanism["realization_id"],
+            "context_facts": binding["context_facts"],
+            "evidence": binding["evidence"],
+            "source_prompt_sha256": binding["source_prompt_sha256"],
+            "functional_contract_id": binding["functional_contract_id"],
+            "outcomes_or_arms_used": False,
+        }
+        frozen_binding = {"binding_id": mechanism_binding_id(core), **core}
+        eligible.append(
+            {
+                **task,
+                "realization_id": mechanism["realization_id"],
+                "oracle_profile_id": mechanism["oracle_profile_id"],
+                "mechanism_binding": frozen_binding,
+            }
+        )
+    payload = "".join(canonical_json(row) + "\n" for row in eligible).encode("utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+    report = {
+        "schema_version": "1.0",
+        "status": "CONTEXT_BINDING_COMPLETE",
+        "source_tasks": len(tasks),
+        "eligible_tasks": len(eligible),
+        "not_applicable_tasks": sum(row["decision"] == "not_applicable" for row in decisions),
+        "unresolved_tasks": sum(row["decision"] == "unresolved" for row in decisions),
+        "outcomes_or_arms_used": False,
+        "eligible_tasks_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    write_bundle(report_output, {"report.json": report, "decisions.json": decisions})
+    return report
 
 
 def prepare_external_tasks(
@@ -353,9 +455,7 @@ def run_measurements(
         error_type = None
         try:
             suffix = "" if arm == "absent" else suffixes[task["task_id"]][arm]
-            prompt = _generation_prompt(
-                task["prompt"], suffix, inputs["config"]["intervention"]
-            )
+            prompt = _generation_prompt(task["prompt"], suffix, inputs["config"]["intervention"])
             seed = int(
                 content_hash(
                     {
@@ -422,9 +522,7 @@ def run_measurements(
                 "code_sha256": hashlib.sha256(code.encode()).hexdigest() if code else None,
                 "code_characters": len(code),
                 "code_lines": len(code.splitlines()),
-                "response_used_markdown_fence": "```" in raw.decode(
-                    "utf-8", errors="replace"
-                ),
+                "response_used_markdown_fence": "```" in raw.decode("utf-8", errors="replace"),
             }
             artifacts["measurement.json"] = measurement
             complete = True
@@ -693,9 +791,19 @@ def _intervention_unit(
         "functional_requirements": [
             item["criterion"] for item in task["functional_contract"]["requirements"]
         ],
-        "mechanism_contract": mechanism["specific_contract"],
         "must_preserve": mechanism["must_preserve"],
     }
+    context_conditioned = "required_delta" in mechanism
+    if context_conditioned:
+        request.update(
+            {
+                "task_context": task["mechanism_binding"]["context_facts"],
+                "required_delta": mechanism["required_delta"],
+                "forbidden_delta": mechanism["forbidden_delta"],
+            }
+        )
+    else:
+        request["mechanism_contract"] = mechanism["specific_contract"]
     artifacts: dict[str, Any] = {"task.json": _task_summary(task), "request.json": request}
     calls = 0
     error_type = None
@@ -716,7 +824,7 @@ def _intervention_unit(
         validation_raw = provider(
             validation_request, inputs["validator"], inputs["validator_prompt"]
         )
-        validation = _validate_semantics(validation_raw)
+        validation = _validate_semantics(validation_raw, context_conditioned=context_conditioned)
         artifacts["execution.json"] = {
             "response_raw": raw.decode("utf-8", errors="replace"),
             "suffixes": suffixes,
@@ -776,18 +884,30 @@ def _validate_suffixes(
     return result
 
 
-def _validate_semantics(raw: bytes) -> dict[str, Any]:
+def _validate_semantics(raw: bytes, *, context_conditioned: bool = False) -> dict[str, Any]:
     value = _strict_json(raw)
     if set(value) != {"specific", "generic", "placebo", "reason"}:
         raise FormalStudyError("validator response keys drifted")
-    expected = {
-        "specific": {
+    specific = (
+        {
+            "required_delta_satisfied": True,
+            "forbidden_delta_absent": True,
+            "functional_contract_preserved": True,
+            "input_format_preserved": True,
+            "interface_preserved": True,
+            "extra_security_mechanism_absent": True,
+        }
+        if context_conditioned
+        else {
             "target_mechanism_present": True,
             "functional_contract_preserved": True,
             "input_format_preserved": True,
             "interface_preserved": True,
             "extra_security_mechanism_absent": True,
-        },
+        }
+    )
+    expected = {
+        "specific": specific,
         "generic": {
             "target_mechanism_absent": True,
             "generic_security_present": True,
@@ -922,7 +1042,7 @@ def _quantile(values: Sequence[float], probability: float) -> float:
 
 
 def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    summary = {
         key: task[key]
         for key in (
             "task_id",
@@ -934,6 +1054,9 @@ def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
             "oracle_profile_id",
         )
     }
+    if "mechanism_binding" in task:
+        summary["mechanism_binding_id"] = task["mechanism_binding"]["binding_id"]
+    return summary
 
 
 def _json_lines(path: Path) -> list[dict[str, Any]]:
@@ -957,6 +1080,7 @@ __all__ = [
     "CONTRASTS",
     "analyze",
     "preflight",
+    "prepare_context_conditioned_tasks",
     "prepare_external_tasks",
     "prepare_registered_tasks",
     "run_interventions",

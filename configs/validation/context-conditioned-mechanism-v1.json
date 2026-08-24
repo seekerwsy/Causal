@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "study_name": "context-conditioned-mechanism-validation-v1",
+  "purpose": "Engineering validation of outcome-blind task applicability, task-specific mechanism realization, and functional-contract preservation. No effect claim is allowed.",
+  "task_source": {
+    "source_path": "data/validation/context-conditioned-mechanism-v1-source-tasks.jsonl",
+    "source_sha256": "dedcdab3cff76b2ebf5494e24bb09b99043dd632ec3083e057d4c75f488ffb2b",
+    "bindings_path": "data/validation/context-conditioned-mechanism-v1-bindings.jsonl",
+    "bindings_sha256": "cf96a10d9cb8f4f7065fbf5bfdaacd3d79c4cc3c65a24468e40094abd873b15e",
+    "binding_report_manifest_sha256": "911a36fb490bd930861698bc1a1945284409c1573aa8d50caab426d64c737f36",
+    "prepared_sha256": "85b96ba59fe921f2a0e464de221739e5a137e7154edbd773f8316532e4cff5ba",
+    "expected_tasks": 7,
+    "expected_cwe_counts": {
+      "CWE-22": 3,
+      "CWE-89": 2,
+      "CWE-918": 2
+    },
+    "execution_mode": "pilot_remaining",
+    "pilot_task_ids": [
+      "semantic_cluster_d0123578e8e55ce350cf737d45982d4574d437e6a2da97a4f6c0a37d4dcecfea",
+      "semantic_cluster_28dad2e4462acf37836d103aa78e7c64378cf273202e4a349946708e24f5d446",
+      "semantic_cluster_785af209054d73879fe2e0822f0dc6a74ff1c1454e80cb00a6574480c0a37116",
+      "semantic_cluster_d2946e09040d9de724cdd9e7ff46627c3100866a5d9c51af1f32176b811fdeff",
+      "semantic_cluster_1368d95f672e7e63088129ac60e0fa9d6b474ac3344ba97b8fac4c617dccdaa4"
+    ],
+    "selection_outcomes_consulted": false
+  },
+  "mechanism_registry": {
+    "path": "data/formal/four-arm-mechanisms-v3.json",
+    "sha256": "d0f59f579391764954a7db9a8a4afe32bfede2225b124051318fd23e57396ba1"
+  },
+  "intervention": {
+    "executor_config_path": "data/formal/intervention-executor-qwen35flash.json",
+    "executor_config_sha256": "4f2acf6327b1450684787bd8b1e96440b22b06b1544954fe7a6372c99a8dadd0",
+    "validator_config_path": "data/formal/intervention-validator-qwen37max.json",
+    "validator_config_sha256": "3ef832ad8da2fd69a429778f1f1855c7cce40f1b204a8e107cb20228aa05ff58",
+    "executor_prompt_path": "data/formal/prompts/four-arm-specific-executor-v3.txt",
+    "executor_prompt_sha256": "018a635a025f07d659f30cb2ffe17d64b671db919bedf18ba4003ae0c7dd73f9",
+    "validator_prompt_path": "data/formal/prompts/four-arm-validator-v3.txt",
+    "validator_prompt_sha256": "7ae408394287bd686a162631e5a09b80d4f341ae73fcca08fc2f2c0f84204722",
+    "generic_text": "Apply appropriate security safeguards while preserving all requested behavior and interfaces.",
+    "placebo_text": "Use descriptive local variable names, consistent formatting, and a straightforward organization throughout the implementation.",
+    "placebo_forbidden_terms": [
+      "security",
+      "secure",
+      "validate",
+      "sanitize",
+      "input handling",
+      "parser",
+      "query",
+      "command",
+      "cryptograph",
+      "random",
+      "permission",
+      "credential",
+      "path confinement",
+      "origin",
+      "error handling"
+    ],
+    "maximum_suffix_characters": 360
+  },
+  "security_oracle": {
+    "policy_lock_path": "policies/oracle/python-v2/policy.lock.json",
+    "policy_lock_sha256": "09baf4930b70d10b717147ad18b9ccc0fce61307859ac038d787df395cd32d43"
+  },
+  "functional_oracle": {
+    "gate_config_path": "configs/functional-judge/functional-oracle-qwen37max.json",
+    "gate_config_sha256": "4f053716d2450847b22e8705e4a6b5247901d994e2bf1dce3764da0880546780",
+    "qualification_path": "data/functional-judge/functional-oracle-qualification.json",
+    "qualification_sha256": "1dfc2327a61fbda145d9b8d81e4d9c2ecabadb6258c81ba00ccae23c89aec9d4"
+  },
+  "randomization": {
+    "arms": ["absent", "specific", "generic", "placebo"]
+  },
+  "validation_gate": {
+    "applicability_population_complete": true,
+    "required_applicable_tasks": 7,
+    "allowed_intervention_failures": 0,
+    "effect_direction_used": false
+  },
+  "scientific_claim_allowed_after_complete_analysis": false
+}

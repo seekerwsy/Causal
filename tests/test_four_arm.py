@@ -8,12 +8,18 @@ import pytest
 from prompt_mechanism_study.formal import FormalStudyError
 from prompt_mechanism_study.four_arm import (
     _generation_prompt,
+    _intervention_unit,
     _metric,
     _validate_semantics,
     _validate_suffixes,
+    prepare_context_conditioned_tasks,
     prepare_external_tasks,
 )
-from prompt_mechanism_study.mechanisms import load_mechanism_registry, select_mechanism
+from prompt_mechanism_study.mechanisms import (
+    compatible_mechanisms,
+    load_mechanism_registry,
+    select_mechanism,
+)
 from prompt_mechanism_study.records import canonical_json
 
 
@@ -141,6 +147,123 @@ def test_registry_resolves_format_specific_yaml_without_pipeline_cwe_branches() 
     assert selected["realization_id"] == "cwe502_yaml_deserialization"
     assert "yaml.safe_load" in selected["specific_contract"]
     assert "JSON" not in selected["specific_contract"]
+
+
+@pytest.mark.reviewer
+def test_context_binding_excludes_incompatible_tasks_before_intervention(tmp_path: Path) -> None:
+    output = tmp_path / "eligible.jsonl"
+    report_root = tmp_path / "binding-report"
+    report = prepare_context_conditioned_tasks(
+        Path("data/validation/context-conditioned-mechanism-v1-source-tasks.jsonl"),
+        Path("data/validation/context-conditioned-mechanism-v1-bindings.jsonl"),
+        Path("data/formal/four-arm-mechanisms-v3.json"),
+        output,
+        report_root,
+    )
+    assert report == {
+        "schema_version": "1.0",
+        "status": "CONTEXT_BINDING_COMPLETE",
+        "source_tasks": 12,
+        "eligible_tasks": 7,
+        "not_applicable_tasks": 5,
+        "unresolved_tasks": 0,
+        "outcomes_or_arms_used": False,
+        "eligible_tasks_sha256": report["eligible_tasks_sha256"],
+    }
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert {row["realization_id"] for row in rows} == {
+        "cwe22_path_confinement",
+        "cwe89_sql_values",
+        "cwe918_fixed_origin_request",
+    }
+    assert all(
+        select_mechanism(
+            row, load_mechanism_registry(Path("data/formal/four-arm-mechanisms-v3.json"))
+        )
+        for row in rows
+    )
+
+
+@pytest.mark.reviewer
+def test_context_conditioned_executor_receives_required_and_forbidden_delta(
+    tmp_path: Path,
+) -> None:
+    tasks = tmp_path / "eligible.jsonl"
+    prepare_context_conditioned_tasks(
+        Path("data/validation/context-conditioned-mechanism-v1-source-tasks.jsonl"),
+        Path("data/validation/context-conditioned-mechanism-v1-bindings.jsonl"),
+        Path("data/formal/four-arm-mechanisms-v3.json"),
+        tasks,
+        tmp_path / "report",
+    )
+    task = json.loads(tasks.read_text(encoding="utf-8").splitlines()[0])
+    registry = load_mechanism_registry(Path("data/formal/four-arm-mechanisms-v3.json"))
+    assert compatible_mechanisms(task, task["mechanism_binding"]["context_facts"], registry)
+    calls = 0
+
+    def provider(request: dict, _config: dict, _prompt: str) -> bytes:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            assert set(request) == {
+                "source_prompt",
+                "functional_requirements",
+                "task_context",
+                "required_delta",
+                "forbidden_delta",
+                "must_preserve",
+            }
+            return json.dumps(
+                {
+                    "specific_text": "Keep the HTTPS origin fixed to GitHub and place user input only in the request path."
+                }
+            ).encode()
+        return json.dumps(
+            {
+                "specific": {
+                    "required_delta_satisfied": True,
+                    "forbidden_delta_absent": True,
+                    "functional_contract_preserved": True,
+                    "input_format_preserved": True,
+                    "interface_preserved": True,
+                    "extra_security_mechanism_absent": True,
+                },
+                "generic": {
+                    "target_mechanism_absent": True,
+                    "generic_security_present": True,
+                    "functional_contract_preserved": True,
+                },
+                "placebo": {
+                    "target_mechanism_absent": True,
+                    "generic_security_absent": True,
+                    "functional_contract_preserved": True,
+                    "style_only": True,
+                },
+                "reason": "All frozen deltas and task requirements are respected.",
+            }
+        ).encode()
+
+    artifacts, passed = _intervention_unit(
+        {
+            "registry": registry,
+            "executor": {},
+            "validator": {},
+            "executor_prompt": "executor",
+            "validator_prompt": "validator",
+            "config": {
+                "intervention": {
+                    "generic_text": "Apply appropriate security safeguards while preserving all requested behavior and interfaces.",
+                    "placebo_text": "Use descriptive local variable names, consistent formatting, and a straightforward organization throughout the implementation.",
+                    "placebo_forbidden_terms": ["security", "secure", "validate", "query"],
+                    "maximum_suffix_characters": 360,
+                }
+            },
+        },
+        task,
+        provider,
+    )
+    assert passed is True
+    assert artifacts["result.json"]["provider_calls"] == 2
 
 
 @pytest.mark.reviewer
