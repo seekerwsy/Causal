@@ -1,0 +1,281 @@
+\section{Method}
+
+\model exposes one path from a natural-language programming request to a
+scoped intervention evidence record. Its three reader-facing stages contain
+seven explicit scientific operations: representation; prioritization;
+hypothesis freeze; intervention and randomization; measurement; outcome
+assembly; and inference and reporting. Figure~\ref{fig:overview} shows the
+stage outputs and the downstream role of the expert study.
+
+\begin{figure}[H]
+  \centering
+  \input{figures/prompt-mechanism-study-overview}
+  \caption{\model maps natural-language prompts into typed Prompt TSGs,
+  discovers and freezes a budgeted set of intervention hypotheses from
+  observational evidence, and evaluates their effects through blocked
+  randomization on cluster-disjoint held-out tasks. The intervention evidence
+  record supports the computational analyses in RQ1--RQ3 and the separately
+  governed expert study in RQ4. The Prompt TSG defines what can be edited;
+  observational discovery determines what should be tested; blocked
+  randomization identifies the assigned prompt-policy effect.}
+  \Description{A vertical workflow begins with a natural-language prompt.
+  Stage I builds a typed Prompt TSG. Stage II discovers, selects, and freezes an
+  intervention hypothesis. Stage III evaluates matched prompt policies through
+  blocked randomization. An intervention evidence record combines the context,
+  edit, selection evidence, effect, uncertainty, and scope. A dashed arrow
+  connects this record to the separately governed RQ4 expert evaluation.}
+  \label{fig:overview}
+\end{figure}
+
+\subsection{Stage I: Typed Prompt Representation}
+\label{sec:representation}
+
+Stage I converts a free-form request into a bounded representation whose task
+context and editable security content can be queried independently.
+
+\subsubsection{Prompt TSG Schema}
+
+For prompt $P$ and a run-locked extractor $\mathcal E$, the extractor-relative
+\prompttsg is
+
+\[
+  G_P=T_{\mathcal E}(P)
+  =(V,E,\tau_V,\tau_E,\alpha),
+\]
+
+where $V$ contains task operations, inputs, assets, sinks, trust boundaries,
+security controls, and presentation controls; $E$ contains prompt-level scope,
+flow, constraint, and guard relations; $\tau_V$ and $\tau_E$ map nodes and
+edges to finite catalog types; and $\alpha$ stores text grounding, factor
+state, and security scope. Prompt TSG relations encode the semantics stated in
+the prompt, not learned causal edges. Presentation controls cannot enter task
+or security-flow motifs, and each safety control must be grounded in the
+bounded context to which it applies.
+
+\subsubsection{Prompt-to-TSG Extraction and Validation}
+
+We construct the same typed representation using either a structured LLM
+extractor or a deterministic finite matcher. The extraction strategy is fixed
+before processing the study collection and applied uniformly without access
+to intervention assignments or generated-code outcomes. Catalog validation
+rejects ill-typed endpoints, dangling references, contradictory states, and
+unbounded matches.
+
+Every context or factor query returns exactly one of \textsc{present},
+\textsc{absent}, \textsc{not-applicable}, or \textsc{unresolved}. In
+particular, \textsc{absent} requires an applicable and fully resolved scope;
+failure to resolve a flow cannot be relabeled as absence. This four-valued
+semantics prevents an unknown context from becoming an apparently valid ADD or
+REMOVE target.
+
+\subsubsection{Context-Conditioned Intervention Templates}
+
+Queries over $G_P$ derive an intervention template
+
+\[
+  \theta=
+  \left\langle
+  C_q, f, z_f^0, \mathcal O_\theta, \mathcal I_\theta
+  \right\rangle,
+\]
+
+where $C_q$ is immutable applicability context, $f$ is the only editable
+security factor, $z_f^0$ is its natural-prompt state, $\mathcal O_\theta$
+contains the valid ADD or REMOVE operations, and $\mathcal I_\theta$ contains
+task, non-target security, context, and presentation invariants. ADD requires
+$z_f^0=\textsc{absent}$ in an applicable resolved context. REMOVE requires
+$z_f^0=\textsc{present}$ plus grounded target evidence and a pre-attested
+task-preserving neutral counterpart. Task operations, sources, sinks, APIs,
+and trust boundaries remain context rather than editable targets.
+
+The Prompt TSG is the representation; intervention templates are
+context-conditioned queries over that representation. A template defines what
+could be tested, but it does not yet specify a full experimental hypothesis.
+
+\subsection{Stage II: Hypothesis Discovery and Selection}
+\label{sec:hypothesis-selection}
+
+Stage II asks which TSG-derived templates should consume a fixed held-out
+evaluation budget. Observational structure supplies selection evidence only;
+it does not identify an intervention effect.
+
+\subsubsection{Constrained Observational Discovery}
+
+For each configured CWE/security scope and generator model, $W$ contains a
+minimal approved set of pre-treatment task metadata, $X^0$ contains natural
+Prompt TSG queries, and $Y^0$ contains discovery outcomes measured by
+independent evaluators. Generated code is not a primary-PAG variable, and
+assigned arms and post-intervention projections do not enter this table.
+
+The Prompt TSG supplies variables and typed background constraints, not causal
+edges. Temporal tiers prohibit outcomes from causing pre-treatment metadata or
+prompt factors; catalog types exclude semantically impossible relations. We
+run the established causal-learn FCI implementation with frozen conditional
+independence and search settings~\cite{spirtes1995fci,zheng2024causallearn}.
+Its PAG preserves endpoint uncertainty under latent-variable assumptions
+rather than selecting a convenient orientation~\cite{zhang2008ancestral}.
+
+A candidate is graph-admissible when its feature--outcome relation satisfies
+the frozen type and scope constraints and appears as a permitted adjacency or
+endpoint-compatible possible path, either globally or in its predeclared
+$C_q$-eligible population. Concurrent prompt factors are not interpreted as
+mediators merely because they co-occur in a PAG.
+
+\subsubsection{Stability under Semantic-Cluster Resampling}
+
+We repeatedly resample whole semantic task clusters and rerun constrained FCI.
+All tasks, request-randomness slots, and outcomes descended from a sampled
+cluster move together. This prevents large families of near-duplicate tasks
+from dominating the support estimate. For candidate skeleton $\widetilde h$,
+we define
+
+\[
+  S(\widetilde h)
+  =\frac{1}{B_{\widetilde h}}
+  \sum_{b=1}^{B_{\widetilde h}}
+  \mathbb I\!\left[
+    \widetilde h\ \text{is graph-admissible in resample }b
+  \right].
+\]
+
+$B_{\widetilde h}$ counts only resamples with the frozen minimum number of
+$C_q$-eligible semantic clusters. An ineligible resample does not enter the
+denominator; too few valid resamples makes the candidate non-rankable rather
+than relaxing the threshold. Full-data graph admissibility is a gate, after
+which $S(\widetilde h)$ supplies cluster-resampling support; frozen score
+components and canonical candidate order resolve ties. $S(\widetilde h)$ is a
+selection-stability measure, neither a causal probability nor evidence that an
+effect is homogeneous across task clusters.
+
+\subsubsection{Budgeted Selection and Hypothesis Freeze}
+
+Each selector ranks the same frozen candidate universe under the same top-$K$
+budget. The TSG-constrained FCI selector is compared with association,
+regularized prediction, LLM-based explanation, and seeded random ranking. The
+union of their selected skeletons crosses one selector-invariant bridge, so a
+shared candidate is protocolized and evaluated once.
+
+Before held-out outcomes exist, a successful bridge freezes
+
+\[
+  h=\left\langle
+  \theta, o, Q_h, Y, d_h, \mathcal S_h, \Gamma_h
+  \right\rangle,
+\]
+
+where $o$ is ADD or REMOVE, $Q_h$ is a finite distribution over prompt-policy
+realizations, $Y$ is the target outcome, $d_h$ is the expected direction,
+$\mathcal S_h$ fixes the task, CWE, generator-model, and population scope, and
+$\Gamma_h$ fixes the primary and specificity contrasts, multiplicity family,
+and evidence rules. Thus Stage II freezes not only what to test, but also how
+the candidate will be tested. A selected slot that cannot be mapped or
+protocolized remains a failed slot within the original $K$; it is not replaced
+after inspecting held-out outcomes.
+
+\subsection{Stage III: Evaluation of Intervention Effects}
+\label{sec:evaluation-effects}
+
+Stage III estimates what each frozen intervention does on cluster-disjoint
+held-out tasks. Randomization is the identification mechanism; effect
+evaluation is the scientific objective.
+
+\subsubsection{Matched Prompt Arms}
+
+For an ADD hypothesis, the target arm adds one scoped security requirement;
+for a REMOVE hypothesis, it replaces one existing requirement with the frozen
+task-preserving neutral counterpart. ADD and REMOVE remain separate
+hypotheses, protocols, and multiplicity coordinates. The no-op arm preserves
+the original factor state while undergoing a rewrite matched to the target
+arm. A length-matched placebo changes presentation without targeting $f$, and
+a direction-compatible generic control supplies security guidance without
+naming $f$. These arms separate the targeted prompt-policy effect from rewrite,
+presentation, and generic security-cue effects.
+
+Each hypothesis uses the finite realization distribution $Q_h$. A fixed
+executor materializes all required arms for every realization and eligible
+task. Before assignment, arm-blind validation checks task and context
+invariance, the permitted target/control delta, and matching requirements. No
+variant states an expected outcome or requests deliberately vulnerable code.
+
+\subsubsection{Eligibility and Blocked Randomization}
+
+A task--hypothesis pair is arm-complete eligible only when its context and
+operation-source gates pass and every required arm and realization passes the
+pre-assignment checks. The complete eligible population is frozen before code
+generation. Blocked, balanced assignment operates within each
+task--hypothesis--realization--generator-model protocol block, while
+\texttt{semantic\_task\_cluster\_id} remains the highest independent sampling
+unit.
+
+Target change, semantic compliance, and non-target drift measure realization
+fidelity after assignment. They are diagnostics, never denominator filters,
+adjustment variables, or substitutes for assigned arm $A$ in the primary ITT.
+
+\subsubsection{Assigned-Arm Effect Estimation}
+
+Generated code is measured by independent security and functional evaluators.
+The primary security outcome is oracle-evaluable secure-code yield: an
+assignment succeeds only when it produces valid code that the security Oracle
+supports and labels secure. Code validity, Oracle support, unknown coverage,
+functionality, and secure-and-functional joint success remain separate
+outcomes so that a production or coverage shift cannot masquerade as security.
+
+For frozen hypothesis $h$, generator model $m$, and outcome $Y$, the primary
+contrast is the target-minus-no-op assigned-arm ITT risk difference
+
+\[
+  \Delta^{\mathrm{ITT}}_{h,m}
+  = \mathbb E[Y\mid A=\mathrm{target}]
+  - \mathbb E[Y\mid A=\mathrm{no\mbox{-}op}].
+\]
+
+Every committed assignment enters under its assigned role. Terminal generation
+and syntax failures retain their predeclared outcome encoding; unavailable
+required evidence is non-evaluable and triggers replay of the same assignment
+rather than imputation. Point estimates average over the frozen task
+population and $Q_h$, and uncertainty resamples whole semantic task clusters.
+Target-minus-placebo and target-minus-generic contrasts assess specificity.
+
+\subsubsection{Evidence Classification and Diagnostics}
+
+An effect is confirmed in the expected direction only when its
+multiplicity-adjusted interval excludes zero in the prospectively frozen
+direction. Expected-direction point estimates without interval exclusion,
+null-compatible intervals, opposite effects, and non-evaluable hypotheses
+retain distinct statuses. Realization heterogeneity, generator-model
+replication, fidelity, and non-target drift remain separate evidence or
+diagnostic dimensions and cannot promote the primary effect status.
+
+\subsection{Intervention Evidence Record}
+\label{sec:evidence-record}
+
+The evidence record is the deterministic output interface of the three stages,
+not a fourth inference stage. For each hypothesis, it organizes
+
+\[
+  \mathcal E_h=
+  \left\langle
+  C_q,f,o,e_h^{\mathrm{selection}},Q_h,
+  \widehat{\Delta}^{\mathrm{ITT}}_h,CI_h,
+  s_h^{\mathrm{effect}},s_h^{\mathrm{specificity}},
+  s_h^{\mathrm{function}},\mathcal S_h,L_h
+  \right\rangle .
+\]
+
+The record states the applicable security context; editable factor and
+operation; observational selection trace; tested policies; assigned-arm
+effect and interval; specificity and functionality evidence; claim scope; and
+the frozen study lineage $L_h$. Selection evidence is explicitly labeled as
+observational selection evidence, not an intervention-effect estimate.
+
+No single label collapses distinct conclusions. The effect axis distinguishes
+confirmed-expected, directionally consistent but inconclusive,
+null-compatible, opposite, and non-evaluable evidence. The specificity axis
+distinguishes supported, unsupported, inconclusive, not tested, and not
+applicable contrasts. The functionality axis distinguishes preserved,
+degraded, improved, inconclusive, and non-evaluable outcomes; ``preserved'' is
+used only when the frozen functionality rule supports that conclusion. These
+axes feed the RQ1--RQ3 tables without hiding mixed evidence. RQ4 separately
+evaluates experts' perceived quality and usefulness of the explanation rendered
+from this record; those ratings do not validate discovery or intervention
+effects.

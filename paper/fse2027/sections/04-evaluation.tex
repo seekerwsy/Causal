@@ -1,16 +1,16 @@
 \section{Evaluation Design and Results}
 
-All computational methods receive the same discover and confirm task
-manifests, model and request-randomness policy, independent Oracle and
+All computational methods receive the same discovery and held-out evaluation task
+manifests, generator-model and request-randomness policy, independent Oracle and
 functional contract, candidate budget, family-valid intervention protocol,
 randomization, outcome encoding, semantic-cluster uncertainty, and
 multiplicity policy. Candidate universes, selector scores and ranks, native
 candidates, mappings, expected directions, and realization policies are frozen
-before confirm outcomes exist.
+before held-out outcomes exist.
 
-Discovery uses the discover split, and randomized confirmation uses held-out
-confirm tasks. The primary confirmatory analysis is hypothesis- and
-model-specific semantic-task-clustered assigned-arm ITT on oracle-evaluable
+Observational selection uses the discovery split, and randomized effect
+evaluation uses held-out tasks. The primary confirmatory analysis is hypothesis- and
+generator-model-specific semantic-task-clustered assigned-arm ITT on oracle-evaluable
 secure-code yield. Secure-and-functional joint success is the key practical
 secondary outcome. Every
 committed assignment remains in its assigned-arm denominator;
@@ -30,24 +30,35 @@ peng2025cweval,bhatt2023cyberseceval,nie2025secodeplt,vero2025baxbench}.
 The frozen task manifest identifies the exact included records and preserves
 dataset provenance and semantic-cluster-disjoint study splits.
 
-\subsection{RQ1: Held-Out Intervention Prioritization}
+\subsection{RQ1: Held-Out Intervention Selection}
 
-\textbf{RQ1. How effectively can different methods prioritize prompt
-interventions that generalize to held-out tasks?}
+\textbf{RQ1. Under a fixed top-$K$ budget, how effectively do different
+selectors identify intervention hypotheses with supported effects on held-out
+tasks?}
 
-The primary selector-only comparison gives TSG-constrained FCI,
-preregistered association, regularized prediction, blinded expert ranking, and
-seeded random ranking the same shared candidate universe, information budget,
-and $K$ slots. The unique union of their top-$K$ skeletons crosses the common
+The primary selector-only comparison gives our approach, Pearson correlation,
+elastic-net logistic regression, and LLM-based explanation the same shared
+candidate universe, information budget, and $K$ slots. Pearson correlation
+ranks each binary prompt factor by its absolute correlation with the frozen binary
+security outcome. Elastic-net logistic regression models all prompt factors
+jointly, selecting regularization strength by semantic-task-clustered
+cross-validation within the discover split and ranking standardized coefficient
+magnitudes. The LLM baseline explains and ranks the same candidates from the
+same discovery evidence without access to held-out outcomes. Seeded random
+ranking provides a chance reference. The unique union of the methods' top-$K$
+skeletons crosses the common
 bridge once and each resulting hypothesis is randomized once; duplicate
 selector references reuse that evidence. Empty, bridge-failed, and
 protocolization-failed slots remain zeroes in denominator $K$. The primary
-endpoint is strict confirmed yield at $K$, accompanied by simultaneous paired
+endpoint is Confirmed Effect Yield@$K$, accompanied by simultaneous paired
 selector-utility differences. Rankings remain conditional on the frozen
 discover split; held-out outcomes neither rerank selectors nor replace failed
 slots.
 
-A separate native-system track provides secondary end-to-end evidence using
+A separate native-system track evaluates Ji et al.'s causality-aided
+prompt--code analysis and NLPerturbator in their native candidate spaces
+\cite{ji2025causality,chen2026nlperturbator}. Their outputs are mapped to the
+editable factor catalog before held-out randomized evaluation and follow
 the fixed funnel
 
 \[
@@ -68,10 +79,9 @@ contrasts.
   \centering
   \small
   \caption{RQ1 shared-universe selector results. Panel A retains every frozen
-  budget slot through confirmation. Panel B reports the corresponding yields;
-  strict confirmed yield at $K$ is primary. FCI, association, prediction,
-  expert, and random rankings use identical candidate and information
-  budgets.}
+  budget slot through effect evaluation. Panel B reports the corresponding
+  yields; Confirmed Effect Yield@$K$ is primary. Our approach and the three
+  baselines use identical candidate and information budgets.}
   \label{tab:rq1}
   \begin{tabular}{lrrrrrr}
     \toprule
@@ -79,29 +89,28 @@ contrasts.
     \midrule
     Selector & $K$ & Selected & Bridged & Protocol & Rand. & Conf. \\
     \midrule
-    TSG-constrained FCI & -- & -- & -- & -- & -- & -- \\
-    Association & -- & -- & -- & -- & -- & -- \\
-    Regularized prediction & -- & -- & -- & -- & -- & -- \\
-    Blinded expert & -- & -- & -- & -- & -- & -- \\
-    Seeded random & -- & -- & -- & -- & -- & -- \\
+    \model & -- & -- & -- & -- & -- & -- \\
+    Pearson correlation & -- & -- & -- & -- & -- & -- \\
+    Elastic-net logistic & -- & -- & -- & -- & -- & -- \\
+    LLM-based explanation & -- & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 
   \medskip
-  \begin{tabular}{lrrrrr}
+  \begin{tabular}{lrrrr}
     \toprule
-    \multicolumn{6}{l}{\textit{Panel B: Derived yields}} \\
+    \multicolumn{5}{l}{\textit{Panel B: Derived yields}} \\
     \midrule
-    Metric & FCI & Assoc. & Predict. & Expert & Random \\
+    Metric & \model & Pearson & Elastic net & LLM expl. \\
     \midrule
-    Selected / $K$ & -- & -- & -- & -- & -- \\
-    Bridged / $K$ & -- & -- & -- & -- & -- \\
-    Protocol / $K$ & -- & -- & -- & -- & -- \\
-    Unique-union share & -- & -- & -- & -- & -- \\
-    Block-freeze coverage & -- & -- & -- & -- & -- \\
-    Randomized / $K$ & -- & -- & -- & -- & -- \\
-    Strict confirmed yield / $K$ & -- & -- & -- & -- & -- \\
-    Confirmed / Randomized & -- & -- & -- & -- & -- \\
+    Selected / $K$ & -- & -- & -- & -- \\
+    Bridged / $K$ & -- & -- & -- & -- \\
+    Protocol / $K$ & -- & -- & -- & -- \\
+    Unique-union share & -- & -- & -- & -- \\
+    Block-freeze coverage & -- & -- & -- & -- \\
+    Randomized / $K$ & -- & -- & -- & -- \\
+    Confirmed Effect Yield@$K$ & -- & -- & -- & -- \\
+    Confirmed / Randomized & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -132,75 +141,54 @@ contrasts.
   \end{tabular}
 \end{table}
 
-\subsection{RQ2: Representation and Prioritization Contribution}
+\subsection{RQ2: Contribution of Context-Conditioned Representation}
 
-\textbf{RQ2. How do \model's structured representation and causal
-prioritization contribute to successful intervention selection?}
+\textbf{RQ2. How does context conditioning in the Prompt TSG representation
+affect candidate validity, protocolization, and held-out selection utility?}
 
-RQ2 separates two questions that require different controls. The selector-only
-track reuses RQ1's direct-plus-context universe and holds every candidate,
-eligibility rule, outcome, realization policy, and information budget fixed
-while changing only the selector. Its FCI-versus-baseline comparisons therefore
-isolate prioritization under a shared universe.
+RQ1 already isolates selector differences on one shared universe. RQ2 instead
+holds the selector, budget, bridge, arm policies, outcome construction, and
+inference fixed while comparing a direct-actionable-feature universe with the
+context-conditioned Prompt TSG universe. Candidate identities and eligible
+populations may differ, so this is an end-to-end representation comparison,
+not a second selector contest.
 
-The representation comparison contrasts a direct-actionable-feature universe
-with a direct-plus-context universe. Because the candidate identities and
-eligible populations can differ, this is an end-to-end comparison, not a pure
-selector comparison. Both universes use the same frozen budget, bridge,
-confirmation protocol, and outcome construction, and report candidate
-coverage, protocolization, strict confirmed yield at $K$, and the distribution
-of hypothesis-specific effects. No selected hypotheses are pooled into an
+The comparison reports candidate coverage, context applicability,
+invalid-operation rate, protocolization rate, randomized coverage, Confirmed
+Effect Yield@$K$, and the distribution of hypothesis-specific effects. The
+context-conditioned representation is valuable when it converts broad factor
+names into operations that are applicable, task-preserving, and evaluable for
+a stated security context. No selected hypotheses are pooled into an
 unapproved cross-hypothesis ATE.
 
 \begin{table}[H]
   \centering
-  \small
-  \caption{RQ2 separates selector-only and representation evidence. Panel A
-  reports shared direct-plus-context-universe selector yields. Panel B compares
-  direct and direct-plus-context universes end-to-end without interpreting the
-  result as pure selector superiority.}
+  \scriptsize
+  \caption{RQ2 compares direct features with context-conditioned Prompt TSG
+  templates end to end. All non-representation coordinates are frozen; the
+  comparison is not interpreted as pure selector superiority.}
   \label{tab:rq2}
-  \begin{tabular}{lrrrrr}
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{lrrrrrr}
     \toprule
-    \multicolumn{6}{l}{\textit{Panel A: Selector-only outcomes}} \\
+    Representation & Candidates & Context appl. & Invalid op. & Protocol & Rand. & Effect Yield@$K$ \\
     \midrule
-    Metric & FCI & Assoc. & Predict. & Expert & Random \\
-    \midrule
-    Selected / $K$ & -- & -- & -- & -- & -- \\
-    Bridged / $K$ & -- & -- & -- & -- & -- \\
-    Protocol / $K$ & -- & -- & -- & -- & -- \\
-    Block-freeze coverage & -- & -- & -- & -- & -- \\
-    Randomized / $K$ & -- & -- & -- & -- & -- \\
-    Strict confirmed yield / $K$ & -- & -- & -- & -- & -- \\
-    Paired utility vs. FCI & -- & -- & -- & -- & -- \\
-    Simultaneous status & -- & -- & -- & -- & -- \\
+    Direct features & -- & -- & -- & -- & -- & -- \\
+    Prompt TSG context & -- & -- & -- & -- & -- & -- \\
     \bottomrule
-  \end{tabular}
-
-  \medskip
-  \begin{tabular}{lrrrrr}
-    \toprule
-    \multicolumn{6}{l}{\textit{Panel B: Representation end-to-end outcomes}} \\
-    \midrule
-    Universe & Candidates & Coverage & Protocol & Rand. & Strict yield / $K$ \\
-    \midrule
-    Direct features & -- & -- & -- & -- & -- \\
-    Direct + context & -- & -- & -- & -- & -- \\
-    \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 \begin{table}[H]
   \centering
   \small
-  \caption{RQ2 hypothesis-specific evidence. Selector-only rows retain one
-  shared-universe identity; representation rows retain their distinct universe
-  identity. Every row reports target-minus-no-op ITT and its simultaneous
-  status without cross-hypothesis pooling.}
+  \caption{RQ2 hypothesis-specific evidence retains each representation
+  universe and context-conditioned population. Every row reports the
+  target-minus-no-op ITT without cross-hypothesis pooling.}
   \label{tab:rq2-evidence}
   \begin{tabular}{llllrr}
     \toprule
-    Track/universe & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
+    Universe & Hyp.\ ID & Context / target & Op. & ITT RD & Interval \\
     \midrule
     \multicolumn{6}{c}{\emph{Rows are populated only from the
     provenance-verified frozen RQ2 manifest}} \\
@@ -210,7 +198,7 @@ unapproved cross-hypothesis ATE.
   \medskip
   \begin{tabular}{llrrl}
     \toprule
-    Hyp.\ ID & Adj.\ status & Indep.\ clusters & Arm counts & Specificity contrasts \\
+    Hyp.\ ID & Effect status & Indep.\ clusters & Arm counts & Specificity \\
     \midrule
     \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
     \bottomrule
@@ -220,10 +208,10 @@ unapproved cross-hypothesis ATE.
 \Needspace{8\baselineskip}
 \subsection{RQ3: Security Intervention Effects}
 
-\textbf{RQ3. Which prompt-side security interventions reliably improve secure
-code generation?}
+\textbf{RQ3. Which frozen prompt interventions improve or degrade secure-code
+yield, and what are their specificity and functionality profiles?}
 
-RQ3 estimates context-conditioned, model-specific, multi-realization policy
+RQ3 estimates context-conditioned, generator-model-specific, multi-realization policy
 effects for the frozen security targets. The primary outcome is
 oracle-evaluable secure-code yield; secure-and-functional joint success is the
 key practical secondary outcome. Code validity, Oracle support, unknowns,
@@ -241,18 +229,19 @@ randomized ADD and REMOVE policies support opposite expected directions.
   \centering
   \small
   \caption{RQ3 reports hypothesis-specific target-versus-no-op assigned-arm
-  effects on oracle-evaluable secure-code yield. ADD and REMOVE remain separate
-  policies; joint success and placebo/generic contrasts provide practical and
-  specificity evidence.}
+  effects on oracle-evaluable secure-code yield. Effect, specificity, and
+  functionality statuses remain separate so that mixed evidence is visible.}
   \label{tab:rq3}
-  \begin{tabular}{lllrrl}
+  \scriptsize
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{lllrrlll}
     \toprule
-    Frozen target & Op. & Outcome & ITT RD & Interval & Evidence \\
+    Intervention & Op. & Generator & ITT RD & Interval & Effect status & Specificity & Functionality \\
     \midrule
-    \multicolumn{6}{c}{\emph{Rows are populated only from the
+    \multicolumn{8}{c}{\emph{Rows are populated only from the
     provenance-verified frozen TargetSpec manifest}} \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 Target-change, semantic-compliance, non-target-drift, task improvement, harm,
@@ -262,10 +251,13 @@ ITT denominator nor replace the primary ITT estimates.
 \subsection{RQ4: Expert-Perceived Explanation Utility}
 
 \textbf{RQ4. How do security experts rate and rank the perceived quality and
-usefulness of explanations produced by different methods?}
+usefulness of intervention explanations produced by different methods?}
 
-Each method's explanation is placed in the same anonymous wrapper and presented
-under a balanced case--method assignment. Qualified experts rate clarity,
+For \model, the intervention evidence record is rendered as an expert-facing
+explanation containing the context, proposed edit, observational selection
+trace, randomized effect and interval, specificity, functionality, and claim
+scope. Each method's explanation is placed in the same anonymous wrapper and
+presented under a balanced case--method assignment. Qualified experts rate clarity,
 evidence sufficiency, credibility, actionability, and overall usefulness on
 five-point ordinal scales. Overall usefulness is the preregistered primary
 human-study outcome; the other dimensions are secondary.
@@ -273,7 +265,7 @@ human-study outcome; the other dimensions are secondary.
 The primary analysis uses an ordinal mixed-effects model with method as a fixed
 effect and participant and case as random effects, followed by
 multiplicity-adjusted comparisons. RQ4 concerns perceived utility only and
-does not claim objective mechanism identification, repair accuracy, or
+does not claim objective factor identification, repair accuracy, or
 validation of the computational causal results.
 
 \begin{table}[H]

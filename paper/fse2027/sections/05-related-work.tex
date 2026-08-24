@@ -9,8 +9,16 @@ CodeQ maps token-level rationales to higher-level programming categories and
 aggregates them into global explanations of code and test generation
 \cite{khati2026codeq}.
 \model uses such evidence only through an explicit bridge that resolves a
-confirmable candidate to one catalog-bound prompt feature and a frozen
+evaluable candidate to one catalog-bound prompt factor and a frozen
 intervention policy.
+
+Ji et al. model human-readable concepts in prompts and generated code to study
+causal prompt--code relations and support prompt calibration
+\cite{ji2025causality}. NLPerturbator instead applies realistic natural-language
+variations to measure the robustness of code-generation models
+\cite{chen2026nlperturbator}. We evaluate both in their native candidate spaces
+and map their outputs to editable prompt factors before randomized effect
+evaluation.
 
 \paragraph{Security hardening and prompt interventions.}
 Prompt-level studies have compared security reminders, CWE-specific
@@ -51,6 +59,6 @@ success separately before assigned-arm aggregation.
 CAM categorizes intermediate outputs in multi-agent code-generation systems
 and simulates realistic errors to rank their contributions to correctness,
 supporting failure repair and feature pruning \cite{lyu2026cam}.
-Where CAM intervenes on intermediate system traces, \model prioritizes
+Where CAM intervenes on intermediate system traces, \model selects
 context-conditioned input-prompt policies and evaluates their security effects
 through held-out blocked randomization.

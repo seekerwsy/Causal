@@ -1,5 +1,12 @@
 # Prompt Mechanism Study FSE Revision Evidence Ledger
 
+> **Internal verification record, not a manuscript-writing authority.** This
+> ledger records evidence status, implementation coordinates, historical
+> identifiers, and revision actions. Use it only to verify whether a scientific
+> claim is supported and to locate its evidence. Do not copy its code names,
+> schema fields, hashes, status language, incident chronology, or compliance
+> tone into the paper. Manuscript structure and prose follow `paper/AGENTS.md`.
+
 - **Revision:** 2026-08-22 related-work coverage revision
 - **Primary manuscript:** [`paper/fse2027/main.tex`](main.tex), with top-level
   manuscript sections under [`paper/fse2027/sections/`](sections/)

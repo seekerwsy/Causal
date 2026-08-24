@@ -13,50 +13,54 @@ programming task.
 Feature attribution, concept-based interpretation, and rationale evaluation
 offer complementary views of model
 behavior~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser},
-but importance or plausibility alone does not identify the effect of an
-editable prompt requirement. Perturbations can further reveal behavioral
-sensitivity to changed text, yet an unconstrained change may alter task
-semantics, presentation, and security content together. These signals are
-valuable evidence sources, but they do not by themselves supply a
-task-preserving intervention or a confirmatory effect estimate.
+while secure-prompt studies compare predefined reminders, reasoning strategies,
+and repair loops~\cite{tony2025prompting,bruni2025promptbenchmark}. These methods
+can identify important text or useful strategies, but they do not determine
+which context-specific requirement is an editable security factor. Free-form
+perturbations also risk changing task semantics and security content together,
+making behavioral differences difficult to attribute.
 
-The missing link is a reproducible progression from \emph{representation}, to
-\emph{hypothesis}, to \emph{effect}. Free-form requirements must first become
-typed, scoped, and editable prompt-side factors. Observational relations among
-those factors must then retain their uncertainty and remain stable across task
-clusters. Finally, the selected hypothesis and its intervention protocol must
-be fixed before held-out outcomes exist, so that confirmation estimates the
-effect of assignment rather than selecting cases in which the intended edit
-happened to succeed.
+The missing link is a path from structured prompt meaning to usable effect
+evidence. Free-form requirements must first become bounded factors whose
+applicability and valid edits are explicit. Observational evidence must then
+allocate a limited experimental budget without being mistaken for an
+intervention effect. Finally, the selected hypotheses and their prompt policies
+must be frozen before controlled evaluation on held-out tasks.
 
-\model provides this progression in three stages.
-\textbf{Security-Aware Prompt Representation} separates an immutable
-task/security context query from one catalog-bound editable feature.
-\textbf{Stability-Guided Observational Prioritization} combines structure-derived
-constraints, FCI, and semantic-task-cluster stability to rank candidates while
-preserving PAG uncertainty.
-\textbf{Randomized Policy Confirmation} freezes a finite distribution of
-task-independent realizations, constructs complete task-specific four-arm
-bundles, randomizes them on held-out tasks, and estimates assigned-arm
-intent-to-treat effects. A shared-universe selector comparison and an explicit
-candidate-to-policy bridge make both prioritization and confirmation auditable.
+\model follows a representation--selection--evaluation architecture.
+\textbf{Typed Prompt Representation} maps each programming request into a
+\prompttsg that separates task semantics, security context, editable safety
+factors, and presentation controls; context-conditioned intervention templates
+are queries over this representation. \textbf{Hypothesis Discovery and
+Selection} uses TSG-derived constraints, FCI evidence, and stability under
+semantic-cluster resampling to discover, rank, and freeze a budgeted set of
+intervention hypotheses. \textbf{Evaluation of Intervention Effects}
+constructs matched prompt arms and estimates their assigned-arm effects on
+cluster-disjoint held-out tasks. The resulting intervention evidence record
+connects represented context, the frozen edit, selection rationale, evaluated
+effect, uncertainty, and claim scope. The Prompt TSG defines what can be
+edited; observational discovery determines what should be tested; blocked
+randomization identifies the assigned prompt-policy effect.
 
+\needspace{8\baselineskip}
 This paper makes the following contributions:
 
 \begin{itemize}
-  \item \textbf{Security-aware prompt representation.} A typed, catalog-bound
-  representation converts free-form requirements into guard-independent
-  contexts and scoped, editable security features.
-  \item \textbf{Budgeted intervention prioritization.} Typed background
-  knowledge, FCI, and semantic-task-cluster stability rank a frozen candidate
-  universe alongside associational, predictive, expert, and random selectors.
-  \item \textbf{Randomized policy confirmation.} Multi-realization prompt
-  policies and held-out blocked randomization produce hypothesis-specific
-  assigned-arm ITT evidence without conditioning on realized edit success.
-  \item \textbf{Provenance-complete evidence accounting.} An explicit bridge
-  records context eligibility, policy realization, protocolization,
-  randomization, and confirmation without upgrading exploratory artifacts.
-  \item \textbf{Expert-facing utility evaluation.} A separately governed,
-  blinded study evaluates how security experts perceive the usefulness of
-  method explanations without treating those ratings as causal or repair evidence.
+  \item \textbf{Typed Prompt TSG representation.} A bounded task-security
+  graph separates task semantics, security context, editable safety factors,
+  and presentation controls. Graph queries derive context-conditioned
+  templates with explicit factor states, valid operations, and invariants.
+  \item \textbf{Budgeted hypothesis discovery and selection.} TSG-derived
+  constraints, FCI uncertainty, and stability under semantic-cluster
+  resampling turn observational evidence into a frozen, budgeted hypothesis
+  set without treating learned relations as effect estimates.
+  \item \textbf{Evaluation of intervention effects.} Matched prompt policies
+  and held-out blocked randomization estimate assigned-arm effects on
+  independently measured security and functionality while retaining failed,
+  null, harmful, and non-evaluable assignments under the frozen analysis.
+  \item \textbf{Expert-facing evidence interface.} A standardized
+  intervention evidence record connects context, editable action, selection
+  evidence, randomized effects, uncertainty, and scope; a separately governed
+  study evaluates its expert-perceived utility without promoting those ratings
+  to computational effect evidence.
 \end{itemize}

@@ -36,13 +36,43 @@ through a traceable table builder. Follow the repository-root `AGENTS.md` and
 the concise paper-local `paper/AGENTS.md` for research-integrity and manuscript
 requirements.
 
-The current narrative organizes the computational method as Security-Aware
-Prompt Representation, Stability-Guided Observational Prioritization, and
-Randomized Policy Confirmation. Earlier commands and identifiers are preserved in the
+The current narrative follows one route from structured representation to
+usable evidence: Typed Prompt Representation, Hypothesis Discovery and
+Selection, Evaluation of Intervention Effects, and the resulting Intervention
+Evidence Record. The expert-perceived utility study is a separately governed
+downstream evaluation, not a fourth computational stage. Earlier commands and identifiers are preserved in the
 [historical revision evidence ledger](revision-evidence-ledger.md); they are
-not current project names or invocation instructions.
+not current project names, invocation instructions, or manuscript prose
+templates. The ledger is used only to verify support and locate evidence;
+implementation identifiers, status notes, hashes, revision actions, and
+incident chronology remain outside the paper narrative.
 
-The manuscript may describe verified core capabilities in the present tense,
-but unfinished RQ1--RQ4 studies and the frozen final paper evidence remain
-future work. Every numerical result stays `--` until a frozen manifest and
-table builder supply exact provenance.
+Working-draft completion status and missing-evidence notes belong in this README
+or the ledger rather than in manuscript prose. Quantitative manuscript claims
+still require a frozen artifact and traceable table builder; until those exist,
+the document remains an internal draft and must not present planned work as
+completed. A submission-ready build must contain neither backfill commentary
+nor unexplained result placeholders.
+
+## Reviewer Reading Guide
+
+The single manuscript entry point is `main.tex`. The active path reads natural
+prompts, produces Prompt TSG intervention templates, freezes a budgeted
+hypothesis set, constructs and randomizes matched prompt policies, measures
+security and functionality independently, assembles outcomes, and reports
+semantic-clustered assigned-arm ITT evidence. The key invariants are: Prompt
+TSG edges are semantic rather than causal; held-out outcomes cannot alter
+selection; assigned arm, not realized fidelity, defines the primary contrast;
+and Oracle coverage, functionality, and joint success remain separate from the
+primary secure-code-yield outcome.
+
+Recommended reading order (eight files):
+
+1. `main.tex`
+2. `sections/01-introduction.tex`
+3. `sections/02-problem-formulation.tex`
+4. `sections/03-method.tex`
+5. `figures/prompt-mechanism-study-overview.tex`
+6. `sections/04-evaluation.tex`
+7. `sections/07-threats-to-validity.tex`
+8. `sections/06-conclusion.tex`

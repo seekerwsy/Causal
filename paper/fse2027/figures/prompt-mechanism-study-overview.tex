@@ -1,46 +1,45 @@
 \begin{tikzpicture}[
   font=\sffamily\footnotesize,
-  stage/.style={draw=black,rounded corners=2pt,align=center,
-    minimum height=9mm,minimum width=34mm,fill=black!5},
-  artifact/.style={draw=black!70,rounded corners=1.5pt,align=center,
-    minimum height=7mm,minimum width=27mm,fill=white},
+  input/.style={draw=black!65,rounded corners=6pt,align=center,
+    minimum height=6.5mm,minimum width=47mm,fill=white},
+  stage/.style={draw=black!80,rounded corners=2pt,align=center,
+    text width=68mm,minimum height=12mm,fill=black!4,inner sep=2.2mm},
+  record/.style={draw=black,rounded corners=2pt,align=center,
+    text width=68mm,minimum height=11mm,fill=black!9,inner sep=2.2mm},
+  downstream/.style={draw=black!60,densely dashed,rounded corners=2pt,
+    align=center,text width=68mm,minimum height=9mm,fill=white,inner sep=2mm},
   flow/.style={-{Latex[length=2mm]},semithick},
-  boundary/.style={densely dashed,semithick}
+  downstreamflow/.style={-{Latex[length=2mm]},semithick,densely dashed},
+  note/.style={font=\sffamily\scriptsize,align=left,text=black!75}
 ]
-  \node[stage] (repr) {\textbf{Security-Aware}\\Prompt Representation};
-  \node[stage,right=8mm of repr] (discover) {\textbf{Stability-Guided}\\Prioritization};
-  \node[stage,right=13mm of discover] (confirm) {\textbf{Randomized Policy}\\Confirmation};
+  \node[input] (prompt) {Natural-Language Programming Prompt};
 
-  \node[artifact,below=5mm of repr] (tsg) {Prompt TSG\\local variables};
-  \node[artifact,below=5mm of discover] (hyp) {FCI + semantic-cluster bootstrap\\frozen policies};
-  \node[artifact,below=5mm of confirm] (itt) {multi-realization arms\\secure-yield ITT};
+  \node[stage,below=4mm of prompt] (repr) {
+    \textbf{Stage I: Build Prompt TSG}\\[-0.2mm]
+    typed nodes, semantic relations, and intervention templates\\[-0.2mm]
+    \textit{Output: Typed Prompt Representation}};
 
-  \draw[flow] (repr) -- (discover);
-  \draw[flow] (discover) -- (confirm);
-  \draw[flow] (repr) -- (tsg);
-  \draw[flow] (discover) -- (hyp);
-  \draw[flow] (confirm) -- (itt);
-  \draw[flow] (tsg) -- (hyp);
-  \draw[flow] (hyp) -- (itt);
+  \node[stage,below=4mm of repr] (select) {
+    \textbf{Stage II: Discover \& Select}\\[-0.2mm]
+    TSG constraints, FCI, and semantic-cluster resampling\\[-0.2mm]
+    \textit{Output: Frozen Intervention Hypothesis}};
 
-  \draw[boundary]
-    ([xshift=6mm,yshift=5mm]discover.north east) --
-    ([xshift=6mm,yshift=-17mm]discover.south east)
-    node[midway,rotate=90,fill=white,inner sep=1pt]
-    {\scriptsize policy freeze};
+  \node[stage,below=4mm of select] (evaluate) {
+    \textbf{Stage III: Evaluate Effects}\\[-0.2mm]
+    matched prompt policies and blocked randomization\\[-0.2mm]
+    \textit{Output: Intervention-Effect Evidence}};
 
-  \node[
-    fit=(repr)(discover)(tsg)(hyp),
-    draw=black!50,
-    rounded corners=3pt,
-    inner sep=3mm,
-    label={[font=\scriptsize]above:discover split}
-  ] {};
-  \node[
-    fit=(confirm)(itt),
-    draw=black!50,
-    rounded corners=3pt,
-    inner sep=3mm,
-    label={[font=\scriptsize]above:held-out confirm split}
-  ] {};
+  \node[record,below=4mm of evaluate] (record) {
+    \textbf{Intervention Evidence Record}\\[-0.2mm]
+    context + edit + selection + effect + uncertainty + scope};
+
+  \node[downstream,below=4mm of record] (expert) {
+    \textbf{Expert Evaluation---RQ4}\\[-0.2mm]
+    perceived quality and usefulness};
+
+  \draw[flow] (prompt) -- (repr);
+  \draw[flow] (repr) -- node[note,right=2mm] {derive templates} (select);
+  \draw[flow] (select) -- node[note,right=2mm] {freeze before held-out outcomes} (evaluate);
+  \draw[flow] (evaluate) -- (record);
+  \draw[downstreamflow] (record) -- node[note,right=2mm] {separate study} (expert);
 \end{tikzpicture}

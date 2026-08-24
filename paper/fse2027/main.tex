@@ -14,7 +14,6 @@
 
 \newcommand{\model}{\textsc{Model}\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
-\newcommand{\resultslot}{\mbox{\emph{Frozen-run results pending.}}}
 
 \acmConference[FSE 2027]{The ACM International Conference on the Foundations
 of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
@@ -23,7 +22,7 @@ of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
 
 \begin{document}
 
-\title{Prioritizing and Confirming Prompt-Side Security Interventions in LLM
+\title{Prioritizing and Evaluating Prompt-Side Security Interventions in LLM
 Code Generation}
 
 \author{Anonymous Author(s)}
@@ -33,22 +32,21 @@ Code Generation}
 }
 
 \begin{abstract}
-Natural-language prompts are part of the security boundary of LLM code
-generation: they can specify the required behavior while leaving validation,
-authorization, trust boundaries, or safe-API constraints implicit. Existing
-attribution and perturbation methods can expose influential text, yet they do
-not by themselves turn that evidence into a task-preserving prompt
-intervention with a confirmatory effect estimate. We present \model, a
-three-stage framework that represents guard-independent task/security context,
-prioritizes one-feature intervention hypotheses with structure-constrained
-FCI, and tests frozen multi-realization prompt policies on held-out tasks. The
-discovery stage combines graph-derived variables, typed background knowledge,
-and semantic-task-cluster bootstrap stability while preserving PAG
-uncertainty. The confirmation stage freezes complete four-arm prompt bundles
-before blocked random assignment and estimates semantic-task-clustered
-assigned-arm intent-to-treat effects on oracle-evaluable secure-code yield. A
-shared candidate universe supports controlled comparisons among causal,
-associational, predictive, expert, and random selectors. \resultslot
+Natural-language programming prompts often specify functionality while leaving
+context-specific security requirements implicit. We present \model, a
+three-stage framework that maps each prompt into a typed Prompt TSG, discovers
+and selects context-conditioned intervention hypotheses from observational
+evidence, and evaluates frozen prompt interventions on cluster-disjoint
+held-out tasks. The Prompt TSG separates immutable task-security context from
+one editable safety factor and defines valid ADD or REMOVE operations.
+TSG-derived constraints, FCI evidence, and support under semantic-cluster
+resampling allocate a fixed evaluation budget without treating observational
+relations as effect evidence. Matched target and control prompt policies then
+undergo blocked randomization, and assigned-arm intent-to-treat analysis
+estimates their effects on independently measured security and functionality.
+For each hypothesis, \model assembles the represented context, frozen edit,
+selection trace, effect estimate, uncertainty, and claim scope into an
+intervention evidence record for expert evaluation.
 \end{abstract}
 
 \begin{CCSXML}
@@ -78,25 +76,17 @@ discovery, randomized experiments, prompt analysis}
 
 \input{sections/02-problem-formulation}
 
-\input{sections/03-representation}
+\input{sections/03-method}
 
-\input{sections/04-prioritization}
+\input{sections/04-evaluation}
 
-\input{sections/05-confirmation}
+\input{sections/05-related-work}
 
-\input{sections/06-evaluation}
+\input{sections/07-threats-to-validity}
 
-\input{sections/07-related-work}
+\input{sections/06-conclusion}
 
-\input{sections/08-synthetic-validation}
-
-\input{sections/09-threats-to-validity}
-
-\input{sections/10-reproducibility}
-
-\input{sections/11-conclusion}
-
-\input{sections/12-data-availability}
+\input{sections/08-data-availability}
 
 \appendix
 

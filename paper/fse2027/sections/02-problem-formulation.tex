@@ -2,7 +2,7 @@
 
 \subsection{An Editable Prompt-Side Security Factor}
 
-Consider a security-neutral request to implement
+Consider a security-underspecified request to implement
 \texttt{read\_report(base\_dir, user\_path)} and return the requested UTF-8
 report. The request fixes the task but leaves path confinement implicit. A
 target-specific variant can require resolving and normalizing the path under
@@ -24,13 +24,14 @@ randomness slot $s$:
   u = (c,i,h,r,a,m,s).
 \]
 
-Tasks are partitioned before model-based discovery into disjoint discovery and
-confirmation pools. The discovery pool supports observational hypothesis
-formation; the held-out confirmation pool supports prompt construction,
-randomized assignment, code generation, and effect estimation. No semantic
+Tasks are partitioned before generator-based discovery into disjoint discovery
+and held-out evaluation pools. The discovery pool supports observational
+hypothesis formation; the held-out evaluation pool supports prompt
+construction, randomized assignment, code generation, and effect estimation. No semantic
 task cluster crosses this boundary. The highest resampling unit is
 \texttt{semantic\_task\_cluster\_id}; every descendant task instance,
-hypothesis, model, arm, realization, and request slot moves with its cluster.
+hypothesis, generator model, arm, realization, and request slot moves with its
+cluster.
 
 The primary analysis estimates semantic-task-clustered assigned-arm ITT on
 \emph{oracle-evaluable secure-code yield} for every committed assignment.
@@ -43,15 +44,15 @@ assignment manifest.
 $W$ contains approved pre-treatment task metadata, $X^0$ contains natural
 Prompt TSG feature queries, and $Y^0$ contains independently committed
 discovery outcomes. A non-editable context query $C_q$ scopes one actionable
-feature $f$. Randomized arm $A$ is the confirmation treatment;
+feature $f$. Randomized arm $A$ is the assigned prompt policy;
 post-intervention $X^{A,R}$ is a separately extracted projection diagnostic
-and never replaces $A$ in the ITT estimator. Model identity remains an analysis
-coordinate and provenance field.
+and never replaces $A$ in the ITT estimator. Generator-model identity remains
+an analysis coordinate and provenance field.
 
 The \prompttsg defines typed prompt structure and the editable queries supplied
 to discovery, while the PAG preserves FCI uncertainty over learned relations.
 Generated code is used only by the independent security Oracle and functional
-checker. Observational paths therefore form hypotheses, and confirmatory claims
+checker. Observational paths therefore form hypotheses, and effect claims
 are limited to task-clustered assigned-arm effects of frozen prompt
 interventions on held-out tasks within their hypothesis, target, operation,
 model, and CWE scopes.
