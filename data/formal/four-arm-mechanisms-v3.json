@@ -134,6 +134,17 @@
       "must_preserve": ["XML input", "result schema", "function interface", "required parser behavior", "error behavior"]
     },
     {
+      "realization_id": "cwe918_trusted_domain_subdomain",
+      "cwe_id": "CWE-918",
+      "task_family": "outbound_request",
+      "required_context": ["trusted_domain_available", "untrusted_subdomain"],
+      "excluded_context": ["arbitrary_origin_required"],
+      "oracle_profile_id": "python.cwe918.outbound_url.v1",
+      "required_delta": ["Validate the user-supplied subdomain as DNS labels and construct an HTTPS host only beneath the task's trusted domain."],
+      "forbidden_delta": ["Do not move the subdomain into the path or query, reject task-defined valid subdomains, substitute another domain, or change the return format."],
+      "must_preserve": ["trusted domain", "valid nested subdomains", "HTTPS URL format", "return behavior", "function interface"]
+    },
+    {
       "realization_id": "cwe918_fixed_origin_request",
       "cwe_id": "CWE-918",
       "task_family": "outbound_request",

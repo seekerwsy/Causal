@@ -175,6 +175,7 @@ def test_context_binding_excludes_incompatible_tasks_before_intervention(tmp_pat
         "cwe22_path_confinement",
         "cwe89_sql_values",
         "cwe918_fixed_origin_request",
+        "cwe918_trusted_domain_subdomain",
     }
     assert all(
         select_mechanism(
@@ -214,9 +215,7 @@ def test_context_conditioned_executor_receives_required_and_forbidden_delta(
                 "must_preserve",
             }
             return json.dumps(
-                {
-                    "specific_text": "Keep the HTTPS origin fixed to GitHub and place user input only in the request path."
-                }
+                {"specific_text": "Keep each valid subdomain beneath the task's trusted domain."}
             ).encode()
         return json.dumps(
             {

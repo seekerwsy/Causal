@@ -6,9 +6,9 @@
     "source_path": "data/validation/context-conditioned-mechanism-v1-source-tasks.jsonl",
     "source_sha256": "dedcdab3cff76b2ebf5494e24bb09b99043dd632ec3083e057d4c75f488ffb2b",
     "bindings_path": "data/validation/context-conditioned-mechanism-v1-bindings.jsonl",
-    "bindings_sha256": "cf96a10d9cb8f4f7065fbf5bfdaacd3d79c4cc3c65a24468e40094abd873b15e",
-    "binding_report_manifest_sha256": "911a36fb490bd930861698bc1a1945284409c1573aa8d50caab426d64c737f36",
-    "prepared_sha256": "85b96ba59fe921f2a0e464de221739e5a137e7154edbd773f8316532e4cff5ba",
+    "bindings_sha256": "d92f4fd6d625e5f2b8fca6a592e0f256d4d46b2c13582653653b8852f60f159c",
+    "binding_report_manifest_sha256": "1368444c75cd1672e79898820d19eeed6915d8a6462097ccaa46427d011cf41d",
+    "prepared_sha256": "edbeb05f98bff7a3cdfd83da4e0a318ead5fe82e1eccde63f81937d8df6d93d6",
     "expected_tasks": 7,
     "expected_cwe_counts": {
       "CWE-22": 3,
@@ -27,7 +27,7 @@
   },
   "mechanism_registry": {
     "path": "data/formal/four-arm-mechanisms-v3.json",
-    "sha256": "d0f59f579391764954a7db9a8a4afe32bfede2225b124051318fd23e57396ba1"
+    "sha256": "2f70e348d1947891efc6debb81495c66cb255095714bd73d442e442dcb47a85e"
   },
   "intervention": {
     "executor_config_path": "data/formal/intervention-executor-qwen35flash.json",
