@@ -243,27 +243,38 @@ def test_context_conditioned_executor_receives_required_and_forbidden_delta(
             }
         ).encode()
 
-    artifacts, passed = _intervention_unit(
-        {
-            "registry": registry,
-            "executor": {},
-            "validator": {},
-            "executor_prompt": "executor",
-            "validator_prompt": "validator",
-            "config": {
-                "intervention": {
-                    "generic_text": "Apply appropriate security safeguards while preserving all requested behavior and interfaces.",
-                    "placebo_text": "Use descriptive local variable names, consistent formatting, and a straightforward organization throughout the implementation.",
-                    "placebo_forbidden_terms": ["security", "secure", "validate", "query"],
-                    "maximum_suffix_characters": 360,
-                }
-            },
+    inputs = {
+        "registry": registry,
+        "executor": {},
+        "validator": {},
+        "executor_prompt": "executor",
+        "validator_prompt": "validator",
+        "config": {
+            "intervention": {
+                "generic_text": "Apply appropriate security safeguards while preserving all requested behavior and interfaces.",
+                "placebo_text": "Use descriptive local variable names, consistent formatting, and a straightforward organization throughout the implementation.",
+                "placebo_forbidden_terms": ["security", "secure", "validate", "query"],
+                "maximum_suffix_characters": 360,
+            }
         },
-        task,
-        provider,
-    )
+    }
+    artifacts, passed = _intervention_unit(inputs, task, provider)
     assert passed is True
     assert artifacts["result.json"]["provider_calls"] == 2
+    assert "response_raw" in artifacts["validation-response.json"]
+
+    invalid_calls = 0
+
+    def invalid_validator(request: dict, _config: dict, _prompt: str) -> bytes:
+        nonlocal invalid_calls
+        invalid_calls += 1
+        if invalid_calls == 1:
+            return json.dumps({"specific_text": "Keep the task's HTTPS origin fixed."}).encode()
+        return b'{"unexpected":true}'
+
+    failed_artifacts, failed = _intervention_unit(inputs, task, invalid_validator)
+    assert failed is False
+    assert failed_artifacts["validation-response.json"] == {"response_raw": '{"unexpected":true}'}
 
 
 @pytest.mark.reviewer

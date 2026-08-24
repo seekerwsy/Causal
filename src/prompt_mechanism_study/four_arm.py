@@ -824,6 +824,9 @@ def _intervention_unit(
         validation_raw = provider(
             validation_request, inputs["validator"], inputs["validator_prompt"]
         )
+        artifacts["validation-response.json"] = {
+            "response_raw": validation_raw.decode("utf-8", errors="replace")
+        }
         validation = _validate_semantics(validation_raw, context_conditioned=context_conditioned)
         artifacts["execution.json"] = {
             "response_raw": raw.decode("utf-8", errors="replace"),
