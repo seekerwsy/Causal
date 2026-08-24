@@ -12,26 +12,26 @@
   downstreamflow/.style={-{Latex[length=2mm]},semithick,densely dashed},
   note/.style={font=\sffamily\scriptsize,align=left,text=black!75}
 ]
-  \node[input] (prompt) {Natural-Language Programming Prompt};
+  \node[input] (prompt) {Natural-Language Prompt};
 
   \node[stage,below=4mm of prompt] (repr) {
     \textbf{Stage I: Build Prompt TSG}\\[-0.2mm]
-    typed nodes, semantic relations, and intervention templates\\[-0.2mm]
+    typed context, requirement state, and valid operations\\[-0.2mm]
     \textit{Output: Typed Prompt Representation}};
 
   \node[stage,below=4mm of repr] (select) {
-    \textbf{Stage II: Discover \& Select}\\[-0.2mm]
+    \textbf{Stage II: Discover \& Freeze}\\[-0.2mm]
     TSG constraints, FCI, and semantic-cluster resampling\\[-0.2mm]
-    \textit{Output: Frozen Intervention Hypothesis}};
+    \textit{Output: Frozen Requirement Hypothesis}};
 
   \node[stage,below=4mm of select] (evaluate) {
     \textbf{Stage III: Evaluate Effects}\\[-0.2mm]
     matched prompt policies and blocked randomization\\[-0.2mm]
-    \textit{Output: Intervention-Effect Evidence}};
+    \textit{Output: Requirement-Effect Evidence}};
 
   \node[record,below=4mm of evaluate] (record) {
-    \textbf{Intervention Evidence Record}\\[-0.2mm]
-    context + edit + selection + effect + uncertainty + scope};
+    \textbf{Requirement Evidence Record}\\[-0.2mm]
+    context + operation + selection + effect + uncertainty + scope};
 
   \node[downstream,below=4mm of record] (expert) {
     \textbf{Expert Evaluation---RQ4}\\[-0.2mm]

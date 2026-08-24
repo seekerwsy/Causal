@@ -1,25 +1,23 @@
 \section{Evaluation Design and Results}
 
-All computational methods receive the same discovery and held-out evaluation task
-manifests, generator-model and request-randomness policy, independent Oracle and
-functional contract, candidate budget, family-valid intervention protocol,
-randomization, outcome encoding, semantic-cluster uncertainty, and
-multiplicity policy. Candidate universes, selector scores and ranks, native
-candidates, mappings, expected directions, and realization policies are frozen
-before held-out outcomes exist.
+The evaluation is organized around the title question. RQ1 identifies
+requirement hypotheses with supported randomized effects; RQ2 determines the
+scope, specificity, functionality, and actionability of those effects; RQ3
+measures how efficiently the representation and selector discover such
+hypotheses under a fixed budget; and RQ4 evaluates experts' perceived utility
+of the resulting evidence records.
 
-Observational selection uses the discovery split, and randomized effect
-evaluation uses held-out tasks. The primary confirmatory analysis is hypothesis- and
-generator-model-specific semantic-task-clustered assigned-arm ITT on oracle-evaluable
-secure-code yield. Secure-and-functional joint success is the key practical
-secondary outcome. Every
-committed assignment remains in its assigned-arm denominator;
-\texttt{target\_changed}, semantic compliance, and non-target drift are
-diagnostics rather than filters.
-
-Throughout the tables, \texttt{--} marks a result slot awaiting
-provenance-verified frozen-run or study backfill; it denotes neither zero, not
-applicable, nor observed missingness.
+All computational methods receive the same discovery and held-out task
+manifests, generator-model and request-randomness policy, independent security
+Oracle and functional contract, candidate budget, family-valid requirement
+protocol, randomization, outcome encoding, semantic-cluster uncertainty, and
+multiplicity policy. Candidate universes, rankings, expected directions,
+realization policies, and decision rules are frozen before held-out outcomes.
+The primary confirmatory analysis is hypothesis- and generator-model-specific
+semantic-task-clustered assigned-arm ITT on oracle-evaluable secure-code yield.
+Every committed assignment remains in its assigned-arm denominator;
+target-change, semantic compliance, generation success, and non-target drift
+remain diagnostics.
 
 \subsection{Study Data}
 
@@ -27,151 +25,165 @@ The task inventory draws from SecurityEval, LLMSecEval, SALLM, CWEval,
 CyberSecEval, and SeCodePLT, with BaxBench used for backend replication
 \cite{siddiq2022securityeval,tony2023llmseceval,siddiq2024sallm,
 peng2025cweval,bhatt2023cyberseceval,nie2025secodeplt,vero2025baxbench}.
-The frozen task manifest identifies the exact included records and preserves
-dataset provenance and semantic-cluster-disjoint study splits.
+The frozen task manifest identifies the exact records and preserves dataset
+provenance and semantic-cluster-disjoint discovery and evaluation splits. The
+frozen requirement manifest binds each result row to one context query,
+requirement, ADD or REMOVE operation, prompt-policy realization distribution,
+generator model, outcome, and multiplicity family.
 
-\subsection{RQ1: Held-Out Intervention Selection}
+\subsection{RQ1: Which Prompt-Side Requirements Have Supported Effects?}
 
-\textbf{RQ1. Under a fixed top-$K$ budget, how effectively do different
-selectors identify intervention hypotheses with supported effects on held-out
-tasks?}
+\textbf{RQ1. Which frozen prompt-side security requirements show supported
+randomized effects on oracle-evaluable secure-code yield?}
 
-The primary selector-only comparison gives our approach, Pearson correlation,
-elastic-net logistic regression, and LLM-based explanation the same shared
-candidate universe, information budget, and $K$ slots. Pearson correlation
-ranks each binary prompt factor by its absolute correlation with the frozen binary
-security outcome. Elastic-net logistic regression models all prompt factors
-jointly, selecting regularization strength by semantic-task-clustered
-cross-validation within the discover split and ranking standardized coefficient
-magnitudes. The LLM baseline explains and ranks the same candidates from the
-same discovery evidence without access to held-out outcomes. Seeded random
-ranking provides a chance reference. The unique union of the methods' top-$K$
-skeletons crosses the common
-bridge once and each resulting hypothesis is randomized once; duplicate
-selector references reuse that evidence. Empty, bridge-failed, and
-protocolization-failed slots remain zeroes in denominator $K$. The primary
-endpoint is Confirmed Effect Yield@$K$, accompanied by simultaneous paired
-selector-utility differences. Rankings remain conditional on the frozen
-discover split; held-out outcomes neither rerank selectors nor replace failed
-slots.
+For every requirement hypothesis and generator model, RQ1 reports the
+target-minus-no-op assigned-arm ITT risk difference, its multiplicity-adjusted
+interval, and the effect status defined in
+Section~\ref{sec:matter-definition}. ADD and REMOVE remain distinct hypotheses:
+a positive supported ADD effect and a negative supported REMOVE effect are
+both evidence that the requirement is beneficial under the corresponding
+operation, whereas bidirectional support requires both separately randomized
+directions. No unsupported cross-hypothesis average replaces the
+hypothesis-specific rows.
 
-A separate native-system track evaluates Ji et al.'s causality-aided
-prompt--code analysis and NLPerturbator in their native candidate spaces
-\cite{ji2025causality,chen2026nlperturbator}. Their outputs are mapped to the
-editable factor catalog before held-out randomized evaluation and follow
-the fixed funnel
+The primary outcome is oracle-evaluable secure-code yield. Code validity,
+Oracle support, unknown coverage, terminal no-code rate, functionality, and
+secure-and-functional joint success remain separate outcomes so that changes
+in production or measurement coverage cannot masquerade as security effects.
 
-\[
-K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
-\rightarrow N_{\mathrm{protocol}} \rightarrow N_{\mathrm{randomized}}
-\rightarrow N_{\mathrm{confirmed}}.
-\]
+\begin{table}[H]
+  \centering
+  \scriptsize
+  \caption{RQ1 directly answers which requirements matter at the effect level.
+  Each row reports a frozen context--requirement--operation hypothesis and its
+  target-versus-no-op assigned-arm effect; adjusted status is never inferred
+  from the point estimate alone.}
+  \label{tab:rq1-effects}
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{llllrrll}
+    \toprule
+    Requirement & Context & Op. & Generator & ITT RD & Adj. interval & Effect status & Benefit \\
+    \midrule
+    \multicolumn{8}{c}{\emph{One row per frozen requirement hypothesis and generator model}} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
 
-That track measures system compatibility rather than pure selector
-superiority. Conditional mapping coverage and mapped yield at $K$ are bridge
-diagnostics; native funnel results cannot replace the shared-universe primary
-comparison. For every frozen method/slot hypothesis, the evidence report
-retains target and operation, target-minus-no-op ITT, simultaneous status,
-independent semantic-cluster and arm counts, and preregistered specificity
-contrasts.
+\subsection{RQ2: When Are Supported Effects Actionable?}
+
+\textbf{RQ2. Under which contexts, operations, policy realizations, and
+generator models are requirement effects target-specific and
+functionality-preserving?}
+
+RQ2 keeps the RQ1 effect estimate intact and adds evidence axes rather than
+collapsing them into one score. Target-versus-placebo and, when family-valid,
+target-versus-generic contrasts assess whether the effect is attributable to
+the named requirement rather than rewriting, presentation length, or generic
+security cues. Functionality is evaluated independently under the frozen
+functional contract. A requirement is labeled practically actionable only
+when its effect is beneficial, specificity is \textsc{Supported}, and
+functionality is \textsc{Preserved}; otherwise the three component statuses
+remain visible.
+
+Context, operation, realization, and generator-model comparisons follow only
+their prospectively frozen support rules. Realization heterogeneity and model
+replication can narrow claim scope but cannot promote the primary effect
+status. Target-change, semantic-compliance, non-target-drift, task improvement,
+harm, and tie rates explain policy realization without filtering ITT.
+
+\begin{table}[H]
+  \centering
+  \scriptsize
+  \caption{RQ2 reports the conditions under which an effect is specific,
+  functionality-preserving, and actionable. Separate axes expose mixed
+  evidence instead of hiding it behind an aggregate label.}
+  \label{tab:rq2-scope}
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{lllllll}
+    \toprule
+    Hypothesis & Frozen scope & Effect & Specificity & Functionality & Fidelity & Actionability \\
+    \midrule
+    \multicolumn{7}{c}{\emph{One row per frozen scope supported by the protocol}} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\subsection{RQ3: Discovery Efficiency under a Fixed Budget}
+
+\textbf{RQ3. Under a fixed top-$K$ evaluation budget, how much do requirement
+selection and context-conditioned representation contribute to discovering
+supported effects?}
+
+\subsubsection{Selector Utility}
+
+The selector-only comparison gives \model, Pearson correlation, elastic-net
+logistic regression, LLM-based explanation, and seeded random ranking the same
+candidate universe, discovery information, and $K$ slots. The unique union of
+the methods' top-$K$ skeletons crosses the common bridge once, so a shared
+hypothesis is protocolized and randomized once and its evidence is reused by
+all selectors that chose it. Empty, bridge-failed, and protocolization-failed
+slots remain in denominator $K$. The primary selector endpoint is
+Supported-Effect Yield@$K$; Supported-Expected and Supported-Opposite counts
+are also reported so discovery quality is not conflated with effect direction.
+Held-out outcomes never rerank selectors or replace failed slots.
 
 \begin{table}[H]
   \centering
   \small
-  \caption{RQ1 shared-universe selector results. Panel A retains every frozen
-  budget slot through effect evaluation. Panel B reports the corresponding
-  yields; Confirmed Effect Yield@$K$ is primary. Our approach and the three
-  baselines use identical candidate and information budgets.}
-  \label{tab:rq1}
+  \caption{RQ3 selector utility on a shared universe and fixed budget. The
+  funnel retains every frozen slot through randomized evaluation.}
+  \label{tab:rq3-selector}
   \begin{tabular}{lrrrrrr}
     \toprule
-    \multicolumn{7}{l}{\textit{Panel A: Frozen-slot funnel}} \\
-    \midrule
-    Selector & $K$ & Selected & Bridged & Protocol & Rand. & Conf. \\
+    Selector & $K$ & Selected & Bridged & Protocol & Randomized & Supported \\
     \midrule
     \model & -- & -- & -- & -- & -- & -- \\
     Pearson correlation & -- & -- & -- & -- & -- & -- \\
     Elastic-net logistic & -- & -- & -- & -- & -- & -- \\
     LLM-based explanation & -- & -- & -- & -- & -- & -- \\
-    \bottomrule
-  \end{tabular}
-
-  \medskip
-  \begin{tabular}{lrrrr}
-    \toprule
-    \multicolumn{5}{l}{\textit{Panel B: Derived yields}} \\
-    \midrule
-    Metric & \model & Pearson & Elastic net & LLM expl. \\
-    \midrule
-    Selected / $K$ & -- & -- & -- & -- \\
-    Bridged / $K$ & -- & -- & -- & -- \\
-    Protocol / $K$ & -- & -- & -- & -- \\
-    Unique-union share & -- & -- & -- & -- \\
-    Block-freeze coverage & -- & -- & -- & -- \\
-    Randomized / $K$ & -- & -- & -- & -- \\
-    Confirmed Effect Yield@$K$ & -- & -- & -- & -- \\
-    Confirmed / Randomized & -- & -- & -- & -- \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-\begin{table}[H]
-  \centering
-  \small
-  \caption{RQ1 hypothesis and paired-selector evidence. The frozen RQ1
-  manifest binds selector/slot references to one shared randomized hypothesis
-  estimate. Paired utility intervals resample top-level semantic clusters and
-  never rerun discovery.}
-  \label{tab:rq1-evidence}
-  \begin{tabular}{llllrr}
-    \toprule
-    Selector/slot & Hyp.\ ID & Frozen target & Op. & ITT RD & Interval \\
-    \midrule
-    \multicolumn{6}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen RQ1 manifest}} \\
-    \bottomrule
-  \end{tabular}
-
-  \medskip
-  \begin{tabular}{llrrl}
-    \toprule
-    Selector pair & Utility diff. & Simult.\ interval & Status & Shared slots \\
-    \midrule
-    \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
+    Seeded random & -- & -- & -- & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\subsection{RQ2: Contribution of Context-Conditioned Representation}
+A separate native-system track evaluates Ji et al.'s causality-aided
+prompt--code analysis and NLPerturbator in their native candidate spaces
+\cite{ji2025causality,chen2026nlperturbator}. Their outputs cross the same
+catalog bridge before randomized evaluation and follow the fixed funnel
 
-\textbf{RQ2. How does context conditioning in the Prompt TSG representation
-affect candidate validity, protocolization, and held-out selection utility?}
+\[
+K \rightarrow N_{\mathrm{native}} \rightarrow N_{\mathrm{mapped}}
+\rightarrow N_{\mathrm{protocol}} \rightarrow N_{\mathrm{randomized}}
+\rightarrow N_{\mathrm{supported}}.
+\]
 
-RQ1 already isolates selector differences on one shared universe. RQ2 instead
-holds the selector, budget, bridge, arm policies, outcome construction, and
-inference fixed while comparing a direct-actionable-feature universe with the
-context-conditioned Prompt TSG universe. Candidate identities and eligible
-populations may differ, so this is an end-to-end representation comparison,
-not a second selector contest.
+This track measures system compatibility, not pure selector superiority;
+mapping coverage and mapped yield cannot replace the shared-universe primary
+comparison.
 
-The comparison reports candidate coverage, context applicability,
-invalid-operation rate, protocolization rate, randomized coverage, Confirmed
-Effect Yield@$K$, and the distribution of hypothesis-specific effects. The
-context-conditioned representation is valuable when it converts broad factor
-names into operations that are applicable, task-preserving, and evaluable for
-a stated security context. No selected hypotheses are pooled into an
-unapproved cross-hypothesis ATE.
+\subsubsection{Representation Utility}
+
+The representation comparison holds the selector, budget, bridge, arm
+policies, outcomes, and inference fixed while comparing a direct-actionable-
+feature universe with the context-conditioned Prompt TSG universe. Candidate
+identities and eligible populations may differ, so this is an end-to-end
+representation comparison. It reports candidate coverage, applicability,
+invalid-operation rate, protocolization, randomized coverage, and
+Supported-Effect Yield@$K$. The relevant advantage is whether context
+conditioning turns broad security labels into applicable, task-preserving,
+evaluable requirement operations.
 
 \begin{table}[H]
   \centering
   \scriptsize
-  \caption{RQ2 compares direct features with context-conditioned Prompt TSG
-  templates end to end. All non-representation coordinates are frozen; the
-  comparison is not interpreted as pure selector superiority.}
-  \label{tab:rq2}
+  \caption{RQ3 representation utility. All non-representation coordinates are
+  fixed; results are interpreted as an end-to-end contribution rather than a
+  second selector contest.}
+  \label{tab:rq3-representation}
   \resizebox{\linewidth}{!}{%
   \begin{tabular}{lrrrrrr}
     \toprule
-    Representation & Candidates & Context appl. & Invalid op. & Protocol & Rand. & Effect Yield@$K$ \\
+    Representation & Candidates & Applicable & Invalid op. & Protocol & Randomized & Effect Yield@$K$ \\
     \midrule
     Direct features & -- & -- & -- & -- & -- & -- \\
     Prompt TSG context & -- & -- & -- & -- & -- & -- \\
@@ -179,100 +191,31 @@ unapproved cross-hypothesis ATE.
   \end{tabular}}
 \end{table}
 
-\begin{table}[H]
-  \centering
-  \small
-  \caption{RQ2 hypothesis-specific evidence retains each representation
-  universe and context-conditioned population. Every row reports the
-  target-minus-no-op ITT without cross-hypothesis pooling.}
-  \label{tab:rq2-evidence}
-  \begin{tabular}{llllrr}
-    \toprule
-    Universe & Hyp.\ ID & Context / target & Op. & ITT RD & Interval \\
-    \midrule
-    \multicolumn{6}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen RQ2 manifest}} \\
-    \bottomrule
-  \end{tabular}
-
-  \medskip
-  \begin{tabular}{llrrl}
-    \toprule
-    Hyp.\ ID & Effect status & Indep.\ clusters & Arm counts & Specificity \\
-    \midrule
-    \multicolumn{5}{c}{\emph{Continued fields for the same frozen rows}} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\Needspace{8\baselineskip}
-\subsection{RQ3: Security Intervention Effects}
-
-\textbf{RQ3. Which frozen prompt interventions improve or degrade secure-code
-yield, and what are their specificity and functionality profiles?}
-
-RQ3 estimates context-conditioned, generator-model-specific, multi-realization policy
-effects for the frozen security targets. The primary outcome is
-oracle-evaluable secure-code yield; secure-and-functional joint success is the
-key practical secondary outcome. Code validity, Oracle support, unknowns,
-terminal no-code rates, and secure-yield bounds remain separate so that a
-coverage or production shift cannot masquerade as safer generated code.
-
-ADD and REMOVE remain separate candidate slots, hypotheses, protocols,
-contrasts, multiplicity coordinates, and evidence. Observed baseline or no-op
-insecurity is neither an eligibility condition nor an ITT denominator filter.
-Target-versus-placebo and, when family-valid, target-versus-generic contrasts
-test specificity. Bidirectional support is awarded only when separately
-randomized ADD and REMOVE policies support opposite expected directions.
-
-\begin{table}[H]
-  \centering
-  \small
-  \caption{RQ3 reports hypothesis-specific target-versus-no-op assigned-arm
-  effects on oracle-evaluable secure-code yield. Effect, specificity, and
-  functionality statuses remain separate so that mixed evidence is visible.}
-  \label{tab:rq3}
-  \scriptsize
-  \resizebox{\linewidth}{!}{%
-  \begin{tabular}{lllrrlll}
-    \toprule
-    Intervention & Op. & Generator & ITT RD & Interval & Effect status & Specificity & Functionality \\
-    \midrule
-    \multicolumn{8}{c}{\emph{Rows are populated only from the
-    provenance-verified frozen TargetSpec manifest}} \\
-    \bottomrule
-  \end{tabular}}
-\end{table}
-
-Target-change, semantic-compliance, non-target-drift, task improvement, harm,
-and tie rates are descriptive diagnostics. They neither filter the assigned-arm
-ITT denominator nor replace the primary ITT estimates.
-
-\subsection{RQ4: Expert-Perceived Explanation Utility}
+\subsection{RQ4: Expert-Perceived Utility of Requirement Evidence}
 
 \textbf{RQ4. How do security experts rate and rank the perceived quality and
-usefulness of intervention explanations produced by different methods?}
+usefulness of requirement evidence records produced by different methods?}
 
-For \model, the intervention evidence record is rendered as an expert-facing
-explanation containing the context, proposed edit, observational selection
-trace, randomized effect and interval, specificity, functionality, and claim
-scope. Each method's explanation is placed in the same anonymous wrapper and
-presented under a balanced case--method assignment. Qualified experts rate clarity,
-evidence sufficiency, credibility, actionability, and overall usefulness on
-five-point ordinal scales. Overall usefulness is the preregistered primary
-human-study outcome; the other dimensions are secondary.
+For \model, each record is rendered as an expert-facing explanation containing
+the context, requirement operation, observational selection trace, randomized
+effect and interval, specificity, functionality, and claim scope. Every
+method's explanation uses the same anonymous wrapper and a balanced
+case--method assignment. Qualified experts rate clarity, evidence sufficiency,
+credibility, actionability, and overall usefulness on five-point ordinal
+scales. Overall usefulness is the preregistered primary human-study outcome;
+the other dimensions are secondary.
 
 The primary analysis uses an ordinal mixed-effects model with method as a fixed
 effect and participant and case as random effects, followed by
-multiplicity-adjusted comparisons. RQ4 concerns perceived utility only and
-does not claim objective factor identification, repair accuracy, or
-validation of the computational causal results.
+multiplicity-adjusted comparisons. RQ4 concerns perceived utility only: it
+does not establish objective requirement identification, repair accuracy, or
+validity of the computational effect estimates.
 
 \begin{table}[H]
   \centering
   \small
-  \caption{RQ4 expert-rating results. Entries report ordinal summaries and
-  model-based contrasts from the preregistered expert study.}
+  \caption{RQ4 expert ratings. Entries report ordinal summaries and
+  model-based contrasts from the separately governed expert study.}
   \label{tab:rq4}
   \begin{tabular}{lrrrrr}
     \toprule

@@ -1,6 +1,6 @@
 \section{Related Work}
 
-\paragraph{Explanations for code-generation models.}
+\paragraph{Attribution, explanation, and requirement-effect evidence.}
 Attribution, concept-based interpretation, and rationale methods expose input
 features, concepts, or evidence associated with model behavior
 \cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,
@@ -8,17 +8,21 @@ deyoung2020eraser}.
 CodeQ maps token-level rationales to higher-level programming categories and
 aggregates them into global explanations of code and test generation
 \cite{khati2026codeq}.
-\model uses such evidence only through an explicit bridge that resolves a
-evaluable candidate to one catalog-bound prompt factor and a frozen
-intervention policy.
+These methods answer which input elements are associated with a prediction;
+they do not by themselves answer whether adding or removing a scoped security
+requirement changes independently measured generated-code outcomes. \model
+uses observational explanation evidence only through an explicit bridge that
+resolves an evaluable candidate to one catalog-bound requirement and a frozen
+prompt policy.
 
 Ji et al. model human-readable concepts in prompts and generated code to study
 causal prompt--code relations and support prompt calibration
 \cite{ji2025causality}. NLPerturbator instead applies realistic natural-language
 variations to measure the robustness of code-generation models
 \cite{chen2026nlperturbator}. We evaluate both in their native candidate spaces
-and map their outputs to editable prompt factors before randomized effect
-evaluation.
+and map their outputs to editable prompt requirements before randomized effect
+evaluation. This separates explaining model behavior from testing whether a
+requirement matters under a controlled intervention.
 
 \paragraph{Security hardening and prompt interventions.}
 Prompt-level studies have compared security reminders, CWE-specific
@@ -32,11 +36,12 @@ analyzer-guided prompt optimization (PromSec), constrained decoding evaluated
 with CodeGuard+, and inference-time representation intervention (Thea)
 \cite{he2023sven,nazzal2024promsec,fu2024codeguard,
 elhusseini2026thea}.
-These methods evaluate predefined or adaptively optimized hardening
-strategies. \model instead freezes context-conditioned prompt-policy
-hypotheses selected under a common budget and estimates their effects on
-held-out tasks using semantic-task-clustered assigned-arm ITT, retaining null
-or harmful effects and Oracle-unknown cases in protocol-defined reporting.
+These methods ask how to harden generation using predefined or adaptively
+optimized strategies. \model asks a different requirement-level question:
+which context-applicable prompt-side requirement has a supported randomized
+effect, under which operation and scope, and with what specificity and
+functionality profile. It freezes those hypotheses under a common budget and
+estimates held-out effects using semantic-task-clustered assigned-arm ITT.
 
 \paragraph{Security benchmarks and evaluation.}
 SecurityEval and LLMSecEval established CWE-indexed prompt suites evaluated

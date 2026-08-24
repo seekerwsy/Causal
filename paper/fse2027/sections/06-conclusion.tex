@@ -1,11 +1,15 @@
 \section{Conclusion}
 
-\model turns security-underspecified programming prompts into scoped evidence
-about prompt-side interventions. A typed Prompt TSG defines valid edits,
-observational discovery selects and freezes the hypotheses worth testing, and
-held-out blocked randomization estimates their assigned prompt-policy effects
-on independently measured security and functionality. The intervention
-evidence record preserves the context, edit, selection trace, evaluated
-effect, uncertainty, and claim scope as one expert-facing interface. Together,
-these components provide a direct route from natural-language prompt structure
-to interpretable, experimentally grounded security evidence.
+\model turns the broad question of whether prompt wording matters into a
+requirement-level empirical question. A typed Prompt TSG defines the applicable
+context and valid ADD or REMOVE operation; observational discovery prioritizes
+and freezes the hypotheses worth a fixed evaluation budget; and held-out
+blocked randomization estimates the assigned prompt-policy effects on
+independently measured security and functionality. Under this design, a
+requirement matters at the effect level only when its adjusted randomized
+interval excludes zero in the frozen scope, becomes beneficial only in the
+security-improving direction, and becomes practically actionable only with
+supported specificity and preserved functionality. The requirement evidence
+record keeps these conclusions, their uncertainty, and their scope together,
+providing a direct and reviewable route from natural-language prompt structure
+to usable security evidence.

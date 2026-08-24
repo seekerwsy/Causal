@@ -1,66 +1,75 @@
 \section{Introduction}
 
 Natural-language prompts now participate directly in the security boundary of
-code generation. They often specify what a program should do while leaving
-validation, authorization, trust boundaries, or safe-API constraints implicit.
-Studies of AI-assisted code generation show that functional-looking outputs
-can still contain security weaknesses and that developers may overestimate the
-security of assisted solutions~\cite{pearce2022copilot,perry2023assistants}.
-The practical question is therefore not only which prompt text matters, but
-which missing or weakly scoped requirement can be edited without changing the
-programming task.
+code generation. They usually specify what a program should do, yet leave
+validation, trust boundaries, safe APIs, or authorization constraints implicit.
+Consequently, code can appear functionally complete while retaining security
+weaknesses, and developers can overestimate the security of assisted solutions
+\cite{pearce2022copilot,perry2023assistants}. For prompt authors, benchmark
+designers, and tool builders, the actionable question is therefore:
+\emph{which prompt-side security requirements actually change generated-code
+security, for which tasks, and without sacrificing functionality?}
 
-Feature attribution, concept-based interpretation, and rationale evaluation
-offer complementary views of model
-behavior~\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser},
+Existing evidence does not answer this question directly. Attribution,
+concept-based interpretation, and rationale evaluation associate input text
+with model behavior
+\cite{sundararajan2017integrated,kim2018tcav,lundberg2017shap,deyoung2020eraser},
 while secure-prompt studies compare predefined reminders, reasoning strategies,
-and repair loops~\cite{tony2025prompting,bruni2025promptbenchmark}. These methods
-can identify important text or useful strategies, but they do not determine
-which context-specific requirement is an editable security factor. Free-form
-perturbations also risk changing task semantics and security content together,
-making behavioral differences difficult to attribute.
+and repair loops~\cite{tony2025prompting,bruni2025promptbenchmark}. These views
+can expose salient text or useful strategies, but they do not establish that a
+specific, context-applicable requirement caused a security change. Conversely,
+free-form prompt perturbations can change task meaning, security content, and
+presentation together, obscuring what was actually tested.
 
-The missing link is a path from structured prompt meaning to usable effect
-evidence. Free-form requirements must first become bounded factors whose
-applicability and valid edits are explicit. Observational evidence must then
-allocate a limited experimental budget without being mistaken for an
-intervention effect. Finally, the selected hypotheses and their prompt policies
-must be frozen before controlled evaluation on held-out tasks.
+The missing link is a controlled path from prompt meaning to requirement-level
+effect evidence. A natural-language request must first be represented so that
+task context and editable security content remain distinct. Observational
+evidence can then prioritize a limited number of hypotheses, but cannot be
+promoted into an effect claim. Finally, each selected requirement, operation,
+policy realization, target outcome, and analysis rule must be frozen before
+held-out randomized evaluation.
 
-\model follows a representation--selection--evaluation architecture.
-\textbf{Typed Prompt Representation} maps each programming request into a
-\prompttsg that separates task semantics, security context, editable safety
-factors, and presentation controls; context-conditioned intervention templates
-are queries over this representation. \textbf{Hypothesis Discovery and
-Selection} uses TSG-derived constraints, FCI evidence, and stability under
-semantic-cluster resampling to discover, rank, and freeze a budgeted set of
-intervention hypotheses. \textbf{Evaluation of Intervention Effects}
-constructs matched prompt arms and estimates their assigned-arm effects on
-cluster-disjoint held-out tasks. The resulting intervention evidence record
-connects represented context, the frozen edit, selection rationale, evaluated
-effect, uncertainty, and claim scope. The Prompt TSG defines what can be
-edited; observational discovery determines what should be tested; blocked
-randomization identifies the assigned prompt-policy effect.
+We introduce \model (\modelfull), which follows this path in three stages.
+\textbf{Typed Prompt Representation} maps a programming request into a
+\prompttsg and derives context-conditioned requirement templates.
+\textbf{Requirement Hypothesis Discovery and Selection} uses TSG-derived
+constraints, FCI evidence, and stability under semantic-cluster resampling to
+freeze a budgeted hypothesis set. \textbf{Evaluation of Requirement Effects}
+constructs matched prompt policies and estimates their assigned-arm effects on
+cluster-disjoint held-out tasks. The boundary is deliberate: the Prompt TSG
+represents candidate requirements; observational discovery determines which
+hypotheses to test; randomized assignment determines the effect of the frozen
+prompt policy.
 
-\needspace{8\baselineskip}
-This paper makes the following contributions:
+We use \emph{matter} as a staged, evidence-bound conclusion rather than a loose
+synonym for importance. A requirement is \emph{effect-relevant} when the
+multiplicity-adjusted target-versus-no-op assigned-arm interval excludes zero
+within its frozen scope. It is \emph{beneficial} when that supported effect has
+the security-improving direction---for example, ADD improves secure-code yield
+or REMOVE reduces it. It is \emph{practically actionable} only when the
+beneficial effect is also target-specific and functionality-preserving under
+the frozen decision rules. Inconclusive evidence is not evidence of no effect,
+and none of these labels generalizes beyond the evaluated context, operation,
+realization distribution, generator model, and outcome.
+
+This paper makes four contributions:
 
 \begin{itemize}
-  \item \textbf{Typed Prompt TSG representation.} A bounded task-security
-  graph separates task semantics, security context, editable safety factors,
-  and presentation controls. Graph queries derive context-conditioned
-  templates with explicit factor states, valid operations, and invariants.
-  \item \textbf{Budgeted hypothesis discovery and selection.} TSG-derived
-  constraints, FCI uncertainty, and stability under semantic-cluster
-  resampling turn observational evidence into a frozen, budgeted hypothesis
-  set without treating learned relations as effect estimates.
-  \item \textbf{Evaluation of intervention effects.} Matched prompt policies
-  and held-out blocked randomization estimate assigned-arm effects on
-  independently measured security and functionality while retaining failed,
-  null, harmful, and non-evaluable assignments under the frozen analysis.
-  \item \textbf{Expert-facing evidence interface.} A standardized
-  intervention evidence record connects context, editable action, selection
-  evidence, randomized effects, uncertainty, and scope; a separately governed
-  study evaluates its expert-perceived utility without promoting those ratings
-  to computational effect evidence.
+  \item \textbf{A requirement-centered prompt representation.} A typed Prompt
+  TSG separates immutable task-security context from editable safety factors
+  and derives applicability-aware ADD and REMOVE templates from a finite
+  catalog.
+  \item \textbf{A budgeted discovery-to-freeze procedure.} Typed constraints,
+  FCI uncertainty, and semantic-cluster stability prioritize requirement
+  hypotheses while keeping observational selection evidence distinct from
+  randomized effect evidence.
+  \item \textbf{A requirement-level randomized evaluation.} Matched prompt
+  policies, blocked assignment, and semantic-task-clustered ITT expose effect,
+  specificity, and functionality as separate axes, retaining null-compatible,
+  opposite, failed, unknown, and non-evaluable outcomes required by the frozen
+  protocol.
+  \item \textbf{A usable evidence interface.} A standardized requirement
+  evidence record joins context, operation, selection trace, randomized effect,
+  uncertainty, and scope; a separately governed study evaluates experts'
+  perceived utility without treating those ratings as effect validation.
 \end{itemize}

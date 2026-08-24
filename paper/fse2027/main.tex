@@ -6,13 +6,17 @@
 
 \usepackage{booktabs}
 \usepackage{flafter}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
 \usepackage{multirow}
 \usepackage{needspace}
+\usepackage{tabularx}
 \usepackage{tikz}
 \usepackage{xspace}
 \usetikzlibrary{arrows.meta,fit,positioning}
 
-\newcommand{\model}{\textsc{Model}\xspace}
+\newcommand{\model}{\textsc{Phase}\xspace}
+\newcommand{\modelfull}{Prompt-side Hypothesis Analysis and Security Evaluation\xspace}
 \newcommand{\prompttsg}{Prompt TSG\xspace}
 
 \acmConference[FSE 2027]{The ACM International Conference on the Foundations
@@ -22,8 +26,8 @@ of Software Engineering}{July 12--16, 2027}{Shenzhen, China}
 
 \begin{document}
 
-\title{Prioritizing and Evaluating Prompt-Side Security Interventions in LLM
-Code Generation}
+\title{\model: Which Prompt-Side Security Requirements Matter in LLM Code
+Generation?}
 
 \author{Anonymous Author(s)}
 \affiliation{%
@@ -33,20 +37,24 @@ Code Generation}
 
 \begin{abstract}
 Natural-language programming prompts often specify functionality while leaving
-context-specific security requirements implicit. We present \model, a
-three-stage framework that maps each prompt into a typed Prompt TSG, discovers
-and selects context-conditioned intervention hypotheses from observational
-evidence, and evaluates frozen prompt interventions on cluster-disjoint
-held-out tasks. The Prompt TSG separates immutable task-security context from
-one editable safety factor and defines valid ADD or REMOVE operations.
-TSG-derived constraints, FCI evidence, and support under semantic-cluster
-resampling allocate a fixed evaluation budget without treating observational
-relations as effect evidence. Matched target and control prompt policies then
-undergo blocked randomization, and assigned-arm intent-to-treat analysis
-estimates their effects on independently measured security and functionality.
-For each hypothesis, \model assembles the represented context, frozen edit,
-selection trace, effect estimate, uncertainty, and claim scope into an
-intervention evidence record for expert evaluation.
+context-specific security requirements implicit. The resulting question is
+not whether security language matters in general, but which prompt-side
+requirement matters for a particular task context. We present \model
+(\modelfull), an empirical framework that maps prompts into typed Prompt TSGs,
+discovers and prospectively freezes requirement hypotheses, and evaluates
+their prompt-policy effects on cluster-disjoint held-out tasks. A requirement
+is effect-relevant only when its multiplicity-adjusted target-versus-no-op
+assigned-arm interval excludes zero within the frozen scope; beneficial and
+practically actionable requirements must satisfy additional direction,
+specificity, and functionality criteria. Prompt TSG constraints, FCI evidence,
+and semantic-cluster stability allocate a fixed evaluation budget without
+treating observational relations as effect evidence. Blocked randomization and
+semantic-task-clustered intent-to-treat analysis then estimate independently
+measured security and functionality effects. For each frozen hypothesis,
+\model assembles the applicable context, requirement operation, selection
+trace, randomized effect, uncertainty, and claim scope into a requirement
+evidence record for computational reporting and separately governed expert
+evaluation.
 \end{abstract}
 
 \begin{CCSXML}
@@ -81,8 +89,6 @@ discovery, randomized experiments, prompt analysis}
 \input{sections/04-evaluation}
 
 \input{sections/05-related-work}
-
-\input{sections/07-threats-to-validity}
 
 \input{sections/06-conclusion}
 

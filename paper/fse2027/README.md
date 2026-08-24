@@ -1,4 +1,4 @@
-# FSE 2027 Draft
+# PHASE FSE 2027 Draft
 
 This directory contains the FSE 2027 paper draft for Prompt Mechanism Study.
 
@@ -36,10 +36,11 @@ through a traceable table builder. Follow the repository-root `AGENTS.md` and
 the concise paper-local `paper/AGENTS.md` for research-integrity and manuscript
 requirements.
 
-The current narrative follows one route from structured representation to
-usable evidence: Typed Prompt Representation, Hypothesis Discovery and
-Selection, Evaluation of Intervention Effects, and the resulting Intervention
-Evidence Record. The expert-perceived utility study is a separately governed
+The current narrative answers which prompt-side security requirements matter
+through one route from structured representation to usable evidence: Typed
+Prompt Representation, Requirement Hypothesis Discovery and Selection,
+Evaluation of Requirement Effects, and the resulting Requirement Evidence
+Record. The expert-perceived utility study is a separately governed
 downstream evaluation, not a fourth computational stage. Earlier commands and identifiers are preserved in the
 [historical revision evidence ledger](revision-evidence-ledger.md); they are
 not current project names, invocation instructions, or manuscript prose
@@ -57,8 +58,8 @@ nor unexplained result placeholders.
 ## Reviewer Reading Guide
 
 The single manuscript entry point is `main.tex`. The active path reads natural
-prompts, produces Prompt TSG intervention templates, freezes a budgeted
-hypothesis set, constructs and randomizes matched prompt policies, measures
+prompts, produces Prompt TSG requirement templates, freezes a budgeted
+requirement-hypothesis set, constructs and randomizes matched prompt policies, measures
 security and functionality independently, assembles outcomes, and reports
 semantic-clustered assigned-arm ITT evidence. The key invariants are: Prompt
 TSG edges are semantic rather than causal; held-out outcomes cannot alter
@@ -66,7 +67,7 @@ selection; assigned arm, not realized fidelity, defines the primary contrast;
 and Oracle coverage, functionality, and joint success remain separate from the
 primary secure-code-yield outcome.
 
-Recommended reading order (eight files):
+Recommended reading order (seven files):
 
 1. `main.tex`
 2. `sections/01-introduction.tex`
@@ -74,5 +75,4 @@ Recommended reading order (eight files):
 4. `sections/03-method.tex`
 5. `figures/prompt-mechanism-study-overview.tex`
 6. `sections/04-evaluation.tex`
-7. `sections/07-threats-to-validity.tex`
-8. `sections/06-conclusion.tex`
+7. `sections/06-conclusion.tex`
