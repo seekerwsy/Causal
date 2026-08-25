@@ -10,6 +10,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
@@ -567,9 +568,18 @@ def run_measurements(
             complete = True
         except (MemoryError, KeyboardInterrupt, SystemExit):
             raise
-        except Exception as error:  # noqa: BLE001 - preserve evidence and stop the phase
+        except Exception as error:  # noqa: BLE001 - preserve exact failure evidence
             error_type = type(error).__name__
-            artifacts["error.json"] = {"error_type": error_type}
+            if calls == 1 and analyzers == 0 and isinstance(
+                error, (HTTPError, TimeoutError, URLError)
+            ):
+                artifacts["generation-error.json"] = {"error_type": error_type}
+                artifacts["measurement.json"] = _generation_failure_measurement(
+                    assignment_id, error_type
+                )
+                complete = True
+            else:
+                artifacts["error.json"] = {"error_type": error_type}
         unit = output / f"assignment-{index:03d}"
         write_bundle(unit, artifacts)
         provider_calls += calls
