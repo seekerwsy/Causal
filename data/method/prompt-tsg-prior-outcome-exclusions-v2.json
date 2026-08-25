@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "review_name": "prior-outcome-exposure-exclusion-v2",
+  "source_tasks_sha256": "273890e8989c39e3988fe8b9a938cd702cb199bc1966f12d6ff45c3691618af0",
+  "outcome_values_used": false,
+  "exclusions": [
+    {
+      "task_id": "semantic_cluster_1cbf1426913d79dd60cda8e85dc0ea0d93ae63a3d622bb963ab10fc10a4a3899",
+      "reason_code": "prior_outcome_exposure",
+      "explanation": "This task received code generation and Oracle measurement in the superseded five-task pilot, so it is excluded from the new prospective population without consulting its outcome value."
+    },
+    {
+      "task_id": "semantic_cluster_3be36f8762d5451aae795f243ee87b724211d26119086b4691a0dab7d4b1beef",
+      "reason_code": "prior_outcome_exposure",
+      "explanation": "This task received code generation and Oracle measurement in the superseded five-task pilot, so it is excluded from the new prospective population without consulting its outcome value."
+    }
+  ]
+}

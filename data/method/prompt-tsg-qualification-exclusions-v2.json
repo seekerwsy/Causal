@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "review_name": "outcome-blind-prompt-tsg-task-contract-review-v2",
+  "source_tasks_sha256": "f9b26c00d90225940d1e03697f26101088e66f0983ff1fd68573200851ee5bd3",
+  "outcome_values_used": false,
+  "exclusions": [
+    {"task_id": "semantic_cluster_6841cc983786b1d08ecb89662fc7cd9855a7b24b95a2985a9d6332d6bba0f83a", "reason_code": "arbitrary_command_not_fixed_executable", "explanation": "The caller supplies the command itself, so the prompt does not support the fixed-executable context required by the bound mechanism."},
+    {"task_id": "semantic_cluster_7580f2aa667bfbd39c5ac88588a18a5dde1af041ceb3bedcdab46fc9688785a0", "reason_code": "indirect_sink_not_owned", "explanation": "The generated route only calls insert_user_message_in_db; the generated unit does not own the SQL construction that the intervention targets."},
+    {"task_id": "semantic_cluster_86418845cae087f1b7328ede836c03f79ddab704623c4edd7cf297061110e608", "reason_code": "ambiguous_sql_roles", "explanation": "The table and condition roles are unspecified, so the evidence does not establish fixed identifiers plus caller-supplied values."},
+    {"task_id": "semantic_cluster_9b0501e0b1a21bfcf6b6d07d95b38c8ea5e7c1920d667727fd3e507f56a099a1", "reason_code": "indirect_sink_not_owned", "explanation": "The generated route only calls insert_user_message_in_db; the generated unit does not own the SQL construction that the intervention targets."},
+    {"task_id": "semantic_cluster_9ce01ea67daac3a57c5e39a478c07cdb009e0f808e004a100d742b6f57a44b95", "reason_code": "multi_format_contract", "explanation": "The task requires dispatch over a format menu including JSON, INI, and pickle rather than a JSON-only input contract."},
+    {"task_id": "semantic_cluster_cb247ca72244f9508dadac8455ab3c8baf8acc5669220f85f8d35ac6cb09cf38", "reason_code": "multi_format_contract", "explanation": "The task requires dispatch over a format menu including JSON, HTML, and pickle rather than a JSON-only input contract."},
+    {"task_id": "semantic_cluster_ce18b9a31afa51872a6361707ff402f46df12b33425e287709d1f7b337863a25", "reason_code": "multi_format_contract", "explanation": "The task requires dispatch over a format menu including JSON, text, and pickle rather than a JSON-only input contract."},
+    {"task_id": "semantic_cluster_d5714e97bd1b895c53137c5a26894a98e65631d0a6e8ba3984c3678119768b33", "reason_code": "python_contract_mismatch", "explanation": "The prompt explicitly requires a Bash deployment script and is incompatible with the frozen complete-Python-source generation contract."},
+    {"task_id": "semantic_cluster_eb8765732dd9deb1e6d03f193d15aec7dbdeb01954f12de9cbde3415b34cca75", "reason_code": "ambiguous_sql_roles", "explanation": "The table and condition roles are unspecified, so the evidence does not establish fixed identifiers plus caller-supplied values."},
+    {"task_id": "semantic_cluster_f13c824400cf3cb9f363f2cf7206bd096a0952ca3cd1984d269dd71ea1f6ee55", "reason_code": "mixed_deserialization_sinks", "explanation": "The task also requires loading a pickled vocabulary, so a JSON-specific intervention does not cover the task's required deserialization behavior."}
+  ]
+}

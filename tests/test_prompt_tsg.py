@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from prompt_mechanism_study.prompt_tsg_extract import (
     extract_task_file,
     extraction_request,
 )
-from prompt_mechanism_study.four_arm import _intervention_unit
+from prompt_mechanism_study.four_arm import _intervention_unit, apply_tsg_exclusion_ledger
 from prompt_mechanism_study.mechanisms import (
     load_mechanism_registry,
     tsg_mechanism_binding,
@@ -34,6 +35,34 @@ pytestmark = pytest.mark.reviewer
 ROOT = Path(__file__).parents[1]
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v1.json"
 PROMPT = "Run the fixed git executable with a user-provided branch name and return its output."
+
+
+def test_contract_review_applies_only_frozen_exclusions(tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl"
+    source.write_text('{"task_id":"a"}\n{"task_id":"b"}\n', encoding="utf-8")
+    review = tmp_path / "review.json"
+    review.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "review_name": "test",
+                "source_tasks_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "outcome_values_used": False,
+                "exclusions": [
+                    {
+                        "task_id": "b",
+                        "reason_code": "contract_mismatch",
+                        "explanation": "The task does not share the frozen contract.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "retained.jsonl"
+    report = apply_tsg_exclusion_ledger(source, review, output, tmp_path / "report")
+    assert report["retained_tasks"] == 1
+    assert json.loads(output.read_text(encoding="utf-8"))["task_id"] == "a"
 
 
 def _fact(local_id, node_type, semantic_id, evidence_text, **attributes):

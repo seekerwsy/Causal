@@ -231,6 +231,66 @@ def prepare_tsg_conditioned_tasks(
     return report
 
 
+def apply_tsg_exclusion_ledger(
+    source_path: Path,
+    review_path: Path,
+    output: Path,
+    report_output: Path,
+) -> dict[str, Any]:
+    """Apply a frozen task exclusion ledger without consulting outcome values."""
+
+    if output.exists() or report_output.exists():
+        raise FileExistsError(output if output.exists() else report_output)
+    source_payload = source_path.read_bytes()
+    tasks = _json_lines(source_path)
+    review = read_json(review_path)
+    if (
+        set(review)
+        != {
+            "schema_version",
+            "review_name",
+            "source_tasks_sha256",
+            "outcome_values_used",
+            "exclusions",
+        }
+        or review["source_tasks_sha256"] != hashlib.sha256(source_payload).hexdigest()
+        or review["outcome_values_used"] is not False
+    ):
+        raise FormalStudyError("TSG contract review metadata drifted")
+    exclusions = review["exclusions"]
+    excluded_ids = [item.get("task_id") for item in exclusions]
+    task_ids = {task["task_id"] for task in tasks}
+    if (
+        len(excluded_ids) != len(set(excluded_ids))
+        or not set(excluded_ids) <= task_ids
+        or any(
+            set(item) != {"task_id", "reason_code", "explanation"}
+            or not all(isinstance(item[key], str) and item[key].strip() for key in item)
+            for item in exclusions
+        )
+    ):
+        raise FormalStudyError("TSG contract review exclusions are invalid")
+    excluded = set(excluded_ids)
+    retained = [task for task in tasks if task["task_id"] not in excluded]
+    payload = "".join(canonical_json(task) + "\n" for task in retained).encode("utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+    report = {
+        "schema_version": "1.0",
+        "status": "PROMPT_TSG_CONTRACT_REVIEW_APPLIED",
+        "source_tasks": len(tasks),
+        "retained_tasks": len(retained),
+        "excluded_tasks": len(exclusions),
+        "exclusion_reason_counts": dict(
+            sorted(Counter(item["reason_code"] for item in exclusions).items())
+        ),
+        "outcome_values_used": False,
+        "retained_tasks_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    write_bundle(report_output, {"report.json": report, "exclusions.json": exclusions})
+    return report
+
+
 def prepare_context_conditioned_tasks(
     source_path: Path,
     bindings_path: Path | Sequence[Path],
@@ -1099,6 +1159,19 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
         ):
             raise FormalStudyError("Prompt TSG catalog drifted")
         prompt_tsg_catalog = load_catalog(catalog_path)
+        for item in (
+            "extractor_config",
+            "extractor_prompt",
+            "contract_exclusions",
+            "freshness_exclusions",
+        ):
+            path_key = f"{item}_path"
+            digest_key = f"{item}_sha256"
+            if path_key not in catalog_config and digest_key not in catalog_config:
+                continue
+            path = root / catalog_config[path_key]
+            if hashlib.sha256(path.read_bytes()).hexdigest() != catalog_config[digest_key]:
+                raise FormalStudyError(f"Prompt TSG {item} drifted")
     tasks_payload = tasks_path.read_bytes()
     tasks = _json_lines(tasks_path)
     source = config["task_source"]
