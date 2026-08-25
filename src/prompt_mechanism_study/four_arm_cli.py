@@ -25,6 +25,7 @@ def main() -> int:
             "measure-full",
             "analyze",
             "analyze-full",
+            "verify-analysis",
         ),
     )
     parser.add_argument("output", type=Path)
@@ -49,6 +50,14 @@ def main() -> int:
     parser.add_argument("--semgrep", type=Path)
     parser.add_argument("--bandit", type=Path)
     args = parser.parse_args()
+    if args.action == "verify-analysis":
+        if args.config is None or args.tasks is None:
+            parser.error("analysis verification requires config and tasks")
+        from prompt_mechanism_study.four_arm_verify import verify_analysis
+
+        report = verify_analysis(args.config, args.tasks, args.output)
+        print(report["status"])
+        return 0
     if args.action == "prepare-registered":
         if args.source_tasks is None or args.mechanism_registry is None:
             parser.error("preparation requires source-tasks and mechanism-registry")

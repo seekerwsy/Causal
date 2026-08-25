@@ -101,3 +101,7 @@ drift. Its local bundle SHA-256 is
 This amendment supports only the two declared families and one generator model. It cannot be cited
 as evidence for the omitted cryptography or identity families, cross-language replication, backend
 replication, or a model-general effect.
+
+Execution results, the deterministic seed-range repair, and final evidence limitations are recorded
+separately in `2026-08-25-fresh-two-family-four-arm-results.md`; that document supersedes any
+pre-repair execution output, but does not alter this prospective population or estimand freeze.
