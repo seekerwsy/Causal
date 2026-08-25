@@ -36,7 +36,7 @@ def main() -> int:
     parser.add_argument("--records", type=Path)
     parser.add_argument("--contracts", type=Path)
     parser.add_argument("--mechanism-registry", type=Path)
-    parser.add_argument("--bindings", type=Path)
+    parser.add_argument("--bindings", type=Path, action="append", default=[])
     parser.add_argument("--binding-report", type=Path)
     parser.add_argument("--selected-task-id", action="append", default=[])
     parser.add_argument("--intervention-pilot", type=Path)
@@ -62,7 +62,7 @@ def main() -> int:
     if args.action == "prepare-context-conditioned":
         required = (
             args.source_tasks,
-            args.bindings,
+            args.bindings or None,
             args.mechanism_registry,
             args.binding_report,
         )

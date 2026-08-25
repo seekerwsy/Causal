@@ -151,7 +151,7 @@ def test_exposed_task_units_are_loaded_from_frozen_jsonl(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    assert _excluded_task_units(sample) == {"unit-a", "unit-b"}
+    assert _excluded_task_units([sample]) == {"unit-a", "unit-b"}
 
 
 def test_priority_extensions_require_contracts_tests_and_supported_tiers() -> None:

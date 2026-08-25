@@ -186,6 +186,57 @@ def test_context_binding_excludes_incompatible_tasks_before_intervention(tmp_pat
 
 
 @pytest.mark.reviewer
+def test_context_binding_fills_mechanical_source_identity_for_concise_reviews(
+    tmp_path: Path,
+) -> None:
+    source = Path("data/validation/context-conditioned-mechanism-v1-source-tasks.jsonl")
+    concise = tmp_path / "concise.jsonl"
+    rows = [
+        {
+            key: value
+            for key, value in json.loads(line).items()
+            if key not in {"source_prompt_sha256", "functional_contract_id"}
+        }
+        for line in Path(
+            "data/validation/context-conditioned-mechanism-v1-bindings.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    concise.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    report = prepare_context_conditioned_tasks(
+        source,
+        concise,
+        Path("data/formal/four-arm-mechanisms-v3.json"),
+        tmp_path / "eligible.jsonl",
+        tmp_path / "report",
+    )
+
+    assert report["eligible_tasks"] == 7
+
+
+@pytest.mark.reviewer
+def test_context_binding_accepts_separate_outcome_blind_review_ledgers(tmp_path: Path) -> None:
+    source = Path("data/validation/context-conditioned-mechanism-v1-source-tasks.jsonl")
+    rows = Path("data/validation/context-conditioned-mechanism-v1-bindings.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+    first.write_text("\n".join(rows[:6]) + "\n", encoding="utf-8")
+    second.write_text("\n".join(rows[6:]) + "\n", encoding="utf-8")
+
+    report = prepare_context_conditioned_tasks(
+        source,
+        [first, second],
+        Path("data/formal/four-arm-mechanisms-v3.json"),
+        tmp_path / "eligible.jsonl",
+        tmp_path / "report",
+    )
+
+    assert report["eligible_tasks"] == 7
+
+
+@pytest.mark.reviewer
 def test_context_conditioned_executor_receives_required_and_forbidden_delta(
     tmp_path: Path,
 ) -> None:

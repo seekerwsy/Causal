@@ -194,6 +194,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     study_design.add_argument(
         "--exclude-sample",
         type=Path,
+        action="append",
+        default=[],
         help="prior JSON/JSONL sample whose exposed task units cannot be selected",
     )
     study_design.add_argument(
@@ -337,7 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output,
             seed=args.seed,
             clusters_per_family=args.clusters_per_family,
-            excluded_sample_path=args.exclude_sample,
+            excluded_sample_paths=args.exclude_sample or None,
             included_families=args.family or None,
             family_quotas=family_quotas or None,
         )

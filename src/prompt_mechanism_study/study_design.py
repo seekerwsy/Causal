@@ -36,7 +36,7 @@ def freeze_study_design(
     discordant_pair_probability: float = 0.30,
     alpha: float = 0.05,
     target_power: float = 0.80,
-    excluded_sample_path: Path | None = None,
+    excluded_sample_paths: Sequence[Path] | None = None,
     included_families: Sequence[str] | None = None,
     family_quotas: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
@@ -66,7 +66,7 @@ def freeze_study_design(
     eligible = {row["cluster_id"]: row for row in eligible_rows}
     units = read_json(units_root / "eligible-task-units.json")
     exclusions = read_json(units_root / "co-selection-exclusions.json")
-    excluded_task_units = _excluded_task_units(excluded_sample_path)
+    excluded_task_units = _excluded_task_units(excluded_sample_paths)
     candidates = [
         row
         for row in _python_candidates(eligible, units, family_by_cwe, seed)
@@ -187,9 +187,9 @@ def freeze_study_design(
         ),
         "selection_seed": seed,
         "excluded_exposed_task_units": len(excluded_task_units),
-        "excluded_sample_sha256": (
-            _sha256(excluded_sample_path) if excluded_sample_path is not None else None
-        ),
+        "excluded_sample_sha256s": [
+            _sha256(path) for path in (excluded_sample_paths or [])
+        ],
         "included_families": family_ids,
         "family_quotas": targets,
         "omitted_families": [family for family in all_family_ids if family not in family_ids],
@@ -211,23 +211,24 @@ def freeze_study_design(
     return report
 
 
-def _excluded_task_units(path: Path | None) -> set[str]:
-    """Load a prior JSON or JSONL sample as a prospective exposure exclusion."""
+def _excluded_task_units(paths: Sequence[Path] | Path | None) -> set[str]:
+    """Load prior JSON or JSONL samples as prospective exposure exclusions."""
 
-    if path is None:
-        return set()
-    if path.suffix == ".jsonl":
-        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    else:
-        rows = read_json(path)
-    if not isinstance(rows, list) or any(
-        not isinstance(row, dict) or not isinstance(row.get("task_unit_id"), str)
-        for row in rows
-    ):
-        raise StudyDesignError("excluded sample does not identify task units")
-    task_units = [row["task_unit_id"] for row in rows]
+    sources = [paths] if isinstance(paths, Path) else list(paths or [])
+    task_units = []
+    for path in sources:
+        if path.suffix == ".jsonl":
+            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        else:
+            rows = read_json(path)
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get("task_unit_id"), str)
+            for row in rows
+        ):
+            raise StudyDesignError("excluded sample does not identify task units")
+        task_units.extend(row["task_unit_id"] for row in rows)
     if len(task_units) != len(set(task_units)):
-        raise StudyDesignError("excluded sample contains duplicate task units")
+        raise StudyDesignError("excluded samples contain duplicate task units")
     return set(task_units)
 
 

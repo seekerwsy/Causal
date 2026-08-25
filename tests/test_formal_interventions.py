@@ -14,7 +14,7 @@ from prompt_mechanism_study.formal import (
     validate_execution_response,
     validate_semantic_response,
 )
-from prompt_mechanism_study.formal_measurement import _normalize_python_source
+from prompt_mechanism_study.formal_measurement import _generation_request, _normalize_python_source
 
 ROOT = Path(__file__).parents[1]
 
@@ -28,6 +28,24 @@ def test_generated_python_normalizes_only_one_complete_outer_fence() -> None:
     assert _normalize_python_source(f"```python\n{code}").startswith("```python")
     mixed = f"Here is the code:\n```python\n{code}\n```"
     assert _normalize_python_source(mixed) == mixed
+
+
+@pytest.mark.reviewer
+def test_generation_request_freezes_nonthinking_mode_when_configured() -> None:
+    request = _generation_request(
+        {
+            "model_id": "generator",
+            "system_prompt": "Return code only.",
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "max_tokens": 100,
+            "enable_thinking": False,
+        },
+        "Implement f().",
+        7,
+    )
+
+    assert request["enable_thinking"] is False
 
 
 @pytest.mark.reviewer

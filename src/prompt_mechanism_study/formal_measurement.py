@@ -247,7 +247,7 @@ def _load_frozen_study(freeze_root: Path) -> Any:
 
 
 def _generation_request(config: dict[str, Any], prompt: str, seed: int) -> dict[str, Any]:
-    return {
+    request = {
         "model": config["model_id"],
         "messages": [
             {"role": "system", "content": config["system_prompt"]},
@@ -259,6 +259,9 @@ def _generation_request(config: dict[str, Any], prompt: str, seed: int) -> dict[
         "seed": seed,
         "n": 1,
     }
+    if "enable_thinking" in config:
+        request["enable_thinking"] = config["enable_thinking"]
+    return request
 
 
 def _generate(request_payload: dict[str, Any], config: dict[str, Any]) -> tuple[bytes, str]:

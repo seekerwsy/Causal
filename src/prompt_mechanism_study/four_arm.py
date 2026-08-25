@@ -45,7 +45,7 @@ Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
 def prepare_context_conditioned_tasks(
     source_path: Path,
-    bindings_path: Path,
+    bindings_path: Path | Sequence[Path],
     registry_path: Path,
     output: Path,
     report_output: Path,
@@ -55,14 +55,16 @@ def prepare_context_conditioned_tasks(
     if output.exists() or report_output.exists():
         raise FileExistsError(output if output.exists() else report_output)
     tasks = _json_lines(source_path)
-    bindings = {row["task_id"]: row for row in _json_lines(bindings_path)}
-    if len(bindings) != len(tasks) or set(bindings) != {row["task_id"] for row in tasks}:
+    binding_paths = [bindings_path] if isinstance(bindings_path, Path) else list(bindings_path)
+    binding_rows = [row for path in binding_paths for row in _json_lines(path)]
+    bindings = {row["task_id"]: row for row in binding_rows}
+    if len(bindings) != len(binding_rows) or not {row["task_id"] for row in tasks} <= set(bindings):
         raise FormalStudyError("context binding population does not match source tasks")
     registry = load_mechanism_registry(registry_path)
     eligible = []
     decisions = []
     for task in tasks:
-        binding = bindings[task["task_id"]]
+        binding = dict(bindings[task["task_id"]])
         required = {
             "task_id",
             "source_prompt_sha256",
@@ -73,6 +75,17 @@ def prepare_context_conditioned_tasks(
             "evidence",
             "outcomes_or_arms_used",
         }
+        concise = {
+            "task_id",
+            "decision",
+            "realization_id",
+            "context_facts",
+            "evidence",
+            "outcomes_or_arms_used",
+        }
+        if set(binding) == concise:
+            binding["source_prompt_sha256"] = task["source_prompt_sha256"]
+            binding["functional_contract_id"] = task["functional_contract"]["contract_id"]
         if (
             set(binding) != required
             or binding["source_prompt_sha256"] != task["source_prompt_sha256"]
