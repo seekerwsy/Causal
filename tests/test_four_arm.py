@@ -10,6 +10,7 @@ from prompt_mechanism_study.four_arm import (
     _functional_failure_measurement,
     _generation_failure_measurement,
     _generation_prompt,
+    _generator_seed,
     _intervention_unit,
     _metric,
     _validate_semantics,
@@ -143,6 +144,16 @@ def test_single_failed_generation_stays_in_assigned_arm_itt_denominator() -> Non
     assert row["generation_error_type"] == "HTTPError"
     assert _metric(row, "secure_yield") == (0, 0, 0)
     assert _metric(row, "functionality") == (0, 0, 0)
+
+
+@pytest.mark.reviewer
+def test_generator_seed_is_replayable_and_within_provider_range() -> None:
+    config = {"randomization": {"generator_seed": 2026082502}}
+
+    first = _generator_seed(config, "task-1", "specific")
+
+    assert first == _generator_seed(config, "task-1", "specific")
+    assert 0 <= first <= 0x7FFFFFFF
 
 
 @pytest.mark.reviewer

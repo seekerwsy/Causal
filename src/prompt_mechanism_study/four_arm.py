@@ -456,14 +456,17 @@ def run_measurements(
     output.mkdir(parents=True)
     rows = []
     provider_calls = analyzer_runs = 0
+    repaired_invalid_seed_requests = 0
     for index, (task, arm) in enumerate(work, start=1):
         assignment_id = _assignment_id(inputs["config"], task["task_id"], arm)
+        prior_calls = 0
+        repair_required = False
         if index <= len(resumed):
-            prior, prior_unit = resumed[index - 1]
+            prior, prior_unit, repair_required = resumed[index - 1]
             artifacts = _bundle_artifacts(prior_unit)
             error_type = prior["error_type"]
             resumed_analyzers = prior["analyzer_runs"]
-            if not prior["complete"]:
+            if not prior["complete"] and not repair_required:
                 if prior["provider_calls"] == 1:
                     artifacts = {
                         "assignment.json": artifacts["assignment.json"],
@@ -497,19 +500,22 @@ def run_measurements(
                             error_type,
                         ),
                     }
-            unit = output / f"assignment-{index:03d}"
-            write_bundle(unit, artifacts)
-            provider_calls += prior["provider_calls"]
-            analyzer_runs += resumed_analyzers
-            rows.append(
-                {
-                    **prior,
-                    "complete": True,
-                    "analyzer_runs": resumed_analyzers,
-                    "bundle_sha256": bundle_digest(unit),
-                }
-            )
-            continue
+            if not repair_required:
+                unit = output / f"assignment-{index:03d}"
+                write_bundle(unit, artifacts)
+                provider_calls += prior["provider_calls"]
+                analyzer_runs += resumed_analyzers
+                rows.append(
+                    {
+                        **prior,
+                        "complete": True,
+                        "analyzer_runs": resumed_analyzers,
+                        "bundle_sha256": bundle_digest(unit),
+                    }
+                )
+                continue
+            prior_calls = prior["provider_calls"]
+            repaired_invalid_seed_requests += 1
         artifacts: dict[str, Any] = {
             "assignment.json": {
                 "assignment_id": assignment_id,
@@ -518,6 +524,12 @@ def run_measurements(
                 "cwe": task["cwe"],
             }
         }
+        if repair_required:
+            artifacts["invalid-request.json"] = {
+                "error_type": error_type,
+                "reason": "unsigned_32_bit_seed_exceeded_provider_signed_31_bit_range",
+                "original_seed": _raw_generator_seed(inputs["config"], task["task_id"], arm),
+            }
         calls = analyzers = 0
         complete = False
         error_type = None
@@ -528,16 +540,7 @@ def run_measurements(
         try:
             suffix = "" if arm == "absent" else suffixes[task["task_id"]][arm]
             prompt = _generation_prompt(task["prompt"], suffix, inputs["config"]["intervention"])
-            seed = int(
-                content_hash(
-                    {
-                        "seed": inputs["config"]["randomization"]["generator_seed"],
-                        "task_id": task["task_id"],
-                        "arm": arm,
-                    }
-                )[:8],
-                16,
-            )
+            seed = _generator_seed(inputs["config"], task["task_id"], arm)
             request = _generation_request(inputs["config"]["generation"], prompt, seed)
             calls += 1
             raw, code = _generate(request, inputs["config"]["generation"])
@@ -622,7 +625,8 @@ def run_measurements(
                 artifacts["error.json"] = {"error_type": error_type}
         unit = output / f"assignment-{index:03d}"
         write_bundle(unit, artifacts)
-        provider_calls += calls
+        total_calls = prior_calls + calls
+        provider_calls += total_calls
         analyzer_runs += analyzers
         rows.append(
             {
@@ -630,7 +634,7 @@ def run_measurements(
                 "task_id": task["task_id"],
                 "arm": arm,
                 "complete": complete,
-                "provider_calls": calls,
+                "provider_calls": total_calls,
                 "analyzer_runs": analyzers,
                 "bundle_sha256": bundle_digest(unit),
                 "error_type": error_type,
@@ -654,6 +658,7 @@ def run_measurements(
         "completed_assignments": sum(row["complete"] for row in rows),
         "provider_calls": provider_calls,
         "analyzer_runs": analyzer_runs,
+        "repaired_invalid_seed_requests": repaired_invalid_seed_requests,
         "scientific_claim_allowed": False,
     }
     write_bundle(output / "summary", {"report.json": report, "assignments.json": rows})
@@ -665,22 +670,30 @@ def _load_measurement_resume(
     phase: str,
     work: Sequence[tuple[dict[str, Any], str]],
     config: Mapping[str, Any],
-) -> list[tuple[dict[str, Any], Path]]:
+) -> list[tuple[dict[str, Any], Path, bool]]:
     """Validate one failed prefix without consulting generated code or measured outcomes."""
 
     if root is None:
         return []
     report = _phase_report(root)
     rows = read_json(root / "summary/assignments.json")
-    if (
-        report.get("status") != "ERROR"
-        or report.get("phase") != phase
-        or not rows
-        or len(rows) > len(work)
-        or any(not row["complete"] for row in rows[:-1])
-        or rows[-1]["complete"]
-        or not _resumable_measurement_failure(rows[-1])
-    ):
+    failed_prefix = (
+        report.get("status") == "ERROR"
+        and report.get("phase") == phase
+        and rows
+        and len(rows) <= len(work)
+        and all(row["complete"] for row in rows[:-1])
+        and not rows[-1]["complete"]
+        and _resumable_measurement_failure(rows[-1])
+    )
+    complete_repair = (
+        report.get("status")
+        in {"PILOT_COMPLETE", "REMAINING_COMPLETE", "FULL_COMPLETE"}
+        and report.get("phase") == phase
+        and len(rows) == len(work)
+        and all(row["complete"] for row in rows)
+    )
+    if not failed_prefix and not complete_repair:
         raise FormalStudyError("measurement resume prefix is invalid")
     result = []
     for index, (row, (task, arm)) in enumerate(zip(rows, work, strict=False), start=1):
@@ -693,7 +706,15 @@ def _load_measurement_resume(
             or bundle_digest(unit) != row["bundle_sha256"]
         ):
             raise FormalStudyError("measurement resume binding drifted")
-        result.append((row, unit))
+        repair = False
+        if complete_repair:
+            measurement = read_json(unit / "measurement.json")
+            repair = (
+                measurement.get("code_status") == "generation_failed"
+                and measurement.get("generation_error_type") == "HTTPError"
+                and _raw_generator_seed(config, task["task_id"], arm) > 0x7FFFFFFF
+            )
+        result.append((row, unit, repair))
     return result
 
 
@@ -1167,6 +1188,25 @@ def _assignment_id(config: Mapping[str, Any], task_id: str, arm: str) -> str:
     return content_id(
         "assignment_", {"study": config["study_name"], "task_id": task_id, "arm": arm}
     )
+
+
+def _raw_generator_seed(config: Mapping[str, Any], task_id: str, arm: str) -> int:
+    return int(
+        content_hash(
+            {
+                "seed": config["randomization"]["generator_seed"],
+                "task_id": task_id,
+                "arm": arm,
+            }
+        )[:8],
+        16,
+    )
+
+
+def _generator_seed(config: Mapping[str, Any], task_id: str, arm: str) -> int:
+    """Map the replay hash into the provider's supported signed-positive range."""
+
+    return _raw_generator_seed(config, task_id, arm) & 0x7FFFFFFF
 
 
 def _metric(row: Mapping[str, Any], metric: str) -> tuple[int, int, int]:
