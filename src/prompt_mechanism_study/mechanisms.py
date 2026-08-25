@@ -8,6 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.prompt_tsg import (
+    PromptTSG,
+    QueryState,
+    feature_state,
+    prompt_tsg_from_record,
+    query_context,
+    query_for_realization,
+)
+from prompt_mechanism_study.records import content_hash
 
 
 class MechanismRegistryError(ValueError):
@@ -102,7 +111,9 @@ def select_mechanism(
         row = registry.get(explicit)
         if row is None or row["cwe_id"] != task.get("cwe"):
             raise MechanismRegistryError("task realization binding is invalid")
-        if "required_delta" in row:
+        if "prompt_tsg_binding" in task:
+            _validate_tsg_binding(task, row)
+        elif "required_delta" in row:
             _validate_context_binding(task, row)
         return dict(row)
 
@@ -154,6 +165,69 @@ def mechanism_binding_id(binding: Mapping[str, Any]) -> str:
     return content_id("mechanism_binding_", core)
 
 
+def tsg_mechanism_binding(
+    task: Mapping[str, Any],
+    graph: PromptTSG,
+    catalog: Mapping[str, Any],
+    registry: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Bind one task using only its frozen Prompt TSG and finite catalog queries."""
+
+    relevant = [
+        row
+        for row in registry.values()
+        if row["cwe_id"] == task.get("cwe") and row["task_family"] == task.get("task_family")
+    ]
+    results = []
+    for row in sorted(relevant, key=lambda item: item["realization_id"]):
+        query = query_for_realization(catalog, row["realization_id"])
+        result = query_context(
+            graph,
+            query=query,
+            cwe=task["cwe"],
+            task_family=task["task_family"],
+        )
+        results.append((row, query, result))
+    present = [item for item in results if item[2].state == QueryState.PRESENT]
+    selected = present[0] if len(present) == 1 else None
+    feature = selected[1]["actionable_feature_id"] if selected else None
+    target_state = feature_state(graph, feature).value if feature else "not_applicable"
+    controls = {
+        semantic_id: feature_state(graph, semantic_id).value
+        for semantic_id in ("control.generic_security", "control.code_style")
+    }
+    if len(present) > 1 or (not present and any(
+        item[2].state == QueryState.UNRESOLVED for item in results
+    )):
+        decision = "unresolved"
+    elif not present:
+        decision = "not_applicable"
+    elif target_state != QueryState.ABSENT.value:
+        decision = "target_feature_present" if target_state == "present" else "unresolved"
+    elif any(state != QueryState.ABSENT.value for state in controls.values()):
+        decision = "control_feature_present"
+    else:
+        decision = "applicable"
+    core = {
+        "decision": decision,
+        "realization_id": selected[0]["realization_id"] if selected else None,
+        "prompt_tsg_id": graph.tsg_id,
+        "context_query_id": selected[1]["query_id"] if selected else None,
+        "context_state": selected[2].state.value if selected else "unresolved" if decision == "unresolved" else "absent",
+        "actionable_feature_id": feature,
+        "target_feature_state": target_state,
+        "control_feature_states": controls,
+        "evidence_node_ids": list(selected[2].evidence_node_ids) if selected else [],
+        "evidence_edge_ids": list(selected[2].evidence_edge_ids) if selected else [],
+        "query_states": [
+            {"query_id": query["query_id"], "state": result.state.value}
+            for _, query, result in results
+        ],
+        "outcomes_or_arms_used": False,
+    }
+    return {"binding_id": mechanism_binding_id(core), **core}
+
+
 def _validate_context_binding(task: Mapping[str, Any], row: Mapping[str, Any]) -> None:
     binding = task.get("mechanism_binding")
     if not isinstance(binding, dict) or set(binding) != {
@@ -187,10 +261,50 @@ def _validate_context_binding(task: Mapping[str, Any], row: Mapping[str, Any]) -
         raise MechanismRegistryError("task context does not satisfy the bound mechanism")
 
 
+def _validate_tsg_binding(task: Mapping[str, Any], row: Mapping[str, Any]) -> None:
+    binding = task.get("prompt_tsg_binding")
+    graph_value = task.get("prompt_tsg")
+    required = {
+        "binding_id",
+        "decision",
+        "realization_id",
+        "prompt_tsg_id",
+        "context_query_id",
+        "context_state",
+        "actionable_feature_id",
+        "target_feature_state",
+        "control_feature_states",
+        "evidence_node_ids",
+        "evidence_edge_ids",
+        "query_states",
+        "outcomes_or_arms_used",
+    }
+    try:
+        graph = prompt_tsg_from_record(graph_value)
+    except (TypeError, ValueError):
+        raise MechanismRegistryError("Prompt TSG mechanism graph is invalid") from None
+    if (
+        not isinstance(binding, dict)
+        or set(binding) != required
+        or binding["decision"] != "applicable"
+        or binding["realization_id"] != row["realization_id"]
+        or binding["context_state"] != "present"
+        or binding["target_feature_state"] != "absent"
+        or set(binding["control_feature_states"].values()) != {"absent"}
+        or binding["outcomes_or_arms_used"] is not False
+        or mechanism_binding_id(binding) != binding["binding_id"]
+        or graph.tsg_id != binding["prompt_tsg_id"]
+        or graph.task_id != task.get("task_id")
+        or graph.prompt_sha256 != content_hash(task.get("prompt"))
+    ):
+        raise MechanismRegistryError("Prompt TSG mechanism binding is invalid")
+
+
 __all__ = [
     "MechanismRegistryError",
     "compatible_mechanisms",
     "load_mechanism_registry",
     "mechanism_binding_id",
     "select_mechanism",
+    "tsg_mechanism_binding",
 ]

@@ -15,7 +15,9 @@ def main() -> int:
         choices=(
             "prepare-registered",
             "prepare-context-conditioned",
+            "prepare-tsg-conditioned",
             "prepare-study-sample",
+            "extract-prompt-tsg",
             "preflight",
             "intervene-pilot",
             "intervene-remaining",
@@ -37,6 +39,12 @@ def main() -> int:
     parser.add_argument("--records", type=Path)
     parser.add_argument("--contracts", type=Path)
     parser.add_argument("--mechanism-registry", type=Path)
+    parser.add_argument("--catalog", type=Path)
+    parser.add_argument("--evaluator", type=Path)
+    parser.add_argument("--extractor-prompt", type=Path)
+    parser.add_argument("--prompt-tsg-bundle", type=Path, action="append", default=[])
+    parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--limit", type=int)
     parser.add_argument("--bindings", type=Path, action="append", default=[])
     parser.add_argument("--binding-report", type=Path)
     parser.add_argument("--selected-task-id", action="append", default=[])
@@ -50,6 +58,45 @@ def main() -> int:
     parser.add_argument("--semgrep", type=Path)
     parser.add_argument("--bandit", type=Path)
     args = parser.parse_args()
+    if args.action == "extract-prompt-tsg":
+        required = (args.tasks, args.catalog, args.evaluator, args.extractor_prompt)
+        if any(value is None for value in required):
+            parser.error("Prompt TSG extraction requires tasks, catalog, evaluator, and prompt")
+        from prompt_mechanism_study.prompt_tsg_extract import extract_task_file
+
+        report = extract_task_file(
+            args.tasks,
+            args.catalog,
+            args.evaluator,
+            args.extractor_prompt,
+            args.output,
+            start=args.start,
+            limit=args.limit,
+        )
+        print(report["status"])
+        return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2
+    if args.action == "prepare-tsg-conditioned":
+        required = (
+            args.source_tasks,
+            args.prompt_tsg_bundle or None,
+            args.catalog,
+            args.mechanism_registry,
+            args.binding_report,
+        )
+        if any(value is None for value in required):
+            parser.error(
+                "TSG preparation requires source tasks, graph bundle, catalog, registry, and report"
+            )
+        report = four_arm.prepare_tsg_conditioned_tasks(
+            args.source_tasks,
+            args.prompt_tsg_bundle,
+            args.catalog,
+            args.mechanism_registry,
+            args.output,
+            args.binding_report,
+        )
+        print(report["status"])
+        return 0
     if args.action == "verify-analysis":
         if args.config is None or args.tasks is None:
             parser.error("analysis verification requires config and tasks")

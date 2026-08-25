@@ -1,0 +1,1 @@
+{"decision_counts":{"applicable":55,"not_applicable":49,"target_feature_present":5,"unresolved":20},"eligible_tasks":55,"eligible_tasks_sha256":"1f551836156cdc3090d0579c1f16218616ec1c4c8df09f58b8193455c42ee6c5","extracted_tasks":129,"outcomes_or_arms_used":false,"schema_version":"1.0","source_population_tasks":133,"status":"PROMPT_TSG_BINDING_COMPLETE"}

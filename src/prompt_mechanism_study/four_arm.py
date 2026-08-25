@@ -36,12 +36,193 @@ from prompt_mechanism_study.mechanisms import (
     load_mechanism_registry,
     mechanism_binding_id,
     select_mechanism,
+    tsg_mechanism_binding,
+)
+from prompt_mechanism_study.prompt_tsg import (
+    apply_feature_patch,
+    load_catalog,
+    prompt_tsg_from_record,
+    prompt_tsg_record,
+    validate_prompt_tsg,
 )
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id
 
 ARMS = ("absent", "specific", "generic", "placebo")
 CONTRASTS = (("specific", "placebo"), ("specific", "absent"), ("specific", "generic"))
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
+
+
+def prepare_tsg_candidate_pool(
+    eligibility_bundle: Path,
+    records_bundle: Path,
+    contracts_bundle: Path,
+    catalog_path: Path,
+    excluded_task_paths: Sequence[Path],
+    included_cwes: Sequence[str],
+    output: Path,
+    report_output: Path,
+) -> dict[str, Any]:
+    """Materialize unseen, contract-resolved candidate tasks before TSG extraction."""
+
+    if output.exists() or report_output.exists():
+        raise FileExistsError(output if output.exists() else report_output)
+    for bundle in (eligibility_bundle, records_bundle, contracts_bundle):
+        verify_bundle(bundle)
+    if not included_cwes or len(included_cwes) != len(set(included_cwes)):
+        raise FormalStudyError("candidate CWE scope is empty or duplicated")
+    excluded = {
+        row["task_id"] for path in excluded_task_paths for row in _json_lines(path)
+    }
+    eligibility = read_json(eligibility_bundle / "eligible-clusters.json")
+    records = {
+        row["record_id"]: row for row in read_json(records_bundle / "records.json")
+    }
+    contracts = {
+        row["cluster_id"]: row
+        for row in read_json(contracts_bundle / "functional-contracts.json")
+    }
+    catalog = load_catalog(catalog_path)
+    family_by_realization = catalog["source_realization_task_families"]
+    rows = []
+    for selected in sorted(eligibility, key=lambda row: row["cluster_id"]):
+        if (
+            selected["status"] != "eligible"
+            or selected["language"] != "python"
+            or selected["cluster_id"] in excluded
+            or selected["primary_cwe"] not in included_cwes
+        ):
+            continue
+        record = records.get(selected["representative_record_id"])
+        contract = contracts.get(selected["cluster_id"])
+        task_family = family_by_realization.get(selected["mechanism_realization_id"])
+        if (
+            record is None
+            or contract is None
+            or task_family is None
+            or record["record_id"] != contract["record_id"]
+            or record["prompt_sha256"] != contract["source_prompt_sha256"]
+            or contract.get("resolution_status") != "resolved"
+            or not contract.get("requirements")
+        ):
+            raise FormalStudyError("candidate lineage or functional contract drifted")
+        rows.append(
+            {
+                "task_id": selected["cluster_id"],
+                "semantic_cluster_id": selected["cluster_id"],
+                "cwe": selected["primary_cwe"],
+                "task_family": task_family,
+                "generation_mode": "complete_python_source",
+                "language": "python",
+                "prompt": record["prompt"],
+                "source_prompt_sha256": content_hash(record["prompt"]),
+                "source_prompt_raw_sha256": record["prompt_sha256"],
+                "source_dataset": record["source_dataset"],
+                "source_record_id": record["record_id"],
+                "source_lineage_family": record["source_lineage_family"],
+                "functional_contract": {
+                    "contract_id": contract["contract_id"],
+                    "entrypoint": contract.get("entrypoint"),
+                    "environment_dependencies": contract["environment_dependencies"],
+                    "requirements": [
+                        {"requirement_id": f"req_{index}", "criterion": criterion}
+                        for index, criterion in enumerate(contract["requirements"], start=1)
+                    ],
+                },
+            }
+        )
+    if not rows or len({row["task_id"] for row in rows}) != len(rows):
+        raise FormalStudyError("candidate population is empty or duplicated")
+    payload = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+    report = {
+        "schema_version": "1.0",
+        "status": "PROMPT_TSG_CANDIDATES_PREPARED",
+        "candidate_tasks": len(rows),
+        "excluded_exposed_tasks": len(excluded),
+        "included_cwes": list(included_cwes),
+        "cwe_counts": dict(sorted(Counter(row["cwe"] for row in rows).items())),
+        "outcomes_or_arms_used": False,
+        "candidate_tasks_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    write_bundle(report_output, {"report.json": report})
+    return report
+
+
+def prepare_tsg_conditioned_tasks(
+    source_path: Path,
+    graph_bundle: Path | Sequence[Path],
+    catalog_path: Path,
+    registry_path: Path,
+    output: Path,
+    report_output: Path,
+) -> dict[str, Any]:
+    """Materialize tasks whose source Prompt TSG admits one absent target feature."""
+
+    if output.exists() or report_output.exists():
+        raise FileExistsError(output if output.exists() else report_output)
+    graph_bundles = [graph_bundle] if isinstance(graph_bundle, Path) else list(graph_bundle)
+    if not graph_bundles:
+        raise FormalStudyError("Prompt TSG graph bundles are missing")
+    for bundle in graph_bundles:
+        verify_bundle(bundle)
+    source_tasks = _json_lines(source_path)
+    graphs = [
+        prompt_tsg_from_record(row)
+        for bundle in graph_bundles
+        for row in read_json(bundle / "graphs.json")
+    ]
+    graph_by_task = {graph.task_id: graph for graph in graphs}
+    source_by_task = {task["task_id"]: task for task in source_tasks}
+    if (
+        len(source_by_task) != len(source_tasks)
+        or len(graph_by_task) != len(graphs)
+        or not set(graph_by_task) <= set(source_by_task)
+    ):
+        raise FormalStudyError("Prompt TSG population does not match source tasks")
+    tasks = [task for task in source_tasks if task["task_id"] in graph_by_task]
+    catalog = load_catalog(catalog_path)
+    registry = load_mechanism_registry(registry_path)
+    eligible = []
+    decisions = []
+    for task in tasks:
+        graph = graph_by_task[task["task_id"]]
+        validate_prompt_tsg(graph, prompt=task["prompt"], catalog=catalog)
+        binding = tsg_mechanism_binding(task, graph, catalog, registry)
+        decisions.append({"task_id": task["task_id"], **binding})
+        if binding["decision"] != "applicable":
+            continue
+        mechanism = registry[binding["realization_id"]]
+        base = {
+            key: value
+            for key, value in task.items()
+            if key not in {"mechanism_binding", "prompt_tsg_binding", "prompt_tsg"}
+        }
+        eligible.append(
+            {
+                **base,
+                "realization_id": mechanism["realization_id"],
+                "oracle_profile_id": mechanism["oracle_profile_id"],
+                "prompt_tsg": prompt_tsg_record(graph),
+                "prompt_tsg_binding": binding,
+            }
+        )
+    payload = "".join(canonical_json(row) + "\n" for row in eligible).encode("utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+    counts = Counter(row["decision"] for row in decisions)
+    report = {
+        "schema_version": "1.0",
+        "status": "PROMPT_TSG_BINDING_COMPLETE",
+        "source_population_tasks": len(source_tasks),
+        "extracted_tasks": len(tasks),
+        "eligible_tasks": len(eligible),
+        "decision_counts": dict(sorted(counts.items())),
+        "outcomes_or_arms_used": False,
+        "eligible_tasks_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    write_bundle(report_output, {"report.json": report, "decisions.json": decisions})
+    return report
 
 
 def prepare_context_conditioned_tasks(
@@ -902,6 +1083,16 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
     if hashlib.sha256(registry_path.read_bytes()).hexdigest() != registry_config["sha256"]:
         raise FormalStudyError("mechanism registry drifted")
     registry = load_mechanism_registry(registry_path)
+    prompt_tsg_catalog = None
+    if "prompt_tsg" in config:
+        catalog_config = config["prompt_tsg"]
+        catalog_path = root / catalog_config["catalog_path"]
+        if (
+            hashlib.sha256(catalog_path.read_bytes()).hexdigest()
+            != catalog_config["catalog_sha256"]
+        ):
+            raise FormalStudyError("Prompt TSG catalog drifted")
+        prompt_tsg_catalog = load_catalog(catalog_path)
     tasks_payload = tasks_path.read_bytes()
     tasks = _json_lines(tasks_path)
     source = config["task_source"]
@@ -940,6 +1131,14 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
             or not task.get("functional_contract", {}).get("requirements")
         ):
             raise FormalStudyError("prepared task record failed validation")
+        if prompt_tsg_catalog is not None:
+            graph = prompt_tsg_from_record(task.get("prompt_tsg"))
+            validate_prompt_tsg(graph, prompt=task["prompt"], catalog=prompt_tsg_catalog)
+            expected_binding = tsg_mechanism_binding(
+                task, graph, prompt_tsg_catalog, registry
+            )
+            if expected_binding != task.get("prompt_tsg_binding"):
+                raise FormalStudyError("Prompt TSG mechanism binding drifted")
     for item in ("executor_config", "validator_config", "executor_prompt", "validator_prompt"):
         path = root / config["intervention"][f"{item}_path"]
         if (
@@ -968,6 +1167,7 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
         "validator_prompt": (root / config["intervention"]["validator_prompt_path"]).read_text(
             encoding="utf-8"
         ),
+        "prompt_tsg_catalog": prompt_tsg_catalog,
     }
 
 
@@ -997,9 +1197,28 @@ def _intervention_unit(
     }
     context_conditioned = "required_delta" in mechanism
     if context_conditioned:
+        if "prompt_tsg_binding" in task:
+            graph = prompt_tsg_from_record(task["prompt_tsg"])
+            binding = task["prompt_tsg_binding"]
+            evidence_ids = set(binding["evidence_node_ids"])
+            request["prompt_tsg_context"] = {
+                "prompt_tsg_id": graph.tsg_id,
+                "context_query_id": binding["context_query_id"],
+                "actionable_feature_id": binding["actionable_feature_id"],
+                "evidence": [
+                    {
+                        "semantic_id": node.semantic_id,
+                        "evidence_text": task["prompt"][node.evidence_start : node.evidence_end],
+                        "attributes": dict(node.attributes),
+                    }
+                    for node in graph.nodes
+                    if node.node_id in evidence_ids
+                ],
+            }
+        else:
+            request["task_context"] = task["mechanism_binding"]["context_facts"]
         request.update(
             {
-                "task_context": task["mechanism_binding"]["context_facts"],
                 "required_delta": mechanism["required_delta"],
                 "forbidden_delta": mechanism["forbidden_delta"],
             }
@@ -1039,6 +1258,41 @@ def _intervention_unit(
             "response_raw": validation_raw.decode("utf-8", errors="replace"),
             "validated": validation,
         }
+        if "prompt_tsg_binding" in task:
+            feature = task["prompt_tsg_binding"]["actionable_feature_id"]
+            variants = {
+                "absent": graph,
+                "specific": apply_feature_patch(
+                    graph,
+                    prompt=task["prompt"],
+                    appended_text=suffixes["specific"],
+                    semantic_id=feature,
+                    catalog=inputs["prompt_tsg_catalog"],
+                ),
+                "generic": apply_feature_patch(
+                    graph,
+                    prompt=task["prompt"],
+                    appended_text=suffixes["generic"],
+                    semantic_id="control.generic_security",
+                    catalog=inputs["prompt_tsg_catalog"],
+                ),
+                "placebo": apply_feature_patch(
+                    graph,
+                    prompt=task["prompt"],
+                    appended_text=suffixes["placebo"],
+                    semantic_id="control.code_style",
+                    catalog=inputs["prompt_tsg_catalog"],
+                ),
+            }
+            artifacts["prompt-tsg-variants.json"] = {
+                "graph_scope": "source_task_plus_arm_payload_excluding_common_envelope",
+                "source_prompt_tsg_id": graph.tsg_id,
+                "arm_prompt_tsgs": {
+                    arm: prompt_tsg_record(variant) for arm, variant in variants.items()
+                },
+                "arm_graphs_are_deterministic_patches": True,
+                "semantic_validation_precedes_patch": True,
+            }
         passed = True
     except (MemoryError, KeyboardInterrupt, SystemExit):
         raise
@@ -1305,6 +1559,8 @@ __all__ = [
     "analyze",
     "preflight",
     "prepare_context_conditioned_tasks",
+    "prepare_tsg_candidate_pool",
+    "prepare_tsg_conditioned_tasks",
     "prepare_external_tasks",
     "prepare_registered_tasks",
     "run_interventions",
