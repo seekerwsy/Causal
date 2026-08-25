@@ -191,6 +191,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     study_design.add_argument("--repository-root", type=Path, default=Path.cwd())
     study_design.add_argument("--seed", type=int, default=2026082301)
     study_design.add_argument("--clusters-per-family", type=int, default=15)
+    study_design.add_argument(
+        "--exclude-sample",
+        type=Path,
+        help="prior JSON/JSONL sample whose exposed task units cannot be selected",
+    )
+    study_design.add_argument(
+        "--family",
+        action="append",
+        default=[],
+        help="mechanism family to include; repeat to prospectively restrict the study population",
+    )
+    study_design.add_argument(
+        "--family-quota",
+        action="append",
+        default=[],
+        metavar="FAMILY=COUNT",
+        help="explicit prospective cluster quota; repeat for an unequal stratified design",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "freeze":
@@ -305,6 +323,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "study-design":
         from prompt_mechanism_study.study_design import freeze_study_design
 
+        family_quotas = {}
+        for item in args.family_quota:
+            try:
+                family, count = item.rsplit("=", 1)
+                family_quotas[family] = int(count)
+            except (ValueError, TypeError):
+                parser.error("family quotas must use FAMILY=COUNT")
         report = freeze_study_design(
             args.repository_root,
             args.eligibility_root,
@@ -312,6 +337,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output,
             seed=args.seed,
             clusters_per_family=args.clusters_per_family,
+            excluded_sample_path=args.exclude_sample,
+            included_families=args.family or None,
+            family_quotas=family_quotas or None,
         )
         print(report["status"])
     else:

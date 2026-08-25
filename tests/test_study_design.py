@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
 from prompt_mechanism_study.study_design import (
     _balanced_sample,
+    _excluded_task_units,
     _power_design,
     _priority_extensions,
 )
@@ -53,6 +56,80 @@ def test_study_design_balances_units_without_crossing_exclusions() -> None:
     )
 
 
+def test_study_design_accepts_explicit_unequal_family_quotas() -> None:
+    families = ["injection", "parser", "crypto"]
+    candidates = [
+        {
+            "task_unit_id": f"{family}-{index}",
+            "cluster_id": f"{family}-{index}",
+            "family_id": family,
+            "primary_cwe": f"CWE-{index % 2}",
+            "representative_lineage_family": f"lineage-{index % 3}",
+        }
+        for family in families
+        for index in range(6)
+    ]
+
+    sample = _balanced_sample(
+        candidates,
+        [],
+        families,
+        per_family={"injection": 4, "parser": 3, "crypto": 2},
+        seed=19,
+        maximum_lineage_fraction=0.5,
+        minimum_lineages=2,
+    )
+
+    assert Counter(row["family_id"] for row in sample) == {
+        "injection": 4,
+        "parser": 3,
+        "crypto": 2,
+    }
+
+
+def test_study_design_reserves_lineage_cap_for_family_without_alternatives() -> None:
+    candidates = [
+        {
+            "task_unit_id": f"crypto-{index}",
+            "cluster_id": f"crypto-{index}",
+            "family_id": "crypto",
+            "primary_cwe": "CWE-338",
+            "representative_lineage_family": "single-lineage",
+        }
+        for index in range(3)
+    ]
+    candidates.extend(
+        {
+            "task_unit_id": f"injection-{lineage}-{index}",
+            "cluster_id": f"injection-{lineage}-{index}",
+            "family_id": "injection",
+            "primary_cwe": "CWE-78",
+            "representative_lineage_family": lineage,
+        }
+        for lineage in ("single-lineage", "other-a", "other-b")
+        for index in range(3)
+    )
+
+    sample = _balanced_sample(
+        candidates,
+        [],
+        ["injection", "crypto"],
+        per_family={"injection": 3, "crypto": 3},
+        seed=23,
+        maximum_lineage_fraction=0.5,
+        minimum_lineages=1,
+    )
+
+    assert sum(
+        row["representative_lineage_family"] == "single-lineage" for row in sample
+    ) == 3
+    assert all(
+        row["representative_lineage_family"] != "single-lineage"
+        for row in sample
+        if row["family_id"] == "injection"
+    )
+
+
 def test_power_freeze_is_explicitly_assumption_conditional() -> None:
     design = _power_design(60, 0.20, 0.30, 0.05, 0.80)
 
@@ -65,6 +142,16 @@ def test_power_freeze_is_explicitly_assumption_conditional() -> None:
         "discordant_pair_probability": 0.4,
         "power": 0.68777,
     }
+
+
+def test_exposed_task_units_are_loaded_from_frozen_jsonl(tmp_path) -> None:
+    sample = tmp_path / "exposed.jsonl"
+    sample.write_text(
+        '{"task_unit_id":"unit-a"}\n{"task_unit_id":"unit-b"}\n',
+        encoding="utf-8",
+    )
+
+    assert _excluded_task_units(sample) == {"unit-a", "unit-b"}
 
 
 def test_priority_extensions_require_contracts_tests_and_supported_tiers() -> None:

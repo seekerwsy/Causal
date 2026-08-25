@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from statistics import NormalDist
 from typing import Any
@@ -34,6 +36,9 @@ def freeze_study_design(
     discordant_pair_probability: float = 0.30,
     alpha: float = 0.05,
     target_power: float = 0.80,
+    excluded_sample_path: Path | None = None,
+    included_families: Sequence[str] | None = None,
+    family_quotas: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Freeze a balanced Python sample and a separate C/C++ readiness audit."""
 
@@ -61,13 +66,43 @@ def freeze_study_design(
     eligible = {row["cluster_id"]: row for row in eligible_rows}
     units = read_json(units_root / "eligible-task-units.json")
     exclusions = read_json(units_root / "co-selection-exclusions.json")
-    candidates = _python_candidates(eligible, units, family_by_cwe, seed)
-    family_ids = [row["family_id"] for row in policy["python_families"]]
+    excluded_task_units = _excluded_task_units(excluded_sample_path)
+    candidates = [
+        row
+        for row in _python_candidates(eligible, units, family_by_cwe, seed)
+        if row["task_unit_id"] not in excluded_task_units
+    ]
+    all_family_ids = [row["family_id"] for row in policy["python_families"]]
+    family_ids = (
+        list(family_quotas)
+        if family_quotas
+        else list(included_families)
+        if included_families
+        else all_family_ids
+    )
+    if (
+        not family_ids
+        or len(family_ids) != len(set(family_ids))
+        or not set(family_ids) <= set(all_family_ids)
+        or (
+            family_quotas is not None
+            and (
+                set(family_quotas) != set(family_ids)
+                or any(not isinstance(value, int) or value <= 0 for value in family_quotas.values())
+            )
+        )
+    ):
+        raise StudyDesignError("included mechanism families are invalid")
+    targets = (
+        dict(family_quotas)
+        if family_quotas is not None
+        else {family: clusters_per_family for family in family_ids}
+    )
     sample = _balanced_sample(
         candidates,
         exclusions,
         family_ids,
-        per_family=clusters_per_family,
+        per_family=targets,
         seed=seed,
         maximum_lineage_fraction=policy["maximum_lineage_fraction"],
         minimum_lineages=policy["minimum_lineages_per_python_family"],
@@ -151,6 +186,13 @@ def freeze_study_design(
             root / "src/prompt_mechanism_study/study_design.py"
         ),
         "selection_seed": seed,
+        "excluded_exposed_task_units": len(excluded_task_units),
+        "excluded_sample_sha256": (
+            _sha256(excluded_sample_path) if excluded_sample_path is not None else None
+        ),
+        "included_families": family_ids,
+        "family_quotas": targets,
+        "omitted_families": [family for family in all_family_ids if family not in family_ids],
         "generated_code_or_outcomes_used": False,
         "scientific_claim_allowed": False,
         "confirmatory_generation_authorized": False,
@@ -167,6 +209,26 @@ def freeze_study_design(
         },
     )
     return report
+
+
+def _excluded_task_units(path: Path | None) -> set[str]:
+    """Load a prior JSON or JSONL sample as a prospective exposure exclusion."""
+
+    if path is None:
+        return set()
+    if path.suffix == ".jsonl":
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    else:
+        rows = read_json(path)
+    if not isinstance(rows, list) or any(
+        not isinstance(row, dict) or not isinstance(row.get("task_unit_id"), str)
+        for row in rows
+    ):
+        raise StudyDesignError("excluded sample does not identify task units")
+    task_units = [row["task_unit_id"] for row in rows]
+    if len(task_units) != len(set(task_units)):
+        raise StudyDesignError("excluded sample contains duplicate task units")
+    return set(task_units)
 
 
 def _python_candidates(
@@ -213,12 +275,19 @@ def _balanced_sample(
     exclusions: list[dict[str, Any]],
     family_ids: list[str],
     *,
-    per_family: int,
+    per_family: int | Mapping[str, int],
     seed: int,
     maximum_lineage_fraction: float,
     minimum_lineages: int,
 ) -> list[dict[str, Any]]:
-    total = per_family * len(family_ids)
+    targets = (
+        {family: per_family for family in family_ids}
+        if isinstance(per_family, int)
+        else dict(per_family)
+    )
+    if set(targets) != set(family_ids) or any(value <= 0 for value in targets.values()):
+        raise StudyDesignError("family sampling targets are invalid")
+    total = sum(targets.values())
     lineage_cap = math.floor(total * maximum_lineage_fraction)
     conflicts = defaultdict(set)
     for row in exclusions:
@@ -232,10 +301,10 @@ def _balanced_sample(
     family_cwes: dict[str, Counter[str]] = defaultdict(Counter)
     family_lineages: dict[str, Counter[str]] = defaultdict(Counter)
     lineage_counts: Counter[str] = Counter()
-    while any(family_counts[family] < per_family for family in family_ids):
+    while any(family_counts[family] < targets[family] for family in family_ids):
         progressed = False
         for family in family_ids:
-            if family_counts[family] >= per_family:
+            if family_counts[family] >= targets[family]:
                 continue
             choices = [
                 row
@@ -243,6 +312,18 @@ def _balanced_sample(
                 if row["family_id"] == family
                 and lineage_counts[row["representative_lineage_family"]] < lineage_cap
                 and not (conflicts[row["task_unit_id"]] & selected_ids)
+                and _lineage_slot_available(
+                    row["representative_lineage_family"],
+                    family,
+                    remaining.values(),
+                    conflicts,
+                    selected_ids,
+                    family_ids,
+                    family_counts,
+                    targets,
+                    lineage_counts,
+                    lineage_cap,
+                )
             ]
             if not choices:
                 raise StudyDesignError(f"cannot satisfy frozen sample constraints for {family}")
@@ -274,6 +355,36 @@ def _balanced_sample(
         core = {"sample_order": index, **row, "selection_seed": seed}
         result.append({"sample_id": content_id("python_sample_", core), **core})
     return result
+
+
+def _lineage_slot_available(
+    lineage: str,
+    choosing_family: str,
+    remaining: Any,
+    conflicts: Mapping[str, set[str]],
+    selected_ids: set[str],
+    family_ids: Sequence[str],
+    family_counts: Mapping[str, int],
+    targets: Mapping[str, int],
+    lineage_counts: Mapping[str, int],
+    lineage_cap: int,
+) -> bool:
+    """Reserve scarce lineage capacity for families that have no alternative lineage."""
+
+    available = list(remaining)
+    mandatory_for_other_families = 0
+    for family in family_ids:
+        if family == choosing_family:
+            continue
+        needed = targets[family] - family_counts[family]
+        alternatives = sum(
+            row["family_id"] == family
+            and row["representative_lineage_family"] != lineage
+            and not (conflicts[row["task_unit_id"]] & selected_ids)
+            for row in available
+        )
+        mandatory_for_other_families += max(0, needed - alternatives)
+    return lineage_counts[lineage] < lineage_cap - mandatory_for_other_families
 
 
 def _power_design(
