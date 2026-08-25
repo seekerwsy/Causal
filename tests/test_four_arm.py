@@ -7,6 +7,7 @@ import pytest
 
 from prompt_mechanism_study.formal import FormalStudyError
 from prompt_mechanism_study.four_arm import (
+    _functional_failure_measurement,
     _generation_failure_measurement,
     _generation_prompt,
     _intervention_unit,
@@ -142,6 +143,21 @@ def test_single_failed_generation_stays_in_assigned_arm_itt_denominator() -> Non
     assert row["generation_error_type"] == "HTTPError"
     assert _metric(row, "secure_yield") == (0, 0, 0)
     assert _metric(row, "functionality") == (0, 0, 0)
+
+
+@pytest.mark.reviewer
+def test_single_failed_functional_review_preserves_security_and_unknown_functionality() -> None:
+    row = _functional_failure_measurement(
+        "assignment_1",
+        '{"response":"code"}',
+        "print('ok')",
+        {"security_label": "secure", "evaluability": "evaluable"},
+        "JudgeGateError",
+    )
+
+    assert _metric(row, "secure_yield") == (1, 1, 1)
+    assert _metric(row, "functionality") == (0, 0, 0)
+    assert row["functional_status"] == "unknown"
 
 
 @pytest.mark.reviewer

@@ -462,22 +462,50 @@ def run_measurements(
             prior, prior_unit = resumed[index - 1]
             artifacts = _bundle_artifacts(prior_unit)
             error_type = prior["error_type"]
+            resumed_analyzers = prior["analyzer_runs"]
             if not prior["complete"]:
-                artifacts = {
-                    "assignment.json": artifacts["assignment.json"],
-                    "generation-error.json": artifacts["error.json"],
-                    "measurement.json": _generation_failure_measurement(
-                        assignment_id, error_type
-                    ),
-                }
+                if prior["provider_calls"] == 1:
+                    artifacts = {
+                        "assignment.json": artifacts["assignment.json"],
+                        "generation-error.json": artifacts["error.json"],
+                        "measurement.json": _generation_failure_measurement(
+                            assignment_id, error_type
+                        ),
+                    }
+                else:
+                    generation = artifacts["generation.json"]
+                    security = _security_decision(
+                        generation["code"],
+                        task["oracle_profile_id"],
+                        inputs["root"]
+                        / inputs["config"]["security_oracle"]["policy_lock_path"],
+                        oracle_source_root,
+                        semgrep,
+                        bandit,
+                    )
+                    resumed_analyzers += 2
+                    artifacts = {
+                        "assignment.json": artifacts["assignment.json"],
+                        "generation.json": generation,
+                        "security.json": security,
+                        "functional-error.json": artifacts["error.json"],
+                        "measurement.json": _functional_failure_measurement(
+                            assignment_id,
+                            generation["response_raw"],
+                            generation["code"],
+                            security,
+                            error_type,
+                        ),
+                    }
             unit = output / f"assignment-{index:03d}"
             write_bundle(unit, artifacts)
             provider_calls += prior["provider_calls"]
-            analyzer_runs += prior["analyzer_runs"]
+            analyzer_runs += resumed_analyzers
             rows.append(
                 {
                     **prior,
                     "complete": True,
+                    "analyzer_runs": resumed_analyzers,
                     "bundle_sha256": bundle_digest(unit),
                 }
             )
@@ -493,6 +521,10 @@ def run_measurements(
         calls = analyzers = 0
         complete = False
         error_type = None
+        raw = b""
+        code = ""
+        security: dict[str, Any] | None = None
+        functional: dict[str, Any] | None = None
         try:
             suffix = "" if arm == "absent" else suffixes[task["task_id"]][arm]
             prompt = _generation_prompt(task["prompt"], suffix, inputs["config"]["intervention"])
@@ -521,8 +553,6 @@ def run_measurements(
                 if not code.strip()
                 else "invalid"
             )
-            security: dict[str, Any] | None = None
-            functional: dict[str, Any] | None = None
             if code_status == "valid":
                 security = _security_decision(
                     code,
@@ -533,6 +563,7 @@ def run_measurements(
                     bandit,
                 )
                 analyzers = 2
+                artifacts["security.json"] = security
                 calls += 1
                 contract = task["functional_contract"]
                 functional_request = build_review_request(
@@ -551,7 +582,6 @@ def run_measurements(
                     "response_raw": functional_raw.decode("utf-8", errors="replace"),
                     "validated": functional,
                 }
-                artifacts["security.json"] = security
             measurement = {
                 "assignment_id": assignment_id,
                 "code_status": code_status,
@@ -576,6 +606,16 @@ def run_measurements(
                 artifacts["generation-error.json"] = {"error_type": error_type}
                 artifacts["measurement.json"] = _generation_failure_measurement(
                     assignment_id, error_type
+                )
+                complete = True
+            elif calls == 2 and analyzers == 2 and security is not None:
+                artifacts["functional-error.json"] = {"error_type": error_type}
+                artifacts["measurement.json"] = _functional_failure_measurement(
+                    assignment_id,
+                    raw.decode("utf-8", errors="replace"),
+                    code,
+                    security,
+                    error_type,
                 )
                 complete = True
             else:
@@ -639,9 +679,7 @@ def _load_measurement_resume(
         or len(rows) > len(work)
         or any(not row["complete"] for row in rows[:-1])
         or rows[-1]["complete"]
-        or rows[-1]["error_type"] not in {"HTTPError", "TimeoutError", "URLError"}
-        or rows[-1]["provider_calls"] != 1
-        or rows[-1]["analyzer_runs"] != 0
+        or not _resumable_measurement_failure(rows[-1])
     ):
         raise FormalStudyError("measurement resume prefix is invalid")
     result = []
@@ -677,6 +715,40 @@ def _generation_failure_measurement(assignment_id: str, error_type: str) -> dict
         "code_lines": 0,
         "response_used_markdown_fence": False,
         "generation_error_type": error_type,
+    }
+
+
+def _resumable_measurement_failure(row: Mapping[str, Any]) -> bool:
+    return (
+        row["error_type"] in {"HTTPError", "TimeoutError", "URLError"}
+        and row["provider_calls"] == 1
+        and row["analyzer_runs"] == 0
+    ) or (
+        row["error_type"] == "JudgeGateError"
+        and row["provider_calls"] == 2
+        and row["analyzer_runs"] == 2
+    )
+
+
+def _functional_failure_measurement(
+    assignment_id: str,
+    response_raw: str,
+    code: str,
+    security: Mapping[str, Any],
+    error_type: str,
+) -> dict[str, Any]:
+    return {
+        "assignment_id": assignment_id,
+        "code_status": "valid",
+        "oracle_status": security["security_label"],
+        "oracle_evaluability": security["evaluability"],
+        "functional_status": "unknown",
+        "generator_evidence_sha256": hashlib.sha256(response_raw.encode()).hexdigest(),
+        "code_sha256": hashlib.sha256(code.encode()).hexdigest(),
+        "code_characters": len(code),
+        "code_lines": len(code.splitlines()),
+        "response_used_markdown_fence": "```" in response_raw,
+        "functional_error_type": error_type,
     }
 
 
