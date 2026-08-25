@@ -30,7 +30,7 @@
   },
   "prompt_tsg": {
     "catalog_path": "data/method/prompt-tsg-catalog-v1.json",
-    "catalog_sha256": "f074c672efd9c125fb6809a7b7ee0d9bf5996a5296858b4d79fd8f87f5a32237",
+    "catalog_sha256": "d1f4feebc637ee51b7dc72dcc7be6e3164ad8ad6f4e76de31d36ceecc2182356",
     "source_graph_rule": "one blinded LLM_FACTS proposal followed by deterministic evidence and type validation",
     "arm_graph_rule": "derive Specific, Generic, and Placebo by one typed patch each; Absent is identity",
     "graph_scope": "source task plus arm payload; common generation envelope is invariant and excluded"

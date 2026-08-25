@@ -10,6 +10,7 @@ data/functional-judge/**/*.json text eol=lf
 data/functional-judge/**/*.jsonl text eol=lf
 data/functional-judge/**/*.txt text eol=lf
 data/formal/** text eol=lf
+data/method/** text eol=lf
 configs/formal/*.json text eol=lf
 configs/functional-judge/*.json text eol=lf
 configs/minimal-validation/*.json text eol=lf
