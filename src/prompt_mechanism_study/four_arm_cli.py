@@ -44,6 +44,7 @@ def main() -> int:
     parser.add_argument("--measurement-pilot", type=Path)
     parser.add_argument("--measurement-remaining", type=Path)
     parser.add_argument("--measurement-full", type=Path)
+    parser.add_argument("--resume-from", type=Path)
     parser.add_argument("--oracle-source-root", type=Path)
     parser.add_argument("--semgrep", type=Path)
     parser.add_argument("--bandit", type=Path)
@@ -123,6 +124,7 @@ def main() -> int:
             semgrep=args.semgrep,
             bandit=args.bandit,
             measurement_pilot=args.measurement_pilot,
+            resume_from=args.resume_from,
         )
     else:
         if args.action == "analyze-full":

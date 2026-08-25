@@ -439,6 +439,7 @@ def run_measurements(
     semgrep: Path,
     bandit: Path,
     measurement_pilot: Path | None = None,
+    resume_from: Path | None = None,
 ) -> dict[str, Any]:
     inputs = _load_inputs(repository_root, config_path, tasks_path)
     tasks = _phase_tasks(inputs, phase)
@@ -450,11 +451,36 @@ def run_measurements(
     judge = load_gate_inputs(inputs["root"])
     work = [(task, arm) for task in tasks for arm in ARMS]
     random.Random(inputs["config"]["randomization"]["execution_order_seed"]).shuffle(work)
+    resumed = _load_measurement_resume(resume_from, phase, work, inputs["config"])
     output.mkdir(parents=True)
     rows = []
     provider_calls = analyzer_runs = 0
     for index, (task, arm) in enumerate(work, start=1):
         assignment_id = _assignment_id(inputs["config"], task["task_id"], arm)
+        if index <= len(resumed):
+            prior, prior_unit = resumed[index - 1]
+            artifacts = _bundle_artifacts(prior_unit)
+            error_type = prior["error_type"]
+            if not prior["complete"]:
+                artifacts = {
+                    "assignment.json": artifacts["assignment.json"],
+                    "generation-error.json": artifacts["error.json"],
+                    "measurement.json": _generation_failure_measurement(
+                        assignment_id, error_type
+                    ),
+                }
+            unit = output / f"assignment-{index:03d}"
+            write_bundle(unit, artifacts)
+            provider_calls += prior["provider_calls"]
+            analyzer_runs += prior["analyzer_runs"]
+            rows.append(
+                {
+                    **prior,
+                    "complete": True,
+                    "bundle_sha256": bundle_digest(unit),
+                }
+            )
+            continue
         artifacts: dict[str, Any] = {
             "assignment.json": {
                 "assignment_id": assignment_id,
@@ -582,6 +608,66 @@ def run_measurements(
     }
     write_bundle(output / "summary", {"report.json": report, "assignments.json": rows})
     return report
+
+
+def _load_measurement_resume(
+    root: Path | None,
+    phase: str,
+    work: Sequence[tuple[dict[str, Any], str]],
+    config: Mapping[str, Any],
+) -> list[tuple[dict[str, Any], Path]]:
+    """Validate one failed prefix without consulting generated code or measured outcomes."""
+
+    if root is None:
+        return []
+    report = _phase_report(root)
+    rows = read_json(root / "summary/assignments.json")
+    if (
+        report.get("status") != "ERROR"
+        or report.get("phase") != phase
+        or not rows
+        or len(rows) > len(work)
+        or any(not row["complete"] for row in rows[:-1])
+        or rows[-1]["complete"]
+        or rows[-1]["error_type"] not in {"HTTPError", "TimeoutError", "URLError"}
+        or rows[-1]["provider_calls"] != 1
+        or rows[-1]["analyzer_runs"] != 0
+    ):
+        raise FormalStudyError("measurement resume prefix is invalid")
+    result = []
+    for index, (row, (task, arm)) in enumerate(zip(rows, work, strict=False), start=1):
+        expected = _assignment_id(config, task["task_id"], arm)
+        unit = root / f"assignment-{index:03d}"
+        if (
+            row["assignment_id"] != expected
+            or row["task_id"] != task["task_id"]
+            or row["arm"] != arm
+            or bundle_digest(unit) != row["bundle_sha256"]
+        ):
+            raise FormalStudyError("measurement resume binding drifted")
+        result.append((row, unit))
+    return result
+
+
+def _bundle_artifacts(root: Path) -> dict[str, Any]:
+    verify_bundle(root)
+    return {name: read_json(root / name) for name in read_json(root / "manifest.json")["files"]}
+
+
+def _generation_failure_measurement(assignment_id: str, error_type: str) -> dict[str, Any]:
+    return {
+        "assignment_id": assignment_id,
+        "code_status": "generation_failed",
+        "oracle_status": "not_run",
+        "oracle_evaluability": None,
+        "functional_status": "not_run",
+        "generator_evidence_sha256": None,
+        "code_sha256": None,
+        "code_characters": 0,
+        "code_lines": 0,
+        "response_used_markdown_fence": False,
+        "generation_error_type": error_type,
+    }
 
 
 def analyze(

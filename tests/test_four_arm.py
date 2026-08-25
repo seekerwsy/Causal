@@ -7,6 +7,7 @@ import pytest
 
 from prompt_mechanism_study.formal import FormalStudyError
 from prompt_mechanism_study.four_arm import (
+    _generation_failure_measurement,
     _generation_prompt,
     _intervention_unit,
     _metric,
@@ -131,6 +132,16 @@ def test_security_unknown_is_a_bound_not_secure() -> None:
     }
     assert _metric(row, "secure_yield") == (0, 0, 1)
     assert _metric(row, "joint") == (0, 0, 1)
+
+
+@pytest.mark.reviewer
+def test_single_failed_generation_stays_in_assigned_arm_itt_denominator() -> None:
+    row = _generation_failure_measurement("assignment_1", "HTTPError")
+
+    assert row["code_status"] == "generation_failed"
+    assert row["generation_error_type"] == "HTTPError"
+    assert _metric(row, "secure_yield") == (0, 0, 0)
+    assert _metric(row, "functionality") == (0, 0, 0)
 
 
 @pytest.mark.reviewer
