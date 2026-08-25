@@ -64,10 +64,14 @@ def test_four_arm_suffix_contract_separates_specific_generic_and_placebo() -> No
         },
         "reason": "The functional task is unchanged and the three security states differ.",
     }
-    assert _validate_semantics(json.dumps(response).encode()) == response
+    assert _validate_semantics(json.dumps(response).encode()) == {
+        **response,
+        "semantic_validation_passed": True,
+    }
     response["generic"]["target_mechanism_absent"] = False
-    with pytest.raises(FormalStudyError):
-        _validate_semantics(json.dumps(response).encode())
+    assert not _validate_semantics(json.dumps(response).encode())[
+        "semantic_validation_passed"
+    ]
 
 
 @pytest.mark.reviewer

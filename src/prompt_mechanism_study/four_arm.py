@@ -84,6 +84,7 @@ def prepare_tsg_candidate_pool(
     catalog = load_catalog(catalog_path)
     family_by_realization = catalog["source_realization_task_families"]
     rows = []
+    explicit_non_python = []
     for selected in sorted(eligibility, key=lambda row: row["cluster_id"]):
         if (
             selected["status"] != "eligible"
@@ -105,6 +106,9 @@ def prepare_tsg_candidate_pool(
             or not contract.get("requirements")
         ):
             raise FormalStudyError("candidate lineage or functional contract drifted")
+        if _requires_non_python_implementation(record["prompt"]):
+            explicit_non_python.append(selected["cluster_id"])
+            continue
         rows.append(
             {
                 "task_id": selected["cluster_id"],
@@ -140,6 +144,8 @@ def prepare_tsg_candidate_pool(
         "status": "PROMPT_TSG_CANDIDATES_PREPARED",
         "candidate_tasks": len(rows),
         "excluded_exposed_tasks": len(excluded),
+        "excluded_explicit_non_python_tasks": len(explicit_non_python),
+        "explicit_non_python_task_ids": explicit_non_python,
         "included_cwes": list(included_cwes),
         "cwe_counts": dict(sorted(Counter(row["cwe"] for row in rows).items())),
         "outcomes_or_arms_used": False,
@@ -1380,11 +1386,33 @@ def _validate_semantics(raw: bytes, *, context_conditioned: bool = False) -> dic
         },
     }
     for arm, verdict in expected.items():
-        if value[arm] != verdict:
-            raise FormalStudyError("suffix failed blinded semantic validation")
+        if not isinstance(value[arm], dict) or set(value[arm]) != set(verdict):
+            raise FormalStudyError("validator arm schema drifted")
+        if any(type(flag) is not bool for flag in value[arm].values()):
+            raise FormalStudyError("validator arm verdict is not boolean")
     if not isinstance(value["reason"], str) or not value["reason"].strip():
         raise FormalStudyError("validator reason is empty")
-    return value
+    return {
+        **value,
+        "semantic_validation_passed": all(value[arm] == verdict for arm, verdict in expected.items()),
+    }
+
+
+def _requires_non_python_implementation(prompt: str) -> bool:
+    """Reject only explicit incompatible language contracts before TSG extraction."""
+
+    normalized = " ".join(prompt.casefold().split())
+    return any(
+        phrase in normalized
+        for phrase in (
+            "write a java program",
+            "write a bash script",
+            "write a bash function",
+            "write a shell script",
+            "in a shell programming language",
+            "in a shell scripting language",
+        )
+    )
 
 
 def _generation_prompt(
