@@ -134,6 +134,17 @@ def extract_prompt_tsg(
         relations, rejected_relations = _project_relations(
             proposal["facts"], proposal["relations"], catalog
         )
+        ignored_unresolved_features = sorted(
+            semantic_id
+            for semantic_id in proposal["unresolved_semantics"]
+            if catalog["semantics"].get(semantic_id)
+            in {"safety_requirement", "presentation_control"}
+        )
+        unresolved_semantics = [
+            semantic_id
+            for semantic_id in proposal["unresolved_semantics"]
+            if semantic_id not in ignored_unresolved_features
+        ]
         graph = build_prompt_tsg(
             task_id=task["task_id"],
             prompt=task["prompt"],
@@ -141,7 +152,7 @@ def extract_prompt_tsg(
             catalog=catalog,
             facts=proposal["facts"],
             relations=relations,
-            unresolved_semantics=proposal["unresolved_semantics"],
+            unresolved_semantics=unresolved_semantics,
         )
     except (PromptTSGError, PromptTSGExtractionError) as error:
         raise PromptTSGExtractionError(str(error), request=request, raw=raw) from None
@@ -153,7 +164,10 @@ def extract_prompt_tsg(
         raise PromptTSGExtractionError(
             "extractor returned a semantic outside its task slice", request=request, raw=raw
         )
-    return graph, request, raw, {"rejected_relations": rejected_relations}
+    return graph, request, raw, {
+        "rejected_relations": rejected_relations,
+        "ignored_unresolved_features": ignored_unresolved_features,
+    }
 
 
 def extract_task_file(

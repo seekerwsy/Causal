@@ -279,7 +279,7 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
             ),
         ],
         "relations": [{"edge_type": "flows_to", "source": "source", "target": "sink"}],
-        "unresolved_semantics": [],
+        "unresolved_semantics": ["feature.argv_without_shell"],
     }
 
     request = extraction_request(task, catalog)
@@ -301,7 +301,10 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
         provider=provider,
     )
     assert graph.task_id == "task-1"
-    assert projection == {"rejected_relations": []}
+    assert projection == {
+        "rejected_relations": [],
+        "ignored_unresolved_features": ["feature.argv_without_shell"],
+    }
 
     tasks_path = tmp_path / "tasks.jsonl"
     tasks_path.write_text(__import__("json").dumps(task) + "\n", encoding="utf-8")
