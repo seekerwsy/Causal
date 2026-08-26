@@ -140,7 +140,7 @@ Run the zero-provider-call preflight for the active pairwise canary:
 prompt-mechanism-study factorial-experiment preflight \
   .artifacts/factorial-preflight \
   --repository-root . \
-  --config configs/formal/factorial-sql-canary-qwen35-v1.json
+  --config configs/formal/factorial-sql-canary-qwen35-v2.json
 ```
 
 With the externally supplied provider credential, run the same frozen path:
@@ -149,7 +149,7 @@ With the externally supplied provider credential, run the same frozen path:
 prompt-mechanism-study factorial-experiment run \
   .artifacts/factorial-sql-canary \
   --repository-root . \
-  --config configs/formal/factorial-sql-canary-qwen35-v1.json
+  --config configs/formal/factorial-sql-canary-qwen35-v2.json
 ```
 
 The run command writes the complete assignment ledger, factorial estimates,
@@ -178,7 +178,7 @@ The active path can be reviewed in at most ten files:
 1. `AGENTS.md` -- scientific and reviewability constraints;
 2. `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
    -- normative protocol, including the pairwise extension;
-3. `configs/formal/factorial-sql-canary-qwen35-v1.json` -- complete bounded-run
+3. `configs/formal/factorial-sql-canary-qwen35-v2.json` -- complete bounded-run
    identity and evidence boundary;
 4. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded Prompt-TSG schema;
 5. `src/prompt_mechanism_study/mechanisms.py` -- atomic features, `PairSpec`,

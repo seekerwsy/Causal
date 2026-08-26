@@ -1,8 +1,9 @@
 {
   "schema_version": "1.0",
-  "study_name": "factorial-sql-canary-qwen35-v1",
+  "study_name": "factorial-sql-canary-qwen35-v2",
   "phase": "development_canary",
-  "purpose": "Validate the frozen pairwise factorial implementation and measure whether a code model responds separately and jointly to SQL value-parameterization and identifier-allowlist requirements.",
+  "purpose": "Validate the frozen pairwise factorial implementation after a pre-outcome executor-format repair and measure whether a code model responds separately and jointly to SQL value-parameterization and identifier-allowlist requirements.",
+  "protocol_repair": "v1 stopped before variant freeze, code generation, and outcomes because the executor repeated the source task in each suffix; v2 narrows only the executor formatting prompt.",
   "corpus": {
     "path": "data/method/factorial-sql-corpus-v1",
     "bundle_sha256": "b0edc8837ad3d44a5ce071a9fa36e5ed6840ce3503ce3064a1dbccbcccaf199f",
@@ -21,8 +22,8 @@
   "intervention": {
     "executor_config_path": "data/formal/intervention-executor-qwen35flash.json",
     "executor_config_sha256": "4f2acf6327b1450684787bd8b1e96440b22b06b1544954fe7a6372c99a8dadd0",
-    "executor_prompt_path": "data/method/prompts/factorial-intervention-executor-v1.txt",
-    "executor_prompt_sha256": "a4698626887a37b0a9e8912934d79296772e0c3f89c841a91481ec44464ef517",
+    "executor_prompt_path": "data/method/prompts/factorial-intervention-executor-v2.txt",
+    "executor_prompt_sha256": "c01b47281be042bb8c21f76bf87852ee49c26c44ee47236ca2da8d80e406b430",
     "validator_config_path": "data/formal/intervention-validator-qwen37max-nonthinking.json",
     "validator_config_sha256": "54763ce30f2db7739ba59135a5d8f1e6a8c769781d051c60958fc857011a670c",
     "validator_prompt_path": "data/method/prompts/factorial-intervention-validator-v1.txt",

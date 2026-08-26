@@ -395,7 +395,7 @@ def test_linear_factorial_runner_closes_and_verifies_a_fake_provider(
     )
     report = run_factorial_experiment(
         Path("."),
-        Path("configs/formal/factorial-sql-canary-qwen35-v1.json"),
+        Path("configs/formal/factorial-sql-canary-qwen35-v2.json"),
         tmp_path / "run",
     )
 
