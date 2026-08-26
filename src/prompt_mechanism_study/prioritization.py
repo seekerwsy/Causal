@@ -286,6 +286,13 @@ def audit_discovery_positivity(
     for query_id in sorted({row["query_id"] for row in rows}):
         query_rows = [row for row in rows if row["query_id"] == query_id]
         context_rows = [row for row in query_rows if row["context_state"] == "present"]
+        context_absent = [row for row in query_rows if row["context_state"] == "absent"]
+        context_unresolved = [
+            row for row in query_rows if row["context_state"] == "unresolved"
+        ]
+        context_not_applicable = [
+            row for row in query_rows if row["context_state"] == "not_applicable"
+        ]
         present = [row for row in context_rows if row["source_feature_state"] == "present"]
         absent = [row for row in context_rows if row["source_feature_state"] == "absent"]
         unresolved = [
@@ -310,6 +317,9 @@ def audit_discovery_positivity(
                 "task_family": first["task_family"],
                 "task_units": len(query_rows),
                 "context_present": len(context_rows),
+                "context_absent": len(context_absent),
+                "context_unresolved": len(context_unresolved),
+                "context_not_applicable": len(context_not_applicable),
                 "feature_present": len(present),
                 "feature_absent": len(absent),
                 "feature_unresolved": len(unresolved),

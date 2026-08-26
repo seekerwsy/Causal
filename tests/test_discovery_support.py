@@ -141,6 +141,9 @@ def test_positivity_gate_requires_both_states_and_shared_lineages(tmp_path: Path
 
     assert report["status"] == "POSITIVITY_GATE_PASSED"
     assert report["fci_executed"] is False
+    assert support["context_present"] == 4
+    assert support["context_absent"] == 0
+    assert support["context_unresolved"] == 0
     assert support["feature_present"] == support["feature_absent"] == 2
     assert support["shared_lineages"] == ["lineage-a", "lineage-b"]
     assert sum(row["confirm_add_source_eligible"] for row in rows) == 2
