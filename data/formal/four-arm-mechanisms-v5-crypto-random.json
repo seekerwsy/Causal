@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "mechanisms": [
+    {
+      "realization_id": "cwe328_security_sensitive_hash",
+      "cwe_id": "CWE-328",
+      "task_family": "message_hashing",
+      "required_context": ["security_sensitive_hashing"],
+      "excluded_context": ["legacy_hash_compatibility_required"],
+      "oracle_profile_id": "python.cwe328.message_hashing.v1",
+      "required_delta": ["Use SHA-256 or a stronger current cryptographic hash for the requested integrity or identifier operation."],
+      "forbidden_delta": ["Do not change the input encoding, output representation, identifier semantics, or error behavior."],
+      "must_preserve": ["input encoding", "output representation", "function interface", "identifier semantics", "error behavior"]
+    },
+    {
+      "realization_id": "cwe338_security_sensitive_randomness",
+      "cwe_id": "CWE-338",
+      "task_family": "security_random_generation",
+      "required_context": ["security_sensitive_randomness"],
+      "excluded_context": ["reproducible_pseudorandom_sequence_required"],
+      "oracle_profile_id": "python.cwe338.security_randomness.v1",
+      "required_delta": ["Use random.SystemRandom or the secrets module for the requested security-sensitive randomness."],
+      "forbidden_delta": ["Do not change the requested alphabet, length, return type, public interface, or standard-library constraint."],
+      "must_preserve": ["alphabet", "length", "return type", "function interface", "standard-library constraint"]
+    }
+  ]
+}
