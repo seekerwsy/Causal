@@ -253,7 +253,7 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
     catalog = load_catalog(CATALOG_PATH)
     task = {
         "task_id": "task-1",
-        "semantic_cluster_id": "task-1",
+        "task_unit_id": "task-1",
         "prompt": PROMPT,
         "source_prompt_sha256": content_hash(PROMPT),
         "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
@@ -333,7 +333,7 @@ def test_tsg_binding_drives_llm_intervention_and_deterministic_arm_patches():
     registry = load_mechanism_registry(ROOT / "data/formal/four-arm-mechanisms-v3.json")
     task = {
         "task_id": "task-1",
-        "semantic_cluster_id": "task-1",
+        "task_unit_id": "task-1",
         "cwe": "CWE-78",
         "task_family": "command_execution",
         "prompt": PROMPT,

@@ -26,9 +26,12 @@ deployment machinery, or several competing execution paths.
    are not causal edges. Generated code supplies independently measured
    security and functionality outcomes; it is not a primary-PAG variable or a
    causal mediator.
-4. Use assigned-arm, semantic-task-clustered ITT as the primary confirmatory
-   analysis. Post-assignment fidelity, semantic compliance, generation
-   success, and non-target drift are diagnostics, never denominator filters.
+4. Use assigned-arm, deduplicated-task-unit ITT as the primary confirmatory
+   analysis. A task unit is the paper-facing name for the independent unit
+   historically stored as `semantic_cluster_id`; reserve "cluster" for the
+   curation implementation and frozen legacy coordinates. Post-assignment
+   fidelity, semantic compliance, generation success, and non-target drift are
+   diagnostics, never denominator filters.
 5. Keep the prospective primary safety outcome, oracle-evaluable secure-code
    yield, separate from code validity, Oracle support, unknown coverage,
    functionality, and secure-and-functional joint success.

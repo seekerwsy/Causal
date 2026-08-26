@@ -1,225 +1,144 @@
 # Prompt Mechanism Study research artifact
 
-Prompt Mechanism Study is a compact, auditable framework for testing whether a frozen prompt
-intervention policy changes oracle-evaluable secure-code yield while preserving
-functionality.
+Prompt Mechanism Study is a compact academic artifact for testing whether a
+frozen prompt intervention changes Oracle-evaluable secure-code yield while
+preserving functionality. It is a research prototype, not a deployment or
+campaign-management platform.
 
-The artifact implements the scientific protocol and delegates environment-
-specific execution to frozen adapters. It intentionally excludes model
-deployment, remote transfer, campaign recovery, credential handling, and
-provider-specific orchestration.
+## Method at a glance
 
-## Implemented method
+```text
+source benchmark records
+        -> deduplicated task units
+        -> one representative prompt per unit
+        -> Prompt TSG and mechanism binding
+        -> four assigned prompt arms
+        -> code generation
+        -> independent security and functionality measurement
+        -> assigned-arm task-unit ITT
+```
 
-The active path has three layers.
+### Terminology
 
-### 1. Representation and prioritization
+- A **source record** is one prompt and its metadata from a benchmark.
+- A **task unit** is one independent, cross-source-deduplicated experimental
+  unit. It may represent one source record or several equivalent records.
+- A **task** is the representative prompt executed for a task unit. The active
+  four-arm studies use exactly one task per unit, so `task_id` is the analysis
+  key.
+- A **Prompt TSG** is the typed semantic representation of that representative
+  prompt. It is not a causal graph and is not the resampling unit.
 
-- Freeze discover and confirm tasks before outcomes.
-- Prevent one semantic task cluster from crossing the split.
-- Freeze context query, actionable feature, ADD/REMOVE operation, outcome, and
-  expected direction as candidate identities.
-- Bind the complete candidate universe to a representation adapter.
-- Bind every candidate score, deterministic tie break, rank, top-K slot, and
-  selector adapter before confirmation.
+Older frozen artifacts use `semantic_cluster_id`, `cluster_id`, and
+`semantic_task_cluster_id` for the task-unit coordinate. Those physical field
+names remain immutable for reproduction. New method prose and prospective
+protocols use **task unit**; "cluster" is otherwise reserved for the internal
+deduplication step that groups source records.
 
-The artifact executes ranking and top-K selection. A Prompt TSG extractor or
-causal selector may produce the frozen universe and score manifest externally;
-its name, version, and policy digest remain part of the study identity.
+## Single active method
 
-### 2. Intervention and randomization
+The method is organized as seven visible stages.
 
-- Freeze one `InterventionSpec` containing the mechanism, ADD/REMOVE operation,
-  and natural-language instruction for the Target and Noop arms.
-- Require every intervention text to come from the frozen LLM-executor adapter;
-  the core applies the sole active edit rule by appending that text to the
-  unchanged source prompt.
-- Require an independent, contract-aware and outcome-blind LLM validator to
-  record task preservation, contract satisfaction, unintended changes, and
-  contradictions for every arm. Only `yes/yes/no/no` enters randomization.
-- Freeze a finite realization distribution using positive integer weights.
-- Materialize one complete task-realization bundle for every confirm task.
-- Bind cluster, task, candidate, policy, realization, task bundle, model, and
-  intervention spec into every complete-block identity.
-- Pair Target and Noop inside every block using a replayable randomization seed
-  and request-randomness slots.
+1. **Representation.** Normalize source records, form conservative task units,
+   choose one representative prompt, and extract bounded Prompt TSG facts.
+2. **Prioritization.** Apply outcome-blind eligibility and sampling rules to
+   the complete candidate inventory.
+3. **Hypothesis freeze.** Freeze task units, Prompt TSG bindings, mechanism
+   registry, model, Oracles, arm texts, seeds, estimands, and multiplicity.
+4. **Intervention and randomization.** Materialize all four prompt variants and
+   randomize their execution order without consulting generated outcomes.
+5. **Measurement.** Generate code, check Python syntax/compilation, run the
+   static Security Oracle, and run the blinded Functional Judge independently.
+6. **Outcome assembly.** Account for every assignment and preserve invalid,
+   insecure, unknown, failed, and functional outcomes without filtering.
+7. **Inference and reporting.** Estimate paired assigned-arm ITT over equally
+   weighted task units, report unknown bounds, and build the frozen result
+   report.
 
-### 3. Measurement and cluster-aware inference
+Prompt TSG selects an applicable mechanism from prompt evidence. It does not
+guarantee that generated code realizes that mechanism, and generated code is
+not treated as a causal mediator. Realization and non-target drift are
+diagnostics only.
 
-- Freeze generator, Security Oracle, and functional-evaluator identities.
-- Bind generator, Oracle, and functional raw-evidence digests for every result.
-- Import measurements only after a separate immutable study freeze exists.
-- Distinguish valid code, terminal no-code, invalid code, Oracle unknown, and
-  infrastructure failure.
-- Decompose each assignment into code-valid yield, Oracle evaluability,
-  observed secure yield, latent secure upper support, functionality, and joint
-  success.
-- Keep terminal no-code and invalid code as assigned-arm zeros.
-- Require infrastructure failures to be repaired or replayed before analysis.
-- Estimate every candidate and model separately.
-- Average request slots inside task-realization blocks, then apply frozen
-  realization and within-cluster task weights, then weight semantic clusters
-  equally.
-- Report target-minus-no-op ITT, unknown bounds, and deterministic
-  semantic-cluster simultaneous bootstrap intervals.
+## Four prompt arms
 
-No treatment-fidelity diagnostic filters an assigned unit.
+Every task unit receives all four assigned variants:
 
-## External adapter boundary
+| Arm ID | Prompt operation | Scientific role |
+| --- | --- | --- |
+| `absent` | Keep the source prompt unchanged | Requirement-absent baseline |
+| `specific` | Append the Prompt-TSG-selected concrete mechanism requirement | Target intervention |
+| `generic` | Append a general security-safeguards reminder | Tests whether specificity matters |
+| `placebo` | Append a style-only instruction about descriptive names, formatting, and straightforward organization | Controls for adding another instruction and changing prompt attention |
 
-Seven adapter identities are frozen:
+`placebo` is the language/code-style arm. It changes the requested presentation
+of generated code, not the security mechanism or the natural-language content
+of the source task. The primary contrast is `specific - placebo`; `specific -
+absent` and `specific - generic` are secondary contrasts. No arm is removed
+from the ITT denominator because its generated code ignored the instruction.
 
-| Adapter | Artifact responsibility |
-| --- | --- |
-| representation | Candidate-universe evidence |
-| selector | Pre-outcome candidate scores |
-| intervention executor | LLM production of free-form intervention text |
-| intervention validator | Contract-aware, outcome-blind semantic validation |
-| generator | Generated-code production |
-| security oracle | Secure, insecure, or unknown decision |
-| functional evaluator | Pass, fail, or unknown decision |
+## Outcomes and evidence boundary
 
-An adapter identity contains a kind, name, version, and policy SHA-256 digest.
-Changing any of them changes the study identity. The core never silently
-substitutes a producer. The study identity also binds the active method version
-and the complete pre-outcome analysis plan.
+The primary safety outcome is observed Oracle-evaluable secure-code yield.
+Code validity, Oracle evaluability, unknown coverage, functionality, and
+secure-and-functional joint success remain separate fields.
 
-## Commands
+The Functional Judge is AST/compilation plus blinded LLM review against the
+frozen functional contract. It is not a substitute for executable tests. The
+Security Oracle is independent and preserves `unknown`; unknown is never
+promoted to secure.
 
-Freeze a protocol before measurement:
+The completed Qwen3.5 and Qwen3.7 strict-TSG studies are frozen null results on
+the same 19-task-unit census. Their reports remain evidence of that bounded
+population, not a universal no-effect claim:
 
-    prompt-mechanism-study freeze protocol.json freeze-artifact
+- `docs/experiments/2026-08-26-prompt-tsg-strict-v2-results.md`;
+- `docs/experiments/2026-08-26-prompt-tsg-qwen37-oracle-v3-results.md`.
 
-After external generators and evaluators produce a complete measurement file:
+## Reviewer commands
 
-    prompt-mechanism-study analyze freeze-artifact measurements.json analysis-artifact
+Run the focused scientific-invariant suite:
 
-Verify or inspect a bundle:
+```text
+python -m pytest -q
+```
 
-    prompt-mechanism-study verify freeze-artifact
-    prompt-mechanism-study verify analysis-artifact
-    prompt-mechanism-study summarize analysis-artifact
+Verify the tracked Qwen3.7 analysis independently:
 
-The freeze command rejects outcome fields. The analyze command replays the
-study from the frozen protocol, verifies the exact-byte bundle, checks study
-and adapter identities, and requires one measurement for every randomized
-assignment.
+```text
+prompt-mechanism-four-arm verify-analysis \
+  data/formal/results/prompt-tsg-strict-19-qwen37-oracle-v3-analysis \
+  --config configs/formal/prompt-tsg-strict-19-qwen37-oracle-v3.json \
+  --tasks data/formal/prompt-tsg-strict-v3-replication-tasks.jsonl
+```
 
-The active functional Oracle is frozen in
-`configs/functional-judge/functional-oracle-qwen37max.json`. Generated
-Python must first pass AST parsing and bytecode compilation. A blinded LLM,
-acting as a software-engineering reviewer, then judges the code against the
-original functional task. Functionality passes only when both gates pass;
-definite non-compliance fails, and unresolved static evidence remains unknown.
-The functional Oracle is independent of and never replaces the static Security
-Oracle. Its frozen engineering qualification is recorded in
-`data/functional-judge/functional-oracle-qualification.json` (15/16 correct,
-one false pass, zero invalid responses); those calibration cases are excluded
-from experimental effect estimates.
+The four-arm entry point also exposes `preflight`, intervention, measurement,
+and analysis actions. Run `prompt-mechanism-four-arm --help` for their bounded
+arguments. Provider credentials and model deployment remain external adapters;
+they are not stored in the artifact.
 
-The active formal study is frozen in
-`configs/formal/bidirectional-heldout-qwen7b-v1.json`. It runs two separate
-paired policies on the same 30 non-D_DEV semantic task clusters. ADD appends a
-task-specific CWE-aligned safety requirement to the original prompt. REMOVE
-starts from that validated safety-bearing prompt and neutralizes only that
-requirement; it never asks for a vulnerability or names an insecure
-replacement. Each policy compares Target with a matched task-preserving Noop.
-The task texts are produced by the frozen intervention LLM and accepted only
-after a separate outcome-blind LLM semantic review.
+## Review reading order
 
-Run the gate before the main experiment. The preflight makes no provider call;
-the pilot covers one frozen case from each task family, and the remaining phase
-is unavailable unless that pilot passes:
+The active path can be reviewed in at most ten files:
 
-    prompt-mechanism-study judge-gate preflight judge-preflight \
-      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
-    prompt-mechanism-study judge-gate pilot judge-pilot \
-      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
-    prompt-mechanism-study judge-gate remaining judge-remaining --pilot-root judge-pilot \
-      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
-    prompt-mechanism-study judge-gate finalize judge-result \
-      --pilot-root judge-pilot --remaining-root judge-remaining \
-      --gate-config configs/functional-judge/functional-oracle-qwen37max.json
+1. `AGENTS.md` -- scientific and reviewability constraints;
+2. `README.md` -- terminology, stages, arms, and evidence boundary;
+3. `configs/formal/prompt-tsg-strict-19-qwen37-oracle-v3.json` -- one complete
+   frozen study identity;
+4. `src/prompt_mechanism_study/four_arm_cli.py` -- single four-arm entry point;
+5. `src/prompt_mechanism_study/four_arm.py` -- linear intervention,
+   measurement, outcome, and analysis path;
+6. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded graph schema and typed
+   arm patches;
+7. `src/prompt_mechanism_study/prompt_tsg_extract.py` -- LLM-fact proposal and
+   deterministic evidence validation;
+8. `src/prompt_mechanism_study/security_profiles.py` -- local Security Oracle
+   profiles;
+9. `src/prompt_mechanism_study/four_arm_verify.py` -- independent result
+   verifier;
+10. `docs/experiments/2026-08-26-prompt-tsg-qwen37-oracle-v3-results.md` --
+    frozen result interpretation and reproduction coordinates.
 
-Every attempted case is closed as its own exact-byte bundle before the phase
-summary is written. Provider requests omit case identity, family, gold label,
-arm, security outcome, and generator identity.
-
-Freeze the intervention texts before any formal code generation:
-
-    prompt-mechanism-study formal-interventions preflight intervention-preflight
-    prompt-mechanism-study formal-interventions pilot intervention-pilot
-    prompt-mechanism-study formal-interventions remaining intervention-remaining \
-      --pilot-root intervention-pilot
-    prompt-mechanism-study formal-interventions finalize intervention-freeze \
-      --pilot-root intervention-pilot --remaining-root intervention-remaining
-
-The pilot contains one task from every included CWE and gates only semantic
-intervention validity. The later generation pilot gates only infrastructure and
-measurement completeness; neither gate may inspect the effect direction.
-
-Prepare external benchmark candidates without executing their code:
-
-    prompt-mechanism-study dataset-prep dataset-prep-smoke \
-      --sallm-root datasets/source-inventory/SALLM-0159a63daed0a88f461bbd69dd1160893e394a67 \
-      --cweval-root datasets/source-inventory/CWEval-e9a2a124c8c53679b6d8d27adfd2f6c40e7576d7 \
-      --cyberseceval-path "datasets/Submission Code and Results/Data/Instruct Prime/instruct.json" \
-      --llmseceval-root datasets/source-inventory/LLMSecEval-39e97f046dbb2c4c604d31b86f2a4d3d27827388 \
-      --securityeval-root datasets/source-inventory/SecurityEval-6f4fb70f782c6d47b02ea24341e8ef8c1eb04a6a \
-      --codeseceval-root datasets/source-inventory/CodeSecEval-HF-c3ffce09269f2d7b092888efe05d070b6fcb97f5 \
-      --secodeplt-root datasets/source-inventory/SeCodePLT-1f3da9ee48e0046359903cba0cc48d03665f96d5 \
-      --limit-per-source 5
-
-The optional limit is only for parser smoke tests. The output closes normalized
-records, exact-prompt provisional clusters, source-test coordinates, exclusions,
-and a report in one immutable bundle. It does not execute source code, complete
-semantic clustering, freeze a population, or authorize a scientific claim.
-The CyberSecEval input is the submission-provided 1,404-row Instruct Prime
-snapshot; normalization starts from that frozen file and does not attempt to
-reconstruct its authors' earlier cleaning. Every candidate source follows the
-same admission and deduplication schema, with its citation, address, version,
-and content hash retained in the artifact.
-
-`contract-requests.json` is an outcome-blind input for an external requirements
-extractor. After those responses are produced, validate and freeze them with:
-
-    prompt-mechanism-study contract-freeze prepared responses.json contracts
-
-Lexical blocking only proposes pairs for later blind semantic adjudication; it
-does not declare semantic duplicates:
-
-    prompt-mechanism-study dedup-candidates prepared dedup-candidates
-
-## Code map
-
-| Module | Responsibility |
-| --- | --- |
-| adapters.py | Frozen external-producer identities |
-| representation.py | Splits, semantic clusters, candidates, universe |
-| prioritization.py | Score, rank, and top-K freeze |
-| intervention.py | Intervention spec, LLM executions, semantic validation, prompt assembly |
-| formal.py | Frozen held-out task selection and ADD/REMOVE intervention preparation |
-| randomization.py | Complete-block assignment |
-| measurement.py | External results and infrastructure boundary |
-| outcomes.py | Total outcome decomposition |
-| inference.py | Cluster-weighted ITT, bounds, simultaneous intervals |
-| workflow.py | Prospective freeze and post-measurement analysis |
-| records.py | Canonical content identities |
-| artifact_io.py | Exact-byte bundle closure |
-| datasets.py | External source normalization and provisional exact deduplication |
-| cli.py | Freeze, analyze, verify, and summarize |
-
-## Review
-
-The default suite contains 42 focused scientific-invariant tests:
-
-    python -m pytest -q
-
-Three additional milestone tests execute the separated freeze/analyze path and
-the complete intervention-freeze smoke:
-
-    python -m pytest -q -m milestone
-
-The default suite is intentionally small. Historical deployment incidents,
-provider diagnostics, campaign receipts, and field-by-field migration tests
-remain in Git history rather than the active reviewer artifact.
+Historical ADD/REMOVE studies, deployment incidents, provider tuning,
+calibration exploration, and server administration remain archival evidence.
+They are not alternative active execution paths.

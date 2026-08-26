@@ -112,7 +112,7 @@ def prepare_tsg_candidate_pool(
         rows.append(
             {
                 "task_id": selected["cluster_id"],
-                "semantic_cluster_id": selected["cluster_id"],
+                "task_unit_id": selected["cluster_id"],
                 "cwe": selected["primary_cwe"],
                 "task_family": task_family,
                 "generation_mode": "complete_python_source",
@@ -410,7 +410,7 @@ def prepare_external_tasks(
     count: int = 30,
     selection_seed: int = 96101,
 ) -> dict[str, Any]:
-    """Select Python clusters by a frozen hash rule without consulting outcomes."""
+    """Select Python task units by a frozen hash rule without consulting outcomes."""
 
     if output.exists():
         raise FileExistsError(output)
@@ -433,7 +433,7 @@ def prepare_external_tasks(
         rows.append(
             {
                 "task_id": source["task_id"],
-                "semantic_cluster_id": source["task_id"],
+                "task_unit_id": source.get("task_unit_id", source["task_id"]),
                 "cwe": source["cwe"],
                 "task_family": source["task_family"],
                 "realization_id": mechanism["realization_id"],
@@ -479,12 +479,16 @@ def prepare_registered_tasks(
     for task_id in selected_task_ids:
         source = source_by_id[task_id]
         mechanism = select_mechanism(source, registry)
+        task_unit_id = (
+            source.get("task_unit_id")
+            or source.get("semantic_cluster_id")
+            or source.get("task_cluster_id")
+            or task_id
+        )
         rows.append(
             {
                 "task_id": task_id,
-                "semantic_cluster_id": source.get(
-                    "semantic_cluster_id", source.get("task_cluster_id")
-                ),
+                "task_unit_id": task_unit_id,
                 "cwe": source["cwe"],
                 "task_family": source["task_family"],
                 "realization_id": mechanism["realization_id"],
@@ -496,8 +500,8 @@ def prepare_registered_tasks(
                 "functional_contract": source["functional_contract"],
             }
         )
-    if any(not row["semantic_cluster_id"] for row in rows):
-        raise FormalStudyError("registered task cluster binding is missing")
+    if any(not row["task_unit_id"] for row in rows):
+        raise FormalStudyError("registered task-unit binding is missing")
     payload = "".join(canonical_json(row) + "\n" for row in rows).encode()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(payload)
@@ -545,7 +549,6 @@ def prepare_study_sample_tasks(
         rows.append(
             {
                 "task_id": selected["cluster_id"],
-                "semantic_cluster_id": selected["cluster_id"],
                 "task_unit_id": selected["task_unit_id"],
                 "sample_order": selected["sample_order"],
                 "cwe": selected["primary_cwe"],
@@ -1183,12 +1186,17 @@ def _load_inputs(root: Path, config_path: Path, tasks_path: Path) -> dict[str, A
     if Counter(row["cwe"] for row in tasks) != Counter(source["expected_cwe_counts"]):
         raise FormalStudyError("prepared task CWE support drifted")
     task_ids = [row["task_id"] for row in tasks]
-    cluster_ids = [row["semantic_cluster_id"] for row in tasks]
+    task_unit_ids = [
+        row.get("task_unit_id")
+        or row.get("semantic_cluster_id")
+        or row["task_id"]
+        for row in tasks
+    ]
     pilot_ids = source.get("pilot_task_ids", [])
     execution_mode = source.get("execution_mode", "pilot_remaining")
     if (
         len(task_ids) != len(set(task_ids))
-        or len(cluster_ids) != len(set(cluster_ids))
+        or len(task_unit_ids) != len(set(task_unit_ids))
         or len(pilot_ids) != len(set(pilot_ids))
         or not set(pilot_ids) <= set(task_ids)
         or config["randomization"]["arms"] != list(ARMS)
@@ -1625,7 +1633,6 @@ def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
         key: task[key]
         for key in (
             "task_id",
-            "semantic_cluster_id",
             "cwe",
             "task_family",
             "realization_id",
@@ -1633,6 +1640,11 @@ def _task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
             "oracle_profile_id",
         )
     }
+    summary["task_unit_id"] = (
+        task.get("task_unit_id")
+        or task.get("semantic_cluster_id")
+        or task["task_id"]
+    )
     if "mechanism_binding" in task:
         summary["mechanism_binding_id"] = task["mechanism_binding"]["binding_id"]
     return summary

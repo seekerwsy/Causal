@@ -3,8 +3,8 @@
 ## Status and scope
 
 This document defines the prospective dataset design for the single active
-Prompt Mechanism Study path. The 240-cluster Python population remains a
-coverage target. Section 8 records a smaller, outcome-blind 60-cluster sample
+Prompt Mechanism Study path. The 240-task-unit Python population remains a
+coverage target. Section 8 records a smaller, outcome-blind 60-task-unit sample
 for the next overall-effect validation; it is not evidence that an intervention
 effect exists.
 
@@ -12,29 +12,39 @@ Generator identities, assignment records, and the pilot split remain unfrozen.
 No generated-code outcome, model score, or historical per-task result may
 influence admission or sampling.
 
-## 1. Statistical units and study layers
+## 1. Statistical units, terminology, and study layers
 
-The highest independent and resampling unit is `semantic_task_cluster_id`.
+The highest independent and resampling unit is the **task unit**, identified as
+`task_unit_id` in prospective protocols. A task unit is the cleaned dataset row
+seen by the experiment, but it may summarize several equivalent source records.
 Rows, prompt rewrites, source mutations, framework variants, language
 translations, request slots, and multiple hypotheses over the same semantic
-task are dependent descendants of that cluster.
+task are dependent descendants of that unit.
+
+The curation implementation groups source records into conservative semantic
+clusters before choosing a representative. Frozen artifacts therefore retain
+physical names such as `cluster_id` and `semantic_task_cluster_id`; these are
+legacy task-unit coordinates, not an additional paper-facing statistical
+concept. This document uses **task unit** for populations, sampling, assignment,
+resampling, and effect estimation, and reserves **cluster** for the internal
+deduplication group or an immutable legacy field/file name.
 
 The prospective dataset has three inferentially separate layers:
 
-| Layer | Target semantic clusters | Role | Primary pooling rule |
+| Layer | Target task units | Role | Primary pooling rule |
 | --- | ---: | --- | --- |
 | Python confirmatory core | 240 | primary assigned-arm ITT | may pool only under the frozen stratified estimator |
 | C/C++ memory-safety replication | 28 | cross-language replication | report separately |
 | backend-application replication | 28 | end-to-end functional/exploit replication | report separately |
 
-The planned evaluation population therefore contains 296 semantic clusters,
+The planned evaluation population therefore contains 296 task units,
 but **296 is not one analysis denominator**. The two replication layers cannot
 be silently pooled with the Python core because their languages, task
 granularity, functional contracts, and security Oracles differ.
 
 Two additional outcome-excluded resources are planned:
 
-- 24 cluster-disjoint tasks for intervention-executor development; and
+- 24 task-unit-disjoint tasks for intervention-executor development; and
 - 24 independent gold programs for functional-Judge and security-Oracle
   calibration.
 
@@ -44,13 +54,13 @@ confirmatory outcomes are also excluded.
 
 ## 2. Confirmatory security families
 
-The Python core targets four mechanism families with 60 semantic clusters per
+The Python core targets four mechanism families with 60 task units per
 family. Leaf-CWE quotas are prospective balancing targets, not separate
 confirmatory estimands.
 
 ### 2.1 Injection and interpreter boundaries
 
-Target 60 clusters, approximately 15 per leaf:
+Target 60 task units, approximately 15 per leaf:
 
 - CWE-78: OS command injection;
 - CWE-79: cross-site scripting;
@@ -59,7 +69,7 @@ Target 60 clusters, approximately 15 per leaf:
 
 ### 2.2 File, parser, and external-resource boundaries
 
-Target 60 clusters, approximately 10 per leaf:
+Target 60 task units, approximately 10 per leaf:
 
 - CWE-22: path traversal;
 - CWE-434: unrestricted or dangerous file upload;
@@ -70,7 +80,7 @@ Target 60 clusters, approximately 10 per leaf:
 
 ### 2.3 Identity, authorization, permissions, and sensitive information
 
-Target 60 clusters, approximately 10 per leaf:
+Target 60 task units, approximately 10 per leaf:
 
 - CWE-200: exposure of sensitive information;
 - CWE-287: improper authentication;
@@ -81,7 +91,7 @@ Target 60 clusters, approximately 10 per leaf:
 
 ### 2.4 Cryptography, randomness, and integrity
 
-Target 60 clusters, approximately 12 per leaf:
+Target 60 task units, approximately 12 per leaf:
 
 - CWE-295: improper certificate validation;
 - CWE-327: use of a broken or risky cryptographic algorithm;
@@ -91,12 +101,12 @@ Target 60 clusters, approximately 12 per leaf:
 - CWE-347: improper verification of cryptographic signature.
 
 The primary paper-facing effect is the frozen overall, hypothesis-specific
-assigned-arm ITT over eligible Python-core clusters. The four family results
+assigned-arm ITT over eligible Python-core task units. The four family results
 are preplanned heterogeneity estimates. Individual CWE results are descriptive
 unless a later, outcome-blind power simulation explicitly freezes a supported
 CWE-level family before generation.
 
-If a leaf quota cannot be filled by eligible, independent clusters, the data
+If a leaf quota cannot be filled by eligible, independent task units, the data
 gate fails for that planned coverage claim. Before any model outcome is read,
 the study may either acquire additional tasks, document an outcome-blind
 within-family redistribution, or narrow the prospective coverage. It may not
@@ -107,9 +117,9 @@ the shortfall.
 
 ### 3.1 C/C++ memory safety
 
-The memory-safety layer targets four independent semantic clusters for each of
+The memory-safety layer targets four independent task units for each of
 CWE-119, CWE-120, CWE-125, CWE-190, CWE-416, CWE-476, and CWE-787, for 28
-clusters total. Measurement requires compilation, a frozen functional test,
+task units total. Measurement requires compilation, a frozen functional test,
 and the applicable executable security check such as ASan/UBSan or a frozen
 exploit. A Python static-analysis result cannot substitute for this layer.
 
@@ -118,7 +128,7 @@ exploit. A Python static-analysis result cannot substitute for this layer.
 The backend layer targets 28 independent application scenarios with frozen
 functional tests and end-to-end security checks. BaxBench is the preferred
 initial source. Framework implementations of one scenario are dependent
-realizations of that scenario, not independent clusters. The selected
+realizations of that scenario, not independent task units. The selected
 framework/language realizations and their weights must be frozen before any
 generation outcome is read.
 
@@ -135,7 +145,7 @@ remains in the same lineage unless independence is demonstrated.
 
 For the Python core:
 
-- no source lineage may contribute more than 25 percent of frozen clusters;
+- no source lineage may contribute more than 25 percent of frozen task units;
 - every mechanism family must contain at least three source lineages;
 - exact and semantic duplicates across all sources count once; and
 - dataset availability or previous model performance cannot change the
@@ -181,7 +191,7 @@ Every admitted confirmatory task must bind:
 
 ```text
 task_id
-semantic_task_cluster_id
+task_unit_id
 source_dataset
 source_version
 source_item_id
@@ -213,7 +223,7 @@ Admission additionally requires:
 5. at least one valid frozen Target/Noop arm protocol for the relevant
    hypothesis;
 6. stable source, version, license, original identity, and content digest;
-7. no semantic-cluster overlap with development, calibration, discovery, or
+7. no task-unit overlap with development, calibration, discovery, or
    another confirmatory/replication split; and
 8. no selection based on generated code, security label, functional verdict,
    or effect direction.
@@ -329,7 +339,7 @@ context.
 At the family level, injection/interpreter has 144 eligible clusters,
 file/parser/external-resource has 79, identity/authorization/permissions has
 22, and cryptography/randomness/integrity has 61. Three families now meet the
-60-cluster target. The identity family remains below target, so the
+60-task-unit target. The identity family remains below target, so the
 prospective four-family population gate remains closed rather than treating
 context-dependent authorization as locally proven.
 
@@ -385,7 +395,7 @@ new CWE labels: CWE-74/77/95/113/117/643/943; CWE-377/379/601;
 CWE-250/259/269/276/352/522/863; and CWE-319/321/326/329/760. Every included
 CWE has at least two candidates. These tasks are the first pool to examine when
 the study prospectively expands its mechanism scope, but they remain excluded
-from the current 60-cluster denominator until their measurement gate passes.
+from the current 60-task-unit denominator until their measurement gate passes.
 The remaining 1,161 outside clusters stay in the inventory at lower priority;
 most lack a source test, a supported language runtime, or a mechanism close to
 the frozen research question.
@@ -424,7 +434,7 @@ CWE-338 (33). Their family support is:
 | cryptography, randomness, integrity | 56 | 60 | count fail |
 
 These counts are not valid for sampling from the new 2,165-cluster population.
-Before the correction, the prospective 240-cluster Python population gate did
+Before the correction, the prospective 240-task-unit Python population gate did
 **not pass**. In addition, 148 of the 204 eligible representatives came from the
 CyberSecEval Instruct Prime lineage. Under the frozen 25-percent per-lineage
 cap, at most 64 of the currently eligible clusters can be selected, even before
@@ -443,7 +453,7 @@ The next Python validation uses one complete four-arm block per sampled task:
 `absent`, `specific`, `generic`, and `placebo`. The frozen minimum sample has
 60 independent task units, 15 per mechanism family, for 240 assignments per
 generator model. The primary contrast is `specific - placebo`; family effects
-are descriptive heterogeneity estimates because 15 clusters per family are
+are descriptive heterogeneity estimates because 15 task units per family are
 not separately powered confirmatory studies.
 
 The dataset size does **not** determine the final assignment count. Assignment
@@ -454,12 +464,12 @@ assignments is a budgeting illustration, not a frozen run contract.
 
 ## 8. Outcome-blind sample-size gate
 
-The 240-cluster Python core is a prospective design target, not a substitute
+The 240-task-unit Python core is a prospective design target, not a substitute
 for hypothesis-specific power analysis. Before confirmation, simulation must
 use plausible and documented values for:
 
 - baseline oracle-evaluable secure-code yield;
-- semantic-cluster dependence;
+- within-task-unit dependence among descendant records or realizations;
 - request-randomness and realization heterogeneity;
 - terminal-no-code and Oracle-unknown rates;
 - the minimum scientifically important effect;
@@ -467,9 +477,9 @@ use plausible and documented values for:
 - the frozen max-|T| multiplicity procedure.
 
 The simulation reports power and interval width for each selected hypothesis's
-actual eligible cluster set. A total pool of 240 cannot rescue a hypothesis
+actual eligible task-unit set. A total pool of 240 cannot rescue a hypothesis
 with sparse applicability. If the target design is insufficient, the study
-must acquire more eligible clusters, reduce the prospectively selected
+must acquire more eligible task units, reduce the prospectively selected
 hypothesis family, or report that confirmation is not supported. It cannot
 change the denominator, combine incompatible strata, or continue sampling in
 response to the observed effect.
@@ -508,7 +518,7 @@ source inventory and version lock
 -> exact and semantic deduplication
 -> functional-contract and Oracle-profile admission
 -> outcome-blind power simulation
--> stratified cluster sampling with a fixed seed
+-> stratified task-unit sampling with a fixed seed
 -> task, split, hypothesis-eligibility, and arm manifests frozen
 -> confirmatory generation authorized
 ```
@@ -521,10 +531,10 @@ typed reasons.
 The planned design is accepted only when:
 
 - all 240 core, 28 memory, and 28 backend targets are either filled by eligible
-  independent clusters or a prospective shortfall amendment is documented
+  independent task units or a prospective shortfall amendment is documented
   before outcomes;
 - the primary hypothesis-specific power gate passes;
-- development, calibration, and all scientific layers are cluster-disjoint;
+- development, calibration, and all scientific layers are task-unit-disjoint;
 - source-lineage caps and family diversity constraints pass;
 - every admitted task has a functional contract and calibrated Oracle profile;
 - the assignment budget is recomputed from the frozen hypothesis and arm

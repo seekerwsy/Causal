@@ -126,6 +126,8 @@ def test_external_selection_uses_only_frozen_inputs_and_drops_outcomes(tmp_path:
     assert first.read_bytes() == second.read_bytes()
     rows = [json.loads(line) for line in first.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 30
+    assert all(row["task_unit_id"] == row["task_id"] for row in rows)
+    assert all("semantic_cluster_id" not in row for row in rows)
     assert all("outcome" not in key for row in rows for key in row)
 
 

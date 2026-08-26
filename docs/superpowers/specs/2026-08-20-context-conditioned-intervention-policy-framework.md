@@ -7,6 +7,14 @@
 **Scope:** Prospective theory, discovery, hypothesis selection, randomized confirmation,
 inference, and paper-facing research questions
 
+**Terminology:** The paper-facing and prospective-protocol name for the highest
+independent sampling/resampling coordinate is **task unit** (`task_unit_id`).
+This document's existing mathematical symbol `c` and frozen physical names
+containing `semantic_task_cluster_id` denote that same unit; "cluster" is
+otherwise reserved for the preceding source-record deduplication operation.
+This terminology change does not alter membership, weights, estimands, or any
+frozen artifact.
+
 ## 1. Authority and Supersession
 
 This document is the review-candidate successor to:

@@ -8,7 +8,7 @@ Default reviewer layer:
 
 Each test owns a scientific invariant:
 
-- discover/confirm and semantic-cluster separation;
+- discover/confirm and task-unit separation;
 - exact candidate-universe, score, rank, and top-K freeze;
 - operation-specific Target/Noop instructions and LLM execution evidence;
 - outcome-blind semantic validation before randomization;
@@ -16,8 +16,8 @@ Each test owns a scientific invariant:
 - frozen adapter identities;
 - code/Oracle/functionality outcome decomposition;
 - terminal and infrastructure failure semantics;
-- equal semantic-cluster weighting and per-model estimates;
-- simultaneous cluster bootstrap replay;
+- equal task-unit weighting and per-model estimates;
+- simultaneous task-unit bootstrap replay;
 - exact-byte artifact closure.
 
 Structural milestone layer:
