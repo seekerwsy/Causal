@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from prompt_mechanism_study.security_profiles import evaluate_security_profile
@@ -104,6 +107,20 @@ def test_profiles_keep_absent_or_unresolved_evidence_unknown() -> None:
         )["security_label"]
         == "insecure"
     )
+
+
+@pytest.mark.parametrize(
+    "case",
+    json.loads(
+        Path("data/oracle-calibration/prompt-tsg-v3-cases.json").read_text(
+            encoding="utf-8"
+        )
+    ),
+    ids=lambda case: case["case_id"],
+)
+def test_prompt_tsg_v3_profiles_match_frozen_calibration(case: dict[str, str]) -> None:
+    result = evaluate_security_profile(case["code"], case["profile_id"])
+    assert result["security_label"] == case["expected_label"]
     assert (
         evaluate_security_profile(
             "def read(path):\n data = open(path).read()\n path.relative_to('/safe')\n return data",

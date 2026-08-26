@@ -1,0 +1,56 @@
+[
+  {
+    "case_id": "path-relative-to-secure",
+    "profile_id": "python.cwe22.path_confinement.v2",
+    "expected_label": "secure",
+    "code": "from pathlib import Path\ndef read(base, name):\n    target = (Path(base).resolve() / name).resolve()\n    target.relative_to(Path(base).resolve())\n    return target.read_text()\n"
+  },
+  {
+    "case_id": "path-is-relative-to-secure",
+    "profile_id": "python.cwe22.path_confinement.v2",
+    "expected_label": "secure",
+    "code": "from pathlib import Path\ndef read(base, name):\n    root = Path(base).resolve()\n    target = (root / name).resolve()\n    if not target.is_relative_to(root):\n        raise ValueError('outside root')\n    return target.read_text()\n"
+  },
+  {
+    "case_id": "path-commonpath-secure",
+    "profile_id": "python.cwe22.path_confinement.v2",
+    "expected_label": "secure",
+    "code": "import os\ndef read(base, name):\n    root = os.path.realpath(base)\n    target = os.path.realpath(os.path.join(root, name))\n    if os.path.commonpath([root, target]) != root:\n        raise ValueError('outside root')\n    return open(target).read()\n"
+  },
+  {
+    "case_id": "path-prefix-check-insecure",
+    "profile_id": "python.cwe22.path_confinement.v2",
+    "expected_label": "insecure",
+    "code": "import os\ndef read(base, name):\n    root = os.path.abspath(base)\n    target = os.path.abspath(os.path.join(root, name))\n    if not target.startswith(root):\n        raise ValueError('outside root')\n    return open(target).read()\n"
+  },
+  {
+    "case_id": "command-list-concatenation-secure",
+    "profile_id": "python.cwe78.fixed_executable_argv.v1",
+    "expected_label": "secure",
+    "code": "import subprocess\ndef submit(args):\n    return subprocess.run(['bsub'] + args, shell=False, check=True)\n"
+  },
+  {
+    "case_id": "command-list-literal-secure",
+    "profile_id": "python.cwe78.fixed_executable_argv.v1",
+    "expected_label": "secure",
+    "code": "import subprocess\ndef list_dir(path):\n    return subprocess.check_output(['ls', path], text=True)\n"
+  },
+  {
+    "case_id": "command-shell-string-insecure",
+    "profile_id": "python.cwe78.fixed_executable_argv.v1",
+    "expected_label": "insecure",
+    "code": "import subprocess\ndef list_dir(path):\n    return subprocess.run(f'ls {path}', shell=True)\n"
+  },
+  {
+    "case_id": "command-dynamic-executable-insecure",
+    "profile_id": "python.cwe78.fixed_executable_argv.v1",
+    "expected_label": "insecure",
+    "code": "import subprocess\ndef run(tool, value):\n    return subprocess.run([tool, value], shell=False)\n"
+  },
+  {
+    "case_id": "command-helper-unresolved",
+    "profile_id": "python.cwe78.fixed_executable_argv.v1",
+    "expected_label": "unknown",
+    "code": "import subprocess\ndef build(value):\n    return make_command(value)\ndef run(value):\n    return subprocess.run(build(value), shell=False)\n"
+  }
+]

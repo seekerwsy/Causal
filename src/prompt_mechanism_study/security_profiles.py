@@ -14,6 +14,8 @@ LOCAL_PROFILE_IDS = frozenset(
     {
         "python.cwe22.archive_extraction.v1",
         "python.cwe22.path_confinement.v1",
+        "python.cwe22.path_confinement.v2",
+        "python.cwe78.fixed_executable_argv.v1",
         "python.cwe611.xml_external_entity.v1",
         "python.cwe732.owner_only_file_permissions.v1",
         "python.cwe798.credential_source.v1",
@@ -89,8 +91,12 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         raise ValueError(f"unsupported local security profile: {profile_id}")
     tree = ast.parse(code)
     aliases = _aliases(tree)
-    if profile_id.endswith("path_confinement.v1"):
+    if profile_id.endswith("path_confinement.v2"):
+        facts = _path_facts_v2(tree, aliases)
+    elif profile_id.endswith("path_confinement.v1"):
         facts = _path_facts(tree, aliases)
+    elif profile_id.endswith("fixed_executable_argv.v1"):
+        facts = _subprocess_facts(tree, aliases)
     elif profile_id.endswith("archive_extraction.v1"):
         facts = _archive_facts(tree, aliases)
     elif profile_id.endswith("xml_external_entity.v1"):
@@ -282,6 +288,169 @@ def _path_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
                 state, reason = "unsafe", "external_input_reaches_path_sink_without_guard"
             else:
                 state, reason = "unresolved", "path_origin_or_containment_is_unresolved"
+            facts.append(_fact(node, name, state, reason))
+    return facts
+
+
+def _always_exits(nodes: list[ast.stmt]) -> bool:
+    return bool(nodes) and isinstance(nodes[-1], (ast.Raise, ast.Return))
+
+
+def _guarded_path_names_v2(function: ast.AST) -> dict[str, int]:
+    """Recognize only guards that stop execution before an unsafe path sink."""
+
+    assignments = _assignments(function)
+    resolved = {
+        name
+        for name, value in assignments.items()
+        if isinstance(value, ast.Call)
+        and (
+            (isinstance(value.func, ast.Attribute) and value.func.attr == "resolve")
+            or _name(value.func, {}).endswith(("os.path.abspath", "os.path.realpath"))
+        )
+    }
+    guarded = _resolved_guarded_names(function)
+    for node in ast.walk(function):
+        if not isinstance(node, ast.If) or not _always_exits(node.body):
+            continue
+        test = node.test
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+            call = test.operand
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "is_relative_to"
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id in resolved
+            ):
+                guarded[call.func.value.id] = min(
+                    guarded.get(call.func.value.id, node.lineno), node.lineno
+                )
+        if not isinstance(test, ast.Compare) or len(test.ops) != 1:
+            continue
+        left = test.left
+        if not (
+            isinstance(left, ast.Call)
+            and _name(left.func, {}).endswith("os.path.commonpath")
+            and left.args
+            and isinstance(left.args[0], (ast.List, ast.Tuple))
+            and len(left.args[0].elts) == 2
+            and isinstance(test.ops[0], (ast.NotEq, ast.IsNot))
+        ):
+            continue
+        for item in left.args[0].elts:
+            if isinstance(item, ast.Name) and item.id in resolved:
+                guarded[item.id] = min(guarded.get(item.id, node.lineno), node.lineno)
+    return guarded
+
+
+def _path_facts_v2(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    facts = []
+    for function in _functions(tree):
+        params = _parameters(function)
+        assignments = _assignments(function)
+        guarded = _guarded_path_names_v2(function)
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _name(node.func, aliases)
+            is_method = isinstance(node.func, ast.Attribute) and node.func.attr in _PATH_METHODS
+            if name not in _PATH_CALLS and not is_method:
+                continue
+            path = node.func.value if is_method else (node.args[0] if node.args else None)
+            if path is None:
+                facts.append(_fact(node, name, "unresolved", "path_argument_missing"))
+                continue
+            expanded = assignments.get(path.id, path) if isinstance(path, ast.Name) else path
+            if (
+                isinstance(path, ast.Name)
+                and path.id in guarded
+                and guarded[path.id] < node.lineno
+            ):
+                state, reason = "safe", "resolved_path_has_stopping_containment_guard"
+            elif _is_fixed_path(expanded, assignments):
+                state, reason = "safe", "path_is_independent_of_function_parameters"
+            elif _contains_external_input(expanded, params, aliases):
+                state, reason = "unsafe", "external_input_reaches_path_sink_without_guard"
+            else:
+                state, reason = "unresolved", "path_origin_or_containment_is_unresolved"
+            facts.append(_fact(node, name, state, reason))
+    return facts
+
+
+_SUBPROCESS_CALLS = frozenset(
+    {
+        "subprocess.call",
+        "subprocess.check_call",
+        "subprocess.check_output",
+        "subprocess.Popen",
+        "subprocess.run",
+    }
+)
+
+
+def _resolve_name(node: ast.AST, assignments: dict[str, ast.AST]) -> ast.AST:
+    seen: set[str] = set()
+    while isinstance(node, ast.Name) and node.id in assignments and node.id not in seen:
+        seen.add(node.id)
+        node = assignments[node.id]
+    return node
+
+
+def _argv_executable(node: ast.AST, assignments: dict[str, ast.AST]) -> ast.AST | None:
+    node = _resolve_name(node, assignments)
+    if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+        return _resolve_name(node.elts[0], assignments)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _argv_executable(node.left, assignments)
+    return None
+
+
+def _subprocess_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    """Bounded CWE-78 profile for fixed executables and structured argv."""
+
+    facts = []
+    for function in _functions(tree):
+        params = _parameters(function)
+        assignments = _assignments(function)
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _name(node.func, aliases)
+            if name in {"os.system", "os.popen"}:
+                facts.append(_fact(node, name, "unsafe", "command_string_api"))
+                continue
+            if name not in _SUBPROCESS_CALLS:
+                continue
+            command = node.args[0] if node.args else next(
+                (item.value for item in node.keywords if item.arg in {"args", "command"}),
+                None,
+            )
+            shell = next((item.value for item in node.keywords if item.arg == "shell"), None)
+            if isinstance(shell, ast.Constant) and shell.value is True:
+                state, reason = "unsafe", "shell_execution_enabled"
+            elif command is None:
+                state, reason = "unresolved", "command_argument_missing"
+            else:
+                resolved = _resolve_name(command, assignments)
+                executable = _argv_executable(resolved, assignments)
+                if executable is not None:
+                    if isinstance(executable, ast.Constant) and isinstance(
+                        executable.value, str
+                    ):
+                        state, reason = "safe", "fixed_executable_structured_argv"
+                    elif _contains_external_input(executable, params, aliases):
+                        state, reason = "unsafe", "untrusted_executable_selection"
+                    else:
+                        state, reason = "unresolved", "executable_selection_unresolved"
+                elif isinstance(resolved, (ast.Name, ast.JoinedStr, ast.BinOp)) and (
+                    _contains_external_input(resolved, params, aliases)
+                ):
+                    state, reason = "unsafe", "external_input_reaches_command_text"
+                elif isinstance(resolved, ast.Constant) and isinstance(resolved.value, str):
+                    state, reason = "safe", "fixed_executable_without_shell"
+                else:
+                    state, reason = "unresolved", "command_form_unresolved"
             facts.append(_fact(node, name, state, reason))
     return facts
 
