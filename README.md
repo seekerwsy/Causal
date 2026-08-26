@@ -109,12 +109,15 @@ identifier rejection and its Oracle accepted only literal maps. The observed
 cell difference is therefore retained as implementation evidence, not as a
 security-effect result.
 
-The active prospective confirmation uses the equivalence-aware v2 Oracle and 30
-fresh controlled task units. The v2 Oracle accepts both literal maps and
-dominating finite-domain membership guards. Both operator orders remain in the
-frozen realization distribution, giving 240 assignments for the Qwen3.5 model.
-This corpus identifies bounded mechanism response; it is not a representative
-sample of all CWE-89 prompts.
+The formal v3 confirmation used the equivalence-aware v2 Oracle and 30 controlled
+task units. The v2 Oracle accepts both literal maps and dominating finite-domain
+membership guards. Both operator orders remained in the frozen realization
+distribution, giving 240 assignments for the Qwen3.5 model. The run completed and
+was independently verified. Its primary interaction was zero with a simultaneous
+interval of `[-0.0833, +0.0833]`; A00 was already 96.7% secure, revealing a severe
+from-scratch baseline ceiling. This is a formal bounded null result, not evidence
+that the method failed to run or that prompt mechanisms never matter. See
+`docs/experiments/2026-08-27-factorial-sql-confirm-v3-results.md`.
 
 ## Outcomes and evidence boundary
 
@@ -165,6 +168,13 @@ unknown bounds, preregistered secondary intervals, and the independent-verifier
 result into one content-addressed bundle. Claim permission does not imply a
 positive or significant result; the frozen primary and practical gates still
 apply.
+
+Verify the tracked formal v3 result bundle and its frozen file hashes:
+
+```text
+prompt-mechanism-study verify \
+  data/formal/results/factorial-sql-confirm-qwen35-v3
+```
 
 Verify the tracked Qwen3.7 analysis independently:
 

@@ -6,7 +6,9 @@
 
 **数据权威：** [研究数据集规范](research-dataset-spec.md)
 
-**最新门控证据：** [自然提示 positivity pilot](experiments/2026-08-26-natural-prompt-positivity-pilot.md)
+**最新正式实验：** [SQL 二因素 confirmation v3](experiments/2026-08-27-factorial-sql-confirm-v3-results.md)
+
+**最新观测门控证据：** [自然提示 positivity pilot](experiments/2026-08-26-natural-prompt-positivity-pilot.md)
 
 本文把现有理论规范、活动代码和已运行证据整理为一条可审查的方法链。它不重新定义冻结实验，也不把规划中的组件写成已经实现或已经产生结果。
 
@@ -281,11 +283,11 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | family-local FCI 与五类 selector 公平比较 | specified，未形成当前可执行主证据 | 当前数据支持不足；活动最小代码只接受外部 score，并未闭合完整 selector benchmark |
 | 原子假设与多 realization 政策 | 部分 implemented + tested | 最小 kernel 已有 candidate、realization、bundle 和 policy 绑定；完整 successor freeze 字段尚未全部闭合 |
 | successor ADD/REMOVE 四臂 | specified，未在最小 kernel 完整实现 | 最小 kernel 目前只有 `TARGET/NOOP`；另一个 four-arm 路径属于已冻结 legacy/pilot 实现，不能冒充 successor 协议 |
-| 二因素配对析因扩展 | specified + implemented + tested + canary executed | `PairSpec`、四 cell bundle、完整块随机化、Oracle Gate、ITT/unknown bounds/max-|T| 和独立 verifier 已闭合；40-assignment SQL canary 只提供工程证据，v2 confirmation 已冻结但尚未执行 |
+| 二因素配对析因扩展 | specified + implemented + tested + formally executed + reported | `PairSpec`、四 cell bundle、完整块随机化、Oracle Gate、ITT/unknown bounds/max-|T| 和独立 verifier 已闭合；240-assignment v3 confirmation 是正式零结果 |
 | 独立 measurement 与 total ledger | implemented + tested | 活动代码保留 code、Oracle、functionality 和基础设施失败边界 |
 | task-unit ITT 与未知 bounds | implemented + tested | Target/Noop、task/realization 权重和同步 bootstrap 已闭合 |
-| 完整 max-|T|、selector nested bootstrap、全局 robustness family | specified，部分 implemented | 尚不能声称 successor 的完整多重推断已执行 |
-| 正式 confirmatory study | frozen + preflight tested，尚未执行 | 30 个 fresh task units、2 个顺序、4 cells，共 240 assignments；当前仍没有 confirmatory effect 结果 |
+| 完整 max-|T|、selector nested bootstrap、全局 robustness family | factorial family implemented + executed；selector family 仍未执行 | 正式析因结果使用冻结 max-|T| family；观测 selector 因支持门失败未运行 |
+| 正式 confirmatory study | frozen + executed + independently verified + reported | 30 个 task units、2 个顺序、4 cells，共 240 assignments；interaction 为 0，校正区间跨 0，功能非劣 Gate 通过 |
 
 ## 13. 当前 Gate 状态
 
@@ -297,17 +299,17 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | FCI selector | **未运行** | 被前一 gate 正确阻止 |
 | successor 单机制四臂完全冻结 | **未通过** | 仍不能把 legacy 四臂冒充 successor confirmation |
 | pairwise factorial canary | **已执行并独立验证；效应解释未通过构造效度审计** | 5 task units、2 个顺序、4 cells，共 40 assignments；旧任务合同和窄 Oracle 混入机制符合性，不能作为安全效应证据 |
-| successor confirmatory generation | **v2 已冻结并通过零调用 preflight，尚未执行** | 30 个 fresh task units、2 个顺序、4 cells，共 240 assignments；使用等价实现感知 Oracle v2 和预注册主/次级效应 family |
+| successor confirmatory generation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
 
-当前准确位置是：**理论内核已稳定，观测 selector 分支被数据支持门阻塞；二因素 canary 已执行但只保留为工程证据，前瞻 v2 随机确认分支已冻结并处于正式生成之前。**
+当前准确位置是：**理论内核和二因素活动路径已闭合；观测 selector 分支被数据支持门阻塞；v3 正式随机确认已经执行并得到可复现零结果，其主要限制是从零生成条件下 A00 的 96.7% 安全天花板。**
 
-## 14. 仍需正式决定的三件事
+## 14. v3 后续研究边界
 
-1. **论文主轴。** 若不新增具有同 lineage 双状态自然变化的数据，主论文应以“Prompt TSG 条件化的随机政策效应”为主，FCI 降为 availability-gated 的 selector 扩展；否则 RQ1/RQ2 仍无法获得所需主证据。
-2. **四臂权威。** successor 规范的主对比是 Target-Noop；`README`/旧 four-arm 产物中的 `specific-placebo` 只能保留为 legacy 结果，不能继续作为新确认实验的主 estimand。
-3. **实现闭合范围。** 配对析因路径只保留线性 runner、既有 Oracle adapter、total ledger、推断和独立 verifier；不要恢复部署、恢复、campaign 或历史兼容框架。若 canary 通过协议 gate，另行冻结未暴露 task units 的确认研究。
+1. **论文主轴。** 随机政策效应仍是当前可识别的主轴；FCI 是 availability-gated selector 扩展，当前不能报告 selector 优越性。
+2. **正式零结果。** v3 的总体、cell、case 和 Oracle 结果已经暴露；不得扩大同一总体、挑选三个响应任务或修改主 outcome 来追求显著性。
+3. **前瞻 follow-up。** 可以在新的冻结协议中研究“显式不安全 starter scaffold 的修复”，并把从零生成 v3 与 scaffold repair 的差异解释为上下文异质性。新研究必须保留全部 task units、使用新 prompt/task 身份、继续完整四 cell 和两个顺序，并将机制轨迹保持为诊断而非分母过滤。
 
-这些决定都发生在新的 confirm outcomes 之前，因此可以作为前瞻性修订；一旦正式 freeze，就不得根据效果方向再修改。
+follow-up 的设计可以由 v3 的总体天花板诊断启发，但必须在新的 provider outcomes 之前冻结；它不能覆盖、合并或重新解释 v3。
 
 ## 15. 最小活动调用图与阅读顺序
 
