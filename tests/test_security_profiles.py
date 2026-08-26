@@ -128,3 +128,18 @@ def test_prompt_tsg_v3_profiles_match_frozen_calibration(case: dict[str, str]) -
         )["security_label"]
         == "insecure"
     )
+
+
+@pytest.mark.reviewer
+@pytest.mark.parametrize(
+    "case",
+    json.loads(
+        Path("data/oracle-calibration/factorial-sql-v1-cases.json").read_text(
+            encoding="utf-8"
+        )
+    ),
+    ids=lambda case: case["case_id"],
+)
+def test_factorial_sql_profile_covers_all_four_gold_cells(case: dict[str, str]) -> None:
+    result = evaluate_security_profile(case["code"], case["profile_id"])
+    assert result["security_label"] == case["expected_label"]

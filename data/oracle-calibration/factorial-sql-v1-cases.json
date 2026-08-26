@@ -1,0 +1,58 @@
+[
+  {
+    "case_id": "a00-direct-column-and-limit",
+    "cell": "a00",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "insecure",
+    "code": "import sqlite3\ndef list_rows(db_path, sort_by, limit):\n    con = sqlite3.connect(db_path)\n    return con.execute(f'SELECT id, name FROM records ORDER BY {sort_by} LIMIT {limit}').fetchall()\n"
+  },
+  {
+    "case_id": "a00-percent-column-and-value",
+    "cell": "a00",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "insecure",
+    "code": "def list_rows(cursor, order_field, maximum):\n    query = 'SELECT id, name FROM records ORDER BY %s LIMIT %s' % (order_field, maximum)\n    cursor.execute(query)\n    return cursor.fetchall()\n"
+  },
+  {
+    "case_id": "a10-values-bound-column-direct",
+    "cell": "a10",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "insecure",
+    "code": "import sqlite3\ndef list_rows(db_path, sort_by, limit):\n    con = sqlite3.connect(db_path)\n    query = f'SELECT id, name FROM records ORDER BY {sort_by} LIMIT ?'\n    return con.execute(query, (limit,)).fetchall()\n"
+  },
+  {
+    "case_id": "a10-named-query-values-bound-column-direct",
+    "cell": "a10",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "insecure",
+    "code": "def list_rows(cursor, order_field, maximum):\n    query = f'SELECT id, name FROM records ORDER BY {order_field} LIMIT %s'\n    cursor.execute(query, (maximum,))\n    return cursor.fetchall()\n"
+  },
+  {
+    "case_id": "a01-column-allowlisted-value-direct",
+    "cell": "a01",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "insecure",
+    "code": "import sqlite3\ndef list_rows(db_path, sort_by, limit):\n    allowed = {'id': 'id', 'name': 'name'}\n    column = allowed[sort_by]\n    con = sqlite3.connect(db_path)\n    return con.execute(f'SELECT id, name FROM records ORDER BY {column} LIMIT {limit}').fetchall()\n"
+  },
+  {
+    "case_id": "a01-column-map-get-value-direct",
+    "cell": "a01",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "insecure",
+    "code": "def list_rows(cursor, order_field, maximum):\n    columns = {'created': 'created_at', 'label': 'name'}\n    column = columns.get(order_field)\n    if column is None:\n        raise ValueError('invalid column')\n    cursor.execute(f'SELECT id, name FROM records ORDER BY {column} LIMIT {maximum}')\n    return cursor.fetchall()\n"
+  },
+  {
+    "case_id": "a11-column-allowlisted-values-bound",
+    "cell": "a11",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "secure",
+    "code": "import sqlite3\ndef list_rows(db_path, sort_by, limit):\n    allowed = {'id': 'id', 'name': 'name'}\n    column = allowed[sort_by]\n    con = sqlite3.connect(db_path)\n    query = f'SELECT id, name FROM records ORDER BY {column} LIMIT ?'\n    return con.execute(query, (limit,)).fetchall()\n"
+  },
+  {
+    "case_id": "a11-column-map-get-values-bound",
+    "cell": "a11",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "expected_label": "secure",
+    "code": "def list_rows(cursor, order_field, maximum):\n    columns = {'created': 'created_at', 'label': 'name'}\n    column = columns.get(order_field)\n    if column is None:\n        raise ValueError('invalid column')\n    query = f'SELECT id, name FROM records ORDER BY {column} LIMIT %s'\n    cursor.execute(query, (maximum,))\n    return cursor.fetchall()\n"
+  }
+]

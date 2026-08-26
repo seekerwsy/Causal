@@ -4,23 +4,342 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.records import content_id, require_text
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
     QueryState,
+    catalog_sha256,
     feature_state,
     prompt_tsg_from_record,
     query_context,
     query_for_realization,
 )
 from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.representation import Operation
 
 
 class MechanismRegistryError(ValueError):
     """Raised when a mechanism registry or task binding is invalid."""
+
+
+class PairRelation(StrEnum):
+    SAME_FLOW = "same_flow"
+    SHARED_SINK = "shared_sink"
+    DISTINCT_CONTROL_POINTS = "distinct_control_points"
+    ALTERNATIVE_CONTROLS = "alternative_controls"
+
+
+class OracleSupportStatus(StrEnum):
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+
+
+class InteractionScale(StrEnum):
+    RISK_DIFFERENCE = "risk_difference"
+
+
+class PairEligibility(StrEnum):
+    APPLICABLE = "applicable"
+    CONTEXT_ABSENT = "context_absent"
+    CONTEXT_NOT_APPLICABLE = "context_not_applicable"
+    CONTEXT_UNRESOLVED = "context_unresolved"
+    FACTOR_SOURCE_STATE = "factor_source_state"
+    COUNTERPART_MISSING = "counterpart_missing"
+    ORACLE_UNSUPPORTED = "oracle_unsupported"
+
+
+@dataclass(frozen=True, slots=True)
+class PairSpec:
+    """One prospectively frozen pair of independently editable Prompt factors."""
+
+    pair_context_query_id: str
+    factor_1_id: str
+    factor_2_id: str
+    operation_1: Operation
+    operation_2: Operation
+    relation_type: PairRelation
+    oracle_profile_id: str
+    oracle_policy_sha256: str
+    oracle_support_status: OracleSupportStatus
+    primary_outcome: str
+    interaction_scale: InteractionScale = InteractionScale.RISK_DIFFERENCE
+
+    def __post_init__(self) -> None:
+        for name in (
+            "pair_context_query_id",
+            "factor_1_id",
+            "factor_2_id",
+            "oracle_profile_id",
+            "primary_outcome",
+        ):
+            require_text(getattr(self, name), name)
+        if self.factor_1_id == self.factor_2_id:
+            raise ValueError("pair factors must be distinct")
+        if type(self.operation_1) is not Operation or type(self.operation_2) is not Operation:
+            raise TypeError("pair operations must be Operation values")
+        if type(self.relation_type) is not PairRelation:
+            raise TypeError("relation_type must be a PairRelation")
+        if type(self.oracle_support_status) is not OracleSupportStatus:
+            raise TypeError("oracle_support_status must be an OracleSupportStatus")
+        if type(self.interaction_scale) is not InteractionScale:
+            raise TypeError("interaction_scale must be an InteractionScale")
+        _require_digest(self.oracle_policy_sha256, "Oracle policy")
+        if self.primary_outcome != "oracle_evaluable_secure_code_yield":
+            raise ValueError("pair primary outcome must be Oracle-evaluable secure-code yield")
+
+    @property
+    def pair_id(self) -> str:
+        return content_id("pair_", self)
+
+    @property
+    def factors(self) -> tuple[str, str]:
+        return self.factor_1_id, self.factor_2_id
+
+    @property
+    def operations(self) -> tuple[Operation, Operation]:
+        return self.operation_1, self.operation_2
+
+
+@dataclass(frozen=True, slots=True)
+class PairBinding:
+    """Outcome-blind task eligibility evidence for one frozen pair."""
+
+    pair_id: str
+    task_id: str
+    prompt_tsg_id: str
+    decision: PairEligibility
+    context_query_id: str
+    context_state: QueryState
+    factor_states: tuple[tuple[str, QueryState], tuple[str, QueryState]]
+    neutral_counterpart_ids: tuple[tuple[str, str], ...]
+    evidence_node_ids: tuple[str, ...]
+    evidence_edge_ids: tuple[str, ...]
+    outcomes_or_arms_used: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("pair_id", "task_id", "prompt_tsg_id", "context_query_id"):
+            require_text(getattr(self, name), name)
+        if type(self.decision) is not PairEligibility:
+            raise TypeError("decision must be PairEligibility")
+        if type(self.context_state) is not QueryState:
+            raise TypeError("context_state must be QueryState")
+        if len(self.factor_states) != 2 or any(
+            not isinstance(feature, str)
+            or not feature
+            or type(state) is not QueryState
+            for feature, state in self.factor_states
+        ):
+            raise ValueError("pair binding requires two typed factor states")
+        if self.factor_states[0][0] == self.factor_states[1][0]:
+            raise ValueError("pair binding factor states must be distinct")
+        if self.neutral_counterpart_ids != tuple(sorted(self.neutral_counterpart_ids)):
+            raise ValueError("neutral counterpart IDs must use canonical order")
+        if self.evidence_node_ids != tuple(sorted(set(self.evidence_node_ids))) or (
+            self.evidence_edge_ids != tuple(sorted(set(self.evidence_edge_ids)))
+        ):
+            raise ValueError("pair binding evidence must be unique and sorted")
+        if self.outcomes_or_arms_used is not False:
+            raise ValueError("pair binding cannot use outcomes or arms")
+
+    @property
+    def binding_id(self) -> str:
+        return content_id("pair_binding_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class PairRegistry:
+    prompt_tsg_catalog_path: str
+    prompt_tsg_catalog_sha256: str
+    atomic_factor_ids: tuple[str, ...]
+    pairs: tuple[PairSpec, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.prompt_tsg_catalog_path, "Prompt TSG catalog path")
+        _require_digest(self.prompt_tsg_catalog_sha256, "Prompt TSG catalog")
+        if not self.atomic_factor_ids or len(self.atomic_factor_ids) != len(
+            set(self.atomic_factor_ids)
+        ):
+            raise ValueError("atomic factor IDs must be non-empty and unique")
+        if tuple(sorted(self.atomic_factor_ids)) != self.atomic_factor_ids:
+            raise ValueError("atomic factor IDs must use canonical order")
+        if not self.pairs or len({pair.pair_id for pair in self.pairs}) != len(self.pairs):
+            raise ValueError("pair registry must contain unique pairs")
+        if tuple(sorted(self.pairs, key=lambda item: item.pair_id)) != self.pairs:
+            raise ValueError("pair registry pairs must use canonical order")
+
+    @property
+    def registry_id(self) -> str:
+        return content_id("pair_registry_", self)
+
+
+def bind_pair(
+    task: Mapping[str, Any],
+    graph: PromptTSG,
+    pair: PairSpec,
+    context_query: Mapping[str, Any],
+    *,
+    neutral_counterparts: Mapping[str, str] | None = None,
+) -> PairBinding:
+    """Evaluate pair eligibility from frozen task-side evidence only."""
+
+    if context_query.get("query_id") != pair.pair_context_query_id:
+        raise MechanismRegistryError("pair context query identity drift")
+    if graph.task_id != task.get("task_id"):
+        raise MechanismRegistryError("pair graph does not bind the task")
+    task_family = task.get("task_family", task.get("archetype"))
+    result = query_context(
+        graph,
+        query=context_query,
+        cwe=task.get("cwe"),
+        task_family=task_family,
+    )
+    factor_states = tuple(
+        (feature, feature_state(graph, feature)) for feature in pair.factors
+    )
+    counterparts = dict(neutral_counterparts or {})
+    for feature, counterpart_id in counterparts.items():
+        if feature not in pair.factors:
+            raise MechanismRegistryError("neutral counterpart is not a pair factor")
+        require_text(counterpart_id, "neutral counterpart ID")
+    if pair.oracle_support_status is OracleSupportStatus.UNSUPPORTED:
+        decision = PairEligibility.ORACLE_UNSUPPORTED
+    elif result.state is QueryState.ABSENT:
+        decision = PairEligibility.CONTEXT_ABSENT
+    elif result.state is QueryState.NOT_APPLICABLE:
+        decision = PairEligibility.CONTEXT_NOT_APPLICABLE
+    elif result.state is QueryState.UNRESOLVED:
+        decision = PairEligibility.CONTEXT_UNRESOLVED
+    elif any(
+        state is not (QueryState.ABSENT if operation is Operation.ADD else QueryState.PRESENT)
+        for (_, state), operation in zip(factor_states, pair.operations, strict=True)
+    ):
+        decision = PairEligibility.FACTOR_SOURCE_STATE
+    elif any(
+        operation is Operation.REMOVE and feature not in counterparts
+        for feature, operation in zip(pair.factors, pair.operations, strict=True)
+    ):
+        decision = PairEligibility.COUNTERPART_MISSING
+    else:
+        decision = PairEligibility.APPLICABLE
+    return PairBinding(
+        pair.pair_id,
+        graph.task_id,
+        graph.tsg_id,
+        decision,
+        pair.pair_context_query_id,
+        result.state,
+        factor_states,  # type: ignore[arg-type]
+        tuple(sorted(counterparts.items())),
+        result.evidence_node_ids,
+        result.evidence_edge_ids,
+    )
+
+
+def validate_pair_factors(
+    pair: PairSpec,
+    catalog: Mapping[str, Any],
+    *,
+    atomic_factor_ids: tuple[str, ...],
+) -> None:
+    """Prove that both pair factors are catalog-bound atomic safety features."""
+
+    if not atomic_factor_ids or len(atomic_factor_ids) != len(set(atomic_factor_ids)):
+        raise MechanismRegistryError("atomic factor registry must be non-empty and unique")
+    semantics = catalog.get("semantics")
+    if not isinstance(semantics, Mapping):
+        raise MechanismRegistryError("Prompt TSG catalog semantics are missing")
+    atomic = set(atomic_factor_ids)
+    for factor in pair.factors:
+        if semantics.get(factor) != "safety_requirement":
+            raise MechanismRegistryError("pair factor is not a catalog safety feature")
+        if factor not in atomic:
+            raise MechanismRegistryError("pair factor is not registered as atomic")
+
+
+def load_pair_registry(path: Path, catalog: Mapping[str, Any]) -> PairRegistry:
+    """Load the finite pair registry and validate it against one frozen catalog."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise MechanismRegistryError("pair registry is unreadable") from None
+    required = {
+        "schema_version",
+        "prompt_tsg_catalog_path",
+        "prompt_tsg_catalog_sha256",
+        "atomic_factor_ids",
+        "pairs",
+    }
+    pair_fields = {
+        "pair_context_query_id",
+        "factor_1_id",
+        "factor_2_id",
+        "operation_1",
+        "operation_2",
+        "relation_type",
+        "oracle_profile_id",
+        "oracle_policy_sha256",
+        "oracle_support_status",
+        "primary_outcome",
+        "interaction_scale",
+    }
+    if not isinstance(value, dict) or set(value) != required or value["schema_version"] != "1.0":
+        raise MechanismRegistryError("pair registry envelope is invalid")
+    if value["prompt_tsg_catalog_sha256"] != catalog_sha256(catalog):
+        raise MechanismRegistryError("pair registry Prompt TSG catalog drift")
+    atomic = value["atomic_factor_ids"]
+    rows = value["pairs"]
+    if (
+        not isinstance(atomic, list)
+        or any(not isinstance(item, str) or not item for item in atomic)
+        or not isinstance(rows, list)
+        or not rows
+        or any(not isinstance(row, dict) or set(row) != pair_fields for row in rows)
+    ):
+        raise MechanismRegistryError("pair registry values are invalid")
+    try:
+        pairs = tuple(
+            PairSpec(
+                row["pair_context_query_id"],
+                row["factor_1_id"],
+                row["factor_2_id"],
+                Operation(row["operation_1"]),
+                Operation(row["operation_2"]),
+                PairRelation(row["relation_type"]),
+                row["oracle_profile_id"],
+                row["oracle_policy_sha256"],
+                OracleSupportStatus(row["oracle_support_status"]),
+                row["primary_outcome"],
+                InteractionScale(row["interaction_scale"]),
+            )
+            for row in rows
+        )
+    except (TypeError, ValueError):
+        raise MechanismRegistryError("pair registry contains an invalid PairSpec") from None
+    query_ids = {query["query_id"] for query in catalog.get("queries", ())}
+    if any(pair.pair_context_query_id not in query_ids for pair in pairs):
+        raise MechanismRegistryError("pair context query is absent from the catalog")
+    frozen_atomic = tuple(sorted(atomic))
+    for pair in pairs:
+        validate_pair_factors(pair, catalog, atomic_factor_ids=frozen_atomic)
+    return PairRegistry(
+        value["prompt_tsg_catalog_path"],
+        value["prompt_tsg_catalog_sha256"],
+        frozen_atomic,
+        tuple(sorted(pairs, key=lambda item: item.pair_id)),
+    )
+
+
+def _require_digest(value: str, name: str) -> None:
+    if not isinstance(value, str) or len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
 
 
 def load_mechanism_registry(path: Path) -> dict[str, dict[str, Any]]:
@@ -301,10 +620,20 @@ def _validate_tsg_binding(task: Mapping[str, Any], row: Mapping[str, Any]) -> No
 
 
 __all__ = [
+    "InteractionScale",
     "MechanismRegistryError",
+    "OracleSupportStatus",
+    "PairBinding",
+    "PairEligibility",
+    "PairRelation",
+    "PairRegistry",
+    "PairSpec",
+    "bind_pair",
     "compatible_mechanisms",
     "load_mechanism_registry",
+    "load_pair_registry",
     "mechanism_binding_id",
     "select_mechanism",
     "tsg_mechanism_binding",
+    "validate_pair_factors",
 ]

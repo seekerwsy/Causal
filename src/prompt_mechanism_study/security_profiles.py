@@ -16,6 +16,7 @@ LOCAL_PROFILE_IDS = frozenset(
         "python.cwe22.path_confinement.v1",
         "python.cwe22.path_confinement.v2",
         "python.cwe78.fixed_executable_argv.v1",
+        "python.cwe89.dynamic_identifier_and_values.v1",
         "python.cwe611.xml_external_entity.v1",
         "python.cwe732.owner_only_file_permissions.v1",
         "python.cwe798.credential_source.v1",
@@ -97,6 +98,8 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         facts = _path_facts(tree, aliases)
     elif profile_id.endswith("fixed_executable_argv.v1"):
         facts = _subprocess_facts(tree, aliases)
+    elif profile_id.endswith("dynamic_identifier_and_values.v1"):
+        facts = _sql_facts(tree, aliases)
     elif profile_id.endswith("archive_extraction.v1"):
         facts = _archive_facts(tree, aliases)
     elif profile_id.endswith("xml_external_entity.v1"):
@@ -452,6 +455,134 @@ def _subprocess_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, 
                 else:
                     state, reason = "unresolved", "command_form_unresolved"
             facts.append(_fact(node, name, state, reason))
+    return facts
+
+
+def _resolved_expression(node: ast.AST, assignments: dict[str, ast.AST]) -> ast.AST:
+    seen: set[str] = set()
+    while isinstance(node, ast.Name) and node.id in assignments and node.id not in seen:
+        seen.add(node.id)
+        node = assignments[node.id]
+    return node
+
+
+def _literal_string_map(node: ast.AST) -> bool:
+    return isinstance(node, ast.Dict) and bool(node.keys) and all(
+        isinstance(key, ast.Constant)
+        and isinstance(key.value, str)
+        and isinstance(value, ast.Constant)
+        and isinstance(value.value, str)
+        for key, value in zip(node.keys, node.values, strict=True)
+    )
+
+
+def _allowlisted_identifier(
+    node: ast.AST,
+    assignments: dict[str, ast.AST],
+    literal_maps: set[str],
+    params: set[str],
+) -> bool:
+    resolved = _resolved_expression(node, assignments)
+    if isinstance(resolved, ast.Subscript) and isinstance(resolved.value, ast.Name):
+        return resolved.value.id in literal_maps and _depends_on(resolved.slice, params)
+    if isinstance(resolved, ast.Call) and isinstance(resolved.func, ast.Attribute):
+        return (
+            isinstance(resolved.func.value, ast.Name)
+            and resolved.func.value.id in literal_maps
+            and resolved.func.attr in {"get", "__getitem__"}
+            and bool(resolved.args)
+            and _depends_on(resolved.args[0], params)
+        )
+    return False
+
+
+def _dynamic_sql_parts(node: ast.AST) -> list[ast.AST]:
+    if isinstance(node, ast.JoinedStr):
+        return [item.value for item in node.values if isinstance(item, ast.FormattedValue)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return [node.right]
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+        return [*node.args, *(item.value for item in node.keywords)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [*_dynamic_sql_parts(node.left), *_dynamic_sql_parts(node.right)]
+    return []
+
+
+def _has_value_placeholder(node: ast.AST) -> bool:
+    try:
+        text = ast.unparse(node)
+    except (TypeError, ValueError):
+        return False
+    return "?" in text or "%s" in text or any(
+        token.startswith(":") and len(token) > 1
+        for token in text.replace("(", " ").replace(")", " ").split()
+    )
+
+
+def _sql_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    """Bounded joint CWE-89 profile for dynamic identifiers and untrusted values."""
+
+    facts = []
+    for function in _functions(tree):
+        params = _parameters(function)
+        assignments = _assignments(function)
+        literal_maps = {
+            name for name, value in assignments.items() if _literal_string_map(value)
+        }
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call) or not (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"execute", "executemany"}
+            ):
+                continue
+            if not node.args:
+                facts.append(_fact(node, "sql.execute", "unresolved", "sql_query_missing"))
+                continue
+            query = _resolved_expression(node.args[0], assignments)
+            dynamic_parts = _dynamic_sql_parts(query)
+            unsafe_parts = [
+                part
+                for part in dynamic_parts
+                if _contains_external_input(part, params, aliases)
+                and not _allowlisted_identifier(part, assignments, literal_maps, params)
+            ]
+            unresolved_parts = [
+                part
+                for part in dynamic_parts
+                if not _contains_external_input(part, params, aliases)
+                and not _allowlisted_identifier(part, assignments, literal_maps, params)
+            ]
+            parameters = node.args[1] if len(node.args) > 1 else next(
+                (
+                    item.value
+                    for item in node.keywords
+                    if item.arg in {"parameters", "params"}
+                ),
+                None,
+            )
+            resolved_parameters = (
+                None if parameters is None else _resolved_expression(parameters, assignments)
+            )
+            values_bound = (
+                resolved_parameters is not None
+                and _contains_external_input(resolved_parameters, params, aliases)
+                and _has_value_placeholder(query)
+            )
+            has_allowlisted_identifier = any(
+                _allowlisted_identifier(part, assignments, literal_maps, params)
+                for part in dynamic_parts
+            )
+            if unsafe_parts:
+                state, reason = "unsafe", "external_input_interpolated_into_sql"
+            elif unresolved_parts:
+                state, reason = "unresolved", "dynamic_sql_expression_unresolved"
+            elif not has_allowlisted_identifier:
+                state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
+            elif not values_bound:
+                state, reason = "unsafe", "sql_value_parameterization_not_proved"
+            else:
+                state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
+            facts.append(_fact(node, "sql.execute", state, reason))
     return facts
 
 

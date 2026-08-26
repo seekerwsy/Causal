@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "node_types": [
+    "task",
+    "task_requirement",
+    "task_operation",
+    "source",
+    "sink",
+    "constraint",
+    "safety_requirement",
+    "presentation_control"
+  ],
+  "edge_types": ["contains", "flows_to", "qualifies", "requires", "guards"],
+  "attribute_names": ["caller_controlled", "fixed", "security_sensitive"],
+  "semantic_guidance": {
+    "source.untrusted_sql_value": "A caller-supplied value reaches a SQL execution operation.",
+    "source.dynamic_sql_identifier": "A caller selects a SQL table, column, or ordering identifier.",
+    "source.untrusted_command_argument": "A caller-supplied value is used as a command argument.",
+    "constraint.user_selected_executable": "The caller selects which executable is invoked.",
+    "constraint.finite_executable_domain": "The task declares a finite set of allowed executables.",
+    "constraint.finite_sql_identifier_domain": "The task declares a finite set of allowed SQL identifiers.",
+    "feature.sql_value_parameterization": "The prompt explicitly requires bound SQL values.",
+    "feature.sql_identifier_allowlist": "The prompt explicitly requires mapping dynamic identifiers through the declared finite allowlist.",
+    "feature.argv_without_shell": "The prompt explicitly requires structured argv and disabled shell execution.",
+    "feature.executable_allowlist": "The prompt explicitly requires mapping the executable through the declared finite allowlist.",
+    "control.generic_security": "A general security reminder without either target mechanism.",
+    "control.code_style": "A presentation, naming, formatting, or readability requirement."
+  },
+  "source_realization_task_families": {
+    "pair_cwe89_dynamic_identifier_and_values": "sql_query",
+    "pair_cwe78_dynamic_executable_and_argument": "command_execution"
+  },
+  "semantics": {
+    "task.root": "task",
+    "task.requirement": "task_requirement",
+    "task.operation": "task_operation",
+    "source.untrusted_sql_value": "source",
+    "source.dynamic_sql_identifier": "source",
+    "source.untrusted_command_argument": "source",
+    "sink.sql_execution": "sink",
+    "sink.process_execution": "sink",
+    "constraint.user_selected_executable": "constraint",
+    "constraint.finite_executable_domain": "constraint",
+    "constraint.arbitrary_executable_required": "constraint",
+    "constraint.finite_sql_identifier_domain": "constraint",
+    "constraint.arbitrary_sql_identifier_required": "constraint",
+    "constraint.static_sql_without_untrusted_input": "constraint",
+    "feature.sql_value_parameterization": "safety_requirement",
+    "feature.sql_identifier_allowlist": "safety_requirement",
+    "feature.argv_without_shell": "safety_requirement",
+    "feature.executable_allowlist": "safety_requirement",
+    "control.generic_security": "safety_requirement",
+    "control.code_style": "presentation_control"
+  },
+  "allowed_edges": [
+    ["task", "contains", "task_requirement"],
+    ["task", "contains", "task_operation"],
+    ["task", "contains", "source"],
+    ["task", "contains", "sink"],
+    ["task", "contains", "constraint"],
+    ["task", "requires", "safety_requirement"],
+    ["task", "contains", "presentation_control"],
+    ["source", "flows_to", "sink"],
+    ["constraint", "qualifies", "source"],
+    ["constraint", "qualifies", "sink"],
+    ["safety_requirement", "guards", "sink"]
+  ],
+  "queries": [
+    {
+      "query_id": "context.dynamic_sql_identifier_and_value_pair.v1",
+      "realization_id": "pair_cwe89_dynamic_identifier_and_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "required_semantics": [
+        "source.untrusted_sql_value",
+        "source.dynamic_sql_identifier",
+        "sink.sql_execution",
+        "constraint.finite_sql_identifier_domain"
+      ],
+      "forbidden_semantics": [
+        "constraint.arbitrary_sql_identifier_required",
+        "constraint.static_sql_without_untrusted_input"
+      ],
+      "required_relations": [
+        ["source.untrusted_sql_value", "flows_to", "sink.sql_execution"],
+        ["source.dynamic_sql_identifier", "flows_to", "sink.sql_execution"]
+      ],
+      "actionable_feature_id": "feature.sql_value_parameterization"
+    },
+    {
+      "query_id": "context.dynamic_executable_and_argument_pair.v1",
+      "realization_id": "pair_cwe78_dynamic_executable_and_argument",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "required_semantics": [
+        "source.untrusted_command_argument",
+        "sink.process_execution",
+        "constraint.user_selected_executable",
+        "constraint.finite_executable_domain"
+      ],
+      "forbidden_semantics": ["constraint.arbitrary_executable_required"],
+      "required_relations": [
+        ["source.untrusted_command_argument", "flows_to", "sink.process_execution"]
+      ],
+      "actionable_feature_id": "feature.argv_without_shell"
+    }
+  ]
+}

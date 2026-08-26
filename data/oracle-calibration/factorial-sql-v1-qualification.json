@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+  "policy_sha256": "1e59ba00bab2ef68b579efddd857c0ce726421ddf6fb8a049adf1a44a968e32c",
+  "implementation_path": "src/prompt_mechanism_study/security_profiles.py",
+  "implementation_sha256": "13535d32c27937cbd0662218164b4e014e1e60e6ec2e1d54da1007cc7099a329",
+  "fixture_path": "data/oracle-calibration/factorial-sql-v1-cases.json",
+  "fixture_sha256": "b72cdfa31cb26f5aadbf42534da6552d4854bc4c310b4b106594e146a2d89044",
+  "gold_cases": 8,
+  "gold_cells": ["a00", "a10", "a01", "a11"],
+  "label_mismatches": 0,
+  "qualification_status": "supported",
+  "scope": "Python functions using direct sqlite3 or DB-API execute/executemany calls, a literal identifier map, one dynamic identifier, and at least one caller-supplied bound value",
+  "known_unsupported_idioms": [
+    "interprocedural query builders",
+    "ORM query construction",
+    "runtime-generated identifier maps",
+    "stored procedures"
+  ],
+  "claim_boundary": "Qualified only for the controlled factorial SQL corpus and matching admitted idioms; this is not a global CWE-89 accuracy claim."
+}

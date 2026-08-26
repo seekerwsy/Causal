@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt-mechanism-study"
-version = "1.3.0"
-description = "Auditable framework for frozen prompt policies and cluster-aware security effects."
+version = "1.4.0"
+description = "Auditable task-unit experiments for frozen prompt-mechanism policies."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = []

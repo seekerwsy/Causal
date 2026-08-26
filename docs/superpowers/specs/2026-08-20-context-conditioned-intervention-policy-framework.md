@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-20
 
-**Status:** User-authorized revision for third-round review
+**Status:** User-authorized revision for third-round review; prospectively amended
+2026-08-27 with the pairwise factorial extension in Section 24
 
 **Scope:** Prospective theory, discovery, hypothesis selection, randomized confirmation,
 inference, and paper-facing research questions
@@ -1200,3 +1201,219 @@ The revised framework is ready for implementation only when tests and spec audit
 | code markers are forbidden from every analysis | 2026-07-13 spec | permit separately produced post-assignment diagnostics, never primary PAG or mediation |
 
 This ledger is prospective. It does not relabel or reinterpret completed legacy experiments.
+
+## 24. Pairwise Factorial Extension
+
+### 24.1 Scope and non-retroactivity
+
+This section prospectively extends the single-feature policy framework to test the joint behavior of
+two atomic actionable Prompt features. It applies only to studies whose freeze explicitly declares
+this extension and whose generated-code outcomes do not exist when the freeze is committed. It does
+not reinterpret any completed ADD/REMOVE or `ABSENT/SPECIFIC/GENERIC/PLACEBO` study.
+
+The pairwise extension is one additional policy family inside the same seven-stage method. It does
+not introduce a second representation, measurement path, Oracle, outcome ledger, or reporting
+framework. Sections 3, 5, 10, 11, 12, 18, 20, and 21 continue to apply unless this section states a
+strictly more specific pairwise rule.
+
+### 24.2 Pair hypothesis and structural prior
+
+Let `f_1` and `f_2` be distinct catalog-bound atomic actionable features, with operations
+`a_1,a_2 in {ADD,REMOVE}`. A confirmable pair is:
+
+\[
+h_{12}=(C_{q,12},(f_1,a_1),(f_2,a_2),r_{12},Q_{12},Y,\kappa),
+\]
+
+where `C_{q,12}` is a target-state-independent pair context query, `r_{12}` is one reviewed
+Prompt-TSG structural relation, `Q_{12}` is the finite joint-realization distribution, `Y` is the
+primary outcome, and `kappa` is the frozen interaction scale. The primary scale is the risk
+difference.
+
+The permitted structural relation vocabulary is finite:
+
+```text
+SAME_FLOW
+SHARED_SINK
+DISTINCT_CONTROL_POINTS
+ALTERNATIVE_CONTROLS
+```
+
+These labels describe Prompt-TSG task/security structure. `SYNERGY`, `REDUNDANCY`, `PREREQUISITE`,
+and `ANTAGONISM` are forbidden as pre-treatment TSG facts or pair-selector inputs; they are possible
+post-randomization interpretations. The method requires structural priors in the feature catalog,
+pair context query, relation vocabulary, source-state rule, and Oracle profile. It does not require
+an expert prior on the sign of the interaction, and the primary interaction test is two-sided.
+
+Composite actionable features must be decomposed before pair admission. A factor is not atomic when
+its Target operation necessarily changes the other factor. In particular, SQL value
+parameterization and SQL identifier allow-listing, and structured argument-vector construction and
+executable allow-listing, are separate atomic factors.
+
+### 24.3 Pair eligibility and optional observational prioritization
+
+For task `i`, the pair context gate requires
+
+\[
+q_{C_{q,12}}(T_E(P_i^0))=PRESENT.
+\]
+
+Each factor then independently satisfies the Section 5.3 source-state rule for its declared
+operation. `ADD x ADD` therefore requires both target features to be absent; mixed and
+`REMOVE x REMOVE` pairs require the corresponding absent/present states and every REMOVE neutral
+counterpart before variant generation. The pair additionally requires a frozen functional contract,
+complete joint-realization support, and a supported Oracle Gate under Section 24.7.
+
+An observational pair selector may be evaluated only when natural discovery data have outcome-blind
+four-cell support, adequate task-unit counts, and source-lineage overlap for the two feature states.
+If that gate fails, a theory- or registry-selected pair may still enter a separately preregistered
+factorial confirmation, but the study cannot claim that observational FCI or another data-driven
+selector discovered the pair. Deterministic products such as `X_1 X_2` are not inserted beside
+`X_1` and `X_2` in a categorical FCI table merely to manufacture an interaction variable.
+
+### 24.4 Factorial cells and assigned treatment
+
+For factor `j`, `Z_j=1` denotes assignment to its Target operator and `Z_j=0` denotes assignment to
+its operation-matched No-op. Every complete block contains:
+
+```text
+A00 = N1 + N2
+A10 = T1 + N2
+A01 = N1 + T2
+A11 = T1 + T2
+```
+
+These are not the legacy single-feature Specific, Generic, Placebo, and Absent roles. Generic and
+presentation-only controls remain in separately frozen single-feature studies and are not silently
+added to the primary `2 x 2` family.
+
+Assignment, rather than extracted post-intervention feature state, is the treatment. Factor fidelity,
+treatment collapse, and non-target drift are diagnostics and never denominator filters.
+
+### 24.5 Joint realization and cross-cell invariants
+
+One outcome-blind intervention-executor transaction should materialize the four task variants for
+one `(pair,task,joint-realization)` bundle when the executor supports structured bundled output. The
+transaction receives no model-generation result, Oracle finding, functionality result, expected
+effect direction, or prior arm outcome. Each variant and the complete bundle are independently
+validated before randomization.
+
+The validator requires the same task semantics, functional contract, pair context, non-target
+security requirements, and presentation policy across all four cells. Only `f_1` and `f_2` may vary;
+`A11` may not introduce a third requirement. `A10` and `A01` must not collapse to the same target
+state, and all four prompt digests must be bound to the bundle.
+
+If the two operators are not prospectively shown to commute, application order is a joint
+realization coordinate. Both `(1,2)` and `(2,1)` orders receive frozen positive probability or the
+pair is excluded. An observed favorable order cannot replace the other order or renormalize
+`Q_{12}`.
+
+### 24.6 Pair block and randomization
+
+The pairwise complete-block key is:
+
+```text
+(task_unit_id,
+ task_instance_id,
+ pair_id,
+ pair_context_query_id,
+ joint_realization_id,
+ factorial_task_bundle_id,
+ model_id,
+ factorial_protocol_id)
+```
+
+Every block contains equally many assignments to `A00`, `A10`, `A01`, and `A11`; the slot count is
+a positive multiple of four. The block-specific shuffle is replayable from the frozen randomization
+seed and block identity. All descendants of one task unit remain together in bootstrap and
+multiplicity calculations.
+
+### 24.7 Oracle support Gate
+
+The pair reuses one frozen Security Oracle profile for the declared policy endpoint. The final
+`PairSpec` freezes:
+
+```text
+oracle_profile_id
+oracle_policy_sha256
+oracle_support_status
+```
+
+`oracle_support_status` is exactly `SUPPORTED` or `UNSUPPORTED` and is decided before randomization.
+`SUPPORTED` requires the same arm-blind profile and policy digest to apply to the task family and all
+four cells, an authenticated mechanism-trace implementation, preserved `unknown`, and a separately
+labeled gold calibration that covers the code idioms admitted by the pair. `UNSUPPORTED` pairs do
+not enter randomization. There is no pair-specific Oracle and no partial-support status.
+
+The assignment-level Oracle result remains `secure`, `insecure`, or `unknown`. The Gate status is
+not an assignment outcome, and factor realization is not substituted for the security label. A
+profile that defines full security as the logical conjunction of both controls may identify a joint
+Prompt-policy interaction, but that result cannot be promoted to universal mechanism synergy without
+an outcome-induced-interaction audit and independent endpoints for the two factors.
+
+### 24.8 Estimands, unknown bounds, and functionality
+
+For model `m`, let `mu_z1z2` be the Section 11 weighted task-unit mean under cell `(z_1,z_2)`. Report:
+
+\[
+\tau_1=\mu_{10}-\mu_{00},\qquad
+\tau_2=\mu_{01}-\mu_{00},
+\]
+
+\[
+\tau_{joint}=\mu_{11}-\mu_{00},\qquad
+\delta=\mu_{11}-\mu_{10}-\mu_{01}+\mu_{00}.
+\]
+
+`delta` is the primary pair interaction and is two-sided. Simple effects
+`mu_11-mu_01` and `mu_11-mu_10` are secondary. The observed primary outcome remains
+oracle-evaluable secure-code yield. Code validity, Oracle evaluability, functionality, and joint
+secure-and-functional success remain separate.
+
+Using the lower and upper cell means from Section 11.4, the interaction bounds are:
+
+\[
+L_\delta=L_{11}-U_{10}-U_{01}+L_{00},
+\qquad
+U_\delta=U_{11}-L_{10}-L_{01}+U_{00}.
+\]
+
+Functionality receives its own factorial estimates. A security-interaction claim cannot receive a
+practical-success label when the preregistered functionality non-inferiority Gate fails. Static
+security with broken task behavior is not silently counted as joint success.
+
+### 24.9 Simultaneous inference and interpretation
+
+All primary `(pair,model,secure-yield,delta)` coordinates form one frozen max-|T| task-unit bootstrap
+family. Factor main effects, joint effects, functionality, per-realization effects, and simple effects
+are secondary families declared before outcomes. The independent result verifier recomputes the four
+cell means and `delta` without importing the production estimator.
+
+A positive point estimate is not by itself synergy, and a negative point estimate is not by itself
+antagonism. A named interaction requires a simultaneous interval excluding zero, the frozen
+practical margin, adequate support, complete provenance, acceptable unknown bounds, and the declared
+functionality Gate. Otherwise the result is directionally consistent, null, conflicting, or
+non-evaluable under Section 15.
+
+### 24.10 Minimal implementation and acceptance additions
+
+The extension modifies the existing representation/mechanism, intervention, randomization,
+measurement, outcome, inference, workflow, and verifier modules. It must not create another campaign,
+measurement framework, Oracle class hierarchy, or deployment system. Measurement and outcome
+assembly are reused unchanged unless a scientific invariant requires a versioned field.
+
+Before a pairwise scale-up, focused tests and a representative canary must prove:
+
+1. composite features are rejected as factors and two atomic factors are independently editable;
+2. pair eligibility reads no arm, generated code, Oracle result, or outcome;
+3. all four cells and every noncommuting order have complete, replayable support;
+4. treatment collapse, a third requirement, context drift, task drift, and missing cells fail closed;
+5. every assignment enters the total ledger and `unknown` remains distinct;
+6. hand-calculated additive, positive, negative, XOR, redundant, prerequisite, and reversal fixtures
+   produce the expected main, joint, and interaction estimates;
+7. task-unit resampling and max-|T| multiplicity are replayable; and
+8. the independent verifier rejects missing, duplicate, replaced, or digest-mismatched assignments.
+
+This extension can produce a meaningful null, harmful, beneficial, or interacting policy result. A
+failure to obtain statistical significance is not permission to change the same frozen pair,
+population, endpoint, Oracle, arm text, denominator, or multiplicity family after unblinding.

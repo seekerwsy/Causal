@@ -82,6 +82,32 @@ removed from the ITT denominator because generated code ignored its instruction.
 The earlier `absent/specific/generic/placebo` studies retain their frozen legacy
 estimands; they are not reinterpreted as prospective ADD/REMOVE confirmation.
 
+## Pairwise factorial extension
+
+The active prospective extension tests two independently editable atomic Prompt
+features in a complete `2 x 2` block:
+
+```text
+A00 = No-op 1 + No-op 2
+A10 = Target 1 + No-op 2
+A01 = No-op 1 + Target 2
+A11 = Target 1 + Target 2
+```
+
+It remains one policy family inside the same seven-stage method. Prompt TSG
+supplies an outcome-blind context and mechanism binding; it is not used as a
+causal graph. Every task-unit/realization/model block contains all four cells,
+and assigned cell is the treatment. The primary pair estimand is the
+task-unit-weighted risk-difference interaction
+`mu11 - mu10 - mu01 + mu00`. Factor fidelity and generated-code style remain
+diagnostics and never filter the ITT denominator.
+
+The first bounded canary pairs SQL value parameterization with a literal-map
+allow-list for dynamic SQL identifiers. It uses one frozen Security Oracle
+profile across all cells, preserves `unknown`, measures functionality
+independently, and exercises both intervention orders. Its controlled corpus is
+an implementation and responsiveness canary, not confirmatory evidence.
+
 ## Outcomes and evidence boundary
 
 The primary safety outcome is observed Oracle-evaluable secure-code yield.
@@ -108,6 +134,28 @@ Run the focused scientific-invariant suite:
 python -m pytest -q
 ```
 
+Run the zero-provider-call preflight for the active pairwise canary:
+
+```text
+prompt-mechanism-study factorial-experiment preflight \
+  .artifacts/factorial-preflight \
+  --repository-root . \
+  --config configs/formal/factorial-sql-canary-qwen35-v1.json
+```
+
+With the externally supplied provider credential, run the same frozen path:
+
+```text
+prompt-mechanism-study factorial-experiment run \
+  .artifacts/factorial-sql-canary \
+  --repository-root . \
+  --config configs/formal/factorial-sql-canary-qwen35-v1.json
+```
+
+The run command writes the complete assignment ledger, factorial estimates,
+and the independent-verifier result into one content-addressed bundle. The
+configuration explicitly sets `scientific_claim_allowed=false`.
+
 Verify the tracked Qwen3.7 analysis independently:
 
 ```text
@@ -117,33 +165,32 @@ prompt-mechanism-four-arm verify-analysis \
   --tasks data/formal/prompt-tsg-strict-v3-replication-tasks.jsonl
 ```
 
-The four-arm entry point exposes reproduction actions for tracked legacy/pilot
-studies. New-protocol work follows the prospective kernel and must not reuse a
-legacy result under successor semantics. Provider credentials and model
-deployment remain external adapters; they are not stored in the artifact.
+The older four-arm entry point exposes reproduction actions for tracked
+legacy/pilot studies only. New pairwise work uses `factorial-experiment` and
+must not reuse a legacy result under successor semantics. Provider credentials
+and model deployment remain external adapters; they are not stored in the
+artifact.
 
 ## Review reading order
 
 The active path can be reviewed in at most ten files:
 
 1. `AGENTS.md` -- scientific and reviewability constraints;
-2. `docs/current-method-theory-framework.md` -- theory, causal boundaries,
-   stages, status, and open gates;
-3. `README.md` -- concise terminology and reproduction boundary;
-4. `configs/formal/prompt-tsg-strict-19-qwen37-oracle-v3.json` -- one complete
-   frozen study identity;
-5. `src/prompt_mechanism_study/workflow.py` -- prospective freeze and analysis
-   call graph;
-6. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded graph schema and typed
-   arm patches;
-7. `src/prompt_mechanism_study/prioritization.py` -- discovery support gate and
-   frozen ranking boundary;
-8. `src/prompt_mechanism_study/prompt_tsg_extract.py` -- LLM-fact proposal and
-   deterministic evidence validation;
-9. `src/prompt_mechanism_study/security_profiles.py` -- local Security Oracle
-   profiles;
-10. `src/prompt_mechanism_study/four_arm_verify.py` -- independent legacy-result
-   verifier;
+2. `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
+   -- normative protocol, including the pairwise extension;
+3. `configs/formal/factorial-sql-canary-qwen35-v1.json` -- complete bounded-run
+   identity and evidence boundary;
+4. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded Prompt-TSG schema;
+5. `src/prompt_mechanism_study/mechanisms.py` -- atomic features, `PairSpec`,
+   and outcome-blind binding;
+6. `src/prompt_mechanism_study/intervention.py` -- four-cell bundled policy;
+7. `src/prompt_mechanism_study/randomization.py` -- replayable complete blocks;
+8. `src/prompt_mechanism_study/factorial_experiment.py` -- single linear run
+   path and total ledger;
+9. `src/prompt_mechanism_study/inference.py` -- task-unit ITT, bounds, and
+   simultaneous inference;
+10. `src/prompt_mechanism_study/factorial_verify.py` -- independent result
+    verifier;
 
 Historical ADD/REMOVE studies, deployment incidents, provider tuning,
 calibration exploration, and server administration remain archival evidence.

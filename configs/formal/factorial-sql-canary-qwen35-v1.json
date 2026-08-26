@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0",
+  "study_name": "factorial-sql-canary-qwen35-v1",
+  "phase": "development_canary",
+  "purpose": "Validate the frozen pairwise factorial implementation and measure whether a code model responds separately and jointly to SQL value-parameterization and identifier-allowlist requirements.",
+  "corpus": {
+    "path": "data/method/factorial-sql-corpus-v1",
+    "bundle_sha256": "b0edc8837ad3d44a5ce071a9fa36e5ed6840ce3503ce3064a1dbccbcccaf199f",
+    "task_ids": [
+      "factorial_sql_task_4c1f1a51a58c210083180af9063052210b312c75424d178009c4625c9168edd4",
+      "factorial_sql_task_bf551695b226ed6c950b1ea3474a882662a9da47f2fb52fbe3e4f2345923caac",
+      "factorial_sql_task_989b165fb106380ddb44ec5e20be0a3fe7f98352820070f5c8d46c6dd7b44faf",
+      "factorial_sql_task_0d24a56d9223e062db581d14f8912d3ecf0cf76e76131c4ae9d7ca2976b26790",
+      "factorial_sql_task_6d5a40bf9186dfc71e0a6049991a9190414f2845ba38e56864581af7f1881577"
+    ],
+    "selection_outcomes_consulted": false,
+    "generalization_boundary": "development canary on a controlled derived SQL corpus"
+  },
+  "pair_registry_path": "data/method/mechanism-pairs-v1.json",
+  "prompt_tsg_catalog_path": "data/method/prompt-tsg-pair-catalog-v1.json",
+  "intervention": {
+    "executor_config_path": "data/formal/intervention-executor-qwen35flash.json",
+    "executor_config_sha256": "4f2acf6327b1450684787bd8b1e96440b22b06b1544954fe7a6372c99a8dadd0",
+    "executor_prompt_path": "data/method/prompts/factorial-intervention-executor-v1.txt",
+    "executor_prompt_sha256": "a4698626887a37b0a9e8912934d79296772e0c3f89c841a91481ec44464ef517",
+    "validator_config_path": "data/formal/intervention-validator-qwen37max-nonthinking.json",
+    "validator_config_sha256": "54763ce30f2db7739ba59135a5d8f1e6a8c769781d051c60958fc857011a670c",
+    "validator_prompt_path": "data/method/prompts/factorial-intervention-validator-v1.txt",
+    "validator_prompt_sha256": "1eb1734b2f90659ef866dc69dd735cf0c3027b39fd7ff024ab3291b9081de841",
+    "maximum_suffix_characters": 600,
+    "factor_1_target": "Bind every caller-supplied SQL value with the database driver's value placeholders and pass the values separately to execute(); do not interpolate them into SQL text.",
+    "factor_1_noop": "Preserve the requested SQL value inputs, their accepted domain, and their effect on the query without adding a new value-handling requirement.",
+    "factor_2_target": "Map the caller-selected SQL identifier through an explicit literal mapping containing exactly the task's declared finite choices before placing the mapped identifier in SQL text.",
+    "factor_2_noop": "Preserve the requested identifier choices and their query role without adding a new identifier-handling requirement.",
+    "joint_realizations": [
+      {"label": "factor-1-then-factor-2", "weight": 1, "application_order": [1, 2]},
+      {"label": "factor-2-then-factor-1", "weight": 1, "application_order": [2, 1]}
+    ]
+  },
+  "generation": {
+    "api_key_env": "ALI_BAILIAN_API_KEY",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model_id": "qwen3.5-flash-2026-02-23",
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 2026082701,
+    "timeout_seconds": 180.0,
+    "max_response_bytes": 65536,
+    "enable_thinking": false,
+    "prompt_path": "data/method/prompts/factorial-code-generator-v1.txt",
+    "prompt_sha256": "70818b28482524afeb2af69840535ef8313a50e9c00a6998404f76c4eed0395f"
+  },
+  "security_oracle": {
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v1",
+    "policy_sha256": "1e59ba00bab2ef68b579efddd857c0ce726421ddf6fb8a049adf1a44a968e32c",
+    "qualification_path": "data/oracle-calibration/factorial-sql-v1-qualification.json",
+    "unknown_rule": "preserve_unknown_and_report_bounds"
+  },
+  "functional_oracle": {
+    "evaluator_config_path": "data/functional-judge/evaluator-candidates/functional-oracle-qwen37max.json",
+    "evaluator_config_sha256": "9335fcf4661f42a38c125ee9cefde66eb2a27f234d6c007378cc84af13da2b63",
+    "prompt_path": "data/functional-judge/prompts/functional-oracle.txt",
+    "prompt_sha256": "fc0b165024ba89f84e98e029e63e7015af1569b28076f509021733a92983c731"
+  },
+  "randomization": {
+    "seed": 2026082702,
+    "slots": [0, 1, 2, 3]
+  },
+  "analysis": {
+    "metrics": ["secure_yield", "code_valid", "oracle_evaluable", "functionality", "joint"],
+    "primary_metric": "secure_yield",
+    "bootstrap_seed": 2026082703,
+    "bootstrap_draws": 2000,
+    "familywise_alpha": 0.05,
+    "functionality_noninferiority_margin": 0.10,
+    "estimand": "assigned_cell_task_unit_weighted_factorial_itt"
+  },
+  "scale_gate": "protocol_integrity_only; outcome direction and significance cannot decide whether the prospectively separate confirmation is run",
+  "scientific_claim_allowed": false
+}

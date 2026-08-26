@@ -176,6 +176,32 @@ s_{\ell m}(D_{disc,m},\mathcal H),\quad |s_{\ell m}|\le K.
 
 这里的 placebo 是**随机化的控制政策**，不是发现阶段的源提示风格变量。
 
+### 7.1 二因素配对析因扩展
+
+当研究问题涉及两个可独立编辑的原子机制时，活动 successor 协议使用同一七阶段路径内的
+`2 x 2` 政策族，而不是把两个单机制四臂结果事后拼成一次交互分析：
+
+| cell | factor 1 | factor 2 |
+| --- | --- | --- |
+| `A00` | operation-matched No-op | operation-matched No-op |
+| `A10` | Target | operation-matched No-op |
+| `A01` | operation-matched No-op | Target |
+| `A11` | Target | Target |
+
+Prompt TSG 只提供 target-state-independent context、两个原子 feature 的 evidence 和结构关系；
+它不包含协同、拮抗或先决关系等结果性标签。若自然 discovery 数据没有 outcome-blind 四格
+支持，可以使用前瞻冻结的 registry pair，但不能宣称该 pair 由 FCI 或其他 selector 发现。
+
+每个 task-unit、joint realization 和 model 组成一个包含四个 cell 的完整 block。assigned cell
+是处理；生成代码中的机制实现、treatment collapse 和非目标漂移只作诊断。若两个 operator
+未证明可交换，则两种应用顺序均以冻结正概率进入 realization 分布。
+
+令四格 task-unit 加权均值为 `mu00`、`mu10`、`mu01`、`mu11`，主交互 estimand 为
+`delta = mu11 - mu10 - mu01 + mu00`。同时报告两个单因素效应、联合效应、unknown bounds、
+功能析因效应和 secure-and-functional joint outcome。首个 SQL canary 的 Oracle endpoint
+本身要求两个控制均成立，因此其结果只能解释为 joint Prompt-policy interaction；没有独立
+factor endpoints 时不能升级为普遍机制 synergy。
+
 ## 8. 风格因素在因果模型中的位置
 
 “风格”不是一个统一变量，必须分三类：
@@ -255,6 +281,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | family-local FCI 与五类 selector 公平比较 | specified，未形成当前可执行主证据 | 当前数据支持不足；活动最小代码只接受外部 score，并未闭合完整 selector benchmark |
 | 原子假设与多 realization 政策 | 部分 implemented + tested | 最小 kernel 已有 candidate、realization、bundle 和 policy 绑定；完整 successor freeze 字段尚未全部闭合 |
 | successor ADD/REMOVE 四臂 | specified，未在最小 kernel 完整实现 | 最小 kernel 目前只有 `TARGET/NOOP`；另一个 four-arm 路径属于已冻结 legacy/pilot 实现，不能冒充 successor 协议 |
+| 二因素配对析因扩展 | specified + implemented + tested，尚未真实执行 | `PairSpec`、四 cell bundle、完整块随机化、Oracle Gate、ITT/unknown bounds/max-|T| 和独立 verifier 已闭合；40-assignment SQL canary 仍禁止科学主张 |
 | 独立 measurement 与 total ledger | implemented + tested | 活动代码保留 code、Oracle、functionality 和基础设施失败边界 |
 | task-unit ITT 与未知 bounds | implemented + tested | Target/Noop、task/realization 权重和同步 bootstrap 已闭合 |
 | 完整 max-|T|、selector nested bootstrap、全局 robustness family | specified，部分 implemented | 尚不能声称 successor 的完整多重推断已执行 |
@@ -268,16 +295,17 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | 自然 Prompt TSG 抽取 canary | **有界通过** | 38/38 记录有效，但还有 unresolved 语义和 Python 版本风险 |
 | discovery positivity/source overlap | **未通过** | CWE-328 无 positive；CWE-611 状态与来源完全分离 |
 | FCI selector | **未运行** | 被前一 gate 正确阻止 |
-| successor 假设/四臂/推断完全冻结 | **未通过** | 规范与活动实现仍需对齐 |
-| successor confirmatory generation | **未授权** | 不能把 legacy/null pilot 当作新协议正式证据 |
+| successor 单机制四臂完全冻结 | **未通过** | 仍不能把 legacy 四臂冒充 successor confirmation |
+| pairwise factorial canary | **实现通过，待真实执行** | 5 task units、2 个顺序、4 cells，共 40 assignments；仅允许验证协议完整性和模型响应性 |
+| successor confirmatory generation | **未冻结** | canary 结果不能自动升级为 confirmatory evidence；确认研究需使用前瞻冻结且未暴露的新 task units |
 
-当前准确位置是：**理论内核已稳定，观测 selector 分支被数据支持门阻塞，随机确认分支尚处于 successor 协议与实现对齐之前。**
+当前准确位置是：**理论内核已稳定，观测 selector 分支被数据支持门阻塞；二因素随机确认分支已完成规范和实现对齐，正处于真实 canary 执行之前。**
 
 ## 14. 仍需正式决定的三件事
 
 1. **论文主轴。** 若不新增具有同 lineage 双状态自然变化的数据，主论文应以“Prompt TSG 条件化的随机政策效应”为主，FCI 降为 availability-gated 的 selector 扩展；否则 RQ1/RQ2 仍无法获得所需主证据。
 2. **四臂权威。** successor 规范的主对比是 Target-Noop；`README`/旧 four-arm 产物中的 `specific-placebo` 只能保留为 legacy 结果，不能继续作为新确认实验的主 estimand。
-3. **实现闭合范围。** 在正式生成前，只补齐 successor 所需的四臂语义、operation-specific eligibility、freeze 字段和主推断；不要恢复部署、恢复、campaign 或历史兼容框架。
+3. **实现闭合范围。** 配对析因路径只保留线性 runner、既有 Oracle adapter、total ledger、推断和独立 verifier；不要恢复部署、恢复、campaign 或历史兼容框架。若 canary 通过协议 gate，另行冻结未暴露 task units 的确认研究。
 
 这些决定都发生在新的 confirm outcomes 之前，因此可以作为前瞻性修订；一旦正式 freeze，就不得根据效果方向再修改。
 

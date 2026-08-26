@@ -9,9 +9,20 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable, Mapping
 
-from prompt_mechanism_study.intervention import Arm, InterventionPolicy
+from prompt_mechanism_study.intervention import (
+    FACTORIAL_CELL_ORDER,
+    Arm,
+    FactorialCell,
+    FactorialPolicy,
+    InterventionPolicy,
+)
 from prompt_mechanism_study.outcomes import Outcome
-from prompt_mechanism_study.randomization import Assignment, Randomization
+from prompt_mechanism_study.randomization import (
+    Assignment,
+    FactorialAssignment,
+    FactorialRandomization,
+    Randomization,
+)
 from prompt_mechanism_study.records import content_id
 from prompt_mechanism_study.representation import Task
 
@@ -22,6 +33,13 @@ class Metric(StrEnum):
     SECURE_YIELD = "secure_yield"
     FUNCTIONALITY = "functionality"
     JOINT = "joint"
+
+
+class FactorialEffect(StrEnum):
+    FACTOR_1 = "factor_1"
+    FACTOR_2 = "factor_2"
+    JOINT = "joint"
+    INTERACTION = "interaction"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +64,33 @@ class AnalysisPlan:
     @property
     def analysis_plan_id(self) -> str:
         return content_id("analysis_plan_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialAnalysisPlan:
+    metrics: tuple[Metric, ...]
+    primary_metric: Metric
+    bootstrap_seed: int
+    bootstrap_draws: int
+    alpha: float
+
+    def __post_init__(self) -> None:
+        if not self.metrics or len(self.metrics) != len(set(self.metrics)):
+            raise ValueError("factorial analysis metrics must be non-empty and unique")
+        if any(type(metric) is not Metric for metric in self.metrics):
+            raise TypeError("factorial analysis metrics must be Metric values")
+        if self.primary_metric is not Metric.SECURE_YIELD or self.primary_metric not in self.metrics:
+            raise ValueError("factorial primary metric must be secure yield")
+        if type(self.bootstrap_seed) is not int:
+            raise TypeError("bootstrap_seed must be an integer")
+        if type(self.bootstrap_draws) is not int or self.bootstrap_draws < 100:
+            raise ValueError("bootstrap_draws must be at least 100")
+        if type(self.alpha) is not float or not 0.0 < self.alpha < 1.0:
+            raise ValueError("alpha must be a float strictly between zero and one")
+
+    @property
+    def analysis_plan_id(self) -> str:
+        return content_id("factorial_analysis_plan_", self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +154,69 @@ class InferenceResult:
         return content_id("inference_", self)
 
 
+@dataclass(frozen=True, slots=True)
+class FactorialCellEstimate:
+    cell: FactorialCell
+    point: float | None
+    lower: float
+    upper: float
+    assignments: int
+
+
+@dataclass(frozen=True, slots=True)
+class TaskUnitFactorialEffect:
+    task_unit_id: str
+    cell_points: tuple[tuple[FactorialCell, float | None], ...]
+    interaction: float | None
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialCoordinateEstimate:
+    pair_id: str
+    model_id: str
+    metric: Metric
+    cells: tuple[FactorialCellEstimate, ...]
+    factor_1: float | None
+    factor_2: float | None
+    joint: float | None
+    interaction: float | None
+    factor_1_bounds: tuple[float, float]
+    factor_2_bounds: tuple[float, float]
+    joint_bounds: tuple[float, float]
+    interaction_bounds: tuple[float, float]
+    task_unit_effects: tuple[TaskUnitFactorialEffect, ...]
+
+    @property
+    def coordinate_id(self) -> str:
+        return content_id(
+            "factorial_coordinate_",
+            {"pair_id": self.pair_id, "model_id": self.model_id, "metric": self.metric},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialSimultaneousInterval:
+    coordinate_id: str
+    effect: FactorialEffect
+    standard_error: float
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialInferenceResult:
+    plan_id: str
+    estimates: tuple[FactorialCoordinateEstimate, ...]
+    intervals: tuple[FactorialSimultaneousInterval, ...]
+    simultaneous_critical_value: float
+
+    @property
+    def inference_id(self) -> str:
+        return content_id("factorial_inference_", self)
+
+
 def estimate_policy_effects(
     randomization: Randomization,
     outcomes: Iterable[Outcome],
@@ -139,6 +247,277 @@ def estimate_policy_effects(
     _common_cluster_support(estimates)
     intervals, critical = _simultaneous_intervals(estimates, plan)
     return InferenceResult(plan.analysis_plan_id, estimates, intervals, critical)
+
+
+def estimate_factorial_effects(
+    randomization: FactorialRandomization,
+    outcomes: Iterable[Outcome],
+    policies: Iterable[FactorialPolicy],
+    tasks: Iterable[Task],
+    plan: FactorialAnalysisPlan,
+) -> FactorialInferenceResult:
+    """Estimate four-cell task-unit ITT effects without diagnostic filtering."""
+
+    frozen_outcomes = tuple(outcomes)
+    by_outcome = {item.assignment_id: item for item in frozen_outcomes}
+    expected = {item.assignment_id for item in randomization.assignments}
+    if len(by_outcome) != len(frozen_outcomes) or set(by_outcome) != expected:
+        raise ValueError("outcomes must cover every factorial assignment exactly once")
+    task_by_id = {item.task_id: item for item in tasks}
+    frozen_policies = tuple(policies)
+    policy_by_pair = {item.pair.pair_id: item for item in frozen_policies}
+    if len(policy_by_pair) != len(frozen_policies):
+        raise ValueError("factorial policies must bind unique pair IDs")
+    estimates = tuple(
+        _factorial_coordinate(
+            randomization,
+            by_outcome,
+            policy_by_pair[pair_id],
+            task_by_id,
+            model_id,
+            metric,
+        )
+        for pair_id in sorted(policy_by_pair)
+        for model_id in randomization.models
+        for metric in plan.metrics
+    )
+    _validate_factorial_support(estimates)
+    intervals, critical = _factorial_simultaneous_intervals(estimates, plan)
+    return FactorialInferenceResult(plan.analysis_plan_id, estimates, intervals, critical)
+
+
+def _factorial_coordinate(
+    randomization: FactorialRandomization,
+    outcomes: Mapping[str, Outcome],
+    policy: FactorialPolicy,
+    tasks: Mapping[str, Task],
+    model_id: str,
+    metric: Metric,
+) -> FactorialCoordinateEstimate:
+    assignments = tuple(
+        item
+        for item in randomization.assignments
+        if item.block.pair_id == policy.pair.pair_id and item.block.model_id == model_id
+    )
+    task_unit_ids = sorted({item.block.task_unit_id for item in assignments})
+    if not task_unit_ids:
+        raise ValueError("factorial analysis coordinate has no randomized assignments")
+    unit_cells: dict[str, dict[FactorialCell, tuple[float | None, float, float, int]]] = {}
+    unit_effects: list[TaskUnitFactorialEffect] = []
+    for task_unit_id in task_unit_ids:
+        cells = {
+            cell: _task_unit_cell(
+                assignments, outcomes, policy, tasks, task_unit_id, cell, metric
+            )
+            for cell in FACTORIAL_CELL_ORDER
+        }
+        unit_cells[task_unit_id] = cells
+        points = {cell: cells[cell][0] for cell in FACTORIAL_CELL_ORDER}
+        interaction = _interaction(points)
+        lower, upper = _interaction_bounds(cells)
+        unit_effects.append(
+            TaskUnitFactorialEffect(
+                task_unit_id,
+                tuple((cell, points[cell]) for cell in FACTORIAL_CELL_ORDER),
+                interaction,
+                lower,
+                upper,
+            )
+        )
+    cell_estimates = tuple(
+        _factorial_cell_estimate(assignments, cell, [unit_cells[unit][cell] for unit in task_unit_ids])
+        for cell in FACTORIAL_CELL_ORDER
+    )
+    means = {item.cell: item.point for item in cell_estimates}
+    lower = {item.cell: item.lower for item in cell_estimates}
+    upper = {item.cell: item.upper for item in cell_estimates}
+    return FactorialCoordinateEstimate(
+        policy.pair.pair_id,
+        model_id,
+        metric,
+        cell_estimates,
+        _difference(means[FactorialCell.A10], means[FactorialCell.A00]),
+        _difference(means[FactorialCell.A01], means[FactorialCell.A00]),
+        _difference(means[FactorialCell.A11], means[FactorialCell.A00]),
+        _interaction(means),
+        (lower[FactorialCell.A10] - upper[FactorialCell.A00], upper[FactorialCell.A10] - lower[FactorialCell.A00]),
+        (lower[FactorialCell.A01] - upper[FactorialCell.A00], upper[FactorialCell.A01] - lower[FactorialCell.A00]),
+        (lower[FactorialCell.A11] - upper[FactorialCell.A00], upper[FactorialCell.A11] - lower[FactorialCell.A00]),
+        _interaction_bounds({cell: (None, lower[cell], upper[cell], 0) for cell in FACTORIAL_CELL_ORDER}),
+        tuple(unit_effects),
+    )
+
+
+def _task_unit_cell(
+    assignments: tuple[FactorialAssignment, ...],
+    outcomes: Mapping[str, Outcome],
+    policy: FactorialPolicy,
+    tasks: Mapping[str, Task],
+    task_unit_id: str,
+    cell: FactorialCell,
+    metric: Metric,
+) -> tuple[float | None, float, float, int]:
+    task_ids = sorted(
+        {
+            item.block.task_instance_id
+            for item in assignments
+            if item.block.task_unit_id == task_unit_id
+        }
+    )
+    if not task_ids or any(task_id not in tasks for task_id in task_ids):
+        raise ValueError("factorial task unit lacks frozen task records")
+    task_total = sum(tasks[task_id].weight for task_id in task_ids)
+    realization_total = sum(item.weight for item in policy.realizations)
+    point = lower = upper = 0.0
+    point_known = True
+    count = 0
+    for task_id in task_ids:
+        task_weight = tasks[task_id].weight / task_total
+        for realization in policy.realizations:
+            realization_weight = realization.weight / realization_total
+            block = [
+                item
+                for item in assignments
+                if item.block.task_unit_id == task_unit_id
+                and item.block.task_instance_id == task_id
+                and item.block.joint_realization_id == realization.realization_id
+                and item.cell is cell
+            ]
+            if not block:
+                raise ValueError("factorial randomization lacks common task-realization support")
+            values = [_metric_value(outcomes[item.assignment_id], metric) for item in block]
+            count += len(block)
+            weight = task_weight * realization_weight
+            if any(value[0] is None for value in values):
+                point_known = False
+            else:
+                point += weight * sum(value[0] for value in values if value[0] is not None) / len(values)
+            lower += weight * sum(value[1] for value in values) / len(values)
+            upper += weight * sum(value[2] for value in values) / len(values)
+    return point if point_known else None, lower, upper, count
+
+
+def _factorial_cell_estimate(
+    assignments: tuple[FactorialAssignment, ...],
+    cell: FactorialCell,
+    units: list[tuple[float | None, float, float, int]],
+) -> FactorialCellEstimate:
+    point = None if any(item[0] is None for item in units) else sum(
+        item[0] for item in units if item[0] is not None
+    ) / len(units)
+    return FactorialCellEstimate(
+        cell,
+        point,
+        sum(item[1] for item in units) / len(units),
+        sum(item[2] for item in units) / len(units),
+        sum(item.cell is cell for item in assignments),
+    )
+
+
+def _difference(left: float | None, right: float | None) -> float | None:
+    return None if left is None or right is None else left - right
+
+
+def _interaction(values: Mapping[FactorialCell, float | None]) -> float | None:
+    if any(values[cell] is None for cell in FACTORIAL_CELL_ORDER):
+        return None
+    return (
+        float(values[FactorialCell.A11])
+        - float(values[FactorialCell.A10])
+        - float(values[FactorialCell.A01])
+        + float(values[FactorialCell.A00])
+    )
+
+
+def _interaction_bounds(
+    cells: Mapping[FactorialCell, tuple[float | None, float, float, int]],
+) -> tuple[float, float]:
+    return (
+        cells[FactorialCell.A11][1]
+        - cells[FactorialCell.A10][2]
+        - cells[FactorialCell.A01][2]
+        + cells[FactorialCell.A00][1],
+        cells[FactorialCell.A11][2]
+        - cells[FactorialCell.A10][1]
+        - cells[FactorialCell.A01][1]
+        + cells[FactorialCell.A00][2],
+    )
+
+
+def _validate_factorial_support(
+    estimates: tuple[FactorialCoordinateEstimate, ...],
+) -> None:
+    supports = {
+        estimate.coordinate_id: {item.task_unit_id for item in estimate.task_unit_effects}
+        for estimate in estimates
+        if estimate.metric is Metric.SECURE_YIELD
+    }
+    values = list(supports.values())
+    for index, left in enumerate(values):
+        for right in values[index + 1 :]:
+            if left & right and left != right:
+                raise ValueError("primary factorial coordinates must have identical or disjoint task-unit support")
+
+
+def _factorial_simultaneous_intervals(
+    estimates: tuple[FactorialCoordinateEstimate, ...],
+    plan: FactorialAnalysisPlan,
+) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
+    eligible = tuple(
+        item
+        for item in estimates
+        if item.metric is plan.primary_metric
+        and item.interaction is not None
+        and all(unit.interaction is not None for unit in item.task_unit_effects)
+    )
+    if not eligible:
+        return (), 0.0
+    support_keys = {
+        item.coordinate_id: tuple(unit.task_unit_id for unit in item.task_unit_effects)
+        for item in eligible
+    }
+    rng_by_support: dict[tuple[str, ...], random.Random] = {}
+    replicates: dict[str, list[float]] = {item.coordinate_id: [] for item in eligible}
+    for support in set(support_keys.values()):
+        seed = int(content_id("bootstrap_", {"seed": plan.bootstrap_seed, "support": support})[-16:], 16)
+        rng_by_support[support] = random.Random(seed)
+    for _ in range(plan.bootstrap_draws):
+        samples: dict[tuple[str, ...], list[int]] = {}
+        for support, rng in rng_by_support.items():
+            samples[support] = [rng.randrange(len(support)) for _ in support]
+        for estimate in eligible:
+            sample = samples[support_keys[estimate.coordinate_id]]
+            effects = [estimate.task_unit_effects[index].interaction for index in sample]
+            replicates[estimate.coordinate_id].append(
+                sum(float(value) for value in effects) / len(effects)
+            )
+    standard_errors = {
+        item.coordinate_id: statistics.stdev(replicates[item.coordinate_id])
+        for item in eligible
+    }
+    maxima = []
+    for draw in range(plan.bootstrap_draws):
+        statistics_for_draw = []
+        for estimate in eligible:
+            standard_error = standard_errors[estimate.coordinate_id]
+            if standard_error > 0.0:
+                statistics_for_draw.append(
+                    abs(replicates[estimate.coordinate_id][draw] - float(estimate.interaction))
+                    / standard_error
+                )
+        maxima.append(max(statistics_for_draw, default=0.0))
+    critical = _quantile(maxima, 1.0 - plan.alpha)
+    intervals = tuple(
+        FactorialSimultaneousInterval(
+            item.coordinate_id,
+            FactorialEffect.INTERACTION,
+            standard_errors[item.coordinate_id],
+            max(-2.0, float(item.interaction) - critical * standard_errors[item.coordinate_id]),
+            min(2.0, float(item.interaction) + critical * standard_errors[item.coordinate_id]),
+        )
+        for item in eligible
+    )
+    return intervals, critical
 
 
 def _coordinate(
@@ -347,9 +726,16 @@ __all__ = [
     "AnalysisPlan",
     "ArmEstimate",
     "ClusterEffect",
+    "FactorialAnalysisPlan",
+    "FactorialCellEstimate",
+    "FactorialCoordinateEstimate",
+    "FactorialEffect",
+    "FactorialInferenceResult",
+    "FactorialSimultaneousInterval",
     "InferenceResult",
     "Metric",
     "PolicyEstimate",
     "SimultaneousInterval",
     "estimate_policy_effects",
+    "estimate_factorial_effects",
 ]

@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Mapping
 
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
+from prompt_mechanism_study.mechanisms import PairSpec
 from prompt_mechanism_study.representation import Candidate, Operation
 
 
@@ -23,6 +24,30 @@ class SemanticVerdict(StrEnum):
     YES = "yes"
     NO = "no"
     UNKNOWN = "unknown"
+
+
+class FactorialCell(StrEnum):
+    A00 = "a00"
+    A10 = "a10"
+    A01 = "a01"
+    A11 = "a11"
+
+    @property
+    def target_states(self) -> tuple[bool, bool]:
+        return {
+            FactorialCell.A00: (False, False),
+            FactorialCell.A10: (True, False),
+            FactorialCell.A01: (False, True),
+            FactorialCell.A11: (True, True),
+        }[self]
+
+
+FACTORIAL_CELL_ORDER = (
+    FactorialCell.A00,
+    FactorialCell.A10,
+    FactorialCell.A01,
+    FactorialCell.A11,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +93,39 @@ class RealizationSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class FactorialRealizationSpec:
+    """One frozen wording and operator-order realization for a mechanism pair."""
+
+    label: str
+    weight: int
+    executor_adapter_id: str
+    factor_1_target_instruction: str
+    factor_1_noop_instruction: str
+    factor_2_target_instruction: str
+    factor_2_noop_instruction: str
+    application_order: tuple[int, int]
+
+    def __post_init__(self) -> None:
+        for name in (
+            "label",
+            "executor_adapter_id",
+            "factor_1_target_instruction",
+            "factor_1_noop_instruction",
+            "factor_2_target_instruction",
+            "factor_2_noop_instruction",
+        ):
+            require_text(getattr(self, name), name)
+        if type(self.weight) is not int or self.weight <= 0:
+            raise ValueError("realization weight must be a positive integer")
+        if self.application_order not in {(1, 2), (2, 1)}:
+            raise ValueError("application_order must be (1, 2) or (2, 1)")
+
+    @property
+    def realization_id(self) -> str:
+        return content_id("factorial_realization_", self)
+
+
+@dataclass(frozen=True, slots=True)
 class InterventionExecution:
     intervention_text: str
     executor_adapter_id: str
@@ -75,6 +133,20 @@ class InterventionExecution:
 
     def __post_init__(self) -> None:
         require_text(self.intervention_text, "intervention_text")
+        require_text(self.executor_adapter_id, "executor_adapter_id")
+        _require_digest(self.evidence_sha256, "executor evidence")
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialExecution:
+    """One complete prompt returned from an outcome-blind bundled execution."""
+
+    prompt_text: str
+    executor_adapter_id: str
+    evidence_sha256: str
+
+    def __post_init__(self) -> None:
+        require_text(self.prompt_text, "prompt_text")
         require_text(self.executor_adapter_id, "executor_adapter_id")
         _require_digest(self.evidence_sha256, "executor evidence")
 
@@ -111,6 +183,51 @@ class SemanticValidation:
 
 
 @dataclass(frozen=True, slots=True)
+class FactorialBundleValidation:
+    """Blind cross-cell validation; all fields must pass before randomization."""
+
+    task_semantics_preserved: SemanticVerdict
+    functional_contract_preserved: SemanticVerdict
+    pair_context_preserved: SemanticVerdict
+    non_target_security_preserved: SemanticVerdict
+    presentation_policy_preserved: SemanticVerdict
+    no_third_requirement: SemanticVerdict
+    treatment_states_distinct: SemanticVerdict
+    validator_adapter_id: str
+    evidence_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "task_semantics_preserved",
+            "functional_contract_preserved",
+            "pair_context_preserved",
+            "non_target_security_preserved",
+            "presentation_policy_preserved",
+            "no_third_requirement",
+            "treatment_states_distinct",
+        ):
+            if type(getattr(self, name)) is not SemanticVerdict:
+                raise TypeError(f"{name} must be a SemanticVerdict")
+        require_text(self.validator_adapter_id, "validator_adapter_id")
+        _require_digest(self.evidence_sha256, "bundle validator evidence")
+
+    @property
+    def passed(self) -> bool:
+        return all(
+            getattr(self, name) is SemanticVerdict.YES
+            for name in (
+                "task_semantics_preserved",
+                "functional_contract_preserved",
+                "pair_context_preserved",
+                "non_target_security_preserved",
+                "presentation_policy_preserved",
+                "no_third_requirement",
+                "treatment_states_distinct",
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ArmVariant:
     arm: Arm
     execution: InterventionExecution
@@ -123,6 +240,27 @@ class ArmVariant:
         require_text(self.prompt_text, "prompt_text")
         if not self.validation.passed:
             raise ValueError("only semantically validated variants may enter randomization")
+
+    @property
+    def variant_sha256(self) -> str:
+        return content_hash(self.prompt_text)
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialVariant:
+    cell: FactorialCell
+    execution: FactorialExecution
+    validation: SemanticValidation
+
+    def __post_init__(self) -> None:
+        if type(self.cell) is not FactorialCell:
+            raise TypeError("cell must be a FactorialCell")
+        if not self.validation.passed:
+            raise ValueError("only semantically validated variants may enter randomization")
+
+    @property
+    def prompt_text(self) -> str:
+        return self.execution.prompt_text
 
     @property
     def variant_sha256(self) -> str:
@@ -161,6 +299,35 @@ class TaskRealizationBundle:
 
 
 @dataclass(frozen=True, slots=True)
+class FactorialTaskBundle:
+    pair_id: str
+    task_id: str
+    task_unit_id: str
+    realization_id: str
+    source_prompt_sha256: str
+    variants: tuple[FactorialVariant, ...]
+    bundle_validation: FactorialBundleValidation
+
+    def __post_init__(self) -> None:
+        for name in ("pair_id", "task_id", "task_unit_id", "realization_id"):
+            require_text(getattr(self, name), name)
+        _require_digest(self.source_prompt_sha256, "source prompt")
+        if tuple(item.cell for item in self.variants) != FACTORIAL_CELL_ORDER:
+            raise ValueError("factorial bundle must contain A00/A10/A01/A11 in canonical order")
+        if len({item.variant_sha256 for item in self.variants}) != len(FACTORIAL_CELL_ORDER):
+            raise ValueError("factorial cells must bind four distinct prompt variants")
+        if not self.bundle_validation.passed:
+            raise ValueError("factorial cross-cell validation did not pass")
+
+    @property
+    def task_bundle_id(self) -> str:
+        return content_id("factorial_task_bundle_", self)
+
+    def variant(self, cell: FactorialCell) -> FactorialVariant:
+        return self.variants[FACTORIAL_CELL_ORDER.index(cell)]
+
+
+@dataclass(frozen=True, slots=True)
 class InterventionPolicy:
     candidate_id: str
     spec: InterventionSpec
@@ -194,6 +361,41 @@ class InterventionPolicy:
     @property
     def policy_id(self) -> str:
         return content_id("policy_", self)
+
+    def realization_weight(self, realization_id: str) -> int:
+        return next(
+            item.weight for item in self.realizations if item.realization_id == realization_id
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FactorialPolicy:
+    pair: PairSpec
+    factorial_protocol_id: str
+    realizations: tuple[FactorialRealizationSpec, ...]
+    bundles: tuple[FactorialTaskBundle, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.factorial_protocol_id, "factorial_protocol_id")
+        if not self.realizations or not self.bundles:
+            raise ValueError("factorial policy requires realizations and task bundles")
+        require_unique((item.realization_id for item in self.realizations), "realization ids")
+        require_unique((item.task_bundle_id for item in self.bundles), "task bundle ids")
+        if tuple(sorted(self.realizations, key=lambda item: item.realization_id)) != self.realizations:
+            raise ValueError("factorial realizations must use canonical order")
+        if tuple(sorted(self.bundles, key=lambda item: item.task_bundle_id)) != self.bundles:
+            raise ValueError("factorial task bundles must use canonical order")
+        realization_ids = {item.realization_id for item in self.realizations}
+        if any(
+            bundle.pair_id != self.pair.pair_id
+            or bundle.realization_id not in realization_ids
+            for bundle in self.bundles
+        ):
+            raise ValueError("factorial bundle drifts from its pair policy")
+
+    @property
+    def policy_id(self) -> str:
+        return content_id("factorial_policy_", self)
 
     def realization_weight(self, realization_id: str) -> int:
         return next(
@@ -278,6 +480,54 @@ def freeze_policy(
     )
 
 
+def freeze_factorial_bundle(
+    pair: PairSpec,
+    *,
+    task_id: str,
+    task_unit_id: str,
+    source_prompt: str,
+    realization: FactorialRealizationSpec,
+    executions: Mapping[FactorialCell, FactorialExecution],
+    validations: Mapping[FactorialCell, SemanticValidation],
+    bundle_validation: FactorialBundleValidation,
+) -> FactorialTaskBundle:
+    if set(executions) != set(FACTORIAL_CELL_ORDER) or set(validations) != set(
+        FACTORIAL_CELL_ORDER
+    ):
+        raise ValueError("all four factorial cell executions and validations are required")
+    require_text(source_prompt, "source_prompt")
+    variants = []
+    for cell in FACTORIAL_CELL_ORDER:
+        execution = executions[cell]
+        if execution.executor_adapter_id != realization.executor_adapter_id:
+            raise ValueError("factorial intervention execution adapter drift")
+        variants.append(FactorialVariant(cell, execution, validations[cell]))
+    return FactorialTaskBundle(
+        pair.pair_id,
+        task_id,
+        task_unit_id,
+        realization.realization_id,
+        content_hash(source_prompt),
+        tuple(variants),
+        bundle_validation,
+    )
+
+
+def freeze_factorial_policy(
+    pair: PairSpec,
+    *,
+    factorial_protocol_id: str,
+    realizations: tuple[FactorialRealizationSpec, ...],
+    bundles: tuple[FactorialTaskBundle, ...],
+) -> FactorialPolicy:
+    return FactorialPolicy(
+        pair,
+        factorial_protocol_id,
+        tuple(sorted(realizations, key=lambda item: item.realization_id)),
+        tuple(sorted(bundles, key=lambda item: item.task_bundle_id)),
+    )
+
+
 def _require_digest(value: str, name: str) -> None:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise ValueError(f"{name} must be a lowercase SHA-256 digest")
@@ -288,6 +538,14 @@ __all__ = [
     "APPEND_SEPARATOR",
     "Arm",
     "ArmVariant",
+    "FACTORIAL_CELL_ORDER",
+    "FactorialBundleValidation",
+    "FactorialCell",
+    "FactorialExecution",
+    "FactorialPolicy",
+    "FactorialRealizationSpec",
+    "FactorialTaskBundle",
+    "FactorialVariant",
     "InterventionExecution",
     "InterventionPolicy",
     "InterventionSpec",
@@ -297,6 +555,8 @@ __all__ = [
     "SemanticVerdict",
     "assemble_prompt",
     "freeze_bundle",
+    "freeze_factorial_bundle",
+    "freeze_factorial_policy",
     "freeze_policy",
     "intervention_spec",
 ]

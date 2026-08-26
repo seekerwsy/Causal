@@ -96,6 +96,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     measurements.add_argument("--bandit", type=Path, required=True)
     measurements.add_argument("--pilot-root", type=Path)
 
+    factorial = commands.add_parser(
+        "factorial-experiment",
+        help="preflight or run the frozen pairwise factorial study",
+    )
+    factorial.add_argument("phase", choices=("preflight", "run"))
+    factorial.add_argument("output", type=Path)
+    factorial.add_argument("--repository-root", type=Path, default=Path.cwd())
+    factorial.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/formal/factorial-sql-canary-qwen35-v1.json"),
+    )
+
     discovery_population = commands.add_parser(
         "discovery-population",
         help="freeze a natural-Prompt task-unit census without outcomes",
@@ -437,6 +450,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             family_quotas=family_quotas or None,
         )
         print(report["status"])
+    elif args.command == "factorial-experiment":
+        from prompt_mechanism_study.factorial_experiment import (
+            preflight_factorial_experiment,
+            run_factorial_experiment,
+        )
+
+        if args.phase == "preflight":
+            report = preflight_factorial_experiment(args.repository_root, args.config)
+            write_bundle(args.output, {"report.json": report})
+        else:
+            report = run_factorial_experiment(
+                args.repository_root,
+                args.config,
+                args.output,
+            )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0
     else:
         return _judge_gate(args)
     return 0
