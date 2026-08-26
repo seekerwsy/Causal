@@ -98,9 +98,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     factorial = commands.add_parser(
         "factorial-experiment",
-        help="preflight or run the frozen pairwise factorial study",
+        help="preflight, run, or verify the frozen pairwise factorial study",
     )
-    factorial.add_argument("phase", choices=("preflight", "run"))
+    factorial.add_argument("phase", choices=("preflight", "run", "verify"))
     factorial.add_argument("output", type=Path)
     factorial.add_argument("--repository-root", type=Path, default=Path.cwd())
     factorial.add_argument(
@@ -451,6 +451,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
     elif args.command == "factorial-experiment":
+        if args.phase == "verify":
+            from prompt_mechanism_study.factorial_verify import (
+                verify_factorial_result_bundle,
+            )
+
+            report = verify_factorial_result_bundle(args.output)
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+            return 0
         from prompt_mechanism_study.factorial_experiment import (
             preflight_factorial_experiment,
             run_factorial_experiment,

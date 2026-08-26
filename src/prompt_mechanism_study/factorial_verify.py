@@ -10,11 +10,14 @@ import random
 import statistics
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+from prompt_mechanism_study.artifact_io import read_json, verify_bundle
 from prompt_mechanism_study.intervention import FACTORIAL_CELL_ORDER, FactorialCell
 from prompt_mechanism_study.outcomes import Outcome
-from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.records import content_hash, content_id
 
 
 def verify_factorial_inference(
@@ -84,12 +87,26 @@ def verify_factorial_inference(
             for cell in FACTORIAL_CELL_ORDER
         }
         points = {cell: cell_rows[cell][0] for cell in FACTORIAL_CELL_ORDER}
+        lower = {cell: cell_rows[cell][1] for cell in FACTORIAL_CELL_ORDER}
+        upper = {cell: cell_rows[cell][2] for cell in FACTORIAL_CELL_ORDER}
         expected = {
             "cells": cell_rows,
             "factor_1": _difference(points[FactorialCell.A10], points[FactorialCell.A00]),
             "factor_2": _difference(points[FactorialCell.A01], points[FactorialCell.A00]),
             "joint": _difference(points[FactorialCell.A11], points[FactorialCell.A00]),
             "interaction": _interaction(points),
+            "factor_1_bounds": (
+                lower[FactorialCell.A10] - upper[FactorialCell.A00],
+                upper[FactorialCell.A10] - lower[FactorialCell.A00],
+            ),
+            "factor_2_bounds": (
+                lower[FactorialCell.A01] - upper[FactorialCell.A00],
+                upper[FactorialCell.A01] - lower[FactorialCell.A00],
+            ),
+            "joint_bounds": (
+                lower[FactorialCell.A11] - upper[FactorialCell.A00],
+                upper[FactorialCell.A11] - lower[FactorialCell.A00],
+            ),
             "interaction_bounds": _interaction_bounds(cell_rows),
             "unit_rows": unit_rows,
         }
@@ -175,6 +192,400 @@ def verify_mechanism_trace_diagnostics(
         "assignments": len(frozen_records),
         "endpoints": len(frozen_endpoints),
     }
+
+
+
+def verify_factorial_result_bundle(root: Path) -> dict[str, Any]:
+    """Recompute a stored active-path result without importing production inference."""
+
+    verify_bundle(root)
+    study = read_json(root / "study-freeze.json")
+    records = read_json(root / "measurement-records.json")
+    analysis = read_json(root / "analysis.json")
+    report = read_json(root / "report.json")
+    config = read_json(root / "effective-config.json")
+    stored_verification = read_json(root / "verification.json")
+    envelopes = (study, analysis, report, config, stored_verification)
+    if not all(isinstance(item, dict) for item in envelopes):
+        raise ValueError("stored factorial result envelope is invalid")
+    if not isinstance(records, list) or not records:
+        raise ValueError("stored factorial measurement records are empty")
+
+    raw_assignments = tuple(study.get("randomization", {}).get("assignments", ()))
+    assignment_by_id = {
+        content_id("factorial_assignment_", item): item for item in raw_assignments
+    }
+    if not raw_assignments or len(assignment_by_id) != len(raw_assignments):
+        raise ValueError("stored factorial assignments are empty or duplicated")
+
+    record_by_id: dict[str, Mapping[str, Any]] = {}
+    derived_outcomes: dict[str, dict[str, Any]] = {}
+    for record in records:
+        measurement = record.get("measurement", {})
+        assignment_id = measurement.get("assignment_id")
+        if (
+            assignment_id not in assignment_by_id
+            or assignment_id in record_by_id
+            or record.get("assignment") != assignment_by_id[assignment_id]
+        ):
+            raise ValueError("stored factorial measurement-to-assignment binding drift")
+        record_by_id[assignment_id] = record
+        derived_outcomes[assignment_id] = _stored_outcome(measurement)
+    if set(record_by_id) != set(assignment_by_id):
+        raise ValueError("stored factorial measurements do not cover every assignment")
+
+    stored_outcomes = {
+        item["assignment_id"]: item for item in analysis.get("outcomes", ())
+    }
+    if stored_outcomes != derived_outcomes:
+        raise ValueError("stored factorial outcome derivation drift")
+
+    randomization, outcomes, policies, tasks, plan, reported = _stored_views(
+        study, analysis["inference"], derived_outcomes
+    )
+    inference_verification = verify_factorial_inference(
+        randomization, outcomes, policies, tasks, plan, reported
+    )
+    if inference_verification != stored_verification:
+        raise ValueError("stored factorial inference verification drift")
+
+    endpoints = tuple(report.get("mechanism_trace_diagnostics", {}))
+    trace_verification = verify_mechanism_trace_diagnostics(
+        records, report.get("mechanism_trace_diagnostics", {}), endpoints
+    )
+    _verify_stored_report(
+        report,
+        config,
+        study,
+        analysis["inference"],
+        trace_verification,
+        inference_verification,
+        len(raw_assignments),
+    )
+    return {
+        "status": "FACTORIAL_RESULT_BUNDLE_VERIFIED",
+        "assignments": len(raw_assignments),
+        "task_units": len(
+            {item["block"]["task_unit_id"] for item in raw_assignments}
+        ),
+        "coordinates": inference_verification["coordinates"],
+        "primary_intervals": inference_verification["primary_intervals"],
+        "secondary_intervals": inference_verification["secondary_intervals"],
+        "mechanism_trace_endpoints": len(endpoints),
+    }
+
+
+def _stored_outcome(measurement: Mapping[str, Any]) -> dict[str, Any]:
+    assignment_id = measurement["assignment_id"]
+    code_status = measurement["code_status"]
+    if code_status != "valid":
+        return {
+            "assignment_id": assignment_id,
+            "code_valid": 0,
+            "oracle_evaluable": 0,
+            "secure_yield": 0,
+            "latent_secure_upper": 0,
+            "functionality": 0,
+            "joint": 0,
+            "latent_joint_upper": 0,
+            "terminal_status": code_status,
+        }
+    oracle = measurement["oracle_status"]
+    functional = measurement["functional_status"]
+    functionality = 1 if functional == "pass" else 0 if functional == "fail" else None
+    evaluable = int(oracle in {"secure", "insecure"})
+    secure = int(oracle == "secure")
+    latent_upper = int(oracle in {"secure", "unknown"})
+    if oracle == "insecure" or functionality == 0:
+        joint = 0
+    elif oracle == "unknown" or functionality is None:
+        joint = None
+    else:
+        joint = 1
+    return {
+        "assignment_id": assignment_id,
+        "code_valid": 1,
+        "oracle_evaluable": evaluable,
+        "secure_yield": secure,
+        "latent_secure_upper": latent_upper,
+        "functionality": functionality,
+        "joint": joint,
+        "latent_joint_upper": int(latent_upper == 1 and functionality != 0),
+        "terminal_status": None,
+    }
+
+
+def _stored_views(
+    study: Mapping[str, Any],
+    inference: Mapping[str, Any],
+    outcomes: Mapping[str, Mapping[str, Any]],
+) -> tuple[Any, tuple[Any, ...], tuple[Any, ...], tuple[Any, ...], Any, Any]:
+    raw_randomization = study["randomization"]
+    assignments = tuple(
+        SimpleNamespace(
+            assignment_id=content_id("factorial_assignment_", item),
+            block=SimpleNamespace(**item["block"]),
+            cell=FactorialCell(item["cell"]),
+            request_slot=item["request_slot"],
+            variant_sha256=item["variant_sha256"],
+        )
+        for item in raw_randomization["assignments"]
+    )
+    randomization = SimpleNamespace(
+        assignments=assignments,
+        models=tuple(raw_randomization["models"]),
+        slots=tuple(raw_randomization["slots"]),
+    )
+
+    policies = []
+    for raw_policy in study["policies"]:
+        raw_pair = raw_policy["pair"]
+        pair = SimpleNamespace(
+            pair_id=content_id("pair_", raw_pair),
+            pair_context_query_id=raw_pair["pair_context_query_id"],
+        )
+        realizations = tuple(
+            SimpleNamespace(
+                realization_id=content_id("factorial_realization_", item),
+                weight=item["weight"],
+            )
+            for item in raw_policy["realizations"]
+        )
+        realization_ids = {item.realization_id for item in realizations}
+        bundles = []
+        for raw_bundle in raw_policy["bundles"]:
+            if (
+                raw_bundle["pair_id"] != pair.pair_id
+                or raw_bundle["realization_id"] not in realization_ids
+            ):
+                raise ValueError("stored factorial bundle policy binding drift")
+            variants = {
+                FactorialCell(item["cell"]): SimpleNamespace(
+                    variant_sha256=content_hash(item["execution"]["prompt_text"])
+                )
+                for item in raw_bundle["variants"]
+            }
+            if set(variants) != set(FACTORIAL_CELL_ORDER):
+                raise ValueError("stored factorial bundle cell support drift")
+            bundle = SimpleNamespace(
+                task_unit_id=raw_bundle["task_unit_id"],
+                task_id=raw_bundle["task_id"],
+                realization_id=raw_bundle["realization_id"],
+                task_bundle_id=content_id("factorial_task_bundle_", raw_bundle),
+            )
+            bundle.variant = variants.__getitem__
+            bundles.append(bundle)
+        policies.append(
+            SimpleNamespace(
+                pair=pair,
+                realizations=realizations,
+                bundles=tuple(bundles),
+                factorial_protocol_id=raw_policy["factorial_protocol_id"],
+            )
+        )
+
+    tasks = tuple(
+        SimpleNamespace(task_id=item["task_id"], weight=item["weight"])
+        for item in study["tasks"]
+    )
+    plan_raw = study["analysis_plan"]
+    plan = SimpleNamespace(
+        primary_metric=plan_raw["primary_metric"],
+        bootstrap_seed=plan_raw["bootstrap_seed"],
+        bootstrap_draws=plan_raw["bootstrap_draws"],
+        alpha=plan_raw["alpha"],
+        secondary_effects=tuple(plan_raw["secondary_effects"]),
+    )
+    estimates = tuple(_stored_estimate_view(item) for item in inference["estimates"])
+    reported = SimpleNamespace(
+        estimates=estimates,
+        simultaneous_critical_value=inference["simultaneous_critical_value"],
+        intervals=tuple(SimpleNamespace(**item) for item in inference["intervals"]),
+        secondary_critical_value=inference["secondary_critical_value"],
+        secondary_intervals=tuple(
+            SimpleNamespace(**item) for item in inference["secondary_intervals"]
+        ),
+    )
+    outcome_views = tuple(SimpleNamespace(**item) for item in outcomes.values())
+    return randomization, outcome_views, tuple(policies), tasks, plan, reported
+
+
+def _stored_estimate_view(item: Mapping[str, Any]) -> Any:
+    coordinate_id = content_id(
+        "factorial_coordinate_",
+        {
+            "pair_id": item["pair_id"],
+            "model_id": item["model_id"],
+            "metric": item["metric"],
+        },
+    )
+    return SimpleNamespace(
+        coordinate_id=coordinate_id,
+        pair_id=item["pair_id"],
+        model_id=item["model_id"],
+        metric=item["metric"],
+        cells=tuple(
+            SimpleNamespace(**{**cell, "cell": FactorialCell(cell["cell"])})
+            for cell in item["cells"]
+        ),
+        factor_1=item["factor_1"],
+        factor_2=item["factor_2"],
+        joint=item["joint"],
+        interaction=item["interaction"],
+        factor_1_bounds=tuple(item["factor_1_bounds"]),
+        factor_2_bounds=tuple(item["factor_2_bounds"]),
+        joint_bounds=tuple(item["joint_bounds"]),
+        interaction_bounds=tuple(item["interaction_bounds"]),
+        task_unit_effects=tuple(
+            SimpleNamespace(
+                task_unit_id=unit["task_unit_id"],
+                interaction=unit["interaction"],
+            )
+            for unit in item["task_unit_effects"]
+        ),
+    )
+
+
+def _verify_stored_report(
+    report: Mapping[str, Any],
+    config: Mapping[str, Any],
+    study: Mapping[str, Any],
+    inference: Mapping[str, Any],
+    trace_verification: Mapping[str, Any],
+    inference_verification: Mapping[str, Any],
+    assignment_count: int,
+) -> None:
+    analysis_estimates = {
+        (item["pair_id"], item["model_id"], item["metric"]): item
+        for item in inference["estimates"]
+    }
+    report_estimates = {
+        (item["pair_id"], item["model_id"], item["metric"]): item
+        for item in report.get("estimates", ())
+    }
+    if set(report_estimates) != set(analysis_estimates):
+        raise ValueError("stored factorial report estimate support drift")
+    for key, source in analysis_estimates.items():
+        observed = report_estimates[key]
+        expected_cells = {
+            item["cell"]: {
+                name: item[name] for name in ("point", "lower", "upper", "assignments")
+            }
+            for item in source["cells"]
+        }
+        if observed.get("cells") != expected_cells:
+            raise ValueError("stored factorial report cell estimate drift")
+        for name in (
+            "factor_1",
+            "factor_2",
+            "joint",
+            "interaction",
+            "factor_1_bounds",
+            "factor_2_bounds",
+            "joint_bounds",
+            "interaction_bounds",
+        ):
+            if observed.get(name) != source[name]:
+                raise ValueError("stored factorial report effect estimate drift")
+
+    analysis_config = config["analysis"]
+    primary_keys = [
+        key
+        for key in analysis_estimates
+        if key[2] == analysis_config["primary_metric"]
+    ]
+    intervals = inference["intervals"]
+    if len(primary_keys) != 1 or len(intervals) != 1:
+        raise ValueError("stored factorial report requires one primary coordinate")
+    pair_id, model_id, _ = primary_keys[0]
+    primary = analysis_estimates[primary_keys[0]]
+    interval = intervals[0]
+    if report.get("primary_simultaneous_interval") != interval:
+        raise ValueError("stored factorial report primary interval drift")
+    significant = interval["lower"] > 0.0 or interval["upper"] < 0.0
+    _same(primary["interaction"], report.get("primary_interaction"))
+    if report.get("primary_interval_excludes_zero") is not significant:
+        raise ValueError("stored factorial report significance drift")
+
+    expected_secondary = [
+        {
+            **item,
+            "excludes_zero": item["lower"] > 0.0 or item["upper"] < 0.0,
+        }
+        for item in inference["secondary_intervals"]
+    ]
+    if report.get("secondary_intervals") != expected_secondary:
+        raise ValueError("stored factorial report secondary interval drift")
+
+    functionality = analysis_estimates[(pair_id, model_id, "functionality")]
+    evaluability = analysis_estimates[(pair_id, model_id, "oracle_evaluable")]
+    practical_margin = float(analysis_config["practical_interaction_margin"])
+    functionality_margin = float(
+        analysis_config["functionality_noninferiority_margin"]
+    )
+    unknown_limit = float(analysis_config["maximum_unknown_fraction"])
+    minimum_evaluability = min(
+        item["point"] for item in evaluability["cells"] if item["point"] is not None
+    )
+    expected_gate = {
+        "security_interval_excludes_zero": significant,
+        "practical_interaction_margin": practical_margin,
+        "practical_interaction_met": primary["interaction"] is not None
+        and abs(primary["interaction"]) >= practical_margin,
+        "functionality_contrast": "a11_minus_a00",
+        "functionality_difference": functionality["joint"],
+        "functionality_noninferiority_margin": functionality_margin,
+        "functionality_noninferior": functionality["joint"] is not None
+        and functionality["joint"] >= -functionality_margin,
+        "maximum_unknown_fraction": unknown_limit,
+        "minimum_oracle_evaluability": minimum_evaluability,
+        "unknown_gate_passed": minimum_evaluability >= 1.0 - unknown_limit,
+    }
+    expected_gate["claim_ready"] = bool(
+        config.get("scientific_claim_allowed", False)
+        and all(
+            expected_gate[name]
+            for name in (
+                "security_interval_excludes_zero",
+                "practical_interaction_met",
+                "functionality_noninferior",
+                "unknown_gate_passed",
+            )
+        )
+    )
+    if report.get("primary_gate") != expected_gate:
+        raise ValueError("stored factorial report claim gate drift")
+
+    expected_status = {
+        "development_canary": "FACTORIAL_CANARY_COMPLETE",
+        "confirmatory": "FACTORIAL_CONFIRMATION_COMPLETE",
+        "prospective_followup": "FACTORIAL_FOLLOWUP_COMPLETE",
+    }.get(config.get("phase"))
+    if (
+        expected_status is None
+        or report.get("status") != expected_status
+        or report.get("phase") not in (None, config.get("phase"))
+        or report.get("study_name") != config.get("study_name")
+        or report.get("tasks") != len(study.get("tasks", ()))
+        or report.get("realizations") != len(study["policies"][0]["realizations"])
+        or report.get("assignments") != assignment_count
+        or report.get("verification") != inference_verification
+        or report.get("mechanism_trace_verification")
+        not in (None, trace_verification)
+        or report.get("scientific_claim_allowed")
+        is not bool(config.get("scientific_claim_allowed", False))
+        or report.get("claim_boundary") != config["corpus"]["generalization_boundary"]
+        or report.get("scale_gate") != config["scale_gate"]
+    ):
+        raise ValueError("stored factorial report envelope drift")
+    _same(
+        inference["simultaneous_critical_value"],
+        report.get("simultaneous_critical_value"),
+    )
+    _same(
+        inference["secondary_critical_value"],
+        report.get("secondary_critical_value"),
+    )
 
 
 def _trace_state(security: Mapping[str, Any] | None, endpoint: str) -> str:
@@ -301,7 +712,13 @@ def _verify_estimate(estimate: Any, expected: Mapping[str, Any]) -> None:
             raise ValueError("reported factorial assignment count drift")
     for name in ("factor_1", "factor_2", "joint", "interaction"):
         _same(expected[name], getattr(estimate, name))
-    _same(expected["interaction_bounds"], estimate.interaction_bounds)
+    for name in (
+        "factor_1_bounds",
+        "factor_2_bounds",
+        "joint_bounds",
+        "interaction_bounds",
+    ):
+        _same(expected[name], getattr(estimate, name))
     stored_units = {item.task_unit_id: item for item in estimate.task_unit_effects}
     if set(stored_units) != {item["task_unit_id"] for item in expected["unit_rows"]}:
         raise ValueError("reported task-unit support drift")
@@ -495,4 +912,8 @@ def _same(expected: Any, observed: Any) -> None:
         raise ValueError("independent verifier found value drift")
 
 
-__all__ = ["verify_factorial_inference", "verify_mechanism_trace_diagnostics"]
+__all__ = [
+    "verify_factorial_inference",
+    "verify_factorial_result_bundle",
+    "verify_mechanism_trace_diagnostics",
+]

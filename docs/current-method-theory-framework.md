@@ -6,7 +6,9 @@
 
 **数据权威：** [研究数据集规范](research-dataset-spec.md)
 
-**最新正式实验：** [SQL 二因素 confirmation v3](experiments/2026-08-27-factorial-sql-confirm-v3-results.md)
+**最新正式实验：** [SQL scaffold-repair 析因 follow-up v1](experiments/2026-08-27-factorial-sql-scaffold-repair-v1-results.md)
+
+**前序正式实验：** [SQL 二因素 from-scratch confirmation v3](experiments/2026-08-27-factorial-sql-confirm-v3-results.md)
 
 **最新观测门控证据：** [自然提示 positivity pilot](experiments/2026-08-26-natural-prompt-positivity-pilot.md)
 
@@ -283,11 +285,11 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | family-local FCI 与五类 selector 公平比较 | specified，未形成当前可执行主证据 | 当前数据支持不足；活动最小代码只接受外部 score，并未闭合完整 selector benchmark |
 | 原子假设与多 realization 政策 | 部分 implemented + tested | 最小 kernel 已有 candidate、realization、bundle 和 policy 绑定；完整 successor freeze 字段尚未全部闭合 |
 | successor ADD/REMOVE 四臂 | specified，未在最小 kernel 完整实现 | 最小 kernel 目前只有 `TARGET/NOOP`；另一个 four-arm 路径属于已冻结 legacy/pilot 实现，不能冒充 successor 协议 |
-| 二因素配对析因扩展 | specified + implemented + tested + formally executed + reported | `PairSpec`、四 cell bundle、完整块随机化、Oracle Gate、ITT/unknown bounds/max-|T| 和独立 verifier 已闭合；240-assignment v3 confirmation 是正式零结果 |
+| 二因素配对析因扩展 | specified + implemented + tested + formally executed + reported | from-scratch v3 是正式零结果；独立冻结的 scaffold-repair follow-up 完成 240 assignments，interaction=+70.0pp，校正区间排除 0，功能非劣 Gate 通过 |
 | 独立 measurement 与 total ledger | implemented + tested | 活动代码保留 code、Oracle、functionality 和基础设施失败边界 |
 | task-unit ITT 与未知 bounds | implemented + tested | Target/Noop、task/realization 权重和同步 bootstrap 已闭合 |
 | 完整 max-|T|、selector nested bootstrap、全局 robustness family | factorial family implemented + executed；selector family 仍未执行 | 正式析因结果使用冻结 max-|T| family；观测 selector 因支持门失败未运行 |
-| 正式 confirmatory study | frozen + executed + independently verified + reported | 30 个 task units、2 个顺序、4 cells，共 240 assignments；interaction 为 0，校正区间跨 0，功能非劣 Gate 通过 |
+| 正式 confirmatory 与 prospective follow-up | frozen + executed + independently verified + reported | v3 interaction=0；follow-up 保留同 30 个 task units、使用新 prompt/task identities，interaction=+70.0pp，不能合并或互相替代 |
 
 ## 13. 当前 Gate 状态
 
@@ -300,16 +302,17 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | successor 单机制四臂完全冻结 | **未通过** | 仍不能把 legacy 四臂冒充 successor confirmation |
 | pairwise factorial canary | **已执行并独立验证；效应解释未通过构造效度审计** | 5 task units、2 个顺序、4 cells，共 40 assignments；旧任务合同和窄 Oracle 混入机制符合性，不能作为安全效应证据 |
 | successor confirmatory generation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
+| scaffold-repair prospective follow-up | **已完成并独立验证；有界正向结果** | 30 个相同 task units、240 assignments；A00=0%、A11=98.3%、interaction=+70.0pp，simultaneous interval=[+56.7,+83.3]pp；功能差=-1.7pp，通过非劣 Gate |
 
-当前准确位置是：**理论内核和二因素活动路径已闭合；观测 selector 分支被数据支持门阻塞；v3 正式随机确认已经执行并得到可复现零结果，其主要限制是从零生成条件下 A00 的 96.7% 安全天花板。**
+当前准确位置是：**理论内核和二因素活动路径已闭合；观测 selector 分支仍被数据支持门阻塞；from-scratch v3 的可复现零结果与 scaffold-repair follow-up 的有界正向结果共同表明，prompt policy 的可观测响应强烈依赖生成上下文。两轮上下文未随机化，跨轮差异只能作为探索性异质性。**
 
 ## 14. v3 后续研究边界
 
 1. **论文主轴。** 随机政策效应仍是当前可识别的主轴；FCI 是 availability-gated selector 扩展，当前不能报告 selector 优越性。
-2. **正式零结果。** v3 的总体、cell、case 和 Oracle 结果已经暴露；不得扩大同一总体、挑选三个响应任务或修改主 outcome 来追求显著性。
-3. **前瞻 follow-up。** 可以在新的冻结协议中研究“显式不安全 starter scaffold 的修复”，并把从零生成 v3 与 scaffold repair 的差异解释为上下文异质性。新研究必须保留全部 task units、使用新 prompt/task 身份、继续完整四 cell 和两个顺序，并将机制轨迹保持为诊断而非分母过滤。
+2. **正式零结果。** v3 的总体、cell、case 和 Oracle 结果保持不变；不能用 follow-up 的正向结果覆盖或重写它。
+3. **follow-up 正向结果。** 可以主张受控 scaffold-repair policy 的 assigned-cell 效应和 joint Prompt-policy interaction；不能主张普遍机制 synergy、自然修复任务总体效应或“scaffold 相对 from-scratch”的随机因果效应。两项 mechanism trace 保持为独立重算的诊断，不进入 ITT 过滤。
 
-follow-up 的设计可以由 v3 的总体天花板诊断启发，但必须在新的 provider outcomes 之前冻结；它不能覆盖、合并或重新解释 v3。
+后续若做跨模型或自然 repair benchmark 复制，必须另行前瞻冻结；不能根据本轮 task-specific outcome 选择任务或机制。
 
 ## 15. 最小活动调用图与阅读顺序
 

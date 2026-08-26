@@ -1,18 +1,20 @@
-from dataclasses import replace
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.factorial_verify import (
-    verify_factorial_inference,
-    verify_mechanism_trace_diagnostics,
-)
+from prompt_mechanism_study.artifact_io import read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.factorial_corpus import build_sql_factorial_corpus
 from prompt_mechanism_study.factorial_experiment import (
     _mechanism_trace_summary,
     preflight_factorial_experiment,
     run_factorial_experiment,
+)
+from prompt_mechanism_study.factorial_verify import (
+    verify_factorial_inference,
+    verify_factorial_result_bundle,
+    verify_mechanism_trace_diagnostics,
 )
 from prompt_mechanism_study.inference import (
     FactorialAnalysisPlan,
@@ -39,14 +41,13 @@ from prompt_mechanism_study.mechanisms import (
     load_pair_registry,
 )
 from prompt_mechanism_study.outcomes import Outcome
+from prompt_mechanism_study.prompt_tsg import load_catalog
 from prompt_mechanism_study.randomization import (
     randomize_factorial,
     verify_factorial_randomization,
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.representation import Operation, Split, Task
-from prompt_mechanism_study.prompt_tsg import load_catalog
-from prompt_mechanism_study.artifact_io import read_json, verify_bundle
 
 
 def _pair() -> PairSpec:
@@ -444,6 +445,39 @@ def test_scaffold_followup_preflight_retains_complete_predecessor_population() -
     assert report["assignments"] == 240
     assert report["oracle_support_status"] == "supported"
     assert report["scientific_claim_allowed"] is False
+
+
+@pytest.mark.reviewer
+def test_tracked_factorial_result_recomputes_independently() -> None:
+    report = verify_factorial_result_bundle(
+        Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
+    )
+
+    assert report == {
+        "status": "FACTORIAL_RESULT_BUNDLE_VERIFIED",
+        "assignments": 240,
+        "task_units": 30,
+        "coordinates": 5,
+        "primary_intervals": 1,
+        "secondary_intervals": 3,
+        "mechanism_trace_endpoints": 2,
+    }
+
+
+@pytest.mark.reviewer
+def test_result_recomputation_rejects_rehashed_report_drift(tmp_path) -> None:
+    source = Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
+    payload = {
+        path.name: read_json(path)
+        for path in source.glob("*.json")
+        if path.name != "manifest.json"
+    }
+    payload["report.json"]["primary_interaction"] = -1.0
+    tampered = tmp_path / "tampered-result"
+    write_bundle(tampered, payload)
+
+    with pytest.raises(ValueError, match="numeric drift"):
+        verify_factorial_result_bundle(tampered)
 
 
 @pytest.mark.reviewer

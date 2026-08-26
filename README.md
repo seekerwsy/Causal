@@ -119,6 +119,16 @@ from-scratch baseline ceiling. This is a formal bounded null result, not evidenc
 that the method failed to run or that prompt mechanisms never matter. See
 `docs/experiments/2026-08-27-factorial-sql-confirm-v3-results.md`.
 
+A separately frozen prospective follow-up retained the same 30 task units but gave
+each task a new prompt identity containing a deterministic starter implementation in
+which both controls were absent. It completed another 240 assignments. Secure yield
+was 0.0% in A00, 11.7% in A10, 16.7% in A01, and 98.3% in A11. The primary interaction
+was +70.0 percentage points with a simultaneous interval of `[+56.7, +83.3]`, and the
+functionality non-inferiority gate passed. This supports a bounded scaffold-repair
+prompt-policy effect, not universal mechanism synergy or a randomized causal effect of
+scaffold context. See
+`docs/experiments/2026-08-27-factorial-sql-scaffold-repair-v1-results.md`.
+
 ## Outcomes and evidence boundary
 
 The primary safety outcome is observed Oracle-evaluable secure-code yield.
@@ -145,22 +155,22 @@ Run the focused scientific-invariant suite:
 python -m pytest -q
 ```
 
-Run the zero-provider-call preflight for the active pairwise confirmation:
+Run the zero-provider-call preflight for the active scaffold-repair follow-up:
 
 ```text
 prompt-mechanism-study factorial-experiment preflight \
-  .artifacts/factorial-confirm-preflight \
+  .artifacts/factorial-scaffold-repair-preflight \
   --repository-root . \
-  --config configs/formal/factorial-sql-confirm-qwen35-v3.json
+  --config configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json
 ```
 
 With the externally supplied provider credential, run the same frozen path:
 
 ```text
 prompt-mechanism-study factorial-experiment run \
-  .artifacts/factorial-sql-confirm-qwen35-v3 \
+  .artifacts/factorial-sql-scaffold-repair-qwen35-v1 \
   --repository-root . \
-  --config configs/formal/factorial-sql-confirm-qwen35-v3.json
+  --config configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json
 ```
 
 The run command writes the complete assignment ledger, factorial estimates,
@@ -174,6 +184,28 @@ Verify the tracked formal v3 result bundle and its frozen file hashes:
 ```text
 prompt-mechanism-study verify \
   data/formal/results/factorial-sql-confirm-qwen35-v3
+```
+
+Independently rederive its assignment bindings, outcomes, task-unit estimates,
+unknown bounds, and bootstrap intervals from the stored measurement ledger:
+
+```text
+prompt-mechanism-study factorial-experiment verify \
+  data/formal/results/factorial-sql-confirm-qwen35-v3
+```
+
+Verify the tracked scaffold-repair follow-up bundle:
+
+```text
+prompt-mechanism-study verify \
+  data/formal/results/factorial-sql-scaffold-repair-qwen35-v1
+```
+
+Recompute the follow-up result rather than trusting its stored analysis:
+
+```text
+prompt-mechanism-study factorial-experiment verify \
+  data/formal/results/factorial-sql-scaffold-repair-qwen35-v1
 ```
 
 Verify the tracked Qwen3.7 analysis independently:
@@ -198,8 +230,8 @@ The active path can be reviewed in at most ten files:
 1. `AGENTS.md` -- scientific and reviewability constraints;
 2. `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
    -- normative protocol, including the pairwise extension;
-3. `configs/formal/factorial-sql-confirm-qwen35-v3.json` -- complete prospective
-   confirmation identity and evidence boundary;
+3. `configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json` -- complete
+   prospective follow-up identity and evidence boundary;
 4. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded Prompt-TSG schema;
 5. `src/prompt_mechanism_study/mechanisms.py` -- atomic features, `PairSpec`,
    and outcome-blind binding;
