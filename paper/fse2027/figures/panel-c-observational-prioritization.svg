@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 500" width="1440" height="500" font-family="Arial, Helvetica, sans-serif">
+  <rect width="1440" height="500" fill="#FFFFFF"/>
+  <defs>
+    <marker id="arrow-default" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 8 4, 0 8" fill="#555555"/>
+    </marker>
+    <marker id="arrow-c0" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 8 4, 0 8" fill="#2F5D8C"/>
+    </marker>
+    <marker id="arrow-c1" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 8 4, 0 8" fill="#A56321"/>
+    </marker>
+    <marker id="arrow-c2" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 8 4, 0 8" fill="#2F6F6D"/>
+    </marker>
+    <marker id="arrow-c3" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 8 4, 0 8" fill="#495F85"/>
+    </marker>
+    <marker id="arrow-c4" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 8 4, 0 8" fill="#6B7280"/>
+    </marker>
+  </defs>
+  <rect x="6.0" y="143.0" width="350.5" height="305.0" fill="#FAFBFC" stroke="#D7DDE5" stroke-width="1" rx="8"/>
+  <rect x="351.0" y="145.0" width="308.0" height="338.0" fill="#FFFCF8" stroke="#E6D5C2" stroke-width="1" rx="8"/>
+  <rect x="716.0" y="145.0" width="298.0" height="338.0" fill="#F8FCFB" stroke="#C7DEDC" stroke-width="1" rx="8"/>
+  <rect x="1081.0" y="145.0" width="298.0" height="340.0" fill="#FAFBFD" stroke="#CBD4E2" stroke-width="1" rx="8"/>
+  <path d="M 115.8,243.0 L 162.8,356.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 239.0,243.0 L 191.3,356.0" stroke="#A56321" stroke-width="2" fill="none" marker-end="url(#arrow-c1)" stroke-dasharray="8,4"/>
+  <path d="M 237.3,356.0 L 441.2,241.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 505.0,241.0 L 505.0,277.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 505.0,353.0 L 505.0,391.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 560.6,391.0 L 806.1,241.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 865.0,241.0 L 865.0,281.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 865.0,349.0 L 865.0,391.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 921.4,391.0 L 1170.3,241.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 1230.0,241.0 L 1230.0,279.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <path d="M 1230.0,351.0 L 1230.0,389.0" stroke="#555555" stroke-width="2" fill="none" marker-end="url(#arrow-default)"/>
+  <rect x="30.0" y="167.0" width="140.0" height="76.0" fill="#EAF2F8" stroke="#2F5D8C" stroke-width="2" rx="8"/>
+  <text x="100.0" y="201.4" font-size="17" fill="#173A5E" text-anchor="middle" font-weight="bold">Natural table</text>
+  <text x="100.0" y="220.4" font-size="14" fill="#888888" text-anchor="middle">W  ·  X⁰  ·  Y⁰</text>
+  <rect x="64.5" y="356.0" width="225.0" height="68.0" fill="#F4F7FA" stroke="#6B7280" stroke-width="2" rx="8"/>
+  <text x="177.0" y="386.4" font-size="17" fill="#374151" text-anchor="middle" font-weight="bold">Dependence audit</text>
+  <text x="177.0" y="405.4" font-size="14" fill="#888888" text-anchor="middle">minimal generating variables</text>
+  <rect x="177.5" y="167.0" width="155.0" height="76.0" fill="#FFF4E6" stroke="#A56321" stroke-width="2" rx="8"/>
+  <text x="255.0" y="193.2" font-size="15" fill="#6F3C0F" text-anchor="middle" font-weight="bold">Typed background</text>
+  <text x="255.0" y="210.2" font-size="15" fill="#6F3C0F" text-anchor="middle" font-weight="bold">knowledge</text>
+  <text x="255.0" y="227.2" font-size="12" fill="#888888" text-anchor="middle">temporal + catalog</text>
+  <rect x="390.0" y="169.0" width="230.0" height="72.0" fill="#FFF4E6" stroke="#A56321" stroke-width="2" rx="8"/>
+  <text x="505.0" y="201.4" font-size="17" fill="#6F3C0F" text-anchor="middle" font-weight="bold">Constrained FCI</text>
+  <text x="505.0" y="220.4" font-size="14" fill="#888888" text-anchor="middle">G-square · frozen search settings</text>
+  <rect x="375.0" y="277.0" width="260.0" height="76.0" fill="#FFF9F1" stroke="#A56321" stroke-width="2" rx="8"/>
+  <text x="505.0" y="311.6" font-size="16" fill="#6F3C0F" text-anchor="middle" font-weight="bold">PAG evidence</text>
+  <text x="505.0" y="329.6" font-size="13" fill="#888888" text-anchor="middle">adjacency · possible ancestry · endpoints retained</text>
+  <rect x="385.0" y="391.0" width="240.0" height="68.0" fill="#FFFFFF" stroke="#A56321" stroke-width="2" rx="8"/>
+  <text x="505.0" y="421.6" font-size="16" fill="#6F3C0F" text-anchor="middle" font-weight="bold">Graph-admissible candidate</text>
+  <text x="505.0" y="439.6" font-size="13" fill="#888888" text-anchor="middle">frozen type + context eligibility</text>
+  <rect x="740.0" y="169.0" width="250.0" height="72.0" fill="#E8F4F3" stroke="#2F6F6D" stroke-width="2" rx="8"/>
+  <text x="865.0" y="201.4" font-size="17" fill="#184B49" text-anchor="middle" font-weight="bold">Semantic-cluster bootstrap</text>
+  <text x="865.0" y="220.4" font-size="14" fill="#888888" text-anchor="middle">resample whole task clusters</text>
+  <rect x="750.0" y="281.0" width="230.0" height="68.0" fill="#F2F8F7" stroke="#2F6F6D" stroke-width="2" rx="8"/>
+  <text x="865.0" y="311.4" font-size="17" fill="#184B49" text-anchor="middle" font-weight="bold">Re-run constrained FCI</text>
+  <text x="865.0" y="330.4" font-size="14" fill="#888888" text-anchor="middle">eligible resamples only</text>
+  <rect x="750.0" y="391.0" width="230.0" height="68.0" fill="#FFFFFF" stroke="#2F6F6D" stroke-width="2" rx="8"/>
+  <text x="865.0" y="421.4" font-size="17" fill="#184B49" text-anchor="middle" font-weight="bold">Stability  S(h)</text>
+  <text x="865.0" y="440.4" font-size="14" fill="#888888" text-anchor="middle">admissible frequency · threshold τ</text>
+  <rect x="1115.0" y="169.0" width="230.0" height="72.0" fill="#EEF2F7" stroke="#495F85" stroke-width="2" rx="8"/>
+  <text x="1230.0" y="201.4" font-size="17" fill="#263B5D" text-anchor="middle" font-weight="bold">Eligible candidates</text>
+  <text x="1230.0" y="220.4" font-size="14" fill="#888888" text-anchor="middle">full-data admissibility gate</text>
+  <rect x="1105.0" y="279.0" width="250.0" height="72.0" fill="#F5F7FA" stroke="#495F85" stroke-width="2" rx="8"/>
+  <text x="1230.0" y="311.6" font-size="16" fill="#263B5D" text-anchor="middle" font-weight="bold">Frozen rank order</text>
+  <text x="1230.0" y="329.6" font-size="13" fill="#888888" text-anchor="middle">S(h) + predeclared score components</text>
+  <rect x="1105.0" y="389.0" width="250.0" height="72.0" fill="#E9EEF6" stroke="#495F85" stroke-width="2" rx="8"/>
+  <text x="1230.0" y="421.6" font-size="16" fill="#263B5D" text-anchor="middle" font-weight="bold">Frozen Top-K hypotheses</text>
+  <text x="1230.0" y="439.6" font-size="13" fill="#888888" text-anchor="middle">shared budget · held-out confirmation</text>
+  <text x="720.0" y="34.0" font-size="23" fill="#111827" text-anchor="middle">(c) Observational Prioritization (Stage II)</text>
+  <text x="720.0" y="64.0" font-size="14" fill="#6B7280" text-anchor="middle">Prompt variables + typed constraints  →  PAG evidence  →  cluster stability  →  frozen Top-K</text>
+  <text x="177.0" y="126.0" font-size="17" fill="#1F2937" text-anchor="middle">1   Typed discovery inputs</text>
+  <text x="505.0" y="126.0" font-size="17" fill="#1F2937" text-anchor="middle">2   Constrained discovery</text>
+  <text x="865.0" y="126.0" font-size="17" fill="#1F2937" text-anchor="middle">3   Semantic-cluster stability</text>
+  <text x="1230.0" y="126.0" font-size="17" fill="#1F2937" text-anchor="middle">4   Shared-budget freeze</text>
+</svg>

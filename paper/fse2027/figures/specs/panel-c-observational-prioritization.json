@@ -1,0 +1,351 @@
+{
+  "title": "Panel C: Observational Prioritization (Stage II)",
+  "canvas": {
+    "width": 1440,
+    "height": 500
+  },
+  "style": {
+    "font_family": "Arial, Helvetica, sans-serif",
+    "font_size": 17,
+    "bg_color": "#FFFFFF",
+    "palette": [
+      "#2F5D8C",
+      "#A56321",
+      "#2F6F6D",
+      "#495F85",
+      "#6B7280"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "natural_table",
+      "label": "Natural table",
+      "sublabel": "W  ·  X⁰  ·  Y⁰",
+      "x": 100,
+      "y": 205,
+      "width": 140,
+      "height": 76,
+      "shape": "rounded",
+      "fill": "#EAF2F8",
+      "stroke": "#2F5D8C",
+      "text_color": "#173A5E"
+    },
+    {
+      "id": "dependence_audit",
+      "label": "Dependence audit",
+      "sublabel": "minimal generating variables",
+      "x": 177,
+      "y": 390,
+      "width": 225,
+      "height": 68,
+      "shape": "rounded",
+      "fill": "#F4F7FA",
+      "stroke": "#6B7280",
+      "text_color": "#374151"
+    },
+    {
+      "id": "typed_bk",
+      "label": "Typed background\nknowledge",
+      "sublabel": "temporal + catalog",
+      "x": 255,
+      "y": 205,
+      "width": 155,
+      "height": 76,
+      "shape": "rounded",
+      "fill": "#FFF4E6",
+      "stroke": "#A56321",
+      "text_color": "#6F3C0F",
+      "font_size": 15
+    },
+    {
+      "id": "fci",
+      "label": "Constrained FCI",
+      "sublabel": "G-square · frozen search settings",
+      "x": 505,
+      "y": 205,
+      "width": 230,
+      "height": 72,
+      "shape": "rounded",
+      "fill": "#FFF4E6",
+      "stroke": "#A56321",
+      "text_color": "#6F3C0F"
+    },
+    {
+      "id": "pag",
+      "label": "PAG evidence",
+      "sublabel": "adjacency · possible ancestry · endpoints retained",
+      "x": 505,
+      "y": 315,
+      "width": 260,
+      "height": 76,
+      "shape": "rounded",
+      "fill": "#FFF9F1",
+      "stroke": "#A56321",
+      "text_color": "#6F3C0F",
+      "font_size": 16
+    },
+    {
+      "id": "candidate_gate",
+      "label": "Graph-admissible candidate",
+      "sublabel": "frozen type + context eligibility",
+      "x": 505,
+      "y": 425,
+      "width": 240,
+      "height": 68,
+      "shape": "rounded",
+      "fill": "#FFFFFF",
+      "stroke": "#A56321",
+      "text_color": "#6F3C0F",
+      "font_size": 16
+    },
+    {
+      "id": "cluster_bootstrap",
+      "label": "Semantic-cluster bootstrap",
+      "sublabel": "resample whole task clusters",
+      "x": 865,
+      "y": 205,
+      "width": 250,
+      "height": 72,
+      "shape": "rounded",
+      "fill": "#E8F4F3",
+      "stroke": "#2F6F6D",
+      "text_color": "#184B49"
+    },
+    {
+      "id": "rerun_fci",
+      "label": "Re-run constrained FCI",
+      "sublabel": "eligible resamples only",
+      "x": 865,
+      "y": 315,
+      "width": 230,
+      "height": 68,
+      "shape": "rounded",
+      "fill": "#F2F8F7",
+      "stroke": "#2F6F6D",
+      "text_color": "#184B49"
+    },
+    {
+      "id": "stability",
+      "label": "Stability  S(h)",
+      "sublabel": "admissible frequency · threshold τ",
+      "x": 865,
+      "y": 425,
+      "width": 230,
+      "height": 68,
+      "shape": "rounded",
+      "fill": "#FFFFFF",
+      "stroke": "#2F6F6D",
+      "text_color": "#184B49"
+    },
+    {
+      "id": "eligible_candidates",
+      "label": "Eligible candidates",
+      "sublabel": "full-data admissibility gate",
+      "x": 1230,
+      "y": 205,
+      "width": 230,
+      "height": 72,
+      "shape": "rounded",
+      "fill": "#EEF2F7",
+      "stroke": "#495F85",
+      "text_color": "#263B5D"
+    },
+    {
+      "id": "frozen_rank",
+      "label": "Frozen rank order",
+      "sublabel": "S(h) + predeclared score components",
+      "x": 1230,
+      "y": 315,
+      "width": 250,
+      "height": 72,
+      "shape": "rounded",
+      "fill": "#F5F7FA",
+      "stroke": "#495F85",
+      "text_color": "#263B5D",
+      "font_size": 16
+    },
+    {
+      "id": "top_k",
+      "label": "Frozen Top-K hypotheses",
+      "sublabel": "shared budget · held-out confirmation",
+      "x": 1230,
+      "y": 425,
+      "width": 250,
+      "height": 72,
+      "shape": "rounded",
+      "fill": "#E9EEF6",
+      "stroke": "#495F85",
+      "text_color": "#263B5D",
+      "font_size": 16
+    }
+  ],
+  "edges": [
+    {
+      "from": "natural_table",
+      "to": "dependence_audit",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "typed_bk",
+      "to": "dependence_audit",
+      "style": "dashed",
+      "color": "#A56321",
+      "thickness": 2
+    },
+    {
+      "from": "dependence_audit",
+      "to": "fci",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "fci",
+      "to": "pag",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "pag",
+      "to": "candidate_gate",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "candidate_gate",
+      "to": "cluster_bootstrap",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "cluster_bootstrap",
+      "to": "rerun_fci",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "rerun_fci",
+      "to": "stability",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "stability",
+      "to": "eligible_candidates",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "eligible_candidates",
+      "to": "frozen_rank",
+      "color": "#555555",
+      "thickness": 2
+    },
+    {
+      "from": "frozen_rank",
+      "to": "top_k",
+      "color": "#555555",
+      "thickness": 2
+    }
+  ],
+  "groups": [
+    {
+      "id": "typed_inputs_group",
+      "label": "",
+      "node_ids": [
+        "natural_table",
+        "dependence_audit",
+        "typed_bk"
+      ],
+      "fill": "#FAFBFC",
+      "stroke": "#D7DDE5",
+      "padding": 24
+    },
+    {
+      "id": "fci_group",
+      "label": "",
+      "node_ids": [
+        "fci",
+        "pag",
+        "candidate_gate"
+      ],
+      "fill": "#FFFCF8",
+      "stroke": "#E6D5C2",
+      "padding": 24
+    },
+    {
+      "id": "stability_group",
+      "label": "",
+      "node_ids": [
+        "cluster_bootstrap",
+        "rerun_fci",
+        "stability"
+      ],
+      "fill": "#F8FCFB",
+      "stroke": "#C7DEDC",
+      "padding": 24
+    },
+    {
+      "id": "ranking_group",
+      "label": "",
+      "node_ids": [
+        "eligible_candidates",
+        "frozen_rank",
+        "top_k"
+      ],
+      "fill": "#FAFBFD",
+      "stroke": "#CBD4E2",
+      "padding": 24
+    }
+  ],
+  "labels": [
+    {
+      "text": "(c) Observational Prioritization (Stage II)",
+      "x": 720,
+      "y": 34,
+      "font_size": 23,
+      "color": "#111827",
+      "anchor": "middle"
+    },
+    {
+      "text": "Prompt variables + typed constraints  →  PAG evidence  →  cluster stability  →  frozen Top-K",
+      "x": 720,
+      "y": 64,
+      "font_size": 14,
+      "color": "#6B7280",
+      "anchor": "middle"
+    },
+    {
+      "text": "1   Typed discovery inputs",
+      "x": 177,
+      "y": 126,
+      "font_size": 17,
+      "color": "#1F2937",
+      "anchor": "middle"
+    },
+    {
+      "text": "2   Constrained discovery",
+      "x": 505,
+      "y": 126,
+      "font_size": 17,
+      "color": "#1F2937",
+      "anchor": "middle"
+    },
+    {
+      "text": "3   Semantic-cluster stability",
+      "x": 865,
+      "y": 126,
+      "font_size": 17,
+      "color": "#1F2937",
+      "anchor": "middle"
+    },
+    {
+      "text": "4   Shared-budget freeze",
+      "x": 1230,
+      "y": 126,
+      "font_size": 17,
+      "color": "#1F2937",
+      "anchor": "middle"
+    }
+  ]
+}

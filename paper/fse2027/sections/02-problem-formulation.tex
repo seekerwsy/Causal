@@ -2,56 +2,26 @@
 
 \subsection{From a Missing Requirement to a Testable Hypothesis}
 
-Consider a security-underspecified request to implement
-\texttt{read\_report(base\_dir, user\_path)} and return the requested UTF-8
-report. The task semantics are fixed, but path confinement is implicit. A
-target policy can add the requirement to resolve and normalize the path under
-\texttt{base\_dir} and reject any resolution outside that directory. A matched
-no-op preserves the original factor state, a length-matched placebo changes
-presentation only, and a generic control requests secure coding without naming
-path confinement. This creates a testable requirement hypothesis without
-assuming that path confinement will affect the generated program.
+Consider a security-underspecified request to implement \texttt{read\_report(base\_dir, user\_path)} and return the requested UTF-8 report. The task semantics are fixed, but path confinement is implicit. A target policy can add the requirement to resolve and normalize the path under \texttt{base\_dir} and reject any resolution outside that directory. A matched no-op preserves the original factor state, a length-matched placebo changes presentation only, and a generic control requests secure coding without naming path confinement. This creates a testable requirement hypothesis without assuming that path confinement will affect the generated program.
 
 \subsection{Units, Variables, and Causal Boundary}
 
-Let a generation unit be indexed by semantic task cluster $c$, task instance
-$i$, requirement hypothesis $h$, realization $r$, prompt arm $a$, generator
-model $m$, and request-randomness slot $s$:
+Let a generation unit be indexed by semantic task cluster $c$, task instance $i$, requirement hypothesis $h$, realization $r$, prompt arm $a$, generator model $m$, and request-randomness slot $s$:
 
 \[
   u = (c,i,h,r,a,m,s).
 \]
 
-Tasks are partitioned before generator-based discovery into disjoint discovery
-and held-out evaluation pools. No semantic task cluster crosses this boundary.
-The highest resampling unit is \texttt{semantic\_task\_cluster\_id}; every
-descendant task instance, hypothesis, model, arm, realization, and request slot
-moves with its cluster.
+Tasks are partitioned before generator-based discovery into disjoint discovery and held-out evaluation pools. No semantic task cluster crosses this boundary. The highest resampling unit is \texttt{semantic\_task\_cluster\_id}; every descendant task instance, hypothesis, model, arm, realization, and request slot moves with its cluster.
 
-$W$ contains approved pre-treatment task metadata, $X^0$ contains natural
-Prompt TSG feature queries, and $Y^0$ contains independently committed
-discovery outcomes. A non-editable context query $C_q$ scopes one actionable
-requirement $f$. Randomized arm $A$ is the assigned prompt policy, whereas
-post-intervention $X^{A,R}$ is a separately extracted realization diagnostic
-and never replaces $A$ in the ITT estimator. Generator-model identity remains
-an analysis coordinate and provenance field.
+$W$ contains approved pre-treatment task metadata, $X^0$ contains natural Prompt TSG feature queries, and $Y^0$ contains independently committed discovery outcomes. A non-editable context query $C_q$ scopes one actionable requirement $f$. Randomized arm $A$ is the assigned prompt policy, whereas post-intervention $X^{A,R}$ is a separately extracted realization diagnostic and never replaces $A$ in the ITT estimator. Generator-model identity remains an analysis coordinate and provenance field.
 
-Prompt TSG edges encode relations stated or grounded in the prompt; they are
-not causal edges. A PAG retains uncertainty in observational discovery, but
-generated code is not a primary-PAG variable or a mediator. Generated code
-supplies independently measured security and functionality outcomes. Thus the
-Prompt TSG represents candidate requirements, observational discovery
-determines which hypotheses to test, and randomized assignment determines the
-effect of the frozen prompt policy.
+Prompt TSG edges encode relations stated or grounded in the prompt; they are not causal edges. A PAG retains uncertainty in observational discovery, but generated code is not a primary-PAG variable or a mediator. Generated code supplies independently measured security and functionality outcomes. Thus the Prompt TSG represents candidate requirements, observational discovery determines which hypotheses to test, and randomized assignment determines the effect of the frozen prompt policy.
 
 \subsection{What It Means for a Requirement to Matter}
 \label{sec:matter-definition}
 
-For frozen hypothesis $h$ and generator model $m$, let
-$\Delta^{\mathrm{ITT}}_{h,m}$ be the target-minus-no-op assigned-arm risk
-difference on oracle-evaluable secure-code yield, and let $CI^{\mathrm{adj}}_{h,m}$
-be its multiplicity-adjusted interval. The effect axis is defined before
-outcome inspection:
+For frozen hypothesis $h$ and generator model $m$, let $\Delta^{\mathrm{ITT}}_{h,m}$ be the target-minus-no-op assigned-arm risk difference on oracle-evaluable secure-code yield, and let $CI^{\mathrm{adj}}_{h,m}$ be its multiplicity-adjusted interval. The effect axis is defined before outcome inspection:
 
 \begin{itemize}
   \item \textsc{Supported-Expected}: the adjusted interval excludes zero in
@@ -67,22 +37,6 @@ outcome inspection:
   invalid, so no effect classification is permitted.
 \end{itemize}
 
-These labels answer different questions. \emph{Effect-relevant} means either
-supported status; \emph{beneficial} means a supported security-improving
-operation-specific effect; and \emph{practically actionable} additionally
-requires \textsc{Supported} specificity and \textsc{Preserved} functionality.
-Specificity is reported as \textsc{Supported}, \textsc{Unsupported},
-\textsc{Inconclusive}, or \textsc{Not-Tested}; functionality as
-\textsc{Preserved}, \textsc{Degraded}, \textsc{Improved},
-\textsc{Inconclusive}, or \textsc{Non-Evaluable}. No aggregate ``matters''
-label overwrites these axes, and inconclusive evidence is never relabeled as
-absence of effect.
+These labels answer different questions. \emph{Effect-relevant} means either supported status; \emph{beneficial} means a supported security-improving operation-specific effect; and \emph{practically actionable} additionally requires \textsc{Supported} specificity and \textsc{Preserved} functionality. Specificity is reported as \textsc{Supported}, \textsc{Unsupported}, \textsc{Inconclusive}, or \textsc{Not-Tested}; functionality as \textsc{Preserved}, \textsc{Degraded}, \textsc{Improved}, \textsc{Inconclusive}, or \textsc{Non-Evaluable}. No aggregate ``matters'' label overwrites these axes, and inconclusive evidence is never relabeled as absence of effect.
 
-The primary analysis is semantic-task-clustered assigned-arm ITT over every
-committed assignment. The primary outcome is oracle-evaluable secure-code
-yield. Code validity, Oracle support, unknown coverage, functionality, and
-secure-and-functional joint success remain separate outcomes; post-assignment
-fidelity, semantic compliance, generation success, and non-target drift are
-diagnostics rather than denominator filters. Claims therefore remain scoped to
-the frozen requirement, context, operation, task population, realization
-distribution, generator model, outcome, and multiplicity family.
+The primary analysis is semantic-task-clustered assigned-arm ITT over every committed assignment. The primary outcome is oracle-evaluable secure-code yield. Code validity, Oracle support, unknown coverage, functionality, and secure-and-functional joint success remain separate outcomes; post-assignment fidelity, semantic compliance, generation success, and non-target drift are diagnostics rather than denominator filters. Claims therefore remain scoped to the frozen requirement, context, operation, task population, realization distribution, generator model, outcome, and multiplicity family.

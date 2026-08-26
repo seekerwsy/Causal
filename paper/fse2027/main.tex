@@ -36,25 +36,7 @@ Generation?}
 }
 
 \begin{abstract}
-Natural-language programming prompts often specify functionality while leaving
-context-specific security requirements implicit. The resulting question is
-not whether security language matters in general, but which prompt-side
-requirement matters for a particular task context. We present \model
-(\modelfull), an empirical framework that maps prompts into typed Prompt TSGs,
-discovers and prospectively freezes requirement hypotheses, and evaluates
-their prompt-policy effects on cluster-disjoint held-out tasks. A requirement
-is effect-relevant only when its multiplicity-adjusted target-versus-no-op
-assigned-arm interval excludes zero within the frozen scope; beneficial and
-practically actionable requirements must satisfy additional direction,
-specificity, and functionality criteria. Prompt TSG constraints, FCI evidence,
-and semantic-cluster stability allocate a fixed evaluation budget without
-treating observational relations as effect evidence. Blocked randomization and
-semantic-task-clustered intent-to-treat analysis then estimate independently
-measured security and functionality effects. For each frozen hypothesis,
-\model assembles the applicable context, requirement operation, selection
-trace, randomized effect, uncertainty, and claim scope into a requirement
-evidence record for computational reporting and separately governed expert
-evaluation.
+Natural-language programming prompts often specify functionality while leaving context-specific security requirements implicit. 
 \end{abstract}
 
 \begin{CCSXML}
@@ -74,8 +56,7 @@ evaluation.
 
 \ccsdesc[500]{Software and its engineering~Software safety}
 \ccsdesc[500]{Security and privacy~Software security engineering}
-\keywords{large language models, code generation, software security, causal
-discovery, randomized experiments, prompt analysis}
+\keywords{large language models, code generation, software security, causal discovery, prompt analysis}
 
 \maketitle
 \raggedbottom
@@ -91,12 +72,6 @@ discovery, randomized experiments, prompt analysis}
 \input{sections/05-related-work}
 
 \input{sections/06-conclusion}
-
-\input{sections/08-data-availability}
-
-\appendix
-
-\input{sections/appendix-a-optional-analyses}
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
