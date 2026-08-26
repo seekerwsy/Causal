@@ -12,7 +12,10 @@ from typing import Any, Mapping
 
 from prompt_mechanism_study.adapters import AdapterBundle, AdapterKind, AdapterSpec
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
-from prompt_mechanism_study.factorial_verify import verify_factorial_inference
+from prompt_mechanism_study.factorial_verify import (
+    verify_factorial_inference,
+    verify_mechanism_trace_diagnostics,
+)
 from prompt_mechanism_study.functional_judge import (
     bailian_complete,
     build_review_request,
@@ -221,7 +224,7 @@ def run_factorial_experiment(
         study.analysis_plan,
         analysis.inference,
     )
-    report = _report(config, study, analysis, verification)
+    report = _report(config, study, analysis, verification, measurement_records)
     environment = {
         "python": sys.version,
         "platform": platform.platform(),
@@ -253,6 +256,7 @@ def _load_inputs(repository_root: Path, config_path: Path) -> dict[str, Any]:
     if config.get("schema_version") != "1.0" or phase not in {
         "development_canary",
         "confirmatory",
+        "prospective_followup",
     }:
         raise FactorialExperimentError("factorial config envelope is invalid")
     claim_allowed = config.get("scientific_claim_allowed")
@@ -276,12 +280,16 @@ def _load_inputs(repository_root: Path, config_path: Path) -> dict[str, Any]:
     task_rows = tuple(by_task[item] for item in selected_ids)
     if len({item["task_unit_id"] for item in task_rows}) != len(task_rows):
         raise FactorialExperimentError("factorial tasks must be unique task units")
-    if phase == "confirmatory" and any(item.get("split") != "confirm" for item in task_rows):
+    if phase in {"confirmatory", "prospective_followup"} and any(
+        item.get("split") != "confirm" for item in task_rows
+    ):
         raise FactorialExperimentError("confirmatory factorial task entered from another split")
     if config["corpus"].get("selection_outcomes_consulted") is not False or any(
         item.get("source_records_used_as_outcomes") is not False for item in task_rows
     ):
         raise FactorialExperimentError("factorial task selection is not outcome blind")
+    if phase == "prospective_followup":
+        _validate_followup(root, config, task_rows)
     catalog_path = root / config["prompt_tsg_catalog_path"]
     registry_path = root / config["pair_registry_path"]
     catalog = load_catalog(catalog_path)
@@ -548,7 +556,13 @@ def _measure_assignment(
     }
 
 
-def _report(config: Mapping[str, Any], study: Any, analysis: Any, verification: Mapping[str, Any]) -> dict[str, Any]:
+def _report(
+    config: Mapping[str, Any],
+    study: Any,
+    analysis: Any,
+    verification: Mapping[str, Any],
+    measurement_records: list[dict[str, Any]],
+) -> dict[str, Any]:
     estimates = []
     for estimate in analysis.inference.estimates:
         estimates.append(
@@ -634,13 +648,28 @@ def _report(config: Mapping[str, Any], study: Any, analysis: Any, verification: 
             )
         )
     )
+    phase = config["phase"]
+    status_by_phase = {
+        "development_canary": "FACTORIAL_CANARY_COMPLETE",
+        "confirmatory": "FACTORIAL_CONFIRMATION_COMPLETE",
+        "prospective_followup": "FACTORIAL_FOLLOWUP_COMPLETE",
+    }
+    trace_endpoints = tuple(
+        analysis_config.get("mechanism_trace_diagnostics", ())
+    )
+    if any(
+        item not in {"identifier_control", "value_parameterization"}
+        for item in trace_endpoints
+    ) or len(trace_endpoints) != len(set(trace_endpoints)):
+        raise FactorialExperimentError("factorial mechanism-trace diagnostics are invalid")
+    trace_summary = _mechanism_trace_summary(measurement_records, trace_endpoints)
+    trace_verification = verify_mechanism_trace_diagnostics(
+        measurement_records, trace_summary, trace_endpoints
+    )
     return {
         "schema_version": "1.0",
-        "status": (
-            "FACTORIAL_CONFIRMATION_COMPLETE"
-            if config["phase"] == "confirmatory"
-            else "FACTORIAL_CANARY_COMPLETE"
-        ),
+        "status": status_by_phase[phase],
+        "phase": phase,
         "study_name": config["study_name"],
         "study_id": study.study_id,
         "tasks": len(study.tasks),
@@ -655,11 +684,113 @@ def _report(config: Mapping[str, Any], study: Any, analysis: Any, verification: 
         "simultaneous_critical_value": analysis.inference.simultaneous_critical_value,
         "secondary_intervals": secondary_intervals,
         "secondary_critical_value": analysis.inference.secondary_critical_value,
+        "mechanism_trace_diagnostics": trace_summary,
+        "mechanism_trace_verification": trace_verification,
         "verification": dict(verification),
         "scientific_claim_allowed": bool(config.get("scientific_claim_allowed", False)),
         "claim_boundary": config["corpus"]["generalization_boundary"],
         "scale_gate": config["scale_gate"],
     }
+
+
+def _validate_followup(
+    root: Path,
+    config: Mapping[str, Any],
+    task_rows: tuple[Mapping[str, Any], ...],
+) -> None:
+    section = config.get("followup")
+    required = {
+        "predecessor_study_name",
+        "predecessor_result_path",
+        "predecessor_report_sha256",
+        "design_informed_by_predecessor_aggregate",
+        "task_specific_outcomes_used_for_selection",
+        "all_predecessor_task_units_retained",
+        "estimand_boundary",
+    }
+    if not isinstance(section, dict) or set(section) != required:
+        raise FactorialExperimentError("prospective follow-up declaration is invalid")
+    if (
+        section["design_informed_by_predecessor_aggregate"] is not True
+        or section["task_specific_outcomes_used_for_selection"] is not False
+        or section["all_predecessor_task_units_retained"] is not True
+        or not isinstance(section["estimand_boundary"], str)
+        or not section["estimand_boundary"].strip()
+    ):
+        raise FactorialExperimentError("prospective follow-up evidence boundary is invalid")
+    predecessor_root = root / section["predecessor_result_path"]
+    verify_bundle(predecessor_root)
+    _require_file_hash(
+        predecessor_root / "report.json", section["predecessor_report_sha256"]
+    )
+    predecessor_report = read_json(predecessor_root / "report.json")
+    predecessor_study = read_json(predecessor_root / "study-freeze.json")
+    if (
+        predecessor_report.get("study_name") != section["predecessor_study_name"]
+        or predecessor_report.get("status") != "FACTORIAL_CONFIRMATION_COMPLETE"
+    ):
+        raise FactorialExperimentError("prospective follow-up predecessor is invalid")
+    predecessor_by_unit = {
+        item["semantic_cluster_id"]: item["task_id"]
+        for item in predecessor_study.get("tasks", ())
+    }
+    predecessor_units = set(predecessor_by_unit)
+    current_units = {item["task_unit_id"] for item in task_rows}
+    if (
+        not predecessor_units
+        or current_units != predecessor_units
+        or len(current_units) != len(task_rows)
+        or any(
+            item.get("predecessor_task_id")
+            != predecessor_by_unit.get(item["task_unit_id"])
+            for item in task_rows
+        )
+    ):
+        raise FactorialExperimentError(
+            "prospective follow-up did not retain every predecessor task unit"
+        )
+
+
+def _mechanism_trace_summary(
+    records: list[dict[str, Any]], endpoints: tuple[str, ...]
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for endpoint in endpoints:
+        cells: dict[str, dict[str, Any]] = {}
+        for cell in FACTORIAL_CELL_ORDER:
+            selected = [
+                item for item in records if item["assignment"]["cell"] == cell.value
+            ]
+            states = [_trace_endpoint_state(item.get("security"), endpoint) for item in selected]
+            safe = states.count("safe")
+            cells[cell.value] = {
+                "assignments": len(selected),
+                "safe": safe,
+                "unsafe": states.count("unsafe"),
+                "unknown": states.count("unknown"),
+                "safe_rate": safe / len(selected) if selected else None,
+            }
+        summary[endpoint] = {
+            "role": "post_assignment_diagnostic_not_mediator_or_denominator_filter",
+            "cells": cells,
+        }
+    return summary
+
+
+def _trace_endpoint_state(
+    security: Mapping[str, Any] | None, endpoint: str
+) -> str:
+    if not security:
+        return "unknown"
+    facts = security.get("decision", {}).get("trace", {}).get("facts", ())
+    states = [item.get(endpoint) for item in facts if isinstance(item, dict)]
+    if not states or any(item not in {"safe", "unsafe", "unknown"} for item in states):
+        return "unknown"
+    if "unsafe" in states:
+        return "unsafe"
+    if all(item == "safe" for item in states):
+        return "safe"
+    return "unknown"
 
 
 def _cell_validation(

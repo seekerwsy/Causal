@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt-mechanism-study"
-version = "1.5.0"
+version = "1.6.0"
 description = "Auditable task-unit experiments for frozen prompt-mechanism policies."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

@@ -128,6 +128,67 @@ def verify_factorial_inference(
     }
 
 
+def verify_mechanism_trace_diagnostics(
+    records: Iterable[Mapping[str, Any]],
+    reported: Mapping[str, Any],
+    endpoints: Iterable[str],
+) -> dict[str, Any]:
+    """Independently recompute assignment-level Oracle trace diagnostics."""
+
+    frozen_records = tuple(records)
+    frozen_endpoints = tuple(endpoints)
+    if set(reported) != set(frozen_endpoints):
+        raise ValueError("independent verifier found mechanism endpoint drift")
+    for endpoint in frozen_endpoints:
+        endpoint_report = reported[endpoint]
+        if (
+            endpoint_report.get("role")
+            != "post_assignment_diagnostic_not_mediator_or_denominator_filter"
+            or set(endpoint_report.get("cells", {}))
+            != {cell.value for cell in FACTORIAL_CELL_ORDER}
+        ):
+            raise ValueError("independent verifier found mechanism trace schema drift")
+        for cell in FACTORIAL_CELL_ORDER:
+            selected = tuple(
+                item
+                for item in frozen_records
+                if item["assignment"]["cell"] == cell.value
+            )
+            states = tuple(
+                _trace_state(item.get("security"), endpoint) for item in selected
+            )
+            safe = states.count("safe")
+            expected = {
+                "assignments": len(selected),
+                "safe": safe,
+                "unsafe": states.count("unsafe"),
+                "unknown": states.count("unknown"),
+                "safe_rate": safe / len(selected) if selected else None,
+            }
+            observed = endpoint_report["cells"][cell.value]
+            if set(observed) != set(expected):
+                raise ValueError("independent verifier found mechanism trace field drift")
+            for key, value in expected.items():
+                _same(value, observed[key])
+    return {
+        "status": "FACTORIAL_MECHANISM_TRACE_VERIFIED",
+        "assignments": len(frozen_records),
+        "endpoints": len(frozen_endpoints),
+    }
+
+
+def _trace_state(security: Mapping[str, Any] | None, endpoint: str) -> str:
+    if not security:
+        return "unknown"
+    facts = security.get("decision", {}).get("trace", {}).get("facts", ())
+    states = [item.get(endpoint) for item in facts if isinstance(item, Mapping)]
+    if not states or any(item not in {"safe", "unsafe", "unknown"} for item in states):
+        return "unknown"
+    if "unsafe" in states:
+        return "unsafe"
+    return "safe" if all(item == "safe" for item in states) else "unknown"
+
+
 def _verify_assignment_support(randomization: Any, policies: Mapping[str, Any]) -> None:
     expected_blocks = {}
     for policy in policies.values():
@@ -434,4 +495,4 @@ def _same(expected: Any, observed: Any) -> None:
         raise ValueError("independent verifier found value drift")
 
 
-__all__ = ["verify_factorial_inference"]
+__all__ = ["verify_factorial_inference", "verify_mechanism_trace_diagnostics"]

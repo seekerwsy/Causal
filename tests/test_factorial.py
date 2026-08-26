@@ -4,9 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.factorial_verify import verify_factorial_inference
+from prompt_mechanism_study.factorial_verify import (
+    verify_factorial_inference,
+    verify_mechanism_trace_diagnostics,
+)
 from prompt_mechanism_study.factorial_corpus import build_sql_factorial_corpus
-from prompt_mechanism_study.factorial_experiment import run_factorial_experiment
+from prompt_mechanism_study.factorial_experiment import (
+    _mechanism_trace_summary,
+    preflight_factorial_experiment,
+    run_factorial_experiment,
+)
 from prompt_mechanism_study.inference import (
     FactorialAnalysisPlan,
     FactorialEffect,
@@ -343,6 +350,100 @@ def test_confirmation_corpus_preserves_factor_two_positivity(tmp_path) -> None:
     assert report["corpus_version"] == "v2"
     assert all("behavior outside" in task["prompt"] for task in tasks)
     assert all("Reject identifier choices" not in task["prompt"] for task in tasks)
+
+
+@pytest.mark.reviewer
+def test_scaffold_followup_preserves_task_units_and_qualifies_starters(tmp_path) -> None:
+    output = tmp_path / "scaffold"
+    report = build_sql_factorial_corpus(
+        Path("."), output, corpus_version="scaffold-v1"
+    )
+    tasks = read_json(output / "tasks.json")
+    predecessor = read_json(Path("data/method/factorial-sql-corpus-v2/tasks.json"))
+
+    verify_bundle(output)
+    assert report["tasks"] == 30
+    assert {task["task_unit_id"] for task in tasks} == {
+        task["task_unit_id"] for task in predecessor
+    }
+    assert {task["task_id"] for task in tasks}.isdisjoint(
+        {task["task_id"] for task in predecessor}
+    )
+    assert all(
+        task["scaffold_qualification"]
+        == {
+            "code_valid": True,
+            "oracle_evaluable": True,
+            "identifier_control": "unsafe",
+            "value_parameterization": "unsafe",
+        }
+        for task in tasks
+    )
+    assert all("insecure" not in task["prompt"].lower() for task in tasks)
+    assert all("vulnerab" not in task["prompt"].lower() for task in tasks)
+
+
+@pytest.mark.reviewer
+def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
+    records = []
+    for cell, identifier, value in (
+        ("a00", "unsafe", "unsafe"),
+        ("a10", "unsafe", "safe"),
+        ("a01", "safe", "unsafe"),
+        ("a11", "safe", "safe"),
+    ):
+        records.append(
+            {
+                "assignment": {"cell": cell},
+                "security": {
+                    "decision": {
+                        "trace": {
+                            "facts": [
+                                {
+                                    "identifier_control": identifier,
+                                    "value_parameterization": value,
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+
+    summary = _mechanism_trace_summary(
+        records, ("identifier_control", "value_parameterization")
+    )
+
+    assert summary["identifier_control"]["cells"]["a01"]["safe_rate"] == 1.0
+    assert summary["identifier_control"]["cells"]["a10"]["safe_rate"] == 0.0
+    assert summary["value_parameterization"]["cells"]["a10"]["safe_rate"] == 1.0
+    assert summary["value_parameterization"]["cells"]["a01"]["safe_rate"] == 0.0
+    assert all(
+        item["role"]
+        == "post_assignment_diagnostic_not_mediator_or_denominator_filter"
+        for item in summary.values()
+    )
+    assert verify_mechanism_trace_diagnostics(
+        records, summary, ("identifier_control", "value_parameterization")
+    ) == {
+        "status": "FACTORIAL_MECHANISM_TRACE_VERIFIED",
+        "assignments": 4,
+        "endpoints": 2,
+    }
+
+
+@pytest.mark.reviewer
+def test_scaffold_followup_preflight_retains_complete_predecessor_population() -> None:
+    report = preflight_factorial_experiment(
+        Path("."),
+        Path("configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json"),
+    )
+
+    assert report["tasks"] == 30
+    assert report["realizations"] == 2
+    assert report["assignments"] == 240
+    assert report["oracle_support_status"] == "supported"
+    assert report["scientific_claim_allowed"] is False
 
 
 @pytest.mark.reviewer

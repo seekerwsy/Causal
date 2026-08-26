@@ -1414,6 +1414,34 @@ Before a pairwise scale-up, focused tests and a representative canary must prove
 7. task-unit resampling and max-|T| multiplicity are replayable; and
 8. the independent verifier rejects missing, duplicate, replaced, or digest-mismatched assignments.
 
+### 24.11 Post-confirmation context follow-ups
+
+A completed factorial result may reveal that its source-generation context lacks treatment
+positivity, for example because the no-target cell already realizes both controls. A new source
+context may then be studied only as a separately frozen prospective follow-up. The completed result
+remains immutable and cannot be pooled into, replaced by, or reinterpreted as the follow-up.
+
+When a follow-up retains the predecessor task semantics but changes the generation context, it must:
+
+1. use new prompt, task, corpus, randomization, and study identities while retaining the predecessor
+   task-unit IDs for paired context-heterogeneity analysis;
+2. retain every predecessor task unit unless an outcome-independent rule was frozen before the
+   predecessor outcomes existed;
+3. authenticate the predecessor result bundle and declare whether its aggregate or task-specific
+   outcomes informed the new design;
+4. freeze the new context, factor texts, model, Oracle, estimands, multiplicity family, practical
+   margins, and claim boundary before any follow-up provider outcome;
+5. qualify any supplied code scaffold for syntax, Oracle evaluability, and intended pre-treatment
+   mechanism state without using generated outcomes;
+6. use development-only task units for a behavior canary so formal follow-up tasks remain unexposed;
+   and
+7. describe cross-context differences as context-conditioned policy heterogeneity, not as a
+   retroactive confirmation of the predecessor or a universal mechanism effect.
+
+Mechanism-trace rates may be predeclared as assignment-level diagnostics and independently
+recomputed. They remain post-assignment implementation markers, not causal mediators, primary
+outcomes, eligibility rules, or denominator filters.
+
 This extension can produce a meaningful null, harmful, beneficial, or interacting policy result. A
 failure to obtain statistical significance is not permission to change the same frozen pair,
 population, endpoint, Oracle, arm text, denominator, or multiplicity family after unblinding.

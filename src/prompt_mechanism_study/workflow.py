@@ -45,7 +45,7 @@ from prompt_mechanism_study.representation import (
 )
 
 METHOD_VERSION = "prompt-mechanism-study-method-1.3.0"
-FACTORIAL_METHOD_VERSION = "prompt-mechanism-study-method-1.5.0-factorial-v2"
+FACTORIAL_METHOD_VERSION = "prompt-mechanism-study-method-1.6.0-factorial-v3"
 
 
 @dataclass(frozen=True, slots=True)
