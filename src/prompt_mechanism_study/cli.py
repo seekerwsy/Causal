@@ -106,7 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     factorial.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/formal/factorial-sql-canary-qwen35-v2.json"),
+        default=Path("configs/formal/factorial-sql-confirm-qwen35-v3.json"),
     )
 
     discovery_population = commands.add_parser(

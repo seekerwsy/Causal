@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+  "policy_path": "data/oracle-calibration/factorial-sql-v2-policy.json",
+  "policy_sha256": "81cf01574cbefb2823bba1c5558142d3e0aa29fbf84d3051255acc26f4ac0420",
+  "implementation_path": "src/prompt_mechanism_study/security_profiles.py",
+  "implementation_sha256": "a1a0be8816a6e53b8a9195ea4ac28c1290a34461844f3d5d86e37666e02aa0cf",
+  "fixture_path": "data/oracle-calibration/factorial-sql-v2-cases.json",
+  "fixture_sha256": "fe816d87f11087462d764c0bd07cf7eb949200a7667824e3721d2dd03c36b387",
+  "gold_cases": 8,
+  "gold_cells": ["a00", "a10", "a01", "a11"],
+  "label_mismatches": 0,
+  "qualification_status": "supported",
+  "scope": "Direct Python DB-API calls with literal-map or dominating literal-domain membership allow-lists and separately bound caller values",
+  "known_unsupported_idioms": [
+    "interprocedural query builders",
+    "ORM query construction",
+    "runtime-generated identifier domains",
+    "guards that do not syntactically stop execution",
+    "stored procedures"
+  ],
+  "claim_boundary": "Qualified only for the controlled factorial SQL corpus and matching admitted idioms; this is not a global CWE-89 accuracy claim."
+}

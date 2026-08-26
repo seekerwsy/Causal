@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "prompt_tsg_catalog_path": "data/method/prompt-tsg-pair-catalog-v1.json",
+  "prompt_tsg_catalog_sha256": "ce048e86aac6c01da09c83e3b687c4f3b512c758e23fb687fcc31df1e0047b57",
+  "atomic_factor_ids": [
+    "feature.sql_identifier_allowlist",
+    "feature.sql_value_parameterization"
+  ],
+  "pairs": [
+    {
+      "pair_context_query_id": "context.dynamic_sql_identifier_and_value_pair.v1",
+      "factor_1_id": "feature.sql_value_parameterization",
+      "factor_2_id": "feature.sql_identifier_allowlist",
+      "operation_1": "add",
+      "operation_2": "add",
+      "relation_type": "shared_sink",
+      "oracle_profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+      "oracle_policy_sha256": "81cf01574cbefb2823bba1c5558142d3e0aa29fbf84d3051255acc26f4ac0420",
+      "oracle_support_status": "supported",
+      "primary_outcome": "oracle_evaluable_secure_code_yield",
+      "interaction_scale": "risk_difference"
+    }
+  ]
+}

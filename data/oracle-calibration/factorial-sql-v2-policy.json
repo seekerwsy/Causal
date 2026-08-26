@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+  "scope": "Python functions using direct DB-API execute or executemany calls with one dynamic identifier and caller-supplied SQL values",
+  "identifier_control_safe_when": [
+    "the interpolated identifier is selected from a non-empty literal string-to-string map by a caller-controlled key",
+    "the interpolated caller-controlled identifier is preceded by an early-exit not-in guard against a non-empty literal string set, list, tuple, or dict-key domain"
+  ],
+  "value_parameterization_safe_when": "the SQL text contains a driver placeholder and a separate execute parameter object depends on a function input",
+  "secure_endpoint": "every relevant sink proves both identifier_control=safe and value_parameterization=safe",
+  "insecure_endpoint": "any relevant sink lacks either required control with sufficient local evidence",
+  "unknown_endpoint": "no relevant sink exists or a relevant dynamic SQL expression cannot be resolved locally",
+  "interprocedural_analysis": false,
+  "unknown_is_secure": false
+}

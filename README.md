@@ -102,11 +102,19 @@ task-unit-weighted risk-difference interaction
 `mu11 - mu10 - mu01 + mu00`. Factor fidelity and generated-code style remain
 diagnostics and never filter the ITT denominator.
 
-The first bounded canary pairs SQL value parameterization with a literal-map
-allow-list for dynamic SQL identifiers. It uses one frozen Security Oracle
-profile across all cells, preserves `unknown`, measures functionality
-independently, and exercises both intervention orders. Its controlled corpus is
-an implementation and responsiveness canary, not confirmatory evidence.
+The completed bounded canary paired SQL value parameterization with a literal-map
+allow-list for dynamic SQL identifiers and exercised both intervention orders.
+It closed all 40 assignments, but its task contract already encouraged
+identifier rejection and its Oracle accepted only literal maps. The observed
+cell difference is therefore retained as implementation evidence, not as a
+security-effect result.
+
+The active prospective confirmation uses the equivalence-aware v2 Oracle and 30
+fresh controlled task units. The v2 Oracle accepts both literal maps and
+dominating finite-domain membership guards. Both operator orders remain in the
+frozen realization distribution, giving 240 assignments for the Qwen3.5 model.
+This corpus identifies bounded mechanism response; it is not a representative
+sample of all CWE-89 prompts.
 
 ## Outcomes and evidence boundary
 
@@ -134,27 +142,29 @@ Run the focused scientific-invariant suite:
 python -m pytest -q
 ```
 
-Run the zero-provider-call preflight for the active pairwise canary:
+Run the zero-provider-call preflight for the active pairwise confirmation:
 
 ```text
 prompt-mechanism-study factorial-experiment preflight \
-  .artifacts/factorial-preflight \
+  .artifacts/factorial-confirm-preflight \
   --repository-root . \
-  --config configs/formal/factorial-sql-canary-qwen35-v2.json
+  --config configs/formal/factorial-sql-confirm-qwen35-v3.json
 ```
 
 With the externally supplied provider credential, run the same frozen path:
 
 ```text
 prompt-mechanism-study factorial-experiment run \
-  .artifacts/factorial-sql-canary \
+  .artifacts/factorial-sql-confirm-qwen35-v3 \
   --repository-root . \
-  --config configs/formal/factorial-sql-canary-qwen35-v2.json
+  --config configs/formal/factorial-sql-confirm-qwen35-v3.json
 ```
 
 The run command writes the complete assignment ledger, factorial estimates,
-and the independent-verifier result into one content-addressed bundle. The
-configuration explicitly sets `scientific_claim_allowed=false`.
+unknown bounds, preregistered secondary intervals, and the independent-verifier
+result into one content-addressed bundle. Claim permission does not imply a
+positive or significant result; the frozen primary and practical gates still
+apply.
 
 Verify the tracked Qwen3.7 analysis independently:
 
@@ -178,8 +188,8 @@ The active path can be reviewed in at most ten files:
 1. `AGENTS.md` -- scientific and reviewability constraints;
 2. `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
    -- normative protocol, including the pairwise extension;
-3. `configs/formal/factorial-sql-canary-qwen35-v2.json` -- complete bounded-run
-   identity and evidence boundary;
+3. `configs/formal/factorial-sql-confirm-qwen35-v3.json` -- complete prospective
+   confirmation identity and evidence boundary;
 4. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded Prompt-TSG schema;
 5. `src/prompt_mechanism_study/mechanisms.py` -- atomic features, `PairSpec`,
    and outcome-blind binding;

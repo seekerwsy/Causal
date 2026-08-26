@@ -281,11 +281,11 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | family-local FCI 与五类 selector 公平比较 | specified，未形成当前可执行主证据 | 当前数据支持不足；活动最小代码只接受外部 score，并未闭合完整 selector benchmark |
 | 原子假设与多 realization 政策 | 部分 implemented + tested | 最小 kernel 已有 candidate、realization、bundle 和 policy 绑定；完整 successor freeze 字段尚未全部闭合 |
 | successor ADD/REMOVE 四臂 | specified，未在最小 kernel 完整实现 | 最小 kernel 目前只有 `TARGET/NOOP`；另一个 four-arm 路径属于已冻结 legacy/pilot 实现，不能冒充 successor 协议 |
-| 二因素配对析因扩展 | specified + implemented + tested，尚未真实执行 | `PairSpec`、四 cell bundle、完整块随机化、Oracle Gate、ITT/unknown bounds/max-|T| 和独立 verifier 已闭合；40-assignment SQL canary 仍禁止科学主张 |
+| 二因素配对析因扩展 | specified + implemented + tested + canary executed | `PairSpec`、四 cell bundle、完整块随机化、Oracle Gate、ITT/unknown bounds/max-|T| 和独立 verifier 已闭合；40-assignment SQL canary 只提供工程证据，v2 confirmation 已冻结但尚未执行 |
 | 独立 measurement 与 total ledger | implemented + tested | 活动代码保留 code、Oracle、functionality 和基础设施失败边界 |
 | task-unit ITT 与未知 bounds | implemented + tested | Target/Noop、task/realization 权重和同步 bootstrap 已闭合 |
 | 完整 max-|T|、selector nested bootstrap、全局 robustness family | specified，部分 implemented | 尚不能声称 successor 的完整多重推断已执行 |
-| 正式 confirmatory study | not frozen / not authorized | 当前没有 successor confirmatory effect 结果 |
+| 正式 confirmatory study | frozen + preflight tested，尚未执行 | 30 个 fresh task units、2 个顺序、4 cells，共 240 assignments；当前仍没有 confirmatory effect 结果 |
 
 ## 13. 当前 Gate 状态
 
@@ -296,10 +296,10 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | discovery positivity/source overlap | **未通过** | CWE-328 无 positive；CWE-611 状态与来源完全分离 |
 | FCI selector | **未运行** | 被前一 gate 正确阻止 |
 | successor 单机制四臂完全冻结 | **未通过** | 仍不能把 legacy 四臂冒充 successor confirmation |
-| pairwise factorial canary | **实现通过，待真实执行** | 5 task units、2 个顺序、4 cells，共 40 assignments；仅允许验证协议完整性和模型响应性 |
-| successor confirmatory generation | **未冻结** | canary 结果不能自动升级为 confirmatory evidence；确认研究需使用前瞻冻结且未暴露的新 task units |
+| pairwise factorial canary | **已执行并独立验证；效应解释未通过构造效度审计** | 5 task units、2 个顺序、4 cells，共 40 assignments；旧任务合同和窄 Oracle 混入机制符合性，不能作为安全效应证据 |
+| successor confirmatory generation | **v2 已冻结并通过零调用 preflight，尚未执行** | 30 个 fresh task units、2 个顺序、4 cells，共 240 assignments；使用等价实现感知 Oracle v2 和预注册主/次级效应 family |
 
-当前准确位置是：**理论内核已稳定，观测 selector 分支被数据支持门阻塞；二因素随机确认分支已完成规范和实现对齐，正处于真实 canary 执行之前。**
+当前准确位置是：**理论内核已稳定，观测 selector 分支被数据支持门阻塞；二因素 canary 已执行但只保留为工程证据，前瞻 v2 随机确认分支已冻结并处于正式生成之前。**
 
 ## 14. 仍需正式决定的三件事
 

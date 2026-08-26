@@ -9,6 +9,7 @@ from prompt_mechanism_study.factorial_corpus import build_sql_factorial_corpus
 from prompt_mechanism_study.factorial_experiment import run_factorial_experiment
 from prompt_mechanism_study.inference import (
     FactorialAnalysisPlan,
+    FactorialEffect,
     Metric,
     estimate_factorial_effects,
 )
@@ -298,6 +299,12 @@ def test_factorial_result_is_independently_recomputed() -> None:
         "assignments": 24,
         "coordinates": 2,
         "primary_intervals": 1,
+        "secondary_intervals": 3,
+    }
+    assert {item.effect for item in result.secondary_intervals} == {
+        FactorialEffect.FACTOR_1,
+        FactorialEffect.FACTOR_2,
+        FactorialEffect.JOINT,
     }
 
 
@@ -322,6 +329,20 @@ def test_controlled_factorial_corpus_freezes_blind_pair_bindings(tmp_path) -> No
     assert report["tasks"] == 3
     assert all(task["pair_binding"]["decision"] == "applicable" for task in tasks)
     assert all(task["pair_binding"]["outcomes_or_arms_used"] is False for task in tasks)
+
+
+@pytest.mark.reviewer
+def test_confirmation_corpus_preserves_factor_two_positivity(tmp_path) -> None:
+    output = tmp_path / "corpus-v2"
+    report = build_sql_factorial_corpus(
+        Path("."), output, limit=3, corpus_version="v2"
+    )
+    tasks = read_json(output / "tasks.json")
+
+    verify_bundle(output)
+    assert report["corpus_version"] == "v2"
+    assert all("behavior outside" in task["prompt"] for task in tasks)
+    assert all("Reject identifier choices" not in task["prompt"] for task in tasks)
 
 
 @pytest.mark.reviewer
@@ -361,7 +382,7 @@ def test_linear_factorial_runner_closes_and_verifies_a_fake_provider(
         elif kind == "factorial_code_generation":
             prompt = request["task_prompt"]
             parameterized = "Bind every caller-supplied SQL value" in prompt
-            allowlisted = "Map the caller-selected SQL identifier" in prompt
+            allowlisted = "constrain the caller-selected SQL identifier" in prompt
             column = (
                 "    allowed = {'id': 'id', 'name': 'name'}\n"
                 "    column = allowed[sort_by]\n"
@@ -395,10 +416,11 @@ def test_linear_factorial_runner_closes_and_verifies_a_fake_provider(
     )
     report = run_factorial_experiment(
         Path("."),
-        Path("configs/formal/factorial-sql-canary-qwen35-v2.json"),
+        Path("configs/formal/factorial-sql-confirm-qwen35-v3.json"),
         tmp_path / "run",
     )
 
-    assert report["assignments"] == 40
+    assert report["assignments"] == 240
     assert report["verification"]["status"] == "FACTORIAL_INFERENCE_VERIFIED"
     assert report["primary_interaction"] == 1.0
+    assert report["primary_gate"]["claim_ready"] is True

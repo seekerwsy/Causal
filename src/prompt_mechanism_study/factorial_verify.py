@@ -106,11 +106,25 @@ def verify_factorial_inference(
         _same(expected[0], stored.standard_error)
         _same(expected[1], stored.lower)
         _same(expected[2], stored.upper)
+    secondary, secondary_critical = _secondary_bootstrap_intervals(recomputed, plan)
+    _same(secondary_critical, reported.secondary_critical_value)
+    stored_secondary = {
+        (item.coordinate_id, _name(item.effect)): item
+        for item in reported.secondary_intervals
+    }
+    if set(stored_secondary) != set(secondary):
+        raise ValueError("independent verifier found secondary interval drift")
+    for key, expected in secondary.items():
+        stored = stored_secondary[key]
+        _same(expected[0], stored.standard_error)
+        _same(expected[1], stored.lower)
+        _same(expected[2], stored.upper)
     return {
         "status": "FACTORIAL_INFERENCE_VERIFIED",
         "assignments": len(assignments),
         "coordinates": len(recomputed),
         "primary_intervals": len(intervals),
+        "secondary_intervals": len(secondary),
     }
 
 
@@ -286,6 +300,78 @@ def _bootstrap_intervals(
         )
         for estimate, _ in eligible
     }, critical
+
+
+def _secondary_bootstrap_intervals(
+    rows: list[tuple[Any, Mapping[str, Any]]], plan: Any
+) -> tuple[dict[tuple[str, str], tuple[float, float, float]], float]:
+    effects = tuple(_name(item) for item in plan.secondary_effects)
+    eligible = [
+        (estimate, expected, effect)
+        for estimate, expected in rows
+        if _name(estimate.metric) == _name(plan.primary_metric)
+        for effect in effects
+        if expected[effect] is not None
+        and all(_unit_effect(unit, effect) is not None for unit in expected["unit_rows"])
+    ]
+    if not eligible:
+        return {}, 0.0
+    keys = [(estimate.coordinate_id, effect) for estimate, _, effect in eligible]
+    support_by_key = {
+        key: tuple(unit["task_unit_id"] for unit in expected["unit_rows"])
+        for key, (_, expected, _) in zip(keys, eligible, strict=True)
+    }
+    rng_by_support = {
+        support: random.Random(
+            int(
+                content_id(
+                    "factorial_secondary_bootstrap_",
+                    {"seed": plan.bootstrap_seed, "support": support},
+                )[-16:],
+                16,
+            )
+        )
+        for support in set(support_by_key.values())
+    }
+    draws = {key: [] for key in keys}
+    for _ in range(plan.bootstrap_draws):
+        indexes = {
+            support: [rng.randrange(len(support)) for _ in support]
+            for support, rng in rng_by_support.items()
+        }
+        for key, (_, expected, effect) in zip(keys, eligible, strict=True):
+            values = [_unit_effect(unit, effect) for unit in expected["unit_rows"]]
+            sample = indexes[support_by_key[key]]
+            draws[key].append(_mean([float(values[index]) for index in sample]))
+    errors = {key: statistics.stdev(values) for key, values in draws.items()}
+    maxima = []
+    for draw in range(plan.bootstrap_draws):
+        values = []
+        for key, (_, expected, effect) in zip(keys, eligible, strict=True):
+            error = errors[key]
+            if error > 0.0:
+                values.append(abs(draws[key][draw] - float(expected[effect])) / error)
+        maxima.append(max(values, default=0.0))
+    critical = _quantile(maxima, 1.0 - plan.alpha)
+    return {
+        key: (
+            errors[key],
+            max(-1.0, float(expected[effect]) - critical * errors[key]),
+            min(1.0, float(expected[effect]) + critical * errors[key]),
+        )
+        for key, (_, expected, effect) in zip(keys, eligible, strict=True)
+    }, critical
+
+
+def _unit_effect(unit: Mapping[str, Any], effect: str) -> float | None:
+    cells = unit["cells"]
+    if effect == "factor_1":
+        return _difference(cells[FactorialCell.A10][0], cells[FactorialCell.A00][0])
+    if effect == "factor_2":
+        return _difference(cells[FactorialCell.A01][0], cells[FactorialCell.A00][0])
+    if effect == "joint":
+        return _difference(cells[FactorialCell.A11][0], cells[FactorialCell.A00][0])
+    return unit["interaction"]
 
 
 def _interaction(values: Mapping[FactorialCell, float | None]) -> float | None:

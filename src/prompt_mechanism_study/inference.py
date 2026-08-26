@@ -73,6 +73,11 @@ class FactorialAnalysisPlan:
     bootstrap_seed: int
     bootstrap_draws: int
     alpha: float
+    secondary_effects: tuple[FactorialEffect, ...] = (
+        FactorialEffect.FACTOR_1,
+        FactorialEffect.FACTOR_2,
+        FactorialEffect.JOINT,
+    )
 
     def __post_init__(self) -> None:
         if not self.metrics or len(self.metrics) != len(set(self.metrics)):
@@ -87,6 +92,16 @@ class FactorialAnalysisPlan:
             raise ValueError("bootstrap_draws must be at least 100")
         if type(self.alpha) is not float or not 0.0 < self.alpha < 1.0:
             raise ValueError("alpha must be a float strictly between zero and one")
+        if (
+            not self.secondary_effects
+            or len(self.secondary_effects) != len(set(self.secondary_effects))
+            or any(
+                type(effect) is not FactorialEffect
+                or effect is FactorialEffect.INTERACTION
+                for effect in self.secondary_effects
+            )
+        ):
+            raise ValueError("secondary factorial effects must be unique non-interactions")
 
     @property
     def analysis_plan_id(self) -> str:
@@ -211,6 +226,8 @@ class FactorialInferenceResult:
     estimates: tuple[FactorialCoordinateEstimate, ...]
     intervals: tuple[FactorialSimultaneousInterval, ...]
     simultaneous_critical_value: float
+    secondary_intervals: tuple[FactorialSimultaneousInterval, ...] = ()
+    secondary_critical_value: float = 0.0
 
     @property
     def inference_id(self) -> str:
@@ -283,7 +300,15 @@ def estimate_factorial_effects(
     )
     _validate_factorial_support(estimates)
     intervals, critical = _factorial_simultaneous_intervals(estimates, plan)
-    return FactorialInferenceResult(plan.analysis_plan_id, estimates, intervals, critical)
+    secondary, secondary_critical = _factorial_secondary_intervals(estimates, plan)
+    return FactorialInferenceResult(
+        plan.analysis_plan_id,
+        estimates,
+        intervals,
+        critical,
+        secondary,
+        secondary_critical,
+    )
 
 
 def _factorial_coordinate(
@@ -518,6 +543,117 @@ def _factorial_simultaneous_intervals(
         for item in eligible
     )
     return intervals, critical
+
+
+def _factorial_secondary_intervals(
+    estimates: tuple[FactorialCoordinateEstimate, ...],
+    plan: FactorialAnalysisPlan,
+) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
+    """Max-|T| intervals for the preregistered secure-yield main/joint family."""
+
+    eligible = tuple(
+        (estimate, effect)
+        for estimate in estimates
+        if estimate.metric is plan.primary_metric
+        for effect in plan.secondary_effects
+        if _factorial_effect(estimate, effect) is not None
+        and all(
+            _task_unit_factorial_effect(unit, effect) is not None
+            for unit in estimate.task_unit_effects
+        )
+    )
+    if not eligible:
+        return (), 0.0
+    keys = tuple((estimate.coordinate_id, effect) for estimate, effect in eligible)
+    support_by_key = {
+        key: tuple(unit.task_unit_id for unit in estimate.task_unit_effects)
+        for key, (estimate, _) in zip(keys, eligible, strict=True)
+    }
+    rng_by_support = {
+        support: random.Random(
+            int(
+                content_id(
+                    "factorial_secondary_bootstrap_",
+                    {"seed": plan.bootstrap_seed, "support": support},
+                )[-16:],
+                16,
+            )
+        )
+        for support in set(support_by_key.values())
+    }
+    replicates: dict[tuple[str, FactorialEffect], list[float]] = {
+        key: [] for key in keys
+    }
+    for _ in range(plan.bootstrap_draws):
+        samples = {
+            support: [rng.randrange(len(support)) for _ in support]
+            for support, rng in rng_by_support.items()
+        }
+        for key, (estimate, effect) in zip(keys, eligible, strict=True):
+            values = [
+                _task_unit_factorial_effect(unit, effect)
+                for unit in estimate.task_unit_effects
+            ]
+            sample = samples[support_by_key[key]]
+            replicates[key].append(
+                sum(float(values[index]) for index in sample) / len(sample)
+            )
+    errors = {key: statistics.stdev(values) for key, values in replicates.items()}
+    maxima = []
+    for draw in range(plan.bootstrap_draws):
+        values = []
+        for key, (estimate, effect) in zip(keys, eligible, strict=True):
+            error = errors[key]
+            if error > 0.0:
+                values.append(
+                    abs(
+                        replicates[key][draw]
+                        - float(_factorial_effect(estimate, effect))
+                    )
+                    / error
+                )
+        maxima.append(max(values, default=0.0))
+    critical = _quantile(maxima, 1.0 - plan.alpha)
+    intervals = []
+    for key, (estimate, effect) in zip(keys, eligible, strict=True):
+        point = float(_factorial_effect(estimate, effect))
+        error = errors[key]
+        lower_limit, upper_limit = _factorial_effect_limits(effect)
+        intervals.append(
+            FactorialSimultaneousInterval(
+                estimate.coordinate_id,
+                effect,
+                error,
+                max(lower_limit, point - critical * error),
+                min(upper_limit, point + critical * error),
+            )
+        )
+    return tuple(intervals), critical
+
+
+def _factorial_effect(
+    estimate: FactorialCoordinateEstimate,
+    effect: FactorialEffect,
+) -> float | None:
+    return getattr(estimate, effect.value)
+
+
+def _task_unit_factorial_effect(
+    unit: TaskUnitFactorialEffect,
+    effect: FactorialEffect,
+) -> float | None:
+    cells = dict(unit.cell_points)
+    if effect is FactorialEffect.FACTOR_1:
+        return _difference(cells[FactorialCell.A10], cells[FactorialCell.A00])
+    if effect is FactorialEffect.FACTOR_2:
+        return _difference(cells[FactorialCell.A01], cells[FactorialCell.A00])
+    if effect is FactorialEffect.JOINT:
+        return _difference(cells[FactorialCell.A11], cells[FactorialCell.A00])
+    return unit.interaction
+
+
+def _factorial_effect_limits(effect: FactorialEffect) -> tuple[float, float]:
+    return (-2.0, 2.0) if effect is FactorialEffect.INTERACTION else (-1.0, 1.0)
 
 
 def _coordinate(

@@ -9,16 +9,20 @@ linked below. The current coherent method is a Prompt-TSG-conditioned randomized
 study with an availability-gated observational-selector extension. The latest natural-Prompt
 positivity audit did not authorize FCI execution.
 
-1. src/prompt_mechanism_study/representation.py
-2. src/prompt_mechanism_study/prioritization.py
+The active pairwise path has one linear entry point,
+`factorial_experiment.run_factorial_experiment`. Read at most these ten core
+files, in order:
+
+1. src/prompt_mechanism_study/mechanisms.py
+2. src/prompt_mechanism_study/factorial_corpus.py
 3. src/prompt_mechanism_study/intervention.py
 4. src/prompt_mechanism_study/randomization.py
-5. src/prompt_mechanism_study/adapters.py
-6. src/prompt_mechanism_study/measurement.py
-7. src/prompt_mechanism_study/outcomes.py
-8. src/prompt_mechanism_study/inference.py
-9. src/prompt_mechanism_study/workflow.py
-10. src/prompt_mechanism_study/cli.py
+5. src/prompt_mechanism_study/factorial_experiment.py
+6. src/prompt_mechanism_study/security_profiles.py
+7. src/prompt_mechanism_study/functional_judge.py
+8. src/prompt_mechanism_study/outcomes.py
+9. src/prompt_mechanism_study/inference.py
+10. src/prompt_mechanism_study/factorial_verify.py
 
 `artifact_io.py` and `records.py` are shared serialization support, not
 additional scientific stages.
@@ -39,9 +43,16 @@ The `prompt-mechanism-four-arm` command and its tracked Qwen result bundles repr
 four-arm studies. They are not a second prospective protocol and cannot be promoted to evidence
 under the successor ADD/REMOVE policy without a new pre-outcome freeze.
 
-Review the freeze and analyze commands separately. A valid analysis must point
-to an earlier exact-byte freeze artifact, reproduce its study identity, bind
-the same measurement adapters, and close every randomized assignment.
+The active confirmation contract is
+`configs/formal/factorial-sql-confirm-qwen35-v3.json`. Its stage boundary is:
+
+    corpus/Prompt TSG -> pair binding -> four-cell prompt freeze -> complete-block
+    randomization -> independent security/functionality measurement -> total
+    outcome ledger -> task-unit ITT -> independent verification
+
+Every randomized assignment must appear exactly once. `unknown`, invalid code,
+functional failure, treatment collapse, and non-target drift are retained or
+reported under their declared boundary and never used as denominator filters.
 
 Run the default invariant tests with:
 

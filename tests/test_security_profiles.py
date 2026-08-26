@@ -134,7 +134,7 @@ def test_prompt_tsg_v3_profiles_match_frozen_calibration(case: dict[str, str]) -
 @pytest.mark.parametrize(
     "case",
     json.loads(
-        Path("data/oracle-calibration/factorial-sql-v1-cases.json").read_text(
+        Path("data/oracle-calibration/factorial-sql-v2-cases.json").read_text(
             encoding="utf-8"
         )
     ),
@@ -143,3 +143,43 @@ def test_prompt_tsg_v3_profiles_match_frozen_calibration(case: dict[str, str]) -
 def test_factorial_sql_profile_covers_all_four_gold_cells(case: dict[str, str]) -> None:
     result = evaluate_security_profile(case["code"], case["profile_id"])
     assert result["security_label"] == case["expected_label"]
+    if "expected_reason" in case:
+        assert (
+            result["decision"]["trace"]["facts"][0]["reason_code"]
+            == case["expected_reason"]
+        )
+
+
+@pytest.mark.reviewer
+def test_factorial_sql_membership_guard_must_stop_before_the_sink() -> None:
+    code = """def list_rows(cursor, order_field, maximum):
+    allowed = {'created_at', 'name'}
+    cursor.execute(f'SELECT * FROM records ORDER BY {order_field} LIMIT %s', (maximum,))
+    if order_field not in allowed:
+        raise ValueError('invalid column')
+"""
+    result = evaluate_security_profile(
+        code, "python.cwe89.dynamic_identifier_and_values.v2"
+    )
+    assert result["security_label"] == "insecure"
+    assert (
+        result["decision"]["trace"]["facts"][0]["reason_code"]
+        == "dynamic_identifier_allowlist_not_proved"
+    )
+
+
+@pytest.mark.reviewer
+def test_factorial_sql_v1_remains_frozen_before_equivalent_allowlist_expansion() -> None:
+    code = """def list_rows(cursor, order_field, maximum):
+    allowed = {'created_at', 'name'}
+    if order_field not in allowed:
+        raise ValueError('invalid column')
+    cursor.execute(f'SELECT * FROM records ORDER BY {order_field} LIMIT %s', (maximum,))
+"""
+    result = evaluate_security_profile(
+        code, "python.cwe89.dynamic_identifier_and_values.v1"
+    )
+    assert result["security_label"] == "insecure"
+    fact = result["decision"]["trace"]["facts"][0]
+    assert fact["reason_code"] == "external_input_interpolated_into_sql"
+    assert "identifier_control" not in fact

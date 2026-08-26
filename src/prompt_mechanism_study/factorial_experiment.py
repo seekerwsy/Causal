@@ -19,7 +19,7 @@ from prompt_mechanism_study.functional_judge import (
     python_syntax_valid,
     validate_review_response,
 )
-from prompt_mechanism_study.inference import FactorialAnalysisPlan, Metric
+from prompt_mechanism_study.inference import FactorialAnalysisPlan, FactorialEffect, Metric
 from prompt_mechanism_study.intervention import (
     FACTORIAL_CELL_ORDER,
     FactorialBundleValidation,
@@ -77,6 +77,9 @@ def preflight_factorial_experiment(
         "credential_present": bool(os.environ.get(key_name, "").strip()),
         "pair_id": inputs["pair"].pair_id,
         "oracle_support_status": inputs["pair"].oracle_support_status.value,
+        "configured_scientific_claim_allowed": bool(
+            inputs["config"].get("scientific_claim_allowed", False)
+        ),
         "scientific_claim_allowed": False,
     }
 
@@ -167,6 +170,12 @@ def run_factorial_experiment(
         config["analysis"]["bootstrap_seed"],
         config["analysis"]["bootstrap_draws"],
         float(config["analysis"]["familywise_alpha"]),
+        tuple(
+            FactorialEffect(item)
+            for item in config["analysis"].get(
+                "secondary_effects", ["factor_1", "factor_2", "joint"]
+            )
+        ),
     )
     study = freeze_factorial_study(
         tasks,
@@ -240,8 +249,17 @@ def _load_inputs(repository_root: Path, config_path: Path) -> dict[str, Any]:
     root = repository_root.resolve()
     config_file = config_path if config_path.is_absolute() else root / config_path
     config = read_json(config_file)
-    if config.get("schema_version") != "1.0" or config.get("phase") != "development_canary":
-        raise FactorialExperimentError("factorial canary config envelope is invalid")
+    phase = config.get("phase")
+    if config.get("schema_version") != "1.0" or phase not in {
+        "development_canary",
+        "confirmatory",
+    }:
+        raise FactorialExperimentError("factorial config envelope is invalid")
+    claim_allowed = config.get("scientific_claim_allowed")
+    if type(claim_allowed) is not bool or (
+        phase == "development_canary" and claim_allowed
+    ):
+        raise FactorialExperimentError("factorial claim boundary is invalid")
     corpus_root = root / config["corpus"]["path"]
     verify_bundle(corpus_root)
     if bundle_digest(corpus_root) != config["corpus"]["bundle_sha256"]:
@@ -249,26 +267,44 @@ def _load_inputs(repository_root: Path, config_path: Path) -> dict[str, Any]:
     all_tasks = read_json(corpus_root / "tasks.json")
     by_task = {item["task_id"]: item for item in all_tasks}
     selected_ids = config["corpus"]["task_ids"]
-    if len(selected_ids) != len(set(selected_ids)) or any(item not in by_task for item in selected_ids):
+    if (
+        not selected_ids
+        or len(selected_ids) != len(set(selected_ids))
+        or any(item not in by_task for item in selected_ids)
+    ):
         raise FactorialExperimentError("factorial task selection is invalid")
     task_rows = tuple(by_task[item] for item in selected_ids)
+    if len({item["task_unit_id"] for item in task_rows}) != len(task_rows):
+        raise FactorialExperimentError("factorial tasks must be unique task units")
+    if phase == "confirmatory" and any(item.get("split") != "confirm" for item in task_rows):
+        raise FactorialExperimentError("confirmatory factorial task entered from another split")
+    if config["corpus"].get("selection_outcomes_consulted") is not False or any(
+        item.get("source_records_used_as_outcomes") is not False for item in task_rows
+    ):
+        raise FactorialExperimentError("factorial task selection is not outcome blind")
     catalog_path = root / config["prompt_tsg_catalog_path"]
     registry_path = root / config["pair_registry_path"]
     catalog = load_catalog(catalog_path)
     registry = load_pair_registry(registry_path, catalog)
     if len(registry.pairs) != 1:
-        raise FactorialExperimentError("canary requires exactly one frozen pair")
+        raise FactorialExperimentError("factorial study requires exactly one frozen pair")
     pair = registry.pairs[0]
     if (
         pair.oracle_profile_id != config["security_oracle"]["profile_id"]
         or pair.oracle_policy_sha256 != config["security_oracle"]["policy_sha256"]
     ):
         raise FactorialExperimentError("factorial Oracle configuration drift")
+    qualification = _oracle_qualification(root, config["security_oracle"], pair)
     for row in task_rows:
         graph = prompt_tsg_from_record(row["prompt_tsg"])
         validate_prompt_tsg(graph, prompt=row["prompt"], catalog=catalog)
-        if _binding(row["pair_binding"]).decision is not PairEligibility.APPLICABLE:
-            raise FactorialExperimentError("non-applicable task entered the canary")
+        binding = _binding(row["pair_binding"])
+        if (
+            binding.decision is not PairEligibility.APPLICABLE
+            or binding.pair_id != pair.pair_id
+            or binding.task_id != row["task_id"]
+        ):
+            raise FactorialExperimentError("non-applicable task entered the factorial study")
     intervention = config["intervention"]
     executor = _locked_json(root, intervention, "executor_config")
     validator = _locked_json(root, intervention, "validator_config")
@@ -283,6 +319,7 @@ def _load_inputs(repository_root: Path, config_path: Path) -> dict[str, Any]:
         executor,
         validator,
         config["generation"],
+        pair.oracle_profile_id,
         pair.oracle_policy_sha256,
         functional_evaluator,
         functional_prompt,
@@ -311,6 +348,7 @@ def _load_inputs(repository_root: Path, config_path: Path) -> dict[str, Any]:
         "catalog": catalog,
         "registry": registry,
         "pair": pair,
+        "oracle_qualification": qualification,
         "task_rows": task_rows,
         "executor": executor,
         "executor_prompt": executor_prompt,
@@ -531,6 +569,9 @@ def _report(config: Mapping[str, Any], study: Any, analysis: Any, verification: 
                 "factor_2": estimate.factor_2,
                 "joint": estimate.joint,
                 "interaction": estimate.interaction,
+                "factor_1_bounds": list(estimate.factor_1_bounds),
+                "factor_2_bounds": list(estimate.factor_2_bounds),
+                "joint_bounds": list(estimate.joint_bounds),
                 "interaction_bounds": list(estimate.interaction_bounds),
             }
         )
@@ -544,12 +585,62 @@ def _report(config: Mapping[str, Any], study: Any, analysis: Any, verification: 
         }
         for item in analysis.inference.intervals
     ]
+    secondary_intervals = [
+        {
+            "coordinate_id": item.coordinate_id,
+            "effect": item.effect.value,
+            "standard_error": item.standard_error,
+            "lower": item.lower,
+            "upper": item.upper,
+            "excludes_zero": item.lower > 0.0 or item.upper < 0.0,
+        }
+        for item in analysis.inference.secondary_intervals
+    ]
     primary = next(item for item in estimates if item["metric"] == "secure_yield")
     interval = intervals[0] if intervals else None
     significant = bool(interval and (interval["lower"] > 0.0 or interval["upper"] < 0.0))
+    functionality = next(item for item in estimates if item["metric"] == "functionality")
+    evaluability = next(item for item in estimates if item["metric"] == "oracle_evaluable")
+    analysis_config = config["analysis"]
+    functionality_margin = float(analysis_config["functionality_noninferiority_margin"])
+    unknown_limit = float(analysis_config.get("maximum_unknown_fraction", 1.0))
+    practical_margin = float(analysis_config.get("practical_interaction_margin", 0.0))
+    minimum_evaluability = min(
+        item["point"] for item in evaluability["cells"].values() if item["point"] is not None
+    )
+    primary_gate = {
+        "security_interval_excludes_zero": significant,
+        "practical_interaction_margin": practical_margin,
+        "practical_interaction_met": primary["interaction"] is not None
+        and abs(primary["interaction"]) >= practical_margin,
+        "functionality_contrast": "a11_minus_a00",
+        "functionality_difference": functionality["joint"],
+        "functionality_noninferiority_margin": functionality_margin,
+        "functionality_noninferior": functionality["joint"] is not None
+        and functionality["joint"] >= -functionality_margin,
+        "maximum_unknown_fraction": unknown_limit,
+        "minimum_oracle_evaluability": minimum_evaluability,
+        "unknown_gate_passed": minimum_evaluability >= 1.0 - unknown_limit,
+    }
+    primary_gate["claim_ready"] = bool(
+        config.get("scientific_claim_allowed", False)
+        and all(
+            primary_gate[name]
+            for name in (
+                "security_interval_excludes_zero",
+                "practical_interaction_met",
+                "functionality_noninferior",
+                "unknown_gate_passed",
+            )
+        )
+    )
     return {
         "schema_version": "1.0",
-        "status": "FACTORIAL_CANARY_COMPLETE",
+        "status": (
+            "FACTORIAL_CONFIRMATION_COMPLETE"
+            if config["phase"] == "confirmatory"
+            else "FACTORIAL_CANARY_COMPLETE"
+        ),
         "study_name": config["study_name"],
         "study_id": study.study_id,
         "tasks": len(study.tasks),
@@ -559,10 +650,13 @@ def _report(config: Mapping[str, Any], study: Any, analysis: Any, verification: 
         "primary_interaction": primary["interaction"],
         "primary_simultaneous_interval": interval,
         "primary_interval_excludes_zero": significant,
+        "primary_gate": primary_gate,
         "estimates": estimates,
         "simultaneous_critical_value": analysis.inference.simultaneous_critical_value,
+        "secondary_intervals": secondary_intervals,
+        "secondary_critical_value": analysis.inference.secondary_critical_value,
         "verification": dict(verification),
-        "scientific_claim_allowed": False,
+        "scientific_claim_allowed": bool(config.get("scientific_claim_allowed", False)),
         "claim_boundary": config["corpus"]["generalization_boundary"],
         "scale_gate": config["scale_gate"],
     }
@@ -618,6 +712,7 @@ def _adapters(
     executor: Mapping[str, Any],
     validator: Mapping[str, Any],
     generation: Mapping[str, Any],
+    oracle_profile_id: str,
     oracle_policy_sha256: str,
     functional_evaluator: Mapping[str, Any],
     functional_prompt: str,
@@ -628,7 +723,7 @@ def _adapters(
         AdapterSpec(AdapterKind.INTERVENTION_EXECUTOR, executor["candidate_id"], "1", content_hash(executor)),
         AdapterSpec(AdapterKind.INTERVENTION_VALIDATOR, validator["candidate_id"], "1", content_hash(validator)),
         AdapterSpec(AdapterKind.GENERATOR, generation["model_id"], "1", content_hash(generation)),
-        AdapterSpec(AdapterKind.SECURITY_ORACLE, "python.cwe89.dynamic_identifier_and_values.v1", "1", oracle_policy_sha256),
+        AdapterSpec(AdapterKind.SECURITY_ORACLE, oracle_profile_id, "1", oracle_policy_sha256),
         AdapterSpec(
             AdapterKind.FUNCTIONAL_EVALUATOR,
             functional_evaluator["candidate_id"],
@@ -636,6 +731,29 @@ def _adapters(
             content_hash({"evaluator": functional_evaluator, "prompt": functional_prompt}),
         ),
     )
+
+
+def _oracle_qualification(root: Path, section: Mapping[str, Any], pair: Any) -> dict[str, Any]:
+    path = root / section["qualification_path"]
+    if "qualification_sha256" in section:
+        _require_file_hash(path, section["qualification_sha256"])
+    qualification = read_json(path)
+    if not isinstance(qualification, dict):
+        raise FactorialExperimentError("Oracle qualification must be a JSON object")
+    if (
+        qualification.get("profile_id") != pair.oracle_profile_id
+        or qualification.get("policy_sha256") != pair.oracle_policy_sha256
+        or qualification.get("qualification_status") != "supported"
+        or qualification.get("label_mismatches") != 0
+        or set(qualification.get("gold_cells", [])) != {
+            cell.value for cell in FACTORIAL_CELL_ORDER
+        }
+    ):
+        raise FactorialExperimentError("Oracle qualification is unsupported or incomplete")
+    for stem in ("implementation", "fixture"):
+        locked_path = root / qualification[f"{stem}_path"]
+        _require_file_hash(locked_path, qualification[f"{stem}_sha256"])
+    return qualification
 
 
 def _locked_json(root: Path, section: Mapping[str, Any], stem: str) -> dict[str, Any]:

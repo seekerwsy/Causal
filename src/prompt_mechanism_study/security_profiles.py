@@ -17,6 +17,7 @@ LOCAL_PROFILE_IDS = frozenset(
         "python.cwe22.path_confinement.v2",
         "python.cwe78.fixed_executable_argv.v1",
         "python.cwe89.dynamic_identifier_and_values.v1",
+        "python.cwe89.dynamic_identifier_and_values.v2",
         "python.cwe611.xml_external_entity.v1",
         "python.cwe732.owner_only_file_permissions.v1",
         "python.cwe798.credential_source.v1",
@@ -98,8 +99,10 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         facts = _path_facts(tree, aliases)
     elif profile_id.endswith("fixed_executable_argv.v1"):
         facts = _subprocess_facts(tree, aliases)
+    elif profile_id.endswith("dynamic_identifier_and_values.v2"):
+        facts = _sql_facts(tree, aliases, equivalent_allowlists=True)
     elif profile_id.endswith("dynamic_identifier_and_values.v1"):
-        facts = _sql_facts(tree, aliases)
+        facts = _sql_facts(tree, aliases, equivalent_allowlists=False)
     elif profile_id.endswith("archive_extraction.v1"):
         facts = _archive_facts(tree, aliases)
     elif profile_id.endswith("xml_external_entity.v1"):
@@ -217,12 +220,19 @@ def _is_fixed_path(node: ast.AST, assignments: dict[str, ast.AST]) -> bool:
     return False
 
 
-def _fact(node: ast.AST, sink: str, state: str, reason: str) -> dict[str, Any]:
+def _fact(
+    node: ast.AST,
+    sink: str,
+    state: str,
+    reason: str,
+    **details: str,
+) -> dict[str, Any]:
     return {
         "line": getattr(node, "lineno", 0),
         "sink_kind": sink,
         "state": state,
         "reason_code": reason,
+        **details,
     }
 
 
@@ -476,13 +486,68 @@ def _literal_string_map(node: ast.AST) -> bool:
     )
 
 
+def _literal_string_domain(node: ast.AST) -> bool:
+    if isinstance(node, ast.Dict):
+        values = node.keys
+    elif isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+        values = node.elts
+    else:
+        return False
+    return bool(values) and all(
+        isinstance(item, ast.Constant) and isinstance(item.value, str)
+        for item in values
+    )
+
+
+def _guarded_identifier_names(
+    function: ast.AST,
+    assignments: dict[str, ast.AST],
+) -> dict[str, int]:
+    """Find literal-domain membership guards that stop execution before a sink."""
+
+    domains = {
+        name for name, value in assignments.items() if _literal_string_domain(value)
+    }
+    guarded: dict[str, int] = {}
+    for node in ast.walk(function):
+        if not isinstance(node, ast.If) or not _always_exits(node.body):
+            continue
+        test = node.test
+        if not (
+            isinstance(test, ast.Compare)
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.NotIn)
+            and len(test.comparators) == 1
+            and isinstance(test.left, ast.Name)
+        ):
+            continue
+        domain = test.comparators[0]
+        if (
+            isinstance(domain, ast.Name)
+            and domain.id in domains
+            or _literal_string_domain(domain)
+        ):
+            guarded[test.left.id] = min(
+                guarded.get(test.left.id, node.lineno), node.lineno
+            )
+    return guarded
+
+
 def _allowlisted_identifier(
     node: ast.AST,
     assignments: dict[str, ast.AST],
     literal_maps: set[str],
     params: set[str],
+    guarded_names: dict[str, int],
+    sink_line: int,
 ) -> bool:
     resolved = _resolved_expression(node, assignments)
+    if (
+        isinstance(resolved, ast.Name)
+        and resolved.id in params
+        and guarded_names.get(resolved.id, sink_line) < sink_line
+    ):
+        return True
     if isinstance(resolved, ast.Subscript) and isinstance(resolved.value, ast.Name):
         return resolved.value.id in literal_maps and _depends_on(resolved.slice, params)
     if isinstance(resolved, ast.Call) and isinstance(resolved.func, ast.Attribute):
@@ -519,7 +584,12 @@ def _has_value_placeholder(node: ast.AST) -> bool:
     )
 
 
-def _sql_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+def _sql_facts(
+    tree: ast.AST,
+    aliases: dict[str, str],
+    *,
+    equivalent_allowlists: bool,
+) -> list[dict[str, Any]]:
     """Bounded joint CWE-89 profile for dynamic identifiers and untrusted values."""
 
     facts = []
@@ -529,6 +599,11 @@ def _sql_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
         literal_maps = {
             name for name, value in assignments.items() if _literal_string_map(value)
         }
+        guarded_names = (
+            _guarded_identifier_names(function, assignments)
+            if equivalent_allowlists
+            else {}
+        )
         for node in ast.walk(function):
             if not isinstance(node, ast.Call) or not (
                 isinstance(node.func, ast.Attribute)
@@ -540,17 +615,29 @@ def _sql_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
                 continue
             query = _resolved_expression(node.args[0], assignments)
             dynamic_parts = _dynamic_sql_parts(query)
-            unsafe_parts = [
-                part
+            evidence_parts = {
+                id(part): (
+                    _resolved_expression(part, assignments)
+                    if equivalent_allowlists
+                    else part
+                )
                 for part in dynamic_parts
-                if _contains_external_input(part, params, aliases)
-                and not _allowlisted_identifier(part, assignments, literal_maps, params)
-            ]
+            }
             unresolved_parts = [
                 part
                 for part in dynamic_parts
-                if not _contains_external_input(part, params, aliases)
-                and not _allowlisted_identifier(part, assignments, literal_maps, params)
+                if not _contains_external_input(evidence_parts[id(part)], params, aliases)
+                and not _allowlisted_identifier(
+                    part, assignments, literal_maps, params, guarded_names, node.lineno
+                )
+            ]
+            unsafe_parts = [
+                part
+                for part in dynamic_parts
+                if _contains_external_input(evidence_parts[id(part)], params, aliases)
+                and not _allowlisted_identifier(
+                    part, assignments, literal_maps, params, guarded_names, node.lineno
+                )
             ]
             parameters = node.args[1] if len(node.args) > 1 else next(
                 (
@@ -569,20 +656,50 @@ def _sql_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
                 and _has_value_placeholder(query)
             )
             has_allowlisted_identifier = any(
-                _allowlisted_identifier(part, assignments, literal_maps, params)
+                _allowlisted_identifier(
+                    part, assignments, literal_maps, params, guarded_names, node.lineno
+                )
                 for part in dynamic_parts
             )
-            if unsafe_parts:
-                state, reason = "unsafe", "external_input_interpolated_into_sql"
-            elif unresolved_parts:
-                state, reason = "unresolved", "dynamic_sql_expression_unresolved"
-            elif not has_allowlisted_identifier:
-                state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
-            elif not values_bound:
-                state, reason = "unsafe", "sql_value_parameterization_not_proved"
+            if equivalent_allowlists:
+                identifier_state = (
+                    "safe"
+                    if has_allowlisted_identifier
+                    else "unknown"
+                    if unresolved_parts
+                    else "unsafe"
+                )
+                value_state = "safe" if values_bound else "unsafe"
+                if unresolved_parts:
+                    state, reason = "unresolved", "dynamic_sql_expression_unresolved"
+                elif not has_allowlisted_identifier:
+                    state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
+                elif not values_bound:
+                    state, reason = "unsafe", "sql_value_parameterization_not_proved"
+                else:
+                    state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
+                facts.append(
+                    _fact(
+                        node,
+                        "sql.execute",
+                        state,
+                        reason,
+                        identifier_control=identifier_state,
+                        value_parameterization=value_state,
+                    )
+                )
             else:
-                state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
-            facts.append(_fact(node, "sql.execute", state, reason))
+                if unsafe_parts:
+                    state, reason = "unsafe", "external_input_interpolated_into_sql"
+                elif unresolved_parts:
+                    state, reason = "unresolved", "dynamic_sql_expression_unresolved"
+                elif not has_allowlisted_identifier:
+                    state, reason = "unsafe", "dynamic_identifier_allowlist_not_proved"
+                elif not values_bound:
+                    state, reason = "unsafe", "sql_value_parameterization_not_proved"
+                else:
+                    state, reason = "safe", "identifier_allowlisted_and_values_parameterized"
+                facts.append(_fact(node, "sql.execute", state, reason))
     return facts
 
 
