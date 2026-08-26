@@ -3,6 +3,12 @@
 Prompt Mechanism Study is a research artifact, not a provider or deployment service. Review
 the scientific path in this order:
 
+Start with the [current theory and method framework](current-method-theory-framework.md). It is a
+review-oriented synthesis, while the normative prospective protocol remains the successor spec
+linked below. The current coherent method is a Prompt-TSG-conditioned randomized intervention
+study with an availability-gated observational-selector extension. The latest natural-Prompt
+positivity audit did not authorize FCI execution.
+
 1. src/prompt_mechanism_study/representation.py
 2. src/prompt_mechanism_study/prioritization.py
 3. src/prompt_mechanism_study/intervention.py
@@ -29,11 +35,15 @@ This compact implementation intentionally chooses one auditable active path:
 - deployment, credentials, retries, recovery, and campaign administration are
   outside the active method.
 
+The `prompt-mechanism-four-arm` command and its tracked Qwen result bundles reproduce legacy/pilot
+four-arm studies. They are not a second prospective protocol and cannot be promoted to evidence
+under the successor ADD/REMOVE policy without a new pre-outcome freeze.
+
 Review the freeze and analyze commands separately. A valid analysis must point
 to an earlier exact-byte freeze artifact, reproduce its study identity, bind
 the same measurement adapters, and close every randomized assignment.
 
-Run the 24 default invariant tests with:
+Run the default invariant tests with:
 
     python -m pytest -q
 

@@ -5,6 +5,11 @@ frozen prompt intervention changes Oracle-evaluable secure-code yield while
 preserving functionality. It is a research prototype, not a deployment or
 campaign-management platform.
 
+The [current theory and method framework](docs/current-method-theory-framework.md) gives the
+paper-facing objects, causal boundaries, seven stages, implementation status, and current gates.
+The normative prospective protocol remains the successor specification; tracked legacy/pilot
+results are not silently upgraded to that protocol.
+
 ## Method at a glance
 
 ```text
@@ -12,7 +17,8 @@ source benchmark records
         -> deduplicated task units
         -> one representative prompt per unit
         -> Prompt TSG and mechanism binding
-        -> four assigned prompt arms
+        -> discovery support gate and hypothesis freeze
+        -> operation-specific assigned prompt arms
         -> code generation
         -> independent security and functionality measurement
         -> assigned-arm task-unit ITT
@@ -41,12 +47,13 @@ The method is organized as seven visible stages.
 
 1. **Representation.** Normalize source records, form conservative task units,
    choose one representative prompt, and extract bounded Prompt TSG facts.
-2. **Prioritization.** Apply outcome-blind eligibility and sampling rules to
-   the complete candidate inventory.
+2. **Prioritization.** Audit natural-prompt feature support and source overlap;
+   run family-local selectors only after that outcome-blind gate passes.
 3. **Hypothesis freeze.** Freeze task units, Prompt TSG bindings, mechanism
    registry, model, Oracles, arm texts, seeds, estimands, and multiplicity.
-4. **Intervention and randomization.** Materialize all four prompt variants and
-   randomize their execution order without consulting generated outcomes.
+4. **Intervention and randomization.** Materialize the frozen ADD- or
+   REMOVE-specific prompt variants and randomize their execution order without
+   consulting generated outcomes.
 5. **Measurement.** Generate code, check Python syntax/compilation, run the
    static Security Oracle, and run the blinded Functional Judge independently.
 6. **Outcome assembly.** Account for every assignment and preserve invalid,
@@ -60,22 +67,20 @@ guarantee that generated code realizes that mechanism, and generated code is
 not treated as a causal mediator. Realization and non-target drift are
 diagnostics only.
 
-## Four prompt arms
+## Prospective four-arm policies
 
-Every task unit receives all four assigned variants:
+Each frozen ADD or REMOVE hypothesis has four policy roles. The primary
+contrast is always Target versus its operation-matched No-op:
 
-| Arm ID | Prompt operation | Scientific role |
-| --- | --- | --- |
-| `absent` | Keep the source prompt unchanged | Requirement-absent baseline |
-| `specific` | Append the Prompt-TSG-selected concrete mechanism requirement | Target intervention |
-| `generic` | Append a general security-safeguards reminder | Tests whether specificity matters |
-| `placebo` | Append a style-only instruction about descriptive names, formatting, and straightforward organization | Controls for adding another instruction and changing prompt attention |
+| Operation | Target | No-op | Placebo/Sham | Generic |
+| --- | --- | --- | --- | --- |
+| ADD | add the concrete mechanism requirement | matched rewrite while the feature remains absent | length-matched presentation-only edit | generic security reminder |
+| REMOVE | remove the concrete requirement using its frozen neutral counterpart | matched edit while retaining the requirement | length-matched unrelated edit | replace the concrete requirement with generic security guidance |
 
-`placebo` is the language/code-style arm. It changes the requested presentation
-of generated code, not the security mechanism or the natural-language content
-of the source task. The primary contrast is `specific - placebo`; `specific -
-absent` and `specific - generic` are secondary contrasts. No arm is removed
-from the ITT denominator because its generated code ignored the instruction.
+Placebo/sham and generic arms are secondary specificity controls. No arm is
+removed from the ITT denominator because generated code ignored its instruction.
+The earlier `absent/specific/generic/placebo` studies retain their frozen legacy
+estimands; they are not reinterpreted as prospective ADD/REMOVE confirmation.
 
 ## Outcomes and evidence boundary
 
@@ -112,32 +117,33 @@ prompt-mechanism-four-arm verify-analysis \
   --tasks data/formal/prompt-tsg-strict-v3-replication-tasks.jsonl
 ```
 
-The four-arm entry point also exposes `preflight`, intervention, measurement,
-and analysis actions. Run `prompt-mechanism-four-arm --help` for their bounded
-arguments. Provider credentials and model deployment remain external adapters;
-they are not stored in the artifact.
+The four-arm entry point exposes reproduction actions for tracked legacy/pilot
+studies. New-protocol work follows the prospective kernel and must not reuse a
+legacy result under successor semantics. Provider credentials and model
+deployment remain external adapters; they are not stored in the artifact.
 
 ## Review reading order
 
 The active path can be reviewed in at most ten files:
 
 1. `AGENTS.md` -- scientific and reviewability constraints;
-2. `README.md` -- terminology, stages, arms, and evidence boundary;
-3. `configs/formal/prompt-tsg-strict-19-qwen37-oracle-v3.json` -- one complete
+2. `docs/current-method-theory-framework.md` -- theory, causal boundaries,
+   stages, status, and open gates;
+3. `README.md` -- concise terminology and reproduction boundary;
+4. `configs/formal/prompt-tsg-strict-19-qwen37-oracle-v3.json` -- one complete
    frozen study identity;
-4. `src/prompt_mechanism_study/four_arm_cli.py` -- single four-arm entry point;
-5. `src/prompt_mechanism_study/four_arm.py` -- linear intervention,
-   measurement, outcome, and analysis path;
+5. `src/prompt_mechanism_study/workflow.py` -- prospective freeze and analysis
+   call graph;
 6. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded graph schema and typed
    arm patches;
-7. `src/prompt_mechanism_study/prompt_tsg_extract.py` -- LLM-fact proposal and
+7. `src/prompt_mechanism_study/prioritization.py` -- discovery support gate and
+   frozen ranking boundary;
+8. `src/prompt_mechanism_study/prompt_tsg_extract.py` -- LLM-fact proposal and
    deterministic evidence validation;
-8. `src/prompt_mechanism_study/security_profiles.py` -- local Security Oracle
+9. `src/prompt_mechanism_study/security_profiles.py` -- local Security Oracle
    profiles;
-9. `src/prompt_mechanism_study/four_arm_verify.py` -- independent result
+10. `src/prompt_mechanism_study/four_arm_verify.py` -- independent legacy-result
    verifier;
-10. `docs/experiments/2026-08-26-prompt-tsg-qwen37-oracle-v3-results.md` --
-    frozen result interpretation and reproduction coordinates.
 
 Historical ADD/REMOVE studies, deployment incidents, provider tuning,
 calibration exploration, and server administration remain archival evidence.

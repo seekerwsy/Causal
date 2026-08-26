@@ -5,8 +5,8 @@
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
 coverage target. Section 8 records a smaller, outcome-blind 60-task-unit sample
-for the next overall-effect validation; it is not evidence that an intervention
-effect exists.
+as a population-feasibility and power-planning canary; it is not a frozen
+successor assignment manifest or evidence that an intervention effect exists.
 
 Generator identities, assignment records, and the pilot split remain unfrozen.
 No generated-code outcome, model score, or historical per-task result may
@@ -477,12 +477,21 @@ the complete per-cluster decision ledger.
 
 ## 7. Arms and assignment budget
 
-The next Python validation uses one complete four-arm block per sampled task:
-`absent`, `specific`, `generic`, and `placebo`. The frozen minimum sample has
-60 independent task units, 15 per mechanism family, for 240 assignments per
-generator model. The primary contrast is `specific - placebo`; family effects
-are descriptive heterogeneity estimates because 15 task units per family are
-not separately powered confirmatory studies.
+The successor protocol uses one operation-specific four-arm family per frozen
+hypothesis. ADD uses `TARGET_PATCH`, `NOOP_REWRITE`,
+`LENGTH_MATCHED_PLACEBO`, and `GENERIC_SECURITY_REMINDER`. REMOVE uses
+`TARGET_REMOVE`, `NOOP_RETAIN`, `LENGTH_MATCHED_SHAM_EDIT`, and
+`GENERIC_SECURITY_REPLACEMENT`. The primary contrast is Target minus the
+operation-matched No-op. Placebo/sham and generic contrasts are secondary
+specificity evidence.
+
+The 60-task-unit canary contains 15 independent task units per mechanism
+family, but it does not imply 240 successor assignments. A task enters an ADD
+block only when its context is present and source feature is absent; it enters
+a REMOVE block only when the feature is present and its task-preserving neutral
+counterpart is frozen. The earlier `absent`, `specific`, `generic`, and
+`placebo` design and its `specific - placebo` contrast remain immutable legacy
+study coordinates and are not reused for successor confirmation.
 
 The dataset size does **not** determine the final assignment count. Assignment
 count is computed only after the hypothesis freeze as the sum over frozen
@@ -524,14 +533,19 @@ available leaf CWEs before breaking ties by lineage and frozen hash order.
 Selection used only frozen task, contract, lineage, mechanism, and
 Oracle-profile fields.
 
-For the paired `specific - placebo` secure-yield contrast, the planning
-calculation uses a 20-percentage-point minimum effect, two-sided alpha 0.05,
-and a prospective discordant-pair probability of 0.30. The normal-approximation
-power is 0.807. This is an assumption-conditional planning result, not observed
-effect evidence: sensitivity power falls to 0.688 if discordance is 0.40.
-Confirmatory generation is not yet authorized. The next gate is limited to
-freezing the four arm texts, generator identity, 240 assignments, and a small
-pilot split.
+The existing paired `specific - placebo` planning calculation used a
+20-percentage-point minimum effect, two-sided alpha 0.05, and a prospective
+discordant-pair probability of 0.30; its normal-approximation power was 0.807,
+falling to 0.688 if discordance was 0.40. This remains an
+assumption-conditional legacy planning diagnostic, not observed effect evidence
+and not a successor Target-Noop power authorization.
+
+Confirmatory generation is not yet authorized. The next successor gate must
+first freeze hypotheses, operation-specific eligibility, complete realization
+support, generator identity, arm texts, request slots, and the actual assignment
+count. It then reruns power simulation for each selected hypothesis's eligible
+task-unit set and Target-Noop primary contrast before any confirmation outcome
+is generated.
 
 The simulation assumptions, code, seeds, candidate curves, chosen design, and
 maximum authorized sample are frozen before the first confirmatory generation.
