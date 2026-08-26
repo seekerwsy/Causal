@@ -29,7 +29,7 @@ concept. This document uses **task unit** for populations, sampling, assignment,
 resampling, and effect estimation, and reserves **cluster** for the internal
 deduplication group or an immutable legacy field/file name.
 
-The prospective dataset has three inferentially separate layers:
+The prospective dataset has three inferentially separate confirmation layers:
 
 | Layer | Target task units | Role | Primary pooling rule |
 | --- | ---: | --- | --- |
@@ -51,6 +51,12 @@ Two additional outcome-excluded resources are planned:
 Neither resource contributes to an intervention-effect estimate. Historical
 canaries, failed runs, Judge-tuning cases, and previously inspected
 confirmatory outcomes are also excluded.
+
+The observational discovery population is a fourth, non-confirmatory resource.
+It retains natural, unmanipulated Prompt variation, including explicit,
+implicit, and absent security requirements. It is task-unit-disjoint from every
+confirmation and replication layer. Discovery outcomes may rank hypotheses but
+never contribute to their held-out randomized effect estimates.
 
 ## 2. Confirmatory security families
 
@@ -187,7 +193,7 @@ The first cleaning pass proceeds in this order:
 
 ## 5. Task admission contract
 
-Every admitted confirmatory task must bind:
+Every admitted task must bind:
 
 ```text
 task_id
@@ -203,15 +209,20 @@ mechanism_family
 functional_contract_id
 security_oracle_profile
 oracle_support_status
+discovery_eligible
+confirm_add_eligible
+confirm_remove_eligible
+source_feature_state
+neutral_counterpart_status
 eligible_arm_protocol_ids
 split
 deduplication_digest
 ```
 
-Admission additionally requires:
+All regimes additionally require:
 
-1. a clear, security-neutral functional request with enough context to produce
-   and evaluate one candidate;
+1. a clear functional request with enough context to produce and evaluate one
+   candidate;
 2. the most specific defensible CWE label and a documented mapping to one
    mechanism family;
 3. a frozen semantic functional contract independent of the generated
@@ -220,13 +231,30 @@ Admission additionally requires:
    optional calibration evidence rather than a universal admission condition;
 4. a prospectively calibrated security-Oracle profile for the language,
    task shape, and CWE;
-5. at least one valid frozen Target/Noop arm protocol for the relevant
-   hypothesis;
+5. for confirmation, at least one valid frozen Target/Noop arm protocol for the
+   relevant hypothesis;
 6. stable source, version, license, original identity, and content digest;
 7. no task-unit overlap with development, calibration, discovery, or
    another confirmatory/replication split; and
 8. no selection based on generated code, security label, functional verdict,
    or effect direction.
+
+Regime-specific admission is then applied without collapsing the states:
+
+- **Discovery:** the source Prompt is natural and unmanipulated. The target
+  feature may be `PRESENT`, `ABSENT`, or `UNRESOLVED`; its state and evidence are
+  extracted before any discovery outcome is read. Each family-local FCI table
+  must pass a frozen within-context positivity and source-overlap audit.
+- **ADD confirmation:** the context is `PRESENT` and the target feature is
+  `ABSENT`. The original Prompt is the source-state no-op; no vulnerable
+  instruction is inserted.
+- **REMOVE confirmation:** the context and target feature are `PRESENT`, the
+  positive requirement has provenance-bound evidence, and a task-preserving
+  neutral counterpart is attested before generation.
+
+Eligibility for one regime does not imply eligibility for another. In
+particular, the security-neutral criterion belongs to ADD confirmation rather
+than to observational discovery as a whole.
 
 A task-level profile may be supported while a generated program still yields
 an Oracle coverage unknown. Such unknowns remain explicit outcomes. They are

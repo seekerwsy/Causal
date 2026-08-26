@@ -90,7 +90,10 @@ The main contribution is therefore the combination of:
 ### 4.1 Discovery regime
 
 For semantic task cluster `c`, task instance `i`, model `m`, and request-randomness slot `s`, let
-`P_i^0` be the natural security-neutral Prompt. With a run-locked extractor `E`, define:
+`P_i^0` be the natural, unmanipulated Prompt. Discovery does not require the actionable feature to
+be absent: its natural Prompt-side state may be `PRESENT`, `ABSENT`, or `UNRESOLVED`. It may not be
+created, removed, or relabeled using generated code or confirmation outcomes. With a run-locked
+extractor `E`, define:
 
 \[
 T_E(P_i^0)=(V_i^0,E_i^0,\tau_V,\tau_E,\operatorname{attr}),
@@ -110,6 +113,12 @@ W_i\rightarrow P_i^0\rightarrow X_i^0,
 committed outcome. The primary local FCI table contains only a minimal non-deterministic subset of
 `W`, natural-Prompt queries `X^0`, and discovery outcomes `Y^0`. `G`, raw code, implementation
 markers, arm identity, intervention diagnostics, and post-treatment features are excluded.
+
+Discovery, ADD confirmation, and REMOVE confirmation have separate admission rules. Discovery
+requires an unmanipulated natural Prompt and within-context feature support. ADD confirmation
+requires the target feature to be `ABSENT`. REMOVE confirmation requires it to be `PRESENT` with
+provenance-bound evidence and an outcome-blind, task-preserving neutral counterpart. A task unit's
+eligibility for one regime does not imply eligibility for either other regime.
 
 ### 4.2 Confirmation regime
 
@@ -355,6 +364,21 @@ Prompt-authoring SCM supplies a justified order, the main analysis:
 Redundant direct features, motifs, and deterministic projections are not placed together in one CI
 table. Each table publishes a deterministic-dependence audit and the minimal generating variable set
 used by FCI.
+
+The primary design uses **family-local FCI tables**, not one repository-wide graph. A frozen
+mechanism-family manifest determines the context queries, actionable Prompt features, approved
+pre-treatment covariates, measurement-support indicators, and outcome included in each table. Open
+task-local TSG evidence remains provenance and cannot become a new causal variable. Every row is one
+independent task unit; request slots are aggregated or sampled only under the frozen analysis in
+Section 7.4.
+
+Before FCI, each `(C_q,f)` receives an outcome-blind positivity audit within the `C_q=PRESENT`
+population. The audit reports `PRESENT`, `ABSENT`, `UNRESOLVED`, and excluded task-unit counts,
+source-lineage overlap, and deterministic dependencies. A candidate enters FCI only when both
+feature states meet the preregistered minimum independent-task support and neither state is a proxy
+for one source lineage. A failed gate is a selector-support result; it cannot be repaired by pooling
+unrelated families, smoothing a constant column, or manufacturing feature states through an
+intervention and calling them observational.
 
 ### 7.2 FCI backend and assumptions
 
@@ -1138,7 +1162,8 @@ The revised framework is ready for implementation only when tests and spec audit
 4. Prompt features share one temporal tier and same-tier direction is not presented as mediation;
 5. every selector in the primary comparison consumes the exact same universe digest;
 6. representation comparisons are labeled end-to-end rather than selector-only;
-7. ADD and REMOVE require their respective frozen source states and neutral-counterpart rule, and
+7. discovery accepts only natural unmanipulated feature states; ADD and REMOVE require their
+   respective frozen source states and neutral-counterpart rule, and
    produce distinct skeleton, hypothesis, protocol, and multiplicity identities;
 8. global realization specification, task realization bundle, model, request slot, task instance,
    and semantic cluster are all explicit;

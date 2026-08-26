@@ -349,11 +349,18 @@ def _evaluator(value: Any) -> dict[str, Any]:
 
 def _json_lines(path: Path) -> list[dict[str, Any]]:
     try:
-        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        if path.suffix == ".jsonl":
+            rows = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        else:
+            rows = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         raise PromptTSGExtractionError("task file is unreadable") from None
-    if any(not isinstance(row, dict) for row in rows):
-        raise PromptTSGExtractionError("task file contains a non-object")
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise PromptTSGExtractionError("task file must contain a list of objects")
     return rows
 
 

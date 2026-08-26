@@ -96,6 +96,51 @@ def main(argv: Sequence[str] | None = None) -> int:
     measurements.add_argument("--bandit", type=Path, required=True)
     measurements.add_argument("--pilot-root", type=Path)
 
+    discovery_population = commands.add_parser(
+        "discovery-population",
+        help="freeze a natural-Prompt task-unit census without outcomes",
+    )
+    discovery_population.add_argument("prepared_root", type=Path)
+    discovery_population.add_argument("clusters_root", type=Path)
+    discovery_population.add_argument("catalog", type=Path)
+    discovery_population.add_argument("output", type=Path)
+    discovery_population.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        metavar="CWE=TASK_FAMILY",
+        help="repeat for each preregistered local discovery scope",
+    )
+    discovery_population.add_argument("--language", default="python")
+
+    prompt_tsg_extract = commands.add_parser(
+        "prompt-tsg-extract",
+        help="extract evidence-bound Prompt TSGs for a frozen task file",
+    )
+    prompt_tsg_extract.add_argument("tasks", type=Path)
+    prompt_tsg_extract.add_argument("catalog", type=Path)
+    prompt_tsg_extract.add_argument("evaluator", type=Path)
+    prompt_tsg_extract.add_argument("extractor_prompt", type=Path)
+    prompt_tsg_extract.add_argument("output", type=Path)
+    prompt_tsg_extract.add_argument("--start", type=int, default=0)
+    prompt_tsg_extract.add_argument("--limit", type=int)
+
+    positivity = commands.add_parser(
+        "positivity-audit",
+        help="audit natural Prompt-feature support before FCI",
+    )
+    positivity.add_argument("tasks", type=Path)
+    positivity.add_argument("catalog", type=Path)
+    positivity.add_argument("output", type=Path)
+    positivity.add_argument(
+        "--prompt-tsg-bundle",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    positivity.add_argument("--minimum-state-task-units", type=int, default=30)
+    positivity.add_argument("--minimum-shared-lineages", type=int, default=2)
+
     dataset_prep = commands.add_parser(
         "dataset-prep",
         help="normalize external task sources without executing their code",
@@ -242,6 +287,54 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] in {"PILOT_COMPLETE", "REMAINING_COMPLETE"} else 2
+    elif args.command == "discovery-population":
+        from prompt_mechanism_study.prioritization import prepare_discovery_population
+
+        scopes = {}
+        for item in args.scope:
+            try:
+                cwe, task_family = item.split("=", 1)
+            except ValueError:
+                parser.error("discovery scopes must use CWE=TASK_FAMILY")
+            if not cwe.strip() or not task_family.strip() or cwe in scopes:
+                parser.error("discovery scopes must be unique non-empty CWE=TASK_FAMILY values")
+            scopes[cwe] = task_family
+        report = prepare_discovery_population(
+            args.prepared_root,
+            args.clusters_root,
+            args.catalog,
+            args.output,
+            scopes=scopes,
+            language=args.language,
+        )
+        print(report["status"])
+    elif args.command == "prompt-tsg-extract":
+        from prompt_mechanism_study.prompt_tsg_extract import extract_task_file
+
+        report = extract_task_file(
+            args.tasks,
+            args.catalog,
+            args.evaluator,
+            args.extractor_prompt,
+            args.output,
+            start=args.start,
+            limit=args.limit,
+        )
+        print(report["status"])
+        return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2
+    elif args.command == "positivity-audit":
+        from prompt_mechanism_study.prioritization import audit_discovery_positivity
+
+        report = audit_discovery_positivity(
+            args.tasks,
+            tuple(args.prompt_tsg_bundle),
+            args.catalog,
+            args.output,
+            minimum_state_task_units=args.minimum_state_task_units,
+            minimum_shared_lineages=args.minimum_shared_lineages,
+        )
+        print(report["status"])
+        return 0 if report["status"] == "POSITIVITY_GATE_PASSED" else 2
     elif args.command == "dataset-prep":
         from prompt_mechanism_study.datasets import prepare_datasets
 
