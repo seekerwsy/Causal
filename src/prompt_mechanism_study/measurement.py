@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Iterable
 
 from prompt_mechanism_study.adapters import AdapterBundle
-from prompt_mechanism_study.randomization import Randomization
+from prompt_mechanism_study.randomization import (
+    FactorialRandomization,
+    Randomization,
+    SuccessorRandomization,
+)
 from prompt_mechanism_study.records import content_id, require_text, require_unique
 
 
@@ -114,7 +118,7 @@ class MeasurementLedger:
 
 
 def close_measurements(
-    randomization: Randomization,
+    randomization: Randomization | SuccessorRandomization | FactorialRandomization,
     adapters: AdapterBundle,
     measurements: Iterable[Measurement],
     *,
@@ -124,7 +128,7 @@ def close_measurements(
     failures = tuple(infrastructure_failures)
     if failures:
         raise ValueError("infrastructure failures require repair or replay before analysis")
-    frozen = tuple(sorted(tuple(measurements), key=lambda item: item.assignment_id))
+    frozen = tuple(sorted(measurements, key=lambda item: item.assignment_id))
     observed = tuple(item.assignment_id for item in frozen)
     expected = {item.assignment_id for item in randomization.assignments}
     if len(observed) != len(set(observed)) or set(observed) != expected:

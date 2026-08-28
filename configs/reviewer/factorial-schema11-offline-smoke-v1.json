@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.1",
+  "study_name": "factorial-schema11-offline-reviewer-smoke-v1",
+  "phase": "development_canary",
+  "purpose": "Zero-network structural smoke of the active schema-1.1 freeze-run-verify path. All provider responses are deterministic test fixtures and no result is scientific effect evidence.",
+  "corpus": {
+    "path": "data/method/factorial-sql-scaffold-canary-v1",
+    "bundle_sha256": "a0e7e9b8b400d78d8c5b215eea8cc48bc4200a105fd1aa9b77a63ea53d965d7c",
+    "task_ids": [
+      "factorial_sql_task_e8cc50eb83909430f4e5087ab8092325d121720dd39bff34b87299bece013cb8",
+      "factorial_sql_task_ab0ce31eb8573f74f0b0dfaf7f42ec568f192c1495f2ac60e428cadb113a2796"
+    ],
+    "selection_outcomes_consulted": false,
+    "generalization_boundary": "offline deterministic reviewer smoke over two controlled SQL task units; not effect evidence"
+  },
+  "pair_registry_path": "data/method/mechanism-pairs-v2.json",
+  "prompt_tsg_catalog_path": "data/method/prompt-tsg-pair-catalog-v1.json",
+  "pair_protocols": [
+    {
+      "pair_id": "pair_0ae9a326b9bab7999154309964bbd9d945c51e857cd1642063ad71cce75bc390",
+      "task_ids": [
+        "factorial_sql_task_e8cc50eb83909430f4e5087ab8092325d121720dd39bff34b87299bece013cb8",
+        "factorial_sql_task_ab0ce31eb8573f74f0b0dfaf7f42ec568f192c1495f2ac60e428cadb113a2796"
+      ],
+      "intervention": {
+        "executor_config_path": "tests/fixtures/factorial-offline-adapter-v1.json",
+        "executor_config_sha256": "9c6b1bbd041d2b6949f1a795c95bf7c692ef46eb57bf034fc79bfc63efe311fb",
+        "executor_prompt_path": "data/method/prompts/factorial-intervention-executor-v2.txt",
+        "executor_prompt_sha256": "c01b47281be042bb8c21f76bf87852ee49c26c44ee47236ca2da8d80e406b430",
+        "validator_config_path": "tests/fixtures/factorial-offline-adapter-v1.json",
+        "validator_config_sha256": "9c6b1bbd041d2b6949f1a795c95bf7c692ef46eb57bf034fc79bfc63efe311fb",
+        "validator_prompt_path": "data/method/prompts/factorial-intervention-validator-v1.txt",
+        "validator_prompt_sha256": "1eb1734b2f90659ef866dc69dd735cf0c3027b39fd7ff024ab3291b9081de841",
+        "maximum_suffix_characters": 600,
+        "factor_1_target": "Bind every caller-supplied SQL value with the database driver's value placeholders and pass the values separately to execute(); do not interpolate them into SQL text.",
+        "factor_1_noop": "Preserve the supplied implementation's value-handling behavior without adding a new value-handling requirement.",
+        "factor_2_target": "Before constructing SQL, constrain the caller-selected SQL identifier using either an explicit literal mapping or a stopping membership guard over exactly the task's declared finite choices; interpolate only the validated or mapped identifier.",
+        "factor_2_noop": "Preserve the supplied implementation's identifier-handling behavior without adding a new identifier-handling requirement.",
+        "joint_application_commutative": false,
+        "joint_realizations": [
+          {
+            "label": "factor-1-then-factor-2",
+            "weight": 1,
+            "application_order": [1, 2]
+          },
+          {
+            "label": "factor-2-then-factor-1",
+            "weight": 1,
+            "application_order": [2, 1]
+          }
+        ]
+      },
+      "security_oracle": {
+        "profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+        "policy_sha256": "81cf01574cbefb2823bba1c5558142d3e0aa29fbf84d3051255acc26f4ac0420",
+        "qualification_path": "tests/fixtures/factorial-offline-security-qualification-v1.json",
+        "qualification_sha256": "da663f266c6b1828f538228e8ff1aca760ea7929e8a0e9b7cdfa44be44fc6771",
+        "unknown_rule": "preserve_unknown_and_report_bounds"
+      },
+      "mechanism_trace_diagnostics": [
+        "value_parameterization",
+        "identifier_control"
+      ]
+    }
+  ],
+  "generation": {
+    "schema_version": "1.0",
+    "provider": "offline_deterministic_test_fixture",
+    "api_key_env": "PROMPT_MECHANISM_STUDY_OFFLINE_FIXTURE_KEY",
+    "base_url": "https://offline.invalid/v1",
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 92002,
+    "timeout_seconds": 1.0,
+    "max_response_bytes": 65536,
+    "enable_thinking": false,
+    "prompt_path": "data/method/prompts/factorial-code-repair-v1.txt",
+    "prompt_sha256": "2c879340cb3a8b550b5fe68277388e5fb80892ca7a02f058fc5cd46c43ab8724",
+    "models": [
+      {
+        "model_id": "factorial-offline-reviewer-smoke-v1"
+      }
+    ]
+  },
+  "functional_oracle": {
+    "evaluator_config_path": "tests/fixtures/factorial-offline-adapter-v1.json",
+    "evaluator_config_sha256": "9c6b1bbd041d2b6949f1a795c95bf7c692ef46eb57bf034fc79bfc63efe311fb",
+    "prompt_path": "data/functional-judge/prompts/functional-oracle.txt",
+    "prompt_sha256": "fc0b165024ba89f84e98e029e63e7015af1569b28076f509021733a92983c731",
+    "qualification_path": "tests/fixtures/factorial-offline-functional-qualification-v1.json",
+    "qualification_sha256": "5f846aa1a433ab1f27af9d0441e2bf8a844d6570719877cef3f70d8be884e1ec"
+  },
+  "randomization": {
+    "seed": 92003,
+    "slots": [0, 1, 2, 3]
+  },
+  "analysis": {
+    "metrics": [
+      "secure_yield",
+      "code_valid",
+      "oracle_evaluable",
+      "functionality",
+      "joint"
+    ],
+    "primary_metric": "secure_yield",
+    "secondary_effects": [
+      "factor_1",
+      "factor_2",
+      "factor_1_given_factor_2",
+      "factor_2_given_factor_1",
+      "joint"
+    ],
+    "bootstrap_seed": 92004,
+    "bootstrap_draws": 100,
+    "familywise_alpha": 0.05,
+    "minimum_task_units": 2,
+    "minimum_valid_bootstrap_fraction": 0.9,
+    "bootstrap_quantile_method": "higher",
+    "practical_interaction_margin": 0.2,
+    "maximum_unknown_fraction": 0.1,
+    "functionality_noninferiority_margin": 0.1,
+    "functionality_noninferiority_separately_powered": false
+  },
+  "scale_gate": "This offline deterministic reviewer smoke checks artifact closure only. Its prompts, generated code, functional verdicts, estimates, intervals, and diagnostics are never scientific effect evidence and cannot authorize scaling.",
+  "scientific_claim_allowed": false
+}

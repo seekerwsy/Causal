@@ -698,6 +698,13 @@ Arm-conditional Oracle coverage uses valid code as its denominator,
 The all-assignment evaluable-code yield `mean(Y_C Y_E)` is reported separately so an arm cannot hide
 low code production behind conditional coverage.
 
+The active analysis freeze lists the five endpoints in this exact order: secure yield, code
+validity, Oracle evaluability, functionality, and joint success. It also freezes the maximum
+per-arm acceptable unknown fraction among valid code. If functionality non-inferiority is declared
+separately powered, the freeze must contain a study-specific power qualification binding the
+task-unit contrast, planned support, model policy, target power, alpha, margin, method, and
+assumptions; otherwise no such qualification or practical-success permission may be present.
+
 ### 11.2 Policy estimand
 
 For hypothesis `h` and model `m`, let `\mathcal P_h^C` be the eligible semantic-cluster
@@ -1382,17 +1389,31 @@ Functionality receives its own factorial estimates. A security-interaction claim
 practical-success label when the preregistered functionality non-inferiority Gate fails. Static
 security with broken task behavior is not silently counted as joint success.
 
+The analysis freeze states whether functionality non-inferiority was separately powered. When it
+was not, the Gate is `not_requested` and cannot authorize a practical-success label. When it was,
+the Gate uses the simultaneous lower confidence bound for `mu_11 - mu_00` and passes only when that
+bound is at least the negative preregistered non-inferiority margin. A point estimate alone is never
+sufficient; an unavailable interval makes the Gate `not_evaluable`, not passed.
+
 ### 24.9 Simultaneous inference and interpretation
 
 All primary `(pair,model,secure-yield,delta)` coordinates form one frozen max-|T| task-unit bootstrap
-family. Factor main effects, joint effects, functionality, per-realization effects, and simple effects
-are secondary families declared before outcomes. The independent result verifier recomputes the four
-cell means and `delta` without importing the production estimator.
+family. A replicate samples once from the union of task units represented anywhere in that family;
+every pair/model descendant of a sampled unit moves with the same multiplicity. Coordinates may have
+partially overlapping support and use only sampled units that belong to their frozen support. Each
+replicate is studentized by its own standard error. A replicate is invalid when any tested coordinate
+falls below its frozen minimum support or has zero standard error, and the family is non-evaluable
+unless the frozen minimum fraction of bootstrap replicates remains valid. The critical value uses the
+frozen upper empirical quantile rule. Factor main effects, joint effects, functionality,
+per-realization effects, and simple effects are secondary families declared before outcomes. The
+independent result verifier recomputes the four cell means, `delta`, resampling family, and Gate
+without importing the production estimator.
 
 A positive point estimate is not by itself synergy, and a negative point estimate is not by itself
-antagonism. A named interaction requires a simultaneous interval excluding zero, the frozen
-practical margin, adequate support, complete provenance, acceptable unknown bounds, and the declared
-functionality Gate. Otherwise the result is directionally consistent, null, conflicting, or
+antagonism. A named **security interaction** requires a simultaneous interval excluding zero, the
+frozen practical margin, adequate support, complete provenance, and acceptable unknown bounds. The
+separate **practical-success** label additionally requires the preregistered functionality Gate to
+pass. Otherwise the corresponding claim is directionally consistent, null, conflicting, or
 non-evaluable under Section 15.
 
 ### 24.10 Minimal implementation and acceptance additions
@@ -1412,7 +1433,9 @@ Before a pairwise scale-up, focused tests and a representative canary must prove
 6. hand-calculated additive, positive, negative, XOR, redundant, prerequisite, and reversal fixtures
    produce the expected main, joint, and interaction estimates;
 7. task-unit resampling and max-|T| multiplicity are replayable; and
-8. the independent verifier rejects missing, duplicate, replaced, or digest-mismatched assignments.
+8. partially overlapping pair supports retain their shared-unit dependence, while inadequate or
+   zero-standard-error bootstrap families fail closed; and
+9. the independent verifier rejects missing, duplicate, replaced, or digest-mismatched assignments.
 
 ### 24.11 Post-confirmation context follow-ups
 

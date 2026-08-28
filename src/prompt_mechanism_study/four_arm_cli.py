@@ -1,15 +1,22 @@
-"""Command-line entry for the bounded four-arm replication."""
+"""Explicit module entry for reproducing frozen legacy four-arm studies."""
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
 
 from prompt_mechanism_study import four_arm
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(prog="prompt-mechanism-four-arm")
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m prompt_mechanism_study.four_arm_cli",
+        description=(
+            "ARCHIVAL ONLY: reproduce frozen legacy/pilot four-arm artifacts; "
+            "new studies use prompt-mechanism-study successor-experiment"
+        ),
+    )
     parser.add_argument(
         "action",
         choices=(
@@ -57,7 +64,7 @@ def main() -> int:
     parser.add_argument("--oracle-source-root", type=Path)
     parser.add_argument("--semgrep", type=Path)
     parser.add_argument("--bandit", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.action == "extract-prompt-tsg":
         required = (args.tasks, args.catalog, args.evaluator, args.extractor_prompt)
         if any(value is None for value in required):

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "provider": "offline_deterministic_test_fixture",
+  "candidate_id": "factorial-offline-reviewer-smoke-v1",
+  "model_id": "factorial-offline-reviewer-smoke-v1",
+  "api_key_env": "PROMPT_MECHANISM_STUDY_OFFLINE_FIXTURE_KEY",
+  "base_url": "https://offline.invalid/v1",
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "seed": 92001,
+  "timeout_seconds": 1.0,
+  "max_response_bytes": 65536,
+  "enable_thinking": false,
+  "fixture_only": true,
+  "scientific_claim_allowed": false
+}

@@ -84,7 +84,7 @@ estimands; they are not reinterpreted as prospective ADD/REMOVE confirmation.
 
 ## Pairwise factorial extension
 
-The active prospective extension tests two independently editable atomic Prompt
+The prospective extension tests two independently editable atomic Prompt
 features in a complete `2 x 2` block:
 
 ```text
@@ -101,6 +101,21 @@ and assigned cell is the treatment. The primary pair estimand is the
 task-unit-weighted risk-difference interaction
 `mu11 - mu10 - mu01 + mu00`. Factor fidelity and generated-code style remain
 diagnostics and never filter the ITT denominator.
+
+Active schema 1.1 inference draws once from the frozen union of task units and
+moves every supported pair/model descendant together. Each multiplicity family
+uses replicate-specific studentization and a frozen max-|T| upper empirical
+quantile. Partially overlapping pair supports are retained; a replicate is
+invalid only when a tested coordinate falls below its frozen minimum support or
+has zero replicate standard error. The run must meet its frozen minimum valid
+replicate fraction, otherwise that interval family is reported non-evaluable.
+
+The security-interaction gate and the practical-success gate are distinct. A
+functionality non-inferiority claim is evaluated only when it was separately
+powered before outcomes and the simultaneous lower bound for `A11 - A00` is at
+least the negative frozen margin. Otherwise functionality is reported as
+`not_requested` or `not_evaluable`; a favorable point estimate cannot silently
+authorize a practical-success claim.
 
 The completed bounded canary paired SQL value parameterization with a literal-map
 allow-list for dynamic SQL identifiers and exercised both intervention orders.
@@ -129,6 +144,30 @@ prompt-policy effect, not universal mechanism synergy or a randomized causal eff
 scaffold context. See
 `docs/experiments/2026-08-27-factorial-sql-scaffold-repair-v1-results.md`.
 
+The current implementation also closes the prospective atomic ADD/REMOVE
+four-arm runner, all five shared-universe selectors, the selector-invariant
+bridge, the Prompt-TSG pair selector, and generalized multi-pair/multi-model
+factorial dispatch. These paths have independent semantic replay or result
+verification. They are implementation and test evidence only until a new study
+is prospectively frozen and run against the declared provider models.
+
+RQ2 representation comparison is implemented as a replay over two already
+complete selector-result funnels: one direct representation and one
+direct-plus-context representation. It checks both source bundles and
+recomputes candidate coverage, protocolization, ConfirmedYield@K, and effect
+summaries. Because representation changes the candidate universe as well as
+selection, this is an end-to-end representation comparison, not a pure
+selector-effect estimate.
+
+The prospective selector boundary is schema 2.0 only; schema 1.0 can be opened
+only through explicitly named `archival-*` phases. Pair selection embeds the
+representative task text and Prompt-TSG graph and recomputes every relation
+motif rather than trusting supplied node IDs. Successor and schema-1.1
+factorial result verifiers also replay the frozen provider responses into code,
+syntax/compilation, Security Oracle, Functional Judge, Measurement, ledger, and
+reported estimates without making another provider call. Schema-1.0 factorial
+bundles retain their historical verifier boundary and are not reinterpreted.
+
 ## Outcomes and evidence boundary
 
 The primary safety outcome is observed Oracle-evaluable secure-code yield.
@@ -139,6 +178,13 @@ The Functional Judge is AST/compilation plus blinded LLM review against the
 frozen functional contract. It is not a substitute for executable tests. The
 Security Oracle is independent and preserves `unknown`; unknown is never
 promoted to secure.
+
+Active successor and schema-1.1 factorial freezes require the same ordered five
+endpoints: secure yield, code validity, Oracle evaluability, functionality, and
+joint secure-and-functional success. Oracle unknown is assessed among valid code;
+an arm or cell with no valid code is non-evaluable rather than assigned a favorable
+coverage value. A claim-bearing functionality non-inferiority Gate additionally
+requires a study-specific, pre-outcome power qualification sealed into the freeze.
 
 The completed Qwen3.5 and Qwen3.7 strict-TSG studies are frozen null results on
 the same 19-task-unit census. Their reports remain evidence of that bounded
@@ -155,19 +201,77 @@ Run the focused scientific-invariant suite:
 python -m pytest -q
 ```
 
-Run the zero-provider-call preflight for the active scaffold-repair follow-up:
+Run the smallest structural reproductions after a method-level change:
 
 ```text
-prompt-mechanism-study factorial-experiment preflight \
+python -m pytest -q -m milestone
+```
+
+The dedicated schema-1.1 reviewer smoke is also runnable alone:
+
+```text
+python -m pytest -q -m milestone tests/test_factorial_reviewer_smoke.py
+```
+
+It closes `2 task units x 1 pair x 2 orders x 4 cells x 1 model = 16`
+assignments through freeze, run, and independent verification. Provider
+transport is a strict offline fixture, while the tracked local Security Oracle
+is executed and its existing gold cases are replayed. The generated result is
+temporary, `scientific_claim_allowed` is false, functionality is not separately
+powered, and no smoke estimate is effect evidence. Its Functional Judge fixture
+has status `STRUCTURAL_SMOKE_ONLY`; the loader rejects that status outside a
+non-claiming development canary.
+
+The package installs one console entry, `prompt-mechanism-study`. Its
+prospective subcommands expose one method through explicit stage boundaries:
+
+```text
+prompt-mechanism-study selector-study --help
+prompt-mechanism-study successor-experiment --help
+prompt-mechanism-study interaction-selector --help
+prompt-mechanism-study factorial-experiment --help
+```
+
+Replay an RQ2 representation comparison from two complete selector-result
+bundles, or independently verify the stored comparison:
+
+```text
+prompt-mechanism-study selector-study compare-representations OUTPUT --config CONFIG
+prompt-mechanism-study selector-study verify-representations OUTPUT
+```
+
+Each stored selector, bridge, successor result, pair selection, and factorial
+result has a semantic verifier; exact-byte `verify` alone is not used as proof
+that a scientific result was recomputed.
+
+An active schema-1.1 factorial study must be materialized before generation:
+
+```text
+prompt-mechanism-study factorial-experiment freeze FREEZE \
+  --repository-root . \
+  --config ACTIVE_SCHEMA_1_1_CONFIG
+
+prompt-mechanism-study factorial-experiment run RESULT \
+  --repository-root . \
+  --config ACTIVE_SCHEMA_1_1_CONFIG \
+  --freeze FREEZE
+```
+
+The tracked scaffold-repair configuration is schema 1.0 evidence. Its
+zero-provider-call preflight therefore uses the explicit archival phase:
+
+```text
+prompt-mechanism-study factorial-experiment archival-preflight \
   .artifacts/factorial-scaffold-repair-preflight \
   --repository-root . \
   --config configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json
 ```
 
-With the externally supplied provider credential, run the same frozen path:
+With the externally supplied provider credential, its historical execution
+path remains reproducible but cannot create successor evidence:
 
 ```text
-prompt-mechanism-study factorial-experiment run \
+prompt-mechanism-study factorial-experiment archival-run \
   .artifacts/factorial-sql-scaffold-repair-qwen35-v1 \
   --repository-root . \
   --config configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json
@@ -211,38 +315,38 @@ prompt-mechanism-study factorial-experiment verify \
 Verify the tracked Qwen3.7 analysis independently:
 
 ```text
-prompt-mechanism-four-arm verify-analysis \
+python -m prompt_mechanism_study.four_arm_cli verify-analysis \
   data/formal/results/prompt-tsg-strict-19-qwen37-oracle-v3-analysis \
   --config configs/formal/prompt-tsg-strict-19-qwen37-oracle-v3.json \
   --tasks data/formal/prompt-tsg-strict-v3-replication-tasks.jsonl
 ```
 
-The older four-arm entry point exposes reproduction actions for tracked
-legacy/pilot studies only. New pairwise work uses `factorial-experiment` and
-must not reuse a legacy result under successor semantics. Provider credentials
-and model deployment remain external adapters; they are not stored in the
-artifact.
+The legacy four-arm runner is deliberately available only as an explicit
+Python module, not as a second installed console command. The main CLI exposes
+older kernel and two-arm paths only through command names that start with
+`archival-`. New work uses the successor stages and must not reuse a legacy
+result under successor semantics. Provider credentials and model deployment
+remain external adapters; they are not stored in the artifact.
 
 ## Review reading order
 
-The active path can be reviewed in at most ten files:
+The scientific core can be reviewed in at most ten files:
 
 1. `AGENTS.md` -- scientific and reviewability constraints;
 2. `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
-   -- normative protocol, including the pairwise extension;
-3. `configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json` -- complete
-   prospective follow-up identity and evidence boundary;
-4. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded Prompt-TSG schema;
-5. `src/prompt_mechanism_study/mechanisms.py` -- atomic features, `PairSpec`,
-   and outcome-blind binding;
-6. `src/prompt_mechanism_study/intervention.py` -- four-cell bundled policy;
+   -- normative protocol;
+3. `src/prompt_mechanism_study/prompt_tsg.py` -- bounded Prompt-TSG schema;
+4. `src/prompt_mechanism_study/mechanisms.py` -- atomic and pair semantics;
+5. `src/prompt_mechanism_study/prioritization.py` -- support gates and selectors;
+6. `src/prompt_mechanism_study/intervention.py` -- frozen four-arm/four-cell policy;
 7. `src/prompt_mechanism_study/randomization.py` -- replayable complete blocks;
-8. `src/prompt_mechanism_study/factorial_experiment.py` -- single linear run
-   path and total ledger;
-9. `src/prompt_mechanism_study/inference.py` -- task-unit ITT, bounds, and
-   simultaneous inference;
-10. `src/prompt_mechanism_study/factorial_verify.py` -- independent result
-    verifier;
+8. `src/prompt_mechanism_study/measurement.py` -- independent measurements;
+9. `src/prompt_mechanism_study/inference.py` -- task-unit ITT and simultaneous inference;
+10. `src/prompt_mechanism_study/workflow.py` -- seven-stage composition.
+
+See `docs/reviewer-guide.md` for the thin runner and independent-verifier
+boundaries. The tracked formal configs and results reproduce executed evidence;
+they are not implementation definitions.
 
 Historical ADD/REMOVE studies, deployment incidents, provider tuning,
 calibration exploration, and server administration remain archival evidence.

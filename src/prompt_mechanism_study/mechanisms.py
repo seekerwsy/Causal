@@ -9,7 +9,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from prompt_mechanism_study.records import content_id, require_text
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
     QueryState,
@@ -19,7 +18,7 @@ from prompt_mechanism_study.prompt_tsg import (
     query_context,
     query_for_realization,
 )
-from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.records import content_hash, content_id, require_text
 from prompt_mechanism_study.representation import Operation
 
 
@@ -32,6 +31,30 @@ class PairRelation(StrEnum):
     SHARED_SINK = "shared_sink"
     DISTINCT_CONTROL_POINTS = "distinct_control_points"
     ALTERNATIVE_CONTROLS = "alternative_controls"
+    SEQUENTIAL_CONTROLS = "sequential_controls"
+    COMPLEMENTARY_COVERAGE = "complementary_coverage"
+    PRECONDITION_FOR = "precondition_for"
+    SUBSUMES = "subsumes"
+    POTENTIALLY_CONFLICTS_WITH = "potentially_conflicts_with"
+
+
+ACTIVE_FACTORIAL_RELATIONS = frozenset(
+    {
+        PairRelation.SAME_FLOW,
+        PairRelation.SHARED_SINK,
+        PairRelation.DISTINCT_CONTROL_POINTS,
+        PairRelation.ALTERNATIVE_CONTROLS,
+    }
+)
+
+
+def validate_active_factorial_relation(relation: PairRelation) -> None:
+    """Admit only the finite relation vocabulary frozen by successor Section 24."""
+
+    if type(relation) is not PairRelation or relation not in ACTIVE_FACTORIAL_RELATIONS:
+        raise MechanismRegistryError(
+            "pair relation is outside the active factorial relation vocabulary"
+        )
 
 
 class OracleSupportStatus(StrEnum):
@@ -103,6 +126,154 @@ class PairSpec:
     @property
     def operations(self) -> tuple[Operation, Operation]:
         return self.operation_1, self.operation_2
+
+
+@dataclass(frozen=True, slots=True)
+class RelationEvidenceContract:
+    """Finite Prompt-TSG motif that licenses one semantic pair relation.
+
+    The contract describes representation evidence only.  Its relations are
+    never interpreted as causal edges and its result never estimates an
+    intervention effect.
+    """
+
+    required_semantics: tuple[str, ...]
+    required_relations: tuple[tuple[str, str, str], ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not self.required_semantics
+            or tuple(sorted(self.required_semantics)) != self.required_semantics
+            or len(set(self.required_semantics)) != len(self.required_semantics)
+            or any(
+                not isinstance(value, str) or not value.strip()
+                for value in self.required_semantics
+            )
+        ):
+            raise ValueError("relation evidence semantics must be non-empty, unique, and sorted")
+        if (
+            not self.required_relations
+            or tuple(sorted(self.required_relations)) != self.required_relations
+            or len(set(self.required_relations)) != len(self.required_relations)
+            or any(
+                len(relation) != 3
+                or any(not isinstance(value, str) or not value.strip() for value in relation)
+                for relation in self.required_relations
+            )
+        ):
+            raise ValueError("relation evidence relations must be non-empty, unique, and sorted")
+        semantics = set(self.required_semantics)
+        if any(
+            source not in semantics or target not in semantics
+            for source, _, target in self.required_relations
+        ):
+            raise ValueError("relation endpoints must be declared required semantics")
+
+    @property
+    def contract_id(self) -> str:
+        return content_id("relation_evidence_contract_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class MechanismRelationSpec:
+    """One finite, prospectively declared Prompt-TSG mechanism relation."""
+
+    relation_id: str
+    factor_1_id: str
+    factor_2_id: str
+    relation_type: PairRelation
+    context_query_id: str
+    evidence_contract: RelationEvidenceContract
+    eligible_languages: tuple[str, ...]
+    eligible_task_families: tuple[str, ...]
+    eligible_cwes: tuple[str, ...]
+    allowed_operation_pairs: tuple[tuple[Operation, Operation], ...]
+
+    def __post_init__(self) -> None:
+        for name in ("relation_id", "factor_1_id", "factor_2_id", "context_query_id"):
+            require_text(getattr(self, name), name)
+        if self.factor_1_id == self.factor_2_id:
+            raise ValueError("mechanism relation factors must be distinct")
+        if type(self.relation_type) is not PairRelation:
+            raise TypeError("relation_type must be a PairRelation")
+        if type(self.evidence_contract) is not RelationEvidenceContract:
+            raise TypeError("evidence_contract must be a RelationEvidenceContract")
+        for values, name in (
+            (self.eligible_languages, "eligible languages"),
+            (self.eligible_task_families, "eligible task families"),
+            (self.eligible_cwes, "eligible CWEs"),
+        ):
+            if (
+                not values
+                or tuple(sorted(values)) != values
+                or len(set(values)) != len(values)
+                or any(not isinstance(value, str) or not value.strip() for value in values)
+            ):
+                raise ValueError(f"{name} must be non-empty, unique, and sorted")
+        if not self.allowed_operation_pairs or len(set(self.allowed_operation_pairs)) != len(
+            self.allowed_operation_pairs
+        ):
+            raise ValueError("allowed operation pairs must be non-empty and unique")
+        if any(
+            len(pair) != 2 or any(type(operation) is not Operation for operation in pair)
+            for pair in self.allowed_operation_pairs
+        ):
+            raise TypeError("allowed operation pairs must contain Operation values")
+        if tuple(
+            sorted(self.allowed_operation_pairs, key=lambda pair: (pair[0].value, pair[1].value))
+        ) != self.allowed_operation_pairs:
+            raise ValueError("allowed operation pairs must use canonical order")
+
+    @property
+    def relation_spec_id(self) -> str:
+        return content_id("mechanism_relation_", self)
+
+    @property
+    def factors(self) -> tuple[str, str]:
+        return self.factor_1_id, self.factor_2_id
+
+
+@dataclass(frozen=True, slots=True)
+class PairRelationEvidence:
+    """Recomputable task-side evidence for one pair relation contract."""
+
+    pair_id: str
+    relation_spec_id: str
+    relation_id: str
+    task_id: str
+    task_unit_id: str
+    prompt_tsg_id: str
+    evidence_contract_id: str
+    state: QueryState
+    evidence_node_ids: tuple[str, ...]
+    evidence_edge_ids: tuple[str, ...]
+    outcomes_or_arms_used: bool = False
+
+    def __post_init__(self) -> None:
+        for name in (
+            "pair_id",
+            "relation_spec_id",
+            "relation_id",
+            "task_id",
+            "task_unit_id",
+            "prompt_tsg_id",
+            "evidence_contract_id",
+        ):
+            require_text(getattr(self, name), name)
+        if type(self.state) is not QueryState:
+            raise TypeError("relation evidence state must be QueryState")
+        if self.evidence_node_ids != tuple(sorted(set(self.evidence_node_ids))) or (
+            self.evidence_edge_ids != tuple(sorted(set(self.evidence_edge_ids)))
+        ):
+            raise ValueError("relation evidence IDs must be unique and sorted")
+        if self.state is QueryState.PRESENT and not self.evidence_node_ids:
+            raise ValueError("present relation evidence must identify Prompt-TSG nodes")
+        if self.outcomes_or_arms_used is not False:
+            raise ValueError("pair relation evidence cannot use outcomes or arms")
+
+    @property
+    def evidence_id(self) -> str:
+        return content_id("pair_relation_evidence_", self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +430,142 @@ def validate_pair_factors(
             raise MechanismRegistryError("pair factor is not a catalog safety feature")
         if factor not in atomic:
             raise MechanismRegistryError("pair factor is not registered as atomic")
+
+
+def validate_mechanism_relation_spec(
+    spec: MechanismRelationSpec,
+    catalog: Mapping[str, Any],
+    *,
+    atomic_factor_ids: tuple[str, ...],
+) -> None:
+    """Validate one relation motif against the same finite Prompt-TSG catalog."""
+
+    semantics = catalog.get("semantics")
+    queries = catalog.get("queries")
+    allowed_edges = catalog.get("allowed_edges")
+    if not isinstance(semantics, Mapping) or not isinstance(queries, list) or not isinstance(
+        allowed_edges, list
+    ):
+        raise MechanismRegistryError("Prompt TSG catalog cannot validate a relation spec")
+    atomic = set(atomic_factor_ids)
+    if any(
+        semantics.get(factor) != "safety_requirement" or factor not in atomic
+        for factor in spec.factors
+    ):
+        raise MechanismRegistryError("relation factors must be registered atomic safety features")
+    query_ids = {
+        query.get("query_id") for query in queries if isinstance(query, Mapping)
+    }
+    if spec.context_query_id not in query_ids:
+        raise MechanismRegistryError("relation context query is absent from the catalog")
+    if any(semantic not in semantics for semantic in spec.evidence_contract.required_semantics):
+        raise MechanismRegistryError("relation evidence uses a semantic outside the catalog")
+    allowed = {tuple(edge) for edge in allowed_edges if isinstance(edge, list) and len(edge) == 3}
+    for source, edge_type, target in spec.evidence_contract.required_relations:
+        typed = (semantics[source], edge_type, semantics[target])
+        if typed not in allowed:
+            raise MechanismRegistryError("relation evidence violates the Prompt TSG edge matrix")
+
+
+def pair_matches_relation_spec(pair: PairSpec, spec: MechanismRelationSpec) -> bool:
+    """Return whether a PairSpec belongs to the finite TSG relation universe."""
+
+    return (
+        pair.factors == spec.factors
+        and pair.pair_context_query_id == spec.context_query_id
+        and pair.relation_type is spec.relation_type
+        and pair.operations in spec.allowed_operation_pairs
+    )
+
+
+def evaluate_pair_relation_evidence(
+    task: Mapping[str, Any],
+    graph: PromptTSG,
+    pair: PairSpec,
+    spec: MechanismRelationSpec,
+) -> PairRelationEvidence:
+    """Evaluate a finite relation motif without consulting an arm or outcome."""
+
+    if not pair_matches_relation_spec(pair, spec):
+        raise MechanismRegistryError("pair does not match its mechanism relation spec")
+    if graph.task_id != task.get("task_id"):
+        raise MechanismRegistryError("relation graph does not bind the task")
+    task_id = task.get("task_id")
+    task_unit_id = task.get("task_unit_id", task_id)
+    if not isinstance(task_id, str) or not isinstance(task_unit_id, str):
+        raise MechanismRegistryError("relation task identity is invalid")
+    require_text(task_id, "task_id")
+    require_text(task_unit_id, "task_unit_id")
+    language = task.get("language")
+    task_family = task.get("task_family", task.get("archetype"))
+    cwe = task.get("cwe")
+    if (
+        language not in spec.eligible_languages
+        or task_family not in spec.eligible_task_families
+        or cwe not in spec.eligible_cwes
+    ):
+        state = QueryState.NOT_APPLICABLE
+        node_ids: tuple[str, ...] = ()
+        edge_ids: tuple[str, ...] = ()
+    else:
+        contract = spec.evidence_contract
+        by_semantic: dict[str, tuple[str, ...]] = {}
+        for semantic in contract.required_semantics:
+            by_semantic[semantic] = tuple(
+                sorted(node.node_id for node in graph.nodes if node.semantic_id == semantic)
+            )
+        node_ids = tuple(sorted({node_id for values in by_semantic.values() for node_id in values}))
+        if set(contract.required_semantics) & set(graph.unresolved_semantics):
+            state = QueryState.UNRESOLVED
+            edge_ids = ()
+        elif any(not by_semantic[semantic] for semantic in contract.required_semantics):
+            state = QueryState.ABSENT
+            edge_ids = ()
+        else:
+            matched_edges: set[str] = set()
+            relation_absent = False
+            for source, edge_type, target in contract.required_relations:
+                sources = set(by_semantic[source])
+                targets = set(by_semantic[target])
+                matches = {
+                    edge.edge_id
+                    for edge in graph.edges
+                    if edge.edge_type == edge_type
+                    and edge.source_id in sources
+                    and edge.target_id in targets
+                }
+                if not matches:
+                    relation_absent = True
+                    break
+                matched_edges.update(matches)
+            state = QueryState.ABSENT if relation_absent else QueryState.PRESENT
+            edge_ids = tuple(sorted(matched_edges)) if state is QueryState.PRESENT else ()
+    return PairRelationEvidence(
+        pair.pair_id,
+        spec.relation_spec_id,
+        spec.relation_id,
+        task_id,
+        task_unit_id,
+        graph.tsg_id,
+        spec.evidence_contract.contract_id,
+        state,
+        node_ids,
+        edge_ids,
+    )
+
+
+def validate_pair_relation_evidence(
+    evidence: PairRelationEvidence,
+    task: Mapping[str, Any],
+    graph: PromptTSG,
+    pair: PairSpec,
+    spec: MechanismRelationSpec,
+) -> None:
+    """Fail closed unless frozen relation evidence exactly recomputes."""
+
+    expected = evaluate_pair_relation_evidence(task, graph, pair, spec)
+    if evidence != expected:
+        raise MechanismRegistryError("pair relation evidence does not recompute")
 
 
 def load_pair_registry(path: Path, catalog: Mapping[str, Any]) -> PairRegistry:
@@ -620,20 +927,29 @@ def _validate_tsg_binding(task: Mapping[str, Any], row: Mapping[str, Any]) -> No
 
 
 __all__ = [
+    "ACTIVE_FACTORIAL_RELATIONS",
     "InteractionScale",
     "MechanismRegistryError",
+    "MechanismRelationSpec",
     "OracleSupportStatus",
     "PairBinding",
     "PairEligibility",
-    "PairRelation",
     "PairRegistry",
+    "PairRelation",
+    "PairRelationEvidence",
     "PairSpec",
+    "RelationEvidenceContract",
     "bind_pair",
     "compatible_mechanisms",
+    "evaluate_pair_relation_evidence",
     "load_mechanism_registry",
     "load_pair_registry",
     "mechanism_binding_id",
+    "pair_matches_relation_spec",
     "select_mechanism",
     "tsg_mechanism_binding",
+    "validate_active_factorial_relation",
+    "validate_mechanism_relation_spec",
     "validate_pair_factors",
+    "validate_pair_relation_evidence",
 ]

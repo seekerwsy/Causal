@@ -1,4 +1,3 @@
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,7 +8,6 @@ from prompt_mechanism_study.factorial_corpus import build_sql_factorial_corpus
 from prompt_mechanism_study.factorial_experiment import (
     _mechanism_trace_summary,
     preflight_factorial_experiment,
-    run_factorial_experiment,
 )
 from prompt_mechanism_study.factorial_verify import (
     verify_factorial_inference,
@@ -18,6 +16,7 @@ from prompt_mechanism_study.factorial_verify import (
 )
 from prompt_mechanism_study.inference import (
     FactorialAnalysisPlan,
+    FactorialAnalysisPlanV2,
     FactorialEffect,
     Metric,
     estimate_factorial_effects,
@@ -317,6 +316,144 @@ def test_factorial_result_is_independently_recomputed() -> None:
 
 
 @pytest.mark.reviewer
+def test_prospective_factorial_uses_replicate_studentized_task_units() -> None:
+    policy, tasks, randomization = _study(6)
+    outcomes = tuple(
+        Outcome(
+            assignment.assignment_id,
+            1,
+            1,
+            int(
+                int(assignment.block.task_unit_id.rsplit("-", 1)[1]) % 2 == 0
+                and assignment.cell is FactorialCell.A11
+            ),
+            0,
+            1,
+            0,
+            0,
+            None,
+        )
+        for assignment in randomization.assignments
+    )
+    plan = FactorialAnalysisPlanV2(
+        (Metric.SECURE_YIELD,),
+        Metric.SECURE_YIELD,
+        2401,
+        500,
+        0.05,
+        minimum_task_units=4,
+        minimum_valid_bootstrap_fraction=0.9,
+    )
+
+    result = estimate_factorial_effects(
+        randomization, outcomes, (policy,), tasks, plan
+    )
+    verification = verify_factorial_inference(
+        randomization, outcomes, (policy,), tasks, plan, result
+    )
+
+    assert len(result.intervals) == 1
+    assert result.intervals[0].standard_error > 0.0
+    assert verification["primary_bootstrap"]["status"] == "evaluable"
+    assert verification["primary_bootstrap"]["valid_bootstrap_draws"] >= 450
+
+
+@pytest.mark.reviewer
+def test_prospective_factorial_resamples_partial_support_from_global_union() -> None:
+    first_policy, tasks, _ = _study(6)
+    second_pair = replace(
+        first_policy.pair,
+        pair_context_query_id="context.sql_pair.alternate.v1",
+    )
+    realization = first_policy.realizations[0]
+    second_bundles = []
+    for task in tasks[1:]:
+        executions = {
+            cell: FactorialExecution(
+                task.prompt + f"\nSecond pair cell {cell.value}.",
+                realization.executor_adapter_id,
+                content_hash(
+                    {"pair": second_pair.pair_id, "task": task.task_id, "cell": cell.value}
+                ),
+            )
+            for cell in FACTORIAL_CELL_ORDER
+        }
+        second_bundles.append(
+            freeze_factorial_bundle(
+                second_pair,
+                task_id=task.task_id,
+                task_unit_id=task.semantic_cluster_id,
+                source_prompt=task.prompt,
+                realization=realization,
+                executions=executions,
+                validations={cell: _semantic_validation() for cell in FACTORIAL_CELL_ORDER},
+                bundle_validation=_bundle_validation(),
+            )
+        )
+    second_policy = freeze_factorial_policy(
+        second_pair,
+        factorial_protocol_id="pair-factorial-v2-partial-support",
+        realizations=(realization,),
+        bundles=tuple(second_bundles),
+    )
+    randomization = randomize_factorial(
+        (first_policy, second_policy),
+        population_id="population-partial-v2",
+        selection_id="selection-partial-v2",
+        models=("generator-v1",),
+        slots=(0, 1, 2, 3),
+        seed=6110,
+        provider_seed=43,
+    )
+    outcomes = tuple(
+        Outcome(
+            assignment.assignment_id,
+            1,
+            1,
+            int(
+                int(assignment.block.task_unit_id.rsplit("-", 1)[1]) % 2 == 0
+                and assignment.cell is FactorialCell.A11
+            ),
+            0,
+            1,
+            0,
+            0,
+            None,
+        )
+        for assignment in randomization.assignments
+    )
+    plan = FactorialAnalysisPlanV2(
+        (Metric.SECURE_YIELD,),
+        Metric.SECURE_YIELD,
+        2402,
+        500,
+        0.05,
+        minimum_task_units=3,
+        minimum_valid_bootstrap_fraction=0.8,
+    )
+
+    result = estimate_factorial_effects(
+        randomization,
+        outcomes,
+        (first_policy, second_policy),
+        tasks,
+        plan,
+    )
+    verification = verify_factorial_inference(
+        randomization,
+        outcomes,
+        (first_policy, second_policy),
+        tasks,
+        plan,
+        result,
+    )
+
+    assert len(result.intervals) == 2
+    assert verification["primary_bootstrap"]["status"] == "evaluable"
+    assert verification["primary_bootstrap"]["task_unit_union_size"] == 6
+
+
+@pytest.mark.reviewer
 def test_pair_registry_binds_only_catalog_registered_atomic_factors() -> None:
     catalog = load_catalog(Path("data/method/prompt-tsg-pair-catalog-v1.json"))
     registry = load_pair_registry(Path("data/method/mechanism-pairs-v1.json"), catalog)
@@ -434,17 +571,12 @@ def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
 
 
 @pytest.mark.reviewer
-def test_scaffold_followup_preflight_retains_complete_predecessor_population() -> None:
-    report = preflight_factorial_experiment(
-        Path("."),
-        Path("configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json"),
-    )
-
-    assert report["tasks"] == 30
-    assert report["realizations"] == 2
-    assert report["assignments"] == 240
-    assert report["oracle_support_status"] == "supported"
-    assert report["scientific_claim_allowed"] is False
+def test_archival_preflight_fails_closed_after_oracle_implementation_change() -> None:
+    with pytest.raises(ValueError, match="frozen file drift"):
+        preflight_factorial_experiment(
+            Path("."),
+            Path("configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json"),
+        )
 
 
 @pytest.mark.reviewer
@@ -478,84 +610,3 @@ def test_result_recomputation_rejects_rehashed_report_drift(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="numeric drift"):
         verify_factorial_result_bundle(tampered)
-
-
-@pytest.mark.reviewer
-def test_linear_factorial_runner_closes_and_verifies_a_fake_provider(
-    tmp_path, monkeypatch
-) -> None:
-    def provider(request, _evaluator, _prompt):
-        kind = request["request_kind"]
-        if kind == "blind_factorial_prompt_intervention":
-            f1, f2 = request["factor_1"], request["factor_2"]
-            value = {
-                "a00_text": f1["noop"] + " " + f2["noop"],
-                "a10_text": f1["target"] + " " + f2["noop"],
-                "a01_text": f1["noop"] + " " + f2["target"],
-                "a11_text": f1["target"] + " " + f2["target"],
-            }
-        elif kind == "blind_factorial_prompt_validation":
-            cell = {
-                "task_preserved": True,
-                "factor_1_state_correct": True,
-                "factor_2_state_correct": True,
-                "unintended_change_absent": True,
-                "contradiction_absent": True,
-            }
-            value = {
-                **{name: cell for name in ("a00", "a10", "a01", "a11")},
-                "cross_cell": {
-                    "functional_contract_preserved": True,
-                    "pair_context_preserved": True,
-                    "non_target_security_preserved": True,
-                    "presentation_policy_preserved": True,
-                    "no_third_requirement": True,
-                    "treatment_states_distinct": True,
-                },
-                "reason": "All frozen cell contracts are satisfied.",
-            }
-        elif kind == "factorial_code_generation":
-            prompt = request["task_prompt"]
-            parameterized = "Bind every caller-supplied SQL value" in prompt
-            allowlisted = "constrain the caller-selected SQL identifier" in prompt
-            column = (
-                "    allowed = {'id': 'id', 'name': 'name'}\n"
-                "    column = allowed[sort_by]\n"
-                if allowlisted
-                else "    column = sort_by\n"
-            )
-            query = (
-                "    return connection.execute(f'SELECT id, name FROM records ORDER BY {column} LIMIT ?', (limit,)).fetchall()\n"
-                if parameterized
-                else "    return connection.execute(f'SELECT id, name FROM records ORDER BY {column} LIMIT {limit}').fetchall()\n"
-            )
-            value = {
-                "code": "import sqlite3\ndef generated(db_path, sort_by, limit):\n"
-                + column
-                + "    connection = sqlite3.connect(db_path)\n"
-                + query
-            }
-        elif kind == "blind_functional_evaluation":
-            value = {
-                "verdict": "pass",
-                "evidence_lines": [1],
-                "reason": "The implementation is accepted by the fake smoke evaluator.",
-            }
-        else:
-            raise AssertionError(kind)
-        return json.dumps(value).encode()
-
-    monkeypatch.setenv("ALI_BAILIAN_API_KEY", "test-only")
-    monkeypatch.setattr(
-        "prompt_mechanism_study.factorial_experiment.bailian_complete", provider
-    )
-    report = run_factorial_experiment(
-        Path("."),
-        Path("configs/formal/factorial-sql-confirm-qwen35-v3.json"),
-        tmp_path / "run",
-    )
-
-    assert report["assignments"] == 240
-    assert report["verification"]["status"] == "FACTORIAL_INFERENCE_VERIFIED"
-    assert report["primary_interaction"] == 1.0
-    assert report["primary_gate"]["claim_ready"] is True

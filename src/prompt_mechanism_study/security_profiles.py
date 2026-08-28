@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -148,6 +149,26 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         "analyzer_runs": 1,
         "local_profile": True,
     }
+
+
+def security_profile_producer_sha256() -> str:
+    """Identity of the exact local Oracle implementation shipped in the artifact."""
+
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def security_profile_policy_sha256(profile_id: str) -> str:
+    """Recompute the frozen profile policy from profile and producer identity."""
+
+    if profile_id not in LOCAL_PROFILE_IDS:
+        raise ValueError(f"unsupported local security profile: {profile_id}")
+    return content_hash(
+        {
+            "profile_id": profile_id,
+            "producer_sha256": security_profile_producer_sha256(),
+            "policy_semantics": "conservative_ast_secure_insecure_unknown_v1",
+        }
+    )
 
 
 def _aliases(tree: ast.AST) -> dict[str, str]:
@@ -894,4 +915,9 @@ def _credential_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, 
     return facts
 
 
-__all__ = ["LOCAL_PROFILE_IDS", "evaluate_security_profile"]
+__all__ = [
+    "LOCAL_PROFILE_IDS",
+    "evaluate_security_profile",
+    "security_profile_policy_sha256",
+    "security_profile_producer_sha256",
+]

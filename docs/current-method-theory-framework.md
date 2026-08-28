@@ -282,13 +282,14 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | --- | --- | --- |
 | Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested + pilot executed | 38 个自然 prompt 完成盲态抽取；这不是 selector 或 effect 结果 |
 | 自然 discovery population 与 positivity audit | implemented + tested + executed + reported | 两个 scope 均未过门；FCI 正确未运行 |
-| family-local FCI 与五类 selector 公平比较 | specified，未形成当前可执行主证据 | 当前数据支持不足；活动最小代码只接受外部 score，并未闭合完整 selector benchmark |
-| 原子假设与多 realization 政策 | 部分 implemented + tested | 最小 kernel 已有 candidate、realization、bundle 和 policy 绑定；完整 successor freeze 字段尚未全部闭合 |
-| successor ADD/REMOVE 四臂 | specified，未在最小 kernel 完整实现 | 最小 kernel 目前只有 `TARGET/NOOP`；另一个 four-arm 路径属于已冻结 legacy/pilot 实现，不能冒充 successor 协议 |
-| 二因素配对析因扩展 | specified + implemented + tested + formally executed + reported | from-scratch v3 是正式零结果；独立冻结的 scaffold-repair follow-up 完成 240 assignments，interaction=+70.0pp，校正区间排除 0，功能非劣 Gate 通过 |
+| family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.0 五类 selector、完整 candidate skeleton、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；schema 1.0 仅保留显式 archival 入口；当前自然数据仍未通过 positivity/source-overlap gate，因而没有 selector 优越性结果 |
+| RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
+| 原子假设与多 realization 政策 | implemented + tested | candidate skeleton、ADD/REMOVE operation、冻结 realization 分布、四臂 bundle、source eligibility 和 bridge provenance 已进入同一 successor freeze |
+| successor ADD/REMOVE 四臂 | implemented + tested，未 formally executed | 活动 runner 已闭合 `Target/No-op/Placebo/Generic`、多模型 complete blocks、五个有序 endpoint、独立 security/functionality measurement、valid-code 条件 unknown Gate、total ledger、task-unit ITT、unknown bounds、realization/LORO robustness；若请求功能非劣效结论则必须预先封存研究专属 power qualification；verifier 从冻结 provider 响应离线重建代码、Oracle/Judge、Measurement、ledger、Gate 和 inference；目前只有离线合成 smoke，不形成新效果结论 |
+| 二因素配对析因扩展 | specified + implemented + tested；单 pair/single-model formally executed + reported | schema 1.1 已支持带真实 Prompt-TSG 关系证据的 outcome-blind pair selector、多 pair、多模型、两种顺序、简单效应、交互分类和原始测量重放；推断按全局 task-unit 联合重采样，保留 pair 间部分重叠支持，并采用 replicate-specific studentized max-|T| 与有效 replicate 下限；security interaction 与需单独功效设计的 functionality non-inferiority gate 分开。真实正式证据仍是 schema 1.0 的 from-scratch v3 零结果与 scaffold-repair follow-up 有界正向结果，不能把合成的 schema 1.1 测试称为新实验 |
 | 独立 measurement 与 total ledger | implemented + tested | 活动代码保留 code、Oracle、functionality 和基础设施失败边界 |
 | task-unit ITT 与未知 bounds | implemented + tested | Target/Noop、task/realization 权重和同步 bootstrap 已闭合 |
-| 完整 max-|T|、selector nested bootstrap、全局 robustness family | factorial family implemented + executed；selector family 仍未执行 | 正式析因结果使用冻结 max-|T| family；观测 selector 因支持门失败未运行 |
+| 完整 max-|T|、selector nested bootstrap、全局 robustness family | implemented + tested；仅既有 factorial family executed | selector-pair simultaneous inference、successor realization/LORO family 和 generalized factorial families 都可独立重算；自然 selector 与新 successor study 尚未正式执行 |
 | 正式 confirmatory 与 prospective follow-up | frozen + executed + independently verified + reported | v3 interaction=0；follow-up 保留同 30 个 task units、使用新 prompt/task identities，interaction=+70.0pp，不能合并或互相替代 |
 
 ## 13. 当前 Gate 状态
@@ -298,13 +299,15 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
 | 自然 Prompt TSG 抽取 canary | **有界通过** | 38/38 记录有效，但还有 unresolved 语义和 Python 版本风险 |
 | discovery positivity/source overlap | **未通过** | CWE-328 无 positive；CWE-611 状态与来源完全分离 |
-| FCI selector | **未运行** | 被前一 gate 正确阻止 |
-| successor 单机制四臂完全冻结 | **未通过** | 仍不能把 legacy 四臂冒充 successor confirmation |
+| FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector 和 artifact verifier 已测试，但被 positivity gate 正确阻止，不能形成 selector 效用结论 |
+| RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |
+| successor 单机制四臂实现 | **工程 Gate 通过；正式实验未运行** | prospective freeze、四臂执行、总账、稳健性推断和独立 verifier 已用离线代表样本闭合；legacy 四臂仍不能冒充 successor confirmation |
+| Prompt-TSG pair selector | **工程 Gate 通过；自然数据未运行** | 关系证据、四 cell 支持、lineage 分离、固定 Top-L、冻结 artifact 和 verifier 已测试；尚无前瞻冻结的自然 pair selection 结果 |
 | pairwise factorial canary | **已执行并独立验证；效应解释未通过构造效度审计** | 5 task units、2 个顺序、4 cells，共 40 assignments；旧任务合同和窄 Oracle 混入机制符合性，不能作为安全效应证据 |
-| successor confirmatory generation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
+| factorial from-scratch confirmation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
 | scaffold-repair prospective follow-up | **已完成并独立验证；有界正向结果** | 30 个相同 task units、240 assignments；A00=0%、A11=98.3%、interaction=+70.0pp，simultaneous interval=[+56.7,+83.3]pp；功能差=-1.7pp，通过非劣 Gate |
 
-当前准确位置是：**理论内核和二因素活动路径已闭合；观测 selector 分支仍被数据支持门阻塞；from-scratch v3 的可复现零结果与 scaffold-repair follow-up 的有界正向结果共同表明，prompt policy 的可观测响应强烈依赖生成上下文。两轮上下文未随机化，跨轮差异只能作为探索性异质性。**
+当前准确位置是：**规范中的单机制 successor、五类 selector、pair selector 和广义二因素执行路径均已实现并通过离线/合成 reviewer tests；自然 selector 仍被数据支持门阻塞，新的 successor 与广义 multi-pair/multi-model 研究尚未前瞻冻结和正式执行。现有论文效果证据仍只有已冻结的 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果。两轮生成上下文未随机化，跨轮差异只能作为探索性异质性。**
 
 ## 14. v3 后续研究边界
 
@@ -323,8 +326,9 @@ dataset records
   -> discovery support gate
        -> pass: frozen selector ranking
        -> fail: no selector claim; outcome-blind catalog hypothesis freeze
-  -> hypothesis and multi-realization policy freeze
-  -> arm materialization and blocked randomization
+  -> selector-invariant bridge and hypothesis/multi-realization policy freeze
+  -> atomic study: ADD/REMOVE four-arm materialization and complete blocks
+       or pair study: outcome-blind pair freeze and 2 x 2 complete blocks
   -> code generation
   -> independent security and functional measurement
   -> total outcome ledger

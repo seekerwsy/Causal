@@ -42,15 +42,18 @@ from prompt_mechanism_study.workflow import StudyFreeze, analyze, freeze_study
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="prompt-mechanism-study")
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    freeze = commands.add_parser("freeze", help="freeze the pre-outcome study protocol")
+    freeze = commands.add_parser(
+        "archival-kernel-freeze",
+        help="reproduce a frozen minimal-kernel study (archival only)",
+    )
     freeze.add_argument("protocol", type=Path)
     freeze.add_argument("output", type=Path)
 
     analyze_command = commands.add_parser(
-        "analyze",
-        help="analyze external measurements against a frozen study",
+        "archival-kernel-analyze",
+        help="reproduce minimal-kernel analysis from external measurements (archival only)",
     )
     analyze_command.add_argument("freeze_root", type=Path)
     analyze_command.add_argument("measurements", type=Path)
@@ -71,8 +74,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     judge.add_argument("--remaining-root", type=Path)
 
     formal = commands.add_parser(
-        "formal-interventions",
-        help="freeze the formal ADD/REMOVE intervention policies before generation",
+        "archival-two-arm-interventions",
+        help="reproduce the frozen two-arm ADD/REMOVE intervention path (archival only)",
     )
     formal.add_argument("phase", choices=("preflight", "pilot", "remaining", "finalize"))
     formal.add_argument("output", type=Path)
@@ -82,8 +85,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     formal.add_argument("--remaining-root", type=Path)
 
     measurements = commands.add_parser(
-        "formal-measurements",
-        help="run frozen generator and Oracle adapters for formal assignments",
+        "archival-two-arm-measurements",
+        help="reproduce frozen two-arm generator and Oracle measurements (archival only)",
     )
     measurements.add_argument("phase", choices=("pilot", "remaining"))
     measurements.add_argument("output", type=Path)
@@ -96,18 +99,85 @@ def main(argv: Sequence[str] | None = None) -> int:
     measurements.add_argument("--bandit", type=Path, required=True)
     measurements.add_argument("--pilot-root", type=Path)
 
+    successor = commands.add_parser(
+        "successor-experiment",
+        help="preflight, run, or independently verify the prospective ADD/REMOVE study",
+    )
+    successor.add_argument("phase", choices=("preflight", "freeze", "run", "verify"))
+    successor.add_argument("output", type=Path)
+    successor.add_argument("--repository-root", type=Path, default=Path.cwd())
+    successor.add_argument("--config", type=Path)
+    successor.add_argument(
+        "--freeze",
+        type=Path,
+        help="verified pre-outcome successor materialization required by run",
+    )
+
     factorial = commands.add_parser(
         "factorial-experiment",
-        help="preflight, run, or verify the frozen pairwise factorial study",
+        help="freeze, run, or verify schema 1.1; archival-* reproduces schema 1.0",
     )
-    factorial.add_argument("phase", choices=("preflight", "run", "verify"))
+    factorial.add_argument(
+        "phase",
+        choices=(
+            "preflight",
+            "freeze",
+            "run",
+            "verify",
+            "archival-preflight",
+            "archival-run",
+        ),
+    )
     factorial.add_argument("output", type=Path)
     factorial.add_argument("--repository-root", type=Path, default=Path.cwd())
-    factorial.add_argument(
+    factorial.add_argument("--config", type=Path)
+    factorial.add_argument("--freeze", type=Path)
+
+    selector_study = commands.add_parser(
+        "selector-study",
+        help=(
+            "freeze, bridge, evaluate, or verify the active schema-2.0 five-selector "
+            "study; archival-* phases reproduce schema 1.0 only"
+        ),
+    )
+    selector_study.add_argument(
+        "phase",
+        choices=(
+            "select",
+            "bridge",
+            "run",
+            "verify",
+            "verify-selection",
+            "verify-bridge",
+            "compare-representations",
+            "verify-representations",
+            "archival-select",
+            "archival-bridge",
+            "archival-verify-selection",
+            "archival-verify-bridge",
+        ),
+        help=(
+            "active selector stage; compare-representations requires --config and writes "
+            "an end-to-end RQ2 bundle, while verify-representations replays that bundle"
+        ),
+    )
+    selector_study.add_argument("output", type=Path, help="bundle to write or verify")
+    selector_study.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/formal/factorial-sql-confirm-qwen35-v3.json"),
+        help="phase-specific frozen input config; required by select/run/comparison phases",
     )
+    selector_study.add_argument("--selection", type=Path)
+    selector_study.add_argument("--bridge", type=Path)
+    selector_study.add_argument("--successor-result", type=Path, action="append", default=[])
+
+    interaction_selector = commands.add_parser(
+        "interaction-selector",
+        help="freeze or independently verify the Prompt-TSG pair selector",
+    )
+    interaction_selector.add_argument("phase", choices=("freeze", "verify"))
+    interaction_selector.add_argument("output", type=Path)
+    interaction_selector.add_argument("--config", type=Path)
 
     discovery_population = commands.add_parser(
         "discovery-population",
@@ -271,9 +341,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    if args.command == "freeze":
+    if args.command == "archival-kernel-freeze":
         _freeze(args.protocol, args.output)
-    elif args.command == "analyze":
+    elif args.command == "archival-kernel-analyze":
         _analyze(args.freeze_root, args.measurements, args.output)
     elif args.command == "verify":
         verify_bundle(args.root)
@@ -281,9 +351,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "summarize":
         verify_bundle(args.root)
         print(json.dumps(read_json(args.root / "analysis.json"), indent=2, sort_keys=True))
-    elif args.command == "formal-interventions":
+    elif args.command == "archival-two-arm-interventions":
         return _formal_interventions(args)
-    elif args.command == "formal-measurements":
+    elif args.command == "archival-two-arm-measurements":
         from prompt_mechanism_study.formal_measurement import run_measurement_phase
 
         report = run_measurement_phase(
@@ -460,19 +530,174 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, sort_keys=True))
             return 0
         from prompt_mechanism_study.factorial_experiment import (
+            freeze_factorial_experiment,
             preflight_factorial_experiment,
             run_factorial_experiment,
         )
 
-        if args.phase == "preflight":
+        if args.config is None:
+            parser.error("factorial preflight, freeze, and run require --config")
+        factorial_config_path = (
+            args.config
+            if args.config.is_absolute()
+            else args.repository_root / args.config
+        )
+        factorial_schema = read_json(factorial_config_path).get("schema_version")
+        archival = args.phase.startswith("archival-")
+        if archival != (factorial_schema == "1.0"):
+            parser.error(
+                "schema 1.0 requires archival-*; active factorial phases require schema 1.1"
+            )
+        if args.phase in {"preflight", "archival-preflight"}:
             report = preflight_factorial_experiment(args.repository_root, args.config)
             write_bundle(args.output, {"report.json": report})
-        else:
-            report = run_factorial_experiment(
+        elif args.phase == "freeze":
+            report = freeze_factorial_experiment(
                 args.repository_root,
                 args.config,
                 args.output,
             )
+        else:
+            if args.phase == "run" and args.freeze is None:
+                parser.error("active factorial run requires --freeze")
+            report = run_factorial_experiment(
+                args.repository_root,
+                args.config,
+                args.output,
+                freeze_root=args.freeze,
+            )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0
+    elif args.command == "successor-experiment":
+        from prompt_mechanism_study.successor_experiment import (
+            freeze_successor_experiment,
+            preflight_successor_experiment,
+            run_successor_experiment,
+            verify_successor_materialization_bundle,
+            verify_successor_result_bundle,
+        )
+
+        if args.phase == "verify":
+            report = verify_successor_result_bundle(args.output)
+        else:
+            if args.config is None:
+                parser.error("successor preflight, freeze, and run require --config")
+            if args.phase == "preflight":
+                report = preflight_successor_experiment(
+                    args.repository_root,
+                    args.config,
+                )
+                write_bundle(args.output, {"report.json": report})
+            elif args.phase == "freeze":
+                report = freeze_successor_experiment(
+                    args.repository_root,
+                    args.config,
+                    args.output,
+                )
+            else:
+                if args.freeze is None:
+                    parser.error("successor run requires --freeze")
+                verify_successor_materialization_bundle(args.freeze)
+                report = run_successor_experiment(
+                    args.repository_root,
+                    args.config,
+                    args.output,
+                    freeze_root=args.freeze,
+                )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0
+    elif args.command == "selector-study":
+        from prompt_mechanism_study.selector_experiment import (
+            freeze_archival_bridge_from_config,
+            freeze_archival_selection_from_config,
+            freeze_bridge_from_config,
+            freeze_selection_from_config,
+            run_representation_comparison_from_config,
+            run_selector_experiment_from_config,
+            verify_archival_bridge_freeze_bundle,
+            verify_archival_selection_freeze_bundle,
+            verify_bridge_freeze_bundle,
+            verify_representation_comparison_bundle,
+            verify_selection_freeze_bundle,
+            verify_selector_experiment_bundle,
+        )
+
+        if args.phase == "verify":
+            report = verify_selector_experiment_bundle(args.output)
+        elif args.phase == "verify-selection":
+            report = verify_selection_freeze_bundle(args.output)
+        elif args.phase == "verify-bridge":
+            if args.selection is None:
+                parser.error("selector verify-bridge requires --selection")
+            report = verify_bridge_freeze_bundle(args.output, args.selection)
+        elif args.phase == "verify-representations":
+            report = verify_representation_comparison_bundle(args.output)
+        elif args.phase == "archival-verify-selection":
+            report = verify_archival_selection_freeze_bundle(args.output)
+        elif args.phase == "archival-verify-bridge":
+            if args.selection is None:
+                parser.error("selector archival-verify-bridge requires --selection")
+            report = verify_archival_bridge_freeze_bundle(args.output, args.selection)
+        elif args.phase == "select":
+            if args.config is None:
+                parser.error("selector select requires --config")
+            report = freeze_selection_from_config(args.config, args.output)
+        elif args.phase == "archival-select":
+            if args.config is None:
+                parser.error("selector archival-select requires --config")
+            report = freeze_archival_selection_from_config(args.config, args.output)
+        elif args.phase == "bridge":
+            if args.config is None or args.selection is None:
+                parser.error("selector bridge requires --config and --selection")
+            report = freeze_bridge_from_config(
+                args.selection,
+                args.config,
+                args.output,
+            )
+        elif args.phase == "compare-representations":
+            if args.config is None:
+                parser.error("selector compare-representations requires --config")
+            report = run_representation_comparison_from_config(args.config, args.output)
+        elif args.phase == "archival-bridge":
+            if args.config is None or args.selection is None:
+                parser.error("selector archival-bridge requires --config and --selection")
+            report = freeze_archival_bridge_from_config(
+                args.selection,
+                args.config,
+                args.output,
+            )
+        else:
+            if (
+                args.config is None
+                or args.selection is None
+                or args.bridge is None
+                or not args.successor_result
+            ):
+                parser.error(
+                    "selector run requires --config, --selection, --bridge, "
+                    "and at least one --successor-result"
+                )
+            report = run_selector_experiment_from_config(
+                args.selection,
+                args.bridge,
+                tuple(args.successor_result),
+                args.config,
+                args.output,
+            )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0
+    elif args.command == "interaction-selector":
+        from prompt_mechanism_study.interaction_selector_experiment import (
+            freeze_interaction_selection_from_config,
+            verify_interaction_selection_bundle,
+        )
+
+        if args.phase == "verify":
+            report = verify_interaction_selection_bundle(args.output)
+        else:
+            if args.config is None:
+                parser.error("interaction-selector freeze requires --config")
+            report = freeze_interaction_selection_from_config(args.config, args.output)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
     else:

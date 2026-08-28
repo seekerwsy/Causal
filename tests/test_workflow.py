@@ -32,7 +32,7 @@ def test_cli_freeze_then_analyze_then_verify(tmp_path: Path) -> None:
     protocol_path = tmp_path / "protocol.json"
     protocol_path.write_text(json.dumps(protocol_spec()), encoding="utf-8")
     freeze_root = tmp_path / "freeze"
-    assert main(["freeze", str(protocol_path), str(freeze_root)]) == 0
+    assert main(["archival-kernel-freeze", str(protocol_path), str(freeze_root)]) == 0
     verify_bundle(freeze_root)
 
     study = example_study()
@@ -45,7 +45,7 @@ def test_cli_freeze_then_analyze_then_verify(tmp_path: Path) -> None:
     assert (
         main(
             [
-                "analyze",
+                "archival-kernel-analyze",
                 str(freeze_root),
                 str(measurement_path),
                 str(analysis_root),
@@ -63,11 +63,18 @@ def test_cli_rejects_cross_study_measurements(tmp_path: Path) -> None:
     protocol_path = tmp_path / "protocol.json"
     protocol_path.write_text(json.dumps(protocol_spec()), encoding="utf-8")
     freeze_root = tmp_path / "freeze"
-    main(["freeze", str(protocol_path), str(freeze_root)])
+    main(["archival-kernel-freeze", str(protocol_path), str(freeze_root)])
     study = example_study()
     document = measurement_document(study, complete_measurements(study))
     document["study_id"] = "study_" + "0" * 64
     measurement_path = tmp_path / "measurements.json"
     measurement_path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="frozen study"):
-        main(["analyze", str(freeze_root), str(measurement_path), str(tmp_path / "analysis")])
+        main(
+            [
+                "archival-kernel-analyze",
+                str(freeze_root),
+                str(measurement_path),
+                str(tmp_path / "analysis"),
+            ]
+        )

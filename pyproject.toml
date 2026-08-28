@@ -12,10 +12,10 @@ dependencies = []
 
 [project.scripts]
 prompt-mechanism-study = "prompt_mechanism_study.cli:main"
-prompt-mechanism-four-arm = "prompt_mechanism_study.four_arm_cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+selectors = ["causal-learn==0.1.4.7", "numpy>=2,<3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
