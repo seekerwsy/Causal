@@ -286,8 +286,8 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；historical pilot executed | 38 个自然 prompt 的历史盲态抽取仅是校准；活动 schema 2.1 freeze 尚未执行 |
-| 自然 discovery population 与 positivity audit | implemented + tested；historical pilot failed | 两个历史 scope 均未过门；其结果不在活动 reviewer tree，也不能替代新的正式 audit |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；fresh qualification executed and failed | 两层盲态抽取器在完全不相交的最终 holdout 上为 18/21 exact、present recall 8/11；均低于预冻结的 90% / 80% 门槛，因此不能进入 formal extraction |
+| 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
 | 原子假设与多 realization 政策 | implemented + tested | candidate skeleton、ADD/REMOVE operation、冻结 realization 分布、四臂 bundle、source eligibility 和 bridge provenance 已进入同一 successor freeze |
@@ -303,8 +303,8 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取 canary | **有历史校准；活动正式 freeze 缺失** | 不能用已移出 reviewer tree 的 38-record pilot 代替 schema 2.1 证据 |
-| discovery positivity/source overlap | **活动正式审计未完成** | 历史 CWE-328/CWE-611 pilot 失败；新鲜正式 discovery population 尚未冻结 |
+| 自然 Prompt TSG 抽取资格 | **最终 holdout 未通过** | 21 个完全不相交 task units 中 18 个 exact；accuracy=85.7%、present recall=72.7%、false-positive present=0、wrong realization=0；冻结门槛不允许 formal extraction |
+| discovery positivity/source overlap | **按协议未执行** | 新鲜语义清洗与合同已完成，但表示 Gate 失败后不得冻结正式 discovery split 或读取自然 outcome |
 | FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |
 | successor 单机制四臂实现 | **工程 Gate 通过；正式实验未运行** | prospective freeze、四臂执行、总账、稳健性推断和独立 verifier 已用离线代表样本闭合；legacy 四臂仍不能冒充 successor confirmation |
@@ -313,7 +313,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | factorial from-scratch confirmation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
 | scaffold-repair prospective follow-up | **已完成并独立验证；有界正向结果** | 30 个相同 task units、240 assignments；A00=0%、A11=98.3%、interaction=+70.0pp，simultaneous interval=[+56.7,+83.3]pp；功能差=-1.7pp，通过非劣 Gate |
 
-当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过离线/合成 reviewer tests。Gate C 仍缺新鲜正式 discovery support audit、正式 hypotheses/policies、power 与 multiplicity freeze；因此 Gate D/E 尚未通过。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
+当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过离线/合成 reviewer tests。Gate C 已在前瞻冻结的 Prompt TSG 表示资格门失败，而不是“尚待继续跑”；因此 formal discovery、hypothesis/policy freeze、Gate D 与 Gate E 均未启动。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
 
 ## 14. v3 后续研究边界
 
@@ -328,7 +328,8 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 ```text
 dataset records
   -> task units / representative prompt
-  -> Prompt TSG / context and feature queries
+  -> qualified Prompt TSG / context and feature queries
+       -> qualification fail: stop before formal extraction
   -> discovery support gate
        -> pass: frozen selector ranking
        -> fail: no selector claim; outcome-blind catalog hypothesis freeze

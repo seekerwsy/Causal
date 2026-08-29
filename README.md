@@ -29,7 +29,8 @@ source records
    units, chooses one representative prompt per unit, and extracts bounded
    Prompt TSG facts.
 2. **Prioritization** audits feature support and source overlap before running
-   family-local selectors. Outcomes are unavailable at this stage.
+   family-local selectors. Only frozen natural-discovery outcomes may enter;
+   confirmation outcomes and arm identities are unavailable.
 3. **Hypothesis freeze** binds the task population, Prompt TSG evidence,
    mechanism or pair, exact prompt variants, adapters, seeds, endpoints,
    estimands, and multiplicity rules.
@@ -90,8 +91,11 @@ coverage. Demo, smoke, calibration, and development-canary outputs are never
 confirmatory evidence.
 
 The active successor and schema-1.1 factorial implementations are specified,
-implemented, and reviewer-tested, but a new claim-bearing provider run has not
-yet been reported under them. The tracked schema-1.0 factorial bundles remain
+implemented, and reviewer-tested. Fresh semantic curation and functional
+contracts are complete, but the final Prompt TSG holdout failed its frozen
+semantic qualification, so formal discovery and a new claim-bearing provider
+run were not started. The exact stopping boundary is recorded in the
+[Gate E readiness audit](docs/gate-e-readiness.md). The tracked schema-1.0 factorial bundles remain
 historical formal evidence and are independently replayable; they are not
 migrated or reinterpreted as active-protocol results:
 

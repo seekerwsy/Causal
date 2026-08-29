@@ -6,146 +6,189 @@
 method contract. The sole normative protocol remains
 [`2026-08-20-context-conditioned-intervention-policy-framework.md`](superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md).
 
-## Decisions applied to the implementation plan
+## Implementation-plan decisions
 
-The feedback plan was adopted with four explicit scope corrections:
+The final PHASE plan is implemented under four explicit scope corrections:
 
-1. The paper may present three macro stages, while the artifact retains the
+1. The paper may summarize three macro phases, while the artifact keeps the
    seven auditable stages required by `AGENTS.md`.
-2. `Target - operation-matched No-op` remains the primary atomic estimand.
-   An unedited Original prompt is not silently added to an arm family after
-   outcomes have been inspected. It may be added only by a later prospective
-   arm-family freeze.
-3. Pair selection is operation-aware and aligned to the risk-difference
-   estimand. The ridge-logit interaction coefficient is a diagnostic, not the
-   ranking target or randomized effect estimate.
-4. A pair result is first a Prompt-policy response-surface result. A mechanism
-   interaction claim additionally requires a pre-randomization
-   `mechanism_eligible` scope; statistical significance cannot upgrade a
-   `policy_only` pair.
+2. `Target - operation-matched No-op` remains the active primary atomic
+   estimand. An Original arm was proposed after prior outcomes existed and is
+   not silently added to the current arm family.
+3. Atomic and pair selection are operation-aware and risk-difference aligned.
+   A ridge-logit coefficient is diagnostic, not the randomized estimand.
+4. A factorial result is first a Prompt-policy response-surface result.
+   Mechanism-interaction language additionally requires a prospectively frozen
+   `mechanism_eligible` scope.
 
-These are protocol choices, not interpretations of a new outcome.
+## Exact gate status
 
-## Gate status
-
-| Gate | Status | Evidence and exact boundary |
+| Gate | Status | Evidence boundary |
 | --- | --- | --- |
-| A — Protocol-complete | **PASS** | One normative spec maps hypothesis, discovery state, selector, eligible population, policy, estimand, evidence status, and permitted claim. Pairwise-only scope, task-bound background, per-pair fitting, operation coding, factorial compatibility, Original-arm boundary, and policy/mechanism claim scope are explicit. |
-| B — Method-complete | **PASS under the revised protocol** | Atomic selector schema 2.1 embeds catalog/prompt/Prompt TSG evidence and recomputes states; `association.v3` is operation- and expected-direction-aware; pair selector schema 1.2 uses operation-aware cross-fitted RD ranking and admits only factorial-compatible relations; factorial schema 1.1 freezes claim scope and emits neutral response-surface labels. Focused synthetic and tamper tests pass. This does not claim that the feedback plan's deferred Original arm was implemented. |
-| C — Experiment-ready | **PARTIAL** | The active paths, Security Oracle qualification, Functional Judge qualification, and offline end-to-end smoke exist. The seven-source raw input was deterministically rebuilt, but a fresh semantic-curation/contract bundle, formal discovery support audit, outcome-blind hypothesis/policy freeze, and study-specific power/multiplicity freeze do not yet exist under the active protocol. |
-| D — Claim-bearing | **NOT REACHED** | No prospective provider run has been executed under selector schema 2.1 or factorial schema 1.1. Historical factorial schema-1.0 bundles remain independently verifiable but cannot be relabelled as active-protocol evidence. |
-| E — Paper-ready | **NOT REACHED** | Method prose and implementation are aligned, but RQ1–RQ3 do not yet have a common prospective evidence package. Any RQ4 expert study also remains a separate, unexecuted human-evaluation work package. |
+| A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
+| B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The prospectively frozen disjoint Prompt TSG semantic qualification failed: 18/21 exact, 85.7% accuracy, 72.7% present recall, zero false-positive present states, and zero wrong realization bindings. The frozen requirements were at least 90% accuracy and 80% recall. |
+| D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
+| E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
-Gate C is the current stopping gate. Advancing the status by running another
-development canary on previously inspected tasks would not be scientifically
-valid.
+Gate C is the enforced stopping point. Lowering the threshold, relabelling the
+three missed cases, or restricting the CWE scope after reading the holdout
+would be an outcome-dependent protocol change.
+
+## Gate C evidence closure
+
+### Data and contracts
+
+- Seven sources were normalized into 2,283 records.
+- Blind semantic adjudication closed all 4,744 candidate pairs and produced
+  2,165 task units; arms, generated code, Oracle labels, and experiment
+  outcomes were unavailable to curation.
+- Functional contracts were extracted and validated for all 2,165 task units.
+  The complete archive SHA-256 is
+  `6efad8095165ab2133691408d447f0527cf7bd635e1e68ddb1509956f35aed01`.
+- The active local Security Oracle boundary replayed 37/37 frozen gold cases
+  across 12 profiles, with `secure`, `insecure`, and `unknown` represented for
+  every profile. This is an idiom-bound calibration, not a global CWE accuracy
+  claim.
+
+### Prompt TSG qualification
+
+The active candidate is a two-stage blind extractor:
+
+```text
+LLM evidence-fact proposal
+  -> deterministic evidence/type projection
+  -> blind LLM accept/reject review of proposed facts only
+  -> normalized Prompt TSG and four-valued queries
+```
+
+The semantic reviewer cannot add a fact, change an evidence span, or invent a
+global semantic ID. Every request, response, projection, and digest is closed
+in the extraction bundle.
+
+Development failures were retained rather than hidden:
+
+- a first disjoint holdout exposed invented evidence and security-role
+  overreach;
+- a stronger proposer still overgeneralized owner-only permission semantics;
+- the two-stage reviewer removed false-positive bindings but initially lost
+  too many true contexts;
+- catalog guidance then became complete for every query-bound semantic.
+
+The first intended final holdout (`v4`) was withdrawn before qualification and
+before any extractor output was read. Gold review had incorrectly treated two
+end-user credentials as application credentials and an ordinary process-lock
+identifier as security-sensitive hashing. Its 24 task units are permanently
+marked exposed in
+[`prompt-tsg-two-stage-holdout-v4-withdrawal.json`](../data/method/prompt-tsg-two-stage-holdout-v4-withdrawal.json).
+
+The replacement `v5` selection was frozen only after excluding v4 and every
+earlier development, qualification, and outcome-exposed unit. Its 21 tasks had
+zero exclusion overlap. Gold labels and thresholds were committed before the
+extractor ran. The downloaded extraction archive had matching local/remote
+SHA-256
+`f6253aa63bfb16b755ac22bfa5c953e2231aa7586d9c11f7284731f115db54ed`.
+
+The immutable qualification result is
+[`prompt-tsg-two-stage-qualification-v5`](../data/method/results/prompt-tsg-two-stage-qualification-v5):
+
+| Metric | Frozen requirement | Result |
+| --- | ---: | ---: |
+| Exact context/realization accuracy | at least 0.90 | **0.857143** |
+| Present-context recall | at least 0.80 | **0.727273** |
+| False-positive present | at most 0 | **0** |
+| Wrong realization | at most 0 | **0** |
+
+The three errors were conservative unresolved decisions for:
+
+1. an API-test prompt requiring JSON serialization/deserialization;
+2. a job-ID prompt requiring a subprocess command whose executable was not
+   named explicitly; and
+3. a libvirt volume configuration containing externally supplied
+   authentication material.
+
+This result supports a narrower diagnostic statement—high precision with
+insufficient context recall on the frozen holdout—but not formal extraction.
 
 ## Claim-to-artifact map
 
-| Intended output | Frozen input | Active implementation | Result field / builder | Current evidence |
-| --- | --- | --- | --- | --- |
-| Atomic selector support and ranking | selector schema 2.1 universe, embedded Prompt TSG evidence, discovery outcomes, selector plan | `build_active_selector_evidence()`, `run_selector_suite()` | `SelectionFreezeManifest.runs`; `run_selector_experiment()` builds strict ConfirmedYield@K | implemented/tested; no formal freeze |
-| Atomic operation-specific observational priority | same discovery freeze plus candidate operation and expected direction | `_association_scores()` in `prioritization.py` | `association.v3` ranking evidence | implemented/tested; no formal ranking |
-| Pair selector priority | pair-selector schema 1.2 catalog, graphs, baseline outcomes, compatible relation specs | `build_tsg_pair_universe()`, `run_interaction_selector()` | selected pair slots, cross-fitted standardized RD interaction, stability diagnostics | implemented/tested; no natural formal selection |
-| Atomic policy effect | successor freeze, complete randomized blocks, independent measurements | `freeze_successor_experiment()`, `run_successor_experiment()` | assigned-arm task-unit ITT and matching verifier | implemented/tested; no active-protocol provider result |
-| Pair policy interaction | factorial schema 1.1 freeze, four-cell blocks, qualified endpoint | `freeze_factorial_experiment()`, `run_factorial_experiment()` | `primary_estimates`, `security_policy_interaction_claim_ready_coordinates`, `mechanism_interaction_claim_ready_coordinates` | implemented/tested; only historical schema-1.0 formal results |
-| Reproducible paper table | exact result bundle and independent verification | matching result verifier plus report JSON | table builder must read verified report fields only | blocked on Gate D |
+| Intended output | Active implementation | Current evidence |
+| --- | --- | --- |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v3 | implemented/tested; final semantic qualification failed |
+| Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
+| Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
+| Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
+| Pair policy interaction | `freeze_factorial_experiment()`, `run_factorial_experiment()` | implemented/tested; only historical schema-1.0 results |
+| Reproducible RQ tables | independent result verifiers plus future table builders | blocked before Gate D |
+
+The task-partition/positivity interface is now linear: the positivity audit can
+read the verified partition bundle's `discovery-graphs.json` directly. This
+closes an engineering defect but does not change the failed scientific Gate.
 
 ## Evidence inventory
 
-The labels below distinguish execution from inherited evidence.
-
 | Evidence | `evidence_type` | Result |
 | --- | --- | --- |
-| Seven-source deterministic normalization at `runs/gate-c-20260830/prepared` | `newly_run` | 2,283 records, 2,166 exact clusters, 117 exact duplicate descendants; bundle SHA-256 `c391c7a13603542e5edd725dcc4018b4abaae0bfaa75177067561a166f7816d4`; no outcomes used and no scientific claim allowed |
-| Prompt-TSG v1 ten-task extractor-development pilot | `newly_run` | 10/10 responses and graph bundles were structurally valid, but evidence review found role overreach for permissions, credential source, SQL identifier/value, and URL authority. The extractor therefore failed semantic qualification; all ten task units are development-only and cannot enter discovery or confirmation. |
-| Focused Prompt-TSG/selector/factorial suite | `newly_run` | 45 passed, 1 deselected; includes state-tamper rejection, operation coding, RD ranking, compatibility filtering, claim-scope replay, and historical verifier compatibility |
-| Default reviewer suite and milestone smoke | `newly_run` | Recorded in the final verification section below after the current change set is frozen |
-| SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0, 30 task units / 240 assignments, interaction 0, simultaneous interval `[-0.0833, 0.0833]` |
-| SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0, 30 task units / 240 assignments, bounded context-specific positive interaction; not a universal mechanism-synergy result |
-| Earlier discussion of expected selector or intervention effects | `user_claim` or development interpretation | never substituted for a frozen result bundle |
+| Seven-source semantic curation | `newly_run` | 2,283 records, 4,744 blind pair decisions, 2,165 task units |
+| Full functional-contract curation | `newly_run` | 2,165/2,165 resolved and bundle-verified |
+| Local Security Oracle qualification | `newly_run` | 37/37 frozen cases, 12 active profiles, unknown preserved |
+| Prompt TSG v5 extraction and qualification | `newly_run` | extraction bundle verified; qualification failed at 18/21 and 8/11 present recall |
+| Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
+| SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
+| SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
+| Earlier expected intervention or selector effects | `user_claim` or development interpretation | never substituted for frozen evidence |
 
 ## Protocol risks and remaining blockers
 
-1. **Fresh population debt.** The rebuilt records are not yet semantically
-   adjudicated, contract-complete, split-disjoint task units. Reusing the old
-   31-task Prompt-TSG population would make a new run a development replication,
-   not an independent claim-bearing study.
-2. **Natural-support risk.** The operation-aware support gate may again reject
-   most atomic or pair candidates. That is a valid null availability result;
-   it must not be repaired by manufacturing Prompt states or selecting a known
-   responsive CWE after outcomes.
-3. **Pair-universe risk.** The active reviewed registry currently contains one
-   qualified SQL pair. It supports a bounded pair study, not a broad Pair
-   Yield@K claim.
-4. **Power debt.** Functionality non-inferiority and interaction claims require
-   study-specific pre-outcome power qualifications. Existing calibrations prove
-   measurement support, not adequate sample size.
-5. **Historical-schema boundary.** Schema-1.0 formal results are preserved and
-   verifiable. They do not prove schema-1.1 execution or selector-schema-2.1
-   behavior.
-6. **Selector stability interpretation.** Pair bootstrap diagnostics resample
-   frozen cross-fitted task contributions; they rank stability and are not a
-   confirmatory confidence interval or a replacement for randomized inference.
-7. **Human evidence debt.** An expert study, if retained as RQ4, needs consent,
-   materials, sampling, and analysis outside the computational runner.
-8. **Provider adherence.** In the first Gate-C attempt, two separate 24-item
-   semantic batches returned only indices 1–10 despite a valid JSON `stop`; a
-   later mixed-language batch returned only eight of ten. All attempts remain
-   closed diagnostics. The active outcome-blind curation limit is therefore
-   five items for semantic adjudication and contract extraction; every index
-   must still be present, and no partial provider response is admitted. The
-   provider also once duplicated an identical JSON key. The active parser may
-   collapse only duplicates whose types and values are identical; conflicting
-   duplicates remain closed errors. The frozen plan binds this policy plus the
-   curation and provider-adapter source digests.
-9. **Extractor semantic qualification.** Structural validation alone did not
-   catch four task-role overgeneralizations in the first ten-task pilot. The
-   first successor attempt also failed a disjoint holdout through invented
-   evidence spans and security-role overreach on filename hashing and random
-   log generation. `qwen3.5-flash` is therefore not qualified as the formal
-   extractor. The stronger extractor has a new identity and remains
-   unqualified until a further disjoint holdout evidence review passes. A
-   successful JSON response or graph construction is not an accuracy claim.
+1. **Representation recall.** The active extractor is conservative but missed
+   three required contexts. Formal natural discovery cannot start.
+2. **Gold scope.** The final holdout evaluates its frozen task mixture, not
+   global natural-language understanding or per-CWE accuracy.
+3. **Natural support.** Even after a future representation qualification,
+   positivity and source-lineage overlap may reject all selector candidates.
+4. **Pair breadth.** The reviewed active registry contains one qualified SQL
+   pair, so it cannot support a broad Pair Yield@K claim.
+5. **Power and multiplicity.** Study-specific qualifications remain absent
+   because the pipeline correctly stopped before hypothesis/policy freeze.
+6. **Historical schema.** Schema-1.0 results remain valid for their own frozen
+   protocols but do not establish schema-1.1 or selector-schema-2.1 behavior.
+7. **Human evidence.** Any expert study remains a separate, unexecuted work
+   package requiring its own governance.
 
-## Exact next Gate C package
+## Permitted next work
 
-No further method change is authorized by an observed pilot result. The next
-prospective package must be frozen in this order:
+The next valid move is not another holdout against the same tuned candidate.
+It must be a new prospectively declared representation study, for example:
 
-1. semantic adjudication and functional contracts for a fresh task-unit split;
-2. Prompt TSG extraction and independent state/support audit;
-3. atomic Top-`K_A` and pair Top-`K_I`, including every empty or failed slot;
-4. exact eligible confirmation tasks, hypotheses, policies, models, Oracles,
-   realization/order weights, and seeds;
-5. primary/secondary endpoints, task-unit weights, multiplicity families,
-   unknown policy, power assumptions, and stopping rule;
-6. a small real-provider canary that may only test execution integrity;
-7. one immutable prospective run followed by the independent verifier.
+- replace free-form context extraction with a more constrained annotation
+  protocol and independently qualified adjudication; or
+- freeze a materially new extractor before selecting a new, fully disjoint
+  corpus and qualification set.
 
-If the support or power gate fails, Gate C remains failed and the paper scope
-must narrow prospectively. Repeating pilots until a favorable effect appears is
-not an allowed path to Gate D.
+Only after that new representation Gate passes may the project regenerate the
+formal selection, partition task units, run discovery positivity, and continue
+through hypothesis, power, policy, canary, and confirmation freezes.
 
-## Final verification section
+## Final verification
 
-The following checks were run on the working tree immediately before its
-reference commit:
+The following checks were run on the final working tree:
 
 ```text
 python -m compileall -q src tests
-python -m pytest -q
-# 30 passed, 126 deselected
+# completed without errors
 
-python -m pytest -q -m extended \
-  tests/test_prompt_tsg.py tests/test_selector_study.py \
-  tests/test_selector_experiment.py tests/test_interaction_selector.py \
-  tests/test_interaction_selector_experiment.py \
-  tests/test_factorial_generalization.py
-# 45 passed, 1 deselected
+python -m pytest -q
+# 73 passed, 129 deselected
+
+python -m pytest -q tests/test_discovery_support.py
+# 4 passed
 
 python -m pytest -q -m milestone tests/test_factorial_reviewer_smoke.py
 # 1 passed
+
+prompt-mechanism-study verify \
+  data/method/results/prompt-tsg-two-stage-qualification-v5
+# VERIFIED
 
 prompt-mechanism-study factorial-experiment verify \
   data/formal/results/factorial-sql-confirm-qwen35-v3
@@ -156,6 +199,7 @@ prompt-mechanism-study factorial-experiment verify \
 # FACTORIAL_RESULT_BUNDLE_VERIFIED: 30 task units, 240 assignments
 ```
 
-`git diff --check` reported no whitespace errors; Git emitted only the existing
-Windows line-ending conversion warnings. Ruff and Black are not installed in
-the current environment, so no lint or formatter result is claimed.
+`git diff --check` reported no whitespace errors. The deliberately failed
+Prompt TSG qualification was also deterministically rebuilt from its frozen
+gold and verified extraction bundle; its failed status is evidence, not a test
+failure to suppress. The historical extended incident suite was not rerun.

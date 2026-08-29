@@ -144,8 +144,12 @@ exploration, or temporary checkpoints.
 ## Current evidence status
 
 The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
-factorial paths are implemented and reviewer-tested. They have not yet produced
-a new claim-bearing provider run. The tracked schema-1.0 factorial results are
-formal historical evidence and remain reproducible through the verifier, but
-are not reinterpreted under schema 1.1. Passing a test establishes neither
-execution nor an effect.
+factorial paths are implemented and reviewer-tested. Fresh seven-source
+semantic curation and all functional contracts are complete, but the final
+disjoint Prompt TSG qualification failed its frozen Gate (18/21 exact and 8/11
+present recall). Formal discovery and confirmation therefore did not start.
+The exact evidence inventory and failed-Gate boundary are in
+[`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
+results are formal historical evidence and remain reproducible through the
+verifier, but are not reinterpreted under schema 1.1. Passing a test establishes
+neither execution nor an effect.

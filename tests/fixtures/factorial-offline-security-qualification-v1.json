@@ -12,7 +12,7 @@
     "a11"
   ],
   "implementation_path": "src/prompt_mechanism_study/security_profiles.py",
-  "implementation_sha256": "e5b6de26e782749426c9e963cd873575ae93109956993c41e52416fac7c8c967",
+  "implementation_sha256": "97b12fd2b761d1fbb63a335d9ffa8d98e4296f091c7d3dcb06c53c169d0f6807",
   "fixture_path": "data/oracle-calibration/factorial-sql-v2-cases.json",
   "fixture_sha256": "fe816d87f11087462d764c0bd07cf7eb949200a7667824e3721d2dd03c36b387",
   "scope": "offline reviewer smoke; existing gold cases replayed locally before the pipeline run",
