@@ -102,6 +102,199 @@ def qualify_local_security_profiles(
     return report
 
 
+def qualify_prompt_tsg_extractor(
+    repository_root: Path,
+    tasks_path: Path,
+    graph_bundle: Path,
+    catalog_path: Path,
+    registry_path: Path,
+    gold_path: Path,
+    output: Path,
+) -> dict[str, Any]:
+    """Replay a prospectively labeled holdout against one frozen extractor bundle."""
+
+    root = repository_root.resolve()
+    verify_bundle(graph_bundle)
+    bundle_report = read_json(graph_bundle / "report.json")
+    requests = _rows(read_json(graph_bundle / "requests.json"))
+    graph_rows = _rows(read_json(graph_bundle / "graphs.json"))
+    tasks = _rows(read_json(tasks_path))
+    task_by_id = {row.get("task_id"): row for row in tasks}
+    if len(task_by_id) != len(tasks) or None in task_by_id:
+        raise EligibilityError("Prompt TSG qualification task identities are invalid")
+    gold = read_json(gold_path)
+    required = {
+        "schema_version",
+        "extractor_candidate_id",
+        "selection_path",
+        "review_completed_before_extraction",
+        "arms_or_outcomes_used",
+        "qualification_rule",
+        "cases",
+    }
+    if (
+        not isinstance(gold, dict)
+        or set(gold) != required
+        or gold["schema_version"] != "1.0"
+        or gold["review_completed_before_extraction"] is not True
+        or gold["arms_or_outcomes_used"] is not False
+    ):
+        raise EligibilityError("Prompt TSG qualification gold record is invalid")
+    rule = gold["qualification_rule"]
+    if (
+        not isinstance(rule, dict)
+        or set(rule)
+        != {
+            "minimum_exact_context_accuracy",
+            "minimum_present_recall",
+            "maximum_false_positive_present",
+            "maximum_wrong_realization",
+        }
+        or type(rule["minimum_exact_context_accuracy"]) is not float
+        or not 0 < rule["minimum_exact_context_accuracy"] <= 1
+        or type(rule["minimum_present_recall"]) is not float
+        or not 0 < rule["minimum_present_recall"] <= 1
+        or type(rule["maximum_false_positive_present"]) is not int
+        or rule["maximum_false_positive_present"] < 0
+        or type(rule["maximum_wrong_realization"]) is not int
+        or rule["maximum_wrong_realization"] < 0
+    ):
+        raise EligibilityError("Prompt TSG qualification rule is invalid")
+    selection_path = (root / gold["selection_path"]).resolve()
+    try:
+        selection_path.relative_to(root)
+    except ValueError:
+        raise EligibilityError("Prompt TSG qualification selection escapes the repository") from None
+    selection = read_json(selection_path)
+    cases = _rows(gold["cases"])
+    case_ids = [row.get("task_id") for row in cases]
+    if (
+        case_ids != selection.get("task_ids")
+        or bundle_report.get("task_selection_sha256") != _sha256(selection_path)
+        or bundle_report.get("task_file_sha256") != _sha256(tasks_path)
+        or bundle_report.get("status") != "PROMPT_TSG_EXTRACTION_COMPLETE"
+        or bundle_report.get("arms_or_outcomes_used") is not False
+    ):
+        raise EligibilityError("Prompt TSG qualification inputs do not match the extraction")
+
+    catalog = load_catalog(catalog_path)
+    registry = load_mechanism_registry(registry_path)
+    graph_by_id = {
+        graph.task_id: graph
+        for row in graph_rows
+        for graph in (prompt_tsg_from_record(row),)
+    }
+    if set(graph_by_id) != set(case_ids) or len(graph_by_id) != len(graph_rows):
+        raise EligibilityError("Prompt TSG qualification graph population differs from gold")
+    results = []
+    for case in cases:
+        if set(case) != {
+            "task_id",
+            "expected_context",
+            "expected_realization_id",
+            "rationale",
+        } or case["expected_context"] not in {"present", "absent", "unresolved"}:
+            raise EligibilityError("Prompt TSG qualification case is invalid")
+        task = task_by_id.get(case["task_id"])
+        if task is None:
+            raise EligibilityError("Prompt TSG qualification task is missing")
+        graph = graph_by_id[case["task_id"]]
+        validate_prompt_tsg(graph, prompt=task["prompt"], catalog=catalog)
+        if graph.extractor_id != gold["extractor_candidate_id"]:
+            raise EligibilityError("Prompt TSG extractor candidate identity drifted")
+        binding = tsg_mechanism_binding(task, graph, catalog, registry)
+        actual_context = (
+            "present"
+            if binding["realization_id"] is not None
+            else "unresolved"
+            if binding["decision"] == "unresolved"
+            else "absent"
+        )
+        matched = (
+            actual_context == case["expected_context"]
+            and binding["realization_id"] == case["expected_realization_id"]
+        )
+        results.append(
+            {
+                "task_id": case["task_id"],
+                "expected_context": case["expected_context"],
+                "actual_context": actual_context,
+                "expected_realization_id": case["expected_realization_id"],
+                "actual_realization_id": binding["realization_id"],
+                "binding_decision": binding["decision"],
+                "matched": matched,
+            }
+        )
+    mismatches = [row for row in results if not row["matched"]]
+    expected_present = [row for row in results if row["expected_context"] == "present"]
+    present_recovered = [
+        row
+        for row in expected_present
+        if row["actual_context"] == "present"
+        and row["actual_realization_id"] == row["expected_realization_id"]
+    ]
+    false_positive_present = [
+        row
+        for row in results
+        if row["expected_context"] != "present" and row["actual_context"] == "present"
+    ]
+    wrong_realization = [
+        row
+        for row in results
+        if row["actual_realization_id"] is not None
+        and row["actual_realization_id"] != row["expected_realization_id"]
+    ]
+    exact_accuracy = (len(results) - len(mismatches)) / len(results)
+    present_recall = len(present_recovered) / len(expected_present)
+    qualified = (
+        exact_accuracy >= rule["minimum_exact_context_accuracy"]
+        and present_recall >= rule["minimum_present_recall"]
+        and len(false_positive_present) <= rule["maximum_false_positive_present"]
+        and len(wrong_realization) <= rule["maximum_wrong_realization"]
+    )
+    projections = [request.get("deterministic_projection", {}) for request in requests]
+    report = {
+        "schema_version": "1.0",
+        "status": "QUALIFIED_FOR_FORMAL_EXTRACTION" if qualified else "QUALIFICATION_FAILED",
+        "extractor_candidate_id": gold["extractor_candidate_id"],
+        "holdout_task_units": len(cases),
+        "matched_task_units": len(cases) - len(mismatches),
+        "mismatched_task_units": len(mismatches),
+        "exact_context_accuracy": round(exact_accuracy, 6),
+        "present_recall": round(present_recall, 6),
+        "false_positive_present": len(false_positive_present),
+        "wrong_realization": len(wrong_realization),
+        "qualification_rule": rule,
+        "context_counts": dict(
+            sorted(Counter(row["expected_context"] for row in cases).items())
+        ),
+        "rejected_descriptive_facts": sum(
+            len(row.get("rejected_facts", [])) for row in projections
+        ),
+        "rejected_relations": sum(
+            len(row.get("rejected_relations", [])) for row in projections
+        ),
+        "ignored_unresolved_features": sum(
+            len(row.get("ignored_unresolved_features", [])) for row in projections
+        ),
+        "extractor_bundle_sha256": bundle_digest(graph_bundle),
+        "extractor_implementation_sha256": bundle_report[
+            "extractor_implementation_sha256"
+        ],
+        "catalog_sha256": _sha256(catalog_path),
+        "registry_sha256": _sha256(registry_path),
+        "gold_sha256": _sha256(gold_path),
+        "selection_sha256": _sha256(selection_path),
+        "arms_or_outcomes_used": False,
+        "claim_boundary": (
+            "Qualification covers the prospectively labeled task-context holdout; "
+            "it is not a global semantic-parsing accuracy claim."
+        ),
+    }
+    write_bundle(output, {"case-results.json": results, "qualification.json": report})
+    return report
+
+
 def freeze_tsg_realization_bindings(
     tasks_path: Path,
     graph_bundles: tuple[Path, ...],
@@ -597,4 +790,5 @@ __all__ = [
     "audit_dataset_eligibility",
     "freeze_tsg_realization_bindings",
     "qualify_local_security_profiles",
+    "qualify_prompt_tsg_extractor",
 ]

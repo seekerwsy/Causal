@@ -151,6 +151,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repository-root", type=Path, default=Path.cwd()
     )
 
+    tsg_qualification = commands.add_parser(
+        "prompt-tsg-qualification",
+        help="compare one extractor bundle with a prospective task-context holdout",
+    )
+    tsg_qualification.add_argument("tasks", type=Path)
+    tsg_qualification.add_argument("graph_bundle", type=Path)
+    tsg_qualification.add_argument("catalog", type=Path)
+    tsg_qualification.add_argument("registry", type=Path)
+    tsg_qualification.add_argument("gold", type=Path)
+    tsg_qualification.add_argument("output", type=Path)
+    tsg_qualification.add_argument("--repository-root", type=Path, default=Path.cwd())
+
     prompt_tsg_extract = commands.add_parser(
         "prompt-tsg-extract",
         help="extract evidence-bound Prompt TSGs for a frozen task file",
@@ -371,6 +383,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] == "QUALIFIED_FOR_EXPERIMENT" else 2
+    elif args.command == "prompt-tsg-qualification":
+        from prompt_mechanism_study.eligibility import qualify_prompt_tsg_extractor
+
+        report = qualify_prompt_tsg_extractor(
+            args.repository_root,
+            args.tasks,
+            args.graph_bundle,
+            args.catalog,
+            args.registry,
+            args.gold,
+            args.output,
+        )
+        print(report["status"])
+        return 0 if report["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION" else 2
     elif args.command == "positivity-audit":
         from prompt_mechanism_study.prioritization import audit_discovery_positivity
 

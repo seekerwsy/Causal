@@ -4,6 +4,12 @@
   "selection_path": "data/method/prompt-tsg-extractor-qwen37max-v5-holdout-selection-v1.json",
   "review_completed_before_extraction": true,
   "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
   "cases": [
     {"task_id": "semantic_cluster_c3b531b70d9a49cce94865253876da60bd77da22c692a9609b1f63b6375c1b0c", "expected_context": "present", "expected_realization_id": "cwe22_path_confinement", "rationale": "The caller selects a theme path under an explicitly named trusted theme directory."},
     {"task_id": "semantic_cluster_d83e91ce4d9f7b31ae3ab151dc7244280ee401479f7f732dbae04961bcfead80", "expected_context": "absent", "expected_realization_id": null, "rationale": "The prompt requests filename validation but names no trusted base directory."},
