@@ -19,8 +19,11 @@ from prompt_mechanism_study.artifact_io import (
 from prompt_mechanism_study.functional_judge import bailian_complete
 from prompt_mechanism_study.records import canonical_value, content_id
 
-SEMANTIC_MAX_ITEMS = 24
-CONTRACT_MAX_ITEMS = 20
+# The frozen provider twice returned only the first ten items from otherwise
+# valid 24-item requests.  Ten is therefore the largest empirically qualified
+# closed-response batch for both outcome-blind curation stages.
+SEMANTIC_MAX_ITEMS = 10
+CONTRACT_MAX_ITEMS = 10
 MAX_BATCH_CHARS = 40_000
 _LABELS = {"same_cluster", "related_but_independent", "different_task", "uncertain"}
 _RESOLUTION = {"resolved", "ambiguous", "unsupported"}

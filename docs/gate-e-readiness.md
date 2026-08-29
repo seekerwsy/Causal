@@ -88,6 +88,11 @@ The labels below distinguish execution from inherited evidence.
    confirmatory confidence interval or a replacement for randomized inference.
 7. **Human evidence debt.** An expert study, if retained as RQ4, needs consent,
    materials, sampling, and analysis outside the computational runner.
+8. **Provider adherence.** In the first Gate-C attempt, two separate 24-item
+   semantic batches returned only indices 1–10 despite a valid JSON `stop`.
+   Both attempts remain closed diagnostics. The active outcome-blind curation
+   limit is therefore ten items for semantic adjudication and contract
+   extraction; no partial provider response is admitted.
 
 ## Exact next Gate C package
 
