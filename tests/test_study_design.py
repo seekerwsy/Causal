@@ -11,7 +11,7 @@ from prompt_mechanism_study.study_design import (
     _priority_extensions,
 )
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 
 def test_study_design_balances_units_without_crossing_exclusions() -> None:

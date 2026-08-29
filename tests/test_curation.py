@@ -14,9 +14,10 @@ from prompt_mechanism_study.curation import (
 from prompt_mechanism_study.records import content_id
 
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 
+@pytest.mark.reviewer
 def test_llm_positive_edges_are_diagnostic_and_do_not_merge_clusters(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared"
     records = [
@@ -99,6 +100,7 @@ def test_llm_positive_edges_are_diagnostic_and_do_not_merge_clusters(tmp_path: P
     )
 
 
+@pytest.mark.reviewer
 def test_exact_prompt_and_frozen_lineage_are_the_only_merge_authorities(
     tmp_path: Path,
 ) -> None:

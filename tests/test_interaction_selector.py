@@ -25,7 +25,7 @@ from prompt_mechanism_study.prompt_tsg import PromptTSG, QueryState, TSGEdge, TS
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.representation import Operation
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 
 FACTOR_1 = "feature.first_control"

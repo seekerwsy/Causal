@@ -62,9 +62,10 @@ from prompt_mechanism_study.successor_experiment import (
 )
 from prompt_mechanism_study.successor_verify import verify_successor_result_bundle
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 
+@pytest.mark.reviewer
 def test_offline_add_remove_runner_closes_and_verifies(tmp_path: Path) -> None:
     config_path = _study(tmp_path)
     provider_calls: list[tuple[str, str]] = []
@@ -266,6 +267,7 @@ def test_preflight_recomputes_remove_evidence_gate(tmp_path: Path) -> None:
         preflight_successor_experiment(tmp_path, config_path)
 
 
+@pytest.mark.reviewer
 def test_materialization_freeze_is_semantic_and_run_does_not_rematerialize(
     tmp_path: Path,
 ) -> None:

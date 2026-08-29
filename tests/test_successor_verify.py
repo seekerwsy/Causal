@@ -42,7 +42,7 @@ from prompt_mechanism_study.representation import (
 from prompt_mechanism_study.successor_verify import verify_successor_inference
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_independent_successor_verifier_recomputes_bounds_and_three_families() -> None:
     randomization, outcomes, policy, tasks, plan, observed = _study()
     report = verify_successor_inference(
@@ -71,6 +71,7 @@ def test_independent_successor_verifier_recomputes_bounds_and_three_families() -
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_independent_successor_verifier_rejects_missing_duplicate_and_replaced_rows() -> None:
     randomization, outcomes, policy, tasks, plan, observed = _study()
     missing_randomization = replace(
@@ -121,7 +122,7 @@ def test_independent_successor_verifier_rejects_missing_duplicate_and_replaced_r
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_independent_successor_verifier_rejects_estimate_and_interval_tampering() -> None:
     randomization, outcomes, policy, tasks, plan, observed = _study()
     estimate = observed.estimates[0]
@@ -168,7 +169,7 @@ def test_independent_successor_verifier_rejects_estimate_and_interval_tampering(
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_successor_claim_gate_fails_closed_when_one_arm_has_zero_valid_code() -> None:
     randomization, outcomes, policy, tasks, plan, _observed = _study()
     plan = replace(

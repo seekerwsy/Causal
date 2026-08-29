@@ -26,6 +26,7 @@ addopts = "-m reviewer"
 markers = [
   "reviewer: fast reviewer-facing scientific invariant suite",
   "milestone: minimal end-to-end reproduction checks",
+  "extended: retained calibration, sensitivity, and adversarial audit coverage",
 ]
 
 [tool.ruff]

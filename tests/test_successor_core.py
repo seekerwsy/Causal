@@ -40,7 +40,7 @@ from prompt_mechanism_study.representation import (
 )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_successor_candidate_is_atomic_and_add_remove_have_distinct_identities() -> None:
     add_policy = _realization_policy(Operation.ADD)
     remove_policy = _realization_policy(Operation.REMOVE)
@@ -67,6 +67,7 @@ def test_successor_candidate_is_atomic_and_add_remove_have_distinct_identities()
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_source_gate_requires_absent_for_add_and_attested_present_for_remove() -> None:
     prompt = "Implement a database lookup."
     add = _hypothesis(Operation.ADD, _realization_policy(Operation.ADD))
@@ -110,7 +111,7 @@ def test_source_gate_requires_absent_for_add_and_attested_present_for_remove() -
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_successor_bundle_requires_four_distinct_validated_arm_variants() -> None:
     policy, hypothesis, eligibility, realization = _complete_policy(Operation.ADD)
     bundle = policy.bundles[0]
@@ -149,13 +150,13 @@ def test_successor_bundle_requires_four_distinct_validated_arm_variants() -> Non
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_arm_protocol_rejects_cross_operation_labels() -> None:
     with pytest.raises(ValueError, match="operation-specific"):
         ArmProtocolV2(Operation.ADD, REMOVE_ARM_LABELS_V2, _digest("protocol"))
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_successor_policy_requires_complete_task_by_realization_support() -> None:
     policy, _, eligibility, _ = _complete_policy(Operation.ADD)
     second = _realization("second")
@@ -189,6 +190,7 @@ def test_successor_policy_requires_complete_task_by_realization_support() -> Non
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_successor_randomization_is_replayable_balanced_and_keeps_nullable_seed() -> None:
     policy, _, _, _ = _complete_policy(Operation.REMOVE)
     arguments = {
@@ -227,6 +229,7 @@ def test_successor_randomization_is_replayable_balanced_and_keeps_nullable_seed(
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_every_successor_block_coordinate_changes_block_identity() -> None:
     policy, _, _, _ = _complete_policy(Operation.ADD)
     assignment = randomize_successor(

@@ -32,7 +32,7 @@ from prompt_mechanism_study.prompt_tsg import (
 from prompt_mechanism_study.records import canonical_json, canonical_value, content_hash
 from test_interaction_selector import _plan
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-pair-catalog-v1.json"
 REGISTRY_PATH = ROOT / "data/method/mechanism-pairs-v2.json"

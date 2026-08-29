@@ -42,7 +42,7 @@ from prompt_mechanism_study.representation import (
 from prompt_mechanism_study.successor_verify import verify_successor_inference
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_strong_label_requires_global_intervals_and_heterogeneity_equivalence() -> None:
     randomization, outcomes, policy, tasks = _study()
     plan = _plan(realization_margin=0.5, functionality_margin=0.3)
@@ -112,7 +112,7 @@ def test_strong_label_requires_global_intervals_and_heterogeneity_equivalence() 
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_point_direction_alone_never_awards_strong_label() -> None:
     randomization, outcomes, policy, tasks = _study()
     plan = _plan(realization_margin=0.0, functionality_margin=0.3)
@@ -132,7 +132,7 @@ def test_point_direction_alone_never_awards_strong_label() -> None:
     assert assessment.practical_success_label == "security_robustness_not_established"
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_functionality_gate_limits_only_practical_success_label() -> None:
     randomization, outcomes, policy, tasks = _study()
     plan = _plan(realization_margin=0.5, functionality_margin=0.01)
@@ -169,7 +169,7 @@ def test_functionality_gate_limits_only_practical_success_label() -> None:
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_strong_label_requires_overall_and_per_realization_support() -> None:
     randomization, outcomes, policy, tasks = _study()
     plan = replace(

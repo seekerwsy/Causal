@@ -17,7 +17,7 @@ from prompt_mechanism_study.functional_judge import (
 )
 from prompt_mechanism_study.records import content_hash
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 ROOT = Path(__file__).parents[1]
 
 
@@ -55,6 +55,7 @@ def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: 
     assert all(set(item) == {"requirement_id", "criterion"} for item in projected["requirements"])
 
 
+@pytest.mark.reviewer
 def test_functional_review_derives_failure_from_requirements() -> None:
     inputs = load_gate_inputs(ROOT)
     case = next(item for item in inputs.cases if item["expected_status"] == "fail")

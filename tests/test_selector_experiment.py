@@ -139,7 +139,7 @@ def _prospective_fixture(monkeypatch):
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_active_selector_recomputes_support_and_information_budget(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -188,7 +188,7 @@ def test_active_selector_recomputes_support_and_information_budget(
         freeze_selection_from_config(raw_path, tmp_path / "tampered-discovery")
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_representation_comparison_is_end_to_end_not_selector_only() -> None:
     direct = {
         "model_id": "model-a",
@@ -222,7 +222,7 @@ def test_representation_comparison_is_end_to_end_not_selector_only() -> None:
     assert differences["unique_confirmed_hypotheses"] == 1
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_representation_comparison_bundle_replays_source_digests(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -277,7 +277,7 @@ def test_representation_comparison_bundle_replays_source_digests(
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_offline_selector_artifact_closure_and_tamper_rejection(tmp_path: Path, monkeypatch) -> None:
     base = tmp_path / "original"
     base.mkdir()
@@ -477,7 +477,7 @@ def test_offline_selector_artifact_closure_and_tamper_rejection(tmp_path: Path, 
         verify_selector_experiment_bundle(result_root)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_stored_selector_result_rejects_duplicate_successor_lineage(tmp_path: Path) -> None:
     # The exact duplicate check is deliberately exercised before any source is trusted.
     root = tmp_path / "invalid"

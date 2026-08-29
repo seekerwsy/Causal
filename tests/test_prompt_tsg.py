@@ -23,7 +23,7 @@ from prompt_mechanism_study.prompt_tsg_extract import (
 from prompt_mechanism_study.records import content_hash
 
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 ROOT = Path(__file__).parents[1]
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v1.json"
@@ -105,6 +105,7 @@ def test_catalog_and_graph_are_canonical_and_round_trip():
     validate_prompt_tsg(graph, prompt=PROMPT, catalog=catalog)
 
 
+@pytest.mark.reviewer
 def test_evidence_must_be_an_exact_prompt_span():
     catalog = load_catalog(CATALOG_PATH)
     with pytest.raises(PromptTSGError, match="evidence"):
@@ -147,6 +148,7 @@ def test_evidence_allows_only_deterministic_whitespace_normalization():
     assert prompt[node.evidence_start : node.evidence_end] == 'the  "users" table'
 
 
+@pytest.mark.reviewer
 def test_context_query_has_total_four_valued_semantics():
     catalog, graph = _command_graph()
     query = query_for_realization(catalog, "cwe78_fixed_executable_argv")
@@ -178,6 +180,7 @@ def test_context_query_has_total_four_valued_semantics():
     assert result.state == QueryState.ABSENT
 
 
+@pytest.mark.reviewer
 def test_typed_patch_adds_only_the_catalog_feature():
     catalog, graph = _command_graph()
     suffix = "Pass command arguments as an argv list and do not invoke a shell."
@@ -205,6 +208,7 @@ def test_typed_patch_adds_only_the_catalog_feature():
     assert original <= patched_projection
 
 
+@pytest.mark.reviewer
 def test_task_local_text_stays_evidence_bound_not_a_global_feature():
     catalog, graph = _command_graph()
     operation = next(node for node in graph.nodes if node.semantic_id == "task.operation")

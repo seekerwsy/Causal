@@ -130,7 +130,7 @@ def test_prompt_tsg_v3_profiles_match_frozen_calibration(case: dict[str, str]) -
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 @pytest.mark.parametrize(
     "case",
     json.loads(
@@ -150,7 +150,7 @@ def test_factorial_sql_profile_covers_all_four_gold_cells(case: dict[str, str]) 
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_sql_membership_guard_must_stop_before_the_sink() -> None:
     code = """def list_rows(cursor, order_field, maximum):
     allowed = {'created_at', 'name'}
@@ -168,7 +168,7 @@ def test_factorial_sql_membership_guard_must_stop_before_the_sink() -> None:
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_sql_v1_remains_frozen_before_equivalent_allowlist_expansion() -> None:
     code = """def list_rows(cursor, order_field, maximum):
     allowed = {'created_at', 'name'}

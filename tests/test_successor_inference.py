@@ -48,9 +48,10 @@ from prompt_mechanism_study.workflow import (
 )
 from prompt_mechanism_study.successor_verify import verify_successor_inference
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 
+@pytest.mark.reviewer
 def test_successor_workflow_estimates_four_arms_and_preserves_unknown_bounds() -> None:
     tasks = tuple(
         Task(

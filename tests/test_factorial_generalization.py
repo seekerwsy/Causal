@@ -245,7 +245,7 @@ def _v11_config(
     return config_path, registry.pairs
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_v11_requires_exact_distinct_outcome_decomposition(tmp_path) -> None:
     config_path, _pairs = _v11_config(tmp_path)
     config = read_json(config_path)
@@ -259,7 +259,7 @@ def test_v11_requires_exact_distinct_outcome_decomposition(tmp_path) -> None:
         preflight_factorial_experiment(ROOT, config_path)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_v11_powered_functionality_gate_requires_qualification(tmp_path) -> None:
     config_path, _pairs = _v11_config(tmp_path)
     config = read_json(config_path)
@@ -274,6 +274,7 @@ def test_v11_powered_functionality_gate_requires_qualification(tmp_path) -> None
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_unknown_gate_conditions_on_valid_code_not_all_assignments() -> None:
     code_valid = {
         "a00": {"point": 0.5},
@@ -323,7 +324,7 @@ def test_unknown_gate_conditions_on_valid_code_not_all_assignments() -> None:
     assert 1.0 - evaluable["a00"]["point"] == 0.75
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_v11_runner_dispatches_two_pairs_and_two_models(tmp_path, monkeypatch) -> None:
     config_path, pairs = _v11_config(tmp_path, separately_powered=True)
     generated_models = []
@@ -639,7 +640,7 @@ def test_v11_runner_dispatches_two_pairs_and_two_models(tmp_path, monkeypatch) -
         verify_factorial_result_bundle(tampered)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_v11_accepts_partially_overlapping_pair_support(tmp_path) -> None:
     config_path, _pairs = _v11_config(tmp_path, partial_overlap=True)
 
@@ -650,6 +651,7 @@ def test_v11_accepts_partially_overlapping_pair_support(tmp_path) -> None:
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_historical_v10_config_is_not_executable_but_result_remains_verifiable() -> None:
     with pytest.raises(FactorialExperimentError, match="config envelope is invalid"):
         preflight_factorial_experiment(

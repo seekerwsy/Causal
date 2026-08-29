@@ -33,7 +33,7 @@ from test_interaction_selector_experiment import (
 )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 @pytest.mark.parametrize(
     ("cells", "expected"),
     [
@@ -52,7 +52,7 @@ def test_factorial_response_surface_classification(cells, expected) -> None:
     ) is expected
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_noncommutative_pair_requires_both_positive_weight_orders() -> None:
     incomplete = {
         "joint_application_commutative": False,
@@ -72,6 +72,7 @@ def test_noncommutative_pair_requires_both_positive_weight_orders() -> None:
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_pair_selection_is_derived_from_verified_artifact(
     tmp_path: Path,
 ) -> None:
@@ -111,7 +112,7 @@ def test_factorial_pair_selection_is_derived_from_verified_artifact(
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_pair_selection_rejects_self_reported_coordinates(
     tmp_path: Path,
 ) -> None:
@@ -141,7 +142,7 @@ def test_factorial_pair_selection_rejects_self_reported_coordinates(
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_v11_rejects_historical_only_pair_relations() -> None:
     registry = load_pair_registry(REGISTRY_PATH, load_catalog(CATALOG_PATH))
     pair = registry.pairs[0]
@@ -158,7 +159,7 @@ def test_factorial_v11_rejects_historical_only_pair_relations() -> None:
         )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_verifier_replays_portable_selector_and_registry_provenance(
     tmp_path: Path,
 ) -> None:

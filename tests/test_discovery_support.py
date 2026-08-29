@@ -16,7 +16,7 @@ from prompt_mechanism_study.prompt_tsg import (
 from prompt_mechanism_study.records import content_hash
 
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 ROOT = Path(__file__).parents[1]
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v1.json"
@@ -68,6 +68,7 @@ def _xml_task(task_id: str, lineage: str, *, feature_present: bool):
     return task, prompt_tsg_record(graph)
 
 
+@pytest.mark.reviewer
 def test_population_freeze_uses_natural_representatives_without_outcomes(tmp_path: Path):
     prompt = "Parse untrusted XML."
     records = [
@@ -114,6 +115,7 @@ def test_population_freeze_uses_natural_representatives_without_outcomes(tmp_pat
     assert tasks[0]["prompt"] == prompt
 
 
+@pytest.mark.reviewer
 def test_positivity_gate_requires_both_states_and_shared_lineages(tmp_path: Path):
     pairs = [
         _xml_task("p-a", "lineage-a", feature_present=True),
@@ -151,6 +153,7 @@ def test_positivity_gate_requires_both_states_and_shared_lineages(tmp_path: Path
     assert not any(row["confirm_remove_eligible"] for row in rows)
 
 
+@pytest.mark.reviewer
 def test_positivity_gate_rejects_a_source_proxy(tmp_path: Path):
     pairs = [
         _xml_task("present", "positive-only", feature_present=True),

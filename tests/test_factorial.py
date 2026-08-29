@@ -146,6 +146,7 @@ def _study(task_count: int = 4):
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_randomization_is_balanced_bound_and_replayable() -> None:
     policy, _, first = _study()
     second = randomize_factorial(
@@ -164,7 +165,7 @@ def test_factorial_randomization_is_balanced_bound_and_replayable() -> None:
     assert all(item.provider_seed is not None for item in first.assignments)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_randomization_rejects_replaced_variant() -> None:
     policy, _, randomization = _study()
     changed = replace(
@@ -180,7 +181,7 @@ def test_factorial_randomization_rejects_replaced_variant() -> None:
         verify_factorial_randomization(corrupted, (policy,))
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 @pytest.mark.parametrize(
     ("cell_value", "expected"),
     [
@@ -218,6 +219,7 @@ def test_factorial_interaction_matches_hand_calculation(cell_value, expected) ->
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_unknown_is_bounded_not_secure() -> None:
     policy, tasks, randomization = _study()
     outcomes = tuple(
@@ -247,6 +249,7 @@ def test_factorial_unknown_is_bounded_not_secure() -> None:
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_analysis_requires_total_assignment_accounting() -> None:
     policy, tasks, randomization = _study()
     outcomes = tuple(
@@ -265,6 +268,7 @@ def test_factorial_analysis_requires_total_assignment_accounting() -> None:
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_factorial_result_is_independently_recomputed() -> None:
     policy, tasks, randomization = _study(6)
     outcomes = tuple(
@@ -324,7 +328,7 @@ def test_factorial_result_is_independently_recomputed() -> None:
     }
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_prospective_factorial_uses_replicate_studentized_task_units() -> None:
     policy, tasks, randomization = _study(6)
     outcomes = tuple(
@@ -367,7 +371,7 @@ def test_prospective_factorial_uses_replicate_studentized_task_units() -> None:
     assert verification["primary_bootstrap"]["valid_bootstrap_draws"] >= 450
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_prospective_factorial_resamples_partial_support_from_global_union() -> None:
     first_policy, tasks, _ = _study(6)
     second_pair = replace(
@@ -463,6 +467,7 @@ def test_prospective_factorial_resamples_partial_support_from_global_union() -> 
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_pair_registry_binds_only_catalog_registered_atomic_factors() -> None:
     catalog = load_catalog(Path("data/method/prompt-tsg-pair-catalog-v1.json"))
     registry = load_pair_registry(Path("data/method/mechanism-pairs-v1.json"), catalog)
@@ -473,7 +478,7 @@ def test_pair_registry_binds_only_catalog_registered_atomic_factors() -> None:
     )
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_controlled_factorial_corpus_freezes_blind_pair_bindings(tmp_path) -> None:
     output = tmp_path / "corpus"
     report = build_sql_factorial_corpus(Path("."), output, limit=3)
@@ -485,7 +490,7 @@ def test_controlled_factorial_corpus_freezes_blind_pair_bindings(tmp_path) -> No
     assert all(task["pair_binding"]["outcomes_or_arms_used"] is False for task in tasks)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_confirmation_corpus_preserves_factor_two_positivity(tmp_path) -> None:
     output = tmp_path / "corpus-v2"
     report = build_sql_factorial_corpus(
@@ -499,7 +504,7 @@ def test_confirmation_corpus_preserves_factor_two_positivity(tmp_path) -> None:
     assert all("Reject identifier choices" not in task["prompt"] for task in tasks)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_scaffold_followup_preserves_task_units_and_qualifies_starters(tmp_path) -> None:
     output = tmp_path / "scaffold"
     report = build_sql_factorial_corpus(
@@ -530,7 +535,7 @@ def test_scaffold_followup_preserves_task_units_and_qualifies_starters(tmp_path)
     assert all("vulnerab" not in task["prompt"].lower() for task in tasks)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
     records = []
     for cell, identifier, value in (
@@ -579,7 +584,7 @@ def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
     }
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_tracked_factorial_result_recomputes_independently() -> None:
     report = verify_factorial_result_bundle(
         Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
@@ -596,7 +601,7 @@ def test_tracked_factorial_result_recomputes_independently() -> None:
     }
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_result_recomputation_rejects_rehashed_report_drift(tmp_path) -> None:
     source = Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
     payload = {

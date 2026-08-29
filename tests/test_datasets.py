@@ -12,7 +12,7 @@ from prompt_mechanism_study.datasets import (
     prepare_dedup_candidates,
 )
 
-pytestmark = pytest.mark.reviewer
+pytestmark = pytest.mark.extended
 
 
 def test_prepare_seven_sources_without_execution(tmp_path: Path) -> None:
@@ -77,6 +77,7 @@ def test_invalid_rows_are_counted_not_silently_dropped(tmp_path: Path) -> None:
     assert read_json(output / "exclusions.json")[0]["source_locator"].endswith("#L2")
 
 
+@pytest.mark.reviewer
 def test_contract_freeze_and_dedup_candidates_are_separate_closed_steps(
     tmp_path: Path,
 ) -> None:

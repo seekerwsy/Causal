@@ -121,6 +121,7 @@ def _fixture(*, supported: bool = True):
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_gate_failure_is_closed_before_any_selector_ranking() -> None:
     manifest, rows, plan, _ids, _scores, _expert = _fixture(supported=False)
     result = run_selector_suite(
@@ -141,7 +142,7 @@ def test_gate_failure_is_closed_before_any_selector_ranking() -> None:
     assert result.gate_failure_reason == "no_candidate_passed_the_frozen_positivity_gate"
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_five_selectors_share_one_universe_and_keep_explicit_k_slots() -> None:
     manifest, rows, plan, candidate_ids, fci_scores, _expert = _fixture()
     result = run_selector_suite(
@@ -178,7 +179,7 @@ def test_five_selectors_share_one_universe_and_keep_explicit_k_slots() -> None:
     assert set(result.selected_union_candidate_ids) <= set(candidate_ids)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_fci_uses_family_local_task_unit_bootstrap_stability(monkeypatch) -> None:
     manifest, rows, plan, candidate_ids, _frozen_scores, _expert = _fixture()
     calls = []
@@ -204,7 +205,7 @@ def test_fci_uses_family_local_task_unit_bootstrap_stability(monkeypatch) -> Non
     assert fci.rankings[0].evidence_sha256 != content_hash(scores)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_prospective_v2_freezes_slot_and_real_pag_bk_sensitivities(monkeypatch, tmp_path) -> None:
     manifest, rows, legacy, candidate_ids, _scores, _expert = _fixture()
     rows = tuple(
@@ -328,7 +329,7 @@ def test_pinned_causal_learn_backend_capability_when_installed() -> None:
     assert isinstance(edges, tuple)
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_blind_expert_contract_rejects_confirm_outcome_access() -> None:
     manifest, rows, plan, candidate_ids, fci_scores, expert = _fixture()
     with pytest.raises(ValueError, match="confirm-outcome blind"):
@@ -397,7 +398,7 @@ def _evaluated_result():
     return selection, bridge, tuple(coordinates), inference_plan, result, candidate_ids
 
 
-@pytest.mark.reviewer
+@pytest.mark.extended
 def test_strict_confirmed_yield_keeps_null_and_bridge_failure_in_k() -> None:
     selection, _bridge, _coordinates, _plan, result, candidate_ids = _evaluated_result()
     fci = next(point for point in result.yield_points if point.selector_id == "tsg_fci.v1")
@@ -410,6 +411,7 @@ def test_strict_confirmed_yield_keeps_null_and_bridge_failure_in_k() -> None:
 
 
 @pytest.mark.reviewer
+@pytest.mark.extended
 def test_nested_selector_result_replays_and_independent_verifier_rejects_drift() -> None:
     selection, bridge, coordinates, plan, result, _candidate_ids = _evaluated_result()
     replay = evaluate_selector_study(selection, bridge, coordinates, plan)
