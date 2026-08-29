@@ -123,9 +123,16 @@ def extract_prompt_tsg(
     catalog: Mapping[str, Any],
     evaluator: Mapping[str, Any],
     system_prompt: str,
+    reviewer_evaluator: Mapping[str, Any] | None = None,
+    reviewer_prompt: str | None = None,
     provider: Provider = bailian_complete,
 ) -> tuple[PromptTSG, dict[str, Any], bytes, dict[str, Any]]:
-    """Run one blinded semantic fact call and validate every returned fact locally."""
+    """Propose evidence-bound facts, optionally review them blindly, then build one TSG."""
+
+    if (reviewer_evaluator is None) != (reviewer_prompt is None):
+        raise PromptTSGExtractionError(
+            "semantic reviewer evaluator and prompt must be supplied together"
+        )
 
     request = extraction_request(task, catalog)
     raw = provider(request, evaluator, system_prompt)
@@ -134,44 +141,74 @@ def extract_prompt_tsg(
         facts, rejected_facts = _project_facts(
             proposal["facts"], request["source_prompt"], catalog
         )
+        offered = set(request["candidate_semantics"])
+        returned = {
+            fact["semantic_id"] for fact in proposal["facts"]
+        } | set(proposal["unresolved_semantics"])
+        if not returned <= offered:
+            raise PromptTSGExtractionError(
+                "extractor returned a semantic outside its task slice"
+            )
         relations, rejected_relations = _project_relations(
             facts, proposal["relations"], catalog
         )
+        review_projection: dict[str, Any] | None = None
+        extractor_id = evaluator["candidate_id"]
+        if reviewer_evaluator is not None and reviewer_prompt is not None:
+            facts, relations, review_projection = _review_catalog_facts(
+                task,
+                facts=facts,
+                relations=relations,
+                catalog=catalog,
+                evaluator=reviewer_evaluator,
+                system_prompt=reviewer_prompt,
+                provider=provider,
+            )
+            rejected_facts.extend(review_projection["rejected_facts"])
+            rejected_relations.extend(review_projection["rejected_relations"])
+            extractor_id = (
+                f"{evaluator['candidate_id']}+{reviewer_evaluator['candidate_id']}"
+            )
+            proposed_unresolved = [
+                *proposal["unresolved_semantics"],
+                *review_projection["unresolved_semantics"],
+            ]
+        else:
+            proposed_unresolved = proposal["unresolved_semantics"]
         ignored_unresolved_features = sorted(
             semantic_id
-            for semantic_id in proposal["unresolved_semantics"]
+            for semantic_id in proposed_unresolved
             if catalog["semantics"].get(semantic_id)
             in {"safety_requirement", "presentation_control"}
         )
-        unresolved_semantics = [
+        unresolved_semantics = sorted(set(
             semantic_id
-            for semantic_id in proposal["unresolved_semantics"]
+            for semantic_id in proposed_unresolved
             if semantic_id not in ignored_unresolved_features
-        ]
+        ))
         graph = build_prompt_tsg(
             task_id=task["task_id"],
             prompt=task["prompt"],
-            extractor_id=evaluator["candidate_id"],
+            extractor_id=extractor_id,
             catalog=catalog,
             facts=facts,
             relations=relations,
             unresolved_semantics=unresolved_semantics,
         )
-    except (PromptTSGError, PromptTSGExtractionError) as error:
+    except PromptTSGExtractionError as error:
+        if error.request is not None or error.raw is not None:
+            raise
         raise PromptTSGExtractionError(str(error), request=request, raw=raw) from None
-    offered = set(request["candidate_semantics"])
-    returned = {
-        fact["semantic_id"] for fact in proposal["facts"]
-    } | set(proposal["unresolved_semantics"])
-    if not returned <= offered:
-        raise PromptTSGExtractionError(
-            "extractor returned a semantic outside its task slice", request=request, raw=raw
-        )
-    return graph, request, raw, {
+    except PromptTSGError as error:
+        raise PromptTSGExtractionError(str(error), request=request, raw=raw) from None
+    projection = {
         "rejected_facts": rejected_facts,
         "rejected_relations": rejected_relations,
         "ignored_unresolved_features": ignored_unresolved_features,
     }
+    if review_projection is not None:
+        projection["semantic_review"] = review_projection
+    return graph, request, raw, projection
 
 
 def extract_task_file(
@@ -184,6 +221,8 @@ def extract_task_file(
     start: int = 0,
     limit: int | None = None,
     task_selection_path: Path | None = None,
+    reviewer_evaluator_path: Path | None = None,
+    reviewer_prompt_path: Path | None = None,
     provider: Provider = bailian_complete,
 ) -> dict[str, Any]:
     """Extract a small frozen task file into one reviewable, content-addressed bundle."""
@@ -240,6 +279,22 @@ def extract_task_file(
     system_prompt = prompt_path.read_text(encoding="utf-8").strip()
     if not system_prompt:
         raise PromptTSGExtractionError("extractor prompt is empty")
+    if (reviewer_evaluator_path is None) != (reviewer_prompt_path is None):
+        raise PromptTSGExtractionError(
+            "semantic reviewer evaluator and prompt paths must be supplied together"
+        )
+    reviewer_evaluator = (
+        _evaluator(read_json(reviewer_evaluator_path))
+        if reviewer_evaluator_path is not None
+        else None
+    )
+    reviewer_prompt = (
+        reviewer_prompt_path.read_text(encoding="utf-8").strip()
+        if reviewer_prompt_path is not None
+        else None
+    )
+    if reviewer_prompt_path is not None and not reviewer_prompt:
+        raise PromptTSGExtractionError("semantic reviewer prompt is empty")
     graphs = []
     requests = []
     responses = []
@@ -251,6 +306,8 @@ def extract_task_file(
                 catalog=catalog,
                 evaluator=evaluator,
                 system_prompt=system_prompt,
+                reviewer_evaluator=reviewer_evaluator,
+                reviewer_prompt=reviewer_prompt,
                 provider=provider,
             )
         except PromptTSGExtractionError as error:
@@ -267,14 +324,29 @@ def extract_task_file(
                 )
             break
         graphs.append(prompt_tsg_record(graph))
-        requests.append({**request, "deterministic_projection": projection})
-        responses.append(
-            {
-                "task_id": task["task_id"],
-                "response_sha256": hashlib.sha256(raw).hexdigest(),
-                "response_text": raw.decode("utf-8", errors="strict"),
+        stored_projection = dict(projection)
+        review = stored_projection.pop("semantic_review", None)
+        request_record = {**request, "deterministic_projection": stored_projection}
+        response_record = {
+            "task_id": task["task_id"],
+            "response_sha256": hashlib.sha256(raw).hexdigest(),
+            "response_text": raw.decode("utf-8", errors="strict"),
+        }
+        if review is not None:
+            request_record["semantic_review_request"] = review["request"]
+            request_record["semantic_review_projection"] = {
+                key: value
+                for key, value in review.items()
+                if key not in {"request", "response_text"}
             }
-        )
+            response_record["semantic_review_response_sha256"] = review[
+                "response_sha256"
+            ]
+            response_record["semantic_review_response_text"] = review[
+                "response_text"
+            ]
+        requests.append(request_record)
+        responses.append(response_record)
     report = {
         "schema_version": "1.0",
         "status": (
@@ -293,6 +365,17 @@ def extract_task_file(
         "catalog_sha256": catalog_sha256(catalog),
         "evaluator_sha256": hashlib.sha256(evaluator_path.read_bytes()).hexdigest(),
         "prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
+        "semantic_reviewer_evaluator_sha256": (
+            hashlib.sha256(reviewer_evaluator_path.read_bytes()).hexdigest()
+            if reviewer_evaluator_path is not None
+            else None
+        ),
+        "semantic_reviewer_prompt_sha256": (
+            hashlib.sha256(reviewer_prompt_path.read_bytes()).hexdigest()
+            if reviewer_prompt_path is not None
+            else None
+        ),
+        "semantic_reviewed_tasks": len(graphs) if reviewer_evaluator is not None else 0,
         "extractor_implementation_sha256": hashlib.sha256(
             Path(__file__).read_bytes()
         ).hexdigest(),
@@ -315,6 +398,131 @@ def extract_task_file(
         },
     )
     return report
+
+
+def _review_catalog_facts(
+    task: Mapping[str, Any],
+    *,
+    facts: Sequence[Mapping[str, Any]],
+    relations: Sequence[Mapping[str, Any]],
+    catalog: Mapping[str, Any],
+    evaluator: Mapping[str, Any],
+    system_prompt: str,
+    provider: Provider,
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]], dict[str, Any]]:
+    """Blindly reject semantic overreach without inventing or repairing a fact."""
+
+    if not system_prompt:
+        raise PromptTSGExtractionError("semantic reviewer prompt is empty")
+    descriptive = {"task.requirement", "task.operation", "data.object"}
+    reviewed = [fact for fact in facts if fact["semantic_id"] not in descriptive]
+    reviewed_ids = {fact["local_id"] for fact in reviewed}
+    reviewed_semantics = {fact["semantic_id"] for fact in reviewed}
+    request = {
+        "schema_version": "1.0",
+        "request_kind": "prompt_tsg_semantic_fact_review",
+        "task_id": task["task_id"],
+        "source_prompt": task["prompt"],
+        "proposed_facts": [
+            {
+                "local_id": fact["local_id"],
+                "node_type": fact["node_type"],
+                "semantic_id": fact["semantic_id"],
+                "evidence_text": fact["evidence_text"],
+                "guidance": catalog["semantic_guidance"].get(
+                    fact["semantic_id"],
+                    "Accept only when the source prompt directly entails this semantic role.",
+                ),
+            }
+            for fact in reviewed
+        ],
+        "arms_or_outcomes_included": False,
+        "output_contract": {
+            "top_level_keys": ["accepted_local_ids", "unresolved_semantics"],
+            "accepted_local_ids": "unique subset of proposed local_id strings",
+            "unresolved_semantics": "unique subset of proposed semantic_id strings",
+        },
+    }
+    raw = provider(request, evaluator, system_prompt)
+    if not isinstance(raw, bytes):
+        raise PromptTSGExtractionError(
+            "semantic reviewer response is not bytes", request=request
+        )
+    try:
+        value = json.loads(raw)
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        raise PromptTSGExtractionError(
+            "semantic reviewer response is not JSON", request=request, raw=raw
+        ) from None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"accepted_local_ids", "unresolved_semantics"}
+        or not isinstance(value["accepted_local_ids"], list)
+        or not isinstance(value["unresolved_semantics"], list)
+        or any(not isinstance(item, str) or not item for item in value["accepted_local_ids"])
+        or any(not isinstance(item, str) or not item for item in value["unresolved_semantics"])
+        or len(value["accepted_local_ids"]) != len(set(value["accepted_local_ids"]))
+        or len(value["unresolved_semantics"]) != len(set(value["unresolved_semantics"]))
+        or not set(value["accepted_local_ids"]) <= reviewed_ids
+        or not set(value["unresolved_semantics"]) <= reviewed_semantics
+    ):
+        raise PromptTSGExtractionError(
+            "semantic reviewer response violates its closed contract",
+            request=request,
+            raw=raw,
+        )
+    accepted_ids = set(value["accepted_local_ids"])
+    accepted_semantics = {
+        fact["semantic_id"] for fact in reviewed if fact["local_id"] in accepted_ids
+    }
+    unresolved = set(value["unresolved_semantics"])
+    if accepted_semantics & unresolved:
+        raise PromptTSGExtractionError(
+            "semantic reviewer both accepted and unresolved one semantic",
+            request=request,
+            raw=raw,
+        )
+    retained_ids = {
+        fact["local_id"]
+        for fact in facts
+        if fact["semantic_id"] in descriptive or fact["local_id"] in accepted_ids
+    }
+    retained_facts = [fact for fact in facts if fact["local_id"] in retained_ids]
+    retained_relations = [
+        relation
+        for relation in relations
+        if relation["source"] in retained_ids and relation["target"] in retained_ids
+    ]
+    rejected_facts = [
+        {
+            "local_id": fact["local_id"],
+            "semantic_id": fact["semantic_id"],
+            "reason": (
+                "semantic_reviewer_unresolved"
+                if fact["semantic_id"] in unresolved
+                else "semantic_reviewer_rejected"
+            ),
+        }
+        for fact in reviewed
+        if fact["local_id"] not in accepted_ids
+    ]
+    rejected_relations = [
+        {
+            **relation,
+            "reason": "semantic_reviewer_endpoint_rejected",
+        }
+        for relation in relations
+        if relation not in retained_relations
+    ]
+    return retained_facts, retained_relations, {
+        "request": request,
+        "response_sha256": hashlib.sha256(raw).hexdigest(),
+        "response_text": raw.decode("utf-8", errors="strict"),
+        "accepted_local_ids": sorted(accepted_ids),
+        "unresolved_semantics": sorted(unresolved),
+        "rejected_facts": rejected_facts,
+        "rejected_relations": rejected_relations,
+    }
 
 
 def _proposal(raw: bytes) -> dict[str, Any]:

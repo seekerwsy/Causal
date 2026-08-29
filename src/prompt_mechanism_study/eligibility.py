@@ -176,6 +176,18 @@ def qualify_prompt_tsg_extractor(
         or bundle_report.get("arms_or_outcomes_used") is not False
     ):
         raise EligibilityError("Prompt TSG qualification inputs do not match the extraction")
+    if "+" in gold["extractor_candidate_id"] and (
+        bundle_report.get("semantic_reviewed_tasks") != len(cases)
+        or not isinstance(bundle_report.get("semantic_reviewer_evaluator_sha256"), str)
+        or not isinstance(bundle_report.get("semantic_reviewer_prompt_sha256"), str)
+        or len(requests) != len(cases)
+        or any(
+            not isinstance(request.get("semantic_review_request"), dict)
+            or not isinstance(request.get("semantic_review_projection"), dict)
+            for request in requests
+        )
+    ):
+        raise EligibilityError("Prompt TSG semantic review evidence is not exactly closed")
 
     catalog = load_catalog(catalog_path)
     registry = load_mechanism_registry(registry_path)
@@ -289,6 +301,12 @@ def qualify_prompt_tsg_extractor(
         "extractor_implementation_sha256": bundle_report[
             "extractor_implementation_sha256"
         ],
+        "semantic_reviewer_evaluator_sha256": bundle_report.get(
+            "semantic_reviewer_evaluator_sha256"
+        ),
+        "semantic_reviewer_prompt_sha256": bundle_report.get(
+            "semantic_reviewer_prompt_sha256"
+        ),
         "catalog_sha256": _sha256(catalog_path),
         "registry_sha256": _sha256(registry_path),
         "gold_sha256": _sha256(gold_path),

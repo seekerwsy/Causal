@@ -404,3 +404,80 @@ def test_extractor_never_drops_nonverbatim_catalog_bound_facts():
             system_prompt="extract facts",
             provider=provider,
         )
+
+
+@pytest.mark.reviewer
+def test_blind_semantic_reviewer_can_only_reject_or_mark_proposed_facts():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v2.json")
+    prompt = "Load a YAML configuration file."
+    task = {
+        "task_id": "yaml-task",
+        "task_unit_id": "yaml-task",
+        "prompt": prompt,
+        "cwe": "CWE-502",
+        "task_family": "deserialization",
+    }
+    proposal = {
+        "facts": [
+            _fact("source", "source", "source.untrusted_yaml", prompt),
+            _fact("sink", "sink", "sink.yaml_deserialization", prompt),
+            _fact(
+                "format",
+                "constraint",
+                "constraint.yaml_format_required",
+                "YAML configuration file",
+            ),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "source", "target": "sink"}
+        ],
+        "unresolved_semantics": [],
+    }
+    review = {
+        "accepted_local_ids": ["sink", "format"],
+        "unresolved_semantics": [],
+    }
+
+    def provider(request, evaluator, _prompt):
+        import json
+
+        if request.get("request_kind") == "prompt_tsg_semantic_fact_review":
+            assert evaluator["candidate_id"] == "reviewer-v1"
+            assert request["arms_or_outcomes_included"] is False
+            return json.dumps(review).encode()
+        assert evaluator["candidate_id"] == "proposer-v1"
+        return json.dumps(proposal).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "proposer-v1"},
+        system_prompt="propose facts",
+        reviewer_evaluator={"candidate_id": "reviewer-v1"},
+        reviewer_prompt="review facts",
+        provider=provider,
+    )
+
+    query = query_for_realization(catalog, "cwe502_yaml_deserialization")
+    assert graph.extractor_id == "proposer-v1+reviewer-v1"
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-502",
+        task_family="deserialization",
+    ).state is QueryState.ABSENT
+    assert projection["semantic_review"]["rejected_facts"] == [
+        {
+            "local_id": "source",
+            "semantic_id": "source.untrusted_yaml",
+            "reason": "semantic_reviewer_rejected",
+        }
+    ]
+    assert projection["semantic_review"]["rejected_relations"] == [
+        {
+            "edge_type": "flows_to",
+            "source": "source",
+            "target": "sink",
+            "reason": "semantic_reviewer_endpoint_rejected",
+        }
+    ]

@@ -183,6 +183,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_tsg_extract.add_argument("--start", type=int, default=0)
     prompt_tsg_extract.add_argument("--limit", type=int)
     prompt_tsg_extract.add_argument("--task-selection", type=Path)
+    prompt_tsg_extract.add_argument("--semantic-reviewer", type=Path)
+    prompt_tsg_extract.add_argument("--semantic-reviewer-prompt", type=Path)
 
     positivity = commands.add_parser(
         "positivity-audit",
@@ -353,6 +355,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             start=args.start,
             limit=args.limit,
             task_selection_path=args.task_selection,
+            reviewer_evaluator_path=args.semantic_reviewer,
+            reviewer_prompt_path=args.semantic_reviewer_prompt,
         )
         print(report["status"])
         return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2
