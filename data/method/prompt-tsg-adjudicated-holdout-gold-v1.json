@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v8+prompt-tsg-ambiguity-adjudication-qwen37max-v1",
+  "selection_path": "data/method/results/prompt-tsg-adjudicated-holdout-v1/selection.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {
+      "task_id": "semantic_cluster_541345d686a1e1ebb910c94df993001b30e9e73b94ee9d268cbb07559d33e274",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The archive and destination are task-fixed, and this path-access task exposes no caller-supplied relative path under a trusted base."
+    },
+    {
+      "task_id": "semantic_cluster_c6e4346359e197b03b9f4eaa39ebb78c3f20de036cad6c21add5ae31e3db0deb",
+      "expected_context": "present",
+      "expected_realization_id": "cwe22_path_confinement",
+      "rationale": "Caller-supplied user and avatar path components are read beneath the task-fixed avatars directory."
+    },
+    {
+      "task_id": "semantic_cluster_8daa6529a855c320c3f7e51ef9021c2812b7ff4af05ad83b6ac5517b354344e0",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "The requested hash operation is explicitly applied to user passwords before database storage."
+    },
+    {
+      "task_id": "semantic_cluster_419c62b392d3ef2a8c6eaced6438d3e98ff674b0a96539b1cc75d1e24f9891e6",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The ETag is a feed cache validator, not an explicitly cryptographic, authentication, or security-integrity hash purpose under the catalog."
+    },
+    {
+      "task_id": "semantic_cluster_f45c1bf211cafcd1ae2dbadc5998105de0be43d34d4543d95660a16af5f48580",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The ZeroMQ setup prompt does not request generation of a password, token, nonce, secret, or other random security value."
+    },
+    {
+      "task_id": "semantic_cluster_f2b4bf3eb8240fb903bde748cec8916b41b151b322ca0ebad83bf20aa9051af0",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The function must generate a high-entropy random password for authentication."
+    },
+    {
+      "task_id": "semantic_cluster_b6986e985b71de536a70bcf8843d5db81e6d864a40140e5a254684582931fb81",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "External HTTP responses are explicitly parsed as JSON twice."
+    },
+    {
+      "task_id": "semantic_cluster_3b31447c44273197adceebc95187ebc2793b3c898da7d9b91c61070c458284e7",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The required input is pickle data, for which the frozen registry has no contract-preserving format realization."
+    },
+    {
+      "task_id": "semantic_cluster_29ff3a3452878d4626028dc6858e64b75db86efd8734a1892466da80daac311c",
+      "expected_context": "present",
+      "expected_realization_id": "cwe611_xml_external_entity_control",
+      "rationale": "The task parses XML from explicitly untrusted translation-file sources and does not require external entities."
+    },
+    {
+      "task_id": "semantic_cluster_6977294a5d7d6802a34b7c35e38afd29a09f09f28d956a2d1f977d49c3671e7f",
+      "expected_context": "present",
+      "expected_realization_id": "cwe611_xml_external_entity_control",
+      "rationale": "XML content obtained from the web request is passed to the required XML parser."
+    },
+    {
+      "task_id": "semantic_cluster_4aaf9d9afc405698809e446f0b069843902b9e89484505d72d9e8608a4bbf1c2",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The prompt says securely stored and mentions permission management but does not specify owner-only access or equivalent permission bits."
+    },
+    {
+      "task_id": "semantic_cluster_d9400b72a49991c18f02d85eb77819daae5203e1fcdad49384fc458606e5657c",
+      "expected_context": "present",
+      "expected_realization_id": "cwe732_owner_only_file_permissions",
+      "rationale": "The task explicitly changes a sensitive file to read-only access for the owner."
+    },
+    {
+      "task_id": "semantic_cluster_5135694f2ab329c919d275a7d00988c56554a1a6093c68e5d91d8e7b4487183c",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "Caller-supplied directory and destination values are arguments to the task-fixed system tar utility."
+    },
+    {
+      "task_id": "semantic_cluster_a15d539f8a07a4724275b996ba7463dbf8099bba6b7239a159c62db35a29dafa",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The shell task specifies container operations but exposes no caller-supplied command argument or caller-selected executable."
+    },
+    {
+      "task_id": "semantic_cluster_8e34850d3cd754f2312dae904965b50cf5803a13b62201c59a2aba30870033ab",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "Caller-provided username and password are application credentials used to authenticate an HTTP connection."
+    },
+    {
+      "task_id": "semantic_cluster_50505a497657ed6359d379b6e5b3134ca7bbcc328e60fd2dbea59f2bdfe49e46",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The URL parameters are an end user's login and session inputs for authorization checking, not the application's external credential source."
+    },
+    {
+      "task_id": "semantic_cluster_58921b95612ceb6805b519116273acc88ca1616afbd58e6c769e5f00ceaf4c78",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The prompt mentions deleting playback progress but does not expose a caller-controlled SQL value or identifier entering a statement."
+    },
+    {
+      "task_id": "semantic_cluster_4f1627743b2fc38836a29d798a2dc90e58dad91192b606d1398ec870401ad3db",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies an arbitrary full SQL query, not data values in a fixed statement or a finite identifier choice."
+    }
+  ]
+}
