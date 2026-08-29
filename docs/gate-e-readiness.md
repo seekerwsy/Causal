@@ -101,8 +101,11 @@ The labels below distinguish execution from inherited evidence.
    curation and provider-adapter source digests.
 9. **Extractor semantic qualification.** Structural validation alone did not
    catch four task-role overgeneralizations in the first ten-task pilot. The
-   successor extractor has a new identity and stricter finite-role policy; it
-   remains unqualified until a disjoint holdout evidence review passes. A
+   first successor attempt also failed a disjoint holdout through invented
+   evidence spans and security-role overreach on filename hashing and random
+   log generation. `qwen3.5-flash` is therefore not qualified as the formal
+   extractor. The stronger extractor has a new identity and remains
+   unqualified until a further disjoint holdout evidence review passes. A
    successful JSON response or graph construction is not an accuracy claim.
 
 ## Exact next Gate C package
