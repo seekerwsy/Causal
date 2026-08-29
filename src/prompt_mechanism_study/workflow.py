@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from prompt_mechanism_study.adapters import AdapterBundle
+from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.inference import (
-    AnalysisPlan,
     FactorialAnalysisPlan,
     FactorialInferenceResult,
-    InferenceResult,
     SuccessorAnalysisPlan,
     SuccessorInferenceResult,
     estimate_factorial_effects,
-    estimate_policy_effects,
     estimate_successor_effects,
 )
 from prompt_mechanism_study.intervention import (
     FactorialPolicy,
-    InterventionPolicy,
     InterventionPolicyV2,
 )
 from prompt_mechanism_study.measurement import (
@@ -34,28 +31,15 @@ from prompt_mechanism_study.mechanisms import (
     PairEligibility,
 )
 from prompt_mechanism_study.outcomes import Outcome, derive_outcomes
-from prompt_mechanism_study.prioritization import SelectionFreeze, freeze_selection
 from prompt_mechanism_study.randomization import (
     FactorialRandomization,
-    Randomization,
     SuccessorRandomization,
-    randomize,
     randomize_factorial,
     randomize_successor,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
-from prompt_mechanism_study.representation import (
-    Candidate,
-    CandidateUniverse,
-    FrozenHypothesisV2,
-    Population,
-    SourceEligibilityV2,
-    Task,
-    freeze_population,
-    freeze_universe,
-)
+from prompt_mechanism_study.representation import FrozenHypothesisV2, SourceEligibilityV2, Task
 
-METHOD_VERSION = "prompt-mechanism-study-method-1.3.0"
 SUCCESSOR_METHOD_VERSION = "prompt-mechanism-study-method-2.0.0-successor"
 FACTORIAL_METHOD_VERSION = "prompt-mechanism-study-method-1.6.0-factorial-v3"
 
@@ -74,62 +58,6 @@ def factorial_oracle_dispatch_policy_sha256(pairs: Iterable[object]) -> str:
     if not material:
         raise ValueError("factorial Oracle dispatch cannot be empty")
     return content_hash(material)
-
-
-@dataclass(frozen=True, slots=True)
-class StudyFreeze:
-    method_version: str
-    population: Population
-    universe: CandidateUniverse
-    selection: SelectionFreeze
-    policies: tuple[InterventionPolicy, ...]
-    adapters: AdapterBundle
-    randomization: Randomization
-    analysis_plan: AnalysisPlan
-
-    def __post_init__(self) -> None:
-        if self.method_version != METHOD_VERSION:
-            raise ValueError("unsupported method version")
-        selected = set(self.selection.selected_candidate_ids)
-        if self.selection.universe_id != self.universe.universe_id:
-            raise ValueError("selection does not bind the candidate universe")
-        if self.universe.representation_adapter_id != self.adapters.representation.adapter_id:
-            raise ValueError("candidate universe representation adapter drift")
-        if self.selection.selector_adapter_id != self.adapters.selector.adapter_id:
-            raise ValueError("selection adapter drift")
-        if {item.candidate_id for item in self.policies} != selected:
-            raise ValueError("one intervention policy must bind every selected candidate")
-        candidates = {item.candidate_id: item for item in self.universe.candidates}
-        if any(
-            policy.spec.operation is not candidates[policy.candidate_id].operation
-            for policy in self.policies
-        ):
-            raise ValueError("intervention policy operation drifts from its candidate")
-        if self.randomization.population_id != self.population.population_id:
-            raise ValueError("randomization population drift")
-        if self.randomization.selection_id != self.selection.selection_id:
-            raise ValueError("randomization selection drift")
-        _validate_policy_support(self)
-
-    @property
-    def study_id(self) -> str:
-        return content_id("study_", self)
-
-
-@dataclass(frozen=True, slots=True)
-class Analysis:
-    study_id: str
-    ledger: MeasurementLedger
-    outcomes: tuple[Outcome, ...]
-    inference: InferenceResult
-
-    def __post_init__(self) -> None:
-        if self.ledger.study_id != self.study_id:
-            raise ValueError("measurement ledger does not bind the study")
-
-    @property
-    def analysis_id(self) -> str:
-        return content_id("analysis_", self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,75 +350,6 @@ class FactorialAnalysis:
         return content_id("factorial_analysis_", self)
 
 
-def freeze_study(
-    tasks: Iterable[Task],
-    candidates: Iterable[Candidate],
-    scores: Mapping[str, float],
-    policies: Iterable[InterventionPolicy],
-    adapters: AdapterBundle,
-    analysis_plan: AnalysisPlan,
-    *,
-    top_k: int,
-    models: Iterable[str],
-    slots: Iterable[int],
-    randomization_seed: int,
-) -> StudyFreeze:
-    population = freeze_population(tasks)
-    universe = freeze_universe(
-        candidates,
-        representation_adapter_id=adapters.representation.adapter_id,
-    )
-    selection = freeze_selection(
-        universe,
-        scores,
-        selector_adapter_id=adapters.selector.adapter_id,
-        top_k=top_k,
-    )
-    frozen_policies = tuple(sorted(policies, key=lambda item: item.policy_id))
-    assignment = randomize(
-        frozen_policies,
-        population_id=population.population_id,
-        selection_id=selection.selection_id,
-        models=models,
-        slots=slots,
-        seed=randomization_seed,
-    )
-    return StudyFreeze(
-        METHOD_VERSION,
-        population,
-        universe,
-        selection,
-        frozen_policies,
-        adapters,
-        assignment,
-        analysis_plan,
-    )
-
-
-def analyze(
-    study: StudyFreeze,
-    measurements: Iterable[Measurement],
-    *,
-    infrastructure_failures: Iterable[InfrastructureFailure] = (),
-) -> Analysis:
-    ledger = close_measurements(
-        study.randomization,
-        study.adapters,
-        measurements,
-        study_id=study.study_id,
-        infrastructure_failures=infrastructure_failures,
-    )
-    outcomes = derive_outcomes(ledger)
-    inference = estimate_policy_effects(
-        study.randomization,
-        outcomes,
-        study.policies,
-        study.population.confirm_tasks,
-        study.analysis_plan,
-    )
-    return Analysis(study.study_id, ledger, outcomes, inference)
-
-
 def freeze_successor_study(
     tasks: Iterable[Task],
     hypotheses: Iterable[FrozenHypothesisV2],
@@ -655,36 +514,6 @@ def analyze_factorial(
     return FactorialAnalysis(study.study_id, ledger, outcomes, inference)
 
 
-def _validate_policy_support(study: StudyFreeze) -> None:
-    confirm_tasks = {item.task_id: item for item in study.population.confirm_tasks}
-    for policy in study.policies:
-        realization_ids = {item.realization_id for item in policy.realizations}
-        support = {(item.task_id, item.realization_id) for item in policy.bundles}
-        expected = {
-            (task_id, realization_id)
-            for task_id in confirm_tasks
-            for realization_id in realization_ids
-        }
-        if len(support) != len(policy.bundles) or support != expected:
-            raise ValueError("policy lacks complete confirm-task realization support")
-        for bundle in policy.bundles:
-            task = confirm_tasks.get(bundle.task_id)
-            if task is None or bundle.semantic_cluster_id != task.semantic_cluster_id:
-                raise ValueError("task bundle population binding drift")
-        if any(
-            realization.executor_adapter_id != study.adapters.intervention_executor.adapter_id
-            for realization in policy.realizations
-        ):
-            raise ValueError("intervention executor adapter drift")
-        if any(
-            variant.validation.validator_adapter_id
-            != study.adapters.intervention_validator.adapter_id
-            for bundle in policy.bundles
-            for variant in bundle.variants
-        ):
-            raise ValueError("intervention validator adapter drift")
-
-
 def _validate_successor_policy_support(study: SuccessorStudyFreeze) -> None:
     task_by_id = {item.task_id: item for item in study.tasks}
     eligibility_by_coordinate = {
@@ -788,31 +617,18 @@ def _validate_factorial_policy_support(study: FactorialStudyFreeze) -> None:
         ):
             raise ValueError("factorial intervention validator adapter drift")
 
-
-def _require_digest(value: str, name: str) -> None:
-    if not isinstance(value, str) or len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
-
-
 __all__ = [
     "FACTORIAL_METHOD_VERSION",
-    "METHOD_VERSION",
     "SUCCESSOR_METHOD_VERSION",
-    "Analysis",
     "FactorialAnalysis",
     "FactorialPairSelection",
     "FactorialStudyFreeze",
-    "StudyFreeze",
     "SuccessorAnalysis",
     "SuccessorSelectionProvenance",
     "SuccessorStudyFreeze",
-    "analyze",
     "analyze_factorial",
     "analyze_successor",
     "factorial_oracle_dispatch_policy_sha256",
     "freeze_factorial_study",
-    "freeze_study",
     "freeze_successor_study",
 ]

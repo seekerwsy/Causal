@@ -74,7 +74,11 @@ is `/home/wsy/prompt-mechanism-study-experiments/four-arm-v2-6c62671-20260825-05
 archive is `.artifacts/four-arm-v2-6c62671-results.tar.gz`. Execution used Ubuntu 22, Python 3.12.13,
 Semgrep 1.168.0, Bandit 1.9.4, and the A800 host. The deployment contains no Python bytecode files.
 
-Run the independent verifier against the tracked bundle with:
+This result is archival evidence. The active package intentionally no longer
+exposes the historical four-arm runner or verifier. Reproduce it from the
+immutable artifact-closure commit `01e55ee` in a separate checkout or Git
+worktree; do not restore that execution path to the active package. From that
+checkout, run:
 
 ```text
 prompt-mechanism-four-arm verify-analysis \

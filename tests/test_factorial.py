@@ -7,7 +7,6 @@ from prompt_mechanism_study.artifact_io import read_json, verify_bundle, write_b
 from prompt_mechanism_study.factorial_corpus import build_sql_factorial_corpus
 from prompt_mechanism_study.factorial_experiment import (
     _mechanism_trace_summary,
-    preflight_factorial_experiment,
 )
 from prompt_mechanism_study.factorial_verify import (
     verify_factorial_inference,
@@ -16,7 +15,6 @@ from prompt_mechanism_study.factorial_verify import (
 )
 from prompt_mechanism_study.inference import (
     FactorialAnalysisPlan,
-    FactorialAnalysisPlanV2,
     FactorialEffect,
     Metric,
     estimate_factorial_effects,
@@ -274,11 +272,23 @@ def test_factorial_result_is_independently_recomputed() -> None:
             assignment.assignment_id,
             1,
             1,
-            int(assignment.cell is FactorialCell.A11),
-            int(assignment.cell is FactorialCell.A11),
+            int(
+                int(assignment.block.task_unit_id.rsplit("-", 1)[1]) % 2 == 0
+                and assignment.cell is not FactorialCell.A00
+            ),
+            int(
+                int(assignment.block.task_unit_id.rsplit("-", 1)[1]) % 2 == 0
+                and assignment.cell is not FactorialCell.A00
+            ),
             1,
-            int(assignment.cell is FactorialCell.A11),
-            int(assignment.cell is FactorialCell.A11),
+            int(
+                int(assignment.block.task_unit_id.rsplit("-", 1)[1]) % 2 == 0
+                and assignment.cell is not FactorialCell.A00
+            ),
+            int(
+                int(assignment.block.task_unit_id.rsplit("-", 1)[1]) % 2 == 0
+                and assignment.cell is not FactorialCell.A00
+            ),
             None,
         )
         for assignment in randomization.assignments
@@ -301,13 +311,12 @@ def test_factorial_result_is_independently_recomputed() -> None:
         result,
     )
 
-    assert verification == {
-        "status": "FACTORIAL_INFERENCE_VERIFIED",
-        "assignments": 24,
-        "coordinates": 2,
-        "primary_intervals": 1,
-        "secondary_intervals": 3,
-    }
+    assert verification["status"] == "FACTORIAL_INFERENCE_VERIFIED"
+    assert verification["assignments"] == 24
+    assert verification["coordinates"] == 2
+    assert verification["primary_intervals"] == 1
+    assert verification["secondary_intervals"] == 3
+    assert verification["primary_bootstrap"]["status"] == "evaluable"
     assert {item.effect for item in result.secondary_intervals} == {
         FactorialEffect.FACTOR_1,
         FactorialEffect.FACTOR_2,
@@ -335,7 +344,7 @@ def test_prospective_factorial_uses_replicate_studentized_task_units() -> None:
         )
         for assignment in randomization.assignments
     )
-    plan = FactorialAnalysisPlanV2(
+    plan = FactorialAnalysisPlan(
         (Metric.SECURE_YIELD,),
         Metric.SECURE_YIELD,
         2401,
@@ -422,7 +431,7 @@ def test_prospective_factorial_resamples_partial_support_from_global_union() -> 
         )
         for assignment in randomization.assignments
     )
-    plan = FactorialAnalysisPlanV2(
+    plan = FactorialAnalysisPlan(
         (Metric.SECURE_YIELD,),
         Metric.SECURE_YIELD,
         2402,
@@ -568,15 +577,6 @@ def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
         "assignments": 4,
         "endpoints": 2,
     }
-
-
-@pytest.mark.reviewer
-def test_archival_preflight_fails_closed_after_oracle_implementation_change() -> None:
-    with pytest.raises(ValueError, match="frozen file drift"):
-        preflight_factorial_experiment(
-            Path("."),
-            Path("configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json"),
-        )
 
 
 @pytest.mark.reviewer

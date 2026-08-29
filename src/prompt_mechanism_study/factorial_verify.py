@@ -28,6 +28,7 @@ from prompt_mechanism_study.functional_judge import (
     python_syntax_valid,
     validate_review_response,
 )
+from prompt_mechanism_study.factorial_freeze import verify_factorial_freeze_bundle
 from prompt_mechanism_study.interaction_selector_experiment import (
     INTERACTION_SELECTION_ARTIFACT_FILES,
     verify_interaction_selection_bundle,
@@ -983,10 +984,6 @@ def _verify_portable_factorial_freeze(root: Path) -> None:
         write_bundle(portable, artifacts)
         if bundle_digest(portable) != metadata.get("bundle_sha256"):
             raise ValueError("stored factorial freeze digest drift")
-        from prompt_mechanism_study.factorial_experiment import (
-            verify_factorial_freeze_bundle,
-        )
-
         verified = verify_factorial_freeze_bundle(portable)
     if verified != metadata.get("verification"):
         raise ValueError("stored factorial freeze semantic verification drift")

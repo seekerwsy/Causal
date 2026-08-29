@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.prompt_tsg import QueryState
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
 
@@ -389,13 +390,6 @@ def freeze_universe(
     )
 
 
-def _require_digest(value: str | None, name: str) -> None:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
 
 
 __all__ = [

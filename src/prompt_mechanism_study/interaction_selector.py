@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.mechanisms import (
     MechanismRelationSpec,
     PairRelationEvidence,
@@ -624,11 +625,6 @@ def _sigmoid(value: float) -> float:
     return exponential / (1.0 + exponential)
 
 
-def _require_digest(value: str) -> None:
-    if not isinstance(value, str) or len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise ValueError("discovery data SHA-256 must be a lowercase digest")
 
 
 __all__ = [

@@ -72,6 +72,78 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def read_json_exact(path: Path) -> Any:
+    """Read JSON while rejecting duplicate keys and non-finite numbers."""
+
+    try:
+        return loads_exact_json(path.read_bytes())
+    except OSError:
+        raise ValueError(f"JSON input is unreadable: {path}") from None
+
+
+def loads_exact_json(payload: str | bytes) -> Any:
+    """Parse strict JSON with unique object keys and finite numeric values."""
+
+    try:
+        return json.loads(
+            payload,
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError, TypeError):
+        raise ValueError("invalid strict JSON") from None
+
+
+def json_object(payload: str | bytes) -> dict[str, Any]:
+    value = loads_exact_json(payload)
+    if not isinstance(value, dict):
+        raise ValueError("JSON value is not an object")
+    return value
+
+
+def confined_path(root: Path, value: object) -> Path:
+    """Resolve one stored path beneath an explicit artifact root."""
+
+    if not isinstance(value, (str, Path)) or not str(value):
+        raise ValueError("stored path is invalid")
+    base = root.resolve()
+    path = Path(value)
+    resolved = path.resolve() if path.is_absolute() else (base / path).resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        raise ValueError("stored path escapes its root") from None
+    return resolved
+
+
+def file_sha256(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        raise ValueError(f"file is unreadable: {path}") from None
+
+
+def require_file_hash(path: Path, expected: object) -> str:
+    digest = require_sha256(expected)
+    if not path.is_file() or file_sha256(path) != digest:
+        raise ValueError(f"frozen file drift: {path}")
+    return digest
+
+
+def is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def require_sha256(value: object, name: str = "value") -> str:
+    if not is_sha256(value):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
 def _valid_name(name: str) -> None:
     path = Path(name)
     if path.is_absolute() or len(path.parts) != 1 or path.name in {"", MANIFEST}:
@@ -79,12 +151,30 @@ def _valid_name(name: str) -> None:
 
 
 def _digest(value: object) -> None:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise ValueError("invalid artifact digest")
+    require_sha256(value)
 
 
-__all__ = ["MANIFEST", "bundle_digest", "read_json", "verify_bundle", "write_bundle"]
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
+__all__ = [
+    "MANIFEST",
+    "bundle_digest",
+    "confined_path",
+    "file_sha256",
+    "is_sha256",
+    "json_object",
+    "loads_exact_json",
+    "read_json",
+    "read_json_exact",
+    "require_file_hash",
+    "require_sha256",
+    "verify_bundle",
+    "write_bundle",
+]

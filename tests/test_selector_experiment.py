@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-import prompt_mechanism_study.selector_experiment as experiment
+import prompt_mechanism_study.selector_analysis as analysis
 from prompt_mechanism_study import prioritization
-from prompt_mechanism_study.artifact_io import read_json, write_bundle
+from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.cli import main
 from prompt_mechanism_study.prioritization import (
     BackgroundKnowledgeRule,
@@ -22,20 +22,17 @@ from prompt_mechanism_study.prioritization import (
 )
 from prompt_mechanism_study.records import canonical_json, canonical_value, content_hash
 from prompt_mechanism_study.representation import FrozenHypothesisV2, TargetSpecV2
+from prompt_mechanism_study.selector_analysis import (
+    run_selector_experiment_from_config,
+    verify_selector_experiment_bundle,
+)
 from prompt_mechanism_study.selector_experiment import (
     SelectorExperimentError,
     build_active_selector_evidence,
-    freeze_archival_bridge_from_config,
-    freeze_archival_selection_from_config,
     freeze_bridge_from_config,
     freeze_selection_from_config,
-    load_archival_bridge_freeze_bundle,
-    load_archival_selection_freeze_bundle,
     load_bridge_freeze_bundle,
     load_selection_freeze_bundle,
-    run_selector_experiment_from_config,
-    verify_archival_selection_freeze_bundle,
-    verify_selector_experiment_bundle,
     write_selection_freeze_bundle,
 )
 from prompt_mechanism_study.selector_inference import (
@@ -143,77 +140,6 @@ def _prospective_fixture(monkeypatch):
 
 
 @pytest.mark.reviewer
-def test_archival_selection_has_an_explicit_entrypoint_and_active_api_rejects_it(
-    tmp_path: Path,
-) -> None:
-    manifest, rows, plan, _ids, fci, expert = _fixture()
-    config = {
-        "schema_version": "1.0",
-        "universe": canonical_value(manifest),
-        "observations": canonical_value(rows),
-        "plan": canonical_value(plan),
-        "expert_input": canonical_value(expert),
-        "fci_relation_scores": canonical_value(fci),
-    }
-    config_path = tmp_path / "selector.json"
-    config_path.write_text(canonical_json(config), encoding="utf-8")
-    output = tmp_path / "selection"
-    with pytest.raises(SelectorExperimentError, match="fields are not exact"):
-        freeze_selection_from_config(config_path, output)
-
-    report = freeze_archival_selection_from_config(config_path, output)
-    assert report["status"] == "ARCHIVAL_SELECTION_FREEZE_VERIFIED"
-    assert load_archival_selection_freeze_bundle(output).selection_id == report["selection_id"]
-    assert verify_archival_selection_freeze_bundle(output)["status"] == "ARCHIVAL_SELECTION_FREEZE_VERIFIED"
-    assert main(["selector-study", "archival-verify-selection", str(output)]) == 0
-    with pytest.raises(SelectorExperimentError, match="active selector requires"):
-        load_selection_freeze_bundle(output)
-
-    selection = load_archival_selection_freeze_bundle(output)
-    bridge_records = tuple(
-        BridgeRecord(
-            candidate_id,
-            BridgeStatus.PROTOCOLIZATION_FAILED,
-            None,
-            "archival_protocolization_failed",
-        )
-        for candidate_id in selection.selected_union_candidate_ids
-    )
-    bridge_config = tmp_path / "archival-bridge.json"
-    bridge_config.write_text(
-        canonical_json(
-            {"schema_version": "1.0", "records": canonical_value(bridge_records)}
-        ),
-        encoding="utf-8",
-    )
-    bridge_root = tmp_path / "archival-bridge"
-    bridge_report = freeze_archival_bridge_from_config(output, bridge_config, bridge_root)
-    assert bridge_report["status"] == "ARCHIVAL_BRIDGE_FREEZE_VERIFIED"
-    assert load_archival_bridge_freeze_bundle(bridge_root, output).records == bridge_records
-    assert main(
-        [
-            "selector-study",
-            "archival-verify-bridge",
-            str(bridge_root),
-            "--selection",
-            str(output),
-        ]
-    ) == 0
-    with pytest.raises(SelectorExperimentError, match="active selector requires"):
-        load_bridge_freeze_bundle(bridge_root, output)
-
-    stored = read_json(output / "effective-config.json")
-    stored["observations"][0]["outcome"] = 1 - stored["observations"][0]["outcome"]
-    payload = (canonical_json(stored) + "\n").encode()
-    (output / "effective-config.json").write_bytes(payload)
-    bundle_manifest = read_json(output / "manifest.json")
-    bundle_manifest["files"]["effective-config.json"] = hashlib.sha256(payload).hexdigest()
-    (output / "manifest.json").write_bytes((canonical_json(bundle_manifest) + "\n").encode())
-    with pytest.raises(SelectorExperimentError):
-        load_archival_selection_freeze_bundle(output)
-
-
-@pytest.mark.reviewer
 def test_active_selector_recomputes_support_and_information_budget(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -285,7 +211,7 @@ def test_representation_comparison_is_end_to_end_not_selector_only() -> None:
         ],
     }
 
-    report = experiment._representation_report(
+    report = analysis._representation_report(
         {"direct": direct, "direct_context": contextual}
     )
 
@@ -325,17 +251,17 @@ def test_representation_comparison_bundle_replays_source_digests(
             "candidate_coverage": 0.75 if role == "direct_context" else 0.5,
         }
 
-    monkeypatch.setattr(experiment, "_representation_summary", fake_summary)
+    monkeypatch.setattr(analysis, "_representation_summary", fake_summary)
     config = {
         "schema_version": "1.0",
         "direct": {
             "result_path": "direct-result",
-            "result_bundle_sha256": experiment.bundle_digest(direct_root),
+            "result_bundle_sha256": bundle_digest(direct_root),
             "representation_adapter_id": "direct-v1",
         },
         "direct_context": {
             "result_path": "context-result",
-            "result_bundle_sha256": experiment.bundle_digest(contextual_root),
+            "result_bundle_sha256": bundle_digest(contextual_root),
             "representation_adapter_id": "direct-context-v1",
         },
     }
@@ -343,10 +269,10 @@ def test_representation_comparison_bundle_replays_source_digests(
     config_path.write_text(canonical_json(config), encoding="utf-8")
     output = tmp_path / "representation-result"
 
-    report = experiment.run_representation_comparison_from_config(config_path, output)
+    report = analysis.run_representation_comparison_from_config(config_path, output)
 
     assert report["status"] == "REPRESENTATION_COMPARISON_COMPLETE"
-    assert experiment.verify_representation_comparison_bundle(output)["status"] == (
+    assert analysis.verify_representation_comparison_bundle(output)["status"] == (
         "REPRESENTATION_COMPARISON_BUNDLE_VERIFIED"
     )
 
@@ -494,7 +420,7 @@ def test_offline_selector_artifact_closure_and_tamper_rejection(tmp_path: Path, 
         "analysis.json": {"inference": {"estimates": estimates}},
     })
     monkeypatch.setattr(
-        experiment,
+        analysis,
         "verify_successor_result_bundle",
         lambda root: {"status": "SUCCESSOR_RESULT_BUNDLE_VERIFIED"},
     )

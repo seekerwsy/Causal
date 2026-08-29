@@ -9,6 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSG,
     QueryState,
@@ -642,11 +643,6 @@ def load_pair_registry(path: Path, catalog: Mapping[str, Any]) -> PairRegistry:
     )
 
 
-def _require_digest(value: str, name: str) -> None:
-    if not isinstance(value, str) or len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
 
 
 def load_mechanism_registry(path: Path) -> dict[str, dict[str, Any]]:

@@ -1,5 +1,3 @@
-import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -22,11 +20,6 @@ from prompt_mechanism_study.prompt_tsg_extract import (
     extract_task_file,
     extraction_request,
 )
-from prompt_mechanism_study.four_arm import _intervention_unit, apply_tsg_exclusion_ledger
-from prompt_mechanism_study.mechanisms import (
-    load_mechanism_registry,
-    tsg_mechanism_binding,
-)
 from prompt_mechanism_study.records import content_hash
 
 
@@ -35,34 +28,6 @@ pytestmark = pytest.mark.reviewer
 ROOT = Path(__file__).parents[1]
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v1.json"
 PROMPT = "Run the fixed git executable with a user-provided branch name and return its output."
-
-
-def test_contract_review_applies_only_frozen_exclusions(tmp_path: Path) -> None:
-    source = tmp_path / "source.jsonl"
-    source.write_text('{"task_id":"a"}\n{"task_id":"b"}\n', encoding="utf-8")
-    review = tmp_path / "review.json"
-    review.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0",
-                "review_name": "test",
-                "source_tasks_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-                "outcome_values_used": False,
-                "exclusions": [
-                    {
-                        "task_id": "b",
-                        "reason_code": "contract_mismatch",
-                        "explanation": "The task does not share the frozen contract.",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    output = tmp_path / "retained.jsonl"
-    report = apply_tsg_exclusion_ledger(source, review, output, tmp_path / "report")
-    assert report["retained_tasks"] == 1
-    assert json.loads(output.read_text(encoding="utf-8"))["task_id"] == "a"
 
 
 def _fact(local_id, node_type, semantic_id, evidence_text, **attributes):
@@ -326,92 +291,3 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
     )
     assert report["graphs"] == 1
     assert report["arms_or_outcomes_used"] is False
-
-
-def test_tsg_binding_drives_llm_intervention_and_deterministic_arm_patches():
-    catalog, graph = _command_graph()
-    registry = load_mechanism_registry(ROOT / "data/formal/four-arm-mechanisms-v3.json")
-    task = {
-        "task_id": "task-1",
-        "task_unit_id": "task-1",
-        "cwe": "CWE-78",
-        "task_family": "command_execution",
-        "prompt": PROMPT,
-        "source_prompt_sha256": content_hash(PROMPT),
-        "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
-        "functional_contract": {
-            "requirements": [{"requirement_id": "req_1", "criterion": "return output"}]
-        },
-    }
-    binding = tsg_mechanism_binding(task, graph, catalog, registry)
-    assert binding["decision"] == "applicable"
-    task.update(
-        {
-            "realization_id": binding["realization_id"],
-            "prompt_tsg": prompt_tsg_record(graph),
-            "prompt_tsg_binding": binding,
-        }
-    )
-    calls = 0
-
-    def provider(request, _evaluator, _prompt):
-        nonlocal calls
-        calls += 1
-        assert "task_context" not in request
-        assert request["prompt_tsg_context"]["prompt_tsg_id"] == graph.tsg_id
-        if calls == 1:
-            return json.dumps(
-                {
-                    "specific_text": (
-                        "Pass command arguments as a sequence and keep shell execution disabled."
-                    )
-                }
-            ).encode()
-        return json.dumps(
-            {
-                "specific": {
-                    "required_delta_satisfied": True,
-                    "forbidden_delta_absent": True,
-                    "functional_contract_preserved": True,
-                    "input_format_preserved": True,
-                    "interface_preserved": True,
-                    "extra_security_mechanism_absent": True,
-                },
-                "generic": {
-                    "target_mechanism_absent": True,
-                    "generic_security_present": True,
-                    "functional_contract_preserved": True,
-                },
-                "placebo": {
-                    "target_mechanism_absent": True,
-                    "generic_security_absent": True,
-                    "functional_contract_preserved": True,
-                    "style_only": True,
-                },
-                "reason": "The suffixes match their frozen roles.",
-            }
-        ).encode()
-
-    inputs = {
-        "registry": registry,
-        "executor": {},
-        "validator": {},
-        "executor_prompt": "executor",
-        "validator_prompt": "validator",
-        "prompt_tsg_catalog": catalog,
-        "config": {
-            "intervention": {
-                "generic_text": "Apply appropriate security safeguards while preserving behavior.",
-                "placebo_text": "Use descriptive local variable names and consistent formatting.",
-                "placebo_forbidden_terms": ["security", "secure", "validate", "query"],
-                "maximum_suffix_characters": 360,
-            }
-        },
-    }
-    artifacts, passed = _intervention_unit(inputs, task, provider)
-
-    assert passed is True
-    variants = artifacts["prompt-tsg-variants.json"]["arm_prompt_tsgs"]
-    assert set(variants) == {"absent", "specific", "generic", "placebo"}
-    assert variants["absent"]["tsg_id"] == graph.tsg_id
-    assert variants["specific"]["tsg_id"] != variants["generic"]["tsg_id"]

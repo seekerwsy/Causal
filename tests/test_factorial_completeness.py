@@ -6,10 +6,12 @@ import pytest
 
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.factorial_experiment import (
+    _pair_selection,
+)
+from prompt_mechanism_study.factorial_protocol import (
     FactorialExperimentError,
-    _v11_pair_selection,
-    _validate_v11_intervention_design,
-    _validate_v11_pair_relations,
+    validate_factorial_intervention_design,
+    validate_factorial_pair_relations,
 )
 from prompt_mechanism_study.factorial_verify import _verify_pair_selection_provenance
 from prompt_mechanism_study.inference import (
@@ -59,9 +61,9 @@ def test_noncommutative_pair_requires_both_positive_weight_orders() -> None:
         ],
     }
     with pytest.raises(FactorialExperimentError, match="require both application orders"):
-        _validate_v11_intervention_design(incomplete)
+        validate_factorial_intervention_design(incomplete)
 
-    _validate_v11_intervention_design(
+    validate_factorial_intervention_design(
         {
             "joint_application_commutative": True,
             "joint_realizations": incomplete["joint_realizations"],
@@ -84,7 +86,7 @@ def test_factorial_pair_selection_is_derived_from_verified_artifact(
         selector_config_path, selector_root
     )
     config = {"pair_selection": {"artifact_path": "selection"}}
-    frozen = _v11_pair_selection(
+    frozen = _pair_selection(
         config,
         registry,
         (pair,),
@@ -100,7 +102,7 @@ def test_factorial_pair_selection_is_derived_from_verified_artifact(
         FactorialExperimentError,
         match="verified interaction selection drifts from factorial pair protocols",
     ):
-        _v11_pair_selection(
+        _pair_selection(
             config,
             registry,
             (SimpleNamespace(pair_id="pair-b"),),
@@ -121,7 +123,7 @@ def test_factorial_pair_selection_rejects_self_reported_coordinates(
         }
     }
     with pytest.raises(FactorialExperimentError, match="provenance is invalid"):
-        _v11_pair_selection(
+        _pair_selection(
             config,
             SimpleNamespace(name="registry"),
             (SimpleNamespace(pair_id="pair-b"),),
@@ -130,7 +132,7 @@ def test_factorial_pair_selection_rejects_self_reported_coordinates(
         )
 
     with pytest.raises(FactorialExperimentError, match="escapes"):
-        _v11_pair_selection(
+        _pair_selection(
             {"pair_selection": {"artifact_path": str(tmp_path.parent / "outside")}},
             SimpleNamespace(name="registry"),
             (SimpleNamespace(pair_id="pair-b"),),
@@ -143,10 +145,10 @@ def test_factorial_pair_selection_rejects_self_reported_coordinates(
 def test_factorial_v11_rejects_historical_only_pair_relations() -> None:
     registry = load_pair_registry(REGISTRY_PATH, load_catalog(CATALOG_PATH))
     pair = registry.pairs[0]
-    _validate_v11_pair_relations((pair,))
+    validate_factorial_pair_relations((pair,))
 
     with pytest.raises(FactorialExperimentError, match="active successor vocabulary"):
-        _validate_v11_pair_relations(
+        validate_factorial_pair_relations(
             (
                 replace(
                     pair,
@@ -166,7 +168,7 @@ def test_factorial_verifier_replays_portable_selector_and_registry_provenance(
     selector_root = tmp_path / "selector"
     freeze_interaction_selection_from_config(selector_config_path, selector_root)
     registry = load_pair_registry(REGISTRY_PATH, load_catalog(CATALOG_PATH))
-    selector_selection = _v11_pair_selection(
+    selector_selection = _pair_selection(
         {"pair_selection": {"artifact_path": "selector"}},
         registry,
         (pair,),
@@ -210,7 +212,7 @@ def test_factorial_verifier_replays_portable_selector_and_registry_provenance(
             {"pair_selection": {"artifact_path": "ignored"}},
         )
 
-    registry_selection = _v11_pair_selection(
+    registry_selection = _pair_selection(
         {},
         registry,
         registry.pairs,

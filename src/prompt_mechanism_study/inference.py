@@ -1,4 +1,4 @@
-"""Semantic-cluster weighted policy effects and simultaneous bootstrap intervals."""
+"""Task-unit ITT and simultaneous inference for active successor studies."""
 
 from __future__ import annotations
 
@@ -12,19 +12,15 @@ from enum import StrEnum
 from prompt_mechanism_study.intervention import (
     FACTORIAL_CELL_ORDER,
     SUCCESSOR_ARM_ROLE_ORDER,
-    Arm,
     FactorialCell,
     FactorialPolicy,
-    InterventionPolicy,
     InterventionPolicyV2,
     PolicyArmRoleV2,
 )
 from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.randomization import (
-    Assignment,
     FactorialAssignment,
     FactorialRandomization,
-    Randomization,
     SuccessorAssignment,
     SuccessorRandomization,
 )
@@ -124,30 +120,6 @@ class FunctionalityGateStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class AnalysisPlan:
-    metrics: tuple[Metric, ...]
-    bootstrap_seed: int
-    bootstrap_draws: int
-    alpha: float
-
-    def __post_init__(self) -> None:
-        if not self.metrics or len(self.metrics) != len(set(self.metrics)):
-            raise ValueError("analysis metrics must be non-empty and unique")
-        if any(type(metric) is not Metric for metric in self.metrics):
-            raise TypeError("analysis metrics must be Metric values")
-        if type(self.bootstrap_seed) is not int:
-            raise TypeError("bootstrap_seed must be an integer")
-        if type(self.bootstrap_draws) is not int or self.bootstrap_draws < 100:
-            raise ValueError("bootstrap_draws must be at least 100")
-        if type(self.alpha) is not float or not 0.0 < self.alpha < 1.0:
-            raise ValueError("alpha must be a float strictly between zero and one")
-
-    @property
-    def analysis_plan_id(self) -> str:
-        return content_id("analysis_plan_", self)
-
-
-@dataclass(frozen=True, slots=True)
 class SuccessorAnalysisPlan:
     """Pre-outcome analysis contract for atomic ADD/REMOVE four-arm policies."""
 
@@ -232,6 +204,8 @@ class SuccessorAnalysisPlan:
 
 @dataclass(frozen=True, slots=True)
 class FactorialAnalysisPlan:
+    """Prospectively frozen factorial inference contract."""
+
     metrics: tuple[Metric, ...]
     primary_metric: Metric
     bootstrap_seed: int
@@ -242,6 +216,14 @@ class FactorialAnalysisPlan:
         FactorialEffect.FACTOR_2,
         FactorialEffect.JOINT,
     )
+    minimum_task_units: int = 2
+    minimum_valid_bootstrap_fraction: float = 0.9
+    bootstrap_quantile_method: str = "higher"
+    practical_interaction_margin: float = 0.0
+    maximum_unknown_fraction: float = 1.0
+    functionality_noninferiority_margin: float = 0.1
+    functionality_noninferiority_separately_powered: bool = False
+    functionality_power_qualification_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if not self.metrics or len(self.metrics) != len(set(self.metrics)):
@@ -266,27 +248,6 @@ class FactorialAnalysisPlan:
             )
         ):
             raise ValueError("secondary factorial effects must be unique non-interactions")
-
-    @property
-    def analysis_plan_id(self) -> str:
-        return content_id("factorial_analysis_plan_", self)
-
-
-@dataclass(frozen=True, slots=True)
-class FactorialAnalysisPlanV2(FactorialAnalysisPlan):
-    """Prospective factorial inference contract; legacy plans remain byte-stable."""
-
-    minimum_task_units: int = 2
-    minimum_valid_bootstrap_fraction: float = 0.9
-    bootstrap_quantile_method: str = "higher"
-    practical_interaction_margin: float = 0.0
-    maximum_unknown_fraction: float = 1.0
-    functionality_noninferiority_margin: float = 0.1
-    functionality_noninferiority_separately_powered: bool = False
-    functionality_power_qualification_sha256: str | None = None
-
-    def __post_init__(self) -> None:
-        super(FactorialAnalysisPlanV2, self).__post_init__()
         if type(self.minimum_task_units) is not int or self.minimum_task_units < 2:
             raise ValueError("factorial minimum_task_units must be at least two")
         if (
@@ -328,67 +289,6 @@ class FactorialAnalysisPlanV2(FactorialAnalysisPlan):
     @property
     def analysis_plan_id(self) -> str:
         return content_id("factorial_analysis_plan_v2_", self)
-
-
-@dataclass(frozen=True, slots=True)
-class ArmEstimate:
-    arm: Arm
-    point: float | None
-    lower: float
-    upper: float
-    assignments: int
-
-
-@dataclass(frozen=True, slots=True)
-class ClusterEffect:
-    semantic_cluster_id: str
-    point: float | None
-    lower: float
-    upper: float
-
-
-@dataclass(frozen=True, slots=True)
-class PolicyEstimate:
-    candidate_id: str
-    model_id: str
-    metric: Metric
-    target: ArmEstimate
-    control: ArmEstimate
-    difference: float | None
-    lower: float
-    upper: float
-    cluster_effects: tuple[ClusterEffect, ...]
-
-    @property
-    def coordinate_id(self) -> str:
-        return content_id(
-            "coordinate_",
-            {
-                "candidate_id": self.candidate_id,
-                "model_id": self.model_id,
-                "metric": self.metric,
-            },
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SimultaneousInterval:
-    coordinate_id: str
-    standard_error: float
-    lower: float
-    upper: float
-
-
-@dataclass(frozen=True, slots=True)
-class InferenceResult:
-    plan_id: str
-    estimates: tuple[PolicyEstimate, ...]
-    intervals: tuple[SimultaneousInterval, ...]
-    simultaneous_critical_value: float
-
-    @property
-    def inference_id(self) -> str:
-        return content_id("inference_", self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -657,38 +557,6 @@ class FactorialInferenceResult:
     @property
     def inference_id(self) -> str:
         return content_id("factorial_inference_", self)
-
-
-def estimate_policy_effects(
-    randomization: Randomization,
-    outcomes: Iterable[Outcome],
-    policies: Iterable[InterventionPolicy],
-    tasks: Iterable[Task],
-    plan: AnalysisPlan,
-) -> InferenceResult:
-    frozen_outcomes = tuple(outcomes)
-    by_outcome = {item.assignment_id: item for item in frozen_outcomes}
-    expected = {item.assignment_id for item in randomization.assignments}
-    if len(by_outcome) != len(frozen_outcomes) or set(by_outcome) != expected:
-        raise ValueError("outcomes must cover every randomized assignment exactly once")
-    task_by_id = {item.task_id: item for item in tasks}
-    policy_by_candidate = {item.candidate_id: item for item in policies}
-    estimates = tuple(
-        _coordinate(
-            randomization,
-            by_outcome,
-            policy_by_candidate[candidate_id],
-            task_by_id,
-            model_id,
-            metric,
-        )
-        for candidate_id in sorted(policy_by_candidate)
-        for model_id in randomization.models
-        for metric in plan.metrics
-    )
-    _common_cluster_support(estimates)
-    intervals, critical = _simultaneous_intervals(estimates, plan)
-    return InferenceResult(plan.analysis_plan_id, estimates, intervals, critical)
 
 
 def estimate_successor_effects(
@@ -1894,17 +1762,9 @@ def estimate_factorial_effects(
         for model_id in randomization.models
         for metric in plan.metrics
     )
-    if isinstance(plan, FactorialAnalysisPlanV2):
-        intervals, critical = _factorial_simultaneous_intervals_v2(estimates, plan)
-        secondary, secondary_critical = _factorial_secondary_intervals_v2(
-            estimates, plan
-        )
-        metric_families = _factorial_metric_families_v2(estimates, plan)
-    else:
-        _validate_factorial_support(estimates)
-        intervals, critical = _factorial_simultaneous_intervals(estimates, plan)
-        secondary, secondary_critical = _factorial_secondary_intervals(estimates, plan)
-        metric_families = _factorial_metric_families(estimates, plan)
+    intervals, critical = _factorial_simultaneous_intervals(estimates, plan)
+    secondary, secondary_critical = _factorial_secondary_intervals(estimates, plan)
+    metric_families = _factorial_metric_families(estimates, plan)
     return FactorialInferenceResult(
         plan.analysis_plan_id,
         estimates,
@@ -2369,227 +2229,9 @@ def _factorial_direction_robustness(
     return "direction_fragile"
 
 
-def _validate_factorial_support(
-    estimates: tuple[FactorialCoordinateEstimate, ...],
-) -> None:
-    supports = {
-        estimate.coordinate_id: {item.task_unit_id for item in estimate.task_unit_effects}
-        for estimate in estimates
-        if estimate.metric is Metric.SECURE_YIELD
-    }
-    values = list(supports.values())
-    for index, left in enumerate(values):
-        for right in values[index + 1 :]:
-            if left & right and left != right:
-                raise ValueError(
-                    "primary factorial coordinates must have identical or disjoint "
-                    "task-unit support"
-                )
-
-
 def _factorial_simultaneous_intervals(
     estimates: tuple[FactorialCoordinateEstimate, ...],
     plan: FactorialAnalysisPlan,
-) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
-    eligible = tuple(
-        item
-        for item in estimates
-        if item.metric is plan.primary_metric
-        and item.interaction is not None
-        and all(unit.interaction is not None for unit in item.task_unit_effects)
-    )
-    if not eligible:
-        return (), 0.0
-    support_keys = {
-        item.coordinate_id: tuple(unit.task_unit_id for unit in item.task_unit_effects)
-        for item in eligible
-    }
-    rng_by_support: dict[tuple[str, ...], random.Random] = {}
-    replicates: dict[str, list[float]] = {item.coordinate_id: [] for item in eligible}
-    for support in set(support_keys.values()):
-        seed = int(
-            content_id(
-                "bootstrap_", {"seed": plan.bootstrap_seed, "support": support}
-            )[-16:],
-            16,
-        )
-        rng_by_support[support] = random.Random(seed)
-    for _ in range(plan.bootstrap_draws):
-        samples: dict[tuple[str, ...], list[int]] = {}
-        for support, rng in rng_by_support.items():
-            samples[support] = [rng.randrange(len(support)) for _ in support]
-        for estimate in eligible:
-            sample = samples[support_keys[estimate.coordinate_id]]
-            effects = [estimate.task_unit_effects[index].interaction for index in sample]
-            replicates[estimate.coordinate_id].append(
-                sum(float(value) for value in effects) / len(effects)
-            )
-    standard_errors = {
-        item.coordinate_id: statistics.stdev(replicates[item.coordinate_id])
-        for item in eligible
-    }
-    maxima = []
-    for draw in range(plan.bootstrap_draws):
-        statistics_for_draw = []
-        for estimate in eligible:
-            standard_error = standard_errors[estimate.coordinate_id]
-            if standard_error > 0.0:
-                statistics_for_draw.append(
-                    abs(replicates[estimate.coordinate_id][draw] - float(estimate.interaction))
-                    / standard_error
-                )
-        maxima.append(max(statistics_for_draw, default=0.0))
-    critical = _quantile(maxima, 1.0 - plan.alpha)
-    intervals = tuple(
-        FactorialSimultaneousInterval(
-            item.coordinate_id,
-            FactorialEffect.INTERACTION,
-            standard_errors[item.coordinate_id],
-            max(-2.0, float(item.interaction) - critical * standard_errors[item.coordinate_id]),
-            min(2.0, float(item.interaction) + critical * standard_errors[item.coordinate_id]),
-        )
-        for item in eligible
-    )
-    return intervals, critical
-
-
-def _factorial_secondary_intervals(
-    estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlan,
-) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
-    """Max-|T| intervals for the preregistered secure-yield main/joint family."""
-
-    return _factorial_effect_family_intervals(
-        estimates,
-        plan,
-        metric=plan.primary_metric,
-        effects=plan.secondary_effects,
-        seed_namespace="factorial_secondary_bootstrap_",
-    )
-
-
-def _factorial_metric_families(
-    estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlan,
-) -> tuple[FactorialMetricFamilyInference, ...]:
-    if not {
-        FactorialEffect.FACTOR_1_GIVEN_FACTOR_2,
-        FactorialEffect.FACTOR_2_GIVEN_FACTOR_1,
-    } <= set(plan.secondary_effects):
-        return ()
-    effects = (FactorialEffect.INTERACTION, *plan.secondary_effects)
-    families = []
-    for family, metric in (
-        (FactorialMetricFamily.FUNCTIONALITY, Metric.FUNCTIONALITY),
-        (FactorialMetricFamily.JOINT, Metric.JOINT),
-    ):
-        if metric not in plan.metrics:
-            continue
-        intervals, critical = _factorial_effect_family_intervals(
-            estimates,
-            plan,
-            metric=metric,
-            effects=effects,
-            seed_namespace=f"factorial_{family.value}_bootstrap_",
-        )
-        families.append(
-            FactorialMetricFamilyInference(family, metric, intervals, critical)
-        )
-    return tuple(families)
-
-
-def _factorial_effect_family_intervals(
-    estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlan,
-    *,
-    metric: Metric,
-    effects: tuple[FactorialEffect, ...],
-    seed_namespace: str,
-) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
-
-    eligible = tuple(
-        (estimate, effect)
-        for estimate in estimates
-        if estimate.metric is metric
-        for effect in effects
-        if _factorial_effect(estimate, effect) is not None
-        and all(
-            _task_unit_factorial_effect(unit, effect) is not None
-            for unit in estimate.task_unit_effects
-        )
-    )
-    if not eligible:
-        return (), 0.0
-    keys = tuple((estimate.coordinate_id, effect) for estimate, effect in eligible)
-    support_by_key = {
-        key: tuple(unit.task_unit_id for unit in estimate.task_unit_effects)
-        for key, (estimate, _) in zip(keys, eligible, strict=True)
-    }
-    rng_by_support = {
-        support: random.Random(
-            int(
-                content_id(
-                    seed_namespace,
-                    {"seed": plan.bootstrap_seed, "support": support},
-                )[-16:],
-                16,
-            )
-        )
-        for support in set(support_by_key.values())
-    }
-    replicates: dict[tuple[str, FactorialEffect], list[float]] = {
-        key: [] for key in keys
-    }
-    for _ in range(plan.bootstrap_draws):
-        samples = {
-            support: [rng.randrange(len(support)) for _ in support]
-            for support, rng in rng_by_support.items()
-        }
-        for key, (estimate, effect) in zip(keys, eligible, strict=True):
-            values = [
-                _task_unit_factorial_effect(unit, effect)
-                for unit in estimate.task_unit_effects
-            ]
-            sample = samples[support_by_key[key]]
-            replicates[key].append(
-                sum(float(values[index]) for index in sample) / len(sample)
-            )
-    errors = {key: statistics.stdev(values) for key, values in replicates.items()}
-    maxima = []
-    for draw in range(plan.bootstrap_draws):
-        values = []
-        for key, (estimate, effect) in zip(keys, eligible, strict=True):
-            error = errors[key]
-            if error > 0.0:
-                values.append(
-                    abs(
-                        replicates[key][draw]
-                        - float(_factorial_effect(estimate, effect))
-                    )
-                    / error
-                )
-        maxima.append(max(values, default=0.0))
-    critical = _quantile(maxima, 1.0 - plan.alpha)
-    intervals = []
-    for key, (estimate, effect) in zip(keys, eligible, strict=True):
-        point = float(_factorial_effect(estimate, effect))
-        error = errors[key]
-        lower_limit, upper_limit = _factorial_effect_limits(effect)
-        intervals.append(
-            FactorialSimultaneousInterval(
-                estimate.coordinate_id,
-                effect,
-                error,
-                max(lower_limit, point - critical * error),
-                min(upper_limit, point + critical * error),
-            )
-        )
-    return tuple(intervals), critical
-
-
-def _factorial_simultaneous_intervals_v2(
-    estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlanV2,
 ) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
     return _factorial_studentized_effect_family(
         estimates,
@@ -2600,9 +2242,9 @@ def _factorial_simultaneous_intervals_v2(
     )
 
 
-def _factorial_secondary_intervals_v2(
+def _factorial_secondary_intervals(
     estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlanV2,
+    plan: FactorialAnalysisPlan,
 ) -> tuple[tuple[FactorialSimultaneousInterval, ...], float]:
     return _factorial_studentized_effect_family(
         estimates,
@@ -2613,9 +2255,9 @@ def _factorial_secondary_intervals_v2(
     )
 
 
-def _factorial_metric_families_v2(
+def _factorial_metric_families(
     estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlanV2,
+    plan: FactorialAnalysisPlan,
 ) -> tuple[FactorialMetricFamilyInference, ...]:
     if not {
         FactorialEffect.FACTOR_1_GIVEN_FACTOR_2,
@@ -2645,7 +2287,7 @@ def _factorial_metric_families_v2(
 
 def _factorial_studentized_effect_family(
     estimates: tuple[FactorialCoordinateEstimate, ...],
-    plan: FactorialAnalysisPlanV2,
+    plan: FactorialAnalysisPlan,
     *,
     metric: Metric,
     effects: tuple[FactorialEffect, ...],
@@ -2787,114 +2429,6 @@ def _factorial_effect_limits(effect: FactorialEffect) -> tuple[float, float]:
     return (-2.0, 2.0) if effect is FactorialEffect.INTERACTION else (-1.0, 1.0)
 
 
-def _coordinate(
-    randomization: Randomization,
-    outcomes: Mapping[str, Outcome],
-    policy: InterventionPolicy,
-    tasks: Mapping[str, Task],
-    model_id: str,
-    metric: Metric,
-) -> PolicyEstimate:
-    assignments = tuple(
-        item
-        for item in randomization.assignments
-        if item.block.candidate_id == policy.candidate_id and item.block.model_id == model_id
-    )
-    cluster_ids = sorted({item.block.semantic_cluster_id for item in assignments})
-    if not cluster_ids:
-        raise ValueError("analysis coordinate has no randomized assignments")
-    target_clusters: list[tuple[float | None, float, float]] = []
-    control_clusters: list[tuple[float | None, float, float]] = []
-    cluster_effects: list[ClusterEffect] = []
-    for cluster_id in cluster_ids:
-        target = _cluster_arm(
-            assignments,
-            outcomes,
-            policy,
-            tasks,
-            cluster_id,
-            Arm.TARGET,
-            metric,
-        )
-        control = _cluster_arm(
-            assignments,
-            outcomes,
-            policy,
-            tasks,
-            cluster_id,
-            Arm.NOOP,
-            metric,
-        )
-        target_clusters.append(target)
-        control_clusters.append(control)
-        point = None if target[0] is None or control[0] is None else target[0] - control[0]
-        cluster_effects.append(
-            ClusterEffect(cluster_id, point, target[1] - control[2], target[2] - control[1])
-        )
-    target = _arm_estimate(assignments, Arm.TARGET, target_clusters)
-    control = _arm_estimate(assignments, Arm.NOOP, control_clusters)
-    point = None if target.point is None or control.point is None else target.point - control.point
-    return PolicyEstimate(
-        policy.candidate_id,
-        model_id,
-        metric,
-        target,
-        control,
-        point,
-        target.lower - control.upper,
-        target.upper - control.lower,
-        tuple(cluster_effects),
-    )
-
-
-def _cluster_arm(
-    assignments: tuple[Assignment, ...],
-    outcomes: Mapping[str, Outcome],
-    policy: InterventionPolicy,
-    tasks: Mapping[str, Task],
-    cluster_id: str,
-    arm: Arm,
-    metric: Metric,
-) -> tuple[float | None, float, float]:
-    cluster_tasks = sorted(
-        {item.block.task_id for item in assignments if item.block.semantic_cluster_id == cluster_id}
-    )
-    task_total = sum(tasks[task_id].weight for task_id in cluster_tasks)
-    realization_total = sum(item.weight for item in policy.realizations)
-    point = 0.0
-    lower = 0.0
-    upper = 0.0
-    point_known = True
-    for task_id in cluster_tasks:
-        task_weight = tasks[task_id].weight / task_total
-        for realization in policy.realizations:
-            realization_weight = realization.weight / realization_total
-            block = [
-                item
-                for item in assignments
-                if item.block.semantic_cluster_id == cluster_id
-                and item.block.task_id == task_id
-                and item.block.realization_id == realization.realization_id
-                and item.arm is arm
-            ]
-            if not block:
-                raise ValueError("randomization lacks common task-realization support")
-            values = [_metric_value(outcomes[item.assignment_id], metric) for item in block]
-            block_point = (
-                None
-                if any(value[0] is None for value in values)
-                else sum(value[0] for value in values if value[0] is not None) / len(values)
-            )
-            weight = task_weight * realization_weight
-            if block_point is None:
-                point_known = False
-            else:
-                point += weight * block_point
-            lower += weight * sum(value[1] for value in values) / len(values)
-            upper += weight * sum(value[2] for value in values) / len(values)
-    return (point if point_known else None, lower, upper)
-
-
 def _metric_value(outcome: Outcome, metric: Metric) -> tuple[int | None, int, int]:
     if metric is Metric.SECURE_YIELD:
         return outcome.secure_yield, outcome.secure_yield, outcome.latent_secure_upper
@@ -2906,83 +2440,6 @@ def _metric_value(outcome: Outcome, metric: Metric) -> tuple[int | None, int, in
     return value, value, value
 
 
-def _arm_estimate(
-    assignments: tuple[Assignment, ...],
-    arm: Arm,
-    clusters: list[tuple[float | None, float, float]],
-) -> ArmEstimate:
-    point = (
-        None
-        if any(item[0] is None for item in clusters)
-        else sum(item[0] for item in clusters if item[0] is not None) / len(clusters)
-    )
-    return ArmEstimate(
-        arm,
-        point,
-        sum(item[1] for item in clusters) / len(clusters),
-        sum(item[2] for item in clusters) / len(clusters),
-        sum(item.arm is arm for item in assignments),
-    )
-
-
-def _common_cluster_support(estimates: tuple[PolicyEstimate, ...]) -> None:
-    supports = {
-        tuple(item.semantic_cluster_id for item in estimate.cluster_effects)
-        for estimate in estimates
-    }
-    if len(supports) != 1:
-        raise ValueError("all analysis coordinates require common semantic-cluster support")
-
-
-def _simultaneous_intervals(
-    estimates: tuple[PolicyEstimate, ...],
-    plan: AnalysisPlan,
-) -> tuple[tuple[SimultaneousInterval, ...], float]:
-    eligible = tuple(
-        item
-        for item in estimates
-        if item.difference is not None
-        and all(cluster.point is not None for cluster in item.cluster_effects)
-    )
-    if not eligible:
-        return (), 0.0
-    cluster_count = len(eligible[0].cluster_effects)
-    rng = random.Random(plan.bootstrap_seed)
-    replicates: dict[str, list[float]] = {item.coordinate_id: [] for item in eligible}
-    for _ in range(plan.bootstrap_draws):
-        sample = [rng.randrange(cluster_count) for _ in range(cluster_count)]
-        for estimate in eligible:
-            effects = [estimate.cluster_effects[index].point for index in sample]
-            replicates[estimate.coordinate_id].append(
-                sum(value for value in effects if value is not None) / cluster_count
-            )
-    standard_errors = {
-        item.coordinate_id: statistics.stdev(replicates[item.coordinate_id]) for item in eligible
-    }
-    maxima: list[float] = []
-    for draw in range(plan.bootstrap_draws):
-        values = []
-        for estimate in eligible:
-            standard_error = standard_errors[estimate.coordinate_id]
-            if standard_error > 0.0:
-                values.append(
-                    abs(replicates[estimate.coordinate_id][draw] - estimate.difference)
-                    / standard_error
-                )
-        maxima.append(max(values, default=0.0))
-    critical = _quantile(maxima, 1.0 - plan.alpha)
-    intervals = tuple(
-        SimultaneousInterval(
-            item.coordinate_id,
-            standard_errors[item.coordinate_id],
-            max(-1.0, item.difference - critical * standard_errors[item.coordinate_id]),
-            min(1.0, item.difference + critical * standard_errors[item.coordinate_id]),
-        )
-        for item in eligible
-    )
-    return intervals, critical
-
-
 def _quantile(values: list[float], probability: float) -> float:
     ordered = sorted(values)
     index = min(len(ordered) - 1, max(0, math.ceil(probability * len(ordered)) - 1))
@@ -2990,11 +2447,7 @@ def _quantile(values: list[float], probability: float) -> float:
 
 
 __all__ = [
-    "AnalysisPlan",
-    "ArmEstimate",
-    "ClusterEffect",
     "FactorialAnalysisPlan",
-    "FactorialAnalysisPlanV2",
     "FactorialCellEstimate",
     "FactorialCoordinateEstimate",
     "FactorialEffect",
@@ -3009,12 +2462,9 @@ __all__ = [
     "FactorialSimultaneousInterval",
     "FamilyInferenceStatus",
     "FunctionalityGateStatus",
-    "InferenceResult",
     "LeaveOneRealizationOutSuccessorEffect",
     "Metric",
-    "PolicyEstimate",
     "RealizationSuccessorEffect",
-    "SimultaneousInterval",
     "SuccessorAnalysisPlan",
     "SuccessorArmEstimate",
     "SuccessorContrast",
@@ -3031,6 +2481,5 @@ __all__ = [
     "TaskUnitSuccessorContribution",
     "classify_factorial_pattern",
     "estimate_factorial_effects",
-    "estimate_policy_effects",
     "estimate_successor_effects",
 ]

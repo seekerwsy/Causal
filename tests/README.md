@@ -9,6 +9,8 @@ Default reviewer layer:
 Each test owns a scientific invariant:
 
 - discover/confirm and task-unit separation;
+- conservative outcome-blind merge authority for semantic task-unit curation;
+- explicit ready/calibration/replication/out-of-scope eligibility accounting;
 - exact shared candidate-universe, score, rank, Top-K, and empty-slot freeze;
 - semantic replay of selector, bridge, and interaction-selection artifacts;
 - positivity-gated FCI, association, prediction, blinded-expert, and seeded-random selectors;

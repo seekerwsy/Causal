@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import platform
 import random
@@ -14,7 +13,27 @@ from pathlib import Path
 from typing import Any
 
 from prompt_mechanism_study.adapters import AdapterBundle, AdapterKind, AdapterSpec
-from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import (
+    bundle_digest,
+    json_object as parse_json_object,
+    read_json,
+    read_json_exact as read_strict_json,
+    require_file_hash as verify_file_hash,
+    verify_bundle,
+    write_bundle,
+)
+from prompt_mechanism_study.factorial_freeze import (
+    validate_factorial_variant_graphs,
+    verify_factorial_freeze_bundle as _verify_factorial_freeze_bundle,
+)
+from prompt_mechanism_study.factorial_protocol import (
+    FactorialExperimentError,
+    validate_factorial_analysis,
+    validate_factorial_config,
+    validate_factorial_functionality_power,
+    validate_factorial_intervention_design,
+    validate_factorial_pair_relations,
+)
 from prompt_mechanism_study.factorial_verify import (
     verify_factorial_inference,
     verify_factorial_result_bundle,
@@ -22,13 +41,9 @@ from prompt_mechanism_study.factorial_verify import (
 )
 from prompt_mechanism_study.functional_judge import (
     bailian_complete,
-    build_review_request,
-    python_syntax_valid,
-    validate_review_response,
 )
 from prompt_mechanism_study.inference import (
     FactorialAnalysisPlan,
-    FactorialAnalysisPlanV2,
     FactorialEffect,
     Metric,
 )
@@ -48,27 +63,28 @@ from prompt_mechanism_study.intervention import (
     freeze_factorial_policy,
 )
 from prompt_mechanism_study.measurement import (
-    CodeStatus,
-    FunctionalStatus,
     Measurement,
-    OracleStatus,
+    MeasurementExecutionError,
+    measure_generated_code,
 )
 from prompt_mechanism_study.mechanisms import (
     PairBinding,
     PairEligibility,
     bind_pair,
     load_pair_registry,
-    validate_active_factorial_relation,
 )
 from prompt_mechanism_study.prompt_tsg import (
     QueryState,
     build_prompt_tsg,
-    feature_state,
     load_catalog,
     prompt_tsg_record,
     prompt_tsg_from_record,
-    query_context,
     validate_prompt_tsg,
+)
+from prompt_mechanism_study.qualification import (
+    QualificationError,
+    load_functional_qualification,
+    validate_functional_qualification,
 )
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id
 from prompt_mechanism_study.representation import Split, Task
@@ -82,10 +98,6 @@ from prompt_mechanism_study.workflow import (
     factorial_oracle_dispatch_policy_sha256,
     freeze_factorial_study,
 )
-
-
-class FactorialExperimentError(ValueError):
-    """A frozen factorial input or provider output failed closed."""
 
 
 def preflight_factorial_experiment(
@@ -108,32 +120,21 @@ def preflight_factorial_experiment(
         * len(inputs["generation_models"])
         for protocol in inputs["pair_protocols"]
     )
-    legacy = inputs["config"]["schema_version"] == "1.0"
     return {
-        "schema_version": inputs["config"]["schema_version"],
+        "schema_version": "1.1",
         "status": "FACTORIAL_PREFLIGHT_COMPLETE",
         "study_name": inputs["config"]["study_name"],
         "tasks": len(inputs["task_rows"]),
-        "realizations": (
-            len(inputs["pair_protocols"][0]["realizations"])
-            if legacy
-            else sum(len(item["realizations"]) for item in inputs["pair_protocols"])
+        "realizations": sum(
+            len(item["realizations"]) for item in inputs["pair_protocols"]
         ),
         "assignments": assignments,
-        "credential_env": credentials[0] if legacy else None,
-        "credential_present": (
-            bool(os.environ.get(credentials[0], "").strip()) if legacy else None
-        ),
         "credentials": [
             {"env": name, "present": bool(os.environ.get(name, "").strip())}
             for name in credentials
         ],
         "models": [item["model_id"] for item in inputs["generation_models"]],
-        "pair_id": inputs["pairs"][0].pair_id if legacy else None,
         "pair_ids": [item.pair_id for item in inputs["pairs"]],
-        "oracle_support_status": (
-            inputs["pairs"][0].oracle_support_status.value if legacy else None
-        ),
         "oracle_support_by_pair": {
             item.pair_id: item.oracle_support_status.value for item in inputs["pairs"]
         },
@@ -184,7 +185,7 @@ def freeze_factorial_experiment(
         assignment_ids,
     )
     write_bundle(output, artifacts)
-    verified = verify_factorial_freeze_bundle(output)
+    verified = _verify_factorial_freeze_bundle(output)
     return {
         "status": "FACTORIAL_FREEZE_COMPLETE",
         "study_id": study.study_id,
@@ -255,485 +256,12 @@ def _prospective_freeze_artifacts(
     return artifacts
 
 
-def _verify_frozen_oracle_qualifications(
-    artifact: Any,
-    study: Mapping[str, Any],
-    pair_by_id: Mapping[str, Any],
-) -> None:
-    if not isinstance(artifact, dict) or set(artifact) != {
-        "schema_version",
-        "producer",
-        "pairs",
-    } or artifact["schema_version"] != "1.0":
-        raise FactorialExperimentError("factorial frozen Oracle evidence is invalid")
-    producer = artifact["producer"]
-    if not isinstance(producer, dict) or set(producer) != {
-        "implementation_id",
-        "sha256",
-    }:
-        raise FactorialExperimentError("factorial frozen Oracle producer is invalid")
-    if (
-        producer["implementation_id"]
-        != "prompt_mechanism_study.security_profiles:evaluate_security_profile"
-        or producer["sha256"] != security_profile_producer_sha256()
-    ):
-        raise FactorialExperimentError("factorial frozen Oracle producer digest drifts")
-    rows = artifact["pairs"]
-    expected_pair_ids = {
-        content_id("pair_", policy["pair"]) for policy in study.get("policies", ())
-    }
-    if (
-        not isinstance(rows, list)
-        or [item.get("pair_id") for item in rows]
-        != sorted(expected_pair_ids)
-        or any(
-            not isinstance(item, dict)
-            or set(item)
-            != {
-                "pair_id",
-                "profile_id",
-                "policy_sha256",
-                "policy_payload",
-                "qualification_sha256",
-                "qualification_payload",
-                "producer_implementation_id",
-                "producer_sha256",
-            }
-            for item in rows
-        )
-    ):
-        raise FactorialExperimentError("factorial frozen Oracle pair support drifts")
-    for row in rows:
-        pair = pair_by_id.get(row["pair_id"])
-        policy_payload = row["policy_payload"]
-        qualification_payload = row["qualification_payload"]
-        if (
-            pair is None
-            or row["profile_id"] != pair.oracle_profile_id
-            or row["policy_sha256"] != pair.oracle_policy_sha256
-            or row["producer_implementation_id"] != producer["implementation_id"]
-            or row["producer_sha256"] != producer["sha256"]
-            or not isinstance(policy_payload, str)
-            or hashlib.sha256(policy_payload.encode("utf-8")).hexdigest()
-            != row["policy_sha256"]
-            or not isinstance(qualification_payload, str)
-            or hashlib.sha256(qualification_payload.encode("utf-8")).hexdigest()
-            != row["qualification_sha256"]
-        ):
-            raise FactorialExperimentError("factorial frozen Oracle identity drifts")
-        policy = _json_object(policy_payload.encode("utf-8"))
-        qualification = _json_object(qualification_payload.encode("utf-8"))
-        if (
-            policy.get("schema_version") != "1.0"
-            or policy.get("profile_id") != pair.oracle_profile_id
-            or qualification.get("profile_id") != pair.oracle_profile_id
-            or qualification.get("policy_sha256") != pair.oracle_policy_sha256
-            or qualification.get("qualification_status") != "supported"
-            or qualification.get("label_mismatches") != 0
-            or set(qualification.get("gold_cells", ()))
-            != {cell.value for cell in FACTORIAL_CELL_ORDER}
-            or qualification.get("implementation_sha256") != producer["sha256"]
-        ):
-            raise FactorialExperimentError(
-                "factorial frozen Oracle qualification semantics drift"
-            )
-    oracle_material = tuple(
-        {
-            "pair_id": row["pair_id"],
-            "profile_id": row["profile_id"],
-            "policy_sha256": row["policy_sha256"],
-            "qualification_sha256": row["qualification_sha256"],
-            "producer_implementation_id": row["producer_implementation_id"],
-            "producer_sha256": row["producer_sha256"],
-        }
-        for row in rows
-    )
-    dispatch_material = tuple(
-        {
-            "pair_id": row["pair_id"],
-            "profile_id": row["profile_id"],
-            "policy_sha256": row["policy_sha256"],
-        }
-        for row in rows
-    )
-    adapter = study.get("adapters", {}).get("security_oracle", {})
-    if adapter != {
-        "kind": "security_oracle",
-        "name": f"factorial-oracle-set-{content_hash(oracle_material)[:16]}",
-        "version": "1",
-        "policy_sha256": content_hash(dispatch_material),
-    }:
-        raise FactorialExperimentError(
-            "factorial frozen Oracle adapter does not bind its qualification evidence"
-        )
 
 
-def _verify_frozen_functionality_power(
-    root: Path,
-    config: Mapping[str, Any],
-    study: Mapping[str, Any],
-) -> None:
-    analysis = config["analysis"]
-    requested = analysis["functionality_noninferiority_separately_powered"]
-    path = root / "factorial-functionality-power-qualification.json"
-    plan = study.get("analysis_plan", {})
-    if not requested:
-        if path.exists() or plan.get("functionality_power_qualification_sha256") is not None:
-            raise FactorialExperimentError(
-                "unrequested functionality power evidence entered the freeze"
-            )
-        return
-    if not path.is_file():
-        raise FactorialExperimentError(
-            "separately powered functionality gate lacks frozen evidence"
-        )
-    artifact = read_json(path)
-    if not isinstance(artifact, dict) or set(artifact) != {
-        "schema_version",
-        "qualification_sha256",
-        "qualification_payload",
-    } or artifact["schema_version"] != "1.0":
-        raise FactorialExperimentError(
-            "frozen functionality power qualification is invalid"
-        )
-    payload_text = artifact["qualification_payload"]
-    if (
-        not isinstance(payload_text, str)
-        or hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
-        != artifact["qualification_sha256"]
-        or artifact["qualification_sha256"]
-        != analysis["functionality_power_qualification"]["sha256"]
-        or plan.get("functionality_power_qualification_sha256")
-        != artifact["qualification_sha256"]
-    ):
-        raise FactorialExperimentError(
-            "frozen functionality power qualification digest drifts"
-        )
-    payload = _json_object(payload_text.encode("utf-8"))
-    _validate_functionality_power_payload(payload, analysis)
-    planned_units = payload["planned_task_units_per_coordinate"]
-    if any(
-        len({bundle["task_unit_id"] for bundle in policy["bundles"]})
-        < planned_units
-        for policy in study.get("policies", ())
-    ):
-        raise FactorialExperimentError(
-            "frozen factorial support is smaller than the functionality power plan"
-        )
 
 
-def _verify_bundled_functional_qualification(
-    config: Mapping[str, Any],
-    study: Mapping[str, Any],
-    sealed: Any,
-) -> None:
-    if not isinstance(sealed, Mapping) or set(sealed) != {
-        "qualification_path",
-        "qualification_sha256",
-        "qualification",
-        "qualification_payload",
-        "qualification_identity",
-    }:
-        raise FactorialExperimentError(
-            "bundled functional Oracle qualification fields are not exact"
-        )
-    payload = sealed["qualification_payload"]
-    qualification = sealed["qualification"]
-    identity = sealed["qualification_identity"]
-    section = config["functional_oracle"]
-    if (
-        not isinstance(payload, str)
-        or not payload
-        or not isinstance(qualification, Mapping)
-        or not isinstance(identity, Mapping)
-        or set(identity)
-        != {
-            "qualification_id",
-            "status",
-            "candidate_id",
-            "model_id",
-            "evaluator_config_sha256",
-            "prompt_sha256",
-            "provider",
-            "fixture_only",
-            "evaluator_scientific_claim_allowed",
-        }
-    ):
-        raise FactorialExperimentError(
-            "bundled functional Oracle qualification envelope drifts"
-        )
-    parsed = _json_object(payload.encode("utf-8"))
-    candidate = qualification.get("candidate", {})
-    if not isinstance(candidate, Mapping):
-        raise FactorialExperimentError(
-            "bundled functional Oracle qualification candidate drifts"
-        )
-    expected_identity = {
-        "qualification_id": content_id(
-            "functional_judge_qualification_v1_", qualification
-        ),
-        "status": qualification.get("status"),
-        "candidate_id": candidate.get("candidate_id"),
-        "model_id": candidate.get("model_id"),
-        "evaluator_config_sha256": candidate.get("evaluator_config_sha256"),
-        "prompt_sha256": candidate.get("prompt_sha256"),
-        "provider": identity.get("provider"),
-        "fixture_only": identity.get("fixture_only"),
-        "evaluator_scientific_claim_allowed": identity.get(
-            "evaluator_scientific_claim_allowed"
-        ),
-    }
-    status = identity.get("status")
-    structural_smoke = status == "STRUCTURAL_SMOKE_ONLY"
-    if structural_smoke and not (
-        config.get("phase") == "development_canary"
-        and config.get("scientific_claim_allowed") is False
-        and identity.get("provider") == "offline_deterministic_test_fixture"
-        and identity.get("fixture_only") is True
-        and identity.get("evaluator_scientific_claim_allowed") is False
-        and qualification.get("semantic_accuracy_claimed") is False
-        and qualification.get("scientific_claim_allowed") is False
-    ):
-        raise FactorialExperimentError(
-            "bundled structural-smoke functional qualification is not allowed"
-        )
-    if (
-        qualification.get("schema_version") != "1.0"
-        or status not in {"QUALIFIED_FOR_EXPERIMENT", "STRUCTURAL_SMOKE_ONLY"}
-        or parsed != qualification
-        or sealed.get("qualification_path") != section.get("qualification_path")
-        or sealed.get("qualification_sha256")
-        != section.get("qualification_sha256")
-        or hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        != section.get("qualification_sha256")
-        or identity != expected_identity
-        or identity.get("evaluator_config_sha256")
-        != section.get("evaluator_config_sha256")
-        or identity.get("prompt_sha256") != section.get("prompt_sha256")
-    ):
-        raise FactorialExperimentError(
-            "bundled functional Oracle qualification drifts"
-        )
-    adapter_material = {
-        "evaluator_config_sha256": identity["evaluator_config_sha256"],
-        "prompt_sha256": identity["prompt_sha256"],
-        "qualification_sha256": sealed["qualification_sha256"],
-        "qualification_identity": identity,
-    }
-    adapter = study.get("adapters", {}).get("functional_evaluator", {})
-    if adapter != {
-        "kind": "functional_evaluator",
-        "name": identity["candidate_id"],
-        "version": "1",
-        "policy_sha256": content_hash(adapter_material),
-    }:
-        raise FactorialExperimentError(
-            "functional evaluator adapter does not bind its qualification"
-        )
 
 
-def verify_factorial_freeze_bundle(root: Path) -> dict[str, Any]:
-    """Semantically replay the active pre-outcome freeze without provider calls."""
-
-    verify_bundle(root)
-    config = _read_exact_json(root / "effective-config.json")
-    study = _read_exact_json(root / "study-freeze.json")
-    task_inputs = _read_exact_json(root / "factorial-measurement-inputs.json")
-    variant_payload = _read_exact_json(root / "factorial-variant-tsgs.json")
-    execution = _read_exact_json(root / "execution-order.json")
-    calls = _read_exact_json(root / "intervention-calls.json")
-    if (
-        config.get("schema_version") != "1.1"
-        or not isinstance(study, Mapping)
-        or set(task_inputs) != {"schema_version", "tasks"}
-        or task_inputs.get("schema_version") != "1.1"
-        or set(variant_payload) != {"schema_version", "variants"}
-        or variant_payload.get("schema_version") != "1.0"
-        or set(execution) != {"schema_version", "assignment_ids"}
-        or execution.get("schema_version") != "1.0"
-        or not isinstance(calls, list)
-    ):
-        raise FactorialExperimentError("factorial freeze envelope is invalid")
-    _validate_v11_config_shape(config)
-    _validate_v11_analysis(config)
-    catalog = load_catalog(root / "factorial-prompt-tsg-catalog.json")
-    registry = load_pair_registry(root / "factorial-pair-registry.json", catalog)
-    pair_by_id = {item.pair_id: item for item in registry.pairs}
-    tasks = {item["task_id"]: item for item in task_inputs["tasks"]}
-    if len(tasks) != len(task_inputs["tasks"]):
-        raise FactorialExperimentError("factorial freeze task inputs are duplicated")
-    graphs = variant_payload["variants"]
-    expected_variants = {}
-    for policy in study.get("policies", ()):
-        pair_id = content_id("pair_", policy["pair"])
-        if pair_id not in pair_by_id or canonical_value(pair_by_id[pair_id]) != policy["pair"]:
-                raise FactorialExperimentError("factorial freeze pair leaves the registry")
-        for bundle in policy["bundles"]:
-            for variant in bundle["variants"]:
-                prompt = variant["execution"]["prompt_text"]
-                expected_variants[content_hash(prompt)] = (prompt, bundle["task_id"])
-    if set(graphs) != set(expected_variants):
-        raise FactorialExperimentError("factorial freeze variant Prompt TSG support drift")
-    for variant_id, (prompt, task_id) in expected_variants.items():
-        graph = prompt_tsg_from_record(graphs[variant_id])
-        if graph.task_id != task_id:
-            raise FactorialExperimentError("factorial freeze variant graph task drift")
-        validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
-    for policy in study["policies"]:
-        pair_id = content_id("pair_", policy["pair"])
-        pair = pair_by_id[pair_id]
-        for bundle in policy["bundles"]:
-            cell_graphs = {
-                FactorialCell(item["cell"]): prompt_tsg_from_record(
-                    graphs[content_hash(item["execution"]["prompt_text"])]
-                )
-                for item in bundle["variants"]
-            }
-            _validate_variant_graphs(
-                {"catalog": catalog},
-                {"pair": pair},
-                tasks[bundle["task_id"]],
-                cell_graphs,
-            )
-
-    _verify_frozen_oracle_qualifications(
-        read_json(root / "factorial-oracle-qualifications.json"),
-        study,
-        pair_by_id,
-    )
-    _verify_frozen_functionality_power(root, config, study)
-    _verify_bundled_functional_qualification(
-        config,
-        study,
-        read_json(root / "factorial-functional-qualification.json"),
-    )
-
-    binding_rows = {
-        (item["pair_id"], item["task_id"]): item
-        for item in study.get("pair_bindings", ())
-    }
-    for (pair_id, task_id), raw_binding in binding_rows.items():
-        task = tasks.get(task_id)
-        pair = pair_by_id.get(pair_id)
-        if task is None or pair is None:
-            raise FactorialExperimentError("factorial freeze pair binding coordinate drift")
-        graph = prompt_tsg_from_record(task["prompt_tsg"])
-        validate_prompt_tsg(graph, prompt=task["prompt"], catalog=catalog)
-        query = next(
-            item
-            for item in catalog["queries"]
-            if item["query_id"] == pair.pair_context_query_id
-        )
-        expected = bind_pair(
-            task,
-            graph,
-            pair,
-            query,
-            neutral_counterparts=dict(raw_binding["neutral_counterpart_ids"]),
-        )
-        if canonical_value(expected) != raw_binding:
-            raise FactorialExperimentError("factorial freeze pair binding replay drift")
-
-    assignments = study.get("randomization", {}).get("assignments", ())
-    assignment_ids = [content_id("factorial_assignment_", item) for item in assignments]
-    order = execution["assignment_ids"]
-    if (
-        not isinstance(order, list)
-        or len(order) != len(set(order))
-        or set(order) != set(assignment_ids)
-    ):
-        raise FactorialExperimentError("factorial global execution order drift")
-    call_coordinates = {
-        (item.get("pair_id"), item.get("task_id"), item.get("realization_id"))
-        for item in calls
-        if isinstance(item, Mapping) and item.get("stage") == "intervention"
-    }
-    expected_coordinates = {
-        (content_id("pair_", policy["pair"]), bundle["task_id"], bundle["realization_id"])
-        for policy in study["policies"]
-        for bundle in policy["bundles"]
-    }
-    if len(call_coordinates) != len(calls) or call_coordinates != expected_coordinates:
-        raise FactorialExperimentError("factorial freeze intervention evidence support drift")
-    bundle_by_coordinate = {
-        (
-            content_id("pair_", policy["pair"]),
-            bundle["task_id"],
-            bundle["realization_id"],
-        ): bundle
-        for policy in study["policies"]
-        for bundle in policy["bundles"]
-    }
-    for call in calls:
-        coordinate = (call["pair_id"], call["task_id"], call["realization_id"])
-        bundle = bundle_by_coordinate[coordinate]
-        task = tasks[call["task_id"]]
-        executor_raw = call.get("executor_response")
-        validator_raw = call.get("validator_response")
-        if (
-            not isinstance(executor_raw, str)
-            or hashlib.sha256(executor_raw.encode("utf-8")).hexdigest()
-            != call.get("executor_response_sha256")
-            or not isinstance(validator_raw, str)
-            or hashlib.sha256(validator_raw.encode("utf-8")).hexdigest()
-            != call.get("validator_response_sha256")
-        ):
-            raise FactorialExperimentError("factorial freeze intervention digest drift")
-        executor = _json_object(executor_raw.encode("utf-8"))
-        validator = _json_object(validator_raw.encode("utf-8"))
-        if set(executor) != {cell.value for cell in FACTORIAL_CELL_ORDER}:
-            raise FactorialExperimentError("factorial freeze executor schema drift")
-        variants = {item["cell"]: item for item in bundle["variants"]}
-        for cell in FACTORIAL_CELL_ORDER:
-            row = executor[cell.value]
-            if not isinstance(row, Mapping) or set(row) != {
-                "prompt_text",
-                "facts",
-                "relations",
-                "unresolved_semantics",
-            }:
-                raise FactorialExperimentError("factorial freeze executor cell drift")
-            prompt = row["prompt_text"]
-            graph = build_prompt_tsg(
-                task_id=task["task_id"],
-                prompt=prompt,
-                extractor_id=call["executor_adapter_id"],
-                catalog=catalog,
-                facts=row["facts"],
-                relations=row["relations"],
-                unresolved_semantics=row["unresolved_semantics"],
-            )
-            if (
-                variants[cell.value]["execution"]["prompt_text"] != prompt
-                or variants[cell.value]["execution"]["evidence_sha256"]
-                != call["executor_response_sha256"]
-                or prompt_tsg_record(graph) != graphs[content_hash(prompt)]
-            ):
-                raise FactorialExperimentError(
-                    "factorial freeze executor-to-variant replay drift"
-                )
-        if (
-            set(validator)
-            != {"a00", "a10", "a01", "a11", "cross_cell", "reason"}
-            or any(
-                type(flag) is not bool or not flag
-                for name, section in validator.items()
-                if name != "reason"
-                for flag in section.values()
-            )
-            or any(
-                item["validation"]["evidence_sha256"]
-                != call["validator_response_sha256"]
-                for item in bundle["variants"]
-            )
-        ):
-            raise FactorialExperimentError("factorial freeze validator replay drift")
-    return {
-        "status": "FACTORIAL_FREEZE_VERIFIED",
-        "study_id": content_id("factorial_study_", study),
-        "assignments": len(assignment_ids),
-        "variants": len(expected_variants),
-    }
 
 
 def run_factorial_experiment(
@@ -748,76 +276,60 @@ def run_factorial_experiment(
     root = repository_root.resolve()
     config_file = config_path if config_path.is_absolute() else root / config_path
     requested_config = _read_exact_json(config_file)
-    active = requested_config.get("schema_version") == "1.1"
-    if active:
-        if freeze_root is None:
-            raise FactorialExperimentError(
-                "active factorial schema 1.1 run requires --freeze"
-            )
-        freeze_path = freeze_root.resolve()
-        freeze_verification = verify_factorial_freeze_bundle(freeze_path)
-        frozen_config = read_json(freeze_path / "effective-config.json")
-        if frozen_config != requested_config:
-            raise FactorialExperimentError("factorial run config drifts from its freeze")
-        frozen_functional_qualification = read_json(
-            freeze_path / "factorial-functional-qualification.json"
-        )
-        inputs = _load_inputs(
-            repository_root,
-            config_path,
-            frozen_functional_qualification=frozen_functional_qualification,
-        )
-    else:
-        if freeze_root is not None:
-            raise FactorialExperimentError(
-                "archival schema 1.0 run does not accept a prospective freeze"
-            )
-        freeze_path = None
-        freeze_verification = None
-        inputs = _load_inputs(repository_root, config_path)
+    if requested_config.get("schema_version") != "1.1":
+        raise FactorialExperimentError("factorial run requires active schema 1.1")
+    if freeze_root is None:
+        raise FactorialExperimentError("active factorial run requires --freeze")
+    freeze_path = freeze_root.resolve()
+    freeze_verification = _verify_factorial_freeze_bundle(freeze_path)
+    frozen_config = read_json(freeze_path / "effective-config.json")
+    if frozen_config != requested_config:
+        raise FactorialExperimentError("factorial run config drifts from its freeze")
+    frozen_functional_qualification = read_json(
+        freeze_path / "factorial-functional-qualification.json"
+    )
+    inputs = _load_inputs(
+        repository_root,
+        config_path,
+        frozen_functional_qualification=frozen_functional_qualification,
+    )
     config = inputs["config"]
     credential_names = tuple(
         sorted({item["api_key_env"] for item in inputs["generation_models"]})
     )
     if any(not os.environ.get(name, "").strip() for name in credential_names):
         raise FactorialExperimentError("provider credential is unavailable")
-    if config["schema_version"] == "1.1":
-        if inputs["functional_qualification"] != frozen_functional_qualification:
-            raise FactorialExperimentError(
-                "factorial run functional qualification drifts from its freeze"
-            )
-        frozen_oracle_evidence = read_json(
-            freeze_path / "factorial-oracle-qualifications.json"
+    if inputs["functional_qualification"] != frozen_functional_qualification:
+        raise FactorialExperimentError(
+            "factorial run functional qualification drifts from its freeze"
         )
-        if frozen_oracle_evidence != inputs["oracle_qualification_artifact"]:
-            raise FactorialExperimentError(
-                "factorial run Oracle producer or qualification drifts from its freeze"
-            )
-        power_path = freeze_path / "factorial-functionality-power-qualification.json"
-        frozen_power = read_json(power_path) if power_path.is_file() else None
-        if frozen_power != inputs["functionality_power_qualification"]:
-            raise FactorialExperimentError(
-                "factorial run functionality power qualification drifts from its freeze"
-            )
-        frozen_calls = read_json(freeze_path / "intervention-calls.json")
-        inputs = {**inputs, "frozen_intervention_calls": frozen_calls}
-        study, policies, calls, variant_tsgs = _materialize_factorial_study(inputs)
-        if calls != frozen_calls:
-            raise FactorialExperimentError(
-                "factorial intervention evidence drifts from its freeze"
-            )
-        if canonical_value(study) != read_json(freeze_path / "study-freeze.json"):
-            raise FactorialExperimentError(
-                "factorial run rematerialization drifts from its freeze"
-            )
-        execution_order = read_json(freeze_path / "execution-order.json")[
-            "assignment_ids"
-        ]
-    else:
-        study, policies, calls, variant_tsgs = _materialize_factorial_study(inputs)
-        execution_order = [
-            item.assignment_id for item in study.randomization.assignments
-        ]
+    frozen_oracle_evidence = read_json(
+        freeze_path / "factorial-oracle-qualifications.json"
+    )
+    if frozen_oracle_evidence != inputs["oracle_qualification_artifact"]:
+        raise FactorialExperimentError(
+            "factorial run Oracle producer or qualification drifts from its freeze"
+        )
+    power_path = freeze_path / "factorial-functionality-power-qualification.json"
+    frozen_power = read_json(power_path) if power_path.is_file() else None
+    if frozen_power != inputs["functionality_power_qualification"]:
+        raise FactorialExperimentError(
+            "factorial run functionality power qualification drifts from its freeze"
+        )
+    frozen_calls = read_json(freeze_path / "intervention-calls.json")
+    inputs = {**inputs, "frozen_intervention_calls": frozen_calls}
+    study, policies, calls, variant_tsgs = _materialize_factorial_study(inputs)
+    if calls != frozen_calls:
+        raise FactorialExperimentError(
+            "factorial intervention evidence drifts from its freeze"
+        )
+    if canonical_value(study) != read_json(freeze_path / "study-freeze.json"):
+        raise FactorialExperimentError(
+            "factorial run rematerialization drifts from its freeze"
+        )
+    execution_order = read_json(freeze_path / "execution-order.json")[
+        "assignment_ids"
+    ]
     task_by_id = {row["task_id"]: row for row in inputs["task_rows"]}
     bundle_by_id = {
         item.task_bundle_id: item for policy in policies for item in policy.bundles
@@ -894,38 +406,37 @@ def run_factorial_experiment(
         "verification.json": verification,
         "report.json": report,
     }
-    if config["schema_version"] == "1.1":
+    artifacts.update(
+        {
+            "factorial-pair-registry.json": inputs["registry_value"],
+            "factorial-prompt-tsg-catalog.json": inputs["catalog"],
+            "factorial-measurement-inputs.json": read_json(
+                freeze_path / "factorial-measurement-inputs.json"
+            ),
+            "factorial-variant-tsgs.json": read_json(
+                freeze_path / "factorial-variant-tsgs.json"
+            ),
+            "factorial-freeze.json": {
+                "bundle_sha256": bundle_digest(freeze_path),
+                "verification": freeze_verification,
+            },
+        }
+    )
+    artifacts.update(
+        {
+            f"freeze-{path.name}": read_json(path)
+            for path in freeze_path.glob("*.json")
+            if path.name != "manifest.json"
+        }
+    )
+    selector_root = inputs["pair_selection_artifact_root"]
+    if selector_root is not None:
         artifacts.update(
             {
-                "factorial-pair-registry.json": inputs["registry_value"],
-                "factorial-prompt-tsg-catalog.json": inputs["catalog"],
-                "factorial-measurement-inputs.json": read_json(
-                    freeze_path / "factorial-measurement-inputs.json"
-                ),
-                "factorial-variant-tsgs.json": read_json(
-                    freeze_path / "factorial-variant-tsgs.json"
-                ),
-                "factorial-freeze.json": {
-                    "bundle_sha256": bundle_digest(freeze_path),
-                    "verification": freeze_verification,
-                },
+                f"pair-selection-{name}": read_json(selector_root / name)
+                for name in INTERACTION_SELECTION_ARTIFACT_FILES
             }
         )
-        artifacts.update(
-            {
-                f"freeze-{path.name}": read_json(path)
-                for path in freeze_path.glob("*.json")
-                if path.name != "manifest.json"
-            }
-        )
-        selector_root = inputs["pair_selection_artifact_root"]
-        if selector_root is not None:
-            artifacts.update(
-                {
-                    f"pair-selection-{name}": read_json(selector_root / name)
-                    for name in INTERACTION_SELECTION_ARTIFACT_FILES
-                }
-            )
     write_bundle(output, artifacts)
     verify_factorial_result_bundle(output)
     return report
@@ -1020,38 +531,7 @@ def _materialize_factorial_study(
             )
         )
     analysis = config["analysis"]
-    plan_type = (
-        FactorialAnalysisPlanV2
-        if config["schema_version"] == "1.1"
-        else FactorialAnalysisPlan
-    )
-    plan_kwargs: dict[str, Any] = {}
-    if config["schema_version"] == "1.1":
-        plan_kwargs = {
-            "minimum_task_units": analysis["minimum_task_units"],
-            "minimum_valid_bootstrap_fraction": analysis[
-                "minimum_valid_bootstrap_fraction"
-            ],
-            "bootstrap_quantile_method": analysis["bootstrap_quantile_method"],
-            "practical_interaction_margin": analysis[
-                "practical_interaction_margin"
-            ],
-            "maximum_unknown_fraction": analysis["maximum_unknown_fraction"],
-            "functionality_noninferiority_margin": analysis[
-                "functionality_noninferiority_margin"
-            ],
-            "functionality_noninferiority_separately_powered": analysis[
-                "functionality_noninferiority_separately_powered"
-            ],
-            "functionality_power_qualification_sha256": (
-                None
-                if inputs["functionality_power_qualification"] is None
-                else inputs["functionality_power_qualification"][
-                    "qualification_sha256"
-                ]
-            ),
-        }
-    analysis_plan = plan_type(
+    analysis_plan = FactorialAnalysisPlan(
         tuple(Metric(item) for item in analysis["metrics"]),
         Metric(analysis["primary_metric"]),
         analysis["bootstrap_seed"],
@@ -1063,7 +543,24 @@ def _materialize_factorial_study(
                 "secondary_effects", ["factor_1", "factor_2", "joint"]
             )
         ),
-        **plan_kwargs,
+        minimum_task_units=analysis["minimum_task_units"],
+        minimum_valid_bootstrap_fraction=analysis[
+            "minimum_valid_bootstrap_fraction"
+        ],
+        bootstrap_quantile_method=analysis["bootstrap_quantile_method"],
+        practical_interaction_margin=analysis["practical_interaction_margin"],
+        maximum_unknown_fraction=analysis["maximum_unknown_fraction"],
+        functionality_noninferiority_margin=analysis[
+            "functionality_noninferiority_margin"
+        ],
+        functionality_noninferiority_separately_powered=analysis[
+            "functionality_noninferiority_separately_powered"
+        ],
+        functionality_power_qualification_sha256=(
+            None
+            if inputs["functionality_power_qualification"] is None
+            else inputs["functionality_power_qualification"]["qualification_sha256"]
+        ),
     )
     study = freeze_factorial_study(
         tuple(_task(row) for row in inputs["task_rows"]),
@@ -1084,8 +581,6 @@ def _materialize_factorial_study(
 def _factorial_protocol_id(
     config: Mapping[str, Any], protocol: Mapping[str, Any]
 ) -> str:
-    if config["schema_version"] == "1.0":
-        return config["study_name"]
     return content_id(
         "factorial_protocol_v11_",
         {
@@ -1111,21 +606,17 @@ def _load_inputs(
     config_file = config_path if config_path.is_absolute() else root / config_path
     config = _read_exact_json(config_file)
     phase = config.get("phase")
-    schema_version = config.get("schema_version")
-    if schema_version not in {"1.0", "1.1"} or phase not in {
+    if config.get("schema_version") != "1.1" or phase not in {
         "development_canary",
         "confirmatory",
         "prospective_followup",
     }:
         raise FactorialExperimentError("factorial config envelope is invalid")
-    if schema_version == "1.1":
-        _validate_v11_config_shape(config)
-        _validate_v11_analysis(config)
-        functionality_power_qualification = _functionality_power_qualification(
-            root, config["analysis"]
-        )
-    else:
-        functionality_power_qualification = None
+    validate_factorial_config(config)
+    validate_factorial_analysis(config)
+    functionality_power_qualification = _functionality_power_qualification(
+        root, config["analysis"]
+    )
     claim_allowed = config.get("scientific_claim_allowed")
     if type(claim_allowed) is not bool or (
         phase == "development_canary" and claim_allowed
@@ -1165,24 +656,8 @@ def _load_inputs(
     registry_value = _read_exact_json(registry_path)
     registry = load_pair_registry(registry_path, catalog)
     pair_by_id = {item.pair_id: item for item in registry.pairs}
-    if schema_version == "1.0":
-        if len(registry.pairs) != 1:
-            raise FactorialExperimentError("factorial study requires exactly one frozen pair")
-        raw_protocols = (
-            {
-                "pair_id": registry.pairs[0].pair_id,
-                "task_ids": list(selected_ids),
-                "intervention": config["intervention"],
-                "security_oracle": config["security_oracle"],
-                "mechanism_trace_diagnostics": config["analysis"].get(
-                    "mechanism_trace_diagnostics", []
-                ),
-            },
-        )
-        generation_models = (dict(config["generation"]),)
-    else:
-        raw_protocols = _v11_pair_protocols(config, pair_by_id, selected_ids)
-        generation_models = _v11_generation_models(config)
+    raw_protocols = _pair_protocols(config, pair_by_id, selected_ids)
+    generation_models = _generation_models(config)
 
     model_ids = tuple(item["model_id"] for item in generation_models)
     if (
@@ -1235,12 +710,9 @@ def _load_inputs(
             root,
             security,
             pair,
-            prospective=schema_version == "1.1",
         )
-        oracle_qualification_evidence = (
-            _oracle_qualification_evidence(root, security, pair, qualification)
-            if schema_version == "1.1"
-            else None
+        oracle_qualification_evidence = _oracle_qualification_evidence(
+            root, security, pair, qualification
         )
         protocol_tasks = tuple(task_by_id[item] for item in raw["task_ids"])
         for row in protocol_tasks:
@@ -1298,50 +770,30 @@ def _load_inputs(
     functional = config["functional_oracle"]
     functional_evaluator = _locked_json(root, functional, "evaluator_config")
     functional_prompt = _locked_text(root, functional, "prompt")
-    if schema_version == "1.1":
-        structural_smoke_allowed = (
-            phase == "development_canary" and claim_allowed is False
-        )
-        functional_qualification = (
-            _functional_qualification(
-                root,
-                functional,
-                functional_evaluator,
-                structural_smoke_allowed=structural_smoke_allowed,
-            )
-            if frozen_functional_qualification is None
-            else _validate_frozen_functional_qualification(
-                functional,
-                functional_evaluator,
-                frozen_functional_qualification,
-                structural_smoke_allowed=structural_smoke_allowed,
-            )
-        )
-        adapters = _generalized_adapters(
-            registry,
-            tuple(loaded_protocols),
-            generation_models,
-            generation_prompt_by_model,
+    structural_smoke_allowed = phase == "development_canary" and claim_allowed is False
+    functional_qualification = (
+        _functional_qualification(
+            root,
+            functional,
             functional_evaluator,
-            functional_qualification,
+            structural_smoke_allowed=structural_smoke_allowed,
         )
-    else:
-        if frozen_functional_qualification is not None:
-            raise FactorialExperimentError(
-                "archival factorial schema cannot consume a frozen functional qualification"
-            )
-        functional_qualification = None
-        protocol = loaded_protocols[0]
-        adapters = _adapters(
-            registry,
-            protocol["executor"],
-            protocol["validator"],
-            generation_models[0],
-            protocol["pair"].oracle_profile_id,
-            protocol["pair"].oracle_policy_sha256,
+        if frozen_functional_qualification is None
+        else _validate_frozen_functional_qualification(
+            functional,
             functional_evaluator,
-            functional_prompt,
+            frozen_functional_qualification,
+            structural_smoke_allowed=structural_smoke_allowed,
         )
+    )
+    adapters = _generalized_adapters(
+        registry,
+        tuple(loaded_protocols),
+        generation_models,
+        generation_prompt_by_model,
+        functional_evaluator,
+        functional_qualification,
+    )
     for protocol in loaded_protocols:
         intervention = protocol["intervention"]
         protocol["realizations"] = tuple(
@@ -1363,18 +815,13 @@ def _load_inputs(
             )
         )
     pairs = tuple(item["pair"] for item in loaded_protocols)
-    if schema_version == "1.1":
-        _validate_v11_pair_relations(pairs)
-    pair_selection = (
-        _v11_pair_selection(
-            config,
-            registry,
-            pairs,
-            repository_root=root,
-            config_root=config_file.parent.resolve(),
-        )
-        if schema_version == "1.1"
-        else None
+    validate_factorial_pair_relations(pairs)
+    pair_selection = _pair_selection(
+        config,
+        registry,
+        pairs,
+        repository_root=root,
+        config_root=config_file.parent.resolve(),
     )
     pair_selection_artifact_root = None
     if pair_selection is not None and pair_selection.source == "selector_artifact":
@@ -1384,10 +831,8 @@ def _load_inputs(
             config_root=config_file.parent.resolve(),
         )
     selected_pair_ids = {item.pair_id for item in pairs}
-    oracle_qualification_artifact = (
-        _oracle_qualification_artifact(tuple(loaded_protocols))
-        if schema_version == "1.1"
-        else None
+    oracle_qualification_artifact = _oracle_qualification_artifact(
+        tuple(loaded_protocols)
     )
     if functionality_power_qualification is not None:
         power_payload = _json_object(
@@ -1412,7 +857,6 @@ def _load_inputs(
         "registry_value": registry_value,
         "pairs": pairs,
         "pair_by_id": {item.pair_id: item for item in pairs},
-        "pair": pairs[0] if schema_version == "1.0" else None,
         "pair_selection": pair_selection,
         "pair_selection_artifact_root": pair_selection_artifact_root,
         "task_rows": task_rows,
@@ -1436,7 +880,6 @@ def _load_inputs(
         "functional_qualification": functional_qualification,
         "functionality_power_qualification": functionality_power_qualification,
         "adapters": adapters,
-        "realizations": loaded_protocols[0]["realizations"] if schema_version == "1.0" else (),
         "trace_endpoints_by_pair": {
             item["pair"].pair_id: item["trace_endpoints"] for item in loaded_protocols
         },
@@ -1444,7 +887,7 @@ def _load_inputs(
     }
 
 
-def _v11_pair_protocols(
+def _pair_protocols(
     config: Mapping[str, Any], pair_by_id: Mapping[str, Any], selected_ids: list[str]
 ) -> tuple[dict[str, Any], ...]:
     rows = config.get("pair_protocols")
@@ -1476,7 +919,7 @@ def _v11_pair_protocols(
             or not isinstance(item["security_oracle"], dict)
         ):
             raise FactorialExperimentError("factorial pair protocol task support is invalid")
-        _validate_v11_intervention_design(item["intervention"])
+        validate_factorial_intervention_design(item["intervention"])
         covered.update(task_ids)
         result.append(dict(item))
     if covered != selected:
@@ -1484,178 +927,9 @@ def _v11_pair_protocols(
     return tuple(result)
 
 
-def _validate_v11_analysis(config: Mapping[str, Any]) -> None:
-    analysis = config.get("analysis")
-    if not isinstance(analysis, dict):
-        raise FactorialExperimentError("factorial schema 1.1 analysis is invalid")
-    required = {
-        "metrics",
-        "primary_metric",
-        "secondary_effects",
-        "bootstrap_seed",
-        "bootstrap_draws",
-        "familywise_alpha",
-        "minimum_task_units",
-        "minimum_valid_bootstrap_fraction",
-        "bootstrap_quantile_method",
-        "practical_interaction_margin",
-        "maximum_unknown_fraction",
-        "functionality_noninferiority_margin",
-        "functionality_noninferiority_separately_powered",
-    }
-    separately_powered = analysis.get(
-        "functionality_noninferiority_separately_powered"
-    )
-    power_field = "functionality_power_qualification"
-    expected = required | ({power_field} if separately_powered is True else set())
-    if set(analysis) != expected:
-        raise FactorialExperimentError(
-            "factorial schema 1.1 analysis fields are not exact"
-        )
-    metrics = analysis.get("metrics")
-    effects = analysis.get("secondary_effects")
-    if metrics != [
-        "secure_yield",
-        "code_valid",
-        "oracle_evaluable",
-        "functionality",
-        "joint",
-    ]:
-        raise FactorialExperimentError(
-            "factorial schema 1.1 requires the five ordered, distinct outcome endpoints"
-        )
-    if not isinstance(effects, list) or not {
-        "factor_1",
-        "factor_2",
-        "factor_1_given_factor_2",
-        "factor_2_given_factor_1",
-        "joint",
-    } <= set(effects):
-        raise FactorialExperimentError(
-            "factorial schema 1.1 requires both conditional simple effects"
-        )
-    if analysis.get("primary_metric") != "secure_yield":
-        raise FactorialExperimentError(
-            "factorial schema 1.1 primary metric must be secure_yield"
-        )
-    if (
-        type(analysis.get("bootstrap_seed")) is not int
-        or type(analysis.get("bootstrap_draws")) is not int
-        or analysis["bootstrap_draws"] < 100
-        or type(analysis.get("familywise_alpha")) is not float
-        or not 0.0 < analysis["familywise_alpha"] < 1.0
-        or type(analysis.get("minimum_task_units")) is not int
-        or analysis["minimum_task_units"] < 2
-        or type(analysis.get("minimum_valid_bootstrap_fraction")) is not float
-        or not 0.0 < analysis["minimum_valid_bootstrap_fraction"] <= 1.0
-        or analysis.get("bootstrap_quantile_method") != "higher"
-        or type(analysis.get("functionality_noninferiority_separately_powered"))
-        is not bool
-        or any(
-            type(analysis.get(name)) is not float
-            or not 0.0 <= analysis[name] <= 1.0
-            for name in (
-                "practical_interaction_margin",
-                "maximum_unknown_fraction",
-                "functionality_noninferiority_margin",
-            )
-        )
-    ):
-        raise FactorialExperimentError(
-            "factorial schema 1.1 bootstrap and functionality-gate rules are invalid"
-        )
-    if separately_powered:
-        reference = analysis[power_field]
-        if (
-            not isinstance(reference, dict)
-            or set(reference) != {"path", "sha256"}
-            or not isinstance(reference["path"], str)
-            or not reference["path"].strip()
-            or not _is_sha256(reference["sha256"])
-        ):
-            raise FactorialExperimentError(
-                "factorial functionality power qualification reference is invalid"
-            )
 
 
-def _validate_v11_config_shape(config: Mapping[str, Any]) -> None:
-    required = {
-        "schema_version",
-        "study_name",
-        "phase",
-        "purpose",
-        "corpus",
-        "pair_registry_path",
-        "prompt_tsg_catalog_path",
-        "pair_protocols",
-        "generation",
-        "functional_oracle",
-        "randomization",
-        "analysis",
-        "scale_gate",
-        "scientific_claim_allowed",
-    }
-    if set(config) not in (required, required | {"pair_selection"}):
-        raise FactorialExperimentError("factorial schema 1.1 top-level fields are not exact")
-    exact_sections = {
-        "corpus": {
-            "path",
-            "bundle_sha256",
-            "task_ids",
-            "selection_outcomes_consulted",
-            "generalization_boundary",
-        },
-        "functional_oracle": {
-            "evaluator_config_path",
-            "evaluator_config_sha256",
-            "prompt_path",
-            "prompt_sha256",
-            "qualification_path",
-            "qualification_sha256",
-        },
-        "randomization": {"seed", "slots"},
-    }
-    for name, fields in exact_sections.items():
-        if not isinstance(config.get(name), Mapping) or set(config[name]) != fields:
-            raise FactorialExperimentError(
-                f"factorial schema 1.1 {name} fields are not exact"
-            )
-def _validate_v11_intervention_design(intervention: Mapping[str, Any]) -> None:
-    commutative = intervention.get("joint_application_commutative")
-    realizations = intervention.get("joint_realizations")
-    if type(commutative) is not bool or not isinstance(realizations, list) or not realizations:
-        raise FactorialExperimentError(
-            "factorial schema 1.1 must declare joint-application commutativity"
-        )
-    orders = set()
-    for item in realizations:
-        if (
-            not isinstance(item, dict)
-            or type(item.get("weight")) is not int
-            or item["weight"] <= 0
-            or item.get("application_order") not in ([1, 2], [2, 1])
-        ):
-            raise FactorialExperimentError(
-                "factorial joint-realization order support is invalid"
-            )
-        orders.add(tuple(item["application_order"]))
-    if not commutative and orders != {(1, 2), (2, 1)}:
-        raise FactorialExperimentError(
-            "non-commutative factorial pairs require both application orders"
-        )
-
-
-def _validate_v11_pair_relations(pairs: tuple[Any, ...]) -> None:
-    try:
-        for pair in pairs:
-            validate_active_factorial_relation(pair.relation_type)
-    except (AttributeError, TypeError, ValueError) as error:
-        raise FactorialExperimentError(
-            "factorial pair relation is outside the active successor vocabulary"
-        ) from error
-
-
-def _v11_generation_models(config: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+def _generation_models(config: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
     generation = config.get("generation")
     if not isinstance(generation, dict) or not isinstance(generation.get("models"), list):
         raise FactorialExperimentError("factorial generation.models must be a list")
@@ -1682,7 +956,7 @@ def _v11_generation_models(config: Mapping[str, Any]) -> tuple[dict[str, Any], .
     return result
 
 
-def _v11_pair_selection(
+def _pair_selection(
     config: Mapping[str, Any],
     registry: Any,
     pairs: tuple[Any, ...],
@@ -1820,37 +1094,16 @@ def _functional_qualification(
     """Load and seal active Functional Judge qualification evidence."""
 
     try:
-        path = root / section["qualification_path"]
-        expected = section["qualification_sha256"]
-    except KeyError:
-        raise FactorialExperimentError("functional Oracle qualification is not frozen") from None
-    _require_file_hash(path, expected)
-    try:
-        payload = path.read_bytes()
-        payload_text = payload.decode("utf-8")
-    except (OSError, UnicodeError):
-        raise FactorialExperimentError(
-            "functional Oracle qualification is unreadable"
-        ) from None
-    qualification = _json_object(payload)
-    sealed = {
-        "qualification_path": section["qualification_path"],
-        "qualification_sha256": hashlib.sha256(payload).hexdigest(),
-        "qualification": qualification,
-        "qualification_payload": payload_text,
-        "qualification_identity": _functional_qualification_identity(
-            qualification,
+        return load_functional_qualification(
+            root,
             section,
             evaluator,
             structural_smoke_allowed=structural_smoke_allowed,
-        ),
-    }
-    return _validate_frozen_functional_qualification(
-        section,
-        evaluator,
-        sealed,
-        structural_smoke_allowed=structural_smoke_allowed,
-    )
+            include_evaluator_metadata=True,
+            confine_to_root=False,
+        )
+    except QualificationError as error:
+        raise FactorialExperimentError(str(error)) from error
 
 
 def _validate_frozen_functional_qualification(
@@ -1860,96 +1113,16 @@ def _validate_frozen_functional_qualification(
     *,
     structural_smoke_allowed: bool,
 ) -> dict[str, Any]:
-    expected_fields = {
-        "qualification_path",
-        "qualification_sha256",
-        "qualification",
-        "qualification_payload",
-        "qualification_identity",
-    }
-    if set(sealed) != expected_fields:
-        raise FactorialExperimentError(
-            "frozen functional Oracle qualification fields are not exact"
+    try:
+        return validate_functional_qualification(
+            section,
+            evaluator,
+            sealed,
+            structural_smoke_allowed=structural_smoke_allowed,
+            include_evaluator_metadata=True,
         )
-    payload = sealed.get("qualification_payload")
-    if not isinstance(payload, str) or not payload:
-        raise FactorialExperimentError(
-            "frozen functional Oracle qualification payload is invalid"
-        )
-    qualification = sealed.get("qualification")
-    if not isinstance(qualification, Mapping):
-        raise FactorialExperimentError(
-            "frozen functional Oracle qualification is not an object"
-        )
-    parsed = _json_object(payload.encode("utf-8"))
-    expected_identity = _functional_qualification_identity(
-        qualification,
-        section,
-        evaluator,
-        structural_smoke_allowed=structural_smoke_allowed,
-    )
-    if (
-        sealed.get("qualification_path") != section.get("qualification_path")
-        or sealed.get("qualification_sha256")
-        != section.get("qualification_sha256")
-        or hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        != section.get("qualification_sha256")
-        or parsed != qualification
-        or sealed.get("qualification_identity") != expected_identity
-    ):
-        raise FactorialExperimentError("functional Oracle qualification drift")
-    return dict(sealed)
-
-
-def _functional_qualification_identity(
-    qualification: Mapping[str, Any],
-    section: Mapping[str, Any],
-    evaluator: Mapping[str, Any],
-    *,
-    structural_smoke_allowed: bool,
-) -> dict[str, Any]:
-    candidate = qualification.get("candidate", {})
-    if not isinstance(candidate, Mapping):
-        raise FactorialExperimentError("functional Oracle candidate is invalid")
-    status = qualification.get("status")
-    structural_smoke = status == "STRUCTURAL_SMOKE_ONLY"
-    if structural_smoke and not (
-        structural_smoke_allowed
-        and evaluator.get("provider") == "offline_deterministic_test_fixture"
-        and evaluator.get("fixture_only") is True
-        and evaluator.get("scientific_claim_allowed") is False
-        and qualification.get("semantic_accuracy_claimed") is False
-        and qualification.get("scientific_claim_allowed") is False
-    ):
-        raise FactorialExperimentError(
-            "structural-smoke-only functional Oracle qualification is not allowed"
-        )
-    if (
-        status not in {"QUALIFIED_FOR_EXPERIMENT", "STRUCTURAL_SMOKE_ONLY"}
-        or candidate.get("candidate_id") != evaluator.get("candidate_id")
-        or candidate.get("model_id") != evaluator.get("model_id")
-        or candidate.get("evaluator_config_sha256")
-        != section.get("evaluator_config_sha256")
-        or candidate.get("prompt_sha256") != section.get("prompt_sha256")
-    ):
-        raise FactorialExperimentError("functional Oracle qualification drift")
-    if qualification.get("schema_version") != "1.0":
-        raise FactorialExperimentError("functional Oracle qualification drift")
-    return {
-        "qualification_id": content_id(
-            "functional_judge_qualification_v1_", qualification
-        ),
-        "status": status,
-        "candidate_id": candidate.get("candidate_id"),
-        "model_id": candidate.get("model_id"),
-        "evaluator_config_sha256": candidate.get("evaluator_config_sha256"),
-        "prompt_sha256": candidate.get("prompt_sha256"),
-        "provider": evaluator.get("provider"),
-        "fixture_only": evaluator.get("fixture_only"),
-        "evaluator_scientific_claim_allowed": evaluator.get(
-            "scientific_claim_allowed"
-        ),
-    }
+    except QualificationError as error:
+        raise FactorialExperimentError(str(error)) from error
 
 
 def _functionality_power_qualification(
@@ -1965,7 +1138,7 @@ def _functionality_power_qualification(
     _require_file_hash(path, reference["sha256"])
     payload_text = path.read_bytes().decode("utf-8")
     payload = _read_exact_json(path)
-    _validate_functionality_power_payload(payload, analysis)
+    validate_factorial_functionality_power(payload, analysis)
     return {
         "schema_version": "1.0",
         "qualification_sha256": reference["sha256"],
@@ -1973,64 +1146,6 @@ def _functionality_power_qualification(
     }
 
 
-def _validate_functionality_power_payload(
-    payload: Any,
-    analysis: Mapping[str, Any],
-) -> None:
-    required = {
-        "schema_version",
-        "qualification_status",
-        "analysis_coordinate",
-        "planned_task_units_per_coordinate",
-        "target_power",
-        "familywise_alpha",
-        "noninferiority_margin",
-        "power_method",
-        "assumptions",
-    }
-    coordinate = payload.get("analysis_coordinate", {}) if isinstance(payload, dict) else {}
-    assumptions = payload.get("assumptions", {}) if isinstance(payload, dict) else {}
-    if (
-        not isinstance(payload, dict)
-        or set(payload) != required
-        or payload["schema_version"] != "1.0"
-        or payload["qualification_status"] != "supported"
-        or coordinate
-        != {
-            "metric": "functionality",
-            "contrast": "a11_minus_a00",
-            "unit": "task_unit",
-            "scope": "each_pair_model_coordinate",
-        }
-        or type(payload["planned_task_units_per_coordinate"]) is not int
-        or payload["planned_task_units_per_coordinate"]
-        < analysis["minimum_task_units"]
-        or type(payload["target_power"]) is not float
-        or not 0.8 <= payload["target_power"] < 1.0
-        or payload["familywise_alpha"] != analysis["familywise_alpha"]
-        or payload["noninferiority_margin"]
-        != analysis["functionality_noninferiority_margin"]
-        or not isinstance(payload["power_method"], str)
-        or not payload["power_method"].strip()
-        or not isinstance(assumptions, dict)
-        or set(assumptions)
-        != {
-            "baseline_functionality_rate",
-            "alternative_difference",
-            "paired_task_unit_correlation",
-        }
-        or type(assumptions["baseline_functionality_rate"]) is not float
-        or not 0.0 <= assumptions["baseline_functionality_rate"] <= 1.0
-        or type(assumptions["alternative_difference"]) is not float
-        or not -1.0 <= assumptions["alternative_difference"] <= 1.0
-        or assumptions["alternative_difference"]
-        <= -analysis["functionality_noninferiority_margin"]
-        or type(assumptions["paired_task_unit_correlation"]) is not float
-        or not -1.0 <= assumptions["paired_task_unit_correlation"] <= 1.0
-    ):
-        raise FactorialExperimentError(
-            "factorial functionality power qualification is unsupported or incomplete"
-        )
 
 
 def _execute_intervention(
@@ -2039,15 +1154,10 @@ def _execute_intervention(
     task: Mapping[str, Any],
     realization: FactorialRealizationSpec,
 ) -> tuple[dict[FactorialCell, str], dict[FactorialCell, Any], bytes, dict[str, Any]]:
-    prospective = inputs["config"]["schema_version"] == "1.1"
     request = {
-        "request_kind": (
-            "blind_factorial_complete_prompt_rewrite"
-            if prospective
-            else "blind_factorial_prompt_intervention"
-        ),
+        "request_kind": "blind_factorial_complete_prompt_rewrite",
         "source_prompt": task["prompt"],
-        "source_prompt_tsg": task["prompt_tsg"] if prospective else None,
+        "source_prompt_tsg": task["prompt_tsg"],
         "functional_requirements": task["functional_contract"]["requirements"],
         "factor_1": {
             "target": realization.factor_1_target_instruction,
@@ -2062,10 +1172,6 @@ def _execute_intervention(
         "factor_ids": list(protocol["pair"].factors),
         "blindness": {"generated_code": False, "oracle_outcomes": False, "effect_direction": False},
     }
-    if not prospective:
-        request.pop("source_prompt_tsg")
-        request.pop("factor_operations")
-        request.pop("factor_ids")
     frozen_call = _frozen_intervention_call(inputs, protocol, task, realization)
     if frozen_call is not None:
         if frozen_call.get("executor_request") != request:
@@ -2077,61 +1183,46 @@ def _execute_intervention(
     maximum = protocol["intervention"]["maximum_suffix_characters"]
     prompts: dict[FactorialCell, str] = {}
     graphs: dict[FactorialCell, Any] = {}
-    if prospective:
-        expected = {cell.value for cell in FACTORIAL_CELL_ORDER}
-        if set(value) != expected:
-            raise FactorialExperimentError("factorial complete-rewrite response schema drift")
-        for cell in FACTORIAL_CELL_ORDER:
-            row = value[cell.value]
-            if not isinstance(row, Mapping) or set(row) != {
-                "prompt_text",
-                "facts",
-                "relations",
-                "unresolved_semantics",
-            }:
-                raise FactorialExperimentError(
-                    "factorial complete-rewrite cell schema drift"
-                )
-            prompt = row["prompt_text"]
-            if (
-                not isinstance(prompt, str)
-                or not prompt.strip()
-                or prompt != prompt.strip()
-                or len(prompt) > len(task["prompt"]) + maximum
-            ):
-                raise FactorialExperimentError("factorial complete prompt is invalid")
-            prompts[cell] = prompt
-            try:
-                graphs[cell] = build_prompt_tsg(
-                    task_id=task["task_id"],
-                    prompt=prompt,
-                    extractor_id=inputs["adapters"].intervention_executor.adapter_id,
-                    catalog=inputs["catalog"],
-                    facts=row["facts"],
-                    relations=row["relations"],
-                    unresolved_semantics=row["unresolved_semantics"],
-                )
-            except (KeyError, TypeError, ValueError) as error:
-                raise FactorialExperimentError(
-                    "factorial complete-rewrite Prompt TSG is invalid"
-                ) from error
-        _validate_variant_graphs(inputs, protocol, task, graphs)
-    else:
-        expected = {f"{cell.value}_text" for cell in FACTORIAL_CELL_ORDER}
-        if set(value) != expected:
-            raise FactorialExperimentError("factorial executor response schema drift")
-        for cell in FACTORIAL_CELL_ORDER:
-            text = value[f"{cell.value}_text"]
-            if (
-                not isinstance(text, str)
-                or not text.strip()
-                or text != text.strip()
-                or len(text) > maximum
-                or "\n" in text
-                or "\r" in text
-            ):
-                raise FactorialExperimentError("factorial executor suffix format drift")
-            prompts[cell] = task["prompt"] + "\n\n" + text
+    expected = {cell.value for cell in FACTORIAL_CELL_ORDER}
+    if set(value) != expected:
+        raise FactorialExperimentError("factorial complete-rewrite response schema drift")
+    for cell in FACTORIAL_CELL_ORDER:
+        row = value[cell.value]
+        if not isinstance(row, Mapping) or set(row) != {
+            "prompt_text",
+            "facts",
+            "relations",
+            "unresolved_semantics",
+        }:
+            raise FactorialExperimentError(
+                "factorial complete-rewrite cell schema drift"
+            )
+        prompt = row["prompt_text"]
+        if (
+            not isinstance(prompt, str)
+            or not prompt.strip()
+            or prompt != prompt.strip()
+            or len(prompt) > len(task["prompt"]) + maximum
+        ):
+            raise FactorialExperimentError("factorial complete prompt is invalid")
+        prompts[cell] = prompt
+        try:
+            graphs[cell] = build_prompt_tsg(
+                task_id=task["task_id"],
+                prompt=prompt,
+                extractor_id=inputs["adapters"].intervention_executor.adapter_id,
+                catalog=inputs["catalog"],
+                facts=row["facts"],
+                relations=row["relations"],
+                unresolved_semantics=row["unresolved_semantics"],
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise FactorialExperimentError(
+                "factorial complete-rewrite Prompt TSG is invalid"
+            ) from error
+    validate_factorial_variant_graphs(
+        inputs["catalog"], protocol["pair"], task, graphs
+    )
     if len(set(prompts.values())) != len(FACTORIAL_CELL_ORDER):
         raise FactorialExperimentError("factorial executor collapsed treatment cells")
     return prompts, graphs, raw, request
@@ -2227,79 +1318,6 @@ def _frozen_intervention_call(
     return matches[0]
 
 
-def _validate_variant_graphs(
-    inputs: Mapping[str, Any],
-    protocol: Mapping[str, Any],
-    task: Mapping[str, Any],
-    graphs: Mapping[FactorialCell, Any],
-) -> None:
-    """Check task/context/non-target projections and exact operation-aware states."""
-
-    source = prompt_tsg_from_record(task["prompt_tsg"])
-    pair = protocol["pair"]
-    query = next(
-        (
-            item
-            for item in inputs["catalog"]["queries"]
-            if item["query_id"] == pair.pair_context_query_id
-        ),
-        None,
-    )
-    if query is None:
-        raise FactorialExperimentError("factorial pair query is absent from the catalog")
-    excluded = {"task.root", *pair.factors}
-
-    def projection(graph: Any) -> tuple[tuple[str, ...], tuple[tuple[str, str, str], ...]]:
-        semantics = {item.node_id: item.semantic_id for item in graph.nodes}
-        nodes = tuple(
-            sorted(
-                item.semantic_id
-                for item in graph.nodes
-                if item.semantic_id not in excluded
-            )
-        )
-        edges = tuple(
-            sorted(
-                (
-                    semantics[item.source_id],
-                    item.edge_type,
-                    semantics[item.target_id],
-                )
-                for item in graph.edges
-                if semantics[item.source_id] not in excluded
-                and semantics[item.target_id] not in excluded
-            )
-        )
-        return nodes, edges
-
-    source_projection = projection(source)
-    for cell in FACTORIAL_CELL_ORDER:
-        graph = graphs[cell]
-        context = query_context(
-            graph,
-            query=query,
-            cwe=task["cwe"],
-            task_family=task.get("task_family", task["archetype"]),
-        )
-        treatment_states = cell.target_states
-        expected_states = tuple(
-            QueryState.PRESENT
-            if (treated and operation.value == "add")
-            or (not treated and operation.value == "remove")
-            else QueryState.ABSENT
-            for treated, operation in zip(
-                treatment_states, pair.operations, strict=True
-            )
-        )
-        observed_states = tuple(feature_state(graph, factor) for factor in pair.factors)
-        if (
-            context.state is not QueryState.PRESENT
-            or projection(graph) != source_projection
-            or observed_states != expected_states
-        ):
-            raise FactorialExperimentError(
-                "factorial variant Prompt TSG projection or target state drift"
-            )
 
 
 def _measure_assignment(
@@ -2327,12 +1345,22 @@ def _measure_assignment(
         "language": "python",
         "output_schema": {"code": "complete Python source string"},
     }
-    raw = bailian_complete(request, evaluator, generation_prompt)
-    value = _json_object(raw)
-    code = value.get("code") if set(value) == {"code"} else None
-    if not isinstance(code, str):
-        raise FactorialExperimentError("generator response schema drift")
-    generator_digest = hashlib.sha256(raw).hexdigest()
+    try:
+        measurement, evidence = measure_generated_code(
+            assignment_id=assignment_id,
+            generation_request=request,
+            generation_evaluator=evaluator,
+            generation_prompt=generation_prompt,
+            source_task_prompt=task["prompt"],
+            functional_contract=task["functional_contract"],
+            functional_evaluator=inputs["functional_evaluator"],
+            functional_prompt=inputs["functional_prompt"],
+            security_profile_id=pair.oracle_profile_id,
+            complete=bailian_complete,
+            security_evaluate=evaluate_security_profile,
+        )
+    except MeasurementExecutionError as error:
+        raise FactorialExperimentError(str(error)) from error
     provider_calls = [
         {
             "stage": "generation",
@@ -2341,88 +1369,41 @@ def _measure_assignment(
             "model_id": model_id,
             "generator_adapter_id": inputs["adapters"].generator.adapter_id,
             "request": request,
-            "response_sha256": generator_digest,
-            "response": raw.decode("utf-8"),
+            "response_sha256": evidence["generation_response_sha256"],
+            "response": evidence["generation_response"],
         }
     ]
-    if not code.strip() or not python_syntax_valid(code):
-        status = CodeStatus.NO_CODE if not code.strip() else CodeStatus.INVALID
-        return (
-            Measurement(
-                assignment_id,
-                status,
-                OracleStatus.NOT_RUN,
-                FunctionalStatus.NOT_RUN,
-                generator_digest,
-                content_hash(code) if code else None,
-                terminal_reason=status.value,
-            ),
+    if evidence["functional_response"] is not None:
+        provider_calls.append(
             {
-                "generation_model_id": model_id,
-                "security_profile_id": pair.oracle_profile_id,
-                "security_policy_sha256": pair.oracle_policy_sha256,
-                "generation_request": request,
-                "generation_response": raw.decode("utf-8"),
-                "code": code,
-                "security": None,
-                "functional_request": None,
-                "functional_response": None,
-            },
-            provider_calls,
+                "stage": "functional",
+                "assignment_id": assignment_id,
+                "pair_id": pair_id,
+                "model_id": model_id,
+                "functional_evaluator_adapter_id": inputs[
+                    "adapters"
+                ].functional_evaluator.adapter_id,
+                "request": evidence["functional_request"],
+                "response_sha256": evidence["functional_response_sha256"],
+                "response": evidence["functional_response"],
+            }
         )
-    security = evaluate_security_profile(code, pair.oracle_profile_id)
-    contract = task["functional_contract"]
-    functional_request = build_review_request(
-        code,
-        task["prompt"],
-        requirements=contract["requirements"],
-        environment_dependencies=contract["environment_dependencies"],
-    )
-    functional_raw = bailian_complete(
-        functional_request,
-        inputs["functional_evaluator"],
-        inputs["functional_prompt"],
-    )
-    functional = validate_review_response(functional_raw, code)
-    functional_digest = hashlib.sha256(functional_raw).hexdigest()
-    provider_calls.append(
-        {
-            "stage": "functional",
-            "assignment_id": assignment_id,
-            "pair_id": pair_id,
-            "model_id": model_id,
-            "functional_evaluator_adapter_id": inputs[
-                "adapters"
-            ].functional_evaluator.adapter_id,
-            "request": functional_request,
-            "response_sha256": functional_digest,
-            "response": functional_raw.decode("utf-8"),
-        }
-    )
-    measurement = Measurement(
-        assignment_id,
-        CodeStatus.VALID,
-        OracleStatus(security["security_label"]),
-        FunctionalStatus(functional["status"]),
-        generator_digest,
-        content_hash(code),
-        content_hash(security),
-        functional_digest,
-    )
+    record = {
+        "generation_model_id": model_id,
+        "security_profile_id": pair.oracle_profile_id,
+        "security_policy_sha256": pair.oracle_policy_sha256,
+        "generation_request": request,
+        "generation_response": evidence["generation_response"],
+        "code": evidence["code"],
+        "security": evidence["security"],
+        "functional_request": evidence["functional_request"],
+        "functional_response": evidence["functional_response"],
+    }
+    if evidence["functional_validated"] is not None:
+        record["functional_validated"] = evidence["functional_validated"]
     return (
         measurement,
-        {
-            "generation_model_id": model_id,
-            "security_profile_id": pair.oracle_profile_id,
-            "security_policy_sha256": pair.oracle_policy_sha256,
-            "generation_request": request,
-            "generation_response": raw.decode("utf-8"),
-            "code": code,
-            "security": security,
-            "functional_request": functional_request,
-            "functional_response": functional_raw.decode("utf-8"),
-            "functional_validated": functional,
-        },
+        record,
         provider_calls,
     )
 
@@ -2565,11 +1546,6 @@ def _report(
         significant = bool(
             interval and (interval["lower"] > 0.0 or interval["upper"] < 0.0)
         )
-        minimum_evaluability = min(
-            item["point"]
-            for item in evaluability["cells"].values()
-            if item["point"] is not None
-        )
         separately_powered = bool(
             analysis_config.get(
                 "functionality_noninferiority_separately_powered", False
@@ -2581,15 +1557,9 @@ def _report(
         functionality_lower = (
             None if functionality_interval is None else functionality_interval.lower
         )
-        if config["schema_version"] == "1.0":
-            functionality_status = "legacy_point_estimate"
-            functionality_noninferior: bool | None = (
-                functionality["joint"] is not None
-                and functionality["joint"] >= -functionality_margin
-            )
-        elif not separately_powered:
+        if not separately_powered:
             functionality_status = "not_requested"
-            functionality_noninferior = None
+            functionality_noninferior: bool | None = None
         elif functionality_lower is None:
             functionality_status = "not_evaluable"
             functionality_noninferior = None
@@ -2610,65 +1580,44 @@ def _report(
             "functionality_noninferior": functionality_noninferior,
             "maximum_unknown_fraction": unknown_limit,
         }
-        if config["schema_version"] == "1.0":
-            gate.update(
-                {
-                    "minimum_oracle_evaluability": minimum_evaluability,
-                    "unknown_gate_passed": minimum_evaluability
-                    >= 1.0 - unknown_limit,
-                }
+        if code_valid is None:
+            raise FactorialExperimentError(
+                "prospective factorial report lacks code-validity endpoint"
             )
-            gate["claim_ready"] = bool(
-                config.get("scientific_claim_allowed", False)
-                and all(
-                    gate[name]
-                    for name in (
-                        "security_interval_excludes_zero",
-                        "practical_interaction_met",
-                        "functionality_noninferior",
-                        "unknown_gate_passed",
-                    )
+        gate.update(
+            _unknown_coverage_summary(
+                code_valid["cells"], evaluability["cells"], unknown_limit
+            )
+        )
+        gate.update(
+            {
+                "functionality_noninferiority_separately_powered": separately_powered,
+                "functionality_power_qualification_sha256": (
+                    analysis_config["functionality_power_qualification"]["sha256"]
+                    if separately_powered
+                    else None
+                ),
+                "functionality_simultaneous_lower": functionality_lower,
+                "functionality_gate_status": functionality_status,
+            }
+        )
+        gate["security_interaction_claim_ready"] = bool(
+            config.get("scientific_claim_allowed", False)
+            and all(
+                gate[name]
+                for name in (
+                    "security_interval_excludes_zero",
+                    "practical_interaction_met",
+                    "unknown_gate_passed",
                 )
             )
-        else:
-            if code_valid is None:
-                raise FactorialExperimentError(
-                    "prospective factorial report lacks code-validity endpoint"
-                )
-            gate.update(
-                _unknown_coverage_summary(
-                    code_valid["cells"], evaluability["cells"], unknown_limit
-                )
-            )
-            gate.update(
-                {
-                    "functionality_noninferiority_separately_powered": separately_powered,
-                    "functionality_power_qualification_sha256": (
-                        analysis_config["functionality_power_qualification"]["sha256"]
-                        if separately_powered
-                        else None
-                    ),
-                    "functionality_simultaneous_lower": functionality_lower,
-                    "functionality_gate_status": functionality_status,
-                }
-            )
-            gate["security_interaction_claim_ready"] = bool(
-                config.get("scientific_claim_allowed", False)
-                and all(
-                    gate[name]
-                    for name in (
-                        "security_interval_excludes_zero",
-                        "practical_interaction_met",
-                        "unknown_gate_passed",
-                    )
-                )
-            )
-            gate["practical_success_claim_ready"] = bool(
-                gate["security_interaction_claim_ready"]
-                and functionality_status == "passed"
-                and functionality_noninferior
-            )
-            gate["claim_ready"] = gate["practical_success_claim_ready"]
+        )
+        gate["practical_success_claim_ready"] = bool(
+            gate["security_interaction_claim_ready"]
+            and functionality_status == "passed"
+            and functionality_noninferior
+        )
+        gate["claim_ready"] = gate["practical_success_claim_ready"]
         primary_results.append(
             {
                 "coordinate_id": primary["coordinate_id"],
@@ -2687,14 +1636,12 @@ def _report(
         "prospective_followup": "FACTORIAL_FOLLOWUP_COMPLETE",
     }
     trace_spec: Any = trace_endpoints_by_pair
-    if config["schema_version"] == "1.0":
-        trace_spec = next(iter(trace_endpoints_by_pair.values()))
     trace_summary = _mechanism_trace_summary(measurement_records, trace_spec)
     trace_verification = verify_mechanism_trace_diagnostics(
         measurement_records, trace_summary, trace_spec
     )
     report = {
-        "schema_version": config["schema_version"],
+        "schema_version": "1.1",
         "status": status_by_phase[phase],
         "phase": phase,
         "study_name": config["study_name"],
@@ -2725,21 +1672,20 @@ def _report(
         "claim_boundary": config["corpus"]["generalization_boundary"],
         "scale_gate": config["scale_gate"],
     }
-    if config["schema_version"] == "1.1":
-        report.update(
-            {
-                "security_interaction_claim_ready_coordinates": [
-                    item["coordinate_id"]
-                    for item in primary_results
-                    if item["gate"]["security_interaction_claim_ready"]
-                ],
-                "practical_success_claim_ready_coordinates": [
-                    item["coordinate_id"]
-                    for item in primary_results
-                    if item["gate"]["practical_success_claim_ready"]
-                ],
-            }
-        )
+    report.update(
+        {
+            "security_interaction_claim_ready_coordinates": [
+                item["coordinate_id"]
+                for item in primary_results
+                if item["gate"]["security_interaction_claim_ready"]
+            ],
+            "practical_success_claim_ready_coordinates": [
+                item["coordinate_id"]
+                for item in primary_results
+                if item["gate"]["practical_success_claim_ready"]
+            ],
+        }
+    )
     if len(primary_results) == 1:
         only = primary_results[0]
         report.update(
@@ -3045,38 +1991,10 @@ def _generalized_adapters(
     )
 
 
-def _adapters(
-    registry: Any,
-    executor: Mapping[str, Any],
-    validator: Mapping[str, Any],
-    generation: Mapping[str, Any],
-    oracle_profile_id: str,
-    oracle_policy_sha256: str,
-    functional_evaluator: Mapping[str, Any],
-    functional_prompt: str,
-) -> AdapterBundle:
-    return AdapterBundle(
-        AdapterSpec(AdapterKind.REPRESENTATION, "prompt-tsg-pair-catalog", "1", registry.prompt_tsg_catalog_sha256),
-        AdapterSpec(AdapterKind.SELECTOR, "preregistered-pair-registry", "1", content_hash(registry)),
-        AdapterSpec(AdapterKind.INTERVENTION_EXECUTOR, executor["candidate_id"], "1", content_hash(executor)),
-        AdapterSpec(AdapterKind.INTERVENTION_VALIDATOR, validator["candidate_id"], "1", content_hash(validator)),
-        AdapterSpec(AdapterKind.GENERATOR, generation["model_id"], "1", content_hash(generation)),
-        AdapterSpec(AdapterKind.SECURITY_ORACLE, oracle_profile_id, "1", oracle_policy_sha256),
-        AdapterSpec(
-            AdapterKind.FUNCTIONAL_EVALUATOR,
-            functional_evaluator["candidate_id"],
-            "1",
-            content_hash({"evaluator": functional_evaluator, "prompt": functional_prompt}),
-        ),
-    )
-
-
 def _oracle_qualification(
     root: Path,
     section: Mapping[str, Any],
     pair: Any,
-    *,
-    prospective: bool,
 ) -> dict[str, Any]:
     path = root / section["qualification_path"]
     if "qualification_sha256" in section:
@@ -3097,24 +2015,23 @@ def _oracle_qualification(
     for stem in ("implementation", "fixture"):
         locked_path = root / qualification[f"{stem}_path"]
         _require_file_hash(locked_path, qualification[f"{stem}_sha256"])
-    if prospective:
-        policy_path = root / qualification.get("policy_path", "")
-        _require_file_hash(policy_path, pair.oracle_policy_sha256)
-        policy = _read_exact_json(policy_path)
-        if (
-            not isinstance(policy, Mapping)
-            or policy.get("schema_version") != "1.0"
-            or policy.get("profile_id") != pair.oracle_profile_id
-        ):
-            raise FactorialExperimentError(
-                "factorial Oracle policy does not canonically bind the profile"
-            )
-        implementation_path = (root / qualification["implementation_path"]).resolve()
-        producer_path = (Path(__file__).resolve().parent / "security_profiles.py").resolve()
-        if implementation_path != producer_path:
-            raise FactorialExperimentError(
-                "factorial Oracle qualification does not bind the active producer"
-            )
+    policy_path = root / qualification.get("policy_path", "")
+    _require_file_hash(policy_path, pair.oracle_policy_sha256)
+    policy = _read_exact_json(policy_path)
+    if (
+        not isinstance(policy, Mapping)
+        or policy.get("schema_version") != "1.0"
+        or policy.get("profile_id") != pair.oracle_profile_id
+    ):
+        raise FactorialExperimentError(
+            "factorial Oracle policy does not canonically bind the profile"
+        )
+    implementation_path = (root / qualification["implementation_path"]).resolve()
+    producer_path = (Path(__file__).resolve().parent / "security_profiles.py").resolve()
+    if implementation_path != producer_path:
+        raise FactorialExperimentError(
+            "factorial Oracle qualification does not bind the active producer"
+        )
     return qualification
 
 
@@ -3188,50 +2105,24 @@ def _locked_text(root: Path, section: Mapping[str, Any], stem: str) -> str:
 
 
 def _require_file_hash(path: Path, expected: str) -> None:
-    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-        raise FactorialExperimentError(f"frozen file drift: {path}")
-
-
-def _is_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
+    try:
+        verify_file_hash(path, expected)
+    except ValueError as error:
+        raise FactorialExperimentError(str(error)) from error
 
 
 def _json_object(raw: bytes) -> dict[str, Any]:
     try:
-        value = json.loads(
-            raw,
-            object_pairs_hook=_unique_json_object,
-            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return parse_json_object(raw)
+    except ValueError:
         raise FactorialExperimentError("provider response is not valid JSON") from None
-    if not isinstance(value, dict):
-        raise FactorialExperimentError("provider response is not a JSON object")
-    return value
 
 
 def _read_exact_json(path: Path) -> Any:
     try:
-        return json.loads(
-            path.read_text(encoding="utf-8"),
-            object_pairs_hook=_unique_json_object,
-            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        return read_strict_json(path)
+    except ValueError:
         raise FactorialExperimentError(f"JSON input is invalid or duplicated: {path}") from None
-
-
-def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    value: dict[str, Any] = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError("duplicate JSON key")
-        value[key] = item
-    return value
 
 
 __all__ = [
@@ -3239,5 +2130,4 @@ __all__ = [
     "freeze_factorial_experiment",
     "preflight_factorial_experiment",
     "run_factorial_experiment",
-    "verify_factorial_freeze_bundle",
 ]

@@ -7,13 +7,13 @@ import pytest
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.factorial_experiment import (
-    FactorialExperimentError,
     _unknown_coverage_summary,
     freeze_factorial_experiment,
     preflight_factorial_experiment,
     run_factorial_experiment,
-    verify_factorial_freeze_bundle,
 )
+from prompt_mechanism_study.factorial_freeze import verify_factorial_freeze_bundle
+from prompt_mechanism_study.factorial_protocol import FactorialExperimentError
 from prompt_mechanism_study.factorial_verify import (
     _independent_unknown_coverage_summary,
     verify_factorial_result_bundle,
@@ -650,8 +650,8 @@ def test_v11_accepts_partially_overlapping_pair_support(tmp_path) -> None:
 
 
 @pytest.mark.reviewer
-def test_v10_preflight_detects_drift_while_frozen_result_remains_verifiable() -> None:
-    with pytest.raises(FactorialExperimentError, match="frozen file drift"):
+def test_historical_v10_config_is_not_executable_but_result_remains_verifiable() -> None:
+    with pytest.raises(FactorialExperimentError, match="config envelope is invalid"):
         preflight_factorial_experiment(
             ROOT,
             ROOT / "configs/formal/factorial-sql-scaffold-repair-qwen35-v1.json",

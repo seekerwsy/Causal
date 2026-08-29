@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.eligibility import audit_dataset_eligibility
+
+
+pytestmark = pytest.mark.reviewer
 
 
 def test_eligibility_separates_ready_calibration_and_out_of_scope_clusters(

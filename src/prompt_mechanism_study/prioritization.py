@@ -15,6 +15,7 @@ from pathlib import Path
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
     read_json,
+    require_sha256 as _require_digest,
     verify_bundle,
     write_bundle,
 )
@@ -1630,7 +1631,12 @@ def _design(
         math.sqrt(sum((row[column] - means[column]) ** 2 for row in train_raw) / len(train_raw)) or 1.0
         for column in range(len(train_raw[0]))
     ]
-    normalize = lambda values: [(value - means[index]) / scales[index] for index, value in enumerate(values)]
+    def normalize(values: list[float]) -> list[float]:
+        return [
+            (value - means[index]) / scales[index]
+            for index, value in enumerate(values)
+        ]
+
     return [normalize(row) for row in train_raw], [normalize(row) for row in test_raw]
 
 
@@ -1837,11 +1843,6 @@ def _score(value: float) -> float:
     return float(value)
 
 
-def _require_digest(value: str, name: str) -> None:
-    if not isinstance(value, str) or len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise ValueError(f"{name} SHA-256 must be a lowercase digest")
 
 
 def _canonical_unique(values: tuple[str, ...], name: str) -> None:

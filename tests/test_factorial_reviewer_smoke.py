@@ -9,12 +9,12 @@ import pytest
 
 from prompt_mechanism_study.artifact_io import read_json
 from prompt_mechanism_study.factorial_experiment import (
-    FactorialExperimentError,
     freeze_factorial_experiment,
     preflight_factorial_experiment,
     run_factorial_experiment,
-    verify_factorial_freeze_bundle,
 )
+from prompt_mechanism_study.factorial_freeze import verify_factorial_freeze_bundle
+from prompt_mechanism_study.factorial_protocol import FactorialExperimentError
 from prompt_mechanism_study.factorial_verify import verify_factorial_result_bundle
 from prompt_mechanism_study.security_profiles import evaluate_security_profile
 
@@ -198,7 +198,7 @@ def test_schema11_zero_network_reviewer_smoke(tmp_path: Path, monkeypatch) -> No
     )
     with pytest.raises(
         FactorialExperimentError,
-        match="structural-smoke-only functional Oracle qualification is not allowed",
+        match="structural-smoke-only functional qualification is not allowed",
     ):
         preflight_factorial_experiment(ROOT, claim_config_path)
 

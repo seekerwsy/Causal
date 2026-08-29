@@ -9,7 +9,6 @@ assignment, estimates assigned-arm ITT, and invokes the independent verifier.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import platform
@@ -25,7 +24,13 @@ from typing import Any
 from prompt_mechanism_study.adapters import AdapterBundle, AdapterKind, AdapterSpec
 from prompt_mechanism_study.artifact_io import (
     bundle_digest,
+    confined_path as resolve_confined_path,
+    is_sha256,
+    json_object as parse_json_object,
     read_json,
+    read_json_exact as read_strict_json,
+    require_file_hash as verify_file_hash,
+    require_sha256,
     verify_bundle,
     write_bundle,
 )
@@ -76,7 +81,9 @@ from prompt_mechanism_study.measurement import (
     CodeStatus,
     FunctionalStatus,
     Measurement,
+    MeasurementExecutionError,
     OracleStatus,
+    measure_generated_code,
 )
 from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.prompt_tsg import (
@@ -89,6 +96,12 @@ from prompt_mechanism_study.prompt_tsg import (
     prompt_tsg_record,
     query_context,
     validate_prompt_tsg,
+)
+from prompt_mechanism_study.qualification import (
+    QualificationError,
+    load_functional_qualification,
+    validate_functional_qualification,
+    validate_functionality_power_payload,
 )
 from prompt_mechanism_study.randomization import (
     SuccessorAssignment,
@@ -118,6 +131,12 @@ from prompt_mechanism_study.security_profiles import (
     evaluate_security_profile,
     security_profile_policy_sha256,
     security_profile_producer_sha256,
+)
+from prompt_mechanism_study.selector_experiment import (
+    bridge_from_record,
+    load_bridge_freeze_bundle,
+    load_selection_freeze_bundle,
+    selection_from_record,
 )
 from prompt_mechanism_study.successor_verify import verify_successor_inference
 from prompt_mechanism_study.workflow import (
@@ -1381,7 +1400,7 @@ def _verify_execution_evidence(
     functional_prompt = _text(
         functional["prompt"], "stored functional evaluator prompt"
     )
-    functional_qualification = _verify_bundled_functional_qualification(
+    functional_qualification = _validate_frozen_functional_qualification(
         _object(config["functional_judge"], "config functional judge"),
         functional_config,
         _object(
@@ -1935,12 +1954,6 @@ def _selection_provenance(
             raise SuccessorExperimentError("selector selection bundle drift")
         if bundle_digest(bridge_root) != selection.get("bridge_bundle_sha256"):
             raise SuccessorExperimentError("selector bridge bundle drift")
-        # Lazy import avoids the selector runner's inverse verification import.
-        from prompt_mechanism_study.selector_experiment import (
-            load_bridge_freeze_bundle,
-            load_selection_freeze_bundle,
-        )
-
         frozen_selection = load_selection_freeze_bundle(selection_root)
         bridge = load_bridge_freeze_bundle(bridge_root, selection_root)
         successful = {
@@ -2734,17 +2747,30 @@ def _measure_assignment(
         "language": task["functional_contract"].get("language", "python"),
         "output_schema": {"code": "complete source string"},
     }
-    generation_raw = _complete(
-        complete,
-        generation_request,
-        evaluator,
-        inputs["generation_prompts"][assignment.block.model_id],
-    )
-    generation = _json_object(generation_raw, "generator response")
-    if set(generation) != {"code"} or not isinstance(generation["code"], str):
-        raise SuccessorExperimentError("successor generator response schema drift")
-    code = generation["code"]
-    generator_digest = hashlib.sha256(generation_raw).hexdigest()
+    def provider_complete(
+        request: dict[str, Any],
+        provider: Mapping[str, Any],
+        system_prompt: str,
+    ) -> bytes:
+        return _complete(complete, request, provider, system_prompt)
+
+    try:
+        measurement, evidence = measure_generated_code(
+            assignment_id=assignment.assignment_id,
+            generation_request=generation_request,
+            generation_evaluator=evaluator,
+            generation_prompt=inputs["generation_prompts"][assignment.block.model_id],
+            source_task_prompt=task["prompt"],
+            functional_contract=_object(task["functional_contract"], "functional contract"),
+            functional_evaluator=inputs["functional_evaluator"],
+            functional_prompt=inputs["functional_prompt"],
+            security_profile_id=oracle["profile_id"],
+            complete=provider_complete,
+            security_evaluate=security_evaluate,
+            security_replay=evaluate_security_profile,
+        )
+    except MeasurementExecutionError as error:
+        raise SuccessorExperimentError(str(error)) from error
     provider_calls = [
         {
             "stage": "generation",
@@ -2752,99 +2778,35 @@ def _measure_assignment(
             "model_id": assignment.block.model_id,
             "provider_seed": assignment.provider_seed,
             "request": generation_request,
-            "response_sha256": generator_digest,
-            "response": generation_raw.decode("utf-8"),
+            "response_sha256": evidence["generation_response_sha256"],
+            "response": evidence["generation_response"],
         }
     ]
-    language = task["functional_contract"].get("language", "python")
-    syntax_valid = language == "python" and python_syntax_valid(code)
-    if not code.strip() or not syntax_valid:
-        status = CodeStatus.NO_CODE if not code.strip() else CodeStatus.INVALID
-        measurement = Measurement(
-            assignment.assignment_id,
-            status,
-            OracleStatus.NOT_RUN,
-            FunctionalStatus.NOT_RUN,
-            generator_digest,
-            content_hash(code) if code else None,
-            terminal_reason=status.value,
+    if evidence["functional_response"] is not None:
+        provider_calls.append(
+            {
+                "stage": "functional_judge",
+                "assignment_id": assignment.assignment_id,
+                "request": evidence["functional_request"],
+                "response_sha256": evidence["functional_response_sha256"],
+                "response": evidence["functional_response"],
+            }
         )
-        return measurement, {
-            "generation_model_id": assignment.block.model_id,
-            "security_profile_id": oracle["profile_id"],
-            "generation_request": generation_request,
-            "generation_response": generation_raw.decode("utf-8"),
-            "code": code,
-            "syntax_valid": False,
-            "security": None,
-            "functional_request": None,
-            "functional_response": None,
-            "provider_calls": provider_calls,
-        }
-
-    security = security_evaluate(code, oracle["profile_id"])
-    if not isinstance(security, Mapping) or security.get("security_label") not in {
-        "secure",
-        "insecure",
-        "unknown",
-    }:
-        raise SuccessorExperimentError("security Oracle response schema drift")
-    security = dict(security)
-    expected_security = evaluate_security_profile(code, oracle["profile_id"])
-    if security != expected_security:
-        raise SuccessorExperimentError(
-            "security Oracle response does not replay from the frozen local profile"
-        )
-    contract = _object(task["functional_contract"], "functional contract")
-    functional_request = build_review_request(
-        code,
-        task["prompt"],
-        requirements=_list(contract.get("requirements"), "functional requirements"),
-        environment_dependencies=_strings(
-            contract.get("environment_dependencies"),
-            "environment dependencies",
-        ),
-        language=language,
-    )
-    functional_raw = _complete(
-        complete,
-        functional_request,
-        inputs["functional_evaluator"],
-        inputs["functional_prompt"],
-    )
-    functional = validate_review_response(functional_raw, code)
-    provider_calls.append(
-        {
-            "stage": "functional_judge",
-            "assignment_id": assignment.assignment_id,
-            "request": functional_request,
-            "response_sha256": hashlib.sha256(functional_raw).hexdigest(),
-            "response": functional_raw.decode("utf-8"),
-        }
-    )
-    measurement = Measurement(
-        assignment.assignment_id,
-        CodeStatus.VALID,
-        OracleStatus(security["security_label"]),
-        FunctionalStatus(functional["status"]),
-        generator_digest,
-        content_hash(code),
-        content_hash(security),
-        hashlib.sha256(functional_raw).hexdigest(),
-    )
-    return measurement, {
+    record = {
         "generation_model_id": assignment.block.model_id,
         "security_profile_id": oracle["profile_id"],
         "generation_request": generation_request,
-        "generation_response": generation_raw.decode("utf-8"),
-        "code": code,
-        "syntax_valid": True,
-        "security": security,
-        "functional_request": functional_request,
-        "functional_response": functional_raw.decode("utf-8"),
-        "functional_validated": functional,
+        "generation_response": evidence["generation_response"],
+        "code": evidence["code"],
+        "syntax_valid": evidence["syntax_valid"],
+        "security": evidence["security"],
+        "functional_request": evidence["functional_request"],
+        "functional_response": evidence["functional_response"],
         "provider_calls": provider_calls,
     }
+    if evidence["functional_validated"] is not None:
+        record["functional_validated"] = evidence["functional_validated"]
+    return measurement, record
 
 
 def _report(
@@ -3169,14 +3131,13 @@ def _verify_stored_selection_provenance(
             "bridge_bundle_manifest",
         }:
             raise SuccessorExperimentError("stored selector evidence fields drift")
-        # Reconstruct the same validated semantic objects used by the source loader.
-        from prompt_mechanism_study.selector_experiment import _bridge, _selection
-
         try:
-            frozen_selection = _selection(
+            frozen_selection = selection_from_record(
                 _object(evidence.get("selection"), "stored selector freeze")
             )
-            bridge = _bridge(_object(evidence.get("bridge"), "stored bridge freeze"))
+            bridge = bridge_from_record(
+                _object(evidence.get("bridge"), "stored bridge freeze")
+            )
         except (TypeError, ValueError, KeyError) as exc:
             raise SuccessorExperimentError(
                 "stored selector bundle evidence is not semantically valid"
@@ -3377,7 +3338,7 @@ def _analysis_plan(value: Mapping[str, Any]) -> SuccessorAnalysisPlan:
                 or set(power_reference) != {"path", "sha256"}
                 or not isinstance(power_reference.get("path"), str)
                 or not power_reference["path"].strip()
-                or not _is_sha256(power_reference.get("sha256"))
+                or not is_sha256(power_reference.get("sha256"))
             )
         )
         or (not separately_powered and power_reference is not None)
@@ -3990,28 +3951,14 @@ def _load_functional_qualification(
 ) -> dict[str, Any]:
     """Load and seal the pre-experiment Functional Judge qualification."""
 
-    path = _inside(root, section.get("qualification_path"))
-    _require_file_hash(path, section.get("qualification_sha256"))
     try:
-        payload = path.read_bytes()
-        text = payload.decode("utf-8")
-    except (OSError, UnicodeError):
-        raise SuccessorExperimentError(
-            "functional judge qualification is unreadable"
-        ) from None
-    qualification = _json_object(payload, "functional judge qualification")
-    sealed = {
-        "qualification_path": str(path.relative_to(root).as_posix()),
-        "qualification_sha256": hashlib.sha256(payload).hexdigest(),
-        "qualification": qualification,
-        "qualification_payload": text,
-        "qualification_identity": _functional_qualification_identity(
-            qualification,
+        return load_functional_qualification(
+            root,
             section,
             evaluator,
-        ),
-    }
-    return _validate_frozen_functional_qualification(section, evaluator, sealed)
+        )
+    except QualificationError as error:
+        raise SuccessorExperimentError(str(error)) from error
 
 
 def _validate_frozen_functional_qualification(
@@ -4021,144 +3968,10 @@ def _validate_frozen_functional_qualification(
 ) -> dict[str, Any]:
     """Validate bundled qualification evidence without reading its source path."""
 
-    expected_fields = {
-        "qualification_path",
-        "qualification_sha256",
-        "qualification",
-        "qualification_payload",
-        "qualification_identity",
-    }
-    if set(sealed) != expected_fields:
-        raise SuccessorExperimentError(
-            "frozen functional judge qualification fields are not exact"
-        )
-    payload = sealed.get("qualification_payload")
-    if not isinstance(payload, str) or not payload:
-        raise SuccessorExperimentError(
-            "frozen functional judge qualification payload must be non-empty text"
-        )
-    qualification = _object(
-        sealed.get("qualification"),
-        "frozen functional judge qualification",
-    )
-    parsed = _json_object(
-        payload.encode("utf-8"),
-        "frozen functional judge qualification payload",
-    )
-    expected_identity = _functional_qualification_identity(
-        qualification,
-        section,
-        evaluator,
-    )
-    if (
-        sealed.get("qualification_path") != section.get("qualification_path")
-        or sealed.get("qualification_sha256")
-        != section.get("qualification_sha256")
-        or hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        != section.get("qualification_sha256")
-        or parsed != qualification
-        or sealed.get("qualification_identity") != expected_identity
-    ):
-        raise SuccessorExperimentError("functional judge qualification drift")
-    return dict(sealed)
-
-
-def _verify_bundled_functional_qualification(
-    section: Mapping[str, Any],
-    evaluator: Mapping[str, Any],
-    sealed: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Independently replay the qualification seal stored in a freeze/result."""
-
-    if set(sealed) != {
-        "qualification_path",
-        "qualification_sha256",
-        "qualification",
-        "qualification_payload",
-        "qualification_identity",
-    }:
-        raise SuccessorExperimentError(
-            "bundled functional judge qualification fields are not exact"
-        )
-    payload = sealed.get("qualification_payload")
-    if not isinstance(payload, str) or not payload:
-        raise SuccessorExperimentError(
-            "bundled functional judge qualification payload is invalid"
-        )
-    qualification = _object(
-        sealed.get("qualification"),
-        "bundled functional judge qualification",
-    )
-    parsed = _json_object(
-        payload.encode("utf-8"),
-        "bundled functional judge qualification payload",
-    )
-    candidate = _object(
-        qualification.get("candidate"),
-        "bundled functional judge qualification candidate",
-    )
-    expected_identity = {
-        "qualification_id": content_id(
-            "functional_judge_qualification_v1_", qualification
-        ),
-        "status": qualification.get("status"),
-        "candidate_id": candidate.get("candidate_id"),
-        "model_id": candidate.get("model_id"),
-        "evaluator_config_sha256": candidate.get("evaluator_config_sha256"),
-        "prompt_sha256": candidate.get("prompt_sha256"),
-    }
-    if (
-        qualification.get("schema_version") != "1.0"
-        or expected_identity["status"] != "QUALIFIED_FOR_EXPERIMENT"
-        or expected_identity["candidate_id"] != evaluator.get("candidate_id")
-        or expected_identity["model_id"] != evaluator.get("model_id")
-        or expected_identity["evaluator_config_sha256"]
-        != section.get("evaluator_config_sha256")
-        or expected_identity["prompt_sha256"] != section.get("prompt_sha256")
-        or sealed.get("qualification_path") != section.get("qualification_path")
-        or sealed.get("qualification_sha256")
-        != section.get("qualification_sha256")
-        or hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        != section.get("qualification_sha256")
-        or parsed != qualification
-        or sealed.get("qualification_identity") != expected_identity
-    ):
-        raise SuccessorExperimentError(
-            "bundled functional judge qualification drifts"
-        )
-    return dict(sealed)
-
-
-def _functional_qualification_identity(
-    qualification: Mapping[str, Any],
-    section: Mapping[str, Any],
-    evaluator: Mapping[str, Any],
-) -> dict[str, Any]:
-    candidate = _object(
-        qualification.get("candidate"),
-        "functional judge qualification candidate",
-    )
-    identity = {
-        "qualification_id": content_id(
-            "functional_judge_qualification_v1_", qualification
-        ),
-        "status": qualification.get("status"),
-        "candidate_id": candidate.get("candidate_id"),
-        "model_id": candidate.get("model_id"),
-        "evaluator_config_sha256": candidate.get("evaluator_config_sha256"),
-        "prompt_sha256": candidate.get("prompt_sha256"),
-    }
-    if (
-        qualification.get("schema_version") != "1.0"
-        or identity["status"] != "QUALIFIED_FOR_EXPERIMENT"
-        or identity["candidate_id"] != evaluator.get("candidate_id")
-        or identity["model_id"] != evaluator.get("model_id")
-        or identity["evaluator_config_sha256"]
-        != section.get("evaluator_config_sha256")
-        or identity["prompt_sha256"] != section.get("prompt_sha256")
-    ):
-        raise SuccessorExperimentError("functional judge qualification drift")
-    return identity
+    try:
+        return validate_functional_qualification(section, evaluator, sealed)
+    except QualificationError as error:
+        raise SuccessorExperimentError(str(error)) from error
 
 
 def _load_functionality_power_qualification(
@@ -4238,66 +4051,27 @@ def _validate_functionality_power_payload(
     analysis: Mapping[str, Any],
     model_ids: tuple[str, ...],
 ) -> None:
-    expected = {
-        "schema_version",
-        "qualification_status",
-        "analysis_coordinate",
-        "planned_task_units_per_coordinate",
-        "model_policy",
-        "target_power",
-        "familywise_alpha",
-        "noninferiority_margin",
-        "power_method",
-        "assumptions",
-    }
-    coordinate = payload.get("analysis_coordinate")
-    model_policy = payload.get("model_policy")
-    assumptions = payload.get("assumptions")
-    if (
-        set(payload) != expected
-        or payload.get("schema_version") != "1.0"
-        or payload.get("qualification_status") != "supported"
-        or coordinate
-        != {
-            "metric": "functionality",
-            "contrast": "target_minus_noop",
-            "unit": "task_unit",
-            "scope": "each_hypothesis_model_coordinate",
-        }
-        or type(payload.get("planned_task_units_per_coordinate")) is not int
-        or payload["planned_task_units_per_coordinate"]
-        < analysis.get("minimum_task_units", 2)
-        or model_policy
-        != {
-            "model_ids": list(model_ids),
-            "cross_model_replication_rule": analysis.get(
-                "cross_model_replication_rule",
-                "oriented_simultaneous_target_noop_each_model_no_pooling",
-            ),
-            "pooled": False,
-        }
-        or type(payload.get("target_power")) is not float
-        or not 0.8 <= payload["target_power"] < 1.0
-        or payload.get("familywise_alpha") != analysis["familywise_alpha"]
-        or payload.get("noninferiority_margin")
-        != analysis.get("functionality_noninferiority_margin", 0.1)
-        or not isinstance(payload.get("power_method"), str)
-        or not payload["power_method"].strip()
-        or not isinstance(assumptions, Mapping)
-        or not assumptions
-        or any(not isinstance(key, str) or not key for key in assumptions)
-    ):
-        raise SuccessorExperimentError(
-            "functionality power qualification does not bind the successor estimand"
+    try:
+        validate_functionality_power_payload(
+            payload,
+            analysis,
+            expected_coordinate={
+                "metric": "functionality",
+                "contrast": "target_minus_noop",
+                "unit": "task_unit",
+                "scope": "each_hypothesis_model_coordinate",
+            },
+            expected_model_policy={
+                "model_ids": list(model_ids),
+                "cross_model_replication_rule": analysis.get(
+                    "cross_model_replication_rule",
+                    "oriented_simultaneous_target_noop_each_model_no_pooling",
+                ),
+                "pooled": False,
+            },
         )
-
-
-def _is_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
+    except QualificationError as error:
+        raise SuccessorExperimentError(str(error)) from error
 
 
 def _adapters(
@@ -4497,19 +4271,17 @@ def _locked_text(root: Path, section: Mapping[str, Any], stem: str) -> str:
 
 
 def _inside(root: Path, value: object) -> Path:
-    if not isinstance(value, (str, Path)):
-        raise SuccessorExperimentError("frozen path is invalid")
-    path = Path(value)
-    resolved = path.resolve() if path.is_absolute() else (root / path).resolve()
-    if not resolved.is_relative_to(root):
-        raise SuccessorExperimentError("frozen path escapes the repository root")
-    return resolved
+    try:
+        return resolve_confined_path(root, value)
+    except ValueError as error:
+        raise SuccessorExperimentError(str(error)) from error
 
 
 def _require_file_hash(path: Path, expected: object) -> None:
-    digest = _digest(expected, "frozen file")
-    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
-        raise SuccessorExperimentError(f"frozen file drift: {path}")
+    try:
+        verify_file_hash(path, expected)
+    except ValueError as error:
+        raise SuccessorExperimentError(str(error)) from error
 
 
 def _complete(
@@ -4528,45 +4300,19 @@ def _complete(
 
 
 def _json_object(raw: bytes, name: str) -> dict[str, Any]:
-    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError
-            result[key] = value
-        return result
-
     try:
-        value = json.loads(
-            raw.decode("utf-8"),
-            object_pairs_hook=unique,
-            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return parse_json_object(raw)
+    except ValueError:
         raise SuccessorExperimentError(f"{name} is not strict JSON") from None
-    return _object(value, name)
 
 
 def _read_json_exact(path: Path) -> Any:
     """Read frozen JSON while rejecting duplicate keys and non-finite numbers."""
 
     try:
-        return json.loads(
-            path.read_text(encoding="utf-8"),
-            object_pairs_hook=lambda pairs: _unique_json_pairs(pairs),
-            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        return read_strict_json(path)
+    except ValueError:
         raise SuccessorExperimentError(f"{path.name} is not strict JSON") from None
-
-
-def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    value: dict[str, Any] = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError("duplicate JSON key")
-        value[key] = item
-    return value
 
 
 def _object(value: object, name: str) -> dict[str, Any]:
@@ -4603,13 +4349,10 @@ def _text(value: object, name: str) -> str:
 
 
 def _digest(value: object, name: str) -> str:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise SuccessorExperimentError(f"{name} must be a lowercase SHA-256 digest")
-    return value
+    try:
+        return require_sha256(value, name)
+    except ValueError as error:
+        raise SuccessorExperimentError(str(error)) from error
 
 
 def _yes(value: bool) -> SemanticVerdict:

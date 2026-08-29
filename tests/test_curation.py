@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.curation import (
     _parse_contracts,
@@ -10,6 +12,9 @@ from prompt_mechanism_study.curation import (
     run_contract_curation,
 )
 from prompt_mechanism_study.records import content_id
+
+
+pytestmark = pytest.mark.reviewer
 
 
 def test_llm_positive_edges_are_diagnostic_and_do_not_merge_clusters(tmp_path: Path) -> None:

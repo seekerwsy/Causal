@@ -31,7 +31,12 @@ This result must not be tuned into significance. A future study should prospecti
 - deployment root: `/home/wsy/prompt-mechanism-study-deployments/prompt-tsg-qwen37-oracle-v3-27c2bce-20260826-19`;
 - experiment root: `/home/wsy/prompt-mechanism-study-experiments/prompt-tsg-qwen37-oracle-v3-27c2bce-20260826-19`.
 
-Run the independent verifier against the tracked bundle with:
+The implementation was frozen at `27c2bce`; the result bundle and independent
+verification were closed together at archival commit `a733068`. The active
+package intentionally no longer exposes the historical four-arm runner or
+verifier. Reproduce this result from `a733068` in a separate checkout or Git
+worktree, without restoring that path to the active package. From that checkout,
+run:
 
 ```text
 prompt-mechanism-four-arm verify-analysis \
