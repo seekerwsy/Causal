@@ -295,6 +295,74 @@ def qualify_prompt_tsg_extractor(
     return report
 
 
+def freeze_prompt_tsg_task_selection(
+    tasks_path: Path,
+    exclusion_paths: tuple[Path, ...],
+    output: Path,
+) -> dict[str, Any]:
+    """Freeze the formal extraction population after provenance-only exclusions."""
+
+    tasks = _rows(read_json(tasks_path))
+    task_ids = [row.get("task_unit_id") for row in tasks]
+    if (
+        not tasks
+        or len(task_ids) != len(set(task_ids))
+        or any(
+            not isinstance(task_id, str)
+            or task_id != row.get("task_id")
+            for task_id, row in zip(task_ids, tasks, strict=True)
+        )
+    ):
+        raise EligibilityError("formal extraction tasks are invalid")
+    excluded: dict[str, str] = {}
+    exclusion_hashes = []
+    for path in exclusion_paths:
+        value = read_json(path)
+        if isinstance(value, list):
+            rows = _rows(value)
+        elif isinstance(value, dict) and isinstance(value.get("exclusions"), list):
+            rows = _rows(value["exclusions"])
+        elif isinstance(value, dict) and isinstance(value.get("task_ids"), list):
+            rows = [{"task_id": task_id} for task_id in value["task_ids"]]
+        else:
+            raise EligibilityError("formal extraction exclusion file is invalid")
+        for row in rows:
+            task_id = row.get("task_unit_id", row.get("task_id"))
+            if not isinstance(task_id, str) or not task_id:
+                raise EligibilityError("formal extraction exclusion lacks a task identity")
+            excluded.setdefault(task_id, path.as_posix())
+        exclusion_hashes.append({"path": path.as_posix(), "sha256": _sha256(path)})
+    selected = [task_id for task_id in task_ids if task_id not in excluded]
+    if not selected:
+        raise EligibilityError("formal extraction selection is empty")
+    selection = {
+        "schema_version": "1.0",
+        "source_tasks_sha256": _sha256(tasks_path),
+        "selection_rule": (
+            "Retain every outcome-blind discovery task unit except prior extractor-development, "
+            "qualification-holdout, semantic-review, or generation/outcome-exposed units."
+        ),
+        "task_ids": selected,
+        "arms_or_outcomes_used": False,
+    }
+    selected_rows = [row for row in tasks if row["task_unit_id"] in set(selected)]
+    report = {
+        "schema_version": "1.0",
+        "status": "FORMAL_PROMPT_TSG_TASKS_FROZEN",
+        "source_task_units": len(tasks),
+        "selected_task_units": len(selected),
+        "excluded_task_units_in_source": len(tasks) - len(selected),
+        "selected_cwe_counts": dict(
+            sorted(Counter(row["cwe"] for row in selected_rows).items())
+        ),
+        "exclusion_files": exclusion_hashes,
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(output, {"selection.json": selection, "report.json": report})
+    return report
+
+
 def freeze_tsg_realization_bindings(
     tasks_path: Path,
     graph_bundles: tuple[Path, ...],
@@ -788,6 +856,7 @@ def _sha256(path: Path) -> str:
 __all__ = [
     "EligibilityError",
     "audit_dataset_eligibility",
+    "freeze_prompt_tsg_task_selection",
     "freeze_tsg_realization_bindings",
     "qualify_local_security_profiles",
     "qualify_prompt_tsg_extractor",

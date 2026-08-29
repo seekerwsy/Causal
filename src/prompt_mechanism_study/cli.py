@@ -163,6 +163,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     tsg_qualification.add_argument("output", type=Path)
     tsg_qualification.add_argument("--repository-root", type=Path, default=Path.cwd())
 
+    tsg_selection = commands.add_parser(
+        "prompt-tsg-selection",
+        help="freeze formal Prompt-TSG tasks after provenance-only exclusions",
+    )
+    tsg_selection.add_argument("tasks", type=Path)
+    tsg_selection.add_argument("output", type=Path)
+    tsg_selection.add_argument("--exclude", type=Path, action="append", required=True)
+
     prompt_tsg_extract = commands.add_parser(
         "prompt-tsg-extract",
         help="extract evidence-bound Prompt TSGs for a frozen task file",
@@ -397,6 +405,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION" else 2
+    elif args.command == "prompt-tsg-selection":
+        from prompt_mechanism_study.eligibility import freeze_prompt_tsg_task_selection
+
+        report = freeze_prompt_tsg_task_selection(
+            args.tasks,
+            tuple(args.exclude),
+            args.output,
+        )
+        print(report["status"])
     elif args.command == "positivity-audit":
         from prompt_mechanism_study.prioritization import audit_discovery_positivity
 
