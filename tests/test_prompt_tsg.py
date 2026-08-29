@@ -419,7 +419,7 @@ def test_extractor_never_drops_nonverbatim_catalog_bound_facts():
 
 
 @pytest.mark.reviewer
-def test_blind_semantic_reviewer_can_only_reject_or_mark_proposed_facts():
+def test_blind_semantic_reviewer_rejects_unsupported_proposed_facts():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v2.json")
     prompt = "Load a YAML configuration file."
     task = {
@@ -446,14 +446,23 @@ def test_blind_semantic_reviewer_can_only_reject_or_mark_proposed_facts():
         "unresolved_semantics": [],
     }
     review = {
-        "accepted_local_ids": ["sink", "format"],
+        "facts": [
+            _fact("review-sink", "sink", "sink.yaml_deserialization", prompt),
+            _fact(
+                "review-format",
+                "constraint",
+                "constraint.yaml_format_required",
+                "YAML configuration file",
+            ),
+        ],
+        "relations": [],
         "unresolved_semantics": [],
     }
 
     def provider(request, evaluator, _prompt):
         import json
 
-        if request.get("request_kind") == "prompt_tsg_semantic_fact_review":
+        if request.get("request_kind") == "prompt_tsg_bounded_ambiguity_adjudication":
             assert evaluator["candidate_id"] == "reviewer-v1"
             assert request["arms_or_outcomes_included"] is False
             return json.dumps(review).encode()
@@ -490,6 +499,114 @@ def test_blind_semantic_reviewer_can_only_reject_or_mark_proposed_facts():
             "edge_type": "flows_to",
             "source": "source",
             "target": "sink",
-            "reason": "semantic_reviewer_endpoint_rejected",
+            "reason": "semantic_reviewer_rejected",
         }
     ]
+
+
+@pytest.mark.reviewer
+def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
+    prompt = (
+        "Write a Python function that takes a job ID as input. "
+        "Use subprocess to execute one command that retrieves the job exit code. "
+        "The command must include the job ID as a parameter."
+    )
+    task = {
+        "task_id": "job-task",
+        "task_unit_id": "job-task",
+        "prompt": prompt,
+        "cwe": "CWE-78",
+        "task_family": "command_execution",
+    }
+    proposal = {
+        "facts": [
+            _fact(
+                "source",
+                "source",
+                "source.untrusted_command_argument",
+                "The command must include the job ID as a parameter",
+                caller_controlled=True,
+            ),
+            _fact(
+                "sink",
+                "sink",
+                "sink.process_execution",
+                "Use subprocess to execute one command",
+            ),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "source", "target": "sink"}
+        ],
+        "unresolved_semantics": ["constraint.fixed_executable"],
+    }
+
+    def provider(request, evaluator, _prompt):
+        import json
+
+        if request.get("request_kind") != "prompt_tsg_bounded_ambiguity_adjudication":
+            assert evaluator["candidate_id"] == "proposer-v1"
+            return json.dumps(proposal).encode()
+        assert evaluator["candidate_id"] == "reviewer-v2"
+        assert request["candidate_semantics"]["constraint.fixed_executable"][
+            "proposer_status"
+        ] == "unresolved"
+        assert [
+            "source.untrusted_command_argument",
+            "flows_to",
+            "sink.process_execution",
+        ] in request["allowed_relations"]
+        return json.dumps(
+            {
+                "facts": [
+                    _fact(
+                        "review-source",
+                        "source",
+                        "source.untrusted_command_argument",
+                        "The command must include the job ID as a parameter",
+                    ),
+                    _fact(
+                        "review-sink",
+                        "sink",
+                        "sink.process_execution",
+                        "Use subprocess to execute one command",
+                    ),
+                    _fact(
+                        "review-fixed",
+                        "constraint",
+                        "constraint.fixed_executable",
+                        "one command that retrieves the job exit code",
+                    ),
+                ],
+                "relations": [
+                    {
+                        "edge_type": "flows_to",
+                        "source": "review-source",
+                        "target": "review-sink",
+                    }
+                ],
+                "unresolved_semantics": [],
+            }
+        ).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "proposer-v1"},
+        system_prompt="propose facts",
+        reviewer_evaluator={"candidate_id": "reviewer-v2"},
+        reviewer_prompt="adjudicate ambiguity",
+        provider=provider,
+    )
+
+    query = query_for_realization(catalog, "cwe78_fixed_executable_argv")
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-78",
+        task_family="command_execution",
+    ).state is QueryState.PRESENT
+    assert "constraint.fixed_executable" in projection["semantic_review"][
+        "accepted_semantics"
+    ]
+    assert projection["semantic_review"]["unsupported_proposer_ambiguities"] == []

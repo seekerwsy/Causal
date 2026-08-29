@@ -1,4 +1,4 @@
-"""One-call LLM_FACTS extraction followed by deterministic Prompt TSG construction."""
+"""Bounded LLM facts, blind ambiguity adjudication, and deterministic Prompt TSGs."""
 
 from __future__ import annotations
 
@@ -155,10 +155,21 @@ def extract_prompt_tsg(
         review_projection: dict[str, Any] | None = None
         extractor_id = evaluator["candidate_id"]
         if reviewer_evaluator is not None and reviewer_prompt is not None:
+            ignored_before_review = [
+                semantic_id
+                for semantic_id in proposal["unresolved_semantics"]
+                if catalog["semantics"].get(semantic_id)
+                in {"safety_requirement", "presentation_control"}
+            ]
             facts, relations, review_projection = _review_catalog_facts(
                 task,
                 facts=facts,
                 relations=relations,
+                proposed_unresolved=[
+                    semantic_id
+                    for semantic_id in proposal["unresolved_semantics"]
+                    if semantic_id not in ignored_before_review
+                ],
                 catalog=catalog,
                 evaluator=reviewer_evaluator,
                 system_prompt=reviewer_prompt,
@@ -170,8 +181,8 @@ def extract_prompt_tsg(
                 f"{evaluator['candidate_id']}+{reviewer_evaluator['candidate_id']}"
             )
             proposed_unresolved = [
-                *proposal["unresolved_semantics"],
                 *review_projection["unresolved_semantics"],
+                *ignored_before_review,
             ]
         else:
             proposed_unresolved = proposal["unresolved_semantics"]
@@ -405,42 +416,76 @@ def _review_catalog_facts(
     *,
     facts: Sequence[Mapping[str, Any]],
     relations: Sequence[Mapping[str, Any]],
+    proposed_unresolved: Sequence[str],
     catalog: Mapping[str, Any],
     evaluator: Mapping[str, Any],
     system_prompt: str,
     provider: Provider,
 ) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]], dict[str, Any]]:
-    """Blindly reject semantic overreach without inventing or repairing a fact."""
+    """Re-annotate asserted and unresolved semantics without widening their set."""
 
     if not system_prompt:
         raise PromptTSGExtractionError("semantic reviewer prompt is empty")
     descriptive = {"task.requirement", "task.operation", "data.object"}
-    reviewed = [fact for fact in facts if fact["semantic_id"] not in descriptive]
-    reviewed_ids = {fact["local_id"] for fact in reviewed}
-    reviewed_semantics = {fact["semantic_id"] for fact in reviewed}
+    descriptions = [fact for fact in facts if fact["semantic_id"] in descriptive]
+    proposed = [fact for fact in facts if fact["semantic_id"] not in descriptive]
+    proposed_semantics = {fact["semantic_id"] for fact in proposed}
+    if (
+        isinstance(proposed_unresolved, (str, bytes))
+        or any(
+            not isinstance(item, str)
+            or item not in catalog["semantics"]
+            or item in proposed_semantics
+            for item in proposed_unresolved
+        )
+        or len(proposed_unresolved) != len(set(proposed_unresolved))
+    ):
+        raise PromptTSGExtractionError("proposer unresolved semantics are invalid")
+    candidate_semantics = proposed_semantics | set(proposed_unresolved)
+    required_relations = {
+        tuple(relation)
+        for query in catalog["queries"]
+        if query["cwe_id"] == task["cwe"]
+        and query["task_family"] == task["task_family"]
+        for relation in query["required_relations"]
+    }
     request = {
         "schema_version": "1.0",
-        "request_kind": "prompt_tsg_semantic_fact_review",
+        "request_kind": "prompt_tsg_bounded_ambiguity_adjudication",
         "task_id": task["task_id"],
         "source_prompt": task["prompt"],
-        "proposed_facts": [
-            {
-                "local_id": fact["local_id"],
-                "node_type": fact["node_type"],
-                "semantic_id": fact["semantic_id"],
-                "evidence_text": fact["evidence_text"],
+        "candidate_semantics": {
+            semantic_id: {
+                "node_type": catalog["semantics"][semantic_id],
                 "guidance": catalog["semantic_guidance"].get(
-                    fact["semantic_id"],
-                    "Accept only when the source prompt directly entails this semantic role.",
+                    semantic_id,
+                    "Accept only when the source prompt directly entails this role.",
                 ),
+                "proposer_status": (
+                    "asserted" if semantic_id in proposed_semantics else "unresolved"
+                ),
+                "proposed_evidence": [
+                    fact["evidence_text"]
+                    for fact in proposed
+                    if fact["semantic_id"] == semantic_id
+                ],
             }
-            for fact in reviewed
-        ],
+            for semantic_id in sorted(candidate_semantics)
+        },
+        "allowed_relations": [list(item) for item in sorted(required_relations)],
         "arms_or_outcomes_included": False,
         "output_contract": {
-            "top_level_keys": ["accepted_local_ids", "unresolved_semantics"],
-            "accepted_local_ids": "unique subset of proposed local_id strings",
-            "unresolved_semantics": "unique subset of proposed semantic_id strings",
+            "top_level_keys": ["facts", "relations", "unresolved_semantics"],
+            "fact_keys": [
+                "local_id",
+                "node_type",
+                "semantic_id",
+                "evidence_text",
+                "occurrence",
+                "attributes",
+            ],
+            "relation_keys": ["edge_type", "source", "target"],
+            "semantic_scope": "candidate_semantics only",
         },
     }
     raw = provider(request, evaluator, system_prompt)
@@ -449,50 +494,66 @@ def _review_catalog_facts(
             "semantic reviewer response is not bytes", request=request
         )
     try:
-        value = json.loads(raw)
-    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
-        raise PromptTSGExtractionError(
-            "semantic reviewer response is not JSON", request=request, raw=raw
-        ) from None
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"accepted_local_ids", "unresolved_semantics"}
-        or not isinstance(value["accepted_local_ids"], list)
-        or not isinstance(value["unresolved_semantics"], list)
-        or any(not isinstance(item, str) or not item for item in value["accepted_local_ids"])
-        or any(not isinstance(item, str) or not item for item in value["unresolved_semantics"])
-        or len(value["accepted_local_ids"]) != len(set(value["accepted_local_ids"]))
-        or len(value["unresolved_semantics"]) != len(set(value["unresolved_semantics"]))
-        or not set(value["accepted_local_ids"]) <= reviewed_ids
-        or not set(value["unresolved_semantics"]) <= reviewed_semantics
-    ):
-        raise PromptTSGExtractionError(
-            "semantic reviewer response violates its closed contract",
-            request=request,
-            raw=raw,
+        review = _proposal(raw)
+        unresolved = review["unresolved_semantics"]
+        if (
+            any(not isinstance(item, str) or not item for item in unresolved)
+            or len(unresolved) != len(set(unresolved))
+        ):
+            raise PromptTSGExtractionError("semantic reviewer ambiguity is invalid")
+        reviewed_facts, rejected_review_facts = _project_facts(
+            review["facts"], task["prompt"], catalog
         )
-    accepted_ids = set(value["accepted_local_ids"])
-    accepted_semantics = {
-        fact["semantic_id"] for fact in reviewed if fact["local_id"] in accepted_ids
-    }
-    unresolved = set(value["unresolved_semantics"])
-    if accepted_semantics & unresolved:
-        raise PromptTSGExtractionError(
-            "semantic reviewer both accepted and unresolved one semantic",
-            request=request,
-            raw=raw,
+        returned_semantics = {
+            fact["semantic_id"] for fact in reviewed_facts
+        } | set(unresolved)
+        if (
+            not returned_semantics <= candidate_semantics
+            or {fact["semantic_id"] for fact in reviewed_facts} & set(unresolved)
+        ):
+            raise PromptTSGExtractionError(
+                "semantic reviewer widened or contradicted its candidate scope"
+            )
+        reviewed_relations, rejected_review_relations = _project_relations(
+            reviewed_facts, review["relations"], catalog
         )
-    retained_ids = {
-        fact["local_id"]
-        for fact in facts
-        if fact["semantic_id"] in descriptive or fact["local_id"] in accepted_ids
-    }
-    retained_facts = [fact for fact in facts if fact["local_id"] in retained_ids]
-    retained_relations = [
-        relation
-        for relation in relations
-        if relation["source"] in retained_ids and relation["target"] in retained_ids
+        semantic_by_local_id = {
+            fact["local_id"]: fact["semantic_id"] for fact in reviewed_facts
+        }
+        if any(
+            (
+                semantic_by_local_id[relation["source"]],
+                relation["edge_type"],
+                semantic_by_local_id[relation["target"]],
+            )
+            not in required_relations
+            for relation in reviewed_relations
+        ):
+            raise PromptTSGExtractionError(
+                "semantic reviewer returned a non-query relation"
+            )
+    except PromptTSGExtractionError as error:
+        raise PromptTSGExtractionError(str(error), request=request, raw=raw) from None
+
+    used_ids = {fact["local_id"] for fact in descriptions}
+    local_id_map = {}
+    normalized_facts = []
+    for index, fact in enumerate(reviewed_facts, start=1):
+        local_id = f"adjudicated_{index}"
+        while local_id in used_ids:
+            local_id = "_" + local_id
+        used_ids.add(local_id)
+        local_id_map[fact["local_id"]] = local_id
+        normalized_facts.append({**fact, "local_id": local_id})
+    normalized_relations = [
+        {
+            "edge_type": relation["edge_type"],
+            "source": local_id_map[relation["source"]],
+            "target": local_id_map[relation["target"]],
+        }
+        for relation in reviewed_relations
     ]
+    accepted_semantics = {fact["semantic_id"] for fact in normalized_facts}
     rejected_facts = [
         {
             "local_id": fact["local_id"],
@@ -503,25 +564,41 @@ def _review_catalog_facts(
                 else "semantic_reviewer_rejected"
             ),
         }
-        for fact in reviewed
-        if fact["local_id"] not in accepted_ids
+        for fact in proposed
+        if fact["semantic_id"] not in accepted_semantics
     ]
+    proposed_semantic_by_id = {
+        fact["local_id"]: fact["semantic_id"] for fact in proposed
+    }
+    accepted_relation_semantics = {
+        (
+            semantic_by_local_id[relation["source"]],
+            relation["edge_type"],
+            semantic_by_local_id[relation["target"]],
+        )
+        for relation in reviewed_relations
+    }
     rejected_relations = [
-        {
-            **relation,
-            "reason": "semantic_reviewer_endpoint_rejected",
-        }
+        {**relation, "reason": "semantic_reviewer_rejected"}
         for relation in relations
-        if relation not in retained_relations
+        if (
+            proposed_semantic_by_id.get(relation["source"]),
+            relation["edge_type"],
+            proposed_semantic_by_id.get(relation["target"]),
+        )
+        not in accepted_relation_semantics
     ]
-    return retained_facts, retained_relations, {
+    return descriptions + normalized_facts, normalized_relations, {
         "request": request,
         "response_sha256": hashlib.sha256(raw).hexdigest(),
         "response_text": raw.decode("utf-8", errors="strict"),
-        "accepted_local_ids": sorted(accepted_ids),
+        "accepted_semantics": sorted(accepted_semantics),
         "unresolved_semantics": sorted(unresolved),
-        "rejected_facts": rejected_facts,
-        "rejected_relations": rejected_relations,
+        "unsupported_proposer_ambiguities": sorted(
+            set(proposed_unresolved) - accepted_semantics - set(unresolved)
+        ),
+        "rejected_facts": rejected_facts + rejected_review_facts,
+        "rejected_relations": rejected_relations + rejected_review_relations,
     }
 
 
