@@ -203,6 +203,71 @@ def test_independently_configured_path_base_remains_applicable():
 
 
 @pytest.mark.reviewer
+def test_semantic_reviewer_drops_relations_outside_query_scope():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
+    prompt = "Read a user filename from the directory supplied as dir_path."
+    task = {
+        "task_id": "caller-base-review-task",
+        "task_unit_id": "caller-base-review-task",
+        "prompt": prompt,
+        "cwe": "CWE-22",
+        "task_family": "path_access",
+    }
+    facts = [
+        _fact(
+            "path",
+            "source",
+            "source.untrusted_relative_path",
+            "user filename",
+            caller_controlled=True,
+        ),
+        _fact("sink", "sink", "sink.file_access", "Read"),
+        _fact(
+            "base",
+            "constraint",
+            "constraint.caller_supplied_path_base",
+            "directory supplied as dir_path",
+            caller_controlled=True,
+        ),
+    ]
+    response = {
+        "facts": facts,
+        "relations": [
+            {"edge_type": "flows_to", "source": "path", "target": "sink"},
+            {"edge_type": "qualifies", "source": "base", "target": "sink"},
+        ],
+        "unresolved_semantics": [],
+    }
+
+    def provider(_request, _evaluator, _prompt):
+        import json
+
+        return json.dumps(response).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "proposer-v1"},
+        system_prompt="propose facts",
+        reviewer_evaluator={"candidate_id": "reviewer-v1"},
+        reviewer_prompt="review facts",
+        provider=provider,
+    )
+    query = query_for_realization(catalog, "cwe22_path_confinement")
+
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-22",
+        task_family="path_access",
+    ).state is QueryState.ABSENT
+    assert any(
+        relation["reason"] == "non_query_relation"
+        for relation in projection["semantic_review"]["rejected_relations"]
+    )
+
+
+@pytest.mark.reviewer
 def test_evidence_must_be_an_exact_prompt_span():
     catalog = load_catalog(CATALOG_PATH)
     with pytest.raises(PromptTSGError, match="evidence"):

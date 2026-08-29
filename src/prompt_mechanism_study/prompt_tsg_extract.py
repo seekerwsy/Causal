@@ -542,18 +542,20 @@ def _review_catalog_facts(
         semantic_by_local_id = {
             fact["local_id"]: fact["semantic_id"] for fact in reviewed_facts
         }
-        if any(
-            (
+        query_relations = []
+        for relation in reviewed_relations:
+            semantic_triple = (
                 semantic_by_local_id[relation["source"]],
                 relation["edge_type"],
                 semantic_by_local_id[relation["target"]],
             )
-            not in required_relations
-            for relation in reviewed_relations
-        ):
-            raise PromptTSGExtractionError(
-                "semantic reviewer returned a non-query relation"
-            )
+            if semantic_triple in required_relations:
+                query_relations.append(relation)
+            else:
+                rejected_review_relations.append(
+                    {**relation, "reason": "non_query_relation"}
+                )
+        reviewed_relations = query_relations
     except PromptTSGExtractionError as error:
         raise PromptTSGExtractionError(str(error), request=request, raw=raw) from None
 

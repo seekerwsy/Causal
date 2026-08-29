@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v10+prompt-tsg-ambiguity-adjudication-qwen37max-v4",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v11+prompt-tsg-ambiguity-adjudication-qwen37max-v5",
   "selection_path": "data/method/results/prompt-tsg-trust-boundary-holdout-v3/selection.json",
   "review_completed_before_extraction": true,
   "arms_or_outcomes_used": false,
