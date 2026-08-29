@@ -8,6 +8,7 @@ import pytest
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.eligibility import (
     audit_dataset_eligibility,
+    freeze_prompt_tsg_holdout_selection,
     freeze_tsg_realization_bindings,
 )
 from prompt_mechanism_study.mechanisms import load_mechanism_registry
@@ -19,6 +20,48 @@ from prompt_mechanism_study.prompt_tsg import (
 
 
 pytestmark = pytest.mark.extended
+
+
+@pytest.mark.reviewer
+def test_holdout_selection_closes_the_complete_exclusion_ledger(tmp_path: Path) -> None:
+    tasks = [
+        {
+            "task_id": f"task-{cwe}-{index}",
+            "task_unit_id": f"task-{cwe}-{index}",
+            "cwe": cwe,
+        }
+        for cwe in ("CWE-22", "CWE-89")
+        for index in range(4)
+    ]
+    tasks_path = tmp_path / "tasks.json"
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+    exclusions = tmp_path / "exclusions.json"
+    exclusions.write_text(
+        json.dumps(
+            {
+                "exclusions": [
+                    {"task_id": "task-CWE-22-0"},
+                    {"task_id": "task-CWE-89-0"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "holdout"
+    report = freeze_prompt_tsg_holdout_selection(
+        tasks_path,
+        (exclusions,),
+        output,
+        cwes=("CWE-22", "CWE-89"),
+        task_units_per_cwe=2,
+        ranking_salt="fixture-v1",
+    )
+    selection = read_json(output / "selection.json")
+
+    assert report["selection_overlap_with_exclusions"] == 0
+    assert report["selected_task_units"] == 4
+    assert not {"task-CWE-22-0", "task-CWE-89-0"} & set(selection["task_ids"])
 
 
 @pytest.mark.reviewer

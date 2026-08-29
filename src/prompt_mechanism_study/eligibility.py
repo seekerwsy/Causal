@@ -340,24 +340,7 @@ def freeze_prompt_tsg_task_selection(
         )
     ):
         raise EligibilityError("formal extraction tasks are invalid")
-    excluded: dict[str, str] = {}
-    exclusion_hashes = []
-    for path in exclusion_paths:
-        value = read_json(path)
-        if isinstance(value, list):
-            rows = _rows(value)
-        elif isinstance(value, dict) and isinstance(value.get("exclusions"), list):
-            rows = _rows(value["exclusions"])
-        elif isinstance(value, dict) and isinstance(value.get("task_ids"), list):
-            rows = [{"task_id": task_id} for task_id in value["task_ids"]]
-        else:
-            raise EligibilityError("formal extraction exclusion file is invalid")
-        for row in rows:
-            task_id = row.get("task_unit_id", row.get("task_id"))
-            if not isinstance(task_id, str) or not task_id:
-                raise EligibilityError("formal extraction exclusion lacks a task identity")
-            excluded.setdefault(task_id, path.as_posix())
-        exclusion_hashes.append({"path": path.as_posix(), "sha256": _sha256(path)})
+    excluded, exclusion_hashes = _load_task_exclusions(exclusion_paths)
     selected = [task_id for task_id in task_ids if task_id not in excluded]
     if not selected:
         raise EligibilityError("formal extraction selection is empty")
@@ -387,6 +370,114 @@ def freeze_prompt_tsg_task_selection(
     }
     write_bundle(output, {"selection.json": selection, "report.json": report})
     return report
+
+
+def freeze_prompt_tsg_holdout_selection(
+    tasks_path: Path,
+    exclusion_paths: tuple[Path, ...],
+    output: Path,
+    *,
+    cwes: tuple[str, ...],
+    task_units_per_cwe: int = 3,
+    ranking_salt: str,
+) -> dict[str, Any]:
+    """Freeze one disjoint, outcome-blind semantic-qualification holdout."""
+
+    tasks = _rows(read_json(tasks_path))
+    task_ids = [row.get("task_unit_id") for row in tasks]
+    if (
+        not tasks
+        or len(task_ids) != len(set(task_ids))
+        or any(
+            not isinstance(task_id, str)
+            or task_id != row.get("task_id")
+            or not isinstance(row.get("cwe"), str)
+            for task_id, row in zip(task_ids, tasks, strict=True)
+        )
+    ):
+        raise EligibilityError("holdout source tasks are invalid")
+    if (
+        not cwes
+        or tuple(sorted(set(cwes))) != cwes
+        or any(not isinstance(cwe, str) or not cwe for cwe in cwes)
+        or type(task_units_per_cwe) is not int
+        or task_units_per_cwe <= 0
+        or not isinstance(ranking_salt, str)
+        or not ranking_salt.strip()
+    ):
+        raise EligibilityError("holdout selection policy is invalid")
+    excluded, exclusion_hashes = _load_task_exclusions(exclusion_paths)
+    selected_rows = []
+    available_counts = {}
+    for cwe in cwes:
+        available = [
+            row
+            for row in tasks
+            if row["cwe"] == cwe and row["task_unit_id"] not in excluded
+        ]
+        available.sort(
+            key=lambda row: hashlib.sha256(
+                f"{ranking_salt}|{row['task_unit_id']}".encode("utf-8")
+            ).hexdigest()
+        )
+        available_counts[cwe] = len(available)
+        if len(available) < task_units_per_cwe:
+            raise EligibilityError(f"holdout stratum {cwe} lacks disjoint task units")
+        selected_rows.extend(available[:task_units_per_cwe])
+    selected = [row["task_unit_id"] for row in selected_rows]
+    if set(selected) & set(excluded) or len(selected) != len(set(selected)):
+        raise EligibilityError("holdout selection overlaps a prior exposure")
+    selection = {
+        "schema_version": "1.0",
+        "source_tasks_sha256": _sha256(tasks_path),
+        "selection_rule": (
+            f"Select {task_units_per_cwe} task units per frozen CWE by ascending "
+            f"SHA-256({ranking_salt}|task_unit_id) after the complete exclusion ledger."
+        ),
+        "task_ids": selected,
+        "arms_or_outcomes_used": False,
+    }
+    report = {
+        "schema_version": "1.0",
+        "status": "PROMPT_TSG_HOLDOUT_FROZEN",
+        "source_task_units": len(tasks),
+        "selected_task_units": len(selected),
+        "selected_cwes": list(cwes),
+        "task_units_per_cwe": task_units_per_cwe,
+        "available_counts_before_selection": available_counts,
+        "ranking_salt": ranking_salt,
+        "exclusion_files": exclusion_hashes,
+        "excluded_task_units_in_source": sum(task_id in excluded for task_id in task_ids),
+        "selection_overlap_with_exclusions": 0,
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(output, {"selection.json": selection, "report.json": report})
+    return report
+
+
+def _load_task_exclusions(
+    exclusion_paths: tuple[Path, ...],
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    excluded: dict[str, str] = {}
+    exclusion_hashes = []
+    for path in exclusion_paths:
+        value = read_json(path)
+        if isinstance(value, list):
+            rows = _rows(value)
+        elif isinstance(value, dict) and isinstance(value.get("exclusions"), list):
+            rows = _rows(value["exclusions"])
+        elif isinstance(value, dict) and isinstance(value.get("task_ids"), list):
+            rows = [{"task_id": task_id} for task_id in value["task_ids"]]
+        else:
+            raise EligibilityError("task exclusion file is invalid")
+        for row in rows:
+            task_id = row.get("task_unit_id", row.get("task_id"))
+            if not isinstance(task_id, str) or not task_id:
+                raise EligibilityError("task exclusion lacks a task identity")
+            excluded.setdefault(task_id, path.as_posix())
+        exclusion_hashes.append({"path": path.as_posix(), "sha256": _sha256(path)})
+    return excluded, exclusion_hashes
 
 
 def freeze_tsg_realization_bindings(
@@ -882,6 +973,7 @@ def _sha256(path: Path) -> str:
 __all__ = [
     "EligibilityError",
     "audit_dataset_eligibility",
+    "freeze_prompt_tsg_holdout_selection",
     "freeze_prompt_tsg_task_selection",
     "freeze_tsg_realization_bindings",
     "qualify_local_security_profiles",

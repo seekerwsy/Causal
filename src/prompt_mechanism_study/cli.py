@@ -171,6 +171,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     tsg_selection.add_argument("output", type=Path)
     tsg_selection.add_argument("--exclude", type=Path, action="append", required=True)
 
+    tsg_holdout = commands.add_parser(
+        "prompt-tsg-holdout-selection",
+        help="freeze a disjoint outcome-blind Prompt TSG qualification holdout",
+    )
+    tsg_holdout.add_argument("tasks", type=Path)
+    tsg_holdout.add_argument("output", type=Path)
+    tsg_holdout.add_argument("--exclude", type=Path, action="append", required=True)
+    tsg_holdout.add_argument("--cwe", action="append", required=True)
+    tsg_holdout.add_argument("--task-units-per-cwe", type=int, default=3)
+    tsg_holdout.add_argument("--ranking-salt", required=True)
+
     prompt_tsg_extract = commands.add_parser(
         "prompt-tsg-extract",
         help="extract evidence-bound Prompt TSGs for a frozen task file",
@@ -416,6 +427,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.tasks,
             tuple(args.exclude),
             args.output,
+        )
+        print(report["status"])
+    elif args.command == "prompt-tsg-holdout-selection":
+        from prompt_mechanism_study.eligibility import freeze_prompt_tsg_holdout_selection
+
+        report = freeze_prompt_tsg_holdout_selection(
+            args.tasks,
+            tuple(args.exclude),
+            args.output,
+            cwes=tuple(sorted(set(args.cwe))),
+            task_units_per_cwe=args.task_units_per_cwe,
+            ranking_salt=args.ranking_salt,
         )
         print(report["status"])
     elif args.command == "positivity-audit":
