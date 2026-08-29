@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "source_tasks_sha256": "f1a8c9e5ec38cd804dc9e5ff2819f0b01dcbca30586eacf3e54317d634160921",
+  "selection_rule": "Two lowest SHA-256 ranks per retained CWE under qualification-v3|task_unit_id after excluding every prior extractor-development, qualification-review, and outcome-exposed task unit. CWE-732 is prospectively removed from this scoped qualification because the prior disjoint holdout identified unresolved generic-security semantics in that stratum and only three unexposed units remain; CWE-918 remains outside qualified local-Oracle support.",
+  "task_ids": [
+    "semantic_cluster_1cbf1426913d79dd60cda8e85dc0ea0d93ae63a3d622bb963ab10fc10a4a3899",
+    "semantic_cluster_9fe902aa454150ca380beb16de32a0194ec455f1d49bfac03707c68cd868f8e0",
+    "semantic_cluster_d89a7e871987ad729bda092a9848ff9033a8d18e41b99df0d42d7242c73283bb",
+    "semantic_cluster_5bbf86c2a092132105e2171f97e0760fbb88dcf4fbff5d9d1f6ab1384f5cf4dc",
+    "semantic_cluster_e5392c9ac021e5afd0e731a0bf0d2f57c383c42981c1dc0cd7114341304b53d5",
+    "semantic_cluster_91968636bcbf6d124b110ca767fa040fa9f7bc7b2288189771614902937889ff",
+    "semantic_cluster_9ce01ea67daac3a57c5e39a478c07cdb009e0f808e004a100d742b6f57a44b95",
+    "semantic_cluster_66af619f7df56d896eda2f92f00b91314d3f96cf0f4eb97c2b5a631ae1c3870f",
+    "semantic_cluster_d50ccba73b4c803289ade73a87b27458b716f1c22e9a425608a9532f32cccd8f",
+    "semantic_cluster_1e89c237cc414aeb1c67f0994ad14d7ddbf990d900eccbd54cca28733785a4ff",
+    "semantic_cluster_b6dd4dafe43feeb0bb7eeab794569c3ece89ee8934f31ccd6b52835f88a2b6af",
+    "semantic_cluster_c19d2f3a09fcf5cba9f91de769fabfd297ca07f41c6d0d7966e201fdf147eeb1",
+    "semantic_cluster_9613b4d5826e71f6642517e271efa88cb79a499e5e7a57ad238988e67cbaae28",
+    "semantic_cluster_1677d94d9ff1d3f10f8060ec8a1f1161b86a2622fa252fd6d2f6b7b1e7a4456c",
+    "semantic_cluster_1943a302df019c9f05f2e8bee0ee47b18411561353578622f727d41e90ded847",
+    "semantic_cluster_6305d7d4293f74607305f4dd4077778e1452a69b1ed6d59c4f257c53797f548e"
+  ],
+  "arms_or_outcomes_used": false
+}
