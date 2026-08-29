@@ -1,0 +1,224 @@
+[
+  {
+    "case_id": "cwe78_fixed_argv_secure",
+    "profile_id": "python.cwe78.function_parameter_subprocess.v2",
+    "expected_label": "secure",
+    "code": "import subprocess\n\ndef run(branch):\n    return subprocess.run(['git', 'show', branch], check=True)\n"
+  },
+  {
+    "case_id": "cwe78_shell_text_insecure",
+    "profile_id": "python.cwe78.function_parameter_subprocess.v2",
+    "expected_label": "insecure",
+    "code": "import subprocess\n\ndef run(command):\n    return subprocess.run(command, shell=True)\n"
+  },
+  {
+    "case_id": "cwe78_dynamic_builder_unknown",
+    "profile_id": "python.cwe78.function_parameter_subprocess.v2",
+    "expected_label": "unknown",
+    "code": "import subprocess\n\ndef run(builder):\n    command = builder()\n    return subprocess.run(command)\n"
+  },
+  {
+    "case_id": "cwe89_values_parameterized_secure",
+    "profile_id": "python.cwe89.sql_values.v1",
+    "expected_label": "secure",
+    "code": "def lookup(cursor, user_id):\n    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))\n    return cursor.fetchone()\n"
+  },
+  {
+    "case_id": "cwe89_value_interpolation_insecure",
+    "profile_id": "python.cwe89.sql_values.v1",
+    "expected_label": "insecure",
+    "code": "def lookup(cursor, user_id):\n    cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')\n    return cursor.fetchone()\n"
+  },
+  {
+    "case_id": "cwe89_query_factory_unknown",
+    "profile_id": "python.cwe89.sql_values.v1",
+    "expected_label": "unknown",
+    "code": "def lookup(cursor, factory):\n    query = factory()\n    cursor.execute(query)\n    return cursor.fetchone()\n"
+  },
+  {
+    "case_id": "cwe89_fixed_query_secure",
+    "profile_id": "python.cwe89.sql_values.v1",
+    "expected_label": "secure",
+    "code": "def count_users(cursor):\n    cursor.execute('SELECT COUNT(*) FROM users')\n    return cursor.fetchone()\n"
+  },
+  {
+    "case_id": "cwe502_json_secure",
+    "profile_id": "python.cwe502.function_parameter_deserialization.v2",
+    "expected_label": "secure",
+    "code": "import json\n\ndef parse(payload):\n    return json.loads(payload)\n"
+  },
+  {
+    "case_id": "cwe502_pickle_insecure",
+    "profile_id": "python.cwe502.function_parameter_deserialization.v2",
+    "expected_label": "insecure",
+    "code": "import pickle\n\ndef parse(payload):\n    return pickle.loads(payload)\n"
+  },
+  {
+    "case_id": "cwe502_custom_decoder_unknown",
+    "profile_id": "python.cwe502.function_parameter_deserialization.v2",
+    "expected_label": "unknown",
+    "code": "def parse(payload, decoder):\n    return decoder.decode(payload)\n"
+  },
+  {
+    "case_id": "cwe328_sha256_secure",
+    "profile_id": "python.cwe328.message_hashing.v1",
+    "expected_label": "secure",
+    "code": "import hashlib\n\ndef digest(message):\n    return hashlib.sha256(message).hexdigest()\n"
+  },
+  {
+    "case_id": "cwe328_md5_insecure",
+    "profile_id": "python.cwe328.message_hashing.v1",
+    "expected_label": "insecure",
+    "code": "import hashlib\n\ndef digest(message):\n    return hashlib.md5(message).hexdigest()\n"
+  },
+  {
+    "case_id": "cwe328_external_hasher_unknown",
+    "profile_id": "python.cwe328.message_hashing.v1",
+    "expected_label": "unknown",
+    "code": "def digest(message, hasher):\n    return hasher(message)\n"
+  },
+  {
+    "case_id": "cwe338_secrets_secure",
+    "profile_id": "python.cwe338.security_randomness.v1",
+    "expected_label": "secure",
+    "code": "import secrets\n\ndef token():\n    return secrets.token_urlsafe(24)\n"
+  },
+  {
+    "case_id": "cwe338_random_insecure",
+    "profile_id": "python.cwe338.security_randomness.v1",
+    "expected_label": "insecure",
+    "code": "import random\n\ndef token():\n    return random.getrandbits(128)\n"
+  },
+  {
+    "case_id": "cwe338_external_rng_unknown",
+    "profile_id": "python.cwe338.security_randomness.v1",
+    "expected_label": "unknown",
+    "code": "def token(rng):\n    return rng.next_token()\n"
+  },
+  {
+    "case_id": "cwe22_resolved_containment_secure",
+    "profile_id": "python.cwe22.path_confinement.v1",
+    "expected_label": "secure",
+    "code": "from pathlib import Path\n\ndef read(base, name):\n    target = (Path(base).resolve() / name).resolve()\n    target.relative_to(Path(base).resolve())\n    return target.read_text()\n"
+  },
+  {
+    "case_id": "cwe22_unconfined_path_insecure",
+    "profile_id": "python.cwe22.path_confinement.v1",
+    "expected_label": "insecure",
+    "code": "def read(name):\n    return open(name).read()\n"
+  },
+  {
+    "case_id": "cwe22_path_factory_unknown",
+    "profile_id": "python.cwe22.path_confinement.v1",
+    "expected_label": "unknown",
+    "code": "def read():\n    return open(make_path()).read()\n"
+  },
+  {
+    "case_id": "cwe22_archive_filter_secure",
+    "profile_id": "python.cwe22.archive_extraction.v1",
+    "expected_label": "secure",
+    "code": "def unpack(archive, destination):\n    archive.extractall(destination, filter='data')\n"
+  },
+  {
+    "case_id": "cwe22_archive_unfiltered_insecure",
+    "profile_id": "python.cwe22.archive_extraction.v1",
+    "expected_label": "insecure",
+    "code": "def unpack(archive, destination):\n    archive.extractall(destination)\n"
+  },
+  {
+    "case_id": "cwe22_archive_custom_handler_unknown",
+    "profile_id": "python.cwe22.archive_extraction.v1",
+    "expected_label": "unknown",
+    "code": "def unpack(archive, destination, handler):\n    return handler.unpack(archive, destination)\n"
+  },
+  {
+    "case_id": "cwe89_dynamic_identifier_and_values_secure",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+    "expected_label": "secure",
+    "code": "def list_rows(cursor, order_field, maximum):\n    allowed = {'created_at': 'created_at', 'name': 'name'}\n    column = allowed[order_field]\n    cursor.execute(f'SELECT * FROM records ORDER BY {column} LIMIT %s', (maximum,))\n    return cursor.fetchall()\n"
+  },
+  {
+    "case_id": "cwe89_dynamic_identifier_direct_insecure",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+    "expected_label": "insecure",
+    "code": "def list_rows(cursor, order_field, maximum):\n    cursor.execute(f'SELECT * FROM records ORDER BY {order_field} LIMIT {maximum}')\n    return cursor.fetchall()\n"
+  },
+  {
+    "case_id": "cwe89_dynamic_custom_database_unknown",
+    "profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+    "expected_label": "unknown",
+    "code": "def list_rows(database, order_field, maximum):\n    return database.lookup(order_field, maximum)\n"
+  },
+  {
+    "case_id": "cwe611_hardened_parser_secure",
+    "profile_id": "python.cwe611.xml_external_entity.v1",
+    "expected_label": "secure",
+    "code": "from lxml import etree\n\ndef parse(data):\n    parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)\n    return etree.fromstring(data, parser=parser)\n"
+  },
+  {
+    "case_id": "cwe611_default_parser_insecure",
+    "profile_id": "python.cwe611.xml_external_entity.v1",
+    "expected_label": "insecure",
+    "code": "from lxml import etree\n\ndef parse(data):\n    return etree.fromstring(data)\n"
+  },
+  {
+    "case_id": "cwe611_custom_parser_unknown",
+    "profile_id": "python.cwe611.xml_external_entity.v1",
+    "expected_label": "unknown",
+    "code": "def parse(data, parser):\n    return parser.parse_document(data)\n"
+  },
+  {
+    "case_id": "cwe918_fixed_origin_secure",
+    "profile_id": "python.cwe918.outbound_url.v1",
+    "expected_label": "secure",
+    "code": "import requests\n\ndef fetch(item):\n    return requests.get(f'https://api.example.test/items/{item}')\n"
+  },
+  {
+    "case_id": "cwe918_dynamic_origin_insecure",
+    "profile_id": "python.cwe918.outbound_url.v1",
+    "expected_label": "insecure",
+    "code": "import requests\n\ndef fetch(url):\n    return requests.get(url)\n"
+  },
+  {
+    "case_id": "cwe918_url_factory_unknown",
+    "profile_id": "python.cwe918.outbound_url.v1",
+    "expected_label": "unknown",
+    "code": "import requests\n\ndef fetch():\n    return requests.get(build_url())\n"
+  },
+  {
+    "case_id": "cwe732_owner_only_secure",
+    "profile_id": "python.cwe732.owner_only_file_permissions.v1",
+    "expected_label": "secure",
+    "code": "import os\n\ndef protect(path):\n    os.chmod(path, 0o600)\n"
+  },
+  {
+    "case_id": "cwe732_world_writable_insecure",
+    "profile_id": "python.cwe732.owner_only_file_permissions.v1",
+    "expected_label": "insecure",
+    "code": "import os\n\ndef protect(path):\n    os.chmod(path, 0o666)\n"
+  },
+  {
+    "case_id": "cwe732_dynamic_mode_unknown",
+    "profile_id": "python.cwe732.owner_only_file_permissions.v1",
+    "expected_label": "unknown",
+    "code": "import os\n\ndef protect(path, mode):\n    os.chmod(path, mode)\n"
+  },
+  {
+    "case_id": "cwe798_caller_credential_secure",
+    "profile_id": "python.cwe798.credential_source.v1",
+    "expected_label": "secure",
+    "code": "def connect(client, password):\n    return client.connect(password=password)\n"
+  },
+  {
+    "case_id": "cwe798_literal_credential_insecure",
+    "profile_id": "python.cwe798.credential_source.v1",
+    "expected_label": "insecure",
+    "code": "def connect(client):\n    return client.connect(password='admin123')\n"
+  },
+  {
+    "case_id": "cwe798_provider_credential_unknown",
+    "profile_id": "python.cwe798.credential_source.v1",
+    "expected_label": "unknown",
+    "code": "def connect(client, provider):\n    password = provider.read()\n    return client.connect(password=password)\n"
+  }
+]

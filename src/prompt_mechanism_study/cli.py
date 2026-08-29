@@ -127,6 +127,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     task_partition.add_argument("--seed", type=int, default=2026083001)
 
+    realization_bindings = commands.add_parser(
+        "realization-bindings",
+        help="freeze Prompt-TSG task-to-mechanism and local-Oracle bindings",
+    )
+    realization_bindings.add_argument("tasks", type=Path)
+    realization_bindings.add_argument("contracts_root", type=Path)
+    realization_bindings.add_argument("catalog", type=Path)
+    realization_bindings.add_argument("registry", type=Path)
+    realization_bindings.add_argument("output", type=Path)
+    realization_bindings.add_argument(
+        "--prompt-tsg-bundle", type=Path, action="append", required=True
+    )
+
+    security_qualification = commands.add_parser(
+        "security-oracle-qualification",
+        help="replay the frozen gold boundary for active local security profiles",
+    )
+    security_qualification.add_argument("registry", type=Path)
+    security_qualification.add_argument("cases", type=Path)
+    security_qualification.add_argument("output", type=Path)
+    security_qualification.add_argument(
+        "--repository-root", type=Path, default=Path.cwd()
+    )
+
     prompt_tsg_extract = commands.add_parser(
         "prompt-tsg-extract",
         help="extract evidence-bound Prompt TSGs for a frozen task file",
@@ -138,6 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_tsg_extract.add_argument("output", type=Path)
     prompt_tsg_extract.add_argument("--start", type=int, default=0)
     prompt_tsg_extract.add_argument("--limit", type=int)
+    prompt_tsg_extract.add_argument("--task-selection", type=Path)
 
     positivity = commands.add_parser(
         "positivity-audit",
@@ -307,6 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output,
             start=args.start,
             limit=args.limit,
+            task_selection_path=args.task_selection,
         )
         print(report["status"])
         return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2
@@ -322,6 +348,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=args.seed,
         )
         print(report["status"])
+    elif args.command == "realization-bindings":
+        from prompt_mechanism_study.eligibility import freeze_tsg_realization_bindings
+
+        report = freeze_tsg_realization_bindings(
+            args.tasks,
+            tuple(args.prompt_tsg_bundle),
+            args.contracts_root,
+            args.catalog,
+            args.registry,
+            args.output,
+        )
+        print(report["status"])
+    elif args.command == "security-oracle-qualification":
+        from prompt_mechanism_study.eligibility import qualify_local_security_profiles
+
+        report = qualify_local_security_profiles(
+            args.repository_root,
+            args.registry,
+            args.cases,
+            args.output,
+        )
+        print(report["status"])
+        return 0 if report["status"] == "QUALIFIED_FOR_EXPERIMENT" else 2
     elif args.command == "positivity-audit":
         from prompt_mechanism_study.prioritization import audit_discovery_positivity
 

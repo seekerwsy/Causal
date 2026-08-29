@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "policy_id": "seven-source-dataset-eligibility-v1",
   "active_layer": "python_confirmatory",
   "source_tests_required": false,
@@ -31,6 +31,7 @@
   ],
   "mechanism_registry_path": "data/method/mechanism-registry-v1.json",
   "functional_oracle_qualification_path": "data/functional-judge/functional-oracle-qualification.json",
+  "security_oracle_qualification_path": "data/oracle-calibration/prompt-tsg-security-profiles-v2-qualification/qualification.json",
   "layers": [
     {
       "layer_id": "python_confirmatory",

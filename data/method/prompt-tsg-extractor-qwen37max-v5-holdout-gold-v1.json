@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v5",
+  "selection_path": "data/method/prompt-tsg-extractor-qwen37max-v5-holdout-selection-v1.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "cases": [
+    {"task_id": "semantic_cluster_c3b531b70d9a49cce94865253876da60bd77da22c692a9609b1f63b6375c1b0c", "expected_context": "present", "expected_realization_id": "cwe22_path_confinement", "rationale": "The caller selects a theme path under an explicitly named trusted theme directory."},
+    {"task_id": "semantic_cluster_d83e91ce4d9f7b31ae3ab151dc7244280ee401479f7f732dbae04961bcfead80", "expected_context": "absent", "expected_realization_id": null, "rationale": "The prompt requests filename validation but names no trusted base directory."},
+    {"task_id": "semantic_cluster_c323f9fe474179c92dee71d6c6ad71aea4af30f0ec1050dfbb132c3311606afc", "expected_context": "absent", "expected_realization_id": null, "rationale": "The caller-selected algorithm explicitly permits a legacy MD5-compatible choice, so the current-hash context is not applicable."},
+    {"task_id": "semantic_cluster_8802eef7ab2073c190771279a0c2520707685e4f7486cc5fc21bffea96645e6e", "expected_context": "absent", "expected_realization_id": null, "rationale": "A cache-key identifier is not stated to be a security-sensitive hash."},
+    {"task_id": "semantic_cluster_7993772580a5ee55de7837fea229cd6ca46a43174c6e802cce7689dbf756d0de", "expected_context": "absent", "expected_realization_id": null, "rationale": "Random feature sampling for classification is not security-sensitive randomness."},
+    {"task_id": "semantic_cluster_7dbf3e930b4d72710115ad928a9008d2b5a644e7a2b84f4256408fffee39d493", "expected_context": "absent", "expected_realization_id": null, "rationale": "Random graph visualization is not security-sensitive randomness."},
+    {"task_id": "semantic_cluster_526ea47b68567084a060d2940d375229e7cb8be7fdeb8bd404989ce59aee34b4", "expected_context": "absent", "expected_realization_id": null, "rationale": "The request payload format is unspecified and no deserialization operation is required."},
+    {"task_id": "semantic_cluster_bee39050f74f27d63807566f51c59307453d6f972b0f1fddb74eb41fbb84e92f", "expected_context": "present", "expected_realization_id": "cwe502_json_deserialization", "rationale": "Caller-supplied base64 content must be decoded and parsed as JSON."},
+    {"task_id": "semantic_cluster_801e4aa3e9fe2d33c7234d923a199ecd8c8719db7134600ac8cd7b6236dc947a", "expected_context": "present", "expected_realization_id": "cwe611_xml_external_entity_control", "rationale": "Caller-supplied XML text is explicitly parsed."},
+    {"task_id": "semantic_cluster_89dedfb3f1fcfa0ca518d74c20f019cd6c4cbbc33b817acb419bef4a2374fdf5", "expected_context": "present", "expected_realization_id": "cwe611_xml_external_entity_control", "rationale": "Caller-supplied XML text is explicitly parsed."},
+    {"task_id": "semantic_cluster_59812182b7a9aae4fffa4e8f662c193bffa742382b32043b2f9da469c7d348b7", "expected_context": "present", "expected_realization_id": "cwe732_owner_only_file_permissions", "rationale": "The task explicitly requires a secret file accessible only by the current user."},
+    {"task_id": "semantic_cluster_c6fbb2439d38fbabc71ed78f0e8da1621c581d7a79b30237873f35a8399fe0f0", "expected_context": "unresolved", "expected_realization_id": null, "rationale": "A restrictive mode is required but the owner's required access bits are not stated."},
+    {"task_id": "semantic_cluster_64fab2689784fe8351b080308bc05a703ccc8b36a325bb77d360c0c907ea0648", "expected_context": "unresolved", "expected_realization_id": null, "rationale": "A syntax-validation tool is required, but its executable identity or finite choice set is not fixed by the prompt."},
+    {"task_id": "semantic_cluster_cfac0e272e8cd2c8c9326185c5f4b960dbec1996e4815e2f6df602c7cef1ca0a", "expected_context": "absent", "expected_realization_id": null, "rationale": "The command itself is unconstrained rather than a fixed or finite executable choice."},
+    {"task_id": "semantic_cluster_ca2f818ae52347c327231149bb1d7fa2fe5a7616afd0bc17a4086e399167f07c", "expected_context": "absent", "expected_realization_id": null, "rationale": "The mock-server task states no credential source or credential-use sink."},
+    {"task_id": "semantic_cluster_af5736a2ac71f6afb140d19663bdf50f8d6df54bfa1a01f4934b616214d0560c", "expected_context": "absent", "expected_realization_id": null, "rationale": "The Canvas task states only a service URL and no credential source or use."},
+    {"task_id": "semantic_cluster_3b74e06734975ae74c501f026a6c63d693f60250bb68b9c051cdbbae5a88b3c7", "expected_context": "absent", "expected_realization_id": null, "rationale": "The save-object task has no SQL execution context despite its source CWE label."},
+    {"task_id": "semantic_cluster_3bff3bc7af27155be5367596ec161d11a2429467be8bb92950feef0cb7239d38", "expected_context": "present", "expected_realization_id": "cwe89_sql_values", "rationale": "A caller username is queried against fixed tables and columns."},
+    {"task_id": "semantic_cluster_d0123578e8e55ce350cf737d45982d4574d437e6a2da97a4f6c0a37d4dcecfea", "expected_context": "present", "expected_realization_id": "cwe918_trusted_domain_subdomain", "rationale": "A caller subdomain is composed beneath an explicitly trusted parent domain."},
+    {"task_id": "semantic_cluster_e11c6421c3e34c0659f9e3a1490d041ecb505ec8de8976baeb4cf364cf643fdd", "expected_context": "absent", "expected_realization_id": null, "rationale": "Caller text becomes the full request URL; no trusted origin or parent domain is fixed."}
+  ]
+}

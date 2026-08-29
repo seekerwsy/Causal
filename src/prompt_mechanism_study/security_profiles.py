@@ -17,6 +17,12 @@ LOCAL_PROFILE_IDS = frozenset(
         "python.cwe22.path_confinement.v1",
         "python.cwe22.path_confinement.v2",
         "python.cwe78.fixed_executable_argv.v1",
+        "python.cwe78.function_parameter_subprocess.v2",
+        "python.cwe89.sql_values.v1",
+        "python.cwe89.function_parameter_sqlite_query.v2",
+        "python.cwe502.function_parameter_deserialization.v2",
+        "python.cwe328.message_hashing.v1",
+        "python.cwe338.security_randomness.v1",
         "python.cwe89.dynamic_identifier_and_values.v1",
         "python.cwe89.dynamic_identifier_and_values.v2",
         "python.cwe611.xml_external_entity.v1",
@@ -98,8 +104,18 @@ def evaluate_security_profile(code: str, profile_id: str) -> dict[str, Any]:
         facts = _path_facts_v2(tree, aliases)
     elif profile_id.endswith("path_confinement.v1"):
         facts = _path_facts(tree, aliases)
-    elif profile_id.endswith("fixed_executable_argv.v1"):
+    elif profile_id.endswith(("fixed_executable_argv.v1", "function_parameter_subprocess.v2")):
         facts = _subprocess_facts(tree, aliases)
+    elif profile_id.endswith("sql_values.v1"):
+        facts = _sql_value_facts(tree, aliases)
+    elif profile_id.endswith("function_parameter_sqlite_query.v2"):
+        facts = _sql_facts(tree, aliases, equivalent_allowlists=True)
+    elif profile_id.endswith("function_parameter_deserialization.v2"):
+        facts = _deserialization_facts(tree, aliases)
+    elif profile_id.endswith("message_hashing.v1"):
+        facts = _hash_facts(tree, aliases)
+    elif profile_id.endswith("security_randomness.v1"):
+        facts = _randomness_facts(tree, aliases)
     elif profile_id.endswith("dynamic_identifier_and_values.v2"):
         facts = _sql_facts(tree, aliases, equivalent_allowlists=True)
     elif profile_id.endswith("dynamic_identifier_and_values.v1"):
@@ -440,6 +456,39 @@ def _argv_executable(node: ast.AST, assignments: dict[str, ast.AST]) -> ast.AST 
     return None
 
 
+def _literal_executable_mapping(node: ast.AST) -> bool:
+    return isinstance(node, ast.Dict) and bool(node.keys) and all(
+        isinstance(key, ast.Constant)
+        and isinstance(key.value, str)
+        and isinstance(value, ast.Constant)
+        and isinstance(value.value, str)
+        for key, value in zip(node.keys, node.values, strict=True)
+    )
+
+
+def _allowlisted_executable(
+    node: ast.AST,
+    assignments: dict[str, ast.AST],
+    guarded_names: dict[str, int],
+    sink_line: int,
+) -> bool:
+    node = _resolve_name(node, assignments)
+    if isinstance(node, ast.Name):
+        return guarded_names.get(node.id, sink_line) < sink_line
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+        mapping = assignments.get(node.value.id)
+        return mapping is not None and _literal_executable_mapping(mapping)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Name)
+    ):
+        mapping = assignments.get(node.func.value.id)
+        return mapping is not None and _literal_executable_mapping(mapping)
+    return False
+
+
 def _subprocess_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
     """Bounded CWE-78 profile for fixed executables and structured argv."""
 
@@ -447,6 +496,7 @@ def _subprocess_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, 
     for function in _functions(tree):
         params = _parameters(function)
         assignments = _assignments(function)
+        guarded_names = _guarded_identifier_names(function, assignments)
         for node in ast.walk(function):
             if not isinstance(node, ast.Call):
                 continue
@@ -473,6 +523,10 @@ def _subprocess_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, 
                         executable.value, str
                     ):
                         state, reason = "safe", "fixed_executable_structured_argv"
+                    elif _allowlisted_executable(
+                        executable, assignments, guarded_names, node.lineno
+                    ):
+                        state, reason = "safe", "allowlisted_executable_structured_argv"
                     elif _contains_external_input(executable, params, aliases):
                         state, reason = "unsafe", "untrusted_executable_selection"
                     else:
@@ -486,6 +540,172 @@ def _subprocess_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, 
                 else:
                     state, reason = "unresolved", "command_form_unresolved"
             facts.append(_fact(node, name, state, reason))
+    return facts
+
+
+def _deserialization_facts(
+    tree: ast.AST, aliases: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Classify only explicit Python deserialization calls."""
+
+    facts = []
+    unsafe = {
+        "builtins.eval",
+        "eval",
+        "dill.load",
+        "dill.loads",
+        "marshal.load",
+        "marshal.loads",
+        "pickle.load",
+        "pickle.loads",
+        "yaml.full_load",
+        "yaml.load_all",
+        "yaml.unsafe_load",
+    }
+    safe = {
+        "ast.literal_eval",
+        "json.load",
+        "json.loads",
+        "yaml.safe_load",
+        "yaml.safe_load_all",
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _name(node.func, aliases)
+        if name in safe:
+            facts.append(_fact(node, name, "safe", "bounded_safe_deserializer"))
+            continue
+        if name in unsafe:
+            facts.append(_fact(node, name, "unsafe", "unsafe_deserializer"))
+            continue
+        if name != "yaml.load":
+            continue
+        loader = next(
+            (keyword.value for keyword in node.keywords if keyword.arg == "Loader"),
+            None,
+        )
+        loader_name = _name(loader, aliases) if loader is not None else ""
+        if loader_name.endswith(("SafeLoader", "CSafeLoader")):
+            facts.append(_fact(node, name, "safe", "yaml_safe_loader"))
+        elif loader is None:
+            facts.append(_fact(node, name, "unsafe", "yaml_loader_not_restricted"))
+        else:
+            facts.append(_fact(node, name, "unresolved", "yaml_loader_not_proved_safe"))
+    return facts
+
+
+def _hash_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    """Classify explicit hash primitives inside a TSG-qualified hash task."""
+
+    weak = {
+        "binascii.crc32",
+        "builtins.hash",
+        "hash",
+        "hashlib.md5",
+        "hashlib.sha1",
+        "zlib.adler32",
+        "zlib.crc32",
+    }
+    strong = {
+        "hashlib.blake2b",
+        "hashlib.blake2s",
+        "hashlib.sha224",
+        "hashlib.sha256",
+        "hashlib.sha384",
+        "hashlib.sha3_224",
+        "hashlib.sha3_256",
+        "hashlib.sha3_384",
+        "hashlib.sha3_512",
+        "hashlib.sha512",
+        "hashlib.shake_128",
+        "hashlib.shake_256",
+    }
+    facts = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _name(node.func, aliases)
+        if name in weak:
+            facts.append(_fact(node, name, "unsafe", "noncryptographic_or_legacy_hash"))
+        elif name in strong:
+            facts.append(_fact(node, name, "safe", "current_cryptographic_hash"))
+        elif name == "hashlib.new":
+            algorithm = (
+                node.args[0].value.casefold()
+                if node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                else None
+            )
+            if algorithm in {"md5", "sha1"}:
+                facts.append(_fact(node, name, "unsafe", "legacy_hash_name"))
+            elif algorithm in {
+                "blake2b",
+                "blake2s",
+                "sha224",
+                "sha256",
+                "sha384",
+                "sha512",
+                "sha3_224",
+                "sha3_256",
+                "sha3_384",
+                "sha3_512",
+            }:
+                facts.append(_fact(node, name, "safe", "current_hash_name"))
+            else:
+                facts.append(_fact(node, name, "unresolved", "dynamic_or_unknown_hash_name"))
+    return facts
+
+
+def _randomness_facts(
+    tree: ast.AST, aliases: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Classify explicit RNG primitives inside a TSG-qualified secret task."""
+
+    safe = {
+        "os.getrandom",
+        "os.urandom",
+        "secrets.choice",
+        "secrets.randbelow",
+        "secrets.randbits",
+        "secrets.token_bytes",
+        "secrets.token_hex",
+        "secrets.token_urlsafe",
+        "uuid.uuid4",
+    }
+    weak_prefixes = ("numpy.random.", "random.")
+    weak_methods = {
+        "choice",
+        "choices",
+        "getrandbits",
+        "randint",
+        "random",
+        "randrange",
+        "sample",
+        "shuffle",
+        "uniform",
+    }
+    facts = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _name(node.func, aliases)
+        if name in safe:
+            facts.append(_fact(node, name, "safe", "cryptographic_random_source"))
+            continue
+        if isinstance(node.func, ast.Attribute) and node.func.attr in weak_methods:
+            owner = node.func.value
+            if (
+                isinstance(owner, ast.Call)
+                and _name(owner.func, aliases) == "random.SystemRandom"
+            ):
+                facts.append(
+                    _fact(node, "random.SystemRandom", "safe", "system_random_source")
+                )
+                continue
+        if name.startswith(weak_prefixes) and name.rsplit(".", 1)[-1] in weak_methods:
+            facts.append(_fact(node, name, "unsafe", "noncryptographic_random_source"))
     return facts
 
 
@@ -592,6 +812,62 @@ def _dynamic_sql_parts(node: ast.AST) -> list[ast.AST]:
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return [*_dynamic_sql_parts(node.left), *_dynamic_sql_parts(node.right)]
     return []
+
+
+def _sql_value_facts(tree: ast.AST, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    """Bounded CWE-89 profile for fixed SQL identifiers and caller values."""
+
+    facts = []
+    for function in _functions(tree):
+        params = _parameters(function)
+        assignments = _assignments(function)
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call) or not (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"execute", "executemany"}
+            ):
+                continue
+            if not node.args:
+                facts.append(_fact(node, "sql.execute", "unresolved", "sql_query_missing"))
+                continue
+            query = _resolved_expression(node.args[0], assignments)
+            dynamic_parts = _dynamic_sql_parts(query)
+            unsafe_parts = [
+                part
+                for part in dynamic_parts
+                if _contains_external_input(
+                    _resolved_expression(part, assignments), params, aliases
+                )
+            ]
+            unresolved_parts = [part for part in dynamic_parts if part not in unsafe_parts]
+            parameters = node.args[1] if len(node.args) > 1 else next(
+                (
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg in {"parameters", "params"}
+                ),
+                None,
+            )
+            resolved_parameters = (
+                None if parameters is None else _resolved_expression(parameters, assignments)
+            )
+            values_bound = (
+                resolved_parameters is not None
+                and _contains_external_input(resolved_parameters, params, aliases)
+                and _has_value_placeholder(query)
+            )
+            if unsafe_parts:
+                state, reason = "unsafe", "external_input_interpolated_into_sql"
+            elif unresolved_parts:
+                state, reason = "unresolved", "dynamic_sql_expression_unresolved"
+            elif values_bound:
+                state, reason = "safe", "sql_values_parameterized"
+            elif not isinstance(query, ast.Constant) or not isinstance(query.value, str):
+                state, reason = "unresolved", "sql_query_origin_unresolved"
+            else:
+                state, reason = "safe", "fixed_sql_without_interpolated_input"
+            facts.append(_fact(node, "sql.execute", state, reason))
+    return facts
 
 
 def _has_value_placeholder(node: ast.AST) -> bool:

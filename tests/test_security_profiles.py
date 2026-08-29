@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from prompt_mechanism_study.artifact_io import read_json
+from prompt_mechanism_study.eligibility import qualify_local_security_profiles
 from prompt_mechanism_study.security_profiles import evaluate_security_profile
 
 
@@ -107,6 +109,39 @@ def test_profiles_keep_absent_or_unresolved_evidence_unknown() -> None:
         )["security_label"]
         == "insecure"
     )
+
+
+@pytest.mark.reviewer
+@pytest.mark.parametrize(
+    "case",
+    json.loads(
+        Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json").read_text(
+            encoding="utf-8"
+        )
+    ),
+    ids=lambda case: case["case_id"],
+)
+def test_active_registry_profiles_match_frozen_gold_cases(case: dict[str, str]) -> None:
+    result = evaluate_security_profile(case["code"], case["profile_id"])
+    assert result["security_label"] == case["expected_label"]
+
+
+@pytest.mark.reviewer
+def test_active_registry_profile_qualification_is_replayable(tmp_path: Path) -> None:
+    output = tmp_path / "qualification"
+    report = qualify_local_security_profiles(
+        Path.cwd(),
+        Path("data/method/mechanism-registry-v1.json"),
+        Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),
+        output,
+    )
+
+    assert report["status"] == "QUALIFIED_FOR_EXPERIMENT"
+    assert report["label_mismatches"] == 0
+    assert report["unsupported_registry_profiles"] == [
+        "unsupported.python.cwe918.trusted_domain_subdomain.v1"
+    ]
+    assert len(read_json(output / "case-results.json")) == report["gold_cases"]
 
 
 @pytest.mark.parametrize(

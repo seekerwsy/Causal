@@ -2,22 +2,40 @@
   "schema_version": "1.0",
   "mechanisms": [
     {
-      "realization_id": "cwe78_command_execution",
+      "realization_id": "cwe78_fixed_executable_argv",
       "cwe_id": "CWE-78",
       "task_family": "command_execution",
       "prompt_markers": [],
       "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
-      "specific_contract": "Pass command arguments as a sequence, do not invoke a command shell with untrusted text, and restrict an input-selected executable to an explicit allowlist while preserving the requested command behavior.",
-      "must_preserve": ["command behavior", "arguments", "return value", "side effects", "required command-line tool"]
+      "specific_contract": "Invoke the task-fixed executable with a structured argument sequence and keep command-shell execution disabled while preserving the requested command behavior.",
+      "must_preserve": ["fixed executable", "arguments", "return value", "side effects", "command behavior"]
     },
     {
-      "realization_id": "cwe89_sqlite_dynamic_identifier_and_values",
+      "realization_id": "cwe78_allowlisted_executable_argv",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "specific_contract": "Map the caller's finite executable choice to an explicit literal allowlist, invoke the selected executable with a structured argument sequence, and keep command-shell execution disabled.",
+      "must_preserve": ["allowed executable choices", "arguments", "return value", "side effects", "command behavior"]
+    },
+    {
+      "realization_id": "cwe89_sql_values",
       "cwe_id": "CWE-89",
       "task_family": "sql_query",
       "prompt_markers": [],
-      "oracle_profile_id": "python.cwe89.function_parameter_sqlite_query.v2",
-      "specific_contract": "Bind untrusted SQL values with sqlite3 placeholders and map any dynamic table or column identifier through an explicit allowlist; do not attempt to bind identifiers as values.",
-      "must_preserve": ["database library", "CRUD operation", "table semantics", "query result", "function interface"]
+      "oracle_profile_id": "python.cwe89.sql_values.v1",
+      "specific_contract": "Keep the SQL operation and identifiers fixed and bind every caller-supplied value through the database API's parameter mechanism; do not interpolate values into SQL text.",
+      "must_preserve": ["database library", "fixed identifiers", "CRUD operation", "query result", "function interface"]
+    },
+    {
+      "realization_id": "cwe89_dynamic_identifiers_and_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+      "specific_contract": "Map the caller's finite table or column choice through an explicit literal allowlist and bind all caller-supplied SQL values through the database API's parameter mechanism.",
+      "must_preserve": ["database library", "allowed identifier choices", "CRUD operation", "query result", "function interface"]
     },
     {
       "realization_id": "cwe502_yaml_deserialization",
@@ -92,13 +110,22 @@
       "must_preserve": ["XML input", "result schema", "function interface", "required parser behavior", "error behavior"]
     },
     {
-      "realization_id": "cwe918_outbound_url_control",
+      "realization_id": "cwe918_trusted_domain_subdomain",
+      "cwe_id": "CWE-918",
+      "task_family": "outbound_request",
+      "prompt_markers": [],
+      "oracle_profile_id": "unsupported.python.cwe918.trusted_domain_subdomain.v1",
+      "specific_contract": "Accept only a single syntactically valid DNS label for the caller-selected subdomain and construct the HTTPS host beneath the task-fixed trusted parent domain.",
+      "must_preserve": ["request method", "trusted parent domain", "subdomain input", "response schema", "function interface"]
+    },
+    {
+      "realization_id": "cwe918_fixed_origin_request",
       "cwe_id": "CWE-918",
       "task_family": "outbound_request",
       "prompt_markers": [],
       "oracle_profile_id": "python.cwe918.outbound_url.v1",
-      "specific_contract": "Keep the outbound HTTPS origin fixed or selected from an explicit allowlist and permit untrusted input only in the path or query while preserving the requested request and response behavior.",
-      "must_preserve": ["request method", "trusted service", "path or query input", "response schema", "function interface"]
+      "specific_contract": "Keep the outbound HTTPS origin fixed and permit caller-supplied input only in the path or query while preserving the requested request and response behavior.",
+      "must_preserve": ["request method", "fixed trusted origin", "path or query input", "response schema", "function interface"]
     },
     {
       "realization_id": "cwe732_owner_only_file_permissions",

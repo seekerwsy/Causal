@@ -183,6 +183,7 @@ def extract_task_file(
     *,
     start: int = 0,
     limit: int | None = None,
+    task_selection_path: Path | None = None,
     provider: Provider = bailian_complete,
 ) -> dict[str, Any]:
     """Extract a small frozen task file into one reviewable, content-addressed bundle."""
@@ -195,7 +196,43 @@ def extract_task_file(
     if limit is not None:
         if type(limit) is not int or limit <= 0:
             raise ValueError("limit must be a positive integer")
-    tasks = source_tasks[start:] if limit is None else source_tasks[start : start + limit]
+    selection_sha256 = None
+    if task_selection_path is not None:
+        if start != 0 or limit is not None:
+            raise ValueError("task selection cannot be combined with start or limit")
+        selection = read_json(task_selection_path)
+        required = {
+            "schema_version",
+            "source_tasks_sha256",
+            "selection_rule",
+            "task_ids",
+            "arms_or_outcomes_used",
+        }
+        if (
+            not isinstance(selection, dict)
+            or set(selection) != required
+            or selection["schema_version"] != "1.0"
+            or selection["source_tasks_sha256"]
+            != hashlib.sha256(tasks_path.read_bytes()).hexdigest()
+            or not isinstance(selection["selection_rule"], str)
+            or not selection["selection_rule"].strip()
+            or selection["arms_or_outcomes_used"] is not False
+            or not isinstance(selection["task_ids"], list)
+            or not selection["task_ids"]
+            or any(
+                not isinstance(task_id, str) or not task_id
+                for task_id in selection["task_ids"]
+            )
+            or len(selection["task_ids"]) != len(set(selection["task_ids"]))
+        ):
+            raise PromptTSGExtractionError("task selection is invalid or stale")
+        by_id = {task.get("task_id"): task for task in source_tasks}
+        if len(by_id) != len(source_tasks) or not set(selection["task_ids"]) <= set(by_id):
+            raise PromptTSGExtractionError("task selection is outside the source population")
+        tasks = [by_id[task_id] for task_id in selection["task_ids"]]
+        selection_sha256 = hashlib.sha256(task_selection_path.read_bytes()).hexdigest()
+    else:
+        tasks = source_tasks[start:] if limit is None else source_tasks[start : start + limit]
     if not tasks or len({task.get("task_id") for task in tasks}) != len(tasks):
         raise PromptTSGExtractionError("task extraction population is empty or duplicated")
     catalog = load_catalog(catalog_path)
@@ -248,6 +285,7 @@ def extract_task_file(
         "tasks": len(tasks),
         "source_tasks": len(source_tasks),
         "selection_start": start,
+        "task_selection_sha256": selection_sha256,
         "graphs": len(graphs),
         "unresolved_tasks": sum(bool(graph["unresolved_semantics"]) for graph in graphs),
         "task_file_sha256": hashlib.sha256(tasks_path.read_bytes()).hexdigest(),
