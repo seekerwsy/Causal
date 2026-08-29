@@ -107,7 +107,7 @@ def test_catalog_and_graph_are_canonical_and_round_trip():
 
 @pytest.mark.reviewer
 def test_active_catalog_guides_every_query_bound_semantic():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v4.json")
     query_semantics = set()
     for query in catalog["queries"]:
         query_semantics.update(query["required_semantics"])
@@ -115,6 +115,85 @@ def test_active_catalog_guides_every_query_bound_semantic():
         query_semantics.add(query["actionable_feature_id"])
 
     assert query_semantics <= set(catalog["semantic_guidance"])
+
+
+@pytest.mark.reviewer
+def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v4.json")
+    prompt = (
+        "Read a user-provided filename from the directory supplied in the "
+        "dir_path function argument."
+    )
+    graph = build_prompt_tsg(
+        task_id="caller-base-task",
+        prompt=prompt,
+        extractor_id="bounded-facts-v1",
+        catalog=catalog,
+        facts=[
+            _fact(
+                "path",
+                "source",
+                "source.untrusted_relative_path",
+                "user-provided filename",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+            _fact(
+                "base",
+                "constraint",
+                "constraint.caller_supplied_path_base",
+                "directory supplied in the dir_path function argument",
+                caller_controlled=True,
+            ),
+        ],
+        relations=[{"edge_type": "flows_to", "source": "path", "target": "sink"}],
+    )
+    query = query_for_realization(catalog, "cwe22_path_confinement")
+
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-22",
+        task_family="path_access",
+    ).state is QueryState.ABSENT
+
+
+@pytest.mark.reviewer
+def test_independently_configured_path_base_remains_applicable():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v4.json")
+    prompt = "Read a user filename beneath the application's configured upload directory."
+    graph = build_prompt_tsg(
+        task_id="configured-base-task",
+        prompt=prompt,
+        extractor_id="bounded-facts-v1",
+        catalog=catalog,
+        facts=[
+            _fact(
+                "path",
+                "source",
+                "source.untrusted_relative_path",
+                "user filename",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+            _fact(
+                "base",
+                "constraint",
+                "constraint.trusted_path_base",
+                "application's configured upload directory",
+                fixed=True,
+            ),
+        ],
+        relations=[{"edge_type": "flows_to", "source": "path", "target": "sink"}],
+    )
+    query = query_for_realization(catalog, "cwe22_path_confinement")
+
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-22",
+        task_family="path_access",
+    ).state is QueryState.PRESENT
 
 
 @pytest.mark.reviewer
