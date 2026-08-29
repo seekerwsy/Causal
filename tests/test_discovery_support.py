@@ -142,6 +142,7 @@ def test_positivity_gate_requires_both_states_and_shared_lineages(tmp_path: Path
     rows = read_json(tmp_path / "audit/positivity-rows.json")
 
     assert report["status"] == "POSITIVITY_GATE_PASSED"
+    assert len(report["positivity_implementation_sha256"]) == 64
     assert report["fci_executed"] is False
     assert support["context_present"] == 4
     assert support["context_absent"] == 0

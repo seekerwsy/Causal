@@ -62,6 +62,7 @@ def run_semantic_curation(
     evaluator, prompt, identities = _policy(root, "semantic-adjudication-v5.txt")
     identities["response_binding"] = "batch_item_index_v1"
     identities["duplicate_index_policy"] = "last_occurrence_wins_if_all_indices_covered"
+    identities["duplicate_json_key_policy"] = "collapse_only_type_and_value_identical_v1"
     identities["diagnostic_fields"] = "nonbinding_bounded_text_v1"
     batches = _batches(pairs, "pair_id", SEMANTIC_MAX_ITEMS, _pair_chars)
     base_plan = {
@@ -143,6 +144,7 @@ def run_contract_curation(
     evaluator, prompt, identities = _policy(root, "contract-extraction-v7.txt")
     identities["response_binding"] = "batch_item_index_v1"
     identities["duplicate_index_policy"] = "last_occurrence_wins_if_all_indices_covered"
+    identities["duplicate_json_key_policy"] = "collapse_only_type_and_value_identical_v1"
     batches = _batches(missing_items, "record_id", CONTRACT_MAX_ITEMS, _contract_chars)
     base_plan = {
         "schema_version": "1.0",
@@ -786,7 +788,9 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
-            raise ValueError("duplicate JSON key")
+            if type(value[key]) is not type(item) or value[key] != item:
+                raise ValueError("conflicting duplicate JSON key")
+            continue
         value[key] = item
     return value
 

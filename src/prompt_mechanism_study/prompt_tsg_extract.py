@@ -251,6 +251,12 @@ def extract_task_file(
         "catalog_sha256": catalog_sha256(catalog),
         "evaluator_sha256": hashlib.sha256(evaluator_path.read_bytes()).hexdigest(),
         "prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
+        "extractor_implementation_sha256": hashlib.sha256(
+            Path(__file__).read_bytes()
+        ).hexdigest(),
+        "provider_adapter_sha256": hashlib.sha256(
+            Path(provider.__code__.co_filename).read_bytes()
+        ).hexdigest(),
         "arms_or_outcomes_used": False,
     }
     if failed is not None:

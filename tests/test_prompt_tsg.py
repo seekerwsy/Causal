@@ -294,4 +294,6 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
         provider=provider,
     )
     assert report["graphs"] == 1
+    assert len(report["extractor_implementation_sha256"]) == 64
+    assert len(report["provider_adapter_sha256"]) == 64
     assert report["arms_or_outcomes_used"] is False

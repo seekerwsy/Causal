@@ -94,7 +94,10 @@ The labels below distinguish execution from inherited evidence.
    closed diagnostics. The active outcome-blind curation limit is therefore
    five items for semantic adjudication and contract extraction; every index
    must still be present, and no partial provider response is admitted. The
-   frozen plan also binds the curation and provider-adapter source digests.
+   provider also once duplicated an identical JSON key. The active parser may
+   collapse only duplicates whose types and values are identical; conflicting
+   duplicates remain closed errors. The frozen plan binds this policy plus the
+   curation and provider-adapter source digests.
 
 ## Exact next Gate C package
 

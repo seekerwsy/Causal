@@ -7,7 +7,9 @@ import pytest
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.curation import (
+    CurationError,
     _parse_contracts,
+    _parse_semantic,
     assemble_semantic_clusters,
     run_contract_curation,
 )
@@ -294,3 +296,19 @@ def test_contract_parser_accepts_a_bound_language_and_nine_requirements() -> Non
 
     assert result[0]["requirements"] == contract["requirements"]
     assert "language" not in result[0]
+
+
+def test_semantic_parser_collapses_only_identical_duplicate_json_keys() -> None:
+    batch = [{"pair_id": "pair-a"}]
+    accepted = (
+        b'{"decisions":[{"item_index":1,"label":"different_task",'
+        b'"label":"different_task","reason":"distinct contracts"}]}'
+    )
+    assert _parse_semantic(accepted, batch)[0]["label"] == "different_task"
+
+    conflicting = (
+        b'{"decisions":[{"item_index":1,"label":"different_task",'
+        b'"label":"same_cluster","reason":"ambiguous"}]}'
+    )
+    with pytest.raises(CurationError):
+        _parse_semantic(conflicting, batch)

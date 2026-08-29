@@ -719,6 +719,9 @@ def prepare_discovery_population(
         "prepared_bundle_sha256": bundle_digest(prepared_root),
         "clusters_bundle_sha256": bundle_digest(clusters_root),
         "catalog_sha256": catalog_sha256(catalog),
+        "population_implementation_sha256": hashlib.sha256(
+            Path(__file__).read_bytes()
+        ).hexdigest(),
         "arms_or_outcomes_used": False,
         "scientific_claim_allowed": False,
     }
@@ -876,6 +879,9 @@ def audit_discovery_positivity(
         "task_file_sha256": hashlib.sha256(tasks_path.read_bytes()).hexdigest(),
         "graph_bundle_sha256": sorted(graph_bundle_ids),
         "catalog_sha256": catalog_sha256(catalog),
+        "positivity_implementation_sha256": hashlib.sha256(
+            Path(__file__).read_bytes()
+        ).hexdigest(),
         "arms_or_outcomes_used": False,
         "fci_executed": False,
         "scientific_claim_allowed": False,
