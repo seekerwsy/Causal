@@ -1011,6 +1011,7 @@ def audit_discovery_positivity(
     *,
     minimum_state_task_units: int = 30,
     minimum_shared_lineages: int = 2,
+    graph_artifact: str = "graphs.json",
 ) -> dict[str, object]:
     """Audit natural feature support before any FCI or outcome is read."""
 
@@ -1020,6 +1021,14 @@ def audit_discovery_positivity(
         raise ValueError("minimum_shared_lineages must be positive")
     if not graph_bundles:
         raise ValueError("at least one Prompt TSG bundle is required")
+    permitted_graph_artifacts = {
+        "graphs.json",
+        "discovery-graphs.json",
+        "pilot-graphs.json",
+        "confirm-graphs.json",
+    }
+    if graph_artifact not in permitted_graph_artifacts:
+        raise ValueError("Prompt TSG graph artifact is invalid")
     tasks = _task_records(tasks_path)
     if not tasks or len({task.get("task_id") for task in tasks}) != len(tasks):
         raise ValueError("discovery tasks are empty or duplicated")
@@ -1029,7 +1038,7 @@ def audit_discovery_positivity(
     for bundle in graph_bundles:
         verify_bundle(bundle)
         graph_bundle_ids.append(bundle_digest(bundle))
-        value = read_json(bundle / "graphs.json")
+        value = read_json(bundle / graph_artifact)
         if not isinstance(value, list):
             raise TypeError("Prompt TSG graph collection is invalid")
         graphs.extend(prompt_tsg_from_record(item) for item in value)
@@ -1152,6 +1161,7 @@ def audit_discovery_positivity(
         "minimum_shared_lineages": minimum_shared_lineages,
         "task_file_sha256": hashlib.sha256(tasks_path.read_bytes()).hexdigest(),
         "graph_bundle_sha256": sorted(graph_bundle_ids),
+        "graph_artifact": graph_artifact,
         "catalog_sha256": catalog_sha256(catalog),
         "positivity_implementation_sha256": hashlib.sha256(
             Path(__file__).read_bytes()

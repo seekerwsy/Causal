@@ -210,6 +210,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="append",
         required=True,
     )
+    positivity.add_argument(
+        "--graph-artifact",
+        default="graphs.json",
+        choices=(
+            "graphs.json",
+            "discovery-graphs.json",
+            "pilot-graphs.json",
+            "confirm-graphs.json",
+        ),
+        help="graph collection inside each verified bundle",
+    )
     positivity.add_argument("--minimum-state-task-units", type=int, default=30)
     positivity.add_argument("--minimum-shared-lineages", type=int, default=2)
 
@@ -451,6 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output,
             minimum_state_task_units=args.minimum_state_task_units,
             minimum_shared_lineages=args.minimum_shared_lineages,
+            graph_artifact=args.graph_artifact,
         )
         print(report["status"])
         return 0 if report["status"] == "POSITIVITY_GATE_PASSED" else 2

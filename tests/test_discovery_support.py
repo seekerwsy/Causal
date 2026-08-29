@@ -233,3 +233,16 @@ def test_task_partition_is_outcome_blind_stratified_and_leakage_closed(tmp_path:
     assert split_by_task["task-0"] == split_by_task["task-1"]
     assert set(split_by_task.values()) == {"discovery", "pilot", "confirm"}
     assert sum(report["partition_counts"].values()) == 12
+
+    support = audit_discovery_positivity(
+        tmp_path / "partition/discovery-tasks.json",
+        (tmp_path / "partition",),
+        CATALOG_PATH,
+        tmp_path / "discovery-audit",
+        minimum_state_task_units=1,
+        minimum_shared_lineages=1,
+        graph_artifact="discovery-graphs.json",
+    )
+
+    assert support["graph_artifact"] == "discovery-graphs.json"
+    assert support["task_units"] == report["partition_counts"]["discovery"]
