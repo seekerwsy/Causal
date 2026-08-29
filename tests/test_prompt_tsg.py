@@ -107,7 +107,7 @@ def test_catalog_and_graph_are_canonical_and_round_trip():
 
 @pytest.mark.reviewer
 def test_active_catalog_guides_every_query_bound_semantic():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v4.json")
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     query_semantics = set()
     for query in catalog["queries"]:
         query_semantics.update(query["required_semantics"])
@@ -119,7 +119,7 @@ def test_active_catalog_guides_every_query_bound_semantic():
 
 @pytest.mark.reviewer
 def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v4.json")
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = (
         "Read a user-provided filename from the directory supplied in the "
         "dir_path function argument."
@@ -146,7 +146,10 @@ def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
                 caller_controlled=True,
             ),
         ],
-        relations=[{"edge_type": "flows_to", "source": "path", "target": "sink"}],
+        relations=[
+            {"edge_type": "flows_to", "source": "path", "target": "sink"},
+            {"edge_type": "qualifies", "source": "base", "target": "sink"},
+        ],
     )
     query = query_for_realization(catalog, "cwe22_path_confinement")
 
@@ -160,7 +163,7 @@ def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
 
 @pytest.mark.reviewer
 def test_independently_configured_path_base_remains_applicable():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v4.json")
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = "Read a user filename beneath the application's configured upload directory."
     graph = build_prompt_tsg(
         task_id="configured-base-task",
@@ -184,7 +187,10 @@ def test_independently_configured_path_base_remains_applicable():
                 fixed=True,
             ),
         ],
-        relations=[{"edge_type": "flows_to", "source": "path", "target": "sink"}],
+        relations=[
+            {"edge_type": "flows_to", "source": "path", "target": "sink"},
+            {"edge_type": "qualifies", "source": "base", "target": "sink"},
+        ],
     )
     query = query_for_realization(catalog, "cwe22_path_confinement")
 
