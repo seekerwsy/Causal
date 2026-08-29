@@ -106,6 +106,18 @@ def test_catalog_and_graph_are_canonical_and_round_trip():
 
 
 @pytest.mark.reviewer
+def test_active_catalog_guides_every_query_bound_semantic():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
+    query_semantics = set()
+    for query in catalog["queries"]:
+        query_semantics.update(query["required_semantics"])
+        query_semantics.update(query["forbidden_semantics"])
+        query_semantics.add(query["actionable_feature_id"])
+
+    assert query_semantics <= set(catalog["semantic_guidance"])
+
+
+@pytest.mark.reviewer
 def test_evidence_must_be_an_exact_prompt_span():
     catalog = load_catalog(CATALOG_PATH)
     with pytest.raises(PromptTSGError, match="evidence"):
