@@ -138,7 +138,7 @@ def extract_prompt_tsg(
     raw = provider(request, evaluator, system_prompt)
     try:
         proposal = _proposal(raw)
-        facts, rejected_facts = _project_facts(
+        facts, rejected_facts, normalized_evidence_occurrences = _project_facts(
             proposal["facts"], request["source_prompt"], catalog
         )
         offered = set(request["candidate_semantics"])
@@ -217,6 +217,10 @@ def extract_prompt_tsg(
         "rejected_relations": rejected_relations,
         "ignored_unresolved_features": ignored_unresolved_features,
     }
+    if normalized_evidence_occurrences:
+        projection["normalized_evidence_occurrences"] = (
+            normalized_evidence_occurrences
+        )
     if review_projection is not None:
         projection["semantic_review"] = review_projection
     return graph, request, raw, projection
@@ -523,7 +527,11 @@ def _review_catalog_facts(
             or len(unresolved) != len(set(unresolved))
         ):
             raise PromptTSGExtractionError("semantic reviewer ambiguity is invalid")
-        reviewed_facts, rejected_review_facts = _project_facts(
+        (
+            reviewed_facts,
+            rejected_review_facts,
+            normalized_review_occurrences,
+        ) = _project_facts(
             review["facts"], task["prompt"], catalog
         )
         returned_semantics = {
@@ -612,7 +620,7 @@ def _review_catalog_facts(
         )
         not in accepted_relation_semantics
     ]
-    return descriptions + normalized_facts, normalized_relations, {
+    projection = {
         "request": request,
         "response_sha256": hashlib.sha256(raw).hexdigest(),
         "response_text": raw.decode("utf-8", errors="strict"),
@@ -625,6 +633,11 @@ def _review_catalog_facts(
         "rejected_facts": rejected_facts + rejected_review_facts,
         "rejected_relations": rejected_relations + rejected_review_relations,
     }
+    if normalized_review_occurrences:
+        projection["normalized_evidence_occurrences"] = (
+            normalized_review_occurrences
+        )
+    return descriptions + normalized_facts, normalized_relations, projection
 
 
 def _proposal(raw: bytes) -> dict[str, Any]:
@@ -647,7 +660,11 @@ def _project_facts(
     facts: Sequence[Mapping[str, Any]],
     prompt: str,
     catalog: Mapping[str, Any],
-) -> tuple[list[Mapping[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    list[Mapping[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
     """Drop only invalid local-description facts; never repair security facts.
 
     The three evidence-bound local semantics below are descriptive annotations
@@ -661,6 +678,7 @@ def _project_facts(
     descriptive = {"task.requirement", "task.operation", "data.object"}
     accepted = []
     rejected = []
+    normalized_occurrences = []
     seen_local_ids: set[str] = set()
     for fact in facts:
         if not isinstance(fact, Mapping) or set(fact) != {
@@ -707,6 +725,19 @@ def _project_facts(
         if offset >= 0:
             accepted.append(fact)
             continue
+        first_offset = prompt.find(evidence)
+        if first_offset >= 0 and prompt.find(evidence, first_offset + 1) < 0:
+            accepted.append({**fact, "occurrence": 1})
+            normalized_occurrences.append(
+                {
+                    "local_id": local_id,
+                    "semantic_id": semantic_id,
+                    "provided_occurrence": occurrence,
+                    "normalized_occurrence": 1,
+                    "reason": "unique_exact_evidence_span",
+                }
+            )
+            continue
         if semantic_id not in descriptive:
             raise PromptTSGExtractionError(
                 "catalog-bound Prompt TSG evidence does not exactly match the prompt"
@@ -718,7 +749,7 @@ def _project_facts(
                 "reason": "noncontiguous_or_nonverbatim_descriptive_evidence",
             }
         )
-    return accepted, rejected
+    return accepted, rejected, normalized_occurrences
 
 
 def _project_relations(

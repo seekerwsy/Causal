@@ -569,6 +569,71 @@ def test_extractor_never_drops_nonverbatim_catalog_bound_facts():
 
 
 @pytest.mark.reviewer
+def test_extractor_normalizes_only_a_unique_exact_evidence_occurrence():
+    catalog = load_catalog(CATALOG_PATH)
+    task = {
+        "task_id": "task-unique-occurrence",
+        "task_unit_id": "task-unique-occurrence",
+        "prompt": PROMPT,
+        "cwe": "CWE-78",
+        "task_family": "command_execution",
+    }
+    response = {
+        "facts": [
+            _fact(
+                "source",
+                "source",
+                "source.untrusted_command_argument",
+                "user-provided branch name",
+                caller_controlled=True,
+            )
+            | {"occurrence": 9},
+            _fact("sink", "sink", "sink.process_execution", "Run"),
+            _fact(
+                "fixed",
+                "constraint",
+                "constraint.fixed_executable",
+                "fixed git executable",
+                fixed=True,
+            ),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "source", "target": "sink"}
+        ],
+        "unresolved_semantics": [],
+    }
+
+    def provider(_request, _evaluator, _prompt):
+        import json
+
+        return json.dumps(response).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "llm-facts-v1"},
+        system_prompt="extract facts",
+        provider=provider,
+    )
+    source = next(
+        node
+        for node in graph.nodes
+        if node.semantic_id == "source.untrusted_command_argument"
+    )
+
+    assert source.evidence_start == PROMPT.index("user-provided branch name")
+    assert projection["normalized_evidence_occurrences"] == [
+        {
+            "local_id": "source",
+            "semantic_id": "source.untrusted_command_argument",
+            "provided_occurrence": 9,
+            "normalized_occurrence": 1,
+            "reason": "unique_exact_evidence_span",
+        }
+    ]
+
+
+@pytest.mark.reviewer
 def test_blind_semantic_reviewer_rejects_unsupported_proposed_facts():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v2.json")
     prompt = "Load a YAML configuration file."
