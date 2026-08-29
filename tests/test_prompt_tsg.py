@@ -271,6 +271,7 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
     )
     assert graph.task_id == "task-1"
     assert projection == {
+        "rejected_facts": [],
         "rejected_relations": [],
         "ignored_unresolved_features": ["feature.argv_without_shell"],
     }
@@ -297,3 +298,109 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
     assert len(report["extractor_implementation_sha256"]) == 64
     assert len(report["provider_adapter_sha256"]) == 64
     assert report["arms_or_outcomes_used"] is False
+
+
+def test_extractor_drops_only_nonverbatim_descriptive_facts():
+    catalog = load_catalog(CATALOG_PATH)
+    task = {
+        "task_id": "task-1",
+        "task_unit_id": "task-1",
+        "prompt": PROMPT,
+        "cwe": "CWE-78",
+        "task_family": "command_execution",
+    }
+    response = {
+        "facts": [
+            _fact(
+                "source",
+                "source",
+                "source.untrusted_command_argument",
+                "user-provided branch name",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.process_execution", "Run"),
+            _fact(
+                "summary",
+                "task_operation",
+                "task.operation",
+                "Run ... and return its output",
+            ),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "source", "target": "sink"},
+            {"edge_type": "qualifies", "source": "summary", "target": "sink"},
+        ],
+        "unresolved_semantics": [],
+    }
+
+    def provider(_request, _evaluator, _prompt):
+        import json
+
+        return json.dumps(response).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "llm-facts-v1"},
+        system_prompt="extract facts",
+        provider=provider,
+    )
+
+    assert {node.semantic_id for node in graph.nodes} == {
+        "task.root",
+        "source.untrusted_command_argument",
+        "sink.process_execution",
+    }
+    assert projection["rejected_facts"] == [
+        {
+            "local_id": "summary",
+            "semantic_id": "task.operation",
+            "reason": "noncontiguous_or_nonverbatim_descriptive_evidence",
+        }
+    ]
+    assert projection["rejected_relations"] == [
+        {
+            "edge_type": "qualifies",
+            "source": "summary",
+            "target": "sink",
+            "reason": "edge_type_matrix_violation",
+        }
+    ]
+
+
+def test_extractor_never_drops_nonverbatim_catalog_bound_facts():
+    catalog = load_catalog(CATALOG_PATH)
+    task = {
+        "task_id": "task-1",
+        "task_unit_id": "task-1",
+        "prompt": PROMPT,
+        "cwe": "CWE-78",
+        "task_family": "command_execution",
+    }
+    response = {
+        "facts": [
+            _fact(
+                "source",
+                "source",
+                "source.untrusted_command_argument",
+                "user-provided ... branch name",
+                caller_controlled=True,
+            )
+        ],
+        "relations": [],
+        "unresolved_semantics": [],
+    }
+
+    def provider(_request, _evaluator, _prompt):
+        import json
+
+        return json.dumps(response).encode()
+
+    with pytest.raises(ValueError, match="catalog-bound"):
+        extract_prompt_tsg(
+            task,
+            catalog=catalog,
+            evaluator={"candidate_id": "llm-facts-v1"},
+            system_prompt="extract facts",
+            provider=provider,
+        )

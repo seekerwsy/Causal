@@ -131,8 +131,11 @@ def extract_prompt_tsg(
     raw = provider(request, evaluator, system_prompt)
     try:
         proposal = _proposal(raw)
+        facts, rejected_facts = _project_facts(
+            proposal["facts"], request["source_prompt"], catalog
+        )
         relations, rejected_relations = _project_relations(
-            proposal["facts"], proposal["relations"], catalog
+            facts, proposal["relations"], catalog
         )
         ignored_unresolved_features = sorted(
             semantic_id
@@ -150,7 +153,7 @@ def extract_prompt_tsg(
             prompt=task["prompt"],
             extractor_id=evaluator["candidate_id"],
             catalog=catalog,
-            facts=proposal["facts"],
+            facts=facts,
             relations=relations,
             unresolved_semantics=unresolved_semantics,
         )
@@ -165,6 +168,7 @@ def extract_prompt_tsg(
             "extractor returned a semantic outside its task slice", request=request, raw=raw
         )
     return graph, request, raw, {
+        "rejected_facts": rejected_facts,
         "rejected_relations": rejected_relations,
         "ignored_unresolved_features": ignored_unresolved_features,
     }
@@ -289,6 +293,84 @@ def _proposal(raw: bytes) -> dict[str, Any]:
     if any(not isinstance(value[field], list) for field in value):
         raise PromptTSGExtractionError("extractor response collections are invalid")
     return value
+
+
+def _project_facts(
+    facts: Sequence[Mapping[str, Any]],
+    prompt: str,
+    catalog: Mapping[str, Any],
+) -> tuple[list[Mapping[str, Any]], list[dict[str, Any]]]:
+    """Drop only invalid local-description facts; never repair security facts.
+
+    The three evidence-bound local semantics below are descriptive annotations
+    and never participate in a context query or actionable-feature state.  A
+    model-proposed annotation whose quoted span is not literally present can
+    therefore be rejected without changing any scientific variable.  All
+    other facts remain fail-closed so this projection cannot manufacture or
+    erase support for an intervention candidate.
+    """
+
+    descriptive = {"task.requirement", "task.operation", "data.object"}
+    accepted = []
+    rejected = []
+    seen_local_ids: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, Mapping) or set(fact) != {
+            "local_id",
+            "node_type",
+            "semantic_id",
+            "evidence_text",
+            "occurrence",
+            "attributes",
+        }:
+            raise PromptTSGExtractionError("extractor fact fields are invalid")
+        local_id = fact.get("local_id")
+        node_type = fact.get("node_type")
+        semantic_id = fact.get("semantic_id")
+        evidence = fact.get("evidence_text")
+        occurrence = fact.get("occurrence")
+        attributes = fact.get("attributes")
+        if (
+            not isinstance(local_id, str)
+            or not local_id.strip()
+            or local_id in seen_local_ids
+            or not isinstance(semantic_id, str)
+            or not semantic_id.strip()
+            or catalog["semantics"].get(semantic_id) != node_type
+            or semantic_id == "task.root"
+            or not isinstance(evidence, str)
+            or not evidence
+            or len(evidence.encode("utf-8")) > 2048
+            or type(occurrence) is not int
+            or occurrence <= 0
+            or not isinstance(attributes, Mapping)
+            or any(
+                key not in catalog["attribute_names"] or type(value) is not bool
+                for key, value in attributes.items()
+            )
+        ):
+            raise PromptTSGExtractionError("extractor fact value is invalid")
+        seen_local_ids.add(local_id)
+        offset = -1
+        for _ in range(occurrence):
+            offset = prompt.find(evidence, offset + 1)
+            if offset < 0:
+                break
+        if offset >= 0:
+            accepted.append(fact)
+            continue
+        if semantic_id not in descriptive:
+            raise PromptTSGExtractionError(
+                "catalog-bound Prompt TSG evidence does not exactly match the prompt"
+            )
+        rejected.append(
+            {
+                "local_id": local_id,
+                "semantic_id": semantic_id,
+                "reason": "noncontiguous_or_nonverbatim_descriptive_evidence",
+            }
+        )
+    return accepted, rejected
 
 
 def _project_relations(
