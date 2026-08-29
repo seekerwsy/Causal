@@ -154,9 +154,9 @@ def freeze_study_design(
             "lineages_per_family": dict(sorted(lineages_per_family.items())),
             "maximum_lineage_count": max(lineage_counts.values()),
             "maximum_lineage_fraction": policy["maximum_lineage_fraction"],
-            "arms": ["absent", "specific", "generic", "placebo"],
+            "arms": ["target", "noop", "placebo", "generic"],
             "assignments_per_model": len(sample) * 4,
-            "primary_contrast": "specific_minus_placebo",
+            "primary_contrast": "target_minus_noop",
             "power_gate_passed": power["power_gate_passed"],
         },
         "c_cpp_replication": {
@@ -389,14 +389,14 @@ def _lineage_slot_available(
 
 
 def _power_design(
-    clusters: int,
+    task_units: int,
     effect: float,
     discordance: float,
     alpha: float,
     target_power: float,
 ) -> dict[str, Any]:
     if (
-        clusters <= 0
+        task_units <= 0
         or not 0 < effect < 1
         or not 0 < discordance <= 1
         or not 0 < alpha < 1
@@ -406,7 +406,7 @@ def _power_design(
     critical = normal.inv_cdf(1 - alpha / 2)
 
     def power_at(value: float) -> float:
-        noncentrality = effect / math.sqrt(value / clusters)
+        noncentrality = effect / math.sqrt(value / task_units)
         return 1 - normal.cdf(critical - noncentrality) + normal.cdf(-critical - noncentrality)
 
     achieved = power_at(discordance)
@@ -416,9 +416,9 @@ def _power_design(
     ]
     return {
         "schema_version": "1.0",
-        "estimand": "paired_cluster_weighted_specific_minus_placebo_itt",
+        "estimand": "paired_task_unit_weighted_target_minus_noop_itt",
         "outcome": "oracle_evaluable_secure_code_yield",
-        "cluster_count": clusters,
+        "task_unit_count": task_units,
         "minimum_detectable_effect": effect,
         "discordant_pair_probability": discordance,
         "two_sided_alpha": alpha,

@@ -89,10 +89,12 @@ The labels below distinguish execution from inherited evidence.
 7. **Human evidence debt.** An expert study, if retained as RQ4, needs consent,
    materials, sampling, and analysis outside the computational runner.
 8. **Provider adherence.** In the first Gate-C attempt, two separate 24-item
-   semantic batches returned only indices 1–10 despite a valid JSON `stop`.
-   Both attempts remain closed diagnostics. The active outcome-blind curation
-   limit is therefore ten items for semantic adjudication and contract
-   extraction; no partial provider response is admitted.
+   semantic batches returned only indices 1–10 despite a valid JSON `stop`; a
+   later mixed-language batch returned only eight of ten. All attempts remain
+   closed diagnostics. The active outcome-blind curation limit is therefore
+   five items for semantic adjudication and contract extraction; every index
+   must still be present, and no partial provider response is admitted. The
+   frozen plan also binds the curation and provider-adapter source digests.
 
 ## Exact next Gate C package
 

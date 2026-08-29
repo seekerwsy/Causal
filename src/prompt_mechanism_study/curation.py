@@ -19,11 +19,12 @@ from prompt_mechanism_study.artifact_io import (
 from prompt_mechanism_study.functional_judge import bailian_complete
 from prompt_mechanism_study.records import canonical_value, content_id
 
-# The frozen provider twice returned only the first ten items from otherwise
-# valid 24-item requests.  Ten is therefore the largest empirically qualified
-# closed-response batch for both outcome-blind curation stages.
-SEMANTIC_MAX_ITEMS = 10
-CONTRACT_MAX_ITEMS = 10
+# The frozen provider twice returned only the first ten items from 24-item
+# requests and later returned eight of ten on a mixed-language batch.  Five is
+# the conservative closed-response unit used by both outcome-blind stages; a
+# response still has to bind every supplied index or the batch is rejected.
+SEMANTIC_MAX_ITEMS = 5
+CONTRACT_MAX_ITEMS = 5
 MAX_BATCH_CHARS = 40_000
 _LABELS = {"same_cluster", "related_but_independent", "different_task", "uncertain"}
 _RESOLUTION = {"resolved", "ambiguous", "unsupported"}
@@ -271,6 +272,12 @@ def _policy(root: Path, prompt_name: str) -> tuple[dict[str, Any], str, dict[str
             "model_id": evaluator["model_id"],
             "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
             "prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
+            "curation_implementation_sha256": hashlib.sha256(
+                (root / "src/prompt_mechanism_study/curation.py").read_bytes()
+            ).hexdigest(),
+            "provider_adapter_sha256": hashlib.sha256(
+                (root / "src/prompt_mechanism_study/functional_judge.py").read_bytes()
+            ).hexdigest(),
             "temperature": evaluator["temperature"],
             "top_p": evaluator["top_p"],
             "seed": evaluator["seed"],

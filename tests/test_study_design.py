@@ -133,6 +133,8 @@ def test_study_design_reserves_lineage_cap_for_family_without_alternatives() -> 
 def test_power_freeze_is_explicitly_assumption_conditional() -> None:
     design = _power_design(60, 0.20, 0.30, 0.05, 0.80)
 
+    assert design["estimand"] == "paired_task_unit_weighted_target_minus_noop_itt"
+    assert design["task_unit_count"] == 60
     assert design["achieved_normal_approximation_power"] == 0.80743
     assert design["power_gate_passed"] is True
     assert design["power_interpretation"] == (
