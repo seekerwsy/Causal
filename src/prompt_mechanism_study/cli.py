@@ -460,8 +460,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             preflight_successor_experiment,
             run_successor_experiment,
             verify_successor_materialization_bundle,
-            verify_successor_result_bundle,
         )
+        from prompt_mechanism_study.successor_verify import verify_successor_result_bundle
 
         if args.phase == "verify":
             report = verify_successor_result_bundle(args.output)

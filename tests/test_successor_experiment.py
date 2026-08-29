@@ -59,8 +59,8 @@ from prompt_mechanism_study.successor_experiment import (
     preflight_successor_experiment,
     run_successor_experiment,
     verify_successor_materialization_bundle,
-    verify_successor_result_bundle,
 )
+from prompt_mechanism_study.successor_verify import verify_successor_result_bundle
 
 pytestmark = pytest.mark.reviewer
 

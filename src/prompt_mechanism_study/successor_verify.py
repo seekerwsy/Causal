@@ -1,19 +1,35 @@
-"""Independent verifier for successor four-arm inference.
+"""Offline verifier for complete successor bundles and four-arm inference.
 
-This module deliberately does not import the production estimator.  It
-reconstructs block support, task-unit arm values, contrasts, unknown bounds,
-and the three bootstrap families from the frozen scientific records.
+Bundle replay reconstructs measurement and artifact bindings from stored raw
+evidence.  The inference verifier deliberately does not import the production
+estimator: it independently rebuilds block support, task-unit arm values,
+contrasts, unknown bounds, and the three bootstrap families.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import random
 import statistics
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
+from prompt_mechanism_study.adapters import AdapterBundle
+from prompt_mechanism_study.artifact_io import (
+    bundle_digest,
+    read_json,
+    verify_bundle,
+)
+from prompt_mechanism_study.functional_judge import (
+    build_review_request,
+    python_syntax_valid,
+    validate_review_response,
+)
 from prompt_mechanism_study.inference import (
     FamilyInferenceStatus,
     FunctionalityGateStatus,
@@ -41,18 +57,1185 @@ from prompt_mechanism_study.intervention import (
     PolicyArmRoleV2,
     TaskRealizationBundleV2,
 )
+from prompt_mechanism_study.measurement import (
+    CodeStatus,
+    FunctionalStatus,
+    Measurement,
+    OracleStatus,
+)
 from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.randomization import (
     SuccessorAssignment,
     SuccessorBlockKey,
     SuccessorRandomization,
 )
-from prompt_mechanism_study.records import content_hash, content_id
+from prompt_mechanism_study.records import canonical_value, content_hash, content_id
 from prompt_mechanism_study.representation import ExpectedDirection, Task
+from prompt_mechanism_study.security_profiles import evaluate_security_profile
+from prompt_mechanism_study.successor_experiment import (
+    SuccessorExperimentError,
+    _analysis_plan,
+    _cross_model_replication,
+    _json_object,
+    _list,
+    _object,
+    _require_canonical_record,
+    _stored_analysis_plan,
+    _stored_hypothesis,
+    _stored_policy,
+    _stored_randomization,
+    _stored_source_eligibility,
+    _stored_task,
+    _strings,
+    _successor_report_estimates,
+    _successor_report_families,
+    _text,
+    _validate_successor_config_envelope,
+    _verify_execution_evidence,
+    _verify_intervention_calls,
+    _verify_stored_selection_provenance,
+)
 
 
 class SuccessorVerificationError(ValueError):
     """A stored successor result does not replay from its frozen inputs."""
+
+
+def verify_successor_result_bundle(root: Path) -> dict[str, Any]:
+    """Verify stored successor evidence without trusting its saved verifier output."""
+
+    manifest = verify_bundle(root)
+    expected_files = {
+        "effective-config.json",
+        "environment.json",
+        "selection-evidence.json",
+        "materialization-freeze.json",
+        "execution-evidence.json",
+        "study-freeze.json",
+        "provider-calls.json",
+        "measurement-records.json",
+        "analysis.json",
+        "verification.json",
+        "report.json",
+    }
+    if set(manifest["files"]) != expected_files:
+        raise SuccessorExperimentError("successor result artifact set is not exact")
+    config = _object(read_json(root / "effective-config.json"), "stored config")
+    selection_evidence = _object(
+        read_json(root / "selection-evidence.json"),
+        "stored selection evidence",
+    )
+    materialization = _object(
+        read_json(root / "materialization-freeze.json"),
+        "stored materialization binding",
+    )
+    if set(materialization) != {"bundle_sha256", "study_freeze_id", "execution_order_sha256"}:
+        raise SuccessorExperimentError("stored materialization binding drifts")
+    execution_evidence = _object(
+        read_json(root / "execution-evidence.json"),
+        "stored execution evidence",
+    )
+    study = _object(read_json(root / "study-freeze.json"), "stored study")
+    if materialization.get("study_freeze_id") != content_id(
+        "successor_study_freeze_", study
+    ):
+        raise SuccessorExperimentError("stored materialization study identity drifts")
+    provider_calls = _list(
+        read_json(root / "provider-calls.json"),
+        "stored provider calls",
+    )
+    records = _list(read_json(root / "measurement-records.json"), "stored measurements")
+    analysis = _object(read_json(root / "analysis.json"), "stored analysis")
+    stored_verification = _object(
+        read_json(root / "verification.json"),
+        "stored verification",
+    )
+    report = _object(read_json(root / "report.json"), "stored report")
+    _validate_successor_config_envelope(config)
+    if config.get("schema_version") != "2.0" or report.get("schema_version") != "2.0":
+        raise SuccessorExperimentError("stored successor schema version drift")
+
+    randomization = _object(study.get("randomization"), "stored randomization")
+    config_plan = _analysis_plan(_object(config.get("analysis"), "stored config analysis"))
+    stored_plan = _stored_analysis_plan(
+        _object(study.get("analysis_plan"), "stored analysis plan")
+    )
+    if config_plan != stored_plan:
+        raise SuccessorExperimentError(
+            "stored successor analysis plan drifts from effective config"
+        )
+    _verify_stored_selection_provenance(
+        config,
+        selection_evidence,
+        study,
+        report,
+        randomization,
+    )
+    assignments = tuple(
+        _object(value, "stored assignment")
+        for value in _list(randomization.get("assignments"), "stored assignments")
+    )
+    if not assignments:
+        raise SuccessorExperimentError("stored successor randomization is empty")
+    assignment_by_id = {
+        content_id("successor_assignment_v2_", item): item for item in assignments
+    }
+    if len(assignment_by_id) != len(assignments):
+        raise SuccessorExperimentError("stored successor assignments are duplicated")
+
+    policies = tuple(
+        _object(value, "stored policy")
+        for value in _list(study.get("policies"), "stored policies")
+    )
+    bundle_by_id: dict[str, dict[str, Any]] = {}
+    for policy in policies:
+        for raw_bundle in _list(policy.get("bundles"), "stored task bundles"):
+            bundle = _object(raw_bundle, "stored task bundle")
+            bundle_id = content_id("task_realization_bundle_v2_", bundle)
+            if bundle_id in bundle_by_id:
+                raise SuccessorExperimentError("stored successor bundles are duplicated")
+            bundle_by_id[bundle_id] = bundle
+    _verify_stored_assignment_variants(assignments, bundle_by_id, config)
+    typed_randomization = _stored_randomization(randomization)
+    typed_policies = tuple(_stored_policy(value) for value in policies)
+    typed_tasks = tuple(
+        _stored_task(_object(value, "stored task"))
+        for value in _list(study.get("tasks"), "stored tasks")
+    )
+    contracts, oracle_by_hypothesis, frozen_adapters = _verify_execution_evidence(
+        config,
+        execution_evidence,
+        study,
+        typed_policies,
+        typed_tasks,
+    )
+
+    record_by_assignment: dict[str, dict[str, Any]] = {}
+    for raw_record in records:
+        record = _object(raw_record, "stored measurement record")
+        assignment = _object(record.get("assignment"), "measurement assignment")
+        assignment_id = content_id("successor_assignment_v2_", assignment)
+        measurement = _object(record.get("measurement"), "stored measurement")
+        if (
+            assignment_id in record_by_assignment
+            or assignment_id not in assignment_by_id
+            or assignment != assignment_by_id[assignment_id]
+            or measurement.get("assignment_id") != assignment_id
+        ):
+            raise SuccessorExperimentError("stored measurement assignment binding drift")
+        record_by_assignment[assignment_id] = record
+    if set(record_by_assignment) != set(assignment_by_id):
+        raise SuccessorExperimentError("stored measurements do not close all assignments")
+    replayed_measurements = _replay_measurements_and_provider_calls(
+        record_by_assignment,
+        provider_calls,
+        typed_randomization,
+        typed_policies,
+        typed_tasks,
+        contracts,
+        oracle_by_hypothesis,
+        frozen_adapters,
+    )
+    generation_order = tuple(
+        item["assignment_id"]
+        for item in sorted(
+            (
+                _object(value, "stored generation call")
+                for value in provider_calls
+                if isinstance(value, dict) and value.get("stage") == "generation"
+            ),
+            key=lambda item: item.get("execution_ordinal"),
+        )
+    )
+    if content_hash(generation_order) != materialization.get("execution_order_sha256"):
+        raise SuccessorExperimentError("stored execution order drifts from materialization")
+
+    ledger = _object(analysis.get("ledger"), "stored ledger")
+    recomputed_study_id = content_id("successor_study_v2_", study)
+    if (
+        analysis.get("study_id") != recomputed_study_id
+        or ledger.get("study_id") != recomputed_study_id
+        or report.get("study_id") != recomputed_study_id
+    ):
+        raise SuccessorExperimentError("stored successor study identity drifts")
+    ledger_measurements = tuple(
+        _object(value, "ledger measurement")
+        for value in _list(ledger.get("measurements"), "ledger measurements")
+    )
+    ledger_by_assignment = {item.get("assignment_id"): item for item in ledger_measurements}
+    stored_record_measurements = {
+        key: _object(value["measurement"], "record measurement")
+        for key, value in record_by_assignment.items()
+    }
+    if (
+        len(ledger_by_assignment) != len(ledger_measurements)
+        or stored_record_measurements != replayed_measurements
+        or ledger_by_assignment != replayed_measurements
+    ):
+        raise SuccessorExperimentError(
+            "stored measurements do not replay from closed provider evidence"
+        )
+
+    recomputed_outcomes = {
+        assignment_id: _stored_outcome(measurement)
+        for assignment_id, measurement in replayed_measurements.items()
+    }
+    stored_outcomes = tuple(
+        _object(value, "stored outcome")
+        for value in _list(analysis.get("outcomes"), "stored outcomes")
+    )
+    outcome_by_assignment = {item.get("assignment_id"): item for item in stored_outcomes}
+    if (
+        len(outcome_by_assignment) != len(stored_outcomes)
+        or outcome_by_assignment != recomputed_outcomes
+    ):
+        raise SuccessorExperimentError("stored outcomes do not replay from measurements")
+
+    coordinates = _recompute_stored_coordinates(study, assignments, recomputed_outcomes)
+    _compare_stored_coordinates(coordinates, analysis, report)
+    typed_outcomes = tuple(
+        _stored_outcome_record(value) for value in stored_outcomes
+    )
+    stored_hypotheses = tuple(
+        _stored_hypothesis(_object(value, "stored hypothesis"))
+        for value in _list(study.get("hypotheses"), "stored hypotheses")
+    )
+    if (
+        len(stored_hypotheses) != len(typed_policies)
+        or {item.hypothesis_id for item in stored_hypotheses}
+        != {item.hypothesis_id for item in typed_policies}
+    ):
+        raise SuccessorExperimentError(
+            "stored successor hypotheses drift from intervention policies"
+        )
+    stored_eligibilities = tuple(
+        _stored_source_eligibility(_object(value, "stored source eligibility"))
+        for value in _list(
+            study.get("source_eligibilities"),
+            "stored source eligibilities",
+        )
+    )
+    policy_eligibilities = tuple(
+        eligibility
+        for policy in typed_policies
+        for eligibility in policy.source_eligibilities
+    )
+    eligible_stored_ids = {
+        item.source_eligibility_id
+        for item in stored_eligibilities
+        if item.eligible
+    }
+    if (
+        len(eligible_stored_ids) != len(policy_eligibilities)
+        or eligible_stored_ids
+        != {item.source_eligibility_id for item in policy_eligibilities}
+    ):
+        raise SuccessorExperimentError(
+            "stored successor source eligibilities drift from intervention policies"
+        )
+    observed_inference = _stored_inference_result(
+        _object(analysis.get("inference"), "stored inference")
+    )
+    try:
+        independent_verification = verify_successor_inference(
+            typed_randomization,
+            typed_outcomes,
+            typed_policies,
+            typed_tasks,
+            stored_plan,
+            observed_inference,
+            maximum_unknown_fraction=float(
+                _object(config.get("analysis"), "stored config analysis")[
+                    "maximum_unknown_fraction"
+                ]
+            ),
+            scientific_claim_allowed=bool(config["scientific_claim_allowed"]),
+            functionality_power_qualification_sha256=(
+                None
+                if not stored_plan.functionality_noninferiority_separately_powered
+                else _object(
+                    _object(config["analysis"], "stored config analysis")[
+                        "functionality_power_qualification"
+                    ],
+                    "stored functionality power reference",
+                )["sha256"]
+            ),
+        )
+    except ValueError as error:
+        raise SuccessorExperimentError(
+            f"stored successor independent inference replay failed: {error}"
+        ) from error
+    if report.get("cross_model_replication") != _cross_model_replication(
+        stored_plan, stored_hypotheses, observed_inference
+    ):
+        raise SuccessorExperimentError("stored cross-model replication label drifts")
+    _verify_stored_inference_report(
+        report,
+        stored_verification,
+        stored_plan,
+        observed_inference,
+        independent_verification,
+    )
+    unknown = sum(
+        measurement.get("oracle_status") == OracleStatus.UNKNOWN.value
+        for measurement in replayed_measurements.values()
+    )
+    if (
+        report.get("assignments") != len(assignments)
+        or report.get("ledger_measurements") != len(records)
+        or report.get("oracle_unknown_assignments") != unknown
+        or report.get("unknown_preserved_not_imputed_secure") is not True
+    ):
+        raise SuccessorExperimentError("stored report assignment or unknown accounting drift")
+    return {
+        "status": "SUCCESSOR_RESULT_BUNDLE_VERIFIED",
+        "assignments": len(assignments),
+        "blocks": len(
+            {content_id("successor_block_v2_", item["block"]) for item in assignments}
+        ),
+        "measurements": len(records),
+        "coordinates": len(coordinates),
+        "unknown_assignments": unknown,
+        "bundle_sha256": bundle_digest(root),
+    }
+
+
+def _verify_stored_assignment_variants(
+    assignments: tuple[dict[str, Any], ...],
+    bundle_by_id: Mapping[str, dict[str, Any]],
+    config: Mapping[str, Any],
+) -> None:
+    roles = tuple(role.value for role in SUCCESSOR_ARM_ROLE_ORDER)
+    slots = tuple(config["randomization"]["request_randomness_slots"])
+    model_ids = {item["model_id"] for item in config["generation"]["models"]}
+    by_block: dict[str, list[dict[str, Any]]] = {}
+    provider_seed_states = set()
+    for assignment in assignments:
+        block = _object(assignment.get("block"), "stored assignment block")
+        bundle_id = block.get("task_realization_bundle_id")
+        bundle = bundle_by_id.get(bundle_id)
+        if bundle is None:
+            raise SuccessorExperimentError("stored assignment references an unknown bundle")
+        variants = tuple(
+            _object(value, "stored prompt variant")
+            for value in _list(bundle.get("variants"), "stored prompt variants")
+        )
+        variant_by_role = {item.get("role"): item for item in variants}
+        if set(variant_by_role) != set(roles) or len(variant_by_role) != len(variants):
+            raise SuccessorExperimentError("stored task bundle lacks exact four-arm support")
+        prompt_hashes = {
+            role: content_hash(variant_by_role[role].get("prompt_text")) for role in roles
+        }
+        if len(set(prompt_hashes.values())) != len(roles):
+            raise SuccessorExperimentError("stored task bundle prompt variants are not distinct")
+        role = assignment.get("arm_role")
+        variant = variant_by_role.get(role)
+        if (
+            role not in roles
+            or assignment.get("variant_sha256") != prompt_hashes[role]
+            or assignment.get("arm_label") != variant.get("arm_label")
+            or block.get("task_unit_id") != bundle.get("task_unit_id")
+            or block.get("task_instance_id") != bundle.get("task_id")
+            or block.get("hypothesis_id") != bundle.get("hypothesis_id")
+            or block.get("target_spec_id") != bundle.get("target_spec_id")
+            or block.get("realization_spec_id") != bundle.get("realization_spec_id")
+            or block.get("arm_protocol_id") != bundle.get("arm_protocol_id")
+            or block.get("model_id") not in model_ids
+            or assignment.get("request_randomness_slot") not in slots
+        ):
+            raise SuccessorExperimentError("stored assignment variant or block binding drift")
+        provider_seed = assignment.get("provider_seed")
+        if provider_seed is not None and (type(provider_seed) is not int or provider_seed < 0):
+            raise SuccessorExperimentError("stored provider seed is invalid")
+        provider_seed_states.add(provider_seed is None)
+        block_id = content_id("successor_block_v2_", block)
+        by_block.setdefault(block_id, []).append(assignment)
+    if len(provider_seed_states) != 1:
+        raise SuccessorExperimentError("stored provider seed support is inconsistent")
+    for block in by_block.values():
+        block_id = content_id("successor_block_v2_", block[0]["block"])
+        expected_roles = list(roles) * (len(slots) // len(roles))
+        block_seed = int(
+            content_hash({"seed": config["randomization"]["seed"], "block_id": block_id})[
+                :16
+            ],
+            16,
+        )
+        random.Random(block_seed).shuffle(expected_roles)
+        expected_by_slot = dict(zip(slots, expected_roles, strict=True))
+        master_provider_seed = config["randomization"]["provider_seed"]
+        if (
+            len(block) != len(slots)
+            or {item["request_randomness_slot"] for item in block} != set(slots)
+            or set(Counter(item["arm_role"] for item in block)) != set(roles)
+            or len(set(Counter(item["arm_role"] for item in block).values())) != 1
+            or any(
+                item["arm_role"] != expected_by_slot[item["request_randomness_slot"]]
+                or item["provider_seed"]
+                != (
+                    None
+                    if master_provider_seed is None
+                    else int(
+                        content_hash(
+                            {
+                                "provider_seed": master_provider_seed,
+                                "block_id": block_id,
+                                "request_randomness_slot": item[
+                                    "request_randomness_slot"
+                                ],
+                                "arm_role": item["arm_role"],
+                            }
+                        )[:8],
+                        16,
+                    )
+                    & 0x7FFFFFFF
+                )
+                for item in block
+            )
+        ):
+            raise SuccessorExperimentError("stored complete-block replay or balance drift")
+
+
+def _stored_outcome(measurement: Mapping[str, Any]) -> dict[str, Any]:
+    assignment_id = measurement.get("assignment_id")
+    code_status = measurement.get("code_status")
+    oracle_status = measurement.get("oracle_status")
+    functional_status = measurement.get("functional_status")
+    if code_status not in {item.value for item in CodeStatus}:
+        raise SuccessorExperimentError("stored code status is invalid")
+    if oracle_status not in {item.value for item in OracleStatus} or functional_status not in {
+        item.value for item in FunctionalStatus
+    }:
+        raise SuccessorExperimentError("stored evaluator status is invalid")
+    if code_status != CodeStatus.VALID.value:
+        if (
+            oracle_status != OracleStatus.NOT_RUN.value
+            or functional_status != FunctionalStatus.NOT_RUN.value
+        ):
+            raise SuccessorExperimentError("terminal code has a stored evaluator result")
+        return {
+            "assignment_id": assignment_id,
+            "code_valid": 0,
+            "oracle_evaluable": 0,
+            "secure_yield": 0,
+            "latent_secure_upper": 0,
+            "functionality": 0,
+            "joint": 0,
+            "latent_joint_upper": 0,
+            "terminal_status": code_status,
+        }
+    if (
+        oracle_status == OracleStatus.NOT_RUN.value
+        or functional_status == FunctionalStatus.NOT_RUN.value
+    ):
+        raise SuccessorExperimentError("valid code lacks a stored evaluator result")
+    evaluable = int(oracle_status in {OracleStatus.SECURE.value, OracleStatus.INSECURE.value})
+    secure = int(oracle_status == OracleStatus.SECURE.value)
+    latent_secure_upper = int(
+        oracle_status in {OracleStatus.SECURE.value, OracleStatus.UNKNOWN.value}
+    )
+    functionality = {
+        FunctionalStatus.PASS.value: 1,
+        FunctionalStatus.FAIL.value: 0,
+        FunctionalStatus.UNKNOWN.value: None,
+    }[functional_status]
+    if oracle_status == OracleStatus.INSECURE.value or functionality == 0:
+        joint = 0
+    elif oracle_status == OracleStatus.UNKNOWN.value or functionality is None:
+        joint = None
+    else:
+        joint = 1
+    return {
+        "assignment_id": assignment_id,
+        "code_valid": 1,
+        "oracle_evaluable": evaluable,
+        "secure_yield": secure,
+        "latent_secure_upper": latent_secure_upper,
+        "functionality": functionality,
+        "joint": joint,
+        "latent_joint_upper": int(latent_secure_upper == 1 and functionality != 0),
+        "terminal_status": None,
+    }
+
+
+def _recompute_stored_coordinates(
+    study: Mapping[str, Any],
+    assignments: tuple[dict[str, Any], ...],
+    outcomes: Mapping[str, dict[str, Any]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    tasks = {
+        item["task_id"]: item
+        for item in (
+            _object(value, "stored task")
+            for value in _list(study.get("tasks"), "stored tasks")
+        )
+    }
+    policies = tuple(
+        _object(value, "stored policy")
+        for value in _list(study.get("policies"), "stored policies")
+    )
+    models = tuple(study["randomization"]["models"])
+    metrics = tuple(study["analysis_plan"]["metrics"])
+    assignment_rows = tuple(
+        (content_id("successor_assignment_v2_", assignment), assignment)
+        for assignment in assignments
+    )
+    result = {}
+    for policy in policies:
+        hypothesis_id = content_id("frozen_hypothesis_v2_", policy["hypothesis"])
+        realizations = tuple(
+            (
+                content_id("realization_spec_v2_", realization),
+                realization["weight"],
+            )
+            for realization in policy["realization_policy"]["realizations"]
+        )
+        if not realizations or any(
+            type(weight) is not int or weight <= 0 for _, weight in realizations
+        ):
+            raise SuccessorExperimentError("stored realization weights are invalid")
+        for model_id in models:
+            selected = tuple(
+                (assignment_id, assignment)
+                for assignment_id, assignment in assignment_rows
+                if assignment["block"]["hypothesis_id"] == hypothesis_id
+                and assignment["block"]["model_id"] == model_id
+            )
+            task_units = sorted({item[1]["block"]["task_unit_id"] for item in selected})
+            if not task_units:
+                raise SuccessorExperimentError("stored inference coordinate has no assignments")
+            for metric in metrics:
+                arms = {}
+                for role in (item.value for item in SUCCESSOR_ARM_ROLE_ORDER):
+                    units = [
+                        _stored_unit_arm(
+                            selected,
+                            outcomes,
+                            tasks,
+                            realizations,
+                            task_unit_id,
+                            role,
+                            metric,
+                        )
+                        for task_unit_id in task_units
+                    ]
+                    arms[role] = {
+                        "point": None
+                        if any(item[0] is None for item in units)
+                        else sum(item[0] for item in units if item[0] is not None) / len(units),
+                        "lower": sum(item[1] for item in units) / len(units),
+                        "upper": sum(item[2] for item in units) / len(units),
+                        "assignments": sum(
+                            assignment["arm_role"] == role for _, assignment in selected
+                        ),
+                    }
+                contrasts = {}
+                for name, right in (
+                    ("target_minus_noop", "noop"),
+                    ("target_minus_placebo", "placebo"),
+                    ("target_minus_generic", "generic"),
+                ):
+                    target = arms["target"]
+                    control = arms[right]
+                    contrasts[name] = {
+                        "point": _stored_difference(target["point"], control["point"]),
+                        "lower_bound": target["lower"] - control["upper"],
+                        "upper_bound": target["upper"] - control["lower"],
+                    }
+                result[(hypothesis_id, model_id, metric)] = {
+                    "arms": arms,
+                    "contrasts": contrasts,
+                }
+    return result
+
+
+def _stored_unit_arm(
+    assignments: tuple[tuple[str, dict[str, Any]], ...],
+    outcomes: Mapping[str, dict[str, Any]],
+    tasks: Mapping[str, Mapping[str, Any]],
+    realizations: tuple[tuple[str, int], ...],
+    task_unit_id: str,
+    role: str,
+    metric: str,
+) -> tuple[float | None, float, float]:
+    task_ids = sorted(
+        {
+            assignment["block"]["task_instance_id"]
+            for _, assignment in assignments
+            if assignment["block"]["task_unit_id"] == task_unit_id
+        }
+    )
+    if not task_ids or any(task_id not in tasks for task_id in task_ids):
+        raise SuccessorExperimentError("stored task-unit support is invalid")
+    task_total = sum(tasks[task_id]["weight"] for task_id in task_ids)
+    realization_total = sum(weight for _, weight in realizations)
+    point = lower = upper = 0.0
+    point_known = True
+    for task_id in task_ids:
+        task_weight = tasks[task_id]["weight"] / task_total
+        for realization_id, raw_weight in realizations:
+            block = tuple(
+                assignment_id
+                for assignment_id, assignment in assignments
+                if assignment["block"]["task_unit_id"] == task_unit_id
+                and assignment["block"]["task_instance_id"] == task_id
+                and assignment["block"]["realization_spec_id"] == realization_id
+                and assignment["arm_role"] == role
+            )
+            if not block:
+                raise SuccessorExperimentError("stored common realization support is incomplete")
+            values = tuple(_stored_metric(outcomes[item], metric) for item in block)
+            weight = task_weight * raw_weight / realization_total
+            if any(item[0] is None for item in values):
+                point_known = False
+            else:
+                point += (
+                    weight
+                    * sum(item[0] for item in values if item[0] is not None)
+                    / len(values)
+                )
+            lower += weight * sum(item[1] for item in values) / len(values)
+            upper += weight * sum(item[2] for item in values) / len(values)
+    return point if point_known else None, lower, upper
+
+
+def _stored_metric(outcome: Mapping[str, Any], metric: str) -> tuple[int | None, int, int]:
+    if metric == Metric.SECURE_YIELD.value:
+        return outcome["secure_yield"], outcome["secure_yield"], outcome["latent_secure_upper"]
+    if metric == Metric.JOINT.value:
+        return outcome["joint"], outcome["joint"] or 0, outcome["latent_joint_upper"]
+    value = outcome.get(metric)
+    if value is None:
+        return None, 0, 1
+    if value not in {0, 1}:
+        raise SuccessorExperimentError("stored outcome metric is not binary")
+    return value, value, value
+
+
+def _replay_measurements_and_provider_calls(
+    records: Mapping[str, Mapping[str, Any]],
+    raw_calls: list[Any],
+    randomization: SuccessorRandomization,
+    policies: tuple[InterventionPolicyV2, ...],
+    tasks: tuple[Task, ...],
+    contracts: Mapping[str, Mapping[str, Any]],
+    oracles: Mapping[str, Mapping[str, Any]],
+    adapters: AdapterBundle,
+) -> dict[str, dict[str, Any]]:
+    calls = tuple(_object(raw, "stored provider call") for raw in raw_calls)
+    intervention_calls = tuple(item for item in calls if item.get("stage") == "intervention")
+    generation_calls = tuple(item for item in calls if item.get("stage") == "generation")
+    functional_calls = tuple(item for item in calls if item.get("stage") == "functional_judge")
+    if len(intervention_calls) + len(generation_calls) + len(functional_calls) != len(calls):
+        raise SuccessorExperimentError("stored provider call stage is invalid")
+    policy_by_hypothesis = {item.hypothesis_id: item for item in policies}
+    task_by_id = {item.task_id: item for item in tasks}
+    bundles = {
+        bundle.task_realization_bundle_id: bundle
+        for policy in policies
+        for bundle in policy.bundles
+    }
+    _verify_intervention_calls(
+        intervention_calls,
+        policy_by_hypothesis,
+        task_by_id,
+        contracts,
+        adapters,
+    )
+    generation_by_assignment = _calls_by_assignment(generation_calls, "generation")
+    functional_by_assignment = _calls_by_assignment(functional_calls, "functional_judge")
+    assignment_by_id = {item.assignment_id: item for item in randomization.assignments}
+    if set(generation_by_assignment) != set(assignment_by_id):
+        raise SuccessorExperimentError("stored generation calls do not close assignments")
+    ordinals = {
+        assignment_id: call.get("execution_ordinal")
+        for assignment_id, call in generation_by_assignment.items()
+    }
+    if set(ordinals.values()) != set(range(len(assignment_by_id))):
+        raise SuccessorExperimentError("stored global execution order is not a permutation")
+    replayed = {}
+    expected_functional_ids = set()
+    for assignment_id, assignment in assignment_by_id.items():
+        record = records[assignment_id]
+        task = task_by_id[assignment.block.task_instance_id]
+        contract = contracts[task.task_id]
+        bundle = bundles[assignment.block.task_realization_bundle_id]
+        prompt = bundle.variant(assignment.arm_role).prompt_text
+        generation_request = {
+            "request_kind": "successor_code_generation",
+            "task_prompt": prompt,
+            "language": contract.get("language", "python"),
+            "output_schema": {"code": "complete source string"},
+        }
+        generation_call = generation_by_assignment[assignment_id]
+        _validate_provider_timing(generation_call)
+        expected_observable = {
+            "model_id": assignment.block.model_id,
+            "provider_seed": assignment.provider_seed,
+            "request_randomness_slot": assignment.request_randomness_slot,
+        }
+        raw_response = _text(generation_call.get("response"), "generation response")
+        response_digest = hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
+        if (
+            generation_call.get("request") != generation_request
+            or record.get("generation_request") != generation_request
+            or record.get("generation_response") != raw_response
+            or generation_call.get("response_sha256") != response_digest
+            or generation_call.get("model_id") != assignment.block.model_id
+            or generation_call.get("provider_seed") != assignment.provider_seed
+            or record.get("generation_model_id") != assignment.block.model_id
+            or generation_call.get("provider_observable_state") != expected_observable
+        ):
+            raise SuccessorExperimentError("stored generation evidence binding drifts")
+        generation = _json_object(raw_response.encode("utf-8"), "stored generator response")
+        if set(generation) != {"code"} or not isinstance(generation["code"], str):
+            raise SuccessorExperimentError("stored generator response schema drifts")
+        code = generation["code"]
+        syntax_valid = contract.get("language", "python") == "python" and python_syntax_valid(code)
+        if record.get("code") != code or record.get("syntax_valid") is not syntax_valid:
+            raise SuccessorExperimentError("stored code or syntax evidence drifts")
+        if not code.strip() or not syntax_valid:
+            status = CodeStatus.NO_CODE if not code.strip() else CodeStatus.INVALID
+            if (
+                record.get("security") is not None
+                or record.get("functional_request") is not None
+                or record.get("functional_response") is not None
+                or assignment_id in functional_by_assignment
+            ):
+                raise SuccessorExperimentError("terminal measurement evidence is not closed")
+            measurement = Measurement(
+                assignment_id,
+                status,
+                OracleStatus.NOT_RUN,
+                FunctionalStatus.NOT_RUN,
+                response_digest,
+                content_hash(code) if code else None,
+                terminal_reason=status.value,
+            )
+        else:
+            oracle = oracles[assignment.block.hypothesis_id]
+            profile_id = oracle["profile_id"]
+            if record.get("security_profile_id") != profile_id:
+                raise SuccessorExperimentError("stored security Oracle profile drifts")
+            security = evaluate_security_profile(code, profile_id)
+            if record.get("security") != security:
+                raise SuccessorExperimentError("stored security Oracle result drifts")
+            functional_request = build_review_request(
+                code,
+                task.prompt,
+                requirements=_list(contract["requirements"], "functional requirements"),
+                environment_dependencies=_strings(
+                    contract.get("environment_dependencies"),
+                    "environment dependencies",
+                ),
+                language=contract.get("language", "python"),
+            )
+            functional_call = functional_by_assignment.get(assignment_id)
+            if functional_call is None:
+                raise SuccessorExperimentError("stored functional call is missing")
+            expected_functional_ids.add(assignment_id)
+            _validate_provider_timing(functional_call)
+            if (
+                functional_call.get("execution_ordinal") != ordinals[assignment_id]
+                or functional_call.get("provider_observable_state") != expected_observable
+                or any(
+                    functional_call.get(name) != generation_call.get(name)
+                    for name in (
+                        "assignment_elapsed_ns",
+                        "assignment_elapsed_ms",
+                        "assignment_started_utc",
+                        "assignment_ended_utc",
+                    )
+                )
+            ):
+                raise SuccessorExperimentError("stored functional execution order drifts")
+            functional_response = _text(
+                functional_call.get("response"),
+                "functional response",
+            )
+            functional_digest = hashlib.sha256(
+                functional_response.encode("utf-8")
+            ).hexdigest()
+            if (
+                functional_call.get("request") != functional_request
+                or record.get("functional_request") != functional_request
+                or record.get("functional_response") != functional_response
+                or functional_call.get("response_sha256") != functional_digest
+            ):
+                raise SuccessorExperimentError("stored functional evidence binding drifts")
+            functional = validate_review_response(
+                functional_response.encode("utf-8"),
+                code,
+            )
+            if record.get("functional_validated") != functional:
+                raise SuccessorExperimentError("stored functional validation drifts")
+            measurement = Measurement(
+                assignment_id,
+                CodeStatus.VALID,
+                OracleStatus(security["security_label"]),
+                FunctionalStatus(functional["status"]),
+                response_digest,
+                content_hash(code),
+                content_hash(security),
+                functional_digest,
+            )
+        replayed[assignment_id] = canonical_value(measurement)
+    if set(functional_by_assignment) != expected_functional_ids:
+        raise SuccessorExperimentError("stored functional provider calls are not exact")
+    return replayed
+
+
+def _validate_provider_timing(call: Mapping[str, Any]) -> None:
+    elapsed_ns = call.get("assignment_elapsed_ns")
+    elapsed_ms = call.get("assignment_elapsed_ms")
+    try:
+        started = datetime.fromisoformat(call.get("assignment_started_utc"))
+        ended = datetime.fromisoformat(call.get("assignment_ended_utc"))
+    except (TypeError, ValueError):
+        raise SuccessorExperimentError("stored provider timing is invalid") from None
+    if (
+        type(elapsed_ns) is not int
+        or elapsed_ns < 0
+        or type(elapsed_ms) is not float
+        or elapsed_ms != elapsed_ns / 1_000_000.0
+        or started.tzinfo is None
+        or ended.tzinfo is None
+        or ended < started
+    ):
+        raise SuccessorExperimentError("stored provider timing is invalid")
+
+
+def _calls_by_assignment(
+    calls: tuple[dict[str, Any], ...],
+    stage: str,
+) -> dict[str, dict[str, Any]]:
+    result = {}
+    for call in calls:
+        assignment_id = call.get("assignment_id")
+        if not isinstance(assignment_id, str) or assignment_id in result:
+            raise SuccessorExperimentError(f"stored {stage} calls are duplicated")
+        result[assignment_id] = call
+    return result
+
+
+def _compare_stored_coordinates(
+    expected: Mapping[tuple[str, str, str], Mapping[str, Any]],
+    analysis: Mapping[str, Any],
+    report: Mapping[str, Any],
+) -> None:
+    inference = _object(analysis.get("inference"), "stored inference")
+    analysis_rows = tuple(
+        _object(value, "stored analysis estimate")
+        for value in _list(inference.get("estimates"), "stored analysis estimates")
+    )
+    report_rows = tuple(
+        _object(value, "stored report estimate")
+        for value in _list(report.get("estimates"), "stored report estimates")
+    )
+    analysis_by_key = {
+        (item.get("hypothesis_id"), item.get("model_id"), item.get("metric")): item
+        for item in analysis_rows
+    }
+    report_by_key = {
+        (item.get("hypothesis_id"), item.get("model_id"), item.get("metric")): item
+        for item in report_rows
+    }
+    if (
+        len(analysis_by_key) != len(analysis_rows)
+        or len(report_by_key) != len(report_rows)
+        or set(analysis_by_key) != set(expected)
+        or set(report_by_key) != set(expected)
+    ):
+        raise SuccessorExperimentError("stored successor coordinate support drift")
+    for key, value in expected.items():
+        analysis_row = analysis_by_key[key]
+        report_row = report_by_key[key]
+        analysis_arms = {
+            item["role"]: item for item in analysis_row.get("arms", ())
+        }
+        report_arms = _object(report_row.get("arms"), "stored report arms")
+        if set(analysis_arms) != set(value["arms"]) or set(report_arms) != set(value["arms"]):
+            raise SuccessorExperimentError("stored four-arm support drift")
+        for role, expected_arm in value["arms"].items():
+            _compare_numbers(expected_arm, analysis_arms[role], ("point", "lower", "upper"))
+            _compare_numbers(expected_arm, report_arms[role], ("point", "lower", "upper"))
+            if (
+                analysis_arms[role].get("assignments") != expected_arm["assignments"]
+                or report_arms[role].get("assignments") != expected_arm["assignments"]
+            ):
+                raise SuccessorExperimentError("stored arm assignment count drift")
+        analysis_contrasts = {
+            item["contrast"]: item for item in analysis_row.get("contrasts", ())
+        }
+        report_contrasts = _object(
+            report_row.get("contrasts"), "stored report contrasts"
+        )
+        if set(analysis_contrasts) != set(value["contrasts"]) or set(report_contrasts) != set(
+            value["contrasts"]
+        ):
+            raise SuccessorExperimentError("stored three-contrast support drift")
+        for contrast, expected_contrast in value["contrasts"].items():
+            fields = ("point", "lower_bound", "upper_bound")
+            _compare_numbers(expected_contrast, analysis_contrasts[contrast], fields)
+            _compare_numbers(expected_contrast, report_contrasts[contrast], fields)
+
+
+def _compare_numbers(
+    expected: Mapping[str, Any],
+    observed: Mapping[str, Any],
+    fields: tuple[str, ...],
+) -> None:
+    for field in fields:
+        left = expected[field]
+        right = observed.get(field)
+        if left is None or right is None:
+            if left is not right:
+                raise SuccessorExperimentError("stored successor estimate missingness drift")
+        elif not isinstance(right, (int, float)) or abs(float(left) - float(right)) > 1e-12:
+            raise SuccessorExperimentError("stored successor estimate or unknown bound drift")
+
+
+def _stored_difference(left: float | None, right: float | None) -> float | None:
+    return None if left is None or right is None else left - right
+
+
+def _verify_stored_inference_report(
+    report: Mapping[str, Any],
+    stored_verification: Mapping[str, Any],
+    plan: SuccessorAnalysisPlan,
+    inference: SuccessorInferenceResult,
+    independent_verification: Mapping[str, Any],
+) -> None:
+    if (
+        report.get("analysis_plan_id") != plan.analysis_plan_id
+        or report.get("inference_id") != inference.inference_id
+    ):
+        raise SuccessorExperimentError(
+            "stored report analysis plan or inference identity drifts"
+        )
+    if report.get("estimates") != _successor_report_estimates(inference):
+        raise SuccessorExperimentError("stored report successor estimates drift")
+    if report.get("bootstrap_families") != _successor_report_families(inference):
+        raise SuccessorExperimentError("stored report bootstrap families drift")
+    expected_robustness = (
+        None if inference.robustness is None else canonical_value(inference.robustness)
+    )
+    if report.get("realization_robustness") != expected_robustness:
+        raise SuccessorExperimentError("stored report realization robustness drifts")
+    if (
+        report.get("claim_assessments")
+        != independent_verification.get("claim_assessments")
+        or report.get("security_claim_ready_coordinates")
+        != independent_verification.get("security_claim_ready_coordinates")
+        or report.get("practical_success_claim_ready_coordinates")
+        != independent_verification.get(
+            "practical_success_claim_ready_coordinates"
+        )
+        or report.get("inference_practical_labels_are_diagnostic_not_claims")
+        is not True
+    ):
+        raise SuccessorExperimentError("stored successor claim gates drift")
+    expected_verification = dict(independent_verification)
+    if (
+        dict(stored_verification) != expected_verification
+        or report.get("verification") != expected_verification
+    ):
+        raise SuccessorExperimentError("stored successor verification summary drifts")
+
+
+def _stored_outcome_record(value: Mapping[str, Any]) -> Outcome:
+    try:
+        outcome = Outcome(
+            value["assignment_id"],
+            value["code_valid"],
+            value["oracle_evaluable"],
+            value["secure_yield"],
+            value["latent_secure_upper"],
+            value["functionality"],
+            value["joint"],
+            value["latent_joint_upper"],
+            value["terminal_status"],
+        )
+    except (KeyError, TypeError, ValueError):
+        raise SuccessorExperimentError("stored successor outcome is invalid") from None
+    _require_canonical_record(outcome, value, "stored successor outcome")
+    return outcome
+
+
+def _stored_task_unit_contribution(
+    value: Mapping[str, Any],
+) -> TaskUnitSuccessorContribution:
+    return TaskUnitSuccessorContribution(
+        value["task_unit_id"],
+        tuple(
+            (PolicyArmRoleV2(role), point, lower, upper)
+            for role, point, lower, upper in value["arm_values"]
+        ),
+        tuple(
+            (SuccessorContrast(contrast), point, lower, upper)
+            for contrast, point, lower, upper in value["contrast_values"]
+        ),
+    )
+
+
+def _stored_realization_effect(value: Mapping[str, Any]) -> RealizationSuccessorEffect:
+    return RealizationSuccessorEffect(
+        value["realization_spec_id"],
+        value["point"],
+        value["lower_bound"],
+        value["upper_bound"],
+        tuple(tuple(item) for item in value["task_unit_effects"]),
+    )
+
+
+def _stored_loro_effect(
+    value: Mapping[str, Any],
+) -> LeaveOneRealizationOutSuccessorEffect:
+    return LeaveOneRealizationOutSuccessorEffect(
+        value["omitted_realization_spec_id"],
+        value["point"],
+        value["lower_bound"],
+        value["upper_bound"],
+        tuple(tuple(item) for item in value["task_unit_effects"]),
+    )
+
+
+def _stored_coordinate(value: Mapping[str, Any]) -> SuccessorCoordinateEstimate:
+    coordinate = SuccessorCoordinateEstimate(
+        value["hypothesis_id"],
+        value["model_id"],
+        Metric(value["metric"]),
+        ExpectedDirection(value["expected_direction"]),
+        tuple(
+            SuccessorArmEstimate(
+                PolicyArmRoleV2(item["role"]),
+                item["point"],
+                item["lower"],
+                item["upper"],
+                item["assignments"],
+            )
+            for item in (_object(raw, "stored successor arm estimate") for raw in value["arms"])
+        ),
+        tuple(
+            SuccessorContrastEstimate(
+                SuccessorContrast(item["contrast"]),
+                item["point"],
+                item["lower_bound"],
+                item["upper_bound"],
+            )
+            for item in (_object(raw, "stored successor contrast estimate") for raw in value["contrasts"])
+        ),
+        tuple(
+            _stored_task_unit_contribution(
+                _object(item, "stored task-unit contribution")
+            )
+            for item in value["task_unit_contributions"]
+        ),
+        tuple(
+            _stored_realization_effect(_object(item, "stored realization effect"))
+            for item in value["realization_effects"]
+        ),
+        value["robustness_label"],
+        tuple(
+            _stored_loro_effect(_object(item, "stored LORO effect"))
+            for item in value["leave_one_realization_out"]
+        ),
+    )
+    _require_canonical_record(coordinate, value, "stored successor coordinate")
+    return coordinate
+
+
+def _stored_family(value: Mapping[str, Any]) -> SuccessorFamilyInference:
+    family = SuccessorFamilyInference(
+        SuccessorIntervalFamily(value["family"]),
+        FamilyInferenceStatus(value["status"]),
+        value["simultaneous_critical_value"],
+        value["valid_bootstrap_draws"],
+        value["invalid_bootstrap_draws"],
+        tuple(
+            SuccessorSimultaneousInterval(
+                item["coordinate_id"],
+                SuccessorContrast(item["contrast"]),
+                item["standard_error"],
+                item["lower"],
+                item["upper"],
+            )
+            for item in (_object(raw, "stored simultaneous interval") for raw in value["intervals"])
+        ),
+    )
+    _require_canonical_record(family, value, "stored successor family")
+    return family
+
+
+def _stored_robustness(value: Mapping[str, Any]) -> SuccessorRobustnessInference:
+    robustness = SuccessorRobustnessInference(
+        FamilyInferenceStatus(value["status"]),
+        value["simultaneous_critical_value"],
+        value["valid_bootstrap_draws"],
+        value["invalid_bootstrap_draws"],
+        tuple(
+            SuccessorRobustnessInterval(
+                item["coordinate_id"],
+                SuccessorRobustnessComponent(item["component"]),
+                item["realization_spec_id"],
+                item["standard_error"],
+                item["lower"],
+                item["upper"],
+            )
+            for item in (_object(raw, "stored robustness interval") for raw in value["intervals"])
+        ),
+        value["functionality_simultaneous_critical_value"],
+        tuple(
+            SuccessorRobustnessAssessment(
+                item["coordinate_id"],
+                item["direction_consistency_proportion"],
+                item["direction_consistency_passed"],
+                item["simultaneous_direction_passed"],
+                item["minimum_support_passed"],
+                item["heterogeneity_max_deviation"],
+                item["heterogeneity_simultaneous_upper"],
+                item["heterogeneity_equivalence_passed"],
+                item["arm_realization_interaction_statistic"],
+                item["arm_realization_randomization_p_value"],
+                item["arm_realization_interaction_passed"],
+                FunctionalityGateStatus(item["functionality_gate_status"]),
+                item["functionality_point"],
+                item["functionality_simultaneous_lower"],
+                item["robustness_label"],
+                item["practical_success_label"],
+            )
+            for item in (_object(raw, "stored robustness assessment") for raw in value["assessments"])
+        ),
+    )
+    _require_canonical_record(robustness, value, "stored successor robustness")
+    return robustness
+
+
+def _stored_inference_result(value: Mapping[str, Any]) -> SuccessorInferenceResult:
+    try:
+        raw_robustness = value["robustness"]
+        result = SuccessorInferenceResult(
+            value["plan_id"],
+            tuple(
+                _stored_coordinate(_object(item, "stored successor coordinate"))
+                for item in value["estimates"]
+            ),
+            tuple(
+                _stored_family(_object(item, "stored successor family"))
+                for item in value["families"]
+            ),
+            (
+                None
+                if raw_robustness is None
+                else _stored_robustness(
+                    _object(raw_robustness, "stored successor robustness")
+                )
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise SuccessorExperimentError("stored successor inference is invalid") from None
+    _require_canonical_record(result, value, "stored successor inference")
+    return result
 
 
 def _replace_robustness_label(
@@ -1399,5 +2582,6 @@ def _quantile(values: list[float], probability: float) -> float:
 
 __all__ = [
     "SuccessorVerificationError",
+    "verify_successor_result_bundle",
     "verify_successor_inference",
 ]

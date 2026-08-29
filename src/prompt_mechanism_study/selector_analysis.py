@@ -41,7 +41,7 @@ from prompt_mechanism_study.selector_inference import (
     evaluate_selector_study,
 )
 from prompt_mechanism_study.selector_verify import verify_selector_result
-from prompt_mechanism_study.successor_experiment import verify_successor_result_bundle
+from prompt_mechanism_study.successor_verify import verify_successor_result_bundle
 
 
 def confirmation_coordinates_from_successor_bundles(
