@@ -16,7 +16,7 @@
     "cases_path": "data/functional-judge/blind-calibration-v4/validation-cases.jsonl",
     "calibration_spec_sha256": "e6d9b9fecb219250dd5a1bce6c30135954b10ada9efdef05b83c5f2ef42cb56a",
     "calibration_spec_path": "data/functional-judge/blind-calibration-v4/calibration-spec.json",
-    "contracts_path": "data/e2e-pilot/five-cwe-held-out-policy-itt-gate-c-plan-phi14b-20260819-01/task-functional-contracts.jsonl",
+    "contracts_path": "data/functional-judge/blind-calibration-v4/task-functional-contracts.jsonl",
     "pilot_cases": 4,
     "pilot_case_ids": [
       "fjcalv4-validation-gtf-fail-a",

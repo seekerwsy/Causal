@@ -28,6 +28,14 @@ htmlcov/
 # Generated experiment outputs
 runs/
 datasets/
+.artifacts/
+.codex-runtime/
+.test-tmp/
+tmp/
+paper/tmp/
+paper/fse2027/out/
+.codex-tmp-*.tar.gz
+secaware-*.tar.gz
 
 # Editor and OS files
 .idea/

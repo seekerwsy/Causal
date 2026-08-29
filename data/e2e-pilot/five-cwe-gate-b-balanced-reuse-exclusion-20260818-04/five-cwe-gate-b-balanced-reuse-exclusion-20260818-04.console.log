@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "/home/ubuntu/secaware-deployments/five-cwe-gate-b-reuse-exclusion-20260818-18/scripts/run_randomized_exploratory_gate_b.py", line 45, in <module>
-    main()
-  File "/home/ubuntu/secaware-deployments/five-cwe-gate-b-reuse-exclusion-20260818-18/scripts/run_randomized_exploratory_gate_b.py", line 34, in main
-    report = run_exploratory_gate_b(
-             ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/ubuntu/secaware-deployments/five-cwe-gate-b-reuse-exclusion-20260818-18/src/secaware/exploratory/gate_b.py", line 841, in run_exploratory_gate_b
-    raise ValueError("exploratory Gate B reviewed exact execution failed validation")
-ValueError: exploratory Gate B reviewed exact execution failed validation

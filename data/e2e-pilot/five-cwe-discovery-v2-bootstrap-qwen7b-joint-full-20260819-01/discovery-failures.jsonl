@@ -1,1 +1,0 @@
-{"failed_replicates": 0, "model_id": "qwen2.5-coder-7b-instruct", "reason_code": "no_stable_hypothesis", "reference_pag_id": "pag_545dbcaa20689ada5bca6f85766432cb6db2318c5d5c8d2c8c0d776935e20069", "schema_version": "1.0", "scope_id": "scope.five_cwe_policy_mechanism_v2", "successful_replicates": 200, "support_denominator": 200, "support_numerator": 81}

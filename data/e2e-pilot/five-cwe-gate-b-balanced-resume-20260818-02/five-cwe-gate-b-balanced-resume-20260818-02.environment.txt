@@ -1,7 +1,0 @@
-2026-08-18T06:08:17+08:00
-ubuntu
-/home/ubuntu/secaware-deployments/five-cwe-gate-b-resume-20260818-16
-Python 3.12.13
-bd7701885d448fc84ecbec4c2445a1224e80243ca8d626a33b6d9e6c6117337f  /home/ubuntu/secaware-experiments/deploy-inputs/five-cwe-gate-b-resume-76c8562.tar
-文件系统        大小  已用  可用 已用% 挂载点
-/dev/nvme0n1p3  901G  296G  560G   35% /

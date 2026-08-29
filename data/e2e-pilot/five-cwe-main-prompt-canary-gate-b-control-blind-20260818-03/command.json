@@ -1,1 +1,0 @@
-{"argv":["scripts/run_randomized_exploratory_gate_b.py","--repo-root",".","--gate-b-config","configs/e2e-pilot/five-cwe-main-prompt-canary-gate-b-v1.json","--app-config","configs/e2e-pilot/five-cwe-main-prompt-canary-gate-b-bailian-v1.yaml","--env-file",".env","--output-dir","/home/ubuntu/secaware-experiments/runs/five-cwe-main-prompt-canary-gate-b-control-blind-20260818-03"]}

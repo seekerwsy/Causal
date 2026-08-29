@@ -1,1 +1,0 @@
-{"excluded_outcomes":["y.discovery_cwe_secure","y.discovery_secure_functional"],"interpretation":"mechanism_to_security_edges_are_definitional_not_discoveries","retained_outcome":"y.discovery_functional","rows":744,"schema_version":"1.0","z_security_y_identity_fraction":1.0,"z_security_y_mismatches":0}

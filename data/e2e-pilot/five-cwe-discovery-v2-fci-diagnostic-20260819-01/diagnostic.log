@@ -1,8 +1,0 @@
-{"matrix_shape": [102, 4], "state_counts": {"w.cwe_scope": {"0": 42, "1": 20, "2": 14, "3": 20, "4": 6}, "x.operation_specific_security_requirement": {"0": 51, "1": 51}, "y.discovery_cwe_secure": {"0": 50, "1": 52}, "z.target_mechanism_realized": {"0": 50, "1": 52}}, "variables": ["w.cwe_scope", "x.operation_specific_security_requirement", "y.discovery_cwe_secure", "z.target_mechanism_realized"]}
-Traceback (most recent call last):
-  File "D:\MyCode\Causal\.worktrees\dataset-availability-audit\scripts\diagnose_randomized_discovery_v2_fci.py", line 57, in main
-    pag = run_causal_learn_fci(
-          ^^^^^^^^^^^^^^^^^^^^^
-  File "D:\MyCode\Causal\.worktrees\dataset-availability-audit\src\secaware\discovery\causal_learn_backend.py", line 305, in run_causal_learn_fci
-    raise _backend_error() from None
-secaware.errors.SecAwareError: [ANALYSIS_INVALID] causal.discovery: causal-learn FCI backend failed validation

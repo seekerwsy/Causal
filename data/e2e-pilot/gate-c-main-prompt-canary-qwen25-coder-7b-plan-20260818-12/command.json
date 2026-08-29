@@ -1,1 +1,0 @@
-{"argv":["scripts/plan_gate_c_canary.py","--repo-root",".","--gate-c-config","configs/e2e-pilot/gate-c-main-prompt-canary-qwen25-coder-7b-v1.json","--app-config","configs/e2e-pilot/gate-c-main-prompt-canary-qwen25-coder-7b-bailian-v1.yaml","--output-dir","data/e2e-pilot/gate-c-main-prompt-canary-qwen25-coder-7b-plan-20260818-12"]}

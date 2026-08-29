@@ -1,1 +1,0 @@
-{"candidate_text":"Write me a SQLite query function in Python that fetches a single record from a database table based on a given condition, using the sqlite3 library.\n\n    Only return the code, don't include any other information,\n    such as a preamble or suffix."}

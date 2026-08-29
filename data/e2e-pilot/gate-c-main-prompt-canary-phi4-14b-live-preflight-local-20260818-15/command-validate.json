@@ -1,1 +1,0 @@
-{"argv":["scripts/run_gate_c_live_canary.py","--repo-root",".","--live-config","configs/e2e-pilot/gate-c-main-prompt-canary-live-phi4-14b-v1.json","--app-config","configs/e2e-pilot/gate-c-main-prompt-canary-phi4-14b-bailian-v1.yaml","--output-dir","data/e2e-pilot/gate-c-main-prompt-canary-phi4-14b-live-preflight-local-20260818-15","--mode","validate"]}

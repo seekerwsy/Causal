@@ -1,1 +1,0 @@
-{"argv":["scripts/run_code_mechanism_calibration.py","--repo-root",".","--config","configs/e2e-pilot/code-mechanism-multilingual-calibration-repair-bailian-v2.json","--run-dir","data/e2e-pilot/code-mechanism-multilingual-calibration-repair-bailian-v2-20260819-01"],"schema_version":"1.0"}

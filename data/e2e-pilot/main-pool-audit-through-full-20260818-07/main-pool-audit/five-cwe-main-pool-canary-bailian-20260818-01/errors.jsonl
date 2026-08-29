@@ -1,5 +1,0 @@
-{"cwe":"CWE-78","error_type":"ValidationError","packet_id":"main_pool_audit_packet_25d3e01f8cc3e9dfedc3bcd4b5fdbec02a5a7afd31212bc872b7907599ce4313","record_id":"1626","schema_version":"1.0","split":"confirm"}
-{"cwe":"CWE-89","error_type":"ValidationError","packet_id":"main_pool_audit_packet_21c4075a64d0a6dce605257e1fcbe8d6dfac64055bfef35b3a33161acc30c0d8","record_id":"1722","schema_version":"1.0","split":"confirm"}
-{"cwe":"CWE-502","error_type":"ValidationError","packet_id":"main_pool_audit_packet_861b6560c1fd767bab271717b5cc9256b68d7edc6e9e3cd194e129fd7d635f6a","record_id":"1820","schema_version":"1.0","split":"confirm"}
-{"cwe":"CWE-328","error_type":"ValidationError","packet_id":"main_pool_audit_packet_c26117f4c9061d45f3d1d0f723a12f6c85f6d39b407c08b9d48da6be50b60da9","record_id":"1907","schema_version":"1.0","split":"confirm"}
-{"cwe":"CWE-338","error_type":"ValidationError","packet_id":"main_pool_audit_packet_0b474a01aba9c0b962d517973e51f92e5adb3da075719e5db5abb92e94317ed6","record_id":"1620","schema_version":"1.0","split":"confirm"}

@@ -1,1 +1,0 @@
-{"expected_strict_clusters_by_cwe":{"CWE-328":9,"CWE-338":5,"CWE-502":21,"CWE-78":21,"CWE-89":3},"purpose":"Prepare all strict, non-CyberSecEval-v2-overlapping cross-source candidates for one outcome-blind eligibility and functional-contract audit.","schema_version":"1.0","selection_seed":2026081831}

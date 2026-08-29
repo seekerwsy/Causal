@@ -1,1 +1,0 @@
-{"argv":["scripts/freeze_independent_validation_runtime.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-independent-validation-runtime-analysis-v1.json","--app-config","configs/e2e-pilot/five-cwe-independent-validation-phi14b-v1.yaml","--output-dir","data/e2e-pilot/five-cwe-independent-validation-runtime-analysis-freeze-20260819-01"]}

@@ -1,7 +1,9 @@
 # Functional Judge v3 fresh holdout
 
-This directory is a distinct engineering-calibration authority. It does not replace or mutate
-`../blind-calibration-v3`, and it cannot support a scientific claim.
+This directory is a distinct engineering-calibration authority. It does not
+replace or mutate the source calibration retained at
+`git:f94d109:data/functional-judge/blind-calibration-v3`, and it cannot support
+a scientific claim.
 
 The active campaign contains the same eight exposed executable tune cases as a regression gate and
 sixteen new static validation cases. The validation set is balanced across the four frozen
@@ -16,6 +18,13 @@ score was used to select, replace, or rank a case. The exact requirement closure
 for every case are recorded in
 `case-source-bindings.jsonl`. `holdout-source-policy.json` records the selection policy, pollution
 audit, source hashes, and the pre-holdout candidate prompt/config cutoff.
+
+For reviewer closure, `task-functional-contracts.jsonl` contains only the four
+exact source records used by this gate. The loader rechecks their frozen
+per-record digests. The gate-config digest in
+`../functional-oracle-qualification.json` remains the identity of the original
+qualification run; relocating identical contract records does not recertify or
+reinterpret that run.
 
 Any later byte change to the bound Functional Judge v3 prompt or evaluator config invalidates this
 set as a fresh holdout for that changed candidate. A changed candidate needs another previously

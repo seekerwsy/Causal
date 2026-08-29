@@ -29,7 +29,7 @@
       "cwes": ["CWE-295", "CWE-327", "CWE-328", "CWE-338", "CWE-347"]
     }
   ],
-  "mechanism_registry_path": "data/formal/four-arm-mechanisms-v2.json",
+  "mechanism_registry_path": "data/method/mechanism-registry-v1.json",
   "functional_oracle_qualification_path": "data/functional-judge/functional-oracle-qualification.json",
   "layers": [
     {

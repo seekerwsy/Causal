@@ -1,1 +1,0 @@
-{"error_type":"SecAwareError","message":"[TSG_INVALID] tsg.extract_prompt.llm_facts: LLM facts extraction validation failed","schema_version":"1.0","status":"GATE_B_FAILED"}

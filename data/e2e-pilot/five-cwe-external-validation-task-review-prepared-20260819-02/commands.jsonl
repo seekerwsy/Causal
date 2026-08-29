@@ -1,1 +1,0 @@
-{"argv":["scripts\\prepare_external_validation_task_review.py","--repo-root",".","--config","configs\\e2e-pilot\\five-cwe-external-validation-task-review-prep-v2.json","--run-dir","data\\e2e-pilot\\five-cwe-external-validation-task-review-prepared-20260819-02"],"provider_calls":0}

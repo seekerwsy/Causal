@@ -11,6 +11,13 @@ successor ADD/REMOVE studies, and factorial schema 1.1. Historical execution
 code is not imported by the package or exposed by the CLI; immutable historical
 result bundles remain available to the independent result verifier.
 
+The review tree retains the active specification, current dataset-curation
+records, Functional Judge qualification inputs, the two replayable factorial
+result bundles, and their result notes. Superseded E2E deployments, server
+runbooks, predecessor four-arm studies, implementation plans, and incident
+chronology were removed from the live tree after commit `f94d109`; Git history
+is their recovery boundary.
+
 ## Seven-stage artifact path
 
 | Stage | Frozen input | Output | Main implementation |

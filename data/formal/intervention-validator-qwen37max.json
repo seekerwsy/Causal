@@ -1,1 +1,0 @@
-{"api_key_env":"ALI_BAILIAN_API_KEY","base_url":"https://dashscope.aliyuncs.com/compatible-mode/v1","candidate_id":"qwen37max-intervention-validator-thinking-v1","enable_thinking":true,"max_response_bytes":16384,"model_id":"qwen3.7-max-2026-05-20","provider":"ali_bailian_pay_as_you_go","schema_version":"1.0","seed":83002,"temperature":0.0,"timeout_seconds":60.0,"top_p":1.0}

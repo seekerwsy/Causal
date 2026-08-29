@@ -1,80 +1,24 @@
-# Prompt Mechanism Study Paper-Specific Instructions
+# Paper-Specific Instructions
 
-The repository-root `AGENTS.md` applies to every file under `paper/`. This file
-adds only paper-local requirements and must remain concise.
+The repository-root `AGENTS.md` applies throughout `paper/`. This file adds
+only manuscript-local rules.
 
-- Use the prospective successor specification at
+- Use
   `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
-  for new-protocol manuscript content. A legacy run remains governed by the
-  exact protocol named by its frozen manifest.
-- Keep the manuscript's four RQs aligned with the single active artifact path:
-  held-out intervention prioritization, representation/prioritization
-  contribution, randomized security-intervention effects, and a separately
-  governed expert study of perceived explanation utility. RQ4 is a human-study
-  evaluation and cannot validate causal discovery or objective repair accuracy.
-- Keep Prompt TSG semantics separate from causal edges, preserve natural
-  variables `X^0`, randomized arm `A`, and post-intervention diagnostics
-  `X^{A,R}`, and use `semantic_task_cluster_id` as the highest resampling unit.
-- Keep assigned-arm ITT primary. Fidelity and target-change measures are
-  diagnostics, not post-assignment filters. JCI, RFCI, and other optional
-  analyses cannot promote or replace the primary result.
-- Do not invent results or silently fill placeholders. Every quantitative cell
-  must trace to a frozen artifact, exact result field, and table builder.
-- State null, harmful, conflicting, unknown, failed, and non-evaluable results
-  accurately when required by the frozen protocol. Narrative emphasis cannot
-  override research integrity.
-- Preserve double-anonymous review and keep Data Availability after Conclusion.
-- After manuscript, table, or figure changes, compile the LaTeX source and
-  visually inspect the rendered PDF.
-
-## Evidence-Ledger Boundary
-
-- Treat `fse2027/revision-evidence-ledger.md`, run manifests, schemas,
-  deployment records, and incident logs as internal verification sources, not
-  as manuscript prose, structure, or tone authorities.
-- Use the ledger only to determine whether a claim is supported and where its
-  evidence resides. Do not copy repository identifiers, class or enum names,
-  schema-field inventories, hashes, receipts, execution status, revision
-  actions, or incident chronology into the manuscript unless they are
-  scientifically necessary.
-- Keep incomplete-study status, missing-evidence notes, and working-draft
-  placeholders in the ledger or README. A submission-ready manuscript must not
-  explain its own backfill state or present planned work as completed.
-- Treat the 2026-07-29 FSE draft narrative-revision design as an archival
-  pre-results writing record. Its future-tense and visible-placeholder
-  directions describe the former draft state and do not govern
-  submission-ready prose.
-- Translate necessary safeguards into scientific design properties such as
-  prospective fixation, outcome blinding, randomized assignment, complete ITT
-  accounting, and independent outcome measurement.
-
-The following principle governs narrative selection, emphasis, and
-presentation. It does not override the repository-root research-integrity
-requirements: material results required by a frozen protocol must still be
-reported accurately; confirmatory outcomes cannot be selectively omitted; and
-RQ, estimand, endpoint, population, or comparison changes made after observing
-outcomes remain exploratory or require a new prospectively frozen study.
-
-【发布会原则】在论文写作、修改、压缩和实验组织的全流程中，始终把论文视为一场学术发布会，而不是项目总结、实验日志或自我审查报告。你的任务不是平均呈现这项工作的所有方面，而是识别其中最值得发表的价值，并围绕这一价值建立最有利、最完整、最有说服力的叙事。
-【核心要求】
-只围绕优势组织论文。优先寻找本文真正领先、独特或不可替代的部分，包括新能力、新问题、新机制、新视角、更强适用性、更低成本、更高效率、更好扩展性或更有意义的权衡。没有形成优势的内容，不应成为论文主线。
-不要写成工作汇报。不要按照 “我们先做了什么、后来尝试了什么、哪些尝试失败了” 的过程展开。论文只保留最终成立的逻辑：问题为什么重要，现有方法为什么不够，本文提供了什么新解法，证据如何支持这一解法。
-不要主动提供负面评价。不要替审稿人总结本文哪里弱、哪里输、哪里不如别人，也不要使用 “遗憾的是”“仅”“仍明显落后”“效果有限”“存在严重不足” 等自我削弱式表达。某项结果不构成优势时，不必主动把它提炼成结论，更不应帮助读者把局部现象上升为对整个方法的否定。
-打不过的维度，不要把它设为比赛项目。如果本文在某个指标上不占优势，就不要把论文叙事建立在该指标上。重新选择更能反映本文价值的任务定义、评价维度、应用场景、约束条件或比较口径。不要争夺不属于本文的冠军，而要明确本文赢的是另一场更有意义的比赛。
-不要说输，改写比较逻辑。面对不占优的结果，不使用 “本文弱于”“性能下降”“未能超过” 等直接失败叙述。优先判断：该结果是否必须讨论；是否可以从不同目标、约束或适用场景解释；是否体现了某种合理权衡；是否可以收缩主张，避免不必要的正面对撞；是否应调整故事主线，使其不再承担证明核心贡献的职责。
-优势必须被明确说出来。不要期待审稿人自己从表格中发现贡献。凡是能够支持本文价值的结果，都应主动解释：本文在哪个条件下表现最好；为什么这种优势会出现；这一优势解决了什么实际问题；相比已有方法，这种能力为什么值得关注。
-控制比较范围。不追求 “所有数据集、所有指标、所有设置全面领先” 这种不必要的目标。只提出证据能够牢固支撑的主张，并围绕这些主张选择最合适的实验和对比。论文的说服力来自主张与证据高度一致，而不是比较项目数量最多。
-实验不是结果仓库，而是论证工具。每个实验都必须承担明确职责，例如：证明核心方法有效；证明优势来自关键机制；证明方法在目标场景中具有价值；排除最可能的替代解释。无法强化主线、容易分散注意力或引出无关争论的实验，应删除、弱化、移动或重新设计。
-允许彻底重构故事。当现有结果无法支撑原始叙事时，不要围绕原始叙事进行防守。重新定义论文真正解决的问题，重新排序贡献，重新选择主结果，重新设计标题、摘要、引言和实验结构。故事应服务于最强证据，而不是忠于最初设想。
-避免给审稿人递刀子。写作时持续检查：这句话是否无意中扩大了本文需要承担的责任；是否提出了一个本来没人要求回答的问题；是否把局部现象描述成普遍缺陷；是否使用了比证据更宽泛的负面判断；是否可以通过更准确的定位避免无意义的自我攻击。不主动制造审稿问题，不主动扩大攻击面，不主动替反方完成论证。
-摘要和引言必须像发布会开场。开头应迅速建立：一个重要且尚未解决的问题；现有方法的关键缺口；本文独特的解决思路；最有分量的结果和意义。不要从实现细节、研究过程或大量背景知识开始，也不要在贡献尚未建立时提前讨论不足。
-结论只强化记忆点。结论不是重新审判论文，而是让读者记住：本文解决了什么、提出了什么、证明了什么、为什么重要。不要在最后一段突然加入新的自我否定或扩大局限性。
-【默认决策规则】当遇到任何不理想的材料时，按以下优先级处理：
-删除与核心主张无关的内容；
-缩小主张，避免无意义的正面对比；
-更换更能体现价值的评价维度；
-将结果解释为目标差异或合理权衡；
-重组实验，使优势成为视觉和叙事中心；
-重新定义论文故事；
-只有在无法回避且确实影响核心结论时，才进行必要说明。
-【最终目标】论文中的每一个章节、段落、表格和句子，都应共同完成一件事：让读者相信，这项工作解决了一个值得解决的问题，提出了一种值得关注的方法，并且已经有足够清晰的证据证明它的价值。不要平均展示，不要主动示弱，不要写实验流水账，不要替审稿人攻击自己。找到真正成立的优势，围绕它组织全部材料，并把这个优势讲到足够清楚。
+  for new-protocol prose. Describe a legacy result only under its frozen
+  protocol and evidence boundary.
+- Keep the four RQs aligned with the active method: outcome-blind
+  prioritization, representation/prioritization contribution, randomized
+  intervention effects, and the separately governed expert study. The expert
+  study cannot validate causal discovery or objective repair accuracy.
+- Call the independent analysis unit a **task unit**. Mention
+  `semantic_cluster_id` only when identifying an immutable legacy field.
+- Keep Prompt TSG semantics separate from causal edges, assigned-arm ITT
+  primary, and post-assignment fidelity or drift strictly diagnostic.
+- Every quantitative claim must trace to a frozen result field and table
+  builder. Report material null, harmful, unknown, failed, or non-evaluable
+  outcomes required by the governing protocol.
+- Preserve double-anonymous review and place Data Availability after the
+  Conclusion.
+- After changing LaTeX, tables, or figures, compile and visually inspect the
+  rendered PDF.

@@ -1,1 +1,0 @@
-{"argv":["scripts/build_randomized_exploratory_canary.py","--repo-root",".","--config","configs/e2e-pilot/five-cwe-main-prompt-canary-gate-a-phi4-14b-v1.json","--output-dir","data/e2e-pilot/five-cwe-main-prompt-canary-gate-a-phi4-14b-20260818-11"]}
