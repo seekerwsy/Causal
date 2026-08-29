@@ -58,6 +58,7 @@ The labels below distinguish execution from inherited evidence.
 | Evidence | `evidence_type` | Result |
 | --- | --- | --- |
 | Seven-source deterministic normalization at `runs/gate-c-20260830/prepared` | `newly_run` | 2,283 records, 2,166 exact clusters, 117 exact duplicate descendants; bundle SHA-256 `c391c7a13603542e5edd725dcc4018b4abaae0bfaa75177067561a166f7816d4`; no outcomes used and no scientific claim allowed |
+| Prompt-TSG v1 ten-task extractor-development pilot | `newly_run` | 10/10 responses and graph bundles were structurally valid, but evidence review found role overreach for permissions, credential source, SQL identifier/value, and URL authority. The extractor therefore failed semantic qualification; all ten task units are development-only and cannot enter discovery or confirmation. |
 | Focused Prompt-TSG/selector/factorial suite | `newly_run` | 45 passed, 1 deselected; includes state-tamper rejection, operation coding, RD ranking, compatibility filtering, claim-scope replay, and historical verifier compatibility |
 | Default reviewer suite and milestone smoke | `newly_run` | Recorded in the final verification section below after the current change set is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0, 30 task units / 240 assignments, interaction 0, simultaneous interval `[-0.0833, 0.0833]` |
@@ -98,6 +99,11 @@ The labels below distinguish execution from inherited evidence.
    collapse only duplicates whose types and values are identical; conflicting
    duplicates remain closed errors. The frozen plan binds this policy plus the
    curation and provider-adapter source digests.
+9. **Extractor semantic qualification.** Structural validation alone did not
+   catch four task-role overgeneralizations in the first ten-task pilot. The
+   successor extractor has a new identity and stricter finite-role policy; it
+   remains unqualified until a disjoint holdout evidence review passes. A
+   successful JSON response or graph construction is not an accuracy claim.
 
 ## Exact next Gate C package
 
