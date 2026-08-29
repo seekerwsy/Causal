@@ -193,7 +193,12 @@ def qualify_prompt_tsg_extractor(
             "expected_context",
             "expected_realization_id",
             "rationale",
-        } or case["expected_context"] not in {"present", "absent", "unresolved"}:
+        } or case["expected_context"] not in {
+            "present",
+            "absent",
+            "unresolved",
+            "absent_or_unresolved",
+        }:
             raise EligibilityError("Prompt TSG qualification case is invalid")
         task = task_by_id.get(case["task_id"])
         if task is None:
@@ -210,9 +215,12 @@ def qualify_prompt_tsg_extractor(
             if binding["decision"] == "unresolved"
             else "absent"
         )
-        matched = (
-            actual_context == case["expected_context"]
-            and binding["realization_id"] == case["expected_realization_id"]
+        context_matched = actual_context == case["expected_context"] or (
+            case["expected_context"] == "absent_or_unresolved"
+            and actual_context in {"absent", "unresolved"}
+        )
+        matched = context_matched and (
+            binding["realization_id"] == case["expected_realization_id"]
         )
         results.append(
             {

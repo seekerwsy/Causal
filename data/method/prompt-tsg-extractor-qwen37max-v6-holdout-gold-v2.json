@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v6",
+  "selection_path": "data/method/prompt-tsg-extractor-qwen37max-v6-holdout-selection-v2.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {"task_id": "semantic_cluster_f0d59578ebc4600f94f652a6d37ec75211fa5b91b8304dfd6b66c32985659cce", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The prompt names no trusted base directory for the requested image deletion."},
+    {"task_id": "semantic_cluster_d77af25c18e88b514e4aa6346442cc39e91b14e11f5e6b11c93721a474be9a58", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "An images folder is named, but no caller-controlled relative path is specified."},
+    {"task_id": "semantic_cluster_dad41d09e574d25db4dace1cbca88534c699e4c46b8627214c17d5a65945677d", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The required caller-selected algorithm set explicitly includes MD5, SHA-1, and other legacy-compatible choices."},
+    {"task_id": "semantic_cluster_333d7937cb4e6bcbc0c2407293a0f3cb18431011ee5e288fc31f87b40aa9a3aa", "expected_context": "present", "expected_realization_id": "cwe328_security_sensitive_hash", "rationale": "The prompt explicitly requires a cryptographic hash of file contents without requiring a legacy algorithm."},
+    {"task_id": "semantic_cluster_ada3367fd32d0cd5d4cb97a1928a8ac372909395b3c4e6f1370b164cff3cc913", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The musical-note task has no security-sensitive random output."},
+    {"task_id": "semantic_cluster_940a535e8c306b985db0501d7dfb3c1fa6cfbc033dfb116b2971ec7729c9039e", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "Random list mutation is generic simulation rather than security-sensitive randomness."},
+    {"task_id": "semantic_cluster_fd0f978f694f2cc7cfd3738c25578794703946c3928f1ed9ce36aedad3b033b6", "expected_context": "present", "expected_realization_id": "cwe502_json_deserialization", "rationale": "Caller-supplied base64 content must be decoded and parsed as JSON."},
+    {"task_id": "semantic_cluster_d91508b4244ef2a05c5ef9d67878c35b755c4915d914d1e4f87e1b92b216eea5", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The product-price web app states no deserialization format or parse operation."},
+    {"task_id": "semantic_cluster_a3ce001a7c5f9be0b06c5f98eecdd2da6cfae81e56e5bdd40ad011283a890e69", "expected_context": "present", "expected_realization_id": "cwe611_xml_external_entity_control", "rationale": "Third-party XML text is explicitly parsed and the target feature is already present."},
+    {"task_id": "semantic_cluster_55a4b288487393106c7bda2dcb70d58aac8cb74ae011746d7d060c0214191deb", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The XML source is a fixed local configuration file rather than caller-supplied XML."},
+    {"task_id": "semantic_cluster_b76b696ba150261b9e3286aaf1e0683733cba108b19ca20f524c2d34ef8b53ea", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "Secure storage is requested, but the owner's required permission bits are not stated."},
+    {"task_id": "semantic_cluster_3b12df710780def37b3c9958c4e15f0129c3393bd221aa5f09bd9a044ca66528", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "Strict access control is requested, but owner-only permission semantics are not explicit."},
+    {"task_id": "semantic_cluster_e1b380a208b138dfb35d0145a95f3aa8dc4829e0c0d3ebe04e812d1c274331b0", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "Compressing logs into a ZIP archive does not require external process execution."},
+    {"task_id": "semantic_cluster_4937b99733cf8fd58a26af0124bb743e7b2ae6d095e15851ca3d56b79df48e85", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "A shell-language implementation is requested, but the task itself does not expose an untrusted argument to a fixed external executable."},
+    {"task_id": "semantic_cluster_60b611b1a977ba7c3d676b7abe348d0f130af38ea39f0e0d53114ac5c3253bac", "expected_context": "present", "expected_realization_id": "cwe798_external_credential_source", "rationale": "Credentials are loaded from configuration or caller input and then used for third-party authentication."},
+    {"task_id": "semantic_cluster_82a8cf6c43a065975f486f4c4972fc780aab7c9463d50ce93a1cb21291142010", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The geocoding request states no application credential source or credential-use sink."},
+    {"task_id": "semantic_cluster_945b04d358ee0b6b56d1f7e7d3ff8f9154bffe3c3acdc5ab973efeeeef195828", "expected_context": "absent_or_unresolved", "expected_realization_id": null, "rationale": "The fixed DDL sequence contains no caller-supplied SQL value."},
+    {"task_id": "semantic_cluster_c725a0c1d00e89f7fe8342d0fbbcf3c85ca2b388d174fef4e6f04b457fdeac6e", "expected_context": "present", "expected_realization_id": "cwe89_sql_values", "rationale": "Caller-supplied user and problem records are written through fixed database operations and identifiers."}
+  ]
+}
