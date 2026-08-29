@@ -81,6 +81,12 @@ def load_catalog(path: Path) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         raise PromptTSGError("Prompt TSG catalog is unreadable") from None
+    return catalog_from_record(value)
+
+
+def catalog_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate an embedded Prompt TSG catalog without trusting a live path."""
+
     required = {
         "schema_version",
         "node_types",
@@ -685,6 +691,7 @@ __all__ = [
     "TSGNode",
     "apply_feature_patch",
     "build_prompt_tsg",
+    "catalog_from_record",
     "catalog_sha256",
     "feature_state",
     "load_catalog",

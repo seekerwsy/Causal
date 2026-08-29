@@ -15,6 +15,7 @@ from prompt_mechanism_study.interaction_selector import (
     run_interaction_selector,
 )
 from prompt_mechanism_study.mechanisms import (
+    FactorialCompatibility,
     MechanismRelationSpec,
     PairRelation,
     PairRelationEvidence,
@@ -31,6 +32,7 @@ from prompt_mechanism_study.prioritization import SelectorKind, SlotStatus
 from prompt_mechanism_study.prompt_tsg import (
     QueryState,
     catalog_sha256,
+    feature_state,
     load_catalog,
     prompt_tsg_from_record,
     validate_prompt_tsg,
@@ -244,6 +246,7 @@ def _relation_spec(value: Mapping[str, Any]) -> MechanismRelationSpec:
             "factor_1_id",
             "factor_2_id",
             "relation_type",
+            "factorial_compatibility",
             "context_query_id",
             "evidence_contract",
             "eligible_languages",
@@ -261,7 +264,9 @@ def _relation_spec(value: Mapping[str, Any]) -> MechanismRelationSpec:
     )
     return MechanismRelationSpec(
         value["relation_id"], value["factor_1_id"], value["factor_2_id"],
-        PairRelation(value["relation_type"]), value["context_query_id"],
+        PairRelation(value["relation_type"]),
+        FactorialCompatibility(value["factorial_compatibility"]),
+        value["context_query_id"],
         RelationEvidenceContract(tuple(contract["required_semantics"]), tuple(tuple(item) for item in contract["required_relations"])),
         tuple(value["eligible_languages"]), tuple(value["eligible_task_families"]),
         tuple(value["eligible_cwes"]),
@@ -345,6 +350,7 @@ def _plan(value: Mapping[str, Any]) -> InteractionSelectorPlan:
             "minimum_shared_lineages",
             "minimum_feature_reliability",
             "ridge_lambda",
+            "cross_fit_folds",
             "bootstrap_draws",
             "bootstrap_seed",
             "top_l_per_lane",
@@ -355,7 +361,8 @@ def _plan(value: Mapping[str, Any]) -> InteractionSelectorPlan:
         value["model_id"], value["outcome_id"], tuple(value["covariate_names"]),
         value["minimum_cell_task_units"], value["minimum_shared_lineages"],
         value["minimum_feature_reliability"], value["ridge_lambda"],
-        value["bootstrap_draws"], value["bootstrap_seed"], value["top_l_per_lane"],
+        value["cross_fit_folds"], value["bootstrap_draws"], value["bootstrap_seed"],
+        value["top_l_per_lane"],
     )
 
 
@@ -363,7 +370,7 @@ def _report(frozen: Any) -> dict[str, Any]:
     graph = list(frozen.selected_graph_pair_ids)
     pure = list(frozen.selected_pure_interaction_pair_ids)
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "status": "INTERACTION_SELECTION_FROZEN",
         "freeze_id": frozen.freeze_id,
         "universe_id": frozen.universe_id,
@@ -391,7 +398,7 @@ def _config(value: Any) -> dict[str, Any]:
         "plan",
         "graph_support_selection",
     }
-    if set(config) != expected or config.get("schema_version") != "1.1":
+    if set(config) != expected or config.get("schema_version") != "1.2":
         raise InteractionSelectorExperimentError("interaction selector config fields are not exact")
     for name in (
         "prompt_tsg_catalog_path",
@@ -476,6 +483,12 @@ def _validate_relation_bindings(
     for row in rows:
         item = evidence_by_id[row.relation_evidence_id]
         task = task_by_id[item.task_id]
+        graph = graph_by_id[item.prompt_tsg_id]
+        pair = pair_by_id[row.pair_id]
+        expected_factor_states = tuple(
+            (factor_id, feature_state(graph, factor_id))
+            for factor_id in pair.factors
+        )
         if (
             row.pair_id != item.pair_id
             or row.relation_spec_id != item.relation_spec_id
@@ -483,8 +496,9 @@ def _validate_relation_bindings(
             or row.task_unit_id != task["task_unit_id"]
             or row.language != task["language"]
             or row.task_archetype != task["task_family"]
-            or row.context_query_id != pair_by_id[row.pair_id].pair_context_query_id
+            or row.context_query_id != pair.pair_context_query_id
             or row.context_state is not item.state
+            or row.factor_states != expected_factor_states
         ):
             raise InteractionSelectorExperimentError(
                 "interaction selector observation drifts from its task-side evidence"

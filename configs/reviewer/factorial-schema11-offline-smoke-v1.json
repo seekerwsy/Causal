@@ -22,6 +22,8 @@
         "factorial_sql_task_e8cc50eb83909430f4e5087ab8092325d121720dd39bff34b87299bece013cb8",
         "factorial_sql_task_ab0ce31eb8573f74f0b0dfaf7f42ec568f192c1495f2ac60e428cadb113a2796"
       ],
+      "interaction_claim_scope": "policy_only",
+      "factorial_compatibility": "compatible",
       "intervention": {
         "executor_config_path": "tests/fixtures/factorial-offline-adapter-v1.json",
         "executor_config_sha256": "9c6b1bbd041d2b6949f1a795c95bf7c692ef46eb57bf034fc79bfc63efe311fb",

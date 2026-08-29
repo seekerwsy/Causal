@@ -231,7 +231,8 @@ def test_schema11_zero_network_reviewer_smoke(tmp_path: Path, monkeypatch) -> No
     assert report["models"] == [OFFLINE_MODEL_ID]
     assert report["scientific_claim_allowed"] is False
     assert report["claim_ready_coordinates"] == []
-    assert report["security_interaction_claim_ready_coordinates"] == []
+    assert report["security_policy_interaction_claim_ready_coordinates"] == []
+    assert report["mechanism_interaction_claim_ready_coordinates"] == []
     assert report["practical_success_claim_ready_coordinates"] == []
     assert report["primary_gate"]["functionality_gate_status"] == "not_requested"
     assert report["primary_gate"]["functionality_noninferior"] is None

@@ -132,6 +132,8 @@ def _v11_config(
             {
                 "pair_id": pair.pair_id,
                 "task_ids": support,
+                "interaction_claim_scope": "policy_only",
+                "factorial_compatibility": "compatible",
                 "intervention": intervention,
                 "security_oracle": {
                     "profile_id": pair.oracle_profile_id,
@@ -269,6 +271,20 @@ def test_v11_powered_functionality_gate_requires_qualification(tmp_path) -> None
     with pytest.raises(
         FactorialExperimentError,
         match="analysis fields are not exact",
+    ):
+        preflight_factorial_experiment(ROOT, config_path)
+
+
+@pytest.mark.extended
+def test_v11_freeze_rejects_noncompatible_pair(tmp_path) -> None:
+    config_path, _pairs = _v11_config(tmp_path)
+    config = read_json(config_path)
+    config["pair_protocols"][0]["factorial_compatibility"] = "nested"
+    _write_json(config_path, config)
+
+    with pytest.raises(
+        FactorialExperimentError,
+        match="not factorial-compatible",
     ):
         preflight_factorial_experiment(ROOT, config_path)
 
@@ -542,7 +558,8 @@ def test_v11_runner_dispatches_two_pairs_and_two_models(tmp_path, monkeypatch) -
         and item["gate"]["practical_success_claim_ready"] is False
         for item in report["primary_results"]
     )
-    assert report["security_interaction_claim_ready_coordinates"] == []
+    assert report["security_policy_interaction_claim_ready_coordinates"] == []
+    assert report["mechanism_interaction_claim_ready_coordinates"] == []
     assert report["practical_success_claim_ready_coordinates"] == []
     assert set(generated_models) == {"generator-a", "generator-b"}
     assert generated_models.count("generator-a") == 32

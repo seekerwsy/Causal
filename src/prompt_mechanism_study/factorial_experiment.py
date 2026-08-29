@@ -893,7 +893,14 @@ def _pair_protocols(
     rows = config.get("pair_protocols")
     if not isinstance(rows, list) or not rows or any(not isinstance(item, dict) for item in rows):
         raise FactorialExperimentError("factorial pair_protocols must be a non-empty list")
-    required = {"pair_id", "task_ids", "intervention", "security_oracle"}
+    required = {
+        "pair_id",
+        "task_ids",
+        "intervention",
+        "security_oracle",
+        "interaction_claim_scope",
+        "factorial_compatibility",
+    }
     allowed = required | {"mechanism_trace_diagnostics"}
     if any(not required <= set(item) or not set(item) <= allowed for item in rows):
         raise FactorialExperimentError("factorial pair protocol is incomplete")
@@ -917,8 +924,16 @@ def _pair_protocols(
             or not set(task_ids) <= selected
             or not isinstance(item["intervention"], dict)
             or not isinstance(item["security_oracle"], dict)
+            or item["interaction_claim_scope"] not in {
+                "policy_only",
+                "mechanism_eligible",
+            }
         ):
             raise FactorialExperimentError("factorial pair protocol task support is invalid")
+        if item["factorial_compatibility"] != "compatible":
+            raise FactorialExperimentError(
+                "factorial pair protocol is not factorial-compatible"
+            )
         validate_factorial_intervention_design(item["intervention"])
         covered.update(task_ids)
         result.append(dict(item))
@@ -1492,6 +1507,9 @@ def _report(
                 "joint_bounds": list(estimate.joint_bounds),
                 "interaction_bounds": list(estimate.interaction_bounds),
                 "response_pattern": estimate.response_pattern.value,
+                "response_surface_pattern": _paper_response_pattern(
+                    estimate.response_pattern.value
+                ),
                 "realization_diagnostics": canonical_value(
                     estimate.realization_diagnostics
                 ),
@@ -1519,6 +1537,10 @@ def _report(
         for item in analysis.inference.secondary_intervals
     ]
     analysis_config = config["analysis"]
+    claim_scope_by_pair = {
+        item["pair_id"]: item["interaction_claim_scope"]
+        for item in config["pair_protocols"]
+    }
     functionality_margin = float(analysis_config["functionality_noninferiority_margin"])
     unknown_limit = float(analysis_config.get("maximum_unknown_fraction", 1.0))
     practical_margin = float(analysis_config.get("practical_interaction_margin", 0.0))
@@ -1570,6 +1592,7 @@ def _report(
             functionality_status = "failed"
             functionality_noninferior = False
         gate: dict[str, Any] = {
+            "interaction_claim_scope": claim_scope_by_pair[primary["pair_id"]],
             "security_interval_excludes_zero": significant,
             "practical_interaction_margin": practical_margin,
             "practical_interaction_met": primary["interaction"] is not None
@@ -1601,7 +1624,7 @@ def _report(
                 "functionality_gate_status": functionality_status,
             }
         )
-        gate["security_interaction_claim_ready"] = bool(
+        gate["security_policy_interaction_claim_ready"] = bool(
             config.get("scientific_claim_allowed", False)
             and all(
                 gate[name]
@@ -1612,8 +1635,12 @@ def _report(
                 )
             )
         )
+        gate["mechanism_interaction_claim_ready"] = bool(
+            gate["security_policy_interaction_claim_ready"]
+            and gate["interaction_claim_scope"] == "mechanism_eligible"
+        )
         gate["practical_success_claim_ready"] = bool(
-            gate["security_interaction_claim_ready"]
+            gate["security_policy_interaction_claim_ready"]
             and functionality_status == "passed"
             and functionality_noninferior
         )
@@ -1674,10 +1701,15 @@ def _report(
     }
     report.update(
         {
-            "security_interaction_claim_ready_coordinates": [
+            "security_policy_interaction_claim_ready_coordinates": [
                 item["coordinate_id"]
                 for item in primary_results
-                if item["gate"]["security_interaction_claim_ready"]
+                if item["gate"]["security_policy_interaction_claim_ready"]
+            ],
+            "mechanism_interaction_claim_ready_coordinates": [
+                item["coordinate_id"]
+                for item in primary_results
+                if item["gate"]["mechanism_interaction_claim_ready"]
             ],
             "practical_success_claim_ready_coordinates": [
                 item["coordinate_id"]
@@ -1697,6 +1729,25 @@ def _report(
             }
         )
     return report
+
+
+def _paper_response_pattern(value: str) -> str:
+    """Map implementation fixtures to non-mechanistic paper-facing descriptions."""
+
+    mapping = {
+        "additive": "no_additional_pattern",
+        "positive_interaction": "positive_nonadditive_pattern",
+        "negative_interaction": "negative_nonadditive_pattern",
+        "xor": "xor_response_pattern",
+        "redundant": "subadditive_joint_benefit_pattern",
+        "prerequisite": "conditional_activation_pattern",
+        "reversal": "simple_effect_sign_reversal",
+        "not_evaluable": "not_evaluable",
+    }
+    try:
+        return mapping[value]
+    except KeyError:
+        raise FactorialExperimentError("factorial response pattern is unsupported") from None
 
 
 def _validate_followup(

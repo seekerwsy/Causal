@@ -67,6 +67,15 @@ class InteractionScale(StrEnum):
     RISK_DIFFERENCE = "risk_difference"
 
 
+class FactorialCompatibility(StrEnum):
+    COMPATIBLE = "compatible"
+    NESTED = "nested"
+    MUTUALLY_EXCLUSIVE = "mutually_exclusive"
+    ENTAILMENT_COLLAPSE = "entailment_collapse"
+    CONFLICTING = "conflicting"
+    UNRESOLVED = "unresolved"
+
+
 class PairEligibility(StrEnum):
     APPLICABLE = "applicable"
     CONTEXT_ABSENT = "context_absent"
@@ -183,6 +192,7 @@ class MechanismRelationSpec:
     factor_1_id: str
     factor_2_id: str
     relation_type: PairRelation
+    factorial_compatibility: FactorialCompatibility
     context_query_id: str
     evidence_contract: RelationEvidenceContract
     eligible_languages: tuple[str, ...]
@@ -197,6 +207,8 @@ class MechanismRelationSpec:
             raise ValueError("mechanism relation factors must be distinct")
         if type(self.relation_type) is not PairRelation:
             raise TypeError("relation_type must be a PairRelation")
+        if type(self.factorial_compatibility) is not FactorialCompatibility:
+            raise TypeError("factorial_compatibility must be typed")
         if type(self.evidence_contract) is not RelationEvidenceContract:
             raise TypeError("evidence_contract must be a RelationEvidenceContract")
         for values, name in (
@@ -924,6 +936,7 @@ def _validate_tsg_binding(task: Mapping[str, Any], row: Mapping[str, Any]) -> No
 
 __all__ = [
     "ACTIVE_FACTORIAL_RELATIONS",
+    "FactorialCompatibility",
     "InteractionScale",
     "MechanismRegistryError",
     "MechanismRelationSpec",

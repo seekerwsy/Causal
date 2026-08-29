@@ -1,8 +1,11 @@
 """Outcome-blind pair support gates and observational interaction ranking.
 
-Prompt-TSG relation specs define the finite pair universe.  The ridge-logit
-interaction coefficient is a discovery ranking signal only; randomized 2x2
-factorial evaluation remains the sole source of causal interaction estimates.
+Prompt-TSG relation specs define the finite pair universe.  Each eligible pair
+is fit separately.  Cross-fitted predicted probabilities are standardized on
+the pair's operation-specific baseline task units and ranked on the risk-
+difference interaction scale.  The ridge-logit interaction coefficient is kept
+only as a diagnostic; randomized 2x2 evaluation remains the sole source of
+causal interaction estimates.
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ from enum import StrEnum
 
 from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.mechanisms import (
+    FactorialCompatibility,
+    InteractionScale,
     MechanismRelationSpec,
     PairRelationEvidence,
     PairSpec,
@@ -22,6 +27,7 @@ from prompt_mechanism_study.mechanisms import (
 )
 from prompt_mechanism_study.prompt_tsg import QueryState
 from prompt_mechanism_study.records import content_hash, content_id, require_text
+from prompt_mechanism_study.representation import Operation
 
 
 class InteractionLane(StrEnum):
@@ -36,6 +42,8 @@ class InteractionPairCandidate:
     context_query_id: str
     factor_1_id: str
     factor_2_id: str
+    operation_1: Operation
+    operation_2: Operation
 
     def __post_init__(self) -> None:
         for name in (
@@ -48,10 +56,16 @@ class InteractionPairCandidate:
             require_text(getattr(self, name), name)
         if self.factor_1_id == self.factor_2_id:
             raise ValueError("interaction candidate factors must be distinct")
+        if type(self.operation_1) is not Operation or type(self.operation_2) is not Operation:
+            raise TypeError("interaction candidate operations must be typed")
 
     @property
     def factors(self) -> tuple[str, str]:
         return self.factor_1_id, self.factor_2_id
+
+    @property
+    def operations(self) -> tuple[Operation, Operation]:
+        return self.operation_1, self.operation_2
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +99,8 @@ def build_tsg_pair_universe(
         if not matches:
             continue
         spec = matches[0]
+        if spec.factorial_compatibility is not FactorialCompatibility.COMPATIBLE:
+            continue
         candidates.append(
             InteractionPairCandidate(
                 pair.pair_id,
@@ -92,6 +108,8 @@ def build_tsg_pair_universe(
                 pair.pair_context_query_id,
                 pair.factor_1_id,
                 pair.factor_2_id,
+                pair.operation_1,
+                pair.operation_2,
             )
         )
     return InteractionPairUniverse(tuple(sorted(candidates, key=lambda item: item.pair_id)))
@@ -179,6 +197,7 @@ class InteractionSelectorPlan:
     minimum_shared_lineages: int
     minimum_feature_reliability: float
     ridge_lambda: float
+    cross_fit_folds: int
     bootstrap_draws: int
     bootstrap_seed: int
     top_l_per_lane: int
@@ -203,6 +222,10 @@ class InteractionSelectorPlan:
             raise ValueError("minimum_feature_reliability must be on [0, 1]")
         if type(self.ridge_lambda) not in {int, float} or self.ridge_lambda <= 0:
             raise ValueError("ridge_lambda must be positive")
+        if type(self.cross_fit_folds) is not int or self.cross_fit_folds < 2:
+            raise ValueError("cross_fit_folds must be at least two")
+        if self.minimum_cell_task_units < self.cross_fit_folds:
+            raise ValueError("minimum_cell_task_units must support every cross-fit fold")
         if type(self.bootstrap_draws) is not int or self.bootstrap_draws < 10:
             raise ValueError("bootstrap_draws must be at least 10")
         if type(self.bootstrap_seed) is not int:
@@ -242,28 +265,41 @@ class PairSupportGate:
 class InteractionPairScore:
     pair_id: str
     lane: InteractionLane
-    interaction_coefficient: float
-    absolute_interaction_coefficient: float
+    observational_score_scale: InteractionScale
+    risk_difference_interaction: float
+    absolute_risk_difference_interaction: float
+    logit_interaction_coefficient: float
     sign_stability: float
-    median_bootstrap_absolute_coefficient: float
+    median_bootstrap_absolute_risk_difference: float
+    baseline_task_units: int
+    cross_fit_folds: int
     bootstrap_draws: int
 
     def __post_init__(self) -> None:
         require_text(self.pair_id, "pair_id")
         if type(self.lane) is not InteractionLane:
             raise TypeError("interaction lane must be typed")
+        if self.observational_score_scale is not InteractionScale.RISK_DIFFERENCE:
+            raise ValueError("interaction selector score must use the risk-difference scale")
         for value in (
-            self.interaction_coefficient,
-            self.absolute_interaction_coefficient,
+            self.risk_difference_interaction,
+            self.absolute_risk_difference_interaction,
+            self.logit_interaction_coefficient,
             self.sign_stability,
-            self.median_bootstrap_absolute_coefficient,
+            self.median_bootstrap_absolute_risk_difference,
         ):
             if type(value) not in {int, float} or not math.isfinite(float(value)):
                 raise ValueError("interaction score values must be finite")
-        if self.absolute_interaction_coefficient != abs(self.interaction_coefficient):
-            raise ValueError("absolute interaction coefficient is inconsistent")
+        if self.absolute_risk_difference_interaction != abs(
+            self.risk_difference_interaction
+        ):
+            raise ValueError("absolute risk-difference interaction is inconsistent")
         if not 0 <= self.sign_stability <= 1:
             raise ValueError("sign stability must be on [0, 1]")
+        if type(self.baseline_task_units) is not int or self.baseline_task_units <= 0:
+            raise ValueError("baseline task-unit count must be positive")
+        if type(self.cross_fit_folds) is not int or self.cross_fit_folds < 2:
+            raise ValueError("cross-fit fold count must be at least two")
         if type(self.bootstrap_draws) is not int or self.bootstrap_draws <= 0:
             raise ValueError("bootstrap draw count must be positive")
 
@@ -460,7 +496,7 @@ def _support_gate(
         if any(state not in {QueryState.ABSENT, QueryState.PRESENT} for state in states):
             reasons.add("factor_state_not_binary")
             continue
-        cell = "".join("1" if state is QueryState.PRESENT else "0" for state in states)
+        cell = _cell_key(states, candidate.operations)
         cells[cell].append(row)
     cell_counts = tuple((cell, len(cells[cell])) for cell in ("00", "01", "10", "11"))
     if any(count < plan.minimum_cell_task_units for _, count in cell_counts):
@@ -503,7 +539,9 @@ def _score_pair(
     lane: InteractionLane,
     plan: InteractionSelectorPlan,
 ) -> InteractionPairScore:
-    coefficient = _interaction_coefficient(rows, float(plan.ridge_lambda))
+    coefficient = _fit_logit(rows, candidate.operations, float(plan.ridge_lambda)).weights[-1]
+    contributions = _cross_fitted_rd_contributions(candidate, rows, plan)
+    risk_difference = sum(contributions) / len(contributions)
     rng = random.Random(
         int(
             content_hash(
@@ -518,9 +556,11 @@ def _score_pair(
     )
     bootstrap = []
     for _ in range(plan.bootstrap_draws):
-        draw = tuple(rows[rng.randrange(len(rows))] for _ in rows)
-        bootstrap.append(_interaction_coefficient(draw, float(plan.ridge_lambda)))
-    direction = _sign(coefficient)
+        draw = tuple(
+            contributions[rng.randrange(len(contributions))] for _ in contributions
+        )
+        bootstrap.append(sum(draw) / len(draw))
+    direction = _sign(risk_difference)
     stability = sum(_sign(value) == direction for value in bootstrap) / len(bootstrap)
     ordered_absolute = sorted(abs(value) for value in bootstrap)
     middle = len(ordered_absolute) // 2
@@ -532,17 +572,47 @@ def _score_pair(
     return InteractionPairScore(
         candidate.pair_id,
         lane,
+        InteractionScale.RISK_DIFFERENCE,
+        risk_difference,
+        abs(risk_difference),
         coefficient,
-        abs(coefficient),
         stability,
         median,
+        len(contributions),
+        plan.cross_fit_folds,
         plan.bootstrap_draws,
     )
 
 
-def _interaction_coefficient(
-    rows: tuple[PairDiscoveryObservation, ...], ridge_lambda: float
-) -> float:
+@dataclass(frozen=True, slots=True)
+class _RidgeLogitModel:
+    covariate_names: tuple[str, ...]
+    means: tuple[float, ...]
+    scales: tuple[float, ...]
+    weights: tuple[float, ...]
+
+    def probability(
+        self,
+        covariates: tuple[tuple[str, float], ...],
+        factor_1: float,
+        factor_2: float,
+    ) -> float:
+        values = dict(covariates)
+        normalized = [
+            (float(values[name]) - self.means[index]) / self.scales[index]
+            for index, name in enumerate(self.covariate_names)
+        ]
+        design = (1.0, *normalized, factor_1, factor_2, factor_1 * factor_2)
+        return _sigmoid(sum(left * right for left, right in zip(self.weights, design, strict=True)))
+
+
+def _fit_logit(
+    rows: tuple[PairDiscoveryObservation, ...],
+    operations: tuple[Operation, Operation],
+    ridge_lambda: float,
+) -> _RidgeLogitModel:
+    if not rows:
+        raise ValueError("interaction model requires discovery rows")
     covariate_names = tuple(name for name, _ in rows[0].covariates)
     raw_covariates = [
         [float(dict(row.covariates)[name]) for name in covariate_names]
@@ -562,8 +632,9 @@ def _interaction_coefficient(
     ]
     design = []
     for row, covariates in zip(rows, raw_covariates, strict=True):
-        x1, x2 = (
-            1.0 if state is QueryState.PRESENT else 0.0 for _, state in row.factor_states
+        x1, x2 = tuple(
+            float(_target_state(state, operation))
+            for (_, state), operation in zip(row.factor_states, operations, strict=True)
         )
         normalized = [
             (covariates[index] - means[index]) / scales[index]
@@ -591,7 +662,92 @@ def _interaction_coefficient(
             weights = updated
             break
         weights = updated
-    return weights[-1]
+    return _RidgeLogitModel(
+        covariate_names,
+        tuple(means),
+        tuple(scales),
+        tuple(weights),
+    )
+
+
+def _cross_fitted_rd_contributions(
+    candidate: InteractionPairCandidate,
+    rows: tuple[PairDiscoveryObservation, ...],
+    plan: InteractionSelectorPlan,
+) -> tuple[float, ...]:
+    """Return one out-of-fold RD-interaction contribution per baseline task unit."""
+
+    fold_by_id: dict[str, int] = {}
+    cells: dict[str, list[PairDiscoveryObservation]] = {
+        cell: [] for cell in ("00", "01", "10", "11")
+    }
+    for row in rows:
+        states = tuple(state for _, state in row.factor_states)
+        cells[_cell_key(states, candidate.operations)].append(row)
+    for cell, values in cells.items():
+        ordered = sorted(
+            values,
+            key=lambda item: content_hash(
+                {
+                    "pair_id": candidate.pair_id,
+                    "task_unit_id": item.task_unit_id,
+                    "cell": cell,
+                    "rule": "cell_stratified_cross_fit_v1",
+                }
+            ),
+        )
+        if len(ordered) < plan.cross_fit_folds:
+            raise ValueError("interaction selector lacks fold-level four-cell support")
+        for index, row in enumerate(ordered):
+            fold_by_id[row.observation_id] = index % plan.cross_fit_folds
+    contributions = []
+    for fold in range(plan.cross_fit_folds):
+        training = tuple(row for row in rows if fold_by_id[row.observation_id] != fold)
+        held_out = tuple(row for row in rows if fold_by_id[row.observation_id] == fold)
+        training_cells = {
+            _cell_key(tuple(state for _, state in row.factor_states), candidate.operations)
+            for row in training
+        }
+        if training_cells != {"00", "01", "10", "11"}:
+            raise ValueError("interaction selector training fold lacks four-cell support")
+        model = _fit_logit(training, candidate.operations, float(plan.ridge_lambda))
+        for row in held_out:
+            states = tuple(state for _, state in row.factor_states)
+            if _cell_key(states, candidate.operations) != "00":
+                continue
+            probabilities = {
+                cell: model.probability(
+                    row.covariates,
+                    float(cell[0]),
+                    float(cell[1]),
+                )
+                for cell in ("00", "01", "10", "11")
+            }
+            contributions.append(
+                probabilities["11"]
+                - probabilities["10"]
+                - probabilities["01"]
+                + probabilities["00"]
+            )
+    if len(contributions) != len(cells["00"]):
+        raise ValueError("cross-fitted baseline contribution coverage is incomplete")
+    return tuple(contributions)
+
+
+def _cell_key(
+    states: tuple[QueryState, QueryState], operations: tuple[Operation, Operation]
+) -> str:
+    return "".join(
+        str(_target_state(state, operation))
+        for state, operation in zip(states, operations, strict=True)
+    )
+
+
+def _target_state(state: QueryState, operation: Operation) -> int:
+    if state not in {QueryState.ABSENT, QueryState.PRESENT}:
+        raise ValueError("interaction factor state is not binary")
+    target = QueryState.PRESENT if operation is Operation.ADD else QueryState.ABSENT
+    return int(state is target)
 
 
 def _rank(scores: tuple[InteractionPairScore, ...]) -> tuple[InteractionRank, ...]:
@@ -599,8 +755,9 @@ def _rank(scores: tuple[InteractionPairScore, ...]) -> tuple[InteractionRank, ..
         scores,
         key=lambda item: (
             -item.sign_stability,
-            -item.absolute_interaction_coefficient,
-            -item.median_bootstrap_absolute_coefficient,
+            -item.absolute_risk_difference_interaction,
+            -item.median_bootstrap_absolute_risk_difference,
+            -abs(item.logit_interaction_coefficient),
             item.pair_id,
         ),
     )

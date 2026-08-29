@@ -16,6 +16,7 @@ from prompt_mechanism_study.interaction_selector_experiment import (
     verify_interaction_selection_bundle,
 )
 from prompt_mechanism_study.mechanisms import (
+    FactorialCompatibility,
     MechanismRelationSpec,
     RelationEvidenceContract,
     evaluate_pair_relation_evidence,
@@ -50,6 +51,7 @@ def _catalog_bound_selector_config(
         pair.factor_1_id,
         pair.factor_2_id,
         pair.relation_type,
+        FactorialCompatibility.COMPATIBLE,
         pair.pair_context_query_id,
         RelationEvidenceContract(
             (
@@ -82,10 +84,21 @@ def _catalog_bound_selector_config(
         cell = f"{x1}{x2}"
         for index in range(8):
             task_unit_id = f"unit-{cell}-{index}"
+            feature_1_text = "Require bound SQL values."
+            feature_2_text = (
+                "Require mapping dynamic identifiers through the declared finite allowlist."
+            )
+            prompt_parts = [
+                "Use dynamic identifier and untrusted value in SQL execution."
+            ]
+            if x1:
+                prompt_parts.append(feature_1_text)
+            if x2:
+                prompt_parts.append(feature_2_text)
             task = {
                 "task_id": f"task-{task_unit_id}",
                 "task_unit_id": task_unit_id,
-                "prompt": "Use dynamic identifier and untrusted value in SQL execution.",
+                "prompt": " ".join(prompt_parts),
                 "language": "python",
                 "task_family": "sql_query",
                 "cwe": "CWE-89",
@@ -120,6 +133,34 @@ def _catalog_bound_selector_config(
                         "occurrence": 1,
                         "attributes": {},
                     },
+                    *(
+                        (
+                            {
+                                "local_id": "factor-1",
+                                "node_type": "safety_requirement",
+                                "semantic_id": pair.factor_1_id,
+                                "evidence_text": feature_1_text,
+                                "occurrence": 1,
+                                "attributes": {},
+                            },
+                        )
+                        if x1
+                        else ()
+                    ),
+                    *(
+                        (
+                            {
+                                "local_id": "factor-2",
+                                "node_type": "safety_requirement",
+                                "semantic_id": pair.factor_2_id,
+                                "evidence_text": feature_2_text,
+                                "occurrence": 1,
+                                "attributes": {},
+                            },
+                        )
+                        if x2
+                        else ()
+                    ),
                 ),
                 relations=(
                     {"edge_type": "flows_to", "source": "identifier", "target": "sink"},
@@ -174,7 +215,7 @@ def _catalog_bound_selector_config(
     )
     return (
         {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "prompt_tsg_catalog_path": str(CATALOG_PATH),
             "prompt_tsg_catalog_sha256": catalog_sha256(catalog),
             "prompt_tsg_evidence_path": str(evidence_path),
@@ -218,6 +259,40 @@ def test_interaction_selection_bundle_replays_and_rejects_semantic_tamper(
     (output / "manifest.json").write_bytes((canonical_json(manifest) + "\n").encode())
     with pytest.raises(InteractionSelectorExperimentError, match="report does not recompute"):
         verify_interaction_selection_bundle(output)
+
+
+def test_interaction_selection_recomputes_factor_states_from_prompt_tsg(
+    tmp_path: Path,
+) -> None:
+    config, _pair = _catalog_bound_selector_config(tmp_path)
+    current = config["observations"][0]["factor_states"][0][1]
+    config["observations"][0]["factor_states"][0][1] = (
+        "present" if current == "absent" else "absent"
+    )
+    rows = tuple(
+        selector_experiment._observation(item) for item in config["observations"]
+    )
+    config["discovery_evidence"] = sorted(
+        (
+            {
+                "observation_id": row.observation_id,
+                "producer_id": "frozen-pair-discovery-v1",
+                "raw_output": canonical_value(row),
+                "raw_output_sha256": content_hash(canonical_value(row)),
+                "confirm_outcomes_used": False,
+            }
+            for row in rows
+        ),
+        key=lambda item: item["observation_id"],
+    )
+    path = tmp_path / "factor-state-drift.json"
+    path.write_text(canonical_json(config), encoding="utf-8")
+
+    with pytest.raises(
+        InteractionSelectorExperimentError,
+        match="observation drifts from its task-side evidence",
+    ):
+        freeze_interaction_selection_from_config(path, tmp_path / "output")
 
 
 def test_interaction_selection_rejects_self_contained_or_legacy_pair_universe(

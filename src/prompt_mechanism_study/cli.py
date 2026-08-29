@@ -59,7 +59,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     selector_study = commands.add_parser(
         "selector-study",
         help=(
-            "freeze, bridge, evaluate, or verify the active schema-2.0 five-selector study"
+            "freeze, bridge, evaluate, or verify the active schema-2.1 five-selector study"
         ),
     )
     selector_study.add_argument(

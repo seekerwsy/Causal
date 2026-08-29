@@ -449,7 +449,15 @@ def canonical_selector_pairs() -> tuple[tuple[str, str], ...]:
     """Primary FCI comparisons against the other four frozen selectors."""
 
     left = f"{SelectorKind.FCI.value}.v1"
-    return tuple((left, f"{kind.value}.v1") for kind in tuple(SelectorKind)[1:])
+    return tuple(
+        (
+            left,
+            "association.v3"
+            if kind is SelectorKind.ASSOCIATION
+            else f"{kind.value}.v1",
+        )
+        for kind in tuple(SelectorKind)[1:]
+    )
 
 
 __all__ = [

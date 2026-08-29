@@ -1119,6 +1119,19 @@ def _verify_frozen_active_protocol_evidence(
 ) -> None:
     analysis = config["analysis"]
     _verify_active_analysis_contract(analysis)
+    protocols = config.get("pair_protocols")
+    if (
+        not isinstance(protocols, list)
+        or not protocols
+        or any(
+            not isinstance(item, Mapping)
+            or item.get("interaction_claim_scope")
+            not in {"policy_only", "mechanism_eligible"}
+            or item.get("factorial_compatibility") != "compatible"
+            for item in protocols
+        )
+    ):
+        raise ValueError("stored factorial interaction claim scope drifts")
     _verify_independent_functional_qualification(root, study, config)
     oracle = read_json(root / "freeze-factorial-oracle-qualifications.json")
     if not isinstance(oracle, Mapping) or set(oracle) != {
@@ -1838,6 +1851,22 @@ def _independent_unknown_coverage_summary(
     }
 
 
+def _independent_paper_response_pattern(value: Any) -> str:
+    mapping = {
+        "additive": "no_additional_pattern",
+        "positive_interaction": "positive_nonadditive_pattern",
+        "negative_interaction": "negative_nonadditive_pattern",
+        "xor": "xor_response_pattern",
+        "redundant": "subadditive_joint_benefit_pattern",
+        "prerequisite": "conditional_activation_pattern",
+        "reversal": "simple_effect_sign_reversal",
+        "not_evaluable": "not_evaluable",
+    }
+    if value not in mapping:
+        raise ValueError("stored factorial response pattern is unsupported")
+    return mapping[value]
+
+
 def _verify_stored_report(
     report: Mapping[str, Any],
     config: Mapping[str, Any],
@@ -1898,6 +1927,10 @@ def _verify_stored_report(
         ):
             if name in source and observed.get(name) != source[name]:
                 raise ValueError("stored factorial report extended effect drift")
+        if config["schema_version"] == "1.1" and observed.get(
+            "response_surface_pattern"
+        ) != _independent_paper_response_pattern(source.get("response_pattern")):
+            raise ValueError("stored factorial report response-surface label drift")
 
     analysis_config = config["analysis"]
     primary_keys = [
@@ -1936,6 +1969,10 @@ def _verify_stored_report(
         for item in family["intervals"]
     }
     schema_version = config["schema_version"]
+    claim_scope_by_pair = {
+        item["pair_id"]: item["interaction_claim_scope"]
+        for item in config.get("pair_protocols", ())
+    }
     expected_primary_results = []
     for pair_id, model_id, metric in sorted(primary_keys):
         primary = analysis_estimates[(pair_id, model_id, metric)]
@@ -2024,6 +2061,7 @@ def _verify_stored_report(
                 raise ValueError(
                     "stored prospective factorial report lacks code-validity endpoint"
                 )
+            gate["interaction_claim_scope"] = claim_scope_by_pair[pair_id]
             gate.update(
                 _independent_unknown_coverage_summary(
                     {
@@ -2049,7 +2087,7 @@ def _verify_stored_report(
                     "functionality_gate_status": functionality_status,
                 }
             )
-            gate["security_interaction_claim_ready"] = bool(
+            gate["security_policy_interaction_claim_ready"] = bool(
                 config.get("scientific_claim_allowed", False)
                 and all(
                     gate[name]
@@ -2060,8 +2098,12 @@ def _verify_stored_report(
                     )
                 )
             )
+            gate["mechanism_interaction_claim_ready"] = bool(
+                gate["security_policy_interaction_claim_ready"]
+                and gate["interaction_claim_scope"] == "mechanism_eligible"
+            )
             gate["practical_success_claim_ready"] = bool(
-                gate["security_interaction_claim_ready"]
+                gate["security_policy_interaction_claim_ready"]
                 and functionality_status == "passed"
                 and functionality_noninferior
             )
@@ -2088,21 +2130,32 @@ def _verify_stored_report(
     if "claim_ready_coordinates" in report and report["claim_ready_coordinates"] != expected_ready:
         raise ValueError("stored factorial report claim-ready coordinate drift")
     if schema_version == "1.1":
-        expected_security_ready = [
+        expected_security_policy_ready = [
             item["coordinate_id"]
             for item in expected_primary_results
-            if item["gate"]["security_interaction_claim_ready"]
+            if item["gate"]["security_policy_interaction_claim_ready"]
+        ]
+        expected_mechanism_ready = [
+            item["coordinate_id"]
+            for item in expected_primary_results
+            if item["gate"]["mechanism_interaction_claim_ready"]
         ]
         expected_practical_ready = [
             item["coordinate_id"]
             for item in expected_primary_results
             if item["gate"]["practical_success_claim_ready"]
         ]
-        if report.get("security_interaction_claim_ready_coordinates") != (
-            expected_security_ready
+        if report.get("security_policy_interaction_claim_ready_coordinates") != (
+            expected_security_policy_ready
         ):
             raise ValueError(
                 "stored factorial report security-claim coordinate drift"
+            )
+        if report.get("mechanism_interaction_claim_ready_coordinates") != (
+            expected_mechanism_ready
+        ):
+            raise ValueError(
+                "stored factorial report mechanism-claim coordinate drift"
             )
         if report.get("practical_success_claim_ready_coordinates") != (
             expected_practical_ready

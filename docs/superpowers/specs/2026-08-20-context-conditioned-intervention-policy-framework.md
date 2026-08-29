@@ -64,6 +64,12 @@ The main contribution is therefore the combination of:
 3. a fair shared-universe comparison of hypothesis selectors; and
 4. external causal validation on held-out semantic task clusters.
 
+The paper may summarize this procedure in three macro phases: **discovery and freeze**
+(representation, prioritization, and hypothesis freeze), **randomized intervention**
+(intervention/randomization and measurement), and **causal reporting** (outcome assembly and
+inference/reporting). This is presentation only. The reviewer artifact retains the seven explicit
+stages, their immutable boundaries, and one linear execution path.
+
 ## 3. Non-Negotiable Boundaries
 
 1. Prompt TSG is the only authoritative task-security graph.
@@ -486,6 +492,17 @@ Random rankings use a fixed list of seeds and report their complete distribution
 ranking is selected. Association, prediction, expert-information, scoring, calibration, and tie-break
 rules are frozen in the implementation protocol before discovery.
 
+The association selector is operation-aware. For ADD, `PRESENT` is the target state and `ABSENT`
+is baseline; for REMOVE those labels are reversed. It first records the signed target-minus-baseline
+conditional risk difference, then orients that value by the hypothesis's prospectively frozen
+expected direction for ranking. It never takes an absolute value before direction is recorded and
+never treats raw `PRESENT` as treatment for a REMOVE candidate. FCI remains a separate selector;
+there is no hidden composite "FCI plus association" score.
+
+Within supported covariate strata, those conditional differences are standardized to the frozen
+operation-specific baseline task-unit distribution. Strata without both states fail support rather
+than being extrapolated, and this observational score is not described as a randomized effect.
+
 Primary selector metrics are:
 
 \[
@@ -588,6 +605,11 @@ Target versus operation-matched no-op is primary. Placebo and generic arms test 
 generic-security explanations. ADD and REMOVE remain separate policies, hypotheses, multiplicity
 coordinates, and evidence; a neutral/positive Prompt pair is never counted twice as independent
 evidence.
+
+The unedited source Prompt (`ORIGINAL`) is not an arm in the active primary family. A future study
+may add it as a separately frozen practical reference, with its own arm family, power analysis, and
+multiplicity plan. It cannot be introduced after examining Target-versus-No-op outcomes, and a
+Target-versus-Original contrast cannot replace the operation-matched primary estimand.
 
 ## 10. Randomization and Independent Units
 
@@ -709,15 +731,16 @@ assumptions; otherwise no such qualification or practical-success permission may
 
 For hypothesis `h` and model `m`, let `\mathcal P_h^C` be the eligible semantic-cluster
 superpopulation, `Q_{h,I\mid C}` the frozen distribution of task instances inside a cluster,
-`Q_h^R` the realization distribution, and `Q_m^U` the model/request-randomness distribution. The
-primary target-versus-no-op estimand is:
+`Q_h^R` the realization distribution, and `Q_m^U` the model/request-randomness distribution. Let the
+immutable task-bound background `B_{CI}` contain the source Prompt, frozen functional contract,
+Prompt-TSG context, and non-target task requirements. The primary target-versus-no-op estimand is:
 
 \[
 \tau_{hm}^{Y}
 =\mathbb E_{\substack{
 C\sim\mathcal P_h^C,\ I\sim Q_{h,I\mid C},\\
 R\sim Q_h^R,\ U\sim Q_m^U}}
-\left[Y_{CI}(T,R,U)-Y_{CI}(N,R,U)\right].
+\left[Y_{CI}(T,R,U;B_{CI})-Y_{CI}(N,R,U;B_{CI})\right].
 \]
 
 This is an intervention-policy ITT over a finite, frozen realization distribution. It is not
@@ -1206,6 +1229,10 @@ The revised framework is ready for implementation only when tests and spec audit
 | RFCI appears in the main method | both previous specs/manuscript | appendix sensitivity backend only |
 | RQ4 is a main-paper RQ | 2026-07-22 spec | retain as a separately governed perceived-utility study without causal or repair promotion |
 | code markers are forbidden from every analysis | 2026-07-13 spec | permit separately produced post-assignment diagnostics, never primary PAG or mediation |
+| raw `PRESENT` always denotes the association target | implementation draft | encode target state by operation: ADD targets `PRESENT`, REMOVE targets `ABSENT` |
+| add an unedited Original arm to improve the current result | post-result design discussion | keep Target versus operation-matched No-op primary; Original requires a new prospective arm-family freeze |
+| every statistically supported pair is mechanism synergy | pairwise draft | freeze `policy_only` or `mechanism_eligible` per pair and report the narrower supported claim |
+| response surfaces receive mechanism names automatically | pairwise draft | use neutral paper-facing response-pattern labels; named mechanisms require independent evidence |
 
 This ledger is prospective. It does not relabel or reinterpret completed legacy experiments.
 
@@ -1257,6 +1284,11 @@ its Target operation necessarily changes the other factor. In particular, SQL va
 parameterization and SQL identifier allow-listing, and structured argument-vector construction and
 executable allow-listing, are separate atomic factors.
 
+Every `MechanismRelationSpec` also freezes one factorial-compatibility decision from
+`COMPATIBLE`, `NESTED`, `MUTUALLY_EXCLUSIVE`, `ENTAILMENT_COLLAPSE`, `CONFLICTING`, or `UNRESOLVED`.
+Only `COMPATIBLE` relations enter the active pair universe; all other decisions fail closed before
+outcomes or arm texts are available.
+
 ### 24.3 Pair eligibility and optional observational prioritization
 
 For task `i`, the pair context gate requires
@@ -1277,6 +1309,15 @@ If that gate fails, a theory- or registry-selected pair may still enter a separa
 factorial confirmation, but the study cannot claim that observational FCI or another data-driven
 selector discovered the pair. Deterministic products such as `X_1 X_2` are not inserted beside
 `X_1` and `X_2` in a categorical FCI table merely to manufacture an interaction variable.
+
+The selector recodes each factor relative to its declared operation, so `Z_j=1` always means the
+natural target state and `Z_j=0` the operation-specific baseline. Each pair is fit separately. The
+primary observational score is a cross-fitted, covariate-standardized risk-difference interaction:
+models are trained on deterministic cell-stratified folds and the four predicted response surfaces
+are standardized over held-out baseline-eligible task units. The ridge-logit interaction
+coefficient is a diagnostic only. Bootstrap sign stability and median absolute score are ranking
+diagnostics, not confirmatory confidence intervals. The randomized `2 x 2` experiment remains the
+only source of a causal interaction estimate.
 
 ### 24.4 Factorial cells and assigned treatment
 
@@ -1337,20 +1378,30 @@ multiplicity calculations.
 
 ### 24.7 Oracle support Gate
 
-The pair reuses one frozen Security Oracle profile for the declared policy endpoint. The final
-`PairSpec` freezes:
+The pair reuses one frozen Security Oracle profile for the declared policy endpoint. The final pair
+protocol freezes:
 
 ```text
 oracle_profile_id
 oracle_policy_sha256
 oracle_support_status
+interaction_claim_scope
+factorial_compatibility
 ```
 
 `oracle_support_status` is exactly `SUPPORTED` or `UNSUPPORTED` and is decided before randomization.
+`factorial_compatibility` must be `COMPATIBLE`; other relation decisions never enter the factorial
+freeze even when a pair is supplied manually rather than selected from discovery.
 `SUPPORTED` requires the same arm-blind profile and policy digest to apply to the task family and all
 four cells, an authenticated mechanism-trace implementation, preserved `unknown`, and a separately
 labeled gold calibration that covers the code idioms admitted by the pair. `UNSUPPORTED` pairs do
 not enter randomization. There is no pair-specific Oracle and no partial-support status.
+
+`interaction_claim_scope` is exactly `policy_only` or `mechanism_eligible` and is also frozen before
+randomization. `policy_only` permits a claim only about the joint Prompt-policy response surface.
+`mechanism_eligible` additionally requires that the Oracle endpoint is not mechanically defined as
+the conjunction of the two factors and that independent evidence can distinguish both controls.
+Statistical significance cannot promote `policy_only` to a mechanism-synergy claim.
 
 The assignment-level Oracle result remains `secure`, `insecure`, or `unknown`. The Gate status is
 not an assignment outcome, and factor realization is not substituted for the security label. A
@@ -1360,7 +1411,8 @@ an outcome-induced-interaction audit and independent endpoints for the two facto
 
 ### 24.8 Estimands, unknown bounds, and functionality
 
-For model `m`, let `mu_z1z2` be the Section 11 weighted task-unit mean under cell `(z_1,z_2)`. Report:
+For model `m`, let `mu_z1z2` be the Section 11 weighted task-unit mean under cell `(z_1,z_2)`,
+averaged over the frozen task-bound background distribution `B`. Report:
 
 \[
 \tau_1=\mu_{10}-\mu_{00},\qquad
@@ -1410,11 +1462,14 @@ independent result verifier recomputes the four cell means, `delta`, resampling 
 without importing the production estimator.
 
 A positive point estimate is not by itself synergy, and a negative point estimate is not by itself
-antagonism. A named **security interaction** requires a simultaneous interval excluding zero, the
-frozen practical margin, adequate support, complete provenance, and acceptable unknown bounds. The
-separate **practical-success** label additionally requires the preregistered functionality Gate to
-pass. Otherwise the corresponding claim is directionally consistent, null, conflicting, or
-non-evaluable under Section 15.
+antagonism. Paper-facing response surfaces use neutral labels such as `positive_nonadditive_pattern`,
+`negative_nonadditive_pattern`, `conditional_activation_pattern`, and
+`simple_effect_sign_reversal`. A named **security policy interaction** requires a simultaneous
+interval excluding zero, the frozen practical margin, adequate support, complete provenance, and
+acceptable unknown bounds. A mechanism-interaction label additionally requires
+`interaction_claim_scope=mechanism_eligible`. The separate **practical-success** label additionally
+requires the preregistered functionality Gate to pass. Otherwise the corresponding claim is
+directionally consistent, null, conflicting, or non-evaluable under Section 15.
 
 ### 24.10 Minimal implementation and acceptance additions
 

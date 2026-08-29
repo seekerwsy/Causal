@@ -39,7 +39,9 @@ from prompt_mechanism_study.representation import (
     Candidate,
     CandidateSkeletonV2,
     CandidateUniverse,
+    ExpectedDirection,
     FrozenHypothesisV2,
+    Operation,
 )
 
 
@@ -1024,7 +1026,7 @@ def _selector_runs(
         SelectorKind.ASSOCIATION,
         universe,
         plan,
-        *_association_scores(rows, supported),
+        *_association_scores(rows, supported, dict(universe.candidate_skeletons)),
     )
     prediction = _run_scored_selector(
         SelectorKind.PREDICTION,
@@ -1515,10 +1517,15 @@ def _run_causal_learn_pag(
 def _association_scores(
     rows: tuple[DiscoveryObservation, ...],
     candidate_ids: tuple[str, ...],
+    skeleton_by_id: Mapping[str, CandidateSkeletonV2],
 ) -> tuple[dict[str, float], tuple[SelectorFailure, ...], str]:
     scores: dict[str, float] = {}
+    raw_effects: dict[str, float] = {}
     failures = []
     for candidate_id in candidate_ids:
+        skeleton = skeleton_by_id[candidate_id]
+        baseline_state = 0 if skeleton.operation is Operation.ADD else 1
+        target_state = 1 - baseline_state
         strata: dict[tuple[tuple[str, float], ...], list[DiscoveryObservation]] = {}
         for row in rows:
             if candidate_id not in dict(row.candidate_states):
@@ -1527,18 +1534,41 @@ def _association_scores(
         weighted = 0.0
         support = 0
         for values in strata.values():
-            state_0 = [row.outcome for row in values if dict(row.candidate_states)[candidate_id] == 0]
-            state_1 = [row.outcome for row in values if dict(row.candidate_states)[candidate_id] == 1]
-            if not state_0 or not state_1:
+            baseline = [
+                row.outcome
+                for row in values
+                if dict(row.candidate_states)[candidate_id] == baseline_state
+            ]
+            target = [
+                row.outcome
+                for row in values
+                if dict(row.candidate_states)[candidate_id] == target_state
+            ]
+            if not baseline or not target:
                 continue
-            count = len(state_0) + len(state_1)
-            weighted += count * (sum(state_1) / len(state_1) - sum(state_0) / len(state_0))
-            support += count
+            baseline_count = len(baseline)
+            weighted += baseline_count * (
+                sum(target) / len(target) - sum(baseline) / len(baseline)
+            )
+            support += baseline_count
         if support:
-            scores[candidate_id] = abs(weighted / support)
+            raw_effect = weighted / support
+            raw_effects[candidate_id] = raw_effect
+            direction = (
+                1.0
+                if skeleton.expected_direction is ExpectedDirection.INCREASE
+                else -1.0
+            )
+            scores[candidate_id] = direction * raw_effect
         else:
             failures.append(SelectorFailure("no_conditional_overlap", "no covariate stratum contains both feature states", candidate_id))
-    evidence = content_hash({"rule": "absolute_overlap_weighted_conditional_risk_difference_v1", "scores": scores})
+    evidence = content_hash(
+        {
+            "rule": "operation_specific_baseline_standardized_conditional_risk_difference_v3",
+            "raw_target_minus_baseline_effects": raw_effects,
+            "direction_oriented_scores": scores,
+        }
+    )
     return scores, tuple(failures), evidence
 
 
@@ -1773,9 +1803,10 @@ def _selector_run(
     failures: tuple[SelectorFailure, ...],
 ) -> SelectorRun:
     status = SelectorRunStatus.PARTIAL if failures else SelectorRunStatus.COMPLETE
+    adapter_version = "v3" if kind is SelectorKind.ASSOCIATION else "v1"
     return SelectorRun(
         kind,
-        f"{kind.value}.v1",
+        f"{kind.value}.{adapter_version}",
         plan.model_id,
         universe.manifest_id,
         universe.discovery_data_sha256,

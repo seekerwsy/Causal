@@ -12,6 +12,13 @@ import prompt_mechanism_study.selector_analysis as analysis
 from prompt_mechanism_study import prioritization
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.cli import main
+from prompt_mechanism_study.prompt_tsg import (
+    apply_feature_patch,
+    build_prompt_tsg,
+    load_catalog,
+    prompt_tsg_from_record,
+    prompt_tsg_record,
+)
 from prompt_mechanism_study.prioritization import (
     BackgroundKnowledgeRule,
     BridgeRecord,
@@ -40,6 +47,80 @@ from prompt_mechanism_study.selector_inference import (
     canonical_selector_pairs,
 )
 from test_selector_study import _fixture
+
+
+CATALOG_PATH = Path(__file__).parents[1] / "data/method/prompt-tsg-catalog-v1.json"
+
+
+def _prompt_tsg_evidence(manifest, rows):
+    catalog = load_catalog(CATALOG_PATH)
+    skeletons = dict(manifest.candidate_skeletons)
+    queries = {item["query_id"]: item for item in catalog["queries"]}
+    prompts = {}
+    graphs = {}
+    for task_unit_id in sorted({item.task_unit_id for item in rows}):
+        task_rows = [item for item in rows if item.task_unit_id == task_unit_id]
+        states = {
+            candidate_id: state
+            for item in task_rows
+            for candidate_id, state in item.candidate_states
+        }
+        relevant_queries = [
+            queries[skeletons[candidate_id].context_query_id]
+            for candidate_id in states
+        ]
+        semantics = {
+            semantic_id
+            for query in relevant_queries
+            for semantic_id in query["required_semantics"]
+        }
+        semantics.update(
+            skeletons[candidate_id].actionable_feature_id
+            for candidate_id, state in states.items()
+            if state == 1
+        )
+        ordered_semantics = sorted(semantics)
+        prompt = " ".join(ordered_semantics)
+        local_by_semantic = {
+            semantic_id: f"fact-{index:02d}"
+            for index, semantic_id in enumerate(ordered_semantics)
+        }
+        facts = [
+            {
+                "local_id": local_by_semantic[semantic_id],
+                "node_type": catalog["semantics"][semantic_id],
+                "semantic_id": semantic_id,
+                "evidence_text": semantic_id,
+                "occurrence": 1,
+                "attributes": {},
+            }
+            for semantic_id in ordered_semantics
+        ]
+        relation_keys = sorted(
+            {
+                tuple(relation)
+                for query in relevant_queries
+                for relation in query["required_relations"]
+            }
+        )
+        relations = [
+            {
+                "source": local_by_semantic[source],
+                "edge_type": edge_type,
+                "target": local_by_semantic[target],
+            }
+            for source, edge_type, target in relation_keys
+        ]
+        prompts[task_unit_id] = prompt
+        graphs[task_unit_id] = build_prompt_tsg(
+            task_id=task_unit_id,
+            prompt=prompt,
+            extractor_id="test-frozen-facts-v1",
+            catalog=catalog,
+            facts=facts,
+            relations=relations,
+        )
+    return prompts, graphs, catalog
 
 
 def _prospective_fixture(monkeypatch):
@@ -102,8 +183,15 @@ def _prospective_fixture(monkeypatch):
         fci_background_knowledge=tuple(rules),
         fci_wrong_bk_perturbation=tuple(wrong_rules),
     )
+    prompts, graphs, catalog = _prompt_tsg_evidence(manifest, rows)
     manifest, support_audit, information_budget, discovery_evidence = (
-        build_active_selector_evidence(manifest, rows)
+        build_active_selector_evidence(
+            manifest,
+            rows,
+            prompt_by_task_unit=prompts,
+            prompt_tsg_by_task_unit=graphs,
+            prompt_tsg_catalog=catalog,
+        )
     )
     expert = replace(
         expert,
@@ -136,6 +224,7 @@ def _prospective_fixture(monkeypatch):
         support_audit,
         information_budget,
         discovery_evidence,
+        catalog,
     )
 
 
@@ -152,11 +241,13 @@ def test_active_selector_recomputes_support_and_information_budget(
         support_audit,
         information_budget,
         discovery_evidence,
+        catalog,
     ) = _prospective_fixture(monkeypatch)
     config = {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "universe": canonical_value(manifest),
         "observations": canonical_value(rows),
+        "prompt_tsg_catalog": catalog,
         "plan": canonical_value(plan),
         "expert_input": None,
         "fci_relation_scores": None,
@@ -186,6 +277,34 @@ def test_active_selector_recomputes_support_and_information_budget(
     raw_path.write_text(canonical_json(raw_config), encoding="utf-8")
     with pytest.raises(SelectorExperimentError, match="does not bind its observation"):
         freeze_selection_from_config(raw_path, tmp_path / "tampered-discovery")
+
+    graph_config = deepcopy(config)
+    row = next(
+        item
+        for item in graph_config["discovery_evidence"]
+        if any(state == 0 for _candidate_id, state in item["raw_output"]["candidate_states"])
+    )
+    candidate_id = next(
+        candidate_id
+        for candidate_id, state in row["raw_output"]["candidate_states"]
+        if state == 0
+    )
+    feature_id = dict(manifest.candidate_skeletons)[candidate_id].actionable_feature_id
+    original_prompt = row["prompt"]
+    patched = apply_feature_patch(
+        prompt_tsg_from_record(row["prompt_tsg"]),
+        prompt=original_prompt,
+        appended_text="Apply the selected security control.",
+        semantic_id=feature_id,
+        catalog=catalog,
+    )
+    row["prompt"] = original_prompt + "\n\nApply the selected security control."
+    row["prompt_sha256"] = content_hash(row["prompt"])
+    row["prompt_tsg"] = prompt_tsg_record(patched)
+    graph_path = tmp_path / "tampered-prompt-tsg.json"
+    graph_path.write_text(canonical_json(graph_config), encoding="utf-8")
+    with pytest.raises(SelectorExperimentError, match="do not recompute from Prompt TSG"):
+        freeze_selection_from_config(graph_path, tmp_path / "tampered-prompt-tsg")
 
 
 @pytest.mark.extended
@@ -290,15 +409,17 @@ def test_offline_selector_artifact_closure_and_tamper_rejection(tmp_path: Path, 
         support_audit,
         information_budget,
         discovery_evidence,
+        catalog,
     ) = _prospective_fixture(monkeypatch)
     selection = run_selector_suite(
         manifest, rows, suite_plan, fci_relation_scores=None, expert_input=expert
     )
     selection_root = base / "selection"
     selection_config = {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "universe": canonical_value(manifest),
         "observations": canonical_value(rows),
+        "prompt_tsg_catalog": catalog,
         "plan": canonical_value(suite_plan),
         "expert_input": canonical_value(expert),
         "fci_relation_scores": None,
@@ -343,7 +464,7 @@ def test_offline_selector_artifact_closure_and_tamper_rejection(tmp_path: Path, 
     bridge_root = base / "bridge"
     bridge_config = base / "bridge.json"
     bridge_config.write_text(
-        canonical_json({"schema_version": "2.0", "records": canonical_value(records)}),
+        canonical_json({"schema_version": "2.1", "records": canonical_value(records)}),
         encoding="utf-8",
     )
     freeze_bridge_from_config(selection_root, bridge_config, bridge_root)

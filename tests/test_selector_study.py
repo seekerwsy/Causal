@@ -30,13 +30,6 @@ from prompt_mechanism_study.representation import (
     TargetSpecV2,
     freeze_universe,
 )
-from prompt_mechanism_study.selector_experiment import (
-    build_active_selector_evidence,
-    freeze_bridge_from_config,
-    load_bridge_freeze_bundle,
-    load_selection_freeze_bundle,
-    write_selection_freeze_bundle,
-)
 from prompt_mechanism_study.selector_inference import (
     ConfirmationCoordinate,
     SelectorInferencePlan,
@@ -46,17 +39,41 @@ from prompt_mechanism_study.selector_verify import verify_selector_result
 
 
 def _fixture(*, supported: bool = True):
+    catalog_candidates = (
+        (
+            "context.untrusted_argument_to_fixed_process.v1",
+            "feature.argv_without_shell",
+            "CWE-78",
+        ),
+        (
+            "context.untrusted_argument_to_finite_process_choice.v1",
+            "feature.executable_allowlist_and_argv",
+            "CWE-78",
+        ),
+        (
+            "context.untrusted_value_to_fixed_sql.v1",
+            "feature.sql_value_parameterization",
+            "CWE-89",
+        ),
+        (
+            "context.finite_dynamic_identifier_sql.v1",
+            "feature.sql_identifier_allowlist_and_values",
+            "CWE-89",
+        ),
+    )
     candidates = tuple(
         Candidate(
             f"candidate.{index}",
-            f"context.{index}",
-            f"feature.{index}",
+            context_query_id,
+            feature_id,
             Operation.ADD if index % 2 == 0 else Operation.REMOVE,
-            f"CWE-{100 + index}",
+            cwe,
             "oracle_evaluable_secure_code_yield",
             ExpectedDirection.INCREASE,
         )
-        for index in range(4)
+        for index, (context_query_id, feature_id, cwe) in enumerate(
+            catalog_candidates
+        )
     )
     universe = freeze_universe(candidates, representation_adapter_id="prompt-tsg-v2")
     candidate_ids = tuple(item.candidate_id for item in universe.candidates)
@@ -70,12 +87,12 @@ def _fixture(*, supported: bool = True):
             candidate_ids[3]: (index // 5) % 2,
         }
         for family_id, family_candidates in (
-            ("family-a", candidate_ids[:2]),
-            ("family-b", candidate_ids[2:]),
+            ("family-a", (candidate_ids[0], candidate_ids[2])),
+            ("family-b", (candidate_ids[1], candidate_ids[3])),
         ):
             rows.append(
                 DiscoveryObservation(
-                    f"task-unit-{index:02d}",
+                    f"task-unit-{index:02d}-{family_id}",
                     "model-a",
                     family_id,
                     0,
@@ -90,7 +107,7 @@ def _fixture(*, supported: bool = True):
         supported_candidate_ids=candidate_ids if supported else (),
         realization_policy_ids={candidate_id: f"realization-policy-{index}" for index, candidate_id in enumerate(candidate_ids)},
         candidate_family_ids={
-            candidate_id: ("family-a" if index < 2 else "family-b")
+            candidate_id: ("family-a" if index in {0, 2} else "family-b")
             for index, candidate_id in enumerate(candidate_ids)
         },
         discovery_data_sha256=discovery_data_sha256(frozen_rows),
@@ -118,6 +135,57 @@ def _fixture(*, supported: bool = True):
         False,
     )
     return manifest, frozen_rows, plan, candidate_ids, fci_scores, expert
+
+
+@pytest.mark.extended
+def test_association_score_respects_remove_baseline_and_expected_direction() -> None:
+    manifest, _rows, _plan, candidate_ids, _fci, _expert = _fixture()
+    candidate_id = candidate_ids[0]
+    skeleton = replace(
+        dict(manifest.candidate_skeletons)[candidate_id],
+        operation=Operation.REMOVE,
+        expected_direction=ExpectedDirection.DECREASE,
+    )
+    observations = (
+        DiscoveryObservation(
+            "baseline-present",
+            "model-a",
+            "family-a",
+            0,
+            ((candidate_id, 1),),
+            (("source_group", 0.0),),
+            1,
+        ),
+        DiscoveryObservation(
+            "target-absent",
+            "model-a",
+            "family-a",
+            0,
+            ((candidate_id, 0),),
+            (("source_group", 0.0),),
+            0,
+        ),
+    )
+
+    decrease_scores, failures, _evidence = prioritization._association_scores(
+        observations,
+        (candidate_id,),
+        {candidate_id: skeleton},
+    )
+    increase_scores, _failures, _evidence = prioritization._association_scores(
+        observations,
+        (candidate_id,),
+        {
+            candidate_id: replace(
+                skeleton,
+                expected_direction=ExpectedDirection.INCREASE,
+            )
+        },
+    )
+
+    assert failures == ()
+    assert decrease_scores[candidate_id] == 1.0
+    assert increase_scores[candidate_id] == -1.0
 
 
 @pytest.mark.reviewer
@@ -200,13 +268,13 @@ def test_fci_uses_family_local_task_unit_bootstrap_stability(monkeypatch) -> Non
 
     # raw, temporal, full, wrong, then every primary bootstrap draw (legacy v1 has no domain family).
     assert len(calls) == 2 * (4 + plan.fci_bootstrap_draws)
-    assert scores[candidate_ids[0]] == scores[candidate_ids[2]] == 1.0
-    assert scores[candidate_ids[1]] == scores[candidate_ids[3]] == 0.0
+    assert scores[candidate_ids[0]] == scores[candidate_ids[1]] == 1.0
+    assert scores[candidate_ids[2]] == scores[candidate_ids[3]] == 0.0
     assert fci.rankings[0].evidence_sha256 != content_hash(scores)
 
 
 @pytest.mark.extended
-def test_prospective_v2_freezes_slot_and_real_pag_bk_sensitivities(monkeypatch, tmp_path) -> None:
+def test_prospective_v2_freezes_slot_and_real_pag_bk_sensitivities(monkeypatch) -> None:
     manifest, rows, legacy, candidate_ids, _scores, _expert = _fixture()
     rows = tuple(
         item
@@ -214,9 +282,6 @@ def test_prospective_v2_freezes_slot_and_real_pag_bk_sensitivities(monkeypatch, 
         for item in (row, replace(row, request_randomness_slot=1, outcome=1 - row.outcome))
     )
     manifest = replace(manifest, discovery_data_sha256=discovery_data_sha256(rows))
-    manifest, support_audit, information_budget, discovery_evidence = (
-        build_active_selector_evidence(manifest, rows)
-    )
     rules = []
     wrong = []
     by_family = dict(manifest.candidate_family_ids)
@@ -283,24 +348,6 @@ def test_prospective_v2_freezes_slot_and_real_pag_bk_sensitivities(monkeypatch, 
     with pytest.raises(ValueError, match="predecessor skeleton"):
         freeze_shared_bridge_map(frozen, bad)
 
-    config = {
-        "schema_version": "2.0", "universe": prioritization.canonical_value(manifest),
-        "observations": prioritization.canonical_value(rows), "plan": prioritization.canonical_value(plan),
-        "expert_input": None, "fci_relation_scores": None,
-        "support_audit": support_audit,
-        "information_budget": information_budget,
-        "discovery_evidence": discovery_evidence,
-    }
-    root = tmp_path / "prospective-selection"
-    write_selection_freeze_bundle(root, frozen, config)
-    assert load_selection_freeze_bundle(root) == frozen
-    bridge_config = tmp_path / "prospective-bridge.json"
-    bridge_config.write_text(prioritization.canonical_json({
-        "schema_version": "2.0", "records": prioritization.canonical_value(bridge.records),
-    }), encoding="utf-8")
-    bridge_root = tmp_path / "prospective-bridge"
-    freeze_bridge_from_config(root, bridge_config, bridge_root)
-    assert load_bridge_freeze_bundle(bridge_root, root) == bridge
 
 
 @pytest.mark.milestone
@@ -392,7 +439,7 @@ def _evaluated_result():
         100,
         0.05,
         0.5,
-        (("tsg_fci.v1", "association.v1"),),
+        (("tsg_fci.v1", "association.v3"),),
     )
     result = evaluate_selector_study(selection, bridge, coordinates, inference_plan)
     return selection, bridge, tuple(coordinates), inference_plan, result, candidate_ids

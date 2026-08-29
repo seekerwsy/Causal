@@ -10,6 +10,7 @@ from prompt_mechanism_study.interaction_selector import (
     run_interaction_selector,
 )
 from prompt_mechanism_study.mechanisms import (
+    FactorialCompatibility,
     InteractionScale,
     MechanismRegistryError,
     MechanismRelationSpec,
@@ -54,6 +55,7 @@ def _relation_spec() -> MechanismRelationSpec:
         FACTOR_1,
         FACTOR_2,
         PairRelation.SAME_FLOW,
+        FactorialCompatibility.COMPATIBLE,
         "context.shared_flow.v1",
         RelationEvidenceContract(
             ("sink.synthetic", "source.synthetic"),
@@ -75,6 +77,7 @@ def _plan() -> InteractionSelectorPlan:
         2,
         0.9,
         0.05,
+        2,
         80,
         20260828,
         1,
@@ -192,9 +195,103 @@ def test_xor_is_ranked_in_pure_interaction_lane_without_graph_main_effect() -> N
     assert frozen.selected_pure_interaction_pair_ids == (pair.pair_id,)
     score = frozen.pure_interaction_ranking[0].score
     assert score.lane is InteractionLane.PURE_INTERACTION
-    assert score.interaction_coefficient < 0
-    assert score.absolute_interaction_coefficient > 0.5
+    assert score.observational_score_scale is InteractionScale.RISK_DIFFERENCE
+    assert score.risk_difference_interaction < 0
+    assert score.absolute_risk_difference_interaction > 0.25
+    assert score.logit_interaction_coefficient < 0
+    assert score.baseline_task_units == 8
+    assert score.cross_fit_folds == 2
     assert score.sign_stability > 0.8
+
+
+@pytest.mark.parametrize(
+    ("secure_counts", "expected_sign"),
+    [
+        ({"00": 1, "10": 2, "01": 2, "11": 7}, 1),
+        ({"00": 7, "10": 6, "01": 6, "11": 1}, -1),
+    ],
+)
+def test_pair_selector_recovers_positive_and_negative_rd_patterns(
+    secure_counts: dict[str, int], expected_sign: int
+) -> None:
+    pair, spec, rows, evidence = _discovery_rows()
+    revised = []
+    for row in rows:
+        cell, index_text = row.task_unit_id.removeprefix("unit-").split("-")
+        revised.append(
+            replace(
+                row,
+                covariates=(("source_code", 0.0),),
+                outcome=int(int(index_text) < secure_counts[cell]),
+            )
+        )
+
+    frozen = run_interaction_selector(
+        build_tsg_pair_universe((pair,), (spec,)),
+        tuple(revised),
+        evidence,
+        _plan(),
+    )
+    score = frozen.scores[0].risk_difference_interaction
+
+    assert (score > 0) - (score < 0) == expected_sign
+
+
+def test_mixed_add_remove_pair_uses_operation_specific_cells() -> None:
+    pair = replace(_pair(), operation_2=Operation.REMOVE)
+    spec = replace(
+        _relation_spec(), allowed_operation_pairs=((Operation.ADD, Operation.REMOVE),)
+    )
+    rows = []
+    evidence = []
+    for target_1, target_2 in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        cell = f"{target_1}{target_2}"
+        for index in range(8):
+            task_unit_id = f"mixed-{cell}-{index}"
+            relation = _evidence(pair, spec, task_unit_id)
+            evidence.append(relation)
+            rows.append(
+                PairDiscoveryObservation(
+                    pair.pair_id,
+                    spec.relation_spec_id,
+                    relation.evidence_id,
+                    task_unit_id,
+                    "model-v1",
+                    f"lineage-{index % 2}",
+                    "python",
+                    "synthetic",
+                    "local-api",
+                    pair.pair_context_query_id,
+                    QueryState.PRESENT,
+                    (
+                        (
+                            FACTOR_1,
+                            QueryState.PRESENT if target_1 else QueryState.ABSENT,
+                        ),
+                        (
+                            FACTOR_2,
+                            QueryState.ABSENT if target_2 else QueryState.PRESENT,
+                        ),
+                    ),
+                    ((FACTOR_1, 0.99), (FACTOR_2, 0.99)),
+                    (("source_code", float(index % 2)),),
+                    target_1 ^ target_2,
+                )
+            )
+
+    frozen = run_interaction_selector(
+        build_tsg_pair_universe((pair,), (spec,)), tuple(rows), tuple(evidence), _plan()
+    )
+
+    assert frozen.gates[0].cell_task_units == (
+        ("00", 8),
+        ("01", 8),
+        ("10", 8),
+        ("11", 8),
+    )
+    score = frozen.selected_pure_interaction_pair_ids
+    assert score == (pair.pair_id,)
+    assert frozen.pure_interaction_ranking[0].score.risk_difference_interaction < -0.25
 
 
 def test_graph_supported_pair_uses_separate_lane() -> None:
@@ -255,3 +352,14 @@ def test_tsg_universe_rejects_undeclared_pair_relation() -> None:
 
     with pytest.raises(ValueError, match="cannot be empty"):
         build_tsg_pair_universe((pair,), (incompatible,))
+
+
+def test_tsg_universe_excludes_nonfactorial_relation() -> None:
+    pair = _pair()
+    nested = replace(
+        _relation_spec(),
+        factorial_compatibility=FactorialCompatibility.NESTED,
+    )
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        build_tsg_pair_universe((pair,), (nested,))

@@ -6,7 +6,7 @@ factorial subcommands are stage boundaries, not competing frameworks.
 
 The normative protocol is the
 [context-conditioned intervention policy framework](superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md).
-The active implementation accepts the prospective selector schema 2.0,
+The active implementation accepts the prospective selector schema 2.1,
 successor ADD/REMOVE studies, and factorial schema 1.1. Historical execution
 code is not imported by the package or exposed by the CLI; immutable historical
 result bundles remain available to the independent result verifier.
@@ -45,6 +45,11 @@ A review should confirm all of the following:
   outcomes; it is not a mediator or primary-PAG variable.
 - Candidate selection, task support, hypotheses, exact variants, adapters,
   seeds, endpoints, estimands, and multiplicity are frozen before outcomes.
+- Atomic and pair discovery states are recomputed from the embedded catalog,
+  prompt, and Prompt TSG evidence; a producer-supplied binary state is never
+  accepted as representation evidence by itself.
+- ADD and REMOVE use operation-specific target/control coding. Pair candidates
+  enter the selector only when their frozen relation is factorial-compatible.
 - Every task-unit/realization/model block has complete assigned-arm support.
 - Assigned-arm, deduplicated-task-unit ITT is primary; task units are equally
   weighted.
@@ -58,6 +63,10 @@ A review should confirm all of the following:
   power qualification; a favorable point estimate alone cannot authorize it.
 - Smoke, demo, calibration, and development-canary outputs cannot be promoted
   to confirmatory evidence.
+- A statistically nonadditive pair is first a Prompt-policy response-surface
+  result. A mechanism-interaction label additionally requires a prospectively
+  frozen `mechanism_eligible` Oracle scope; `policy_only` cannot be promoted by
+  significance.
 
 ## Reading order
 
@@ -134,7 +143,7 @@ exploration, or temporary checkpoints.
 
 ## Current evidence status
 
-The successor, schema-2.0 selector, pair selector, and generalized schema-1.1
+The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
 factorial paths are implemented and reviewer-tested. They have not yet produced
 a new claim-bearing provider run. The tracked schema-1.0 factorial results are
 formal historical evidence and remain reproducible through the verifier, but

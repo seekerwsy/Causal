@@ -10,7 +10,7 @@
 
 **前序正式实验：** [SQL 二因素 from-scratch confirmation v3](experiments/2026-08-27-factorial-sql-confirm-v3-results.md)
 
-**最新观测门控证据：** [自然提示 positivity pilot](experiments/2026-08-26-natural-prompt-positivity-pilot.md)
+**当前 Gate 与证据审计：** [Gate E readiness](gate-e-readiness.md)
 
 本文把现有理论规范、活动代码和已运行证据整理为一条可审查的方法链。它不重新定义冻结实验，也不把规划中的组件写成已经实现或已经产生结果。
 
@@ -26,7 +26,7 @@ selector 决定“有限预算下优先测试什么”
 随机实验决定“冻结的提示政策是否产生效果”
 ```
 
-当前最稳健的核心是第一行和第三行。第二行是有前置门控的扩展：最新自然提示 pilot 未通过 positivity 和来源重叠门，因此 FCI 尚未执行，也不能形成 selector 优越性结论。
+当前最稳健的核心是第一行和第三行。第二行是有前置门控的扩展：活动代码已经闭合 support gate 与五类 selector，但当前审查树没有一份通过该门且可重放的正式自然 discovery freeze，因此尚不能形成 selector 优越性结论。
 
 ## 2. 理论层次
 
@@ -102,6 +102,8 @@ W_i\rightarrow P_i^0\rightarrow X_i^0,
 
 family-local FCI 表只能包含最小的 `W`、自然提示查询 `X^0` 和发现结果 `Y^0`。原始代码、arm、生成代码特征和干预后特征均不得进入该表。
 
+活动 selector schema 2.1 不信任 discovery producer 自报的 `X^0`。它把 catalog、自然 prompt 和 Prompt TSG 一并闭合进 freeze，加载时重新验证 evidence span、上下文查询和 actionable-feature 状态，再与 observation 中的二值编码逐项比对。
+
 FCI 之前必须通过 outcome-blind positivity gate：在同一 `C_q=PRESENT` 上下文内，`f=PRESENT` 与 `f=ABSENT` 都有足够独立 task units，且两种状态不能由数据来源完全分离。若失败，结论是“当前观测数据不支持该 selector”，不能通过平滑、跨族合并或人工制造状态修复。
 
 ### 4.2 Confirmation：冻结政策的随机实验
@@ -146,7 +148,7 @@ s_{\ell m}(D_{disc,m},\mathcal H),\quad |s_{\ell m}|\le K.
 
 ### 5.3 当前选择
 
-最新 positivity pilot 在 CWE-328 和 CWE-611 上均未通过支持门，且 CWE-611 的特征状态被来源 lineage 完全分离。因此当前框架采用：
+历史 positivity pilot 在 CWE-328 和 CWE-611 上均未通过支持门，且 CWE-611 的特征状态被来源 lineage 完全分离；该 pilot 的活动结果文件已从 reviewer tree 移出，不能充当新协议证据。因此当前框架采用：
 
 1. Prompt TSG 继续负责上下文与可编辑特征绑定；
 2. FCI 保留为通过支持门后才启用的条件模块；
@@ -178,6 +180,8 @@ s_{\ell m}(D_{disc,m},\mathcal H),\quad |s_{\ell m}|\le K.
 
 主对比是 `Target - operation-matched No-op`。它识别冻结目标政策的分配效应。`Target - Placebo` 与 `Target - Generic` 是次级 specificity 对比，分别排除“仅多加文字/改变风格”和“任何安全提醒都一样”的解释。
 
+未编辑的 Original prompt 不是当前活动 arm，也不替代匹配 No-op。若论文需要 `Target-Original` 的实践参照，必须作为新的前瞻 arm-family 明确冻结后再运行；既有结果不能事后补算该对比。
+
 这里的 placebo 是**随机化的控制政策**，不是发现阶段的源提示风格变量。
 
 ### 7.1 二因素配对析因扩展
@@ -202,9 +206,11 @@ Prompt TSG 只提供 target-state-independent context、两个原子 feature 的
 
 令四格 task-unit 加权均值为 `mu00`、`mu10`、`mu01`、`mu11`，主交互 estimand 为
 `delta = mu11 - mu10 - mu01 + mu00`。同时报告两个单因素效应、联合效应、unknown bounds、
-功能析因效应和 secure-and-functional joint outcome。首个 SQL canary 的 Oracle endpoint
-本身要求两个控制均成立，因此其结果只能解释为 joint Prompt-policy interaction；没有独立
-factor endpoints 时不能升级为普遍机制 synergy。
+功能析因效应和 secure-and-functional joint outcome。论文首先使用中性的 response-surface
+标签，例如 `positive_nonadditive_pattern`。每个 pair 在随机化前冻结
+`interaction_claim_scope=policy_only|mechanism_eligible`；首个 SQL canary 的 Oracle endpoint
+本身要求两个控制均成立，因此只能解释为 joint Prompt-policy interaction，不能因显著性
+升级为普遍机制 synergy。
 
 ## 8. 风格因素在因果模型中的位置
 
@@ -241,10 +247,10 @@ Y_{joint}=Y_{secure}I(\text{functional pass}).
 对假设 `h` 和模型 `m`，主 estimand 是：
 
 \[
-\tau_{hm}^{Y}=E[Y(T,R,U)-Y(N,R,U)],
+\tau_{hm}^{Y}=E_{(i,B_i),R,U}[Y(T,R,U)-Y(N,R,U)],
 \]
 
-期望在冻结的 eligible task units、任务权重、realization 分布 `Q_h` 和请求随机性上取值。它是**特定政策在特定范围内的 ITT**，不是普遍的 `do(f=1)`、自然语言通用特征效应或模型无关效应。
+其中 `B_i` 是任务 `i` 中未操纵且跨臂固定的 Prompt 背景，不是独立抽取的 `B~nu`。期望在冻结的 eligible task units、任务绑定背景、任务权重、realization 分布 `Q_h` 和请求随机性上取值。它是**特定政策在特定范围内的 ITT**，不是普遍的 `do(f=1)`、自然语言通用特征效应或模型无关效应。
 
 对 Oracle unknown，观测 secure yield 不把 unknown 改成 insecure，而是另报 latent secure yield 的上下界。任何正向差异若主要来自代码生成率或 Oracle 覆盖变化，都不能解释为更安全的代码。
 
@@ -280,13 +286,13 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested + pilot executed | 38 个自然 prompt 完成盲态抽取；这不是 selector 或 effect 结果 |
-| 自然 discovery population 与 positivity audit | implemented + tested + executed + reported | 两个 scope 均未过门；FCI 正确未运行 |
-| family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.0 五类 selector、完整 candidate skeleton、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；schema 1.0 执行代码已退出活动包，仅由 Git 历史保存；当前自然数据仍未通过 positivity/source-overlap gate，因而没有 selector 优越性结果 |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；historical pilot executed | 38 个自然 prompt 的历史盲态抽取仅是校准；活动 schema 2.1 freeze 尚未执行 |
+| 自然 discovery population 与 positivity audit | implemented + tested；historical pilot failed | 两个历史 scope 均未过门；其结果不在活动 reviewer tree，也不能替代新的正式 audit |
+| family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
 | 原子假设与多 realization 政策 | implemented + tested | candidate skeleton、ADD/REMOVE operation、冻结 realization 分布、四臂 bundle、source eligibility 和 bridge provenance 已进入同一 successor freeze |
 | successor ADD/REMOVE 四臂 | implemented + tested，未 formally executed | 活动 runner 已闭合 `Target/No-op/Placebo/Generic`、多模型 complete blocks、五个有序 endpoint、独立 security/functionality measurement、valid-code 条件 unknown Gate、total ledger、task-unit ITT、unknown bounds、realization/LORO robustness；若请求功能非劣效结论则必须预先封存研究专属 power qualification；verifier 从冻结 provider 响应离线重建代码、Oracle/Judge、Measurement、ledger、Gate 和 inference；目前只有离线合成 smoke，不形成新效果结论 |
-| 二因素配对析因扩展 | specified + implemented + tested；单 pair/single-model formally executed + reported | schema 1.1 已支持带真实 Prompt-TSG 关系证据的 outcome-blind pair selector、多 pair、多模型、两种顺序、简单效应、交互分类和原始测量重放；推断按全局 task-unit 联合重采样，保留 pair 间部分重叠支持，并采用 replicate-specific studentized max-|T| 与有效 replicate 下限；security interaction 与需单独功效设计的 functionality non-inferiority gate 分开。真实正式证据仍是 schema 1.0 的 from-scratch v3 零结果与 scaffold-repair follow-up 有界正向结果，不能把合成的 schema 1.1 测试称为新实验 |
+| 二因素配对析因扩展 | specified + implemented + tested；单 pair/single-model historical schema 1.0 executed + reported | pair selector schema 1.2 已支持 operation-aware 编码、Prompt-TSG 状态重算、factorial compatibility、per-pair cross-fitted RD ranking 和 bootstrap stability；factorial schema 1.1 支持多 pair、多模型、两种顺序、简单效应、中性 response-surface taxonomy、预冻结 policy/mechanism claim scope 和原始测量重放。真实正式证据仍是 schema 1.0 的 from-scratch v3 零结果与 scaffold-repair follow-up 有界正向结果，不能把合成的 schema 1.1 测试称为新实验 |
 | 独立 measurement 与 total ledger | implemented + tested | 活动代码保留 code、Oracle、functionality 和基础设施失败边界 |
 | task-unit ITT 与未知 bounds | implemented + tested | Target/Noop、task/realization 权重和同步 bootstrap 已闭合 |
 | 完整 max-|T|、selector nested bootstrap、全局 robustness family | implemented + tested；仅既有 factorial family executed | selector-pair simultaneous inference、successor realization/LORO family 和 generalized factorial families 都可独立重算；自然 selector 与新 successor study 尚未正式执行 |
@@ -297,9 +303,9 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取 canary | **有界通过** | 38/38 记录有效，但还有 unresolved 语义和 Python 版本风险 |
-| discovery positivity/source overlap | **未通过** | CWE-328 无 positive；CWE-611 状态与来源完全分离 |
-| FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector 和 artifact verifier 已测试，但被 positivity gate 正确阻止，不能形成 selector 效用结论 |
+| 自然 Prompt TSG 抽取 canary | **有历史校准；活动正式 freeze 缺失** | 不能用已移出 reviewer tree 的 38-record pilot 代替 schema 2.1 证据 |
+| discovery positivity/source overlap | **活动正式审计未完成** | 历史 CWE-328/CWE-611 pilot 失败；新鲜正式 discovery population 尚未冻结 |
+| FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |
 | successor 单机制四臂实现 | **工程 Gate 通过；正式实验未运行** | prospective freeze、四臂执行、总账、稳健性推断和独立 verifier 已用离线代表样本闭合；legacy 四臂仍不能冒充 successor confirmation |
 | Prompt-TSG pair selector | **工程 Gate 通过；自然数据未运行** | 关系证据、四 cell 支持、lineage 分离、固定 Top-L、冻结 artifact 和 verifier 已测试；尚无前瞻冻结的自然 pair selection 结果 |
@@ -307,7 +313,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | factorial from-scratch confirmation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
 | scaffold-repair prospective follow-up | **已完成并独立验证；有界正向结果** | 30 个相同 task units、240 assignments；A00=0%、A11=98.3%、interaction=+70.0pp，simultaneous interval=[+56.7,+83.3]pp；功能差=-1.7pp，通过非劣 Gate |
 
-当前准确位置是：**规范中的单机制 successor、五类 selector、pair selector 和广义二因素执行路径均已实现并通过离线/合成 reviewer tests；自然 selector 仍被数据支持门阻塞，新的 successor 与广义 multi-pair/multi-model 研究尚未前瞻冻结和正式执行。现有论文效果证据仍只有已冻结的 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果。两轮生成上下文未随机化，跨轮差异只能作为探索性异质性。**
+当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过离线/合成 reviewer tests。Gate C 仍缺新鲜正式 discovery support audit、正式 hypotheses/policies、power 与 multiplicity freeze；因此 Gate D/E 尚未通过。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
 
 ## 14. v3 后续研究边界
 

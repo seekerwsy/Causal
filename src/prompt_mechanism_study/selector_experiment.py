@@ -8,6 +8,16 @@ from pathlib import Path
 from typing import Any
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.prompt_tsg import (
+    PromptTSG,
+    QueryState,
+    catalog_from_record,
+    feature_state,
+    prompt_tsg_from_record,
+    prompt_tsg_record,
+    query_context,
+    validate_prompt_tsg,
+)
 from prompt_mechanism_study.prioritization import (
     BackgroundKnowledgeRule,
     BridgeRecord,
@@ -47,12 +57,12 @@ class SelectorExperimentError(ValueError):
     """A stored selector-study artifact failed closed."""
 
 
-ACTIVE_SELECTOR_SCHEMA_VERSION = "2.0"
+ACTIVE_SELECTOR_SCHEMA_VERSION = "2.1"
 ACTIVE_SELECTOR_BEHAVIOR_VERSION = "shared-selector-suite-v2"
 
 
 def freeze_selection_from_config(config_path: Path, output: Path) -> dict[str, Any]:
-    """Freeze the active prospective selector protocol (schema 2.0 only)."""
+    """Freeze the active prospective selector protocol (schema 2.1 only)."""
 
     config = _object(read_json(config_path), "selector freeze config")
     selection = _selection_from_config(config)
@@ -63,6 +73,9 @@ def build_active_selector_evidence(
     universe: CandidateUniverseManifest,
     observations: Sequence[DiscoveryObservation],
     *,
+    prompt_by_task_unit: Mapping[str, str],
+    prompt_tsg_by_task_unit: Mapping[str, PromptTSG],
+    prompt_tsg_catalog: Mapping[str, Any],
     source_lineage_by_task_unit: Mapping[str, str] | None = None,
     producer_id: str = "frozen-natural-discovery-v1",
     minimum_positive_task_units: int = 2,
@@ -73,12 +86,23 @@ def build_active_selector_evidence(
 
     if not isinstance(producer_id, str) or not producer_id.strip():
         raise SelectorExperimentError("discovery producer_id is invalid")
+    frozen_observations = tuple(observations)
+    task_units = {item.task_unit_id for item in frozen_observations}
+    if set(prompt_by_task_unit) != task_units or set(prompt_tsg_by_task_unit) != task_units:
+        raise SelectorExperimentError(
+            "Prompt TSG evidence must exactly cover discovery task units"
+        )
+    catalog = catalog_from_record(prompt_tsg_catalog)
     lineage_map = dict(source_lineage_by_task_unit or {})
     evidence = []
-    for observation in observations:
+    for observation in frozen_observations:
         lineage = lineage_map.get(observation.task_unit_id, "source-lineage.default")
         if not isinstance(lineage, str) or not lineage.strip():
             raise SelectorExperimentError("discovery source lineage is invalid")
+        prompt = prompt_by_task_unit[observation.task_unit_id]
+        graph = prompt_tsg_by_task_unit[observation.task_unit_id]
+        if not isinstance(prompt, str) or not prompt.strip() or type(graph) is not PromptTSG:
+            raise SelectorExperimentError("discovery Prompt TSG evidence is invalid")
         raw_output = canonical_value(observation)
         evidence.append(
             {
@@ -88,6 +112,9 @@ def build_active_selector_evidence(
                 "request_randomness_slot": observation.request_randomness_slot,
                 "source_lineage_id": lineage,
                 "producer_id": producer_id,
+                "prompt": prompt,
+                "prompt_sha256": content_hash(prompt),
+                "prompt_tsg": prompt_tsg_record(graph),
                 "raw_output": raw_output,
                 "raw_output_sha256": content_hash(raw_output),
                 "confirm_outcomes_used": False,
@@ -99,15 +126,15 @@ def build_active_selector_evidence(
         "minimum_negative_task_units": minimum_negative_task_units,
         "minimum_shared_source_lineages": minimum_shared_source_lineages,
     }
-    parsed = _discovery_evidence(tuple(observations), evidence)
-    support = _support_audit(universe, tuple(observations), parsed, thresholds)
+    parsed = _discovery_evidence(universe, frozen_observations, evidence, catalog)
+    support = _support_audit(universe, frozen_observations, parsed, thresholds)
     supported = tuple(row["candidate_id"] for row in support["rows"] if row["eligible"])
     interim = replace(
         universe,
         supported_candidate_ids=supported,
         positivity_audit_sha256=content_hash(support),
     )
-    information_budget = _information_budget(interim, tuple(observations), evidence)
+    information_budget = _information_budget(interim, frozen_observations, evidence)
     frozen = replace(interim, information_budget_sha256=content_hash(information_budget))
     return frozen, support, information_budget, evidence
 
@@ -115,6 +142,7 @@ def build_active_selector_evidence(
 def _validate_active_selector_evidence(
     universe: CandidateUniverseManifest,
     observations: tuple[DiscoveryObservation, ...],
+    raw_prompt_tsg_catalog: Any,
     raw_support: Any,
     raw_information_budget: Any,
     raw_discovery_evidence: Any,
@@ -142,7 +170,12 @@ def _validate_active_selector_evidence(
             "minimum_shared_source_lineages",
         )
     }
-    evidence = _discovery_evidence(observations, raw_discovery_evidence)
+    catalog = catalog_from_record(
+        _object(raw_prompt_tsg_catalog, "embedded Prompt TSG catalog")
+    )
+    evidence = _discovery_evidence(
+        universe, observations, raw_discovery_evidence, catalog
+    )
     expected_support = _support_audit(universe, observations, evidence, thresholds)
     if support != expected_support or content_hash(support) != universe.positivity_audit_sha256:
         raise SelectorExperimentError("selector support audit does not recompute")
@@ -160,7 +193,10 @@ def _validate_active_selector_evidence(
 
 
 def _discovery_evidence(
-    observations: tuple[DiscoveryObservation, ...], value: Any
+    universe: CandidateUniverseManifest,
+    observations: tuple[DiscoveryObservation, ...],
+    value: Any,
+    catalog: Mapping[str, Any],
 ) -> dict[str, Mapping[str, Any]]:
     rows = _list(value, "selector discovery evidence")
     if [item.get("observation_id") for item in rows if isinstance(item, dict)] != sorted(
@@ -179,6 +215,9 @@ def _discovery_evidence(
                 "request_randomness_slot",
                 "source_lineage_id",
                 "producer_id",
+                "prompt",
+                "prompt_sha256",
+                "prompt_tsg",
                 "raw_output",
                 "raw_output_sha256",
                 "confirm_outcomes_used",
@@ -186,12 +225,24 @@ def _discovery_evidence(
             "selector discovery evidence item",
         )
         observation = observation_by_id.get(item["observation_id"])
+        prompt = item["prompt"]
+        try:
+            graph = prompt_tsg_from_record(item["prompt_tsg"])
+            validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
+        except (TypeError, ValueError):
+            raise SelectorExperimentError(
+                "selector discovery Prompt TSG evidence is invalid"
+            ) from None
         if (
             observation is None
             or item["observation_id"] in evidence_by_id
             or item["task_unit_id"] != observation.task_unit_id
             or item["model_id"] != observation.model_id
             or item["request_randomness_slot"] != observation.request_randomness_slot
+            or not isinstance(prompt, str)
+            or not prompt.strip()
+            or item["prompt_sha256"] != content_hash(prompt)
+            or graph.task_id != observation.task_unit_id
             or item["raw_output"] != canonical_value(observation)
             or item["raw_output_sha256"] != content_hash(item["raw_output"])
             or item["confirm_outcomes_used"] is not False
@@ -201,10 +252,59 @@ def _discovery_evidence(
             or not item["producer_id"].strip()
         ):
             raise SelectorExperimentError("selector discovery evidence does not bind its observation")
+        _validate_candidate_states_from_graph(universe, observation, graph, catalog)
         evidence_by_id[item["observation_id"]] = item
     if set(evidence_by_id) != set(observation_by_id):
         raise SelectorExperimentError("selector discovery evidence is not exactly closed")
     return evidence_by_id
+
+
+def _validate_candidate_states_from_graph(
+    universe: CandidateUniverseManifest,
+    observation: DiscoveryObservation,
+    graph: PromptTSG,
+    catalog: Mapping[str, Any],
+) -> None:
+    """Recompute every atomic selector state from the frozen Prompt TSG."""
+
+    queries = {item["query_id"]: item for item in catalog["queries"]}
+    skeletons = dict(universe.candidate_skeletons)
+    expected_ids = tuple(
+        candidate_id
+        for candidate_id, family_id in universe.candidate_family_ids
+        if family_id == observation.family_id
+    )
+    expected = []
+    for candidate_id in expected_ids:
+        skeleton = skeletons[candidate_id]
+        query = queries.get(skeleton.context_query_id)
+        if (
+            query is None
+            or query["cwe_id"] != skeleton.cwe
+            or query["actionable_feature_id"] != skeleton.actionable_feature_id
+        ):
+            raise SelectorExperimentError(
+                "candidate skeleton does not bind the embedded Prompt TSG catalog"
+            )
+        context = query_context(
+            graph,
+            query=query,
+            cwe=skeleton.cwe,
+            task_family=query["task_family"],
+        ).state
+        state = feature_state(graph, skeleton.actionable_feature_id)
+        if context is not QueryState.PRESENT or state not in {
+            QueryState.PRESENT,
+            QueryState.ABSENT,
+        }:
+            raise SelectorExperimentError(
+                "atomic selector state is not resolved in an applicable Prompt TSG context"
+            )
+        expected.append((candidate_id, int(state is QueryState.PRESENT)))
+    if tuple(expected) != observation.candidate_states:
+        raise SelectorExperimentError(
+            "atomic selector candidate states do not recompute from Prompt TSG"
+        )
 
 
 def _support_audit(
@@ -331,6 +431,7 @@ def _selection_from_config(config: Mapping[str, Any]) -> SelectionFreezeManifest
         "schema_version",
         "universe",
         "observations",
+        "prompt_tsg_catalog",
         "plan",
         "expert_input",
         "fci_relation_scores",
@@ -358,6 +459,7 @@ def _selection_from_config(config: Mapping[str, Any]) -> SelectionFreezeManifest
     information_budget = _validate_active_selector_evidence(
         universe,
         observations,
+        config["prompt_tsg_catalog"],
         config["support_audit"],
         config["information_budget"],
         config["discovery_evidence"],
@@ -386,7 +488,7 @@ def write_selection_freeze_bundle(
     selection: SelectionFreezeManifest,
     effective_config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Write an active schema-2.0 five-selector freeze."""
+    """Write an active schema-2.1 five-selector freeze."""
 
     _require_selector_protocol(selection.plan)
     config = _object(effective_config, "selector effective config")
@@ -407,7 +509,7 @@ def write_selection_freeze_bundle(
 
 
 def load_selection_freeze_bundle(root: Path) -> SelectionFreezeManifest:
-    """Load and replay an active schema-2.0 selector freeze."""
+    """Load and replay an active schema-2.1 selector freeze."""
 
     manifest = verify_bundle(root)
     _exact_files(manifest, {"effective-config.json", "identity.json", "selection.json"}, "selection freeze")
@@ -437,7 +539,7 @@ def write_bridge_freeze_bundle(
     selection_bundle: Path,
     bridge: SharedBridgeMap,
 ) -> dict[str, Any]:
-    """Freeze an active schema-2.0 predecessor-bound bridge."""
+    """Freeze an active schema-2.1 predecessor-bound bridge."""
 
     selection = load_selection_freeze_bundle(selection_bundle)
     _validate_active_bridge_contract(selection, bridge)
@@ -463,7 +565,7 @@ def freeze_bridge_from_config(
     config_path: Path,
     output: Path,
 ) -> dict[str, Any]:
-    """Freeze active schema-2.0 protocolization decisions."""
+    """Freeze active schema-2.1 protocolization decisions."""
 
     selection = load_selection_freeze_bundle(selection_bundle)
 
@@ -489,7 +591,7 @@ def freeze_bridge_from_config(
 
 
 def load_bridge_freeze_bundle(root: Path, selection_bundle: Path) -> SharedBridgeMap:
-    """Load and independently revalidate an active schema-2.0 bridge."""
+    """Load and independently revalidate an active schema-2.1 bridge."""
 
     manifest = verify_bundle(root)
     _exact_files(manifest, {"bridge.json", "lineage.json"}, "bridge freeze")
