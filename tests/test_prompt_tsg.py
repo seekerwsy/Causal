@@ -610,3 +610,54 @@ def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
         "accepted_semantics"
     ]
     assert projection["semantic_review"]["unsupported_proposer_ambiguities"] == []
+
+
+@pytest.mark.reviewer
+def test_empty_catalog_candidate_scope_skips_semantic_provider():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
+    prompt = "Return deserialized pickled data from the request."
+    task = {
+        "task_id": "pickle-task",
+        "task_unit_id": "pickle-task",
+        "prompt": prompt,
+        "cwe": "CWE-502",
+        "task_family": "deserialization",
+    }
+    proposal = {
+        "facts": [
+            _fact(
+                "requirement",
+                "task_requirement",
+                "task.requirement",
+                prompt,
+            )
+        ],
+        "relations": [],
+        "unresolved_semantics": [],
+    }
+    calls = []
+
+    def provider(_request, evaluator, _prompt):
+        import json
+
+        calls.append(evaluator["candidate_id"])
+        if evaluator["candidate_id"] != "proposer-v1":
+            raise AssertionError("empty candidate scope must not call semantic reviewer")
+        return json.dumps(proposal).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "proposer-v1"},
+        system_prompt="propose facts",
+        reviewer_evaluator={"candidate_id": "reviewer-v2"},
+        reviewer_prompt="adjudicate ambiguity",
+        provider=provider,
+    )
+
+    assert calls == ["proposer-v1"]
+    assert {node.semantic_id for node in graph.nodes} == {
+        "task.root",
+        "task.requirement",
+    }
+    assert projection["semantic_review"]["provider_called"] is False

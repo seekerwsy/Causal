@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_FAILED_BEFORE_QUALIFICATION",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v8+prompt-tsg-ambiguity-adjudication-qwen37max-v1",
+  "selection_path": "data/method/results/prompt-tsg-adjudicated-holdout-v1/selection.json",
+  "selection_sha256": "9d03dad858647028f3ee73545cae677fbde338d38c923565a308f8d4d38accde",
+  "gold_path": "data/method/prompt-tsg-adjudicated-holdout-gold-v1.json",
+  "gold_sha256": "1ff1b6f1188a2f7c7f3ebd4863cb0cd197e54951eca5fc98d73aca679312a5c5",
+  "extractor_bundle_sha256": "df4e3e6ede45d50fb0a0ed5cacd97f5d9e0faba51324f1ca84be96ddaa364d50",
+  "remote_output": "/home/wsy/prompt-mechanism-study-experiments/gate-c-tsg-adjudicated-final-11fb932-20260830-01/holdout-v1",
+  "selected_task_units": 18,
+  "completed_graphs": 7,
+  "failed_task_id": "semantic_cluster_3b31447c44273197adceebc95187ebc2793b3c898da7d9b91c61070c458284e7",
+  "error_type": "PromptTSGExtractionError",
+  "error_reason": "The proposer produced an empty catalog candidate scope for a pickle-only task, but the semantic reviewer invented out-of-catalog pickle semantics; deterministic projection rejected the response.",
+  "disposition": "The v1 candidate failed and the complete 18-task selection is permanently exposure-excluded. No qualification metric is computed and no v1 retry is permitted.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

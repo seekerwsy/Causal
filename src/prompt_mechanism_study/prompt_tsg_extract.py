@@ -18,7 +18,7 @@ from prompt_mechanism_study.prompt_tsg import (
     load_catalog,
     prompt_tsg_record,
 )
-from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.records import canonical_json, content_hash
 
 
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
@@ -387,6 +387,10 @@ def extract_task_file(
             else None
         ),
         "semantic_reviewed_tasks": len(graphs) if reviewer_evaluator is not None else 0,
+        "semantic_reviewer_provider_calls": sum(
+            request.get("semantic_review_projection", {}).get("provider_called") is True
+            for request in requests
+        ),
         "extractor_implementation_sha256": hashlib.sha256(
             Path(__file__).read_bytes()
         ).hexdigest(),
@@ -488,6 +492,24 @@ def _review_catalog_facts(
             "semantic_scope": "candidate_semantics only",
         },
     }
+    if not candidate_semantics:
+        raw = canonical_json(
+            {"facts": [], "relations": [], "unresolved_semantics": []}
+        ).encode("utf-8")
+        return descriptions, [], {
+            "request": request,
+            "response_sha256": hashlib.sha256(raw).hexdigest(),
+            "response_text": raw.decode("utf-8"),
+            "provider_called": False,
+            "accepted_semantics": [],
+            "unresolved_semantics": [],
+            "unsupported_proposer_ambiguities": [],
+            "rejected_facts": [],
+            "rejected_relations": [
+                {**relation, "reason": "empty_catalog_candidate_scope"}
+                for relation in relations
+            ],
+        }
     raw = provider(request, evaluator, system_prompt)
     if not isinstance(raw, bytes):
         raise PromptTSGExtractionError(
@@ -592,6 +614,7 @@ def _review_catalog_facts(
         "request": request,
         "response_sha256": hashlib.sha256(raw).hexdigest(),
         "response_text": raw.decode("utf-8", errors="strict"),
+        "provider_called": True,
         "accepted_semantics": sorted(accepted_semantics),
         "unresolved_semantics": sorted(unresolved),
         "unsupported_proposer_ambiguities": sorted(
