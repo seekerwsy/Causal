@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v12+prompt-tsg-ambiguity-adjudication-qwen37max-v6",
+  "selection_path": "data/method/results/prompt-tsg-evidence-occurrence-holdout-v4/selection.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {
+      "task_id": "semantic_cluster_3e139a4f760463249a86d846658635fe71182ea372e6f8c5e6694a58849ec27f",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The prompt fixes both the archive and extraction destination and exposes no caller-supplied relative path under a trusted path-access base."
+    },
+    {
+      "task_id": "semantic_cluster_75f72ec32f90e69ef10e360d31ad00579492bbe15d8afbc24b7c81853f2a313e",
+      "expected_context": "present",
+      "expected_realization_id": "cwe22_path_confinement",
+      "rationale": "A caller requests a relative document path under a separately supplied application context base_dir, and the contract explicitly rejects paths outside that allowed directory."
+    },
+    {
+      "task_id": "semantic_cluster_88011dd2a8fe2b6543dc5ac8f4b7415a701c2363f7b3a261a4c4d171e5121ad9",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "The input is explicitly hashed cryptographically and optionally checked against a reference hash with constant-time comparison."
+    },
+    {
+      "task_id": "semantic_cluster_6f685d79ce8d702201b39d0dd7c9f35f2d3295b9b1f136f0f52a35466e66a07b",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "The prompt explicitly requires a cryptographic hash to produce the website-and-timestamp identifier."
+    },
+    {
+      "task_id": "semantic_cluster_fbf2a115f970180391ad382885e14d734fc54bcc55c70d02d5f6419077104056",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Filtering address and port records by country requests no random security value."
+    },
+    {
+      "task_id": "semantic_cluster_bcf70c51fead8173957d4e275cbe6ca29e0f69535134aefa2553f6737a22e8a1",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Random population sampling is ordinary statistical behavior rather than password, token, nonce, secret, session, or other security-sensitive randomness."
+    },
+    {
+      "task_id": "semantic_cluster_9aa9fc7c404e5b475f11d6023b79bce529f89ad73fac829c061aac13f9f97b48",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The function serializes a payload with Pickle and does not request a supported deserialization operation."
+    },
+    {
+      "task_id": "semantic_cluster_c1ead72e2307388e09f64f657e5f5b95d026b6eaffeeaf7f890de0bc12df78a7",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Setting layer weights and saving a model specifies no caller-supplied YAML, JSON, or Python-literal deserialization."
+    },
+    {
+      "task_id": "semantic_cluster_c8885b7ae141b2fe84fa9aa135d67eb4e9b61fa9bafeb0a100b685fdcf07a4e2",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Despite its function name, the contract only reads a text file and does not require external process execution."
+    },
+    {
+      "task_id": "semantic_cluster_a9d647e05e655355eba40bf9748e711de725c61bb0d1fea61e02ad9f76a166da",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Sending a cross-platform notification does not fix a subprocess operation or expose a caller-supplied process argument."
+    },
+    {
+      "task_id": "semantic_cluster_261e9b0e92f91b73d972da3c97627c1e1668d24fb21accb241be130638c2b2d6",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "A page password requirement is an end-user access rule, not an external application credential source and use sink."
+    },
+    {
+      "task_id": "semantic_cluster_d217f85d2fe0f72a3281e1621e6c7cec3da5111bcbaed4bc37b45defaddf2ce5",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The password-reset token and form data are user-flow inputs, not a trusted application credential used to access another service."
+    },
+    {
+      "task_id": "semantic_cluster_deea48970203c2a2670180e6d7c93da271dd35f596bab677af5cd6df1690fbdb",
+      "expected_context": "present",
+      "expected_realization_id": "cwe89_sql_values",
+      "rationale": "A caller-supplied integer user ID is queried against a fixed SQLite database, users table, and fixed output columns."
+    },
+    {
+      "task_id": "semantic_cluster_dabad2a30e368a1a545358c74048d3b489c1ffffec726b51ab7e78aa36a7f1a4",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Reading CSV rows contains no SQL execution context."
+    }
+  ]
+}
