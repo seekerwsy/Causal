@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "selection_path": "data/method/results/prompt-tsg-two-stage-holdout-v4/selection.json",
+  "gold_path": "data/method/prompt-tsg-two-stage-holdout-gold-v4.json",
+  "withdrawn_before_qualification": true,
+  "extractor_output_accessed": false,
+  "arms_or_outcomes_used": false,
+  "all_selected_task_units_are_exposed": true,
+  "reason_codes": [
+    "gold_application_credential_scope_error",
+    "gold_security_sensitive_hash_scope_error"
+  ],
+  "decision": "The v4 batch is ineligible for extractor qualification. Its immutable selection and gold remain as an audit record, and every selected task unit must be excluded from replacement qualification and formal extraction.",
+  "scope_note": "The error was found by checking the frozen gold rationales against the catalog semantic guidance before reading any extractor graph, response, or qualification result. End-user account passwords and password-reset tokens are not application credentials under source.external_credential, and an ordinary process-lock identifier is not an explicitly security-sensitive hash identifier."
+}
