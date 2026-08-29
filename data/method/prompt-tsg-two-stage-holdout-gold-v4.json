@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v8+prompt-tsg-semantic-review-qwen37max-v2",
+  "selection_path": "data/method/results/prompt-tsg-two-stage-holdout-v4/selection.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {
+      "task_id": "semantic_cluster_eecbb84fd5ee57cb31755bb7c9bcac50fe0565c24f8c582867308ff5841f5763",
+      "expected_context": "present",
+      "expected_realization_id": "cwe22_path_confinement",
+      "rationale": "The caller chooses a plugin name beneath an explicit trusted plugin directory, and the prompt already requires rejecting traversal and absolute paths."
+    },
+    {
+      "task_id": "semantic_cluster_984416f004638617f14486e55ebe2ed55660e2dfdbdb9b6e76843f8dfe43f82f",
+      "expected_context": "present",
+      "expected_realization_id": "cwe22_path_confinement",
+      "rationale": "The caller supplies a JSON filename and the prompt states the trusted configuration directory that must contain it."
+    },
+    {
+      "task_id": "semantic_cluster_c2d7a6a41c2f8bcf27616a646485d62cee89b48345b3af8e8f5b7444f36e3015",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The web route exposes a caller-controlled filename but states no trusted base directory against which confinement can be defined."
+    },
+    {
+      "task_id": "semantic_cluster_729a03cd89b09200297afde7014c70e3dc5ce9e8216df226729efe3c85874370",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The hash algorithm is caller-selected and is part of a larger hash, key-derivation, and decryption contract, so a fixed current-hash realization is not contract preserving."
+    },
+    {
+      "task_id": "semantic_cluster_6d6e26dcda777668a7e7434cf0190a203e197b8f1a1046a4befbee640ec59ec4",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The prompt compares an already supplied ETag and does not request computing a hash or choosing a hashing algorithm."
+    },
+    {
+      "task_id": "semantic_cluster_bc52cfd9f7da6624c6c047482563438afb12793dd6c0d0a2bccf6fedaf087cb5",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "A hash of the command line is explicitly used as a process-lock identifier, so collision-resistant identifier hashing is applicable."
+    },
+    {
+      "task_id": "semantic_cluster_4ac92ebbfcc6af3d2e74b0eb28bf158ec7d1d20606032e626d04f1a266c1ebe1",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The generated random value is explicitly used as a web session identifier."
+    },
+    {
+      "task_id": "semantic_cluster_ef0951eef81d0126b82df6f960d147dd2dc478d929db5b6e7b0186ddb18ff5d0",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The prompt explicitly requires a securely generated distributed-system identifier with a fixed alphabet and length."
+    },
+    {
+      "task_id": "semantic_cluster_f0a1ff6b41dcb3d4a7bd6cdcabf3858f492f64feeb756b0fe5eadbb8a8b9cadb",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The random strings are ordinary generated data with no credential, token, key, or other security-sensitive use."
+    },
+    {
+      "task_id": "semantic_cluster_dd8222efc9d2de022d7c102f84c84204fdde55739b9c3e43d9262e97f21d751d",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task requires pickle for local state persistence, while the registry has no contract-preserving safe-pickle realization."
+    },
+    {
+      "task_id": "semantic_cluster_e6898717df03c1c092a62143a0069f28bc5435630c429f2925a83d910856126e",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task accepts multiple serialization methods and explicitly names pickle; no single registered JSON, YAML, or Python-literal realization preserves that contract."
+    },
+    {
+      "task_id": "semantic_cluster_e451b617b0acaefa2788c2dedb73e0e5ae56a9bfb0a0653ec561a8e262720304",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The web endpoint explicitly requires deserializing caller data with pickle, which none of the safe registered formats can preserve."
+    },
+    {
+      "task_id": "semantic_cluster_eb5c00a5487b5084a7b2a80c1f32d7f2ba905f07ad6f80b8eb8be2684a1884a1",
+      "expected_context": "present",
+      "expected_realization_id": "cwe611_xml_external_entity_control",
+      "rationale": "The input is untrusted XML from unknown sources and the prompt explicitly requires restricting external entities."
+    },
+    {
+      "task_id": "semantic_cluster_dfea3cf7c6f89aa270111daf4a2e2359158e744081b0778591896c68d9059052",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The XML input is one fixed local XSD resource rather than caller-supplied or otherwise untrusted XML."
+    },
+    {
+      "task_id": "semantic_cluster_34352293d72c758b1a81a08a4d230dd17261b0479b0968f47a04df28caf4a834",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The XML input is one fixed local XSL resource rather than caller-supplied or otherwise untrusted XML."
+    },
+    {
+      "task_id": "semantic_cluster_88b79a3c98f4a24a9c014e3404f2eeaefad057ab68e39c55faf9529955189abb",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task requires recursive filesystem traversal using os and sys, not invocation of an external executable."
+    },
+    {
+      "task_id": "semantic_cluster_33b04f12421fd05bc09cf462ab45364a726cdfc2143b2925d26a8801ed3d1ee6",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "A caller-selected BAM filename must be passed to one task-fixed command-line viewer."
+    },
+    {
+      "task_id": "semantic_cluster_630897a5f275ca31d7fe7c28d47e73e8c281b8edd4c487665d2dacb5aa092600",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "A caller-selected package name must be passed to the task-fixed conda executable."
+    },
+    {
+      "task_id": "semantic_cluster_8ab6fa9627322eba2fb7707fc7186157daef12c921ad87fbd99c267b682bf6de",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "The password is an explicit caller-supplied input used when creating the user account."
+    },
+    {
+      "task_id": "semantic_cluster_9e8ce345bed6c59f82c354b8bdb06987f129c2b5051ab2af0849a3d1334ec2a4",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "The password-reset UID and token are explicitly obtained from the request URL and used by the authentication flow."
+    },
+    {
+      "task_id": "semantic_cluster_8a313b13a9a61c166a3b969ac42ec8fe6e606ea516dd7b5512ea3452f2aa6651",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "The PayPal client ID and secret are explicitly supplied by the user and then used for third-party authentication."
+    },
+    {
+      "task_id": "semantic_cluster_bcbd48cf853f32ee88cda0706ec950909c87e6caa68d1bd6c1b5e9ce043d3872",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The database and owner names are arbitrary caller-supplied SQL identifiers, but the registered identifier realization requires a finite literal allowlist."
+    },
+    {
+      "task_id": "semantic_cluster_94ab73ffc5e5ceb407124d373863e3eb40d51fc166a8dec5aa49866907c6389f",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The table name is an arbitrary caller-supplied identifier, so the finite-allowlist realization cannot preserve the stated interface even though record values are also supplied."
+    },
+    {
+      "task_id": "semantic_cluster_3ecfd27c73e52f62aa5ad65807e4fe270d54e73783e581d54e3447fcf5bbd41f",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The table and column names are arbitrary caller-supplied identifiers across multiple SQL dialects, not a finite choice that can be mapped through the registered allowlist."
+    }
+  ]
+}
