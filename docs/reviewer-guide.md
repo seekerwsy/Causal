@@ -146,8 +146,9 @@ exploration, or temporary checkpoints.
 The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
 factorial paths are implemented and reviewer-tested. Fresh seven-source
 semantic curation and all functional contracts are complete, but the final
-disjoint Prompt TSG qualification failed its frozen Gate (18/21 exact and 8/11
-present recall). Formal discovery and confirmation therefore did not start.
+disjoint Prompt TSG qualification failed its frozen Gate (13/14 exact and 3/4
+present recall; zero false-positive present states). Formal discovery and
+confirmation therefore did not start.
 The exact evidence inventory and failed-Gate boundary are in
 [`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
 results are formal historical evidence and remain reproducible through the

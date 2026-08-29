@@ -286,7 +286,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；fresh qualification executed and failed | 两层盲态抽取器在完全不相交的最终 holdout 上为 18/21 exact、present recall 8/11；均低于预冻结的 90% / 80% 门槛，因此不能进入 formal extraction |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；fresh qualification executed and failed | 最终候选在完全不相交的替代 holdout 上为 13/14 exact、present recall 3/4、false-positive present=0、wrong realization=0；准确率通过 90% 门槛，但 recall 未达到预冻结的 80%，因此不能进入 formal extraction |
 | 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
@@ -303,7 +303,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取资格 | **最终 holdout 未通过** | 21 个完全不相交 task units 中 18 个 exact；accuracy=85.7%、present recall=72.7%、false-positive present=0、wrong realization=0；冻结门槛不允许 formal extraction |
+| 自然 Prompt TSG 抽取资格 | **最终 holdout 未通过** | 14 个完全不相交 task units 中 13 个 exact；accuracy=92.9%、present recall=75.0%、false-positive present=0、wrong realization=0；准确率通过，但冻结 recall 门槛不允许 formal extraction |
 | discovery positivity/source overlap | **按协议未执行** | 新鲜语义清洗与合同已完成，但表示 Gate 失败后不得冻结正式 discovery split 或读取自然 outcome |
 | FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |

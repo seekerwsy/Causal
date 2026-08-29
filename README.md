@@ -93,8 +93,9 @@ confirmatory evidence.
 The active successor and schema-1.1 factorial implementations are specified,
 implemented, and reviewer-tested. Fresh semantic curation and functional
 contracts are complete, but the final Prompt TSG holdout failed its frozen
-semantic qualification, so formal discovery and a new claim-bearing provider
-run were not started. The exact stopping boundary is recorded in the
+semantic qualification (13/14 exact, 3/4 present recall, and zero
+false-positive present states), so formal discovery and a new claim-bearing
+provider run were not started. The exact stopping boundary is recorded in the
 [Gate E readiness audit](docs/gate-e-readiness.md). The tracked schema-1.0 factorial bundles remain
 historical formal evidence and are independently replayable; they are not
 migrated or reinterpreted as active-protocol results:

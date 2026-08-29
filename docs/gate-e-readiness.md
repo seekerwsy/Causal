@@ -27,13 +27,13 @@ The final PHASE plan is implemented under four explicit scope corrections:
 | --- | --- | --- |
 | A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
 | B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
-| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The prospectively frozen disjoint Prompt TSG semantic qualification failed: 18/21 exact, 85.7% accuracy, 72.7% present recall, zero false-positive present states, and zero wrong realization bindings. The frozen requirements were at least 90% accuracy and 80% recall. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The final prospectively frozen disjoint Prompt TSG qualification was 13/14 exact (92.9%) with 3/4 present recall (75.0%), zero false-positive present states, and zero wrong realization bindings. Accuracy passed, but recall did not reach the frozen 80% requirement. |
 | D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
 | E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
 Gate C is the enforced stopping point. Lowering the threshold, relabelling the
-three missed cases, or restricting the CWE scope after reading the holdout
-would be an outcome-dependent protocol change.
+missed case, restricting the CWE scope, or repeatedly drawing same-population
+holdouts after reading these results would be outcome-dependent tuning.
 
 ## Gate C evidence closure
 
@@ -58,63 +58,59 @@ The active candidate is a two-stage blind extractor:
 ```text
 LLM evidence-fact proposal
   -> deterministic evidence/type projection
-  -> blind LLM accept/reject review of proposed facts only
+  -> normalize an occurrence only when the quoted span is exact and unique
+  -> blind LLM re-annotation within the proposer-declared semantic scope
+  -> reject and record relations outside the query-declared semantic triples
   -> normalized Prompt TSG and four-valued queries
 ```
 
-The semantic reviewer cannot add a fact, change an evidence span, or invent a
-global semantic ID. Every request, response, projection, and digest is closed
-in the extraction bundle.
+The reviewer cannot widen the proposer-declared catalog scope or invent a
+global semantic ID. A query can use only exact prompt spans, catalog facts, and
+its declared relations. Catalog v5 also distinguishes a caller-supplied base
+from an independently trusted base and requires the latter to qualify the
+specific file-access sink. Every request, response, projection, and digest is
+closed in the extraction bundle.
 
-Development failures were retained rather than hidden:
+The bounded repair sequence remains visible without promoting development
+replays to evidence:
 
-- a first disjoint holdout exposed invented evidence and security-role
-  overreach;
-- a stronger proposer still overgeneralized owner-only permission semantics;
-- the two-stage reviewer removed false-positive bindings but initially lost
-  too many true contexts;
-- catalog guidance then became complete for every query-bound semantic.
+- the predecessor v5 qualification failed at 18/21 exact and 8/11 present
+  recall;
+- bounded ambiguity adjudication improved a fresh v2 holdout to 20/21 exact
+  and 5/5 recall, but one caller-supplied directory was falsely treated as a
+  trusted base, so the zero-false-positive Gate still failed; the immutable
+  result is
+  [`prompt-tsg-adjudicated-qualification-v2`](../data/method/results/prompt-tsg-adjudicated-qualification-v2);
+- the trust-boundary v3 extraction stopped before qualification because the
+  proposer supplied an impossible occurrence index for a unique exact span;
+  all 21 selected task units were exposure-excluded and not retried, as
+  recorded in
+  [`prompt-tsg-trust-boundary-holdout-v3-failure.json`](../data/method/prompt-tsg-trust-boundary-holdout-v3-failure.json);
+- deterministic unique-span occurrence normalization was then frozen before a
+  replacement v4 selection and gold review.
 
-The first intended final holdout (`v4`) was withdrawn before qualification and
-before any extractor output was read. Gold review had incorrectly treated two
-end-user credentials as application credentials and an ordinary process-lock
-identifier as security-sensitive hashing. Its 24 task units are permanently
-marked exposed in
-[`prompt-tsg-two-stage-holdout-v4-withdrawal.json`](../data/method/prompt-tsg-two-stage-holdout-v4-withdrawal.json).
-
-The replacement `v5` selection was frozen only after excluding v4 and every
-earlier development, qualification, and outcome-exposed unit. Its 21 tasks had
-zero exclusion overlap. Gold labels and thresholds were committed before the
-extractor ran. The downloaded extraction archive had matching local/remote
-SHA-256
-`f6253aa63bfb16b755ac22bfa5c953e2231aa7586d9c11f7284731f115db54ed`.
-
-The immutable qualification result is
-[`prompt-tsg-two-stage-qualification-v5`](../data/method/results/prompt-tsg-two-stage-qualification-v5):
+The immutable final result is
+[`prompt-tsg-evidence-occurrence-qualification-v4`](../data/method/results/prompt-tsg-evidence-occurrence-qualification-v4):
 
 | Metric | Frozen requirement | Result |
 | --- | ---: | ---: |
-| Exact context/realization accuracy | at least 0.90 | **0.857143** |
-| Present-context recall | at least 0.80 | **0.727273** |
+| Exact context/realization accuracy | at least 0.90 | **0.928571** |
+| Present-context recall | at least 0.80 | **0.750000** |
 | False-positive present | at most 0 | **0** |
 | Wrong realization | at most 0 | **0** |
 
-The three errors were conservative unresolved decisions for:
-
-1. an API-test prompt requiring JSON serialization/deserialization;
-2. a job-ID prompt requiring a subprocess command whose executable was not
-   named explicitly; and
-3. a libvirt volume configuration containing externally supplied
-   authentication material.
-
-This result supports a narrower diagnostic statement—high precision with
-insufficient context recall on the frozen holdout—but not formal extraction.
+The only mismatch was conservative: a document-retrieval task listed
+`base_dir` under `Context` and `doc_path` under `Arguments`; the frozen gold
+treated `base_dir` as the independently supplied application context, while
+both LLM stages treated it as caller-supplied. The label and threshold remain
+unchanged. The result supports a narrow high-precision diagnostic, not formal
+extraction or any active-protocol intervention claim.
 
 ## Claim-to-artifact map
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v3 | implemented/tested; final semantic qualification failed |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 | implemented/tested; final semantic qualification failed |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -132,7 +128,9 @@ closes an engineering defect but does not change the failed scientific Gate.
 | Seven-source semantic curation | `newly_run` | 2,283 records, 4,744 blind pair decisions, 2,165 task units |
 | Full functional-contract curation | `newly_run` | 2,165/2,165 resolved and bundle-verified |
 | Local Security Oracle qualification | `newly_run` | 37/37 frozen cases, 12 active profiles, unknown preserved |
-| Prompt TSG v5 extraction and qualification | `newly_run` | extraction bundle verified; qualification failed at 18/21 and 8/11 present recall |
+| Prompt TSG bounded-adjudication v2 | `newly_run` | 20/21 exact and 5/5 recall, but one false-positive present state failed the frozen Gate |
+| Prompt TSG trust-boundary v3 | `newly_run` | formal extraction stopped after 2/21 graphs on an impossible occurrence index; no qualification metric; all selected units excluded |
+| Prompt TSG final v4 extraction and qualification | `newly_run` | extraction bundle verified; qualification failed at 13/14 exact and 3/4 present recall |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
@@ -140,10 +138,13 @@ closes an engineering defect but does not change the failed scientific Gate.
 
 ## Protocol risks and remaining blockers
 
-1. **Representation recall.** The active extractor is conservative but missed
-   three required contexts. Formal natural discovery cannot start.
-2. **Gold scope.** The final holdout evaluates its frozen task mixture, not
-   global natural-language understanding or per-CWE accuracy.
+1. **Representation recall.** The active extractor retained zero false-positive
+   present states but recovered only 3/4 frozen present contexts. Formal natural
+   discovery cannot start.
+2. **Gold scope and size.** Exhaustion of the repeatedly exposure-excluded
+   CWE-328 stratum limited the final replacement holdout to 14 task units. It
+   evaluates that frozen task mixture, not global understanding or per-CWE
+   accuracy.
 3. **Natural support.** Even after a future representation qualification,
    positivity and source-lineage overlap may reject all selector candidates.
 4. **Pair breadth.** The reviewed active registry contains one qualified SQL
@@ -157,13 +158,16 @@ closes an engineering defect but does not change the failed scientific Gate.
 
 ## Permitted next work
 
-The next valid move is not another holdout against the same tuned candidate.
-It must be a new prospectively declared representation study, for example:
+The next valid move is not another holdout from the remaining 373-task source
+population. It must be a new prospectively declared representation study on a
+genuinely independent corpus, for example:
 
 - replace free-form context extraction with a more constrained annotation
   protocol and independently qualified adjudication; or
-- freeze a materially new extractor before selecting a new, fully disjoint
-  corpus and qualification set.
+- replace trusted-boundary inference with an explicit dataset-side trust field
+  whose annotation is qualified independently; or
+- freeze a materially new extractor before selecting a new external corpus and
+  qualification set.
 
 Only after that new representation Gate passes may the project regenerate the
 formal selection, partition task units, run discovery positivity, and continue
@@ -178,7 +182,10 @@ python -m compileall -q src tests
 # completed without errors
 
 python -m pytest -q
-# 73 passed, 129 deselected
+# 79 passed, 129 deselected
+
+python -m pytest -q tests/test_prompt_tsg.py
+# 12 passed, 5 deselected
 
 python -m pytest -q tests/test_discovery_support.py
 # 4 passed
@@ -187,7 +194,7 @@ python -m pytest -q -m milestone tests/test_factorial_reviewer_smoke.py
 # 1 passed
 
 prompt-mechanism-study verify \
-  data/method/results/prompt-tsg-two-stage-qualification-v5
+  data/method/results/prompt-tsg-evidence-occurrence-qualification-v4
 # VERIFIED
 
 prompt-mechanism-study factorial-experiment verify \
