@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_FAILED_BEFORE_QUALIFICATION",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v11+prompt-tsg-ambiguity-adjudication-qwen37max-v5",
+  "selection_path": "data/method/results/prompt-tsg-trust-boundary-holdout-v3/selection.json",
+  "selection_sha256": "704bde017531821acb6cda4fcea726a8492b1d4003f39f1b1d228e198e8564fc",
+  "gold_path": "data/method/prompt-tsg-trust-boundary-holdout-gold-v3.json",
+  "gold_sha256": "3a4a2bd944befeF4f70b75f43be5337abeb758ade205896b39db42004ead7a44",
+  "extractor_bundle_sha256": "70af448f228fe63d6d989046b3d5d37b4f9ca18b7e68711e129a5221d0f334df",
+  "remote_output": "/home/wsy/prompt-mechanism-study-experiments/gate-c-tsg-trust-final-6f49f25-20260830-01/holdout-v3",
+  "selected_task_units": 21,
+  "completed_graphs": 2,
+  "failed_task_id": "semantic_cluster_ec76a18fd49d7fd25b51ab077720e2df0bccfb9a76cc7e37ecab868e34b810d4",
+  "error_type": "PromptTSGExtractionError",
+  "error_reason": "The proposer quoted the unique exact span file_name but supplied occurrence 3 although the prompt contains one occurrence; the strict evidence projection rejected the catalog-bound fact before semantic qualification.",
+  "disposition": "No qualification metric is computed. The complete 21-task selection is permanently exposure-excluded, and the v3 selection will not be retried after the deterministic occurrence-normalization repair.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
