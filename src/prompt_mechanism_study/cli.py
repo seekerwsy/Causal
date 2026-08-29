@@ -114,6 +114,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     discovery_population.add_argument("--language", default="python")
 
+    task_partition = commands.add_parser(
+        "task-partition",
+        help="freeze an outcome-blind discovery/pilot/confirmation task-unit partition",
+    )
+    task_partition.add_argument("tasks", type=Path)
+    task_partition.add_argument("clusters_root", type=Path)
+    task_partition.add_argument("catalog", type=Path)
+    task_partition.add_argument("output", type=Path)
+    task_partition.add_argument(
+        "--prompt-tsg-bundle", type=Path, action="append", required=True
+    )
+    task_partition.add_argument("--seed", type=int, default=2026083001)
+
     prompt_tsg_extract = commands.add_parser(
         "prompt-tsg-extract",
         help="extract evidence-bound Prompt TSGs for a frozen task file",
@@ -297,6 +310,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2
+    elif args.command == "task-partition":
+        from prompt_mechanism_study.prioritization import freeze_task_unit_partition
+
+        report = freeze_task_unit_partition(
+            args.tasks,
+            tuple(args.prompt_tsg_bundle),
+            args.clusters_root,
+            args.catalog,
+            args.output,
+            seed=args.seed,
+        )
+        print(report["status"])
     elif args.command == "positivity-audit":
         from prompt_mechanism_study.prioritization import audit_discovery_positivity
 

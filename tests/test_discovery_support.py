@@ -6,6 +6,7 @@ import pytest
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.prioritization import (
     audit_discovery_positivity,
+    freeze_task_unit_partition,
     prepare_discovery_population,
 )
 from prompt_mechanism_study.prompt_tsg import (
@@ -177,3 +178,58 @@ def test_positivity_gate_rejects_a_source_proxy(tmp_path: Path):
 
     assert report["status"] == "POSITIVITY_GATE_FAILED"
     assert support["failure_reasons"] == ["insufficient_source_lineage_overlap"]
+
+
+@pytest.mark.reviewer
+def test_task_partition_is_outcome_blind_stratified_and_leakage_closed(tmp_path: Path):
+    pairs = [
+        _xml_task(f"task-{index}", f"lineage-{index % 2}", feature_present=index % 2 == 0)
+        for index in range(12)
+    ]
+    tasks = []
+    clusters = []
+    for index, (task, _graph) in enumerate(pairs):
+        task["record_id"] = f"record-{index}"
+        tasks.append(task)
+        clusters.append(
+            {
+                "cluster_id": task["task_id"],
+                "record_ids": [task["record_id"]],
+                "representative_record_id": task["record_id"],
+            }
+        )
+    tasks_path = tmp_path / "tasks.json"
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+    graph_bundle = tmp_path / "graphs"
+    write_bundle(graph_bundle, {"graphs.json": [graph for _task, graph in pairs]})
+    clusters_root = tmp_path / "clusters"
+    write_bundle(
+        clusters_root,
+        {
+            "semantic-clusters.json": clusters,
+            "diagnostic-semantic-edges.json": [
+                {
+                    "left": "record-0",
+                    "right": "record-1",
+                    "label": "same_cluster",
+                }
+            ],
+        },
+    )
+
+    report = freeze_task_unit_partition(
+        tasks_path,
+        (graph_bundle,),
+        clusters_root,
+        CATALOG_PATH,
+        tmp_path / "partition",
+        seed=17,
+    )
+    assignments = read_json(tmp_path / "partition/assignments.json")
+    split_by_task = {row["task_id"]: row["partition"] for row in assignments}
+
+    assert report["arms_or_outcomes_used"] is False
+    assert report["cross_partition_diagnostic_edges"] == 0
+    assert split_by_task["task-0"] == split_by_task["task-1"]
+    assert set(split_by_task.values()) == {"discovery", "pilot", "confirm"}
+    assert sum(report["partition_counts"].values()) == 12

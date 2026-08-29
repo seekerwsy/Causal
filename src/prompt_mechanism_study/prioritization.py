@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -727,6 +727,280 @@ def prepare_discovery_population(
     }
     write_bundle(output, {"tasks.json": tasks, "report.json": report})
     return report
+
+
+def freeze_task_unit_partition(
+    tasks_path: Path,
+    graph_bundles: tuple[Path, ...],
+    clusters_root: Path,
+    catalog_path: Path,
+    output: Path,
+    *,
+    seed: int = 2026083001,
+    split_weights: Mapping[str, int] | None = None,
+) -> dict[str, object]:
+    """Freeze an outcome-blind discovery/pilot/confirmation partition.
+
+    The task-side Prompt TSG state is used only for stratification. Diagnostic
+    same/uncertain semantic edges are co-located so near-duplicate prompts
+    cannot cross analysis partitions even though those edges do not alter ITT
+    weights or task-unit identities.
+    """
+
+    if type(seed) is not int or seed < 0:
+        raise ValueError("partition seed must be a nonnegative integer")
+    split_names = ("discovery", "pilot", "confirm")
+    supplied_weights = dict(
+        split_weights or {"discovery": 6, "pilot": 1, "confirm": 3}
+    )
+    if (
+        set(supplied_weights) != set(split_names)
+        or any(
+            type(supplied_weights[split]) is not int or supplied_weights[split] <= 0
+            for split in split_names
+        )
+    ):
+        raise ValueError("partition weights must be positive discovery/pilot/confirm integers")
+    weights = {split: supplied_weights[split] for split in split_names}
+    verify_bundle(clusters_root)
+    tasks = _task_records(tasks_path)
+    if not tasks or len({task.get("task_unit_id") for task in tasks}) != len(tasks):
+        raise ValueError("partition tasks are empty or duplicated")
+    if any(task.get("task_id") != task.get("task_unit_id") for task in tasks):
+        raise ValueError("active task and task-unit identities must coincide")
+
+    catalog = load_catalog(catalog_path)
+    graph_records: list[dict[str, object]] = []
+    graph_bundle_ids = []
+    for bundle in graph_bundles:
+        verify_bundle(bundle)
+        graph_bundle_ids.append(bundle_digest(bundle))
+        raw = read_json(bundle / "graphs.json")
+        if not isinstance(raw, list) or any(not isinstance(row, dict) for row in raw):
+            raise TypeError("partition Prompt TSG collection is invalid")
+        graph_records.extend(raw)
+    graph_by_task = {
+        graph.task_id: (graph, record)
+        for record in graph_records
+        for graph in (prompt_tsg_from_record(record),)
+    }
+    task_ids = {task["task_id"] for task in tasks}
+    if len(graph_by_task) != len(graph_records) or set(graph_by_task) != task_ids:
+        raise ValueError("partition Prompt TSG population does not exactly match tasks")
+
+    task_by_id = {task["task_unit_id"]: task for task in tasks}
+    state_by_task: dict[str, tuple[tuple[str, str, str], ...]] = {}
+    for task_id, task in task_by_id.items():
+        graph = graph_by_task[task_id][0]
+        validate_prompt_tsg(graph, prompt=task["prompt"], catalog=catalog)
+        queries = [
+            query
+            for query in catalog["queries"]
+            if query["cwe_id"] == task["cwe"]
+            and query["task_family"] == task["task_family"]
+        ]
+        if not queries:
+            raise ValueError("a partition task has no catalog query")
+        state_by_task[task_id] = tuple(
+            sorted(
+                (
+                    query["query_id"],
+                    query_context(
+                        graph,
+                        query=query,
+                        cwe=task["cwe"],
+                        task_family=task["task_family"],
+                    ).state.value,
+                    feature_state(graph, query["actionable_feature_id"]).value,
+                )
+                for query in queries
+            )
+        )
+
+    clusters = read_json(clusters_root / "semantic-clusters.json")
+    diagnostic = read_json(clusters_root / "diagnostic-semantic-edges.json")
+    if not isinstance(clusters, list) or not isinstance(diagnostic, list):
+        raise TypeError("partition semantic-cluster inputs are invalid")
+    cluster_by_record = {}
+    for cluster in clusters:
+        if not isinstance(cluster, dict) or not isinstance(cluster.get("record_ids"), list):
+            raise ValueError("partition semantic cluster is invalid")
+        for record_id in cluster["record_ids"]:
+            if record_id in cluster_by_record:
+                raise ValueError("a record belongs to multiple semantic clusters")
+            cluster_by_record[record_id] = cluster["cluster_id"]
+
+    parent = {task_id: task_id for task_id in task_by_id}
+
+    def find(value: str) -> str:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    def union(left: str, right: str) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            keep, drop = min(left_root, right_root), max(left_root, right_root)
+            parent[drop] = keep
+
+    colocated_edges = 0
+    outside_edges = 0
+    for edge in diagnostic:
+        if (
+            not isinstance(edge, dict)
+            or edge.get("label") not in {"same_cluster", "uncertain"}
+        ):
+            raise ValueError("partition diagnostic edge is invalid")
+        left = cluster_by_record.get(edge.get("left"))
+        right = cluster_by_record.get(edge.get("right"))
+        if left in parent and right in parent:
+            union(left, right)
+            colocated_edges += 1
+        else:
+            outside_edges += 1
+
+    components: dict[str, list[str]] = defaultdict(list)
+    for task_id in sorted(task_by_id):
+        components[find(task_id)].append(task_id)
+    groups = [tuple(sorted(members)) for members in components.values()]
+    groups.sort(
+        key=lambda members: (
+            -len(members),
+            hashlib.sha256(
+                canonical_json([seed, list(members)]).encode("utf-8")
+            ).hexdigest(),
+        )
+    )
+
+    strata = {
+        task_id: canonical_json(
+            [
+                task_by_id[task_id]["cwe"],
+                task_by_id[task_id]["task_family"],
+                task_by_id[task_id]["source_lineage_family"],
+                state_by_task[task_id],
+            ]
+        )
+        for task_id in task_by_id
+    }
+    stratum_totals = Counter(strata.values())
+    targets = {
+        stratum: _partition_targets(total, weights)
+        for stratum, total in stratum_totals.items()
+    }
+    overall_targets = _partition_targets(len(tasks), weights)
+    current = {split: Counter() for split in split_names}
+    overall = Counter()
+    split_by_task = {}
+    group_by_task = {}
+    for members in groups:
+        group_counts = Counter(strata[task_id] for task_id in members)
+
+        def delta(split: str) -> tuple[float, int]:
+            penalty = 0.0
+            for stratum, count in group_counts.items():
+                target = targets[stratum][split]
+                before = current[split][stratum] - target
+                after = before + count
+                penalty += (after * after - before * before) / max(target, 1) ** 2
+            target = overall_targets[split]
+            before = overall[split] - target
+            after = before + len(members)
+            # Preserve the predeclared global budget even when many fine
+            # strata contain only one task unit and therefore round their
+            # pilot target to zero.
+            penalty += 10.0 * (after * after - before * before) / max(target, 1) ** 2
+            return penalty, split_names.index(split)
+
+        selected = min(split_names, key=delta)
+        group_id = content_id("task_partition_group_", members)
+        for task_id in members:
+            split_by_task[task_id] = selected
+            group_by_task[task_id] = group_id
+        current[selected].update(group_counts)
+        overall[selected] += len(members)
+
+    assignments = []
+    split_tasks = {split: [] for split in split_names}
+    split_graphs = {split: [] for split in split_names}
+    for task_id in sorted(task_by_id):
+        task = task_by_id[task_id]
+        split = split_by_task[task_id]
+        assignments.append(
+            {
+                "task_id": task_id,
+                "task_unit_id": task_id,
+                "partition": split,
+                "co_location_group_id": group_by_task[task_id],
+                "cwe": task["cwe"],
+                "task_family": task["task_family"],
+                "source_lineage_family": task["source_lineage_family"],
+                "query_states": [
+                    {
+                        "query_id": query_id,
+                        "context_state": context_state,
+                        "feature_state": source_state,
+                    }
+                    for query_id, context_state, source_state in state_by_task[task_id]
+                ],
+                "arms_or_outcomes_used": False,
+            }
+        )
+        split_tasks[split].append(task)
+        split_graphs[split].append(graph_by_task[task_id][1])
+
+    if len(assignments) != len(tasks) or any(not split_tasks[split] for split in split_names):
+        raise ValueError("partition did not produce three complete non-empty splits")
+    if any(
+        len({split_by_task[task_id] for task_id in members}) != 1
+        for members in groups
+    ):
+        raise ValueError("a co-location group crossed partitions")
+    counts = Counter(item["partition"] for item in assignments)
+    report: dict[str, object] = {
+        "schema_version": "1.0",
+        "status": "TASK_UNIT_PARTITION_FROZEN",
+        "task_units": len(tasks),
+        "partition_counts": {split: counts[split] for split in split_names},
+        "partition_weights": weights,
+        "partition_seed": seed,
+        "co_location_groups": len(groups),
+        "diagnostic_edges_colocated": colocated_edges,
+        "diagnostic_edges_outside_population": outside_edges,
+        "cross_partition_diagnostic_edges": 0,
+        "task_file_sha256": hashlib.sha256(tasks_path.read_bytes()).hexdigest(),
+        "graph_bundle_sha256": sorted(graph_bundle_ids),
+        "clusters_bundle_sha256": bundle_digest(clusters_root),
+        "catalog_sha256": catalog_sha256(catalog),
+        "partition_implementation_sha256": hashlib.sha256(
+            Path(__file__).read_bytes()
+        ).hexdigest(),
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    artifacts: dict[str, object] = {
+        "assignments.json": assignments,
+        "report.json": report,
+    }
+    for split in split_names:
+        artifacts[f"{split}-tasks.json"] = split_tasks[split]
+        artifacts[f"{split}-graphs.json"] = split_graphs[split]
+    write_bundle(output, artifacts)
+    return report
+
+
+def _partition_targets(total: int, weights: Mapping[str, int]) -> dict[str, int]:
+    denominator = sum(weights.values())
+    base = {split: total * weight // denominator for split, weight in weights.items()}
+    remainder = total - sum(base.values())
+    order = sorted(
+        weights,
+        key=lambda split: (-(total * weights[split] % denominator), tuple(weights).index(split)),
+    )
+    for split in order[:remainder]:
+        base[split] += 1
+    return base
 
 
 def audit_discovery_positivity(
@@ -1937,6 +2211,7 @@ __all__ = [
     "freeze_candidate_universe_manifest",
     "freeze_selection",
     "freeze_shared_bridge_map",
+    "freeze_task_unit_partition",
     "prepare_discovery_population",
     "run_selector_suite",
 ]
