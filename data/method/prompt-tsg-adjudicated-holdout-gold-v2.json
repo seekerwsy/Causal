@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v8+prompt-tsg-ambiguity-adjudication-qwen37max-v2",
+  "selection_path": "data/method/results/prompt-tsg-adjudicated-holdout-v2/selection.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {
+      "task_id": "semantic_cluster_56d3bde99d58f8b4685c6394ccc7f547300b3c9101ec3a095f4a5ecb0cd00433",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Both filename and directory path are supplied to the function, so the prompt does not establish a trusted base that confines the relative path."
+    },
+    {
+      "task_id": "semantic_cluster_5e8972e0f9afc8fa0fd90d4002566c2af4c75a9c1b4fd316855bd628b1fa3d93",
+      "expected_context": "present",
+      "expected_realization_id": "cwe22_path_confinement",
+      "rationale": "The caller supplies a directory key and relative log path while the directories mapping supplies the configured base path."
+    },
+    {
+      "task_id": "semantic_cluster_eb46f6172a05c112a48e74fb9c8496ec242381a1dd95048adb4ec85e27a73cb7",
+      "expected_context": "present",
+      "expected_realization_id": "cwe22_path_confinement",
+      "rationale": "The caller supplies a relative note path under a task-fixed per-user notes directory, with escape explicitly prohibited."
+    },
+    {
+      "task_id": "semantic_cluster_f4a93c548463ade0bbbae8220afee5701902081f7bdb41a8ca70c90e4e9207d4",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The MongoDB collection task requests no hashing operation or security-sensitive hash input."
+    },
+    {
+      "task_id": "semantic_cluster_6316bd12e0ad5856ed4677c87d41d460136a963c93d3e1a68b9417bc42dde133",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The API message is hashed, but the prompt states no authentication, integrity, recovery, cryptographic identifier, or other explicit security purpose."
+    },
+    {
+      "task_id": "semantic_cluster_cdb61a1617be3135837fab927010b97ce0dce4e701d84eec181c2378533ce5c9",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "A salted hash is explicitly generated and stored as a password-recovery token."
+    },
+    {
+      "task_id": "semantic_cluster_450f8aea99111c5fb150a52285ce7788ce07184ba6d2c7066e0caf57671e26cc",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Publishing a ROS message at a rate does not request any random security value."
+    },
+    {
+      "task_id": "semantic_cluster_d2dd2352c33bf7dc12a128a04050c0a7ba5d3561150a94559ab5ce51ce1b9001",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The requested random string has no password, token, nonce, secret, session, verification, or other security-sensitive role."
+    },
+    {
+      "task_id": "semantic_cluster_770b818beec5776d3485792ced065a7cee6eb495c1d4e19d7335c9a9e7b2c021",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Random array intervals are ordinary algorithmic sampling rather than security-sensitive randomness."
+    },
+    {
+      "task_id": "semantic_cluster_e7dac91e5976ac534e74a6816d89c7badd19e554fd9d399a5f369962de7494f2",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The required format is pickle, for which the frozen registry has no contract-preserving deserialization realization."
+    },
+    {
+      "task_id": "semantic_cluster_fe9817926a73d8f19dc291cb3c16ca33382dc9ac9783cf8cfc0dfdcae5d6b4ec",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The authentication token must be loaded with cPickle, which is outside the frozen format realizations."
+    },
+    {
+      "task_id": "semantic_cluster_7113103116800c2c736d7269fbfb2c9b13a4829d9c775e4e4276299b5a9996d9",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The request data must be unmarshalled with marshal, which is outside the frozen format realizations."
+    },
+    {
+      "task_id": "semantic_cluster_c16c8cf6bd4a935dd4e4ba1eb4c201fe7a62a95e8d664b80486eee414ce8f679",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The shell workflow names task operations but exposes no caller-supplied command argument or caller-selected executable."
+    },
+    {
+      "task_id": "semantic_cluster_bf91950f6a16ca2d9fe4306f01278f2ca2605d327b2decf47000b9bf467cece4",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Mercurial is task-fixed, but the prompt does not state that a caller-supplied value becomes a command argument."
+    },
+    {
+      "task_id": "semantic_cluster_a6e3465a1815c5a4ff67e751934f54ad45828fa36ccee9f74008895b2fbdba34",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The user supplies an entire command rather than arguments to a task-fixed or finite-choice executable."
+    },
+    {
+      "task_id": "semantic_cluster_33f4270d5a4051bd22dca205289343eced9823d0472cbfa01362ec534832922d",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The prompt describes test login credentials but does not establish an externally supplied application credential source."
+    },
+    {
+      "task_id": "semantic_cluster_5bf57b0a8a76d03aab8c8fbb1024166b839a8783c869ce146bce9309df05d6b6",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The URL username and password are an end user's authentication input, explicitly outside application credential-source semantics."
+    },
+    {
+      "task_id": "semantic_cluster_b0c74c45c90f4e8dcceb4566c5383b5069bfa7b6c9052aa4f149e571b9c2bf67",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Incorrect registration-form values are end-user test inputs, not application credentials used to access a protected resource."
+    },
+    {
+      "task_id": "semantic_cluster_a3c199f60eb8a2be4c5a0618a8d34ce695472dfe1b6ed99f81fbd0aeb89adfbd",
+      "expected_context": "present",
+      "expected_realization_id": "cwe89_sql_values",
+      "rationale": "The function updates and saves database state for a caller-specified book using fixed record operations."
+    },
+    {
+      "task_id": "semantic_cluster_ecda0988decbf71fb2711e9aaab3c35d97b70ad1c35d3223a50831d6eacedea2",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "Attaching database connections exposes no caller-controlled data value in a fixed SQL statement or finite SQL identifier choice."
+    },
+    {
+      "task_id": "semantic_cluster_abfdf5e559291aac625cd6e476476cdea37a2527a471b6da1155ec6f22f29013",
+      "expected_context": "present",
+      "expected_realization_id": "cwe89_sql_values",
+      "rationale": "The caller-supplied keyword is a data value used in a fixed search over the fixed data_entries table and entry column."
+    }
+  ]
+}
