@@ -1,0 +1,161 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Prospective scoped Prompt TSG qualification population; not an intervention-effect dataset or a prevalence sample.",
+  "method_revision_commit": "e49020fb5f9e776b2ec0ea288fd1bc63e8e407ec",
+  "source": {
+    "dataset": "DevEval",
+    "repository": "https://github.com/seketeam/DevEval",
+    "commit": "c1653455e0a18480a29aa07ba51636070f113316",
+    "license": "not_declared_in_pinned_repository",
+    "source_path": "Experiments/prompt/without_context/gpt-4-1106_prompt.jsonl",
+    "source_git_blob_sha1": "dbe31d7ef571dfde93c6983ddfa24291c3be8718",
+    "source_bytes": 1533143,
+    "source_sha256": "1798383d278e7dc907f4568cd9369bd424884298e4cf88af8c9ec55a08c5dbab",
+    "source_task_units": 1825
+  },
+  "population_rule": {
+    "language": "python",
+    "split": "without_context_gpt_4_1106",
+    "selection_mode": "coverage_stratified_expert_challenge_set",
+    "selection_rule": "Review only the official prompt text and source provenance. Freeze unique namespaces that expose positive and hard-negative contracts across eight catalog task families. Remove materially equivalent tasks already present in the seven-source or prior qualification populations. Do not inspect v17/v7 extraction output, generated code, arms, Oracle results, or experiment outcomes.",
+    "family_order": [
+      "command_execution",
+      "sql_query",
+      "deserialization",
+      "message_hashing",
+      "security_random_generation",
+      "credential_source",
+      "archive_extraction",
+      "xml_parsing"
+    ],
+    "family_quotas": {
+      "command_execution": 4,
+      "sql_query": 4,
+      "deserialization": 6,
+      "message_hashing": 4,
+      "security_random_generation": 4,
+      "credential_source": 4,
+      "archive_extraction": 2,
+      "xml_parsing": 3
+    },
+    "selected_upstream_ids_by_family": {
+      "command_execution": [
+        "mackup.utils.is_process_running",
+        "mrjob.fs.hadoop.HadoopFilesystem.mkdir",
+        "dominate.util.system",
+        "mssqlcli.util.is_command_valid"
+      ],
+      "sql_query": [
+        "threatingestor.state.State.get_state",
+        "sqlitedict.SqliteDict.update",
+        "datasette.utils.derive_named_parameters",
+        "sqlitedict.SqliteDict.get_tablenames"
+      ],
+      "deserialization": [
+        "bentoml._internal.configuration.helpers.load_config_file",
+        "passpie.database.PasspieStorage.read",
+        "authlib.jose.util.extract_header",
+        "sacred.arg_parser._convert_value",
+        "datasette.utils.parse_metadata",
+        "pyramid.session.PickleSerializer.loads"
+      ],
+      "message_hashing": [
+        "sslyze.plugins.certificate_info._certificate_utils.get_public_key_sha256",
+        "telethon.helpers.generate_key_data_from_nonce",
+        "sqlite_utils.utils.hash_record",
+        "arctic.store._version_store_utils.checksum"
+      ],
+      "security_random_generation": [
+        "pyramid.csrf.SessionCSRFStoragePolicy.new_csrf_token",
+        "pyramid.testing.DummySession.new_csrf_token",
+        "diffprivlib.utils.check_random_state",
+        "wandb.sdk.lib.runid.generate_id"
+      ],
+      "credential_source": [
+        "gif_for_cli.generate.utils.process_input_source",
+        "kinto.plugins.openid.OpenIDConnectPolicy._verify_token",
+        "kinto.core.testing.get_user_headers",
+        "boto.sts.credentials.Credentials.to_dict"
+      ],
+      "archive_extraction": [
+        "mrjob.util.unarchive",
+        "boto.glacier.job.Job.download_to_fileobj"
+      ],
+      "xml_parsing": [
+        "oletools.ooxml.get_type",
+        "boto.s3.bucket.Bucket.get_tags",
+        "pysimplesoap.simplexml.SimpleXMLElement.as_xml"
+      ]
+    },
+    "frozen_task_units": 31
+  },
+  "support_scope": {
+    "candidate_realization_ids_with_expected_present_gold": [
+      "cwe22_archive_extraction",
+      "cwe328_security_sensitive_hash",
+      "cwe338_security_sensitive_randomness",
+      "cwe502_json_deserialization",
+      "cwe502_python_literal_deserialization",
+      "cwe502_yaml_deserialization",
+      "cwe611_xml_external_entity_control",
+      "cwe78_fixed_executable_argv",
+      "cwe798_external_credential_source",
+      "cwe89_sql_values"
+    ],
+    "catalog_realization_ids_without_expected_present_gold": [
+      "cwe22_path_confinement",
+      "cwe732_owner_only_file_permissions",
+      "cwe78_allowlisted_executable_argv",
+      "cwe89_dynamic_identifiers_and_values",
+      "cwe918_fixed_origin_request",
+      "cwe918_trusted_domain_subdomain"
+    ],
+    "rule": "A passing Gate may support only realization IDs represented by at least one expected-present gold case. Realizations without positive gold remain unavailable for formal extraction regardless of aggregate metrics."
+  },
+  "overlap_audit": {
+    "comparison_populations": [
+      "The previously curated seven-source task corpus",
+      "The exposed AI-Security-Benchmark, SecCodeBench, and BigCodeBench qualification populations"
+    ],
+    "against_seven_source": {
+      "comparison_records": 2283,
+      "normalized_exact_matches": 0,
+      "same_language_char_tfidf_nearest_max": 0.541756,
+      "same_language_char_tfidf_nearest_mean": 0.373189
+    },
+    "against_prior_external": {
+      "comparison_records": 57,
+      "normalized_exact_matches": 0,
+      "same_language_char_tfidf_nearest_max": 0.46151,
+      "same_language_char_tfidf_nearest_mean": 0.232143
+    },
+    "semantic_review_rule": "Exclude only a task requiring the same principal operation on the same object under a materially equivalent functional contract; a shared CWE, library, language, or broad operation is insufficient.",
+    "semantic_exclusions": [
+      {
+        "upstream_id": "kinto.plugins.accounts.utils.hash_password",
+        "comparison": "cweval benchmark/core/py/cwe_327_1_task.py",
+        "reason": "Both tasks require hashing one supplied password and returning its stored hash."
+      },
+      {
+        "upstream_id": "kinto.core.utils.hmac_digest",
+        "comparison": "cyberseceval_instruct_prime C-W-016",
+        "reason": "Both tasks require a SHA-256 HMAC over a message using a supplied secret and return a hexadecimal digest."
+      },
+      {
+        "upstream_id": "datasets.utils.extract.TarExtractor.extract",
+        "comparison": "cweval benchmark/core/py/cwe_022_2_task.py",
+        "reason": "Both tasks require extracting one tar archive path into one supplied destination path."
+      }
+    ],
+    "review_completed_before_extraction": true
+  },
+  "provenance_limits": [
+    "DevEval was constructed by an independent benchmark project and is not an effect-estimation corpus in this study.",
+    "The selected set is deliberately balanced and adversarial; it cannot estimate natural context prevalence in DevEval.",
+    "DevEval supplies task prompts, not authoritative Prompt TSG labels. Gold labels below are a source-only method audit frozen before extraction.",
+    "No top-level license file was present at the pinned repository commit; the artifact records the source URL, commit, exact prompt-file hash, and selected records.",
+    "A passing result is scoped to the positively represented realization IDs and this frozen Python prompt population."
+  ],
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false
+}

@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "status": "PROSPECTIVE_GATE_C_FROZEN",
+  "frozen_on": "2026-08-30",
+  "method_revision_commit": "e49020fb5f9e776b2ec0ea288fd1bc63e8e407ec",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v17+prompt-tsg-ambiguity-adjudication-qwen37max-v7",
+  "inputs": {
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-tsg-extractor-qwen37max-v17.json",
+      "sha256": "bdf25bc737ced07bb3cbf140c00680314d5548843a66d0c1a70289c375f50a6f"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-tsg-facts-v15.txt",
+      "sha256": "06fb37d364dd0d86449e3877097ddad3ba480fd29a626e11c90e29a259cc7bdf"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-tsg-ambiguity-adjudication-qwen37max-v7.json",
+      "sha256": "f9968896935f681fb1ed9626a5449e6e1396b48a0de87f3a2ece536b896296c7"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-tsg-ambiguity-adjudication-v3.txt",
+      "sha256": "b04939fbd683819b9b55b25925f4d1f9bb1e5764b0084c610ff513b80d19b1ac"
+    },
+    "mechanism_registry": {
+      "path": "data/method/mechanism-registry-v1.json",
+      "sha256": "f322e27aa1ce7dcc598427f7a0ab608d29ae9d17385a0bbe20e20a3dcd835e10"
+    },
+    "source_manifest": {
+      "path": "data/method/prompt-tsg-external-qualification-source-v4.json",
+      "sha256": "3f515fd62b5493cbe5dad6f8e762fb0b7cf445093a300682da174268118fd1c2"
+    },
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+      "sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8"
+    },
+    "selection": {
+      "path": "data/method/prompt-tsg-external-qualification-selection-v4.json",
+      "sha256": "3e736b7df77ca3106ff46419d79a566f3aeeffe251db39dc36718d9ab9f35304"
+    },
+    "gold": {
+      "path": "data/method/prompt-tsg-external-qualification-gold-v4.json",
+      "sha256": "58be49642dce3308316b0b0f9622c53f4350595099af43b6ec5c99bd968a201d"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_tsg_extract.py",
+      "sha256": "053e6ae5ba507d5bab383bbc86944a2759171474ff7131cac327d9f8751c2084"
+    },
+    "qualification_implementation": {
+      "path": "src/prompt_mechanism_study/eligibility.py",
+      "sha256": "878fe678e1d0a0438ab0486727a87cf9dc56f8e411296392776202d153c08bf1"
+    }
+  },
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "candidate_support_realization_ids": [
+    "cwe22_archive_extraction",
+    "cwe328_security_sensitive_hash",
+    "cwe338_security_sensitive_randomness",
+    "cwe502_json_deserialization",
+    "cwe502_python_literal_deserialization",
+    "cwe502_yaml_deserialization",
+    "cwe611_xml_external_entity_control",
+    "cwe78_fixed_executable_argv",
+    "cwe798_external_credential_source",
+    "cwe89_sql_values"
+  ],
+  "execution_rule": "Commit this freeze before the first v17/v7 request. Execute the 31 selected tasks exactly once. If extraction or qualification fails, exclude the entire DevEval v4 population from later Gate claims; do not retry, resample, relabel, or lower thresholds.",
+  "formal_use_rule": "Formal extraction may begin only if the frozen qualification passes. Even then, only candidate_support_realization_ids are qualified; every other catalog realization remains unavailable.",
+  "model_requests_observed_before_freeze": false,
+  "arms_or_outcomes_used": false
+}

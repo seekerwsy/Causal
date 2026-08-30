@@ -346,6 +346,102 @@ def test_bigcodebench_external_qualification_freeze_is_self_consistent():
 
 
 @pytest.mark.reviewer
+def test_deveval_scoped_qualification_freeze_is_self_consistent():
+    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v4.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    selection = json.loads(
+        (
+            ROOT
+            / "data/method/prompt-tsg-external-qualification-selection-v4.json"
+        ).read_text(encoding="utf-8")
+    )
+    gold = json.loads(
+        (ROOT / "data/method/prompt-tsg-external-qualification-gold-v4.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source = json.loads(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-source-v4.json"
+        ).read_text(encoding="utf-8")
+    )
+    freeze = json.loads(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-freeze-v4.json"
+        ).read_text(encoding="utf-8")
+    )
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v11.json")
+
+    task_ids = [row["task_id"] for row in tasks]
+    assert len(tasks) == len(set(task_ids)) == 31
+    assert task_ids == selection["task_ids"]
+    assert task_ids == [row["task_id"] for row in gold["cases"]]
+    assert selection["source_tasks_sha256"] == hashlib.sha256(
+        tasks_path.read_bytes()
+    ).hexdigest()
+    assert all(
+        row["prompt_sha256"]
+        == hashlib.sha256(row["prompt"].encode("utf-8")).hexdigest()
+        for row in tasks
+    )
+    assert source["source"]["commit"] == (
+        "c1653455e0a18480a29aa07ba51636070f113316"
+    )
+    assert source["source"]["source_sha256"] == (
+        "1798383d278e7dc907f4568cd9369bd424884298e4cf88af8c9ec55a08c5dbab"
+    )
+    assert source["population_rule"]["frozen_task_units"] == 31
+    assert sum(source["population_rule"]["family_quotas"].values()) == 31
+    for family, upstream_ids in source["population_rule"][
+        "selected_upstream_ids_by_family"
+    ].items():
+        assert upstream_ids == [
+            row["source"]["upstream_id"]
+            for row in tasks
+            if row["task_family"] == family
+        ]
+    assert sum(row["expected_context"] == "present" for row in gold["cases"]) == 16
+
+    positive_realizations = sorted(
+        {
+            row["expected_realization_id"]
+            for row in gold["cases"]
+            if row["expected_context"] == "present"
+        }
+    )
+    assert positive_realizations == freeze["candidate_support_realization_ids"]
+    assert positive_realizations == source["support_scope"][
+        "candidate_realization_ids_with_expected_present_gold"
+    ]
+    catalog_realizations = sorted(
+        {query["realization_id"] for query in catalog["queries"]}
+    )
+    assert sorted(set(catalog_realizations) - set(positive_realizations)) == source[
+        "support_scope"
+    ]["catalog_realization_ids_without_expected_present_gold"]
+
+    for item in freeze["inputs"].values():
+        path = ROOT / item["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+    assert freeze["model_requests_observed_before_freeze"] is False
+    assert freeze["arms_or_outcomes_used"] is False
+
+    exposed_prompt_hashes = {
+        row["prompt_sha256"]
+        for version in ("v1", "v2", "v3")
+        for row in json.loads(
+            (
+                ROOT
+                / f"data/method/prompt-tsg-external-qualification-tasks-{version}.json"
+            ).read_text(encoding="utf-8")
+        )
+    }
+    assert exposed_prompt_hashes.isdisjoint(
+        {row["prompt_sha256"] for row in tasks}
+    )
+
+
+@pytest.mark.reviewer
 def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = (
