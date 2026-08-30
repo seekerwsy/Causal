@@ -48,7 +48,9 @@ class TaskContextContract:
     task_id: str
     prompt_sha256: str
     catalog_sha256: str
-    query_id: str
+    cwe_id: str
+    task_family: str
+    query_ids: tuple[str, ...]
     annotator_id: str
     review_status: str
     arms_or_outcomes_used: bool
@@ -74,7 +76,9 @@ def task_context_contract_from_record(value: Mapping[str, Any]) -> TaskContextCo
         "task_id",
         "prompt_sha256",
         "catalog_sha256",
-        "query_id",
+        "cwe_id",
+        "task_family",
+        "query_ids",
         "annotator_id",
         "review_status",
         "arms_or_outcomes_used",
@@ -132,7 +136,9 @@ def task_context_contract_from_record(value: Mapping[str, Any]) -> TaskContextCo
             value["task_id"],
             value["prompt_sha256"],
             value["catalog_sha256"],
-            value["query_id"],
+            value["cwe_id"],
+            value["task_family"],
+            tuple(value["query_ids"]),
             value["annotator_id"],
             value["review_status"],
             value["arms_or_outcomes_used"],
@@ -154,7 +160,7 @@ def compile_task_context_contract(
 ) -> PromptTSG:
     """Validate one exhaustive decision table and compile it without model discretion."""
 
-    query = _validate_contract(contract, prompt=prompt, catalog=catalog)
+    _validate_contract(contract, prompt=prompt, catalog=catalog)
     local_ids = {
         decision.semantic_id: f"semantic-{index:03d}"
         for index, decision in enumerate(contract.semantic_decisions)
@@ -194,7 +200,7 @@ def compile_task_context_contract(
     graph = build_prompt_tsg(
         task_id=contract.task_id,
         prompt=prompt,
-        extractor_id=f"task-context-contract-v1:{contract.contract_id}",
+        extractor_id=f"task-context-contract-v2:{contract.contract_id}",
         catalog=catalog,
         facts=facts,
         relations=relations,
@@ -202,9 +208,48 @@ def compile_task_context_contract(
         unresolved_relations=unresolved_relations,
         schema_version="2.0",
     )
-    if query["query_id"] != contract.query_id:
-        raise PromptTSGError("compiled task context query identity changed")
     return graph
+
+
+def task_context_scope(
+    *, cwe_id: str, task_family: str, catalog: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Return the complete catalog slice decided once for one task unit."""
+
+    queries = sorted(
+        (
+            query
+            for query in catalog["queries"]
+            if query["cwe_id"] == cwe_id and query["task_family"] == task_family
+        ),
+        key=lambda query: query["query_id"],
+    )
+    if not queries:
+        raise PromptTSGError("task context contract scope has no catalog query")
+    semantic_ids = sorted(
+        {
+            semantic_id
+            for query in queries
+            for semantic_id in (
+                *query["required_semantics"],
+                *query["forbidden_semantics"],
+                query["actionable_feature_id"],
+            )
+        }
+    )
+    relations = sorted(
+        {
+            tuple(relation)
+            for query in queries
+            for relation in query["required_relations"]
+        }
+    )
+    return {
+        "queries": tuple(queries),
+        "query_ids": tuple(query["query_id"] for query in queries),
+        "semantic_ids": tuple(semantic_ids),
+        "relations": tuple(relations),
+    }
 
 
 def _validate_contract(
@@ -214,7 +259,7 @@ def _validate_contract(
     catalog: Mapping[str, Any],
 ) -> Mapping[str, Any]:
     if (
-        contract.schema_version != "1.0"
+        contract.schema_version != "2.0"
         or contract.prompt_sha256 != content_hash(prompt)
         or contract.catalog_sha256 != catalog_sha256(catalog)
         or contract.review_status not in _REVIEW_STATUSES
@@ -223,15 +268,17 @@ def _validate_contract(
     ):
         raise PromptTSGError("task context contract envelope is invalid")
     require_text(contract.task_id, "task_id")
-    require_text(contract.query_id, "query_id")
+    require_text(contract.cwe_id, "cwe_id")
+    require_text(contract.task_family, "task_family")
     require_text(contract.annotator_id, "annotator_id")
-    queries = [query for query in catalog["queries"] if query["query_id"] == contract.query_id]
-    if len(queries) != 1:
-        raise PromptTSGError("task context contract query is not unique")
-    query = queries[0]
-    expected_semantics = set(query["required_semantics"]) | set(
-        query["forbidden_semantics"]
-    ) | {query["actionable_feature_id"]}
+    scope = task_context_scope(
+        cwe_id=contract.cwe_id,
+        task_family=contract.task_family,
+        catalog=catalog,
+    )
+    if contract.query_ids != scope["query_ids"]:
+        raise PromptTSGError("task context contract queries are not exhaustive")
+    expected_semantics = set(scope["semantic_ids"])
     semantic_ids = tuple(decision.semantic_id for decision in contract.semantic_decisions)
     if (
         set(semantic_ids) != expected_semantics
@@ -275,7 +322,7 @@ def _validate_contract(
         elif has_evidence or decision.attributes:
             raise PromptTSGError("non-present semantic decision cannot assert evidence")
 
-    expected_relations = {tuple(relation) for relation in query["required_relations"]}
+    expected_relations = set(scope["relations"])
     actual_relations = tuple(decision.relation for decision in contract.relation_decisions)
     if (
         set(actual_relations) != expected_relations
@@ -300,7 +347,7 @@ def _validate_contract(
             raise PromptTSGError("relation with an absent endpoint must be absent")
         if QueryState.UNRESOLVED in endpoint_states and decision.state is not QueryState.UNRESOLVED:
             raise PromptTSGError("relation with an unresolved endpoint must be unresolved")
-    return query
+    return scope
 
 
 __all__ = [
@@ -308,6 +355,7 @@ __all__ = [
     "SemanticDecision",
     "TaskContextContract",
     "compile_task_context_contract",
+    "task_context_scope",
     "task_context_contract_from_record",
     "task_context_contract_record",
 ]

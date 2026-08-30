@@ -96,10 +96,12 @@ contracts are complete. Multiple prospectively frozen external Prompt TSG
 attempts nevertheless failed Gate C. The latest DevEval run completed all 31
 graphs but reached only 27/31 exact matches, with two false-positive present
 states and two wrong realizations. All failed bundles are retained and none of
-the exposed populations is reused. A contract-first replacement now requires
-an exhaustive reviewed decision table and compiles the graph locally; it
-passes a four-case exposed architecture canary but has not passed a fresh
-independent extraction qualification. Formal discovery and a new claim-bearing
+the exposed populations is reused. The active contract-first replacement now
+requires one exhaustive task-level decision table spanning every catalog query
+for that task family. Two source-only LLM annotations are made independently;
+their deterministic consensus compiles the graph locally and maps disagreement
+to `unresolved`. The implementation closes under focused replay, but it has not
+yet passed a fresh independent extraction qualification. Formal discovery and a new claim-bearing
 provider run therefore were not started. The exact stopping boundary is recorded in the
 [Gate E readiness audit](docs/gate-e-readiness.md). The tracked schema-1.0 factorial bundles remain
 historical formal evidence and are independently replayable; they are not

@@ -191,27 +191,31 @@ definitions, extractor policy, and canonicalization rules are content-addressed.
 
 #### Prospective contract-first authority
 
-The post-v4 successor does not let an LLM author the scientific graph directly. For one
-task-query pair, the existing catalog query together with its actionable feature is the sole
-`MechanismDefinition`; no parallel mechanism-definition table is introduced. It determines the
-finite decision scope
+The post-v4 successor does not let an LLM author the scientific graph directly. For one task, all
+catalog queries matching its frozen `(CWE, task_family)` coordinates, together with their actionable
+features, are the sole `MechanismDefinition`; no parallel mechanism-definition table is introduced.
+For (Q(t)), the complete matching query set, they determine one task-level finite decision scope
 
 \[
-S_q=\operatorname{required}(q)\cup\operatorname{forbidden}(q)\cup\{f_q\},
+S_t=\bigcup_{q\in Q(t)}
+\left(\operatorname{required}(q)\cup\operatorname{forbidden}(q)\cup\{f_q\}\right),
 \qquad
-R_q=\operatorname{requiredRelations}(q).
+R_t=\bigcup_{q\in Q(t)}\operatorname{requiredRelations}(q).
 \]
 
 Before graph compilation, a `TaskContextContract` bound to the task, natural-Prompt hash, catalog
-digest, and query ID must assign every member of `S_q` and `R_q` exactly one of `PRESENT`, `ABSENT`,
-or `UNRESOLVED`. A `PRESENT` semantic requires an exact evidence occurrence. An omitted semantic or
+digest, CWE, task family, and complete ordered query-ID set must assign every member of `S_t` and
+`R_t` exactly one of `PRESENT`, `ABSENT`, or `UNRESOLVED`. A `PRESENT` semantic requires an exact evidence occurrence. An omitted semantic or
 relation is an invalid contract, not evidence of absence. Every decision also carries a bounded
 human-reviewable rationale; absence is never represented by an unexplained empty field. A relation with an unresolved endpoint is
 unresolved, and a relation with an absent endpoint is absent. Arms and outcomes are unavailable when
 the contract is produced and reviewed.
 
-An LLM may propose this finite decision table, but the accepted, reviewed contract is the scientific
-authority. A deterministic compiler derives node types from the catalog, verifies evidence spans and
+Two LLM calls with different frozen seeds independently complete this finite table from the same
+source-only request; neither sees the other's output. State disagreement becomes `UNRESOLVED`.
+When both mark a semantic `PRESENT`, a deterministic rule retains the longer already-validated exact
+span and only attributes asserted by both. The consensus contract, not either model response, is the
+scientific authority. A deterministic compiler derives node types from the catalog, verifies evidence spans and
 logical consistency, and emits the Prompt TSG. Record schema 2.0 preserves unresolved relations
 explicitly; schema-1.0 identities and frozen runs remain compatible and are never migrated in
 place: their canonical field set and content identity are unchanged, and the frozen files are not
@@ -246,7 +250,7 @@ A graph is publishable only when all of the following hold:
    fail closed; and
 8. query and projection results are recomputed from the canonical graph, never from an LLM-authored
    flat shadow; and
-9. contract-first graphs enumerate every query-scoped semantic and required relation before
+9. contract-first graphs enumerate every task-scope semantic and required relation across all matching queries before
    compilation; omission is a schema error, never `ABSENT`.
 
 ### 5.3 Four-valued query semantics

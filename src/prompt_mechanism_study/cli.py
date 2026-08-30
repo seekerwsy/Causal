@@ -164,6 +164,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     tsg_qualification.add_argument("--repository-root", type=Path, default=Path.cwd())
     tsg_qualification.add_argument("--path-authority-annotations", type=Path)
 
+    contract_qualification = commands.add_parser(
+        "prompt-contract-qualification",
+        help="independently replay and score the active task-level Prompt TSG Gate C",
+    )
+    contract_qualification.add_argument("tasks", type=Path)
+    contract_qualification.add_argument("extraction_bundle", type=Path)
+    contract_qualification.add_argument("catalog", type=Path)
+    contract_qualification.add_argument("registry", type=Path)
+    contract_qualification.add_argument("gold", type=Path)
+    contract_qualification.add_argument("proposer_evaluator", type=Path)
+    contract_qualification.add_argument("proposer_prompt", type=Path)
+    contract_qualification.add_argument("reviewer_evaluator", type=Path)
+    contract_qualification.add_argument("reviewer_prompt", type=Path)
+    contract_qualification.add_argument("output", type=Path)
+    contract_qualification.add_argument(
+        "--repository-root", type=Path, default=Path.cwd()
+    )
+
     tsg_selection = commands.add_parser(
         "prompt-tsg-selection",
         help="freeze formal Prompt-TSG tasks after provenance-only exclusions",
@@ -198,6 +216,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_tsg_extract.add_argument("--semantic-reviewer", type=Path)
     prompt_tsg_extract.add_argument("--semantic-reviewer-prompt", type=Path)
     prompt_tsg_extract.add_argument("--path-authority-annotations", type=Path)
+
+    prompt_contract_extract = commands.add_parser(
+        "prompt-contract-extract",
+        help="run the active blind dual-annotation task contract extractor",
+    )
+    prompt_contract_extract.add_argument("tasks", type=Path)
+    prompt_contract_extract.add_argument("catalog", type=Path)
+    prompt_contract_extract.add_argument("proposer_evaluator", type=Path)
+    prompt_contract_extract.add_argument("proposer_prompt", type=Path)
+    prompt_contract_extract.add_argument("reviewer_evaluator", type=Path)
+    prompt_contract_extract.add_argument("reviewer_prompt", type=Path)
+    prompt_contract_extract.add_argument("selection", type=Path)
+    prompt_contract_extract.add_argument("output", type=Path)
 
     positivity = commands.add_parser(
         "positivity-audit",
@@ -385,6 +416,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2
+    elif args.command == "prompt-contract-extract":
+        from prompt_mechanism_study.prompt_contract_extract import (
+            extract_contract_task_file,
+        )
+
+        report = extract_contract_task_file(
+            args.tasks,
+            args.catalog,
+            args.proposer_evaluator,
+            args.proposer_prompt,
+            args.reviewer_evaluator,
+            args.reviewer_prompt,
+            args.selection,
+            args.output,
+        )
+        print(report["status"])
     elif args.command == "task-partition":
         from prompt_mechanism_study.prioritization import freeze_task_unit_partition
 
@@ -432,6 +479,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.gold,
             args.output,
             path_authority_annotations_path=args.path_authority_annotations,
+        )
+        print(report["status"])
+        return 0 if report["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION" else 2
+    elif args.command == "prompt-contract-qualification":
+        from prompt_mechanism_study.prompt_contract_qualification import (
+            qualify_prompt_contract_extractor,
+        )
+
+        report = qualify_prompt_contract_extractor(
+            args.repository_root,
+            args.tasks,
+            args.extraction_bundle,
+            args.catalog,
+            args.registry,
+            args.gold,
+            args.proposer_evaluator,
+            args.proposer_prompt,
+            args.reviewer_evaluator,
+            args.reviewer_prompt,
+            args.output,
         )
         print(report["status"])
         return 0 if report["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION" else 2
