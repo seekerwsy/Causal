@@ -1,0 +1,149 @@
+{
+  "schema_version": "2.0",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "freeze_date": "2026-08-31",
+  "protocol_id": "task_context_contract_v2_dual_blind_consensus_task_keyed_json_schema_fail_closed_evidence_bounded_concurrency",
+  "method_revision_commit": "70679d490b3b9ad47cba19c53b76c729c3da8110",
+  "extractor_candidate_id": "dual-blind-consensus:prompt-contract-proposer-qwen37max-v4+prompt-contract-reviewer-qwen37max-v4",
+  "response_protocol_id": "task_keyed_prompt_contract_json_schema_v1",
+  "response_transport": "strict task-specific JSON objects whose required keys are exactly the frozen semantic and relation scopes, followed by fail-closed exact-evidence projection and independent local replay",
+  "relation_endpoint_precedence": [
+    "any_absent_implies_absent",
+    "otherwise_any_unresolved_implies_unresolved",
+    "otherwise_consult_relation_annotation"
+  ],
+  "endpoint_closure_stage": "each independent annotation before graph validation and consensus",
+  "provider_calls_per_task": 2,
+  "execution": {
+    "task_workers": 4,
+    "within_task_order": "proposer_then_reviewer",
+    "artifact_order": "frozen_selection_order"
+  },
+  "unsupported_present_evidence_policy": "deterministically_project_to_unresolved_without_retry",
+  "provider_schema_pilot": {
+    "status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
+    "response_protocol_id": "task_keyed_prompt_contract_json_schema_v1",
+    "exposed_task_units": 3,
+    "provider_calls": 6,
+    "contracts": 3,
+    "graphs": 3,
+    "task_workers": 4,
+    "effective_task_workers": 3,
+    "gate_accuracy_evidence": false
+  },
+  "frozen_task_units": 28,
+  "prior_provider_exposure": {
+    "conservatively_exposed_task_units": 28,
+    "retained_responses": 0,
+    "retained_graphs": 0,
+    "gate_score_computed": false,
+    "model_state_changed": false,
+    "researcher_inspected_semantic_output": false
+  },
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "candidate_support_realization_ids": [
+    "cwe338_security_sensitive_randomness",
+    "cwe502_json_deserialization",
+    "cwe502_yaml_deserialization",
+    "cwe78_fixed_executable_argv",
+    "cwe89_sql_values"
+  ],
+  "inputs": {
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "mechanism_registry": {
+      "path": "data/method/mechanism-registry-v1.json",
+      "sha256": "f322e27aa1ce7dcc598427f7a0ab608d29ae9d17385a0bbe20e20a3dcd835e10"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37max-v4.json",
+      "sha256": "d03b9495b0c1d0d6bcba4aa8d4c34ba1c759b97219fc66877364a9cb76a5c32b"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v3.txt",
+      "sha256": "27c71e2ef0e86aac441317f982cbea01108bd443b0391bf7e82450b795aba48a"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37max-v4.json",
+      "sha256": "37cd80f833ccd4af8db97d6e6bb3d59dbaaeb76a0e3263a55a6fddd1f62cf625"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v3.txt",
+      "sha256": "f78bda9376136b4009b6bdafedf9d0b60a177aa02043cdd3d8def747e739c93a"
+    },
+    "predecessor_disposition": {
+      "path": "data/method/prompt-tsg-external-qualification-v9-terminated.json",
+      "sha256": "233fb2c49e0d70f821dd605ee36f591474581fc751131d7ecd9702a42a6403fd"
+    },
+    "provider_schema_pilot_freeze": {
+      "path": "data/method/prompt-contract-concurrency-pilot-freeze-v4.json",
+      "sha256": "14b2020e055016aab650f2ad4750823053c9e177e03542a21729cf1fb64fb61b"
+    },
+    "provider_schema_pilot_manifest": {
+      "path": "data/method/results/prompt-contract-concurrency-pilot-v4/manifest.json",
+      "sha256": "bc2e2a3329c10deccc9edf8e7f8aa9d7a146374b28e248450b626eec0e98bd63"
+    },
+    "provider_schema_pilot_report": {
+      "path": "data/method/results/prompt-contract-concurrency-pilot-v4/report.json",
+      "sha256": "cc962f02cc149e0964a28da5472f2453f37d5db1fa6ca2b9ba4ae4a13daadac4"
+    },
+    "source_manifest": {
+      "path": "data/method/prompt-tsg-external-qualification-source-v10.json",
+      "sha256": "3caf701ffa9cf01bdd23ee619d9c2569b327458a1f87b94dc341efff3de954ca"
+    },
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v5.json",
+      "sha256": "6b4aca676b40e765bae8b7fe8477235210caa2c5258ada849aa130af798bdcad"
+    },
+    "selection": {
+      "path": "data/method/prompt-tsg-external-qualification-selection-v10.json",
+      "sha256": "c6e172ea033199fdbd503321bd36a6564102e4bffe8ea1e134e641222bdad4b0"
+    },
+    "gold": {
+      "path": "data/method/prompt-tsg-external-qualification-gold-v10.json",
+      "sha256": "c70b842a677d249fb2c49bfb4629e16e191dc0da1d9cf1fb69c161164f0ded3b"
+    },
+    "contract_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract.py",
+      "sha256": "8793512a1892aaaa1f9f6cf04c0b9aac54ae7525c153661f5ecf49aff7eb5b9a"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_extract.py",
+      "sha256": "01147fac7cb46b67ecd576d4b0d112a7bbb9efb965aff5caf743fea033642596"
+    },
+    "qualification_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_qualification.py",
+      "sha256": "9c5f73b36012bac543cea8376d11ad409dad2de82482c0ef463df8e09d8146eb"
+    },
+    "graph_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_tsg.py",
+      "sha256": "b0131677b94a0dee251986e2cb60f0e3f5a8452c9cd84c67655cf40e3cbd1f27"
+    },
+    "binding_implementation": {
+      "path": "src/prompt_mechanism_study/mechanisms.py",
+      "sha256": "c9b6b3fab1a2ca979b6afab373cd5e28a27a76917e8c4ff16b534e22f8b0d57a"
+    },
+    "provider_adapter": {
+      "path": "src/prompt_mechanism_study/functional_judge.py",
+      "sha256": "4030b96b9655dc5842d9dc904c7daf751c3a5711361fdcf11c0c457e0595d163"
+    },
+    "artifact_io": {
+      "path": "src/prompt_mechanism_study/artifact_io.py",
+      "sha256": "f763219080fb50931ebb5d36a30400cf9a855441152c49fc8d3ab9eaf8779d29"
+    },
+    "records": {
+      "path": "src/prompt_mechanism_study/records.py",
+      "sha256": "a5d47d8344f09b3e239b74b1cb83f733c75afc69e6c0c09fe7230f15e4da594f"
+    }
+  },
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
