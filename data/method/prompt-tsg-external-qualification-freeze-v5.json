@@ -1,0 +1,100 @@
+{
+  "schema_version": "2.0",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "freeze_date": "2026-08-31",
+  "protocol_id": "task_context_contract_v2_dual_blind_consensus",
+  "method_revision_commit": "0eadfff9d05a1990a007d21b58eb2ad77163672a",
+  "extractor_candidate_id": "dual-blind-consensus:prompt-contract-proposer-qwen37max-v1+prompt-contract-reviewer-qwen37max-v1",
+  "provider_calls_per_task": 2,
+  "frozen_task_units": 28,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "candidate_support_realization_ids": [
+    "cwe338_security_sensitive_randomness",
+    "cwe502_json_deserialization",
+    "cwe502_yaml_deserialization",
+    "cwe78_fixed_executable_argv",
+    "cwe89_sql_values"
+  ],
+  "inputs": {
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "mechanism_registry": {
+      "path": "data/method/mechanism-registry-v1.json",
+      "sha256": "f322e27aa1ce7dcc598427f7a0ab608d29ae9d17385a0bbe20e20a3dcd835e10"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37max-v1.json",
+      "sha256": "a43d96b62ee721d6b148293c6a6a7ceadc3b56ffcc712794af434fa38a7682fb"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v1.txt",
+      "sha256": "36e60d27299b211bd42d0c459953ec8b22d2f5912bbfc2cd9c38bf177777fa51"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37max-v1.json",
+      "sha256": "d3bf6bb3762ea39e73b5a31a55b8d1234fedb301b628be872ff0755e7ce496a4"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v1.txt",
+      "sha256": "b09b68536cb0333befab54ccd333356b367403b3c8c0448ee68c0298fffa83ed"
+    },
+    "source_manifest": {
+      "path": "data/method/prompt-tsg-external-qualification-source-v5.json",
+      "sha256": "511de65390ed163073d8c1177a4d8481f5adbdda3bbc4d01f540db147b49dc1f"
+    },
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v5.json",
+      "sha256": "6b4aca676b40e765bae8b7fe8477235210caa2c5258ada849aa130af798bdcad"
+    },
+    "selection": {
+      "path": "data/method/prompt-tsg-external-qualification-selection-v5.json",
+      "sha256": "d594a2d7a6d126fe18de47d464e513f95aaa9fddddbdd646c83cdf5af919108f"
+    },
+    "gold": {
+      "path": "data/method/prompt-tsg-external-qualification-gold-v5.json",
+      "sha256": "02e9bcab3c82e6e1222a3385a8facfdf749896449467b8900e07a8717bbd1bbc"
+    },
+    "contract_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract.py",
+      "sha256": "2b7c00cbc9316bbf5b0f7d7947a26fe0dee2eb8bc8eda03571a5bf54e442b8c4"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_extract.py",
+      "sha256": "896435cef1fcb182afd610f9d7b616d653b82f904ddab7bfb3a9d3dbb37f70df"
+    },
+    "qualification_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_qualification.py",
+      "sha256": "414c4dcedd8b829fc0b3824f6acbfad9a6f91a657f25aab59d4314cfc2e278b8"
+    },
+    "graph_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_tsg.py",
+      "sha256": "b0131677b94a0dee251986e2cb60f0e3f5a8452c9cd84c67655cf40e3cbd1f27"
+    },
+    "binding_implementation": {
+      "path": "src/prompt_mechanism_study/mechanisms.py",
+      "sha256": "c9b6b3fab1a2ca979b6afab373cd5e28a27a76917e8c4ff16b534e22f8b0d57a"
+    },
+    "provider_adapter": {
+      "path": "src/prompt_mechanism_study/functional_judge.py",
+      "sha256": "ed54cc906bd1580ca96d559b7d0c7969dcf58c4addd721e8833c44f2cdf785b7"
+    },
+    "artifact_io": {
+      "path": "src/prompt_mechanism_study/artifact_io.py",
+      "sha256": "f763219080fb50931ebb5d36a30400cf9a855441152c49fc8d3ab9eaf8779d29"
+    },
+    "records": {
+      "path": "src/prompt_mechanism_study/records.py",
+      "sha256": "a5d47d8344f09b3e239b74b1cb83f733c75afc69e6c0c09fe7230f15e4da594f"
+    }
+  },
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

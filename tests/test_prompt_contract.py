@@ -367,3 +367,60 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
     assert report["provider_calls"] == 2
     assert qualification["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION"
     assert qualification["exact_context_accuracy"] == 1.0
+
+
+def test_prospective_v5_gate_freeze_is_source_only_and_self_consistent():
+    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
+    selection_path = (
+        ROOT / "data/method/prompt-tsg-external-qualification-selection-v5.json"
+    )
+    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v5.json"
+    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v5.json"
+    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v5.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    catalog = load_catalog(CATALOG_PATH)
+
+    task_ids = [task["task_id"] for task in tasks]
+    assert len(tasks) == len(set(task_ids)) == 28
+    assert task_ids == selection["task_ids"]
+    assert task_ids == [case["task_id"] for case in gold["cases"]]
+    assert selection["source_tasks_sha256"] == hashlib.sha256(
+        tasks_path.read_bytes()
+    ).hexdigest()
+    assert all(
+        task["prompt_sha256"]
+        == hashlib.sha256(task["prompt"].encode("utf-8")).hexdigest()
+        for task in tasks
+    )
+    assert all(
+        task_context_scope(
+            cwe_id=task["cwe"],
+            task_family=task["task_family"],
+            catalog=catalog,
+        )["query_ids"]
+        for task in tasks
+    )
+    assert sum(case["expected_context"] == "present" for case in gold["cases"]) == 10
+    positive_realizations = sorted(
+        {
+            case["expected_realization_id"]
+            for case in gold["cases"]
+            if case["expected_context"] == "present"
+        }
+    )
+    assert positive_realizations == sorted(
+        source["support_scope"]["candidate_realization_ids_with_expected_present_gold"]
+    )
+    assert positive_realizations == sorted(freeze["candidate_support_realization_ids"])
+    assert source["gold_annotation"]["independent_human_annotation"] is False
+    assert source["review_completed_before_extraction"] is True
+    assert gold["review_completed_before_extraction"] is True
+    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert freeze["arms_or_outcomes_used"] is False
+    for item in freeze["inputs"].values():
+        path = ROOT / item["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
