@@ -131,6 +131,22 @@ def test_active_catalog_guides_every_query_bound_semantic():
 
 
 @pytest.mark.reviewer
+def test_prospective_catalog_freezes_xml_and_sql_semantic_boundaries():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v8.json")
+    guidance = catalog["semantic_guidance"]
+
+    assert "DTD validation or internal-DTD support alone does not entail" in guidance[
+        "constraint.external_entities_required"
+    ]
+    assert "Separately named function or request parameters" in guidance[
+        "source.dynamic_sql_identifier"
+    ]
+    assert "optional separately named parameters" in guidance[
+        "constraint.fixed_sql_identifiers"
+    ]
+
+
+@pytest.mark.reviewer
 def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = (

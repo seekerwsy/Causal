@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "status": "PROSPECTIVELY_SPECIFIED",
+  "scope": "Prompt TSG task-semantics extraction only; no intervention arm, generated code, Oracle output, or effect outcome is changed.",
+  "supersedes_for_future_qualification_only": {
+    "catalog": "data/method/prompt-tsg-catalog-v5.json",
+    "proposer_prompt": "data/method/prompts/prompt-tsg-facts-v10.txt",
+    "proposer_evaluator": "data/method/prompt-tsg-extractor-qwen37max-v12.json"
+  },
+  "prospective_files": {
+    "catalog": "data/method/prompt-tsg-catalog-v8.json",
+    "proposer_prompt": "data/method/prompts/prompt-tsg-facts-v13.txt",
+    "proposer_evaluator": "data/method/prompt-tsg-extractor-qwen37max-v15.json",
+    "ambiguity_reviewer": "data/method/prompt-tsg-ambiguity-adjudication-qwen37max-v6.json",
+    "ambiguity_reviewer_prompt": "data/method/prompts/prompt-tsg-ambiguity-adjudication-v2.txt"
+  },
+  "clarifications": [
+    {
+      "clarification_id": "xml_dtd_validation_is_not_external_resolution",
+      "rule": "DTD validation or internal-DTD support alone does not entail required external-entity resolution. The forbidden constraint is present only when the task explicitly requires external general or parameter entities, fetching or loading an external DTD or schema through an external system/network identifier, or parser network access.",
+      "affected_semantics": [
+        "constraint.external_entities_required"
+      ]
+    },
+    {
+      "clarification_id": "named_sql_value_arguments_are_not_identifier_tokens",
+      "rule": "Optional separately named arguments with fixed field roles remain SQL values even when any subset may be supplied. A dynamic SQL identifier requires a caller-supplied token whose value selects a table, column, schema, database, ordering field, or equivalent SQL grammar role.",
+      "affected_semantics": [
+        "source.untrusted_sql_value",
+        "source.dynamic_sql_identifier",
+        "constraint.fixed_sql_identifiers",
+        "constraint.finite_sql_identifier_domain",
+        "constraint.arbitrary_sql_identifier_required"
+      ]
+    }
+  ],
+  "unchanged": [
+    "Prompt TSG graph schema and four-valued query semantics",
+    "registered realization queries and mechanism registry",
+    "qualification thresholds",
+    "all frozen extraction and qualification bundles",
+    "assigned-arm ITT and downstream outcome definitions"
+  ],
+  "evidence_boundary": "The clarification is specified and locally testable but does not count as externally validated until a disjoint, prospectively frozen qualification population is extracted once and scored against pre-extraction gold labels.",
+  "arms_or_outcomes_used": false
+}
