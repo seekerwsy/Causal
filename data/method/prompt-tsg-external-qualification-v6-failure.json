@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_FAILED_BEFORE_BUNDLE",
+  "freeze_sha256": "a11b06d67bd8c6c3534ba5baa7d3f51162113dc54dbb95981b0b839f60505bc3",
+  "method_revision_commit": "fae25b80787def62984200de9766bc32905073f4",
+  "provider_calls": "unknown; at least 2 and at most 56",
+  "formal_task_units_conservatively_treated_as_exposed": 28,
+  "response_artifacts_retained": false,
+  "graphs_retained": 0,
+  "gate_score_computed": false,
+  "failure": "The deterministic validator imposed contradictory states on a relation whose endpoints were ABSENT and UNRESOLVED.",
+  "root_cause": "Endpoint rules were independent if-statements. ABSENT must dominate UNRESOLVED because a relation cannot exist when either endpoint is known absent.",
+  "disposition": "v6 remains immutable and is not qualified. A prospective v7 freezes the total endpoint truth table before rerunning; no v6 semantic response or gold comparison was inspected.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

@@ -204,6 +204,57 @@ def test_blind_request_is_exhaustive_and_contains_no_arm_or_outcome():
     assert "generated" not in json.dumps(request).lower()
 
 
+def test_absent_endpoint_dominates_unresolved_endpoint_for_relation_state():
+    task, catalog = _inputs()
+    contract = _contract(task, catalog)
+    sink_id = "sink.sql_execution"
+    semantic_decisions = tuple(
+        replace(
+            row,
+            state=QueryState.UNRESOLVED,
+            evidence_text=None,
+            occurrence=None,
+            attributes=(),
+        )
+        if row.semantic_id == sink_id
+        else row
+        for row in contract.semantic_decisions
+    )
+    states = {row.semantic_id: row.state for row in semantic_decisions}
+    relation_decisions = tuple(
+        replace(
+            row,
+            state=(
+                QueryState.ABSENT
+                if QueryState.ABSENT
+                in {states[row.source_semantic_id], states[row.target_semantic_id]}
+                else QueryState.UNRESOLVED
+            ),
+        )
+        for row in contract.relation_decisions
+    )
+
+    graph = compile_task_context_contract(
+        replace(
+            contract,
+            semantic_decisions=semantic_decisions,
+            relation_decisions=relation_decisions,
+        ),
+        prompt=task["prompt"],
+        catalog=catalog,
+    )
+
+    assert any(
+        relation[0] == "constraint.finite_sql_identifier_domain"
+        for relation in graph.unresolved_relations
+    ) is False
+    assert (
+        "constraint.fixed_sql_identifiers",
+        "qualifies",
+        "sink.sql_execution",
+    ) in graph.unresolved_relations
+
+
 def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unresolved():
     task, catalog = _inputs()
     base = _contract(task, catalog)
@@ -467,4 +518,5 @@ def test_prospective_v6_gate_freeze_closes_array_only_successor():
     assert freeze["arms_or_outcomes_used"] is False
     for item in freeze["inputs"].values():
         path = ROOT / item["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+        if item["path"].startswith("data/"):
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]

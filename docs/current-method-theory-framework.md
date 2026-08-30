@@ -96,6 +96,10 @@ Git 保存，不再作为活动输入。当前 task-level 接口已通过聚焦�
 合同抽取准确，也不重开 Gate C。下一次独立 Gate 应资格审查合同生成过程，而不是再次
 让 LLM 直接生成图。
 
+relation 的端点状态采用一个总序真值表，而不是两条可冲突的规则：任一端点
+`ABSENT` 时 relation 为 `ABSENT`；否则任一端点 `UNRESOLVED` 时 relation 为
+`UNRESOLVED`；只有两个端点均 `PRESENT` 时才裁决 relation 自身状态。
+
 ### 3.3 原子假设
 
 可确认假设为：

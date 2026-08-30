@@ -207,8 +207,10 @@ Before graph compilation, a `TaskContextContract` bound to the task, natural-Pro
 digest, CWE, task family, and complete ordered query-ID set must assign every member of `S_t` and
 `R_t` exactly one of `PRESENT`, `ABSENT`, or `UNRESOLVED`. A `PRESENT` semantic requires an exact evidence occurrence. An omitted semantic or
 relation is an invalid contract, not evidence of absence. Every decision also carries a bounded
-human-reviewable rationale; absence is never represented by an unexplained empty field. A relation with an unresolved endpoint is
-unresolved, and a relation with an absent endpoint is absent. Arms and outcomes are unavailable when
+human-reviewable rationale; absence is never represented by an unexplained empty field. Endpoint
+state precedence is total: if either endpoint is `ABSENT`, the relation is `ABSENT`; otherwise, if
+either endpoint is `UNRESOLVED`, the relation is `UNRESOLVED`; only two `PRESENT` endpoints permit
+the relation decision itself to be `PRESENT`. Arms and outcomes are unavailable when
 the contract is produced and reviewed.
 
 Two LLM calls with different frozen seeds independently complete this finite table from the same

@@ -343,10 +343,12 @@ def _validate_contract(
         endpoint_states = {states[decision.source_semantic_id], states[decision.target_semantic_id]}
         if decision.state is QueryState.PRESENT and endpoint_states != {QueryState.PRESENT}:
             raise PromptTSGError("present relation requires present endpoints")
-        if QueryState.ABSENT in endpoint_states and decision.state is not QueryState.ABSENT:
-            raise PromptTSGError("relation with an absent endpoint must be absent")
-        if QueryState.UNRESOLVED in endpoint_states and decision.state is not QueryState.UNRESOLVED:
-            raise PromptTSGError("relation with an unresolved endpoint must be unresolved")
+        if QueryState.ABSENT in endpoint_states:
+            if decision.state is not QueryState.ABSENT:
+                raise PromptTSGError("relation with an absent endpoint must be absent")
+        elif QueryState.UNRESOLVED in endpoint_states:
+            if decision.state is not QueryState.UNRESOLVED:
+                raise PromptTSGError("relation with an unresolved endpoint must be unresolved")
     return scope
 
 
