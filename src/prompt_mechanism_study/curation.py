@@ -420,6 +420,91 @@ def run_contract_quality_review(
     return report
 
 
+def repair_response_format_contract_leaks(
+    contracts_root: Path,
+    output: Path,
+) -> dict[str, Any]:
+    """Remove response-format instructions from a successor contract bundle."""
+
+    contracts = contracts_root.resolve()
+    verify_bundle(contracts)
+    contract_rows = _rows(
+        read_json(contracts / "functional-contracts.json"),
+        "functional contracts",
+    )
+    corrected: list[dict[str, Any]] = []
+    repaired_only: list[dict[str, Any]] = []
+    repairs: list[dict[str, Any]] = []
+    seen_clusters: set[str] = set()
+    for contract in contract_rows:
+        cluster_id = contract.get("cluster_id")
+        if not isinstance(cluster_id, str) or cluster_id in seen_clusters:
+            raise CurationError("functional contracts have invalid task-unit identities")
+        seen_clusters.add(cluster_id)
+        original_core = {key: value for key, value in contract.items() if key != "contract_id"}
+        if contract.get("contract_id") != content_id("cluster_contract_", original_core):
+            raise CurationError("functional contract content identity is invalid")
+        requirements = contract.get("requirements")
+        if not isinstance(requirements, list) or any(
+            not isinstance(requirement, str) or not requirement.strip()
+            for requirement in requirements
+        ):
+            raise CurationError("contract requirements are invalid")
+        removed = [
+            requirement
+            for requirement in requirements
+            if _is_response_format_requirement(requirement)
+        ]
+        retained = [requirement for requirement in requirements if requirement not in removed]
+        if removed and not retained:
+            raise CurationError("format-leak repair would erase every functional requirement")
+        corrected_core = {**original_core, "requirements": retained}
+        corrected_contract = {
+            **corrected_core,
+            "contract_id": content_id("cluster_contract_", corrected_core),
+        }
+        corrected.append(corrected_contract)
+        if removed:
+            repaired_only.append(corrected_contract)
+            repairs.append(
+                {
+                    "cluster_id": cluster_id,
+                    "record_id": contract["record_id"],
+                    "old_contract_id": contract["contract_id"],
+                    "new_contract_id": corrected_contract["contract_id"],
+                    "removed_requirements": removed,
+                    "repair_code": "remove_response_format_instruction_v1",
+                }
+            )
+    corrected.sort(key=lambda item: item["cluster_id"])
+    repaired_only.sort(key=lambda item: item["cluster_id"])
+    repairs.sort(key=lambda item: item["cluster_id"])
+    report = {
+        "schema_version": "1.0",
+        "status": "FUNCTIONAL_CONTRACT_FORMAT_REPAIRS_FROZEN",
+        "source_contracts_bundle_sha256": bundle_digest(contracts),
+        "contract_count": len(corrected),
+        "repaired_contract_count": len(repairs),
+        "unchanged_contract_count": len(corrected) - len(repairs),
+        "repair_rule": "remove_response_format_instruction_v1",
+        "arms_or_outcomes_used": False,
+        "semantic_quality_established": False,
+        "final_experiment_eligibility_established": False,
+        "scientific_claim_allowed": False,
+    }
+    destination = output.resolve()
+    write_bundle(
+        destination,
+        {
+            "functional-contracts.json": corrected,
+            "repaired-contracts.json": repaired_only,
+            "repairs.json": repairs,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def assemble_semantic_clusters(
     prepared_root: Path,
     candidates_root: Path,
@@ -1057,13 +1142,16 @@ def _deterministic_contract_issues(contract: Mapping[str, Any]) -> list[str]:
     if not isinstance(requirements, list):
         raise CurationError("contract requirements are invalid")
     if any(
-        marker in requirement.lower()
+        _is_response_format_requirement(requirement)
         for requirement in requirements
         if isinstance(requirement, str)
-        for marker in _RESPONSE_FORMAT_MARKERS
     ):
         return ["response_format_instruction_leak"]
     return []
+
+
+def _is_response_format_requirement(requirement: str) -> bool:
+    return any(marker in requirement.lower() for marker in _RESPONSE_FORMAT_MARKERS)
 
 
 def _json_object(raw: bytes) -> dict[str, Any]:
@@ -1125,5 +1213,6 @@ __all__ = [
     "assemble_semantic_clusters",
     "run_contract_curation",
     "run_contract_quality_review",
+    "repair_response_format_contract_leaks",
     "run_semantic_curation",
 ]

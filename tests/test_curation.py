@@ -12,6 +12,7 @@ from prompt_mechanism_study.curation import (
     _parse_contract_reviews,
     _parse_semantic,
     assemble_semantic_clusters,
+    repair_response_format_contract_leaks,
     run_contract_curation,
     run_contract_quality_review,
 )
@@ -393,6 +394,44 @@ def test_contract_review_parser_rejects_faithful_rows_with_issue_codes() -> None
     ).encode()
     with pytest.raises(CurationError):
         _parse_contract_reviews(raw, [{"cluster_id": "cluster-a"}])
+
+
+def test_response_format_leak_repair_preserves_task_and_rekeys_contract(
+    tmp_path: Path,
+) -> None:
+    core = {
+        "cluster_id": "cluster-a",
+        "entrypoint": "solve",
+        "environment_dependencies": [],
+        "inputs": ["value"],
+        "outputs": ["result"],
+        "reason": "Explicit behavior.",
+        "record_id": "record-a",
+        "requirements": [
+            "Return the transformed value.",
+            "Output only the code without preamble or suffix.",
+        ],
+        "resolution_status": "resolved",
+        "side_effects": [],
+        "source_prompt_sha256": "a" * 64,
+    }
+    original = {**core, "contract_id": content_id("cluster_contract_", core)}
+    contracts = tmp_path / "contracts"
+    write_bundle(contracts, {"functional-contracts.json": [original]})
+
+    output = tmp_path / "corrected"
+    report = repair_response_format_contract_leaks(contracts, output)
+
+    corrected = read_json(output / "functional-contracts.json")
+    assert report["repaired_contract_count"] == 1
+    assert report["semantic_quality_established"] is False
+    assert corrected[0]["cluster_id"] == original["cluster_id"]
+    assert corrected[0]["contract_id"] != original["contract_id"]
+    assert corrected[0]["requirements"] == ["Return the transformed value."]
+    assert read_json(output / "repairs.json")[0]["old_contract_id"] == original[
+        "contract_id"
+    ]
+    assert read_json(contracts / "functional-contracts.json") == [original]
 
 
 def test_semantic_parser_collapses_only_identical_duplicate_json_keys() -> None:

@@ -339,6 +339,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     review_contracts.add_argument("--workers", type=int, default=1)
     review_contracts.add_argument("--reuse-root", type=Path)
 
+    repair_contracts = commands.add_parser(
+        "repair-contract-format-leaks",
+        help="freeze a successor contract bundle without response-format requirements",
+    )
+    repair_contracts.add_argument("contracts_root", type=Path)
+    repair_contracts.add_argument("output", type=Path)
+
     eligibility = commands.add_parser(
         "dataset-eligibility",
         help="audit curated clusters for current experiment readiness",
@@ -619,6 +626,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_new_batches=args.max_new_batches,
             workers=args.workers,
             reuse_root=args.reuse_root,
+        )
+        print(report["status"])
+    elif args.command == "repair-contract-format-leaks":
+        from prompt_mechanism_study.curation import repair_response_format_contract_leaks
+
+        report = repair_response_format_contract_leaks(
+            args.contracts_root,
+            args.output,
         )
         print(report["status"])
     elif args.command == "assemble-semantic-clusters":
