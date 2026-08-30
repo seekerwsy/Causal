@@ -577,8 +577,8 @@ def _execute(
 ) -> tuple[list[dict[str, Any]], bool]:
     if max_new_batches is not None and (type(max_new_batches) is not int or max_new_batches <= 0):
         raise ValueError("max_new_batches must be a positive integer")
-    if type(workers) is not int or not 1 <= workers <= 4:
-        raise ValueError("workers must be an integer between one and four")
+    if type(workers) is not int or not 1 <= workers <= 6:
+        raise ValueError("workers must be an integer between one and six")
     expected_names = {f"batch-{index:04d}" for index in range(1, len(batches) + 1)}
     actual_names = {item.name for item in (run_root / "batches").iterdir()}
     if not actual_names <= expected_names:
