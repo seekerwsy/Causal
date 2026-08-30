@@ -440,6 +440,58 @@ def test_deveval_scoped_qualification_freeze_is_self_consistent():
         {row["prompt_sha256"] for row in tasks}
     )
 
+    failure = json.loads(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-v4-failure.json"
+        ).read_text(encoding="utf-8")
+    )
+    extraction = ROOT / failure["extractor_bundle_path"]
+    qualification = ROOT / failure["qualification_bundle_path"]
+    verify_bundle(extraction)
+    verify_bundle(qualification)
+    assert bundle_digest(extraction) == failure["extractor_bundle_sha256"]
+    assert bundle_digest(qualification) == failure["qualification_bundle_sha256"]
+    for key in ("catalog", "freeze", "source_manifest"):
+        assert failure[f"{key}_sha256"] == hashlib.sha256(
+            (ROOT / failure[f"{key}_path"]).read_bytes()
+        ).hexdigest()
+    assert failure["tasks_sha256"] == hashlib.sha256(tasks_path.read_bytes()).hexdigest()
+    assert failure["selection_sha256"] == hashlib.sha256(
+        (
+            ROOT
+            / "data/method/prompt-tsg-external-qualification-selection-v4.json"
+        ).read_bytes()
+    ).hexdigest()
+    assert failure["gold_sha256"] == hashlib.sha256(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-gold-v4.json"
+        ).read_bytes()
+    ).hexdigest()
+
+    extraction_report = json.loads(
+        (extraction / "report.json").read_text(encoding="utf-8")
+    )
+    qualification_report = json.loads(
+        (qualification / "qualification.json").read_text(encoding="utf-8")
+    )
+    assert extraction_report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE"
+    assert extraction_report["graphs"] == failure["execution"]["completed_graphs"] == 31
+    assert '"node_type"' not in (extraction / "responses.json").read_text(
+        encoding="utf-8"
+    )
+    assert qualification_report["status"] == failure["status"] == "QUALIFICATION_FAILED"
+    for metric in (
+        "matched_task_units",
+        "mismatched_task_units",
+        "exact_context_accuracy",
+        "present_recall",
+        "false_positive_present",
+        "wrong_realization",
+    ):
+        assert qualification_report[metric] == failure["qualification"][metric]
+    assert len(failure["mismatches"]) == 4
+    assert failure["scientific_claim_allowed"] is False
+
 
 @pytest.mark.reviewer
 def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():

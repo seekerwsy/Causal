@@ -1,0 +1,172 @@
+{
+  "schema_version": "1.0",
+  "status": "QUALIFICATION_FAILED",
+  "evidence_type": "newly_run",
+  "claim_readiness": "blocked",
+  "freeze_commit": "d1eabd77deaf833ff92c9c19d866ad599d178f93",
+  "method_revision_commit": "e49020fb5f9e776b2ec0ea288fd1bc63e8e407ec",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v17+prompt-tsg-ambiguity-adjudication-qwen37max-v7",
+  "catalog_path": "data/method/prompt-tsg-catalog-v11.json",
+  "catalog_sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09",
+  "freeze_path": "data/method/prompt-tsg-external-qualification-freeze-v4.json",
+  "freeze_sha256": "a0bf93890ee6b09b4da7c983e084cac23d7e6666a4b89e76505786c1775582a9",
+  "source_manifest_path": "data/method/prompt-tsg-external-qualification-source-v4.json",
+  "source_manifest_sha256": "3f515fd62b5493cbe5dad6f8e762fb0b7cf445093a300682da174268118fd1c2",
+  "tasks_path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+  "tasks_sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8",
+  "selection_path": "data/method/prompt-tsg-external-qualification-selection-v4.json",
+  "selection_sha256": "3e736b7df77ca3106ff46419d79a566f3aeeffe251db39dc36718d9ab9f35304",
+  "gold_path": "data/method/prompt-tsg-external-qualification-gold-v4.json",
+  "gold_sha256": "58be49642dce3308316b0b0f9622c53f4350595099af43b6ec5c99bd968a201d",
+  "extractor_bundle_path": "data/method/results/prompt-tsg-external-extraction-v4",
+  "qualification_bundle_path": "data/method/results/prompt-tsg-external-qualification-v4",
+  "source_archive_sha256": "3ed83708fa7a549b925e55c1778fb9d22fd5448c92d11b61fd235d22fe19d38e",
+  "extraction_archive_sha256": "5e3978fdda6d722fbbc4060dd387104e0130bbab864d4ff8bdbf8c6d0fee1ace",
+  "extractor_bundle_sha256": "c96806ea0ee0c303b5e716fadf8204b7a748f0e1797973580a94e473b3f93488",
+  "qualification_bundle_sha256": "c05be40967abda7f14574c6f26533a8a00f52377106016db26c09ce5abf77cca",
+  "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/prompt-tsg-deveval-gate-c-v4-d1eabd7-20260830-01",
+  "remote_output": "/home/wsy/prompt-mechanism-study-experiments/prompt-tsg-deveval-gate-c-v4-d1eabd7-20260830-01/extraction",
+  "environment": {
+    "host_gpu": "2 x NVIDIA A800 80GB PCIe",
+    "python": "3.12.13"
+  },
+  "execution": {
+    "selected_tasks": 31,
+    "completed_graphs": 31,
+    "proposer_calls": 31,
+    "reviewer_calls": 31,
+    "response_node_type_occurrences": 0,
+    "arms_or_outcomes_used": false,
+    "automatic_retries": 0
+  },
+  "qualification": {
+    "matched_task_units": 27,
+    "mismatched_task_units": 4,
+    "exact_context_accuracy": 0.870968,
+    "present_recall": 0.875,
+    "false_positive_present": 2,
+    "wrong_realization": 2,
+    "rule": {
+      "minimum_exact_context_accuracy": 0.9,
+      "minimum_present_recall": 0.8,
+      "maximum_false_positive_present": 0,
+      "maximum_wrong_realization": 0
+    },
+    "passed_components": [
+      "present_recall"
+    ],
+    "failed_components": [
+      "exact_context_accuracy",
+      "false_positive_present",
+      "wrong_realization"
+    ]
+  },
+  "family_results": [
+    {
+      "task_family": "archive_extraction",
+      "matched": 2,
+      "cases": 2,
+      "present_recovered": 1,
+      "expected_present": 1,
+      "false_positive_present": 0
+    },
+    {
+      "task_family": "command_execution",
+      "matched": 4,
+      "cases": 4,
+      "present_recovered": 2,
+      "expected_present": 2,
+      "false_positive_present": 0
+    },
+    {
+      "task_family": "credential_source",
+      "matched": 2,
+      "cases": 4,
+      "present_recovered": 1,
+      "expected_present": 2,
+      "false_positive_present": 1
+    },
+    {
+      "task_family": "deserialization",
+      "matched": 6,
+      "cases": 6,
+      "present_recovered": 4,
+      "expected_present": 4,
+      "false_positive_present": 0
+    },
+    {
+      "task_family": "message_hashing",
+      "matched": 4,
+      "cases": 4,
+      "present_recovered": 2,
+      "expected_present": 2,
+      "false_positive_present": 0
+    },
+    {
+      "task_family": "security_random_generation",
+      "matched": 3,
+      "cases": 4,
+      "present_recovered": 1,
+      "expected_present": 1,
+      "false_positive_present": 1
+    },
+    {
+      "task_family": "sql_query",
+      "matched": 3,
+      "cases": 4,
+      "present_recovered": 1,
+      "expected_present": 2,
+      "false_positive_present": 0
+    },
+    {
+      "task_family": "xml_parsing",
+      "matched": 3,
+      "cases": 3,
+      "present_recovered": 2,
+      "expected_present": 2,
+      "false_positive_present": 0
+    }
+  ],
+  "mismatches": [
+    {
+      "upstream_task_id": "sqlitedict.SqliteDict.update",
+      "expected_context": "present",
+      "actual_context": "absent",
+      "expected_realization_id": "cwe89_sql_values",
+      "actual_realization_id": null,
+      "diagnosis": "Both models accepted the SQL-value source, SQL-execution sink, and fixed-identifier fact. The proposer supplied both required relations, but the reviewer omitted the fixed-identifiers-to-sink qualifies relation, so the intersection policy removed an otherwise supported edge. This is a relation-adjudication false negative rather than a missing atomic fact."
+    },
+    {
+      "upstream_task_id": "diffprivlib.utils.check_random_state",
+      "expected_context": "absent_or_unresolved",
+      "actual_context": "present",
+      "expected_realization_id": null,
+      "actual_realization_id": "cwe338_security_sensitive_randomness",
+      "diagnosis": "Both models treated returning a SystemRandom object as generation of a security value and ignored the same contract's seeded deterministic modes. The current catalog does not force a distinction between selecting an RNG implementation and generating a password, token, nonce, secret, or similar value."
+    },
+    {
+      "upstream_task_id": "kinto.plugins.openid.OpenIDConnectPolicy._verify_token",
+      "expected_context": "present",
+      "actual_context": "unresolved",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "actual_realization_id": null,
+      "diagnosis": "The reviewer recovered the external-credential source, credential-use sink, and their flow but left external-credential permission unresolved despite an explicit access_token function parameter. The case also exposes a taxonomy boundary between application credentials and per-request bearer credentials that the current gold and catalog do not define sharply enough."
+    },
+    {
+      "upstream_task_id": "kinto.core.testing.get_user_headers",
+      "expected_context": "absent_or_unresolved",
+      "actual_context": "present",
+      "expected_realization_id": null,
+      "actual_realization_id": "cwe798_external_credential_source",
+      "diagnosis": "Both models treated end-user username/password input and local Basic-Auth header construction as application credential sourcing and protected-resource authentication. This contradicts the catalog's end-user-input exclusion and its requirement that the sink use a credential to authenticate to a service."
+    }
+  ],
+  "protocol_risks": [
+    "The credential-source taxonomy is under-specified for per-request access tokens and authentication-header helpers; one frozen gold case is consequently interpretation-sensitive.",
+    "The reviewer currently re-adjudicates relations by omission, so a correct proposer relation can disappear without an explicit contradiction.",
+    "RNG factory selection and security-value generation share the same finite semantic slice, allowing mixed deterministic contracts to become false-positive present states.",
+    "Six catalog realizations had no expected-present case and would have remained outside the support scope even if aggregate qualification had passed."
+  ],
+  "disposition": "The DevEval v4 population is fully exposed and permanently excluded from future Gate evidence. It must not be retried, resampled, relabeled, or used to lower thresholds. Gate C remains failed; formal discovery, hypothesis freeze, intervention experiments, and Gate D/E do not start from this result.",
+  "scientific_claim_allowed": false
+}

@@ -27,7 +27,7 @@ The final PHASE plan is implemented under four explicit scope corrections:
 | --- | --- | --- |
 | A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
 | B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
-| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The structured-authority successor failed its complete 16-task external qualification. A revised candidate stopped on task 2 of a disjoint 10-task SecCodeBench population. Catalog v9/proposer v16 then stopped on task 16 of a prospectively frozen 31-task BigCodeBench population; the first 15 closed graphs already contained one false-positive present state and one wrong realization, while both frozen maxima were zero. No failed population is reused. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The compiled successor completed a prospectively frozen 31-task-unit DevEval qualification, but matched only 27/31 (`0.870968`), with two false-positive present states and two wrong realizations. Only present recall passed (`0.875`). No failed population is reused. |
 | D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
 | E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
@@ -69,7 +69,7 @@ LLM semantic-ID and exact-evidence proposal (no structural node type)
 The reviewer may recover a proposer omission, but only from the finite catalog
 slice computed before either model call and only with a new exact prompt span.
 It cannot invent a global semantic ID or structural type. A query can use only
-exact prompt spans, catalog facts, and its declared relations. Catalog v10
+exact prompt spans, catalog facts, and its declared relations. Catalog v11
 carries forward the distinction between a
 caller-supplied base and an independently trusted base, and additionally
 freezes the DTD/entity, dynamic-identifier, named-tool, checkpoint-format, and
@@ -79,13 +79,56 @@ sink, and flow already identify the format, and requires each query-bound
 constraint to qualify its particular sink. Every
 request, response, projection, and digest is closed in the extraction bundle.
 
-Commit `5c81bd0` implements this successor as catalog v10, proposer v17, and
-reviewer v7. The default reviewer suite closed at 92/92 tests. A four-case
+Commit `5c81bd0` implements the compiled response contract as proposer v17 and
+reviewer v7; commit `e49020f` freezes catalog v11 and limits any passing claim
+to realizations represented by positive holdout gold. A four-case
 replay of already exposed BigCodeBench failures completed and agreed with the
 previously visible labels, including the former schema-stop case. This is
 development evidence only, not an accuracy estimate or a reopened Gate. Its
 bounded provenance and disposition are recorded in
 [`prompt-tsg-compiled-successor-development-v1.json`](../data/method/prompt-tsg-compiled-successor-development-v1.json).
+
+### DevEval compiled-successor qualification
+
+The next qualification was frozen at commit `d1eabd7` before any model
+request. It used 31 independent Python task units from the pinned DevEval
+without-context prompt source, distributed across eight registered task
+families. Exact normalized overlap with the seven-source corpus and all prior
+external qualification prompts was zero. Gold contained 16 present and 15
+absent-or-unresolved cases. Only 10 catalog realizations had positive gold;
+six other realizations were prospectively outside the qualification claim
+boundary.
+
+One formal run completed all 31 proposer and 31 reviewer calls without retries.
+All 31 graphs closed, no response supplied the locally compiled `node_type`,
+and neither arms nor outcomes were available. The verified artifacts are
+[`prompt-tsg-external-extraction-v4`](../data/method/results/prompt-tsg-external-extraction-v4)
+and
+[`prompt-tsg-external-qualification-v4`](../data/method/results/prompt-tsg-external-qualification-v4).
+
+| Metric | Frozen requirement | DevEval result |
+| --- | ---: | ---: |
+| Exact context/realization accuracy | at least 0.90 | **0.870968 (27/31)** |
+| Present-context recall | at least 0.80 | **0.875000 (14/16)** |
+| False-positive present | at most 0 | **2** |
+| Wrong realization | at most 0 | **2** |
+
+Archive extraction, command execution, deserialization, message hashing, and
+XML parsing closed perfectly; SQL missed one of four cases. The four
+mismatches expose three contract boundaries:
+
+1. A correct proposer SQL relation disappeared because the reviewer omitted,
+   rather than explicitly rejected, the same relation.
+2. An RNG factory with seeded deterministic branches was promoted to
+   security-value generation.
+3. External application credentials, per-request bearer credentials, and
+   end-user Basic-Auth header construction were not separated sharply enough;
+   this caused one false negative and one false positive.
+
+The immutable machine-readable disposition is
+[`prompt-tsg-external-qualification-v4-failure.json`](../data/method/prompt-tsg-external-qualification-v4-failure.json).
+This population is fully exposed and is never retried, resampled, relabelled,
+or used to lower the Gate.
 
 The bounded repair sequence remains visible without promoting development
 replays to evidence:
@@ -126,7 +169,7 @@ extraction or any active-protocol intervention claim.
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v10 | successor implemented/tested and development-replayed on four exposed failures; every earlier independent qualification failed, so formal use remains prohibited until one new independent qualification passes |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v11 | compiled successor implemented, tested, and executed on a frozen 31-unit DevEval holdout; qualification failed at 27/31 with two false-positive states and two wrong realizations, so formal use remains prohibited |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -151,6 +194,7 @@ closes an engineering defect but does not change the failed scientific Gate.
 | Structured-authority external qualification v1 | `newly_run` | independent 16-task extraction closed once at 16/16; qualification failed at 14/16 exact, 3/5 present recall, zero false-positive present states, and one wrong realization; all three path cases matched |
 | SecCodeBench successor extraction v2 | `newly_run` development evidence | disjoint 10-task inputs and gold were frozen first; extraction stopped on task 2 after one graph, and task 1 already made present recall mathematically unable to reach 0.80; no qualification metric was produced |
 | BigCodeBench successor extraction v3 | `newly_run` development evidence | disjoint 31-task inputs and gold were frozen first; extraction stopped on task 16 after 15 graphs. The completed prefix already contained one false-positive present state and one wrong realization, so the frozen Gate was unreachable; no qualification metric was produced |
+| DevEval compiled-successor qualification v4 | `newly_run` | 31/31 extraction complete; 27/31 exact, 14/16 present recall, two false-positive present states, and two wrong realizations; frozen Gate failed and the population is exposure-excluded |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
@@ -158,21 +202,16 @@ closes an engineering defect but does not change the failed scientific Gate.
 
 ## Protocol risks and remaining blockers
 
-1. **Representation recall, precision, realization identity, and response
-   validity.** The complete external Gate recovered only 3/5 frozen present
-   contexts and assigned one SQL case to the wrong realization. SecCodeBench
-   additionally left a fixed two-tool pipeline unresolved and returned an
-   impossible evidence occurrence while mapping a framework checkpoint to
-   Python-literal text. BigCodeBench then exposed all three remaining failure
-   modes in one independent prefix: a platform-dependent but unnamed command
-   was falsely treated as a fixed named executable, two explicit JSON tasks
-   lost their context because a redundant format-constraint fact was missing,
-   and the bounded reviewer changed a catalog-supplied node type. Formal
-   natural discovery cannot start.
-2. **Gold scope and size.** Exhaustion of the repeatedly exposure-excluded
-   CWE-328 stratum limited the final replacement holdout to 14 task units. It
-   evaluates that frozen task mixture, not global understanding or per-CWE
-   accuracy.
+1. **Relation adjudication.** A reviewer omission currently removes a proposer
+   relation without recording whether the relation was rejected or merely
+   overlooked. The DevEval SQL false negative shows that every query-required
+   relation needs an explicit `accept`/`reject`/`unresolved` decision before
+   another Gate attempt.
+2. **Semantic taxonomy.** The catalog must separate application/deployment
+   credentials from end-user or per-request credentials, and RNG selection
+   from actual password/token/nonce generation. Mixed deterministic branches
+   also need a frozen blocking rule. These are construct definitions rather
+   than prompt-tuning details.
 3. **Natural support.** Even after a future representation qualification,
    positivity and source-lineage overlap may reject all selector candidates.
 4. **Pair breadth.** The reviewed active registry contains one qualified SQL
@@ -424,33 +463,25 @@ exposure-excluded. The machine-readable disposition is
 
 ## Permitted next work
 
-The v4 internal population, the 16-task AI-Security-Benchmark population, the
-10-task SecCodeBench population, and the 31-task BigCodeBench selection are
-exposed. None may be resampled, retried, or retuned into a passing Gate.
-Catalog v9 and proposer v16 failed independent external use rather than merely
-lacking evidence. The materially simpler successor now derives catalog-fixed
-`node_type` locally, removes redundant deserialization-format facts, binds
-constraints to their actual sink, rechecks the complete finite task slice, and
-keeps path authority in the explicit four-state task annotation. These choices
-have passed focused tests and an exposed development replay, but neither can
-qualify the extractor.
+All prior qualification populations, including the 31-task DevEval v4 set,
+are exposed and cannot be reused as Gate evidence. Drawing another holdout
+immediately would spend independent data before the newly observed construct
+defects are repaired.
 
-The next and only Gate-bearing action is to freeze catalog v10, proposer v17,
-reviewer v7, model settings, thresholds, source population, selection, and gold
-labels before any response is observed, then run the extractor once on another
-genuinely independent corpus. A failed new population is not resampled or
-relabelled. Replacing the LLM with a dataset-side semantic annotation remains a
-future alternative, not a live parallel path.
+The only permitted development work is therefore bounded and outcome-blind:
 
-The structured authority implementation now has prospective external support
-for the two authority states actually present in this source
-(`application_configured` and `unspecified`). `caller_supplied` and
-`no_bounding_base` remain engineering-tested only. The complete representation
-Gate remains failed, so discovery and effect estimation are still prohibited.
+1. make every query-required relation receive an explicit reviewer decision,
+   so omission is not silently interpreted as rejection;
+2. split application/deployment credentials from bearer/end-user credentials
+   and distinguish header construction from authenticating to a service;
+3. split RNG factory selection from generation of a security-sensitive value,
+   with mixed seeded/deterministic behavior blocking an asserted context;
+4. validate those rules on synthetic fixtures and already exposed cases only.
 
-Only after that new representation Gate passes may the project regenerate the
-formal selection, partition task units, run discovery positivity, and continue
-through hypothesis, power, policy, canary, and confirmation freezes.
+After the construct definitions, evaluator behavior, and thresholds are
+frozen, one genuinely independent population may be selected and run once.
+Only a passing representation Gate permits formal discovery, positivity
+analysis, hypothesis and policy freeze, Gate D, or Gate E.
 
 ## Final verification
 
@@ -461,10 +492,10 @@ python -m compileall -q src/prompt_mechanism_study
 # completed without errors
 
 python -m pytest -q
-# 92 passed, 129 deselected
+# 94 passed, 129 deselected
 
 python -m pytest -q tests/test_prompt_tsg.py
-# 25 passed, 5 deselected
+# 27 passed, 5 deselected
 
 python -m pytest -q tests/test_discovery_support.py
 # 4 passed
@@ -486,6 +517,14 @@ prompt-mechanism-study verify \
 
 prompt-mechanism-study verify \
   data/method/results/prompt-tsg-external-extraction-v3
+# VERIFIED
+
+prompt-mechanism-study verify \
+  data/method/results/prompt-tsg-external-extraction-v4
+# VERIFIED
+
+prompt-mechanism-study verify \
+  data/method/results/prompt-tsg-external-qualification-v4
 # VERIFIED
 
 prompt-mechanism-study factorial-experiment verify \

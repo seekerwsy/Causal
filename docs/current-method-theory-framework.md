@@ -297,7 +297,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | compiled successor implemented + tested + development-executed；formal qualification 仍失败 | catalog v10/proposer v17/reviewer v7 只让 LLM 返回 semantic ID、精确证据和允许关系，结构类型由 catalog 本地派生；第二层在完整有限 task slice 内可补回第一层漏项。92 个默认 reviewer tests 通过，四个已暴露 BigCodeBench 失败例的开发回放闭合且方向一致，但这不能形成资格指标。此前三次 prospective external attempts 均失败，所有暴露 population 均不重跑，因此仍不能进入 formal extraction |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | compiled successor implemented + tested；formal qualification executed once and failed | catalog v11/proposer v17/reviewer v7 只让 LLM 返回 semantic ID、精确证据、属性和允许关系，结构类型由 catalog 本地派生；第二层在完整有限 task slice 内复核。冻结的 DevEval v4 资格运行完成 31/31 图，但仅 27/31 匹配，present recall 为 14/16，并出现 2 个 false-positive present 和 2 个 wrong realization；因此不能进入 formal extraction。开放语义仍由原文 evidence span 保留，失败集中在关系裁决、凭据分类和 RNG 工厂边界 |
 | 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
@@ -314,7 +314,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取资格 | **多次独立外部 Gate 均未通过；compiled successor 待一次新资格** | 最新已冻结 BigCodeBench population 在第 16 个响应违反 catalog node type 后停止，前 15 张图已使原 Gate 不可达。后继实现已消除让 LLM 重复结构类型的合同，并通过暴露开发例，但尚未在新独立 population 上运行；不报告开发 replay 的 accuracy/recall |
+| 自然 Prompt TSG 抽取资格 | **compiled successor 的独立外部 Gate 已完整执行但未通过** | DevEval v4 在冻结后一次性完成 31 个 task units：27/31 exact、14/16 present recall、2 false-positive present、2 wrong realization。结构输出合同已闭合，但语义构造边界未闭合；该 population 不重跑、不重标，下一步先在已暴露案例和合成 fixtures 上修订关系/凭据/RNG 定义 |
 | discovery positivity/source overlap | **按协议未执行** | 新鲜语义清洗与合同已完成，但表示 Gate 失败后不得冻结正式 discovery split 或读取自然 outcome |
 | FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |
@@ -324,7 +324,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | factorial from-scratch confirmation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
 | scaffold-repair prospective follow-up | **已完成并独立验证；有界正向结果** | 30 个相同 task units、240 assignments；A00=0%、A11=98.3%、interaction=+70.0pp，simultaneous interval=[+56.7,+83.3]pp；功能差=-1.7pp，通过非劣 Gate |
 
-当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过离线/合成 reviewer tests。Gate C 的既有前瞻资格均已失败；compiled successor 虽已实现并完成暴露开发检查，但还没有新的独立资格证据。因此 formal discovery、hypothesis/policy freeze、Gate D 与 Gate E 均未启动。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
+当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过离线/合成 reviewer tests。Gate C 的 compiled successor 已获得一次完整的新独立资格结果，但以 27/31、2 个 false-positive present 和 2 个 wrong realization 失败。因此 formal discovery、hypothesis/policy freeze、Gate D 与 Gate E 均未启动。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
 
 ## 14. v3 后续研究边界
 

@@ -145,21 +145,15 @@ exploration, or temporary checkpoints.
 
 The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
 factorial paths are implemented and reviewer-tested. Fresh seven-source
-semantic curation and all functional contracts are complete, but three
-prospectively frozen external Prompt TSG attempts failed Gate C. The latest
-catalog-v9/proposer-v16 attempt used 31 independent BigCodeBench task units and
-stopped on task 16 after a schema-invalid semantic-review response. The first
-15 closed graphs had already produced one false-positive present state and one
-wrong realization, while the frozen maximum for each was zero. Formal
-discovery and confirmation therefore did not start. The complete 31-task
-selection is exposure-excluded and is not retried; any successor now requires
-a materially simpler frozen response contract and another genuinely
-independent qualification population. The compiled successor at commit
-`5c81bd0` now removes model-supplied structural types, derives them from catalog
-v10, and lets the independent reviewer recover omissions only inside the
-precomputed task-family slice with exact evidence. It passes the focused
-reviewer suite and a four-case exposed development replay, but has not passed a
-new qualification population; Gate C therefore remains failed.
+semantic curation and all functional contracts are complete. The compiled
+Prompt TSG successor removes model-supplied structural types, derives them from
+catalog v11, and bounds both LLM stages to catalog IDs plus exact prompt
+evidence. A prospectively frozen DevEval qualification completed all 31 graphs
+once, but failed Gate C at 27/31 exact, 14/16 present recall, two false-positive
+present states, and two wrong realizations. The structural response contract
+therefore works, while relation adjudication and the credential/RNG semantic
+boundaries remain unqualified. The DevEval population is exposure-excluded and
+is not retried or relabelled. Formal discovery and confirmation did not start.
 The exact evidence inventory and failed-Gate boundary are in
 [`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
 results are formal historical evidence and remain reproducible through the
