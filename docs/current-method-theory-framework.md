@@ -66,6 +66,17 @@ PRESENT | ABSENT | NOT_APPLICABLE | UNRESOLVED
 
 `UNRESOLVED` 不能折叠成 `ABSENT`；`NOT_APPLICABLE` 也不能作为缺失值进入同一分母。
 
+路径访问中的 base authority 是一个冻结的任务侧坐标，不再由两个 LLM
+阶段重复推断。前瞻 successor 使用
+`application_configured / caller_supplied / unspecified / no_bounding_base`
+四状态注释，并绑定 `task_id`、prompt hash 与精确证据 occurrence。Prompt TSG
+确定性消费该坐标：前两者分别生成 trusted/caller-supplied fact，
+`unspecified` 保持 `UNRESOLVED`，没有 bounding base 才记为 `ABSENT`。LLM 仍负责
+开放文本中的 source、sink 和其他 task semantics；reviewer 接受 proposer 已有
+fact 时复用其已校验 evidence binding，只裁决语义，不再次猜 occurrence。
+这一 successor 已在暴露过的 5 个开发 case 上验证接口行为，但尚未通过新的独立
+Gate，因此不能替代当前失败的正式资格结果。
+
 ### 3.3 原子假设
 
 可确认假设为：
@@ -286,7 +297,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；fresh qualification executed and failed | 最终候选在完全不相交的替代 holdout 上为 13/14 exact、present recall 3/4、false-positive present=0、wrong realization=0；准确率通过 90% 门槛，但 recall 未达到预冻结的 80%，因此不能进入 formal extraction |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；fresh qualification executed and failed；structured-authority successor 仅 development-tested | 最终候选在完全不相交的替代 holdout 上为 13/14 exact、present recall 3/4、false-positive present=0、wrong realization=0；准确率通过 90% 门槛，但 recall 未达到预冻结的 80%，因此不能进入 formal extraction。后续四状态 authority 接口在 5 个已暴露 case 上为 5/5，只证明实现闭合，不改变 Gate |
 | 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |

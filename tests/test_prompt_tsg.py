@@ -41,6 +41,18 @@ def _fact(local_id, node_type, semantic_id, evidence_text, **attributes):
     }
 
 
+def _path_authority(task, state, evidence_text, occurrence=1):
+    return {
+        "annotation_protocol_id": "explicit_path_base_authority_v1",
+        "task_id": task["task_id"],
+        "prompt_sha256": content_hash(task["prompt"]),
+        "authority_state": state,
+        "evidence_text": evidence_text,
+        "occurrence": occurrence,
+        "rationale": f"test fixture for {state}",
+    }
+
+
 def _command_graph(*, unresolved=()):
     catalog = load_catalog(CATALOG_PATH)
     facts = [
@@ -200,6 +212,322 @@ def test_independently_configured_path_base_remains_applicable():
         cwe="CWE-22",
         task_family="path_access",
     ).state is QueryState.PRESENT
+
+
+@pytest.mark.reviewer
+def test_unspecified_path_base_authority_remains_unresolved():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
+    prompt = "Read a user filename beneath base_dir. Context: base_dir is the directory used for reads."
+    graph = build_prompt_tsg(
+        task_id="ambiguous-base-task",
+        prompt=prompt,
+        extractor_id="explicit-authority-v1",
+        catalog=catalog,
+        facts=[
+            _fact(
+                "path",
+                "source",
+                "source.untrusted_relative_path",
+                "user filename",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+        ],
+        relations=[
+            {"edge_type": "flows_to", "source": "path", "target": "sink"}
+        ],
+        unresolved_semantics=[
+            "constraint.caller_supplied_path_base",
+            "constraint.trusted_path_base",
+        ],
+    )
+    query = query_for_realization(catalog, "cwe22_path_confinement")
+
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-22",
+        task_family="path_access",
+    ).state is QueryState.UNRESOLVED
+
+
+@pytest.mark.reviewer
+def test_structured_authority_overrides_proposer_and_bypasses_semantic_reviewer():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
+    prompt = "Read a user filename beneath base_dir. Context: base_dir is the directory used for reads."
+    task = {
+        "task_id": "ambiguous-base-extraction-task",
+        "task_unit_id": "ambiguous-base-extraction-task",
+        "prompt": prompt,
+        "cwe": "CWE-22",
+        "task_family": "path_access",
+    }
+    response = {
+        "facts": [
+            _fact(
+                "path",
+                "source",
+                "source.untrusted_relative_path",
+                "user filename",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+            _fact(
+                "wrong-base",
+                "constraint",
+                "constraint.trusted_path_base",
+                "base_dir",
+                fixed=True,
+            ),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "path", "target": "sink"},
+            {"edge_type": "qualifies", "source": "wrong-base", "target": "sink"},
+        ],
+        "unresolved_semantics": [],
+    }
+    review = {
+        "facts": [
+            _fact(
+                "review-path",
+                "source",
+                "source.untrusted_relative_path",
+                "user filename",
+                caller_controlled=True,
+            ),
+            _fact("review-sink", "sink", "sink.file_access", "Read"),
+        ],
+        "relations": [
+            {
+                "edge_type": "flows_to",
+                "source": "review-path",
+                "target": "review-sink",
+            }
+        ],
+        "unresolved_semantics": [],
+    }
+
+    def provider(request, _evaluator, system_prompt):
+        import json
+
+        if request.get("request_kind") == "prompt_tsg_bounded_ambiguity_adjudication":
+            assert not set(request["candidate_semantics"]) & {
+                "constraint.caller_supplied_path_base",
+                "constraint.trusted_path_base",
+            }
+            assert request["allowed_relations"] == [
+                [
+                    "source.untrusted_relative_path",
+                    "flows_to",
+                    "sink.file_access",
+                ]
+            ]
+            assert request["evidence_binding_policy"]["asserted_candidate"].startswith(
+                "reuse validated proposer evidence"
+            )
+            return json.dumps(review).encode()
+        return json.dumps(response).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "explicit-authority-proposer-v1"},
+        system_prompt="propose facts",
+        reviewer_evaluator={"candidate_id": "explicit-authority-reviewer-v1"},
+        reviewer_prompt="review facts",
+        path_authority_annotation=_path_authority(
+            task,
+            "unspecified",
+            "base_dir",
+        ),
+        provider=provider,
+    )
+    query = query_for_realization(catalog, "cwe22_path_confinement")
+
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-22",
+        task_family="path_access",
+    ).state is QueryState.UNRESOLVED
+    assert projection["semantic_review"]["unresolved_semantics"] == []
+    assert projection["path_authority"]["authority_state"] == "unspecified"
+    assert projection["path_authority"]["model_facts_removed"] == [
+        {
+            "local_id": "wrong-base",
+            "semantic_id": "constraint.trusted_path_base",
+        }
+    ]
+
+
+@pytest.mark.reviewer
+@pytest.mark.parametrize(
+    ("state", "prompt", "base_evidence", "source_evidence", "expected"),
+    [
+        (
+            "application_configured",
+            "Read a user filename beneath the application-configured base_dir, "
+            "which is not caller-controlled.",
+            "application-configured base_dir, which is not caller-controlled",
+            "user filename",
+            QueryState.PRESENT,
+        ),
+        (
+            "caller_supplied",
+            "Read a user filename beneath base_dir supplied as a function argument.",
+            "base_dir supplied as a function argument",
+            "user filename",
+            QueryState.ABSENT,
+        ),
+        (
+            "unspecified",
+            "Read a user filename beneath base_dir.",
+            "base_dir",
+            "user filename",
+            QueryState.UNRESOLVED,
+        ),
+        (
+            "no_bounding_base",
+            "Read a user-provided file path.",
+            None,
+            "user-provided file path",
+            QueryState.ABSENT,
+        ),
+    ],
+)
+def test_structured_path_authority_has_total_four_state_projection(
+    state, prompt, base_evidence, source_evidence, expected
+):
+    import json
+
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
+    task = {
+        "task_id": f"path-authority-{state}",
+        "task_unit_id": f"path-authority-{state}",
+        "prompt": prompt,
+        "cwe": "CWE-22",
+        "task_family": "path_access",
+    }
+    response = {
+        "facts": [
+            _fact(
+                "path",
+                "source",
+                "source.untrusted_relative_path",
+                source_evidence,
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "path", "target": "sink"}
+        ],
+        "unresolved_semantics": [],
+    }
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "path-authority-test"},
+        system_prompt="extract facts",
+        path_authority_annotation=_path_authority(
+            task,
+            state,
+            base_evidence,
+            None if state == "no_bounding_base" else 1,
+        ),
+        provider=lambda *_: json.dumps(response).encode(),
+    )
+    query = query_for_realization(catalog, "cwe22_path_confinement")
+
+    assert query_context(
+        graph,
+        query=query,
+        cwe="CWE-22",
+        task_family="path_access",
+    ).state is expected
+    assert projection["path_authority"]["projection_status"] == "applied"
+
+
+@pytest.mark.reviewer
+def test_path_authority_bundle_is_bound_to_source_population(tmp_path):
+    import hashlib
+    import json
+
+    prompt = "Read a user filename beneath the application-configured base_dir."
+    task = {
+        "task_id": "path-authority-bundle-task",
+        "task_unit_id": "path-authority-bundle-task",
+        "prompt": prompt,
+        "prompt_sha256": content_hash(prompt),
+        "cwe": "CWE-22",
+        "task_family": "path_access",
+    }
+    tasks_path = tmp_path / "tasks.json"
+    tasks_path.write_text(json.dumps([task]), encoding="utf-8")
+    annotation_path = tmp_path / "path-authority.json"
+    annotation_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "annotation_protocol_id": "explicit_path_base_authority_v1",
+                "source_tasks_sha256": hashlib.sha256(
+                    tasks_path.read_bytes()
+                ).hexdigest(),
+                "review_completed_before_extraction": True,
+                "arms_or_outcomes_used": False,
+                "annotations": [
+                    {
+                        key: value
+                        for key, value in _path_authority(
+                            task,
+                            "application_configured",
+                            "application-configured base_dir",
+                        ).items()
+                        if key != "annotation_protocol_id"
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = {
+        "facts": [
+            _fact(
+                "path",
+                "source",
+                "source.untrusted_relative_path",
+                "user filename",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "path", "target": "sink"}
+        ],
+        "unresolved_semantics": [],
+    }
+
+    report = extract_task_file(
+        tasks_path,
+        ROOT / "data/method/prompt-tsg-catalog-v5.json",
+        ROOT / "data/method/prompt-tsg-extractor-qwen35flash-v1.json",
+        ROOT / "data/method/prompts/prompt-tsg-facts-v1.txt",
+        tmp_path / "bundle",
+        path_authority_annotations_path=annotation_path,
+        provider=lambda *_: json.dumps(response).encode(),
+    )
+
+    assert report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE"
+    assert report["path_authority_protocol_id"] == "explicit_path_base_authority_v1"
+    assert report["path_authority_annotated_tasks"] == 1
+    assert report["path_authority_state_counts"] == {"application_configured": 1}
+    stored_request = json.loads(
+        (tmp_path / "bundle/requests.json").read_text(encoding="utf-8")
+    )[0]
+    assert stored_request["deterministic_projection"]["path_authority"][
+        "authority_state"
+    ] == "application_configured"
 
 
 @pytest.mark.reviewer
@@ -629,6 +957,93 @@ def test_extractor_normalizes_only_a_unique_exact_evidence_occurrence():
             "provided_occurrence": 9,
             "normalized_occurrence": 1,
             "reason": "unique_exact_evidence_span",
+        }
+    ]
+
+
+@pytest.mark.reviewer
+def test_semantic_reviewer_reuses_validated_proposer_evidence_binding():
+    import json
+
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
+    prompt = "Read theme_path beneath the configured root. theme_path selects a theme."
+    task = {
+        "task_id": "repeated-path-evidence-task",
+        "task_unit_id": "repeated-path-evidence-task",
+        "prompt": prompt,
+        "cwe": "CWE-22",
+        "task_family": "path_access",
+    }
+    proposal = {
+        "facts": [
+            _fact(
+                "source",
+                "source",
+                "source.untrusted_relative_path",
+                "theme_path",
+                caller_controlled=True,
+            ),
+            _fact("sink", "sink", "sink.file_access", "Read"),
+        ],
+        "relations": [
+            {"edge_type": "flows_to", "source": "source", "target": "sink"}
+        ],
+        "unresolved_semantics": [],
+    }
+    review = {
+        "facts": [
+            _fact(
+                "review-source",
+                "source",
+                "source.untrusted_relative_path",
+                "theme_path",
+            )
+            | {"occurrence": 38},
+            _fact("review-sink", "sink", "sink.file_access", "Read"),
+        ],
+        "relations": [
+            {
+                "edge_type": "flows_to",
+                "source": "review-source",
+                "target": "review-sink",
+            }
+        ],
+        "unresolved_semantics": [],
+    }
+
+    def provider(request, _evaluator, _prompt):
+        value = (
+            review
+            if request.get("request_kind")
+            == "prompt_tsg_bounded_ambiguity_adjudication"
+            else proposal
+        )
+        return json.dumps(value).encode()
+
+    graph, _, _, projection = extract_prompt_tsg(
+        task,
+        catalog=catalog,
+        evaluator={"candidate_id": "proposer-v1"},
+        system_prompt="propose facts",
+        reviewer_evaluator={"candidate_id": "reviewer-v1"},
+        reviewer_prompt="review semantics",
+        provider=provider,
+    )
+    source = next(
+        node
+        for node in graph.nodes
+        if node.semantic_id == "source.untrusted_relative_path"
+    )
+
+    assert source.evidence_start == prompt.index("theme_path")
+    assert projection["semantic_review"]["reused_proposer_evidence"] == [
+        {
+            "local_id": "review-source",
+            "semantic_id": "source.untrusted_relative_path",
+            "reviewed_evidence_text": "theme_path",
+            "reviewed_occurrence": 38,
+            "proposer_evidence_text": "theme_path",
+            "proposer_occurrence": 1,
         }
     ]
 

@@ -131,6 +131,7 @@ closes an engineering defect but does not change the failed scientific Gate.
 | Prompt TSG bounded-adjudication v2 | `newly_run` | 20/21 exact and 5/5 recall, but one false-positive present state failed the frozen Gate |
 | Prompt TSG trust-boundary v3 | `newly_run` | formal extraction stopped after 2/21 graphs on an impossible occurrence index; no qualification metric; all selected units excluded |
 | Prompt TSG final v4 extraction and qualification | `newly_run` | extraction bundle verified; qualification failed at 13/14 exact and 3/4 present recall |
+| Structured path-authority successor trial | `newly_run` development evidence | real 5-case replay completed at 5/5 exact with no false-positive or wrong realization; all cases and labels were previously exposed, so this is interface validation rather than Gate evidence |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
@@ -156,6 +157,74 @@ closes an engineering defect but does not change the failed scientific Gate.
 7. **Human evidence.** Any expert study remains a separate, unexecuted work
    package requiring its own governance.
 
+## Post-Gate explicit-authority development trial
+
+After the immutable v4 failure, one development-only successor rule was tried
+on five previously exposed CWE-22 task units. The rule requires base authority
+to be explicit: a base in a function signature or `Arguments` is
+caller-supplied; an application-configured, predefined, trusted, global, or
+literal task root is trusted; and a base named only as generic `Context` is
+unresolved. Arms, generated code, Oracle labels, and experiment outcomes were
+not used. Because every task unit was already exposed, none of these replays is
+qualification evidence.
+
+Three bounded candidates were run:
+
+| Development candidate | Exact cases | Present recall | Diagnostic result |
+| --- | ---: | ---: | --- |
+| principle-only two-stage prompt | 1/5 | 1/3 | confused all three authority states |
+| closed decision table, thinking reviewer | 3/5 | 1/3 | correctly made the former v4 mismatch unresolved, but rejected two explicit predefined roots |
+| closed decision table, non-thinking reviewer | 3/5 | 1/3 | retained the corrected ambiguous and caller-supplied states, but still inconsistently rejected two explicit trusted roots |
+
+The verified extraction archives have SHA-256 digests
+`c8ea42770c5f643e9577fba194745068a15e25aa1a57ac0db3c6faec80bc2218`,
+`c245ab03fc74f04aaae16a950b63ef8ffe45e29af68c66fdbdfb2ba299c44821`,
+and `fd09a924d3dd12b0fab6069845aea16891eac142a9c9d8e22bb3bf35aa13505a`.
+They remain development archives, not reviewer or paper evidence. The result is
+useful but negative: explicit-authority prompting fixes the original ambiguous
+case, yet prompt engineering alone has not produced a qualified representation
+extractor. The active Gate C therefore remains failed.
+
+### Structured authority successor
+
+The follow-up removed path-base authority from the two LLM stages rather than
+adding more examples. A separate outcome-blind annotation is bound to each
+selected `task_id` and prompt hash, cites an exact occurrence, and uses four
+states: `application_configured`, `caller_supplied`, `unspecified`, or
+`no_bounding_base`. The deterministic projection maps the first two to one
+authority fact, maps `unspecified` to unresolved authority, and keeps
+`no_bounding_base` absent. Stage-one model authority facts and relations are
+removed and recorded before semantic review; the reviewer is not offered those
+semantics, and any scope widening still fails closed.
+
+Three real development executions exposed two general interface defects and
+then closed the five-case path:
+
+| Execution | Completed graphs | Result |
+| --- | ---: | --- |
+| structured-authority v4 | 2/5 | reviewer relation vocabulary still named an endpoint outside its candidate set, so the fail-closed extractor stopped on scope widening |
+| structured-authority v5 | 4/5 | reviewer accepted a repeated `theme_path` fact but returned impossible occurrence indices; the extractor stopped rather than guessing a span |
+| structured-authority v6 | 5/5 | reviewer relations were candidate-closed, and accepted proposer facts reused their already validated evidence binding |
+
+The v6 archive SHA-256 is
+`0bdcf14b182c9bf9ce177234ad883c7e0b403c87eaff7f5f23f2addd13df61f0`;
+the downloaded bundle was independently verified. The annotation input SHA-256
+is `8c6103a040804b8bce0becc2ea308915e04e02ac414dabb5d8a2fb15a85824bb`,
+and the extractor implementation SHA-256 is
+`e34177339d4a4a18deb95c1e418ab48f694726de183046d32f64b2ef3c10d917`.
+Replaying the existing verifier against the development labels produced 5/5
+exact contexts, 3/3 present recall, zero false-positive present states, and
+zero wrong realizations. One explicit path-confinement feature was already
+present in its source prompt and remained a diagnostic
+`target_feature_present` case; it was not denominator-filtered.
+
+These metrics do **not** pass or reopen Gate C: the same five prompts and labels
+had already been used to design the rule, and the v4/v5 failures were examined
+before v6. They establish that the structured interface now behaves as
+specified and that the two observed failures were fail-closed. A claim-bearing
+Gate still requires a prospectively frozen independent corpus and annotation
+review.
+
 ## Permitted next work
 
 The next valid move is not another holdout from the remaining 373-task source
@@ -168,6 +237,11 @@ genuinely independent corpus, for example:
   whose annotation is qualified independently; or
 - freeze a materially new extractor before selecting a new external corpus and
   qualification set.
+
+The structured authority implementation now satisfies the engineering part of
+the second option. The remaining work is scientific: select a genuinely new
+corpus, freeze the annotation and gold before extraction, and run one new Gate
+without further tuning on its outcomes.
 
 Only after that new representation Gate passes may the project regenerate the
 formal selection, partition task units, run discovery positivity, and continue
@@ -182,10 +256,10 @@ python -m compileall -q src tests
 # completed without errors
 
 python -m pytest -q
-# 79 passed, 129 deselected
+# 87 passed, 129 deselected
 
 python -m pytest -q tests/test_prompt_tsg.py
-# 12 passed, 5 deselected
+# 20 passed, 5 deselected
 
 python -m pytest -q tests/test_discovery_support.py
 # 4 passed

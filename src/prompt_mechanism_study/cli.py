@@ -196,6 +196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_tsg_extract.add_argument("--task-selection", type=Path)
     prompt_tsg_extract.add_argument("--semantic-reviewer", type=Path)
     prompt_tsg_extract.add_argument("--semantic-reviewer-prompt", type=Path)
+    prompt_tsg_extract.add_argument("--path-authority-annotations", type=Path)
 
     positivity = commands.add_parser(
         "positivity-audit",
@@ -379,6 +380,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             task_selection_path=args.task_selection,
             reviewer_evaluator_path=args.semantic_reviewer,
             reviewer_prompt_path=args.semantic_reviewer_prompt,
+            path_authority_annotations_path=args.path_authority_annotations,
         )
         print(report["status"])
         return 0 if report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE" else 2

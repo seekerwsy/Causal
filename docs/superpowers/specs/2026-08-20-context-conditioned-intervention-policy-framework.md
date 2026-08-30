@@ -226,6 +226,46 @@ q:T_E(P)\rightarrow
 - `NOT_APPLICABLE`: the frozen CWE/task-archetype applicability predicate is false.
 - `UNRESOLVED`: extraction, evidence, conflict, or bounded matching cannot justify any other state.
 
+For prospective path-access representations after the failed evidence-occurrence v4
+qualification, base-directory authority uses an explicit-evidence triage. A base is
+`trusted` only when the source prompt explicitly states that it is application-configured,
+deployment-fixed, a literal task constant, predefined independently of caller input, or
+otherwise not caller-controlled. A base is `caller_supplied` only when the prompt explicitly
+places it in a function argument or signature, request field, command-line value, or states
+that the caller selects it. Merely listing `base_dir` under `Context`, naming an allowed
+directory, or already requesting path confinement establishes neither authority. When the
+prompt describes a bounding base but leaves its authority unspecified, both authority
+alternatives remain `UNRESOLVED`; when no bounding base is described, both are simply absent.
+This is a new prospective representation rule and does not relabel, repair, or reopen the
+frozen v4 Gate C result.
+
+The successor implementation represents this triage as one frozen task-side annotation,
+not as another free-form LLM judgment. The annotation is bound to `task_id` and
+`prompt_sha256`, cites an exact prompt occurrence when a base is described, and has exactly
+one of four states:
+
+```text
+application_configured | caller_supplied | unspecified | no_bounding_base
+```
+
+`unspecified` projects both authority alternatives to `UNRESOLVED`; `no_bounding_base`
+projects both as absent. For the other two states, the implementation injects exactly one
+evidence-bound authority fact after semantic review. Proposer opinions about these two
+authority semantics are removed and disclosed; the reviewer is not offered those semantics,
+and an out-of-scope reviewer output fails closed. It continues to judge only source, sink,
+feature, and other task semantics. A trusted-base relation is added only
+when exactly one `sink.file_access` fact exists; otherwise the trusted-base binding remains
+unresolved. When the reviewer accepts a fact already proposed in stage one, its semantic
+decision is retained but the already validated proposer evidence span and occurrence are
+reused. Newly resolved facts still require new exact evidence. This keeps the LLM responsible
+for open-text semantics without asking it twice to locate or infer the frozen authority
+coordinate.
+
+An exposed development replay cannot qualify this successor. Before it becomes the active
+extractor, the annotation protocol, task population, labels, catalog, model settings, and
+thresholds must be frozen on a genuinely independent corpus, and the existing Prompt-TSG
+qualification verifier must pass without changing the v4 record.
+
 For existential motifs, multiple matches aggregate to `PRESENT`. A negative condition such as
 "without a guard" is satisfied only after the matcher has checked the same bounded flow for a valid
 guard. Search exhaustion, traversal bounds, or unresolved endpoints produce `UNRESOLVED`, not

@@ -149,6 +149,11 @@ semantic curation and all functional contracts are complete, but the final
 disjoint Prompt TSG qualification failed its frozen Gate (13/14 exact and 3/4
 present recall; zero false-positive present states). Formal discovery and
 confirmation therefore did not start.
+After that failure, a development-only successor moved path-base authority to
+a four-state, prompt-hash-bound task annotation and made the LLM stages consume
+it deterministically. It closed 5/5 previously exposed diagnostic cases, but
+those cases were used during repair, so the active Gate remains failed until a
+new independent population is frozen and evaluated.
 The exact evidence inventory and failed-Gate boundary are in
 [`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
 results are formal historical evidence and remain reproducible through the

@@ -23,6 +23,22 @@ from prompt_mechanism_study.records import canonical_json, content_hash
 
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
+_PATH_AUTHORITY_PROTOCOL = "explicit_path_base_authority_v1"
+_PATH_AUTHORITY_SEMANTICS = frozenset(
+    {
+        "constraint.trusted_path_base",
+        "constraint.caller_supplied_path_base",
+    }
+)
+_PATH_AUTHORITY_STATES = frozenset(
+    {
+        "application_configured",
+        "caller_supplied",
+        "unspecified",
+        "no_bounding_base",
+    }
+)
+
 
 class PromptTSGExtractionError(ValueError):
     """The frozen extraction request or the model's fact proposal is invalid."""
@@ -125,6 +141,7 @@ def extract_prompt_tsg(
     system_prompt: str,
     reviewer_evaluator: Mapping[str, Any] | None = None,
     reviewer_prompt: str | None = None,
+    path_authority_annotation: Mapping[str, Any] | None = None,
     provider: Provider = bailian_complete,
 ) -> tuple[PromptTSG, dict[str, Any], bytes, dict[str, Any]]:
     """Propose evidence-bound facts, optionally review them blindly, then build one TSG."""
@@ -134,6 +151,11 @@ def extract_prompt_tsg(
             "semantic reviewer evaluator and prompt must be supplied together"
         )
 
+    authority = (
+        _validate_path_authority_annotation(task, path_authority_annotation)
+        if path_authority_annotation is not None
+        else None
+    )
     request = extraction_request(task, catalog)
     raw = provider(request, evaluator, system_prompt)
     try:
@@ -152,12 +174,25 @@ def extract_prompt_tsg(
         relations, rejected_relations = _project_relations(
             facts, proposal["relations"], catalog
         )
+        proposed_unresolved = proposal["unresolved_semantics"]
+        authority_override: dict[str, Any] | None = None
+        if authority is not None:
+            (
+                facts,
+                relations,
+                proposed_unresolved,
+                authority_override,
+            ) = _strip_model_path_authority(
+                facts,
+                relations,
+                proposed_unresolved,
+            )
         review_projection: dict[str, Any] | None = None
         extractor_id = evaluator["candidate_id"]
         if reviewer_evaluator is not None and reviewer_prompt is not None:
             ignored_before_review = [
                 semantic_id
-                for semantic_id in proposal["unresolved_semantics"]
+                for semantic_id in proposed_unresolved
                 if catalog["semantics"].get(semantic_id)
                 in {"safety_requirement", "presentation_control"}
             ]
@@ -167,7 +202,7 @@ def extract_prompt_tsg(
                 relations=relations,
                 proposed_unresolved=[
                     semantic_id
-                    for semantic_id in proposal["unresolved_semantics"]
+                    for semantic_id in proposed_unresolved
                     if semantic_id not in ignored_before_review
                 ],
                 catalog=catalog,
@@ -185,7 +220,7 @@ def extract_prompt_tsg(
                 *ignored_before_review,
             ]
         else:
-            proposed_unresolved = proposal["unresolved_semantics"]
+            proposed_unresolved = list(proposed_unresolved)
         ignored_unresolved_features = sorted(
             semantic_id
             for semantic_id in proposed_unresolved
@@ -197,6 +232,20 @@ def extract_prompt_tsg(
             for semantic_id in proposed_unresolved
             if semantic_id not in ignored_unresolved_features
         ))
+        authority_projection: dict[str, Any] | None = None
+        if authority is not None:
+            facts, relations, unresolved_semantics, authority_projection = (
+                _apply_path_authority(
+                    task,
+                    facts=facts,
+                    relations=relations,
+                    unresolved_semantics=unresolved_semantics,
+                    annotation=authority,
+                    catalog=catalog,
+                    model_override=authority_override or {},
+                )
+            )
+            extractor_id = f"{extractor_id}+{_PATH_AUTHORITY_PROTOCOL}"
         graph = build_prompt_tsg(
             task_id=task["task_id"],
             prompt=task["prompt"],
@@ -223,6 +272,8 @@ def extract_prompt_tsg(
         )
     if review_projection is not None:
         projection["semantic_review"] = review_projection
+    if authority_projection is not None:
+        projection["path_authority"] = authority_projection
     return graph, request, raw, projection
 
 
@@ -238,6 +289,7 @@ def extract_task_file(
     task_selection_path: Path | None = None,
     reviewer_evaluator_path: Path | None = None,
     reviewer_prompt_path: Path | None = None,
+    path_authority_annotations_path: Path | None = None,
     provider: Provider = bailian_complete,
 ) -> dict[str, Any]:
     """Extract a small frozen task file into one reviewable, content-addressed bundle."""
@@ -289,6 +341,15 @@ def extract_task_file(
         tasks = source_tasks[start:] if limit is None else source_tasks[start : start + limit]
     if not tasks or len({task.get("task_id") for task in tasks}) != len(tasks):
         raise PromptTSGExtractionError("task extraction population is empty or duplicated")
+    path_authority_annotations = (
+        _load_path_authority_annotations(
+            path_authority_annotations_path,
+            tasks_path=tasks_path,
+            tasks=tasks,
+        )
+        if path_authority_annotations_path is not None
+        else {}
+    )
     catalog = load_catalog(catalog_path)
     evaluator = _evaluator(read_json(evaluator_path))
     system_prompt = prompt_path.read_text(encoding="utf-8").strip()
@@ -323,6 +384,9 @@ def extract_task_file(
                 system_prompt=system_prompt,
                 reviewer_evaluator=reviewer_evaluator,
                 reviewer_prompt=reviewer_prompt,
+                path_authority_annotation=path_authority_annotations.get(
+                    task["task_id"]
+                ),
                 provider=provider,
             )
         except PromptTSGExtractionError as error:
@@ -395,6 +459,26 @@ def extract_task_file(
             request.get("semantic_review_projection", {}).get("provider_called") is True
             for request in requests
         ),
+        "path_authority_annotation_sha256": (
+            hashlib.sha256(path_authority_annotations_path.read_bytes()).hexdigest()
+            if path_authority_annotations_path is not None
+            else None
+        ),
+        "path_authority_protocol_id": (
+            _PATH_AUTHORITY_PROTOCOL if path_authority_annotations else None
+        ),
+        "path_authority_annotated_tasks": len(path_authority_annotations),
+        "path_authority_state_counts": {
+            state: sum(
+                annotation["authority_state"] == state
+                for annotation in path_authority_annotations.values()
+            )
+            for state in sorted(_PATH_AUTHORITY_STATES)
+            if any(
+                annotation["authority_state"] == state
+                for annotation in path_authority_annotations.values()
+            )
+        },
         "extractor_implementation_sha256": hashlib.sha256(
             Path(__file__).read_bytes()
         ).hexdigest(),
@@ -417,6 +501,272 @@ def extract_task_file(
         },
     )
     return report
+
+
+def _load_path_authority_annotations(
+    path: Path,
+    *,
+    tasks_path: Path,
+    tasks: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Load one outcome-blind task-side authority annotation bundle."""
+
+    value = read_json(path)
+    required = {
+        "schema_version",
+        "annotation_protocol_id",
+        "source_tasks_sha256",
+        "review_completed_before_extraction",
+        "arms_or_outcomes_used",
+        "annotations",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value["schema_version"] != "1.0"
+        or value["annotation_protocol_id"] != _PATH_AUTHORITY_PROTOCOL
+        or value["source_tasks_sha256"]
+        != hashlib.sha256(tasks_path.read_bytes()).hexdigest()
+        or value["review_completed_before_extraction"] is not True
+        or value["arms_or_outcomes_used"] is not False
+        or not isinstance(value["annotations"], list)
+    ):
+        raise PromptTSGExtractionError("path-authority annotation bundle is invalid or stale")
+    expected = {
+        task.get("task_id")
+        for task in tasks
+        if task.get("cwe") == "CWE-22" and task.get("task_family") == "path_access"
+    }
+    if not expected:
+        raise PromptTSGExtractionError(
+            "path-authority annotations require at least one selected path-access task"
+        )
+    annotations: dict[str, dict[str, Any]] = {}
+    raw_fields = {
+        "task_id",
+        "prompt_sha256",
+        "authority_state",
+        "evidence_text",
+        "occurrence",
+        "rationale",
+    }
+    tasks_by_id = {task.get("task_id"): task for task in tasks}
+    for raw in value["annotations"]:
+        if not isinstance(raw, dict) or set(raw) != raw_fields:
+            raise PromptTSGExtractionError("path-authority annotation fields are invalid")
+        task_id = raw.get("task_id")
+        if task_id in annotations or task_id not in expected:
+            raise PromptTSGExtractionError(
+                "path-authority annotation population is duplicated or out of scope"
+            )
+        annotations[task_id] = _validate_path_authority_annotation(
+            tasks_by_id[task_id],
+            {"annotation_protocol_id": _PATH_AUTHORITY_PROTOCOL, **raw},
+        )
+    if set(annotations) != expected:
+        raise PromptTSGExtractionError(
+            "path-authority annotations do not cover the selected path-access tasks"
+        )
+    return annotations
+
+
+def _validate_path_authority_annotation(
+    task: Mapping[str, Any], value: Mapping[str, Any]
+) -> dict[str, Any]:
+    fields = {
+        "annotation_protocol_id",
+        "task_id",
+        "prompt_sha256",
+        "authority_state",
+        "evidence_text",
+        "occurrence",
+        "rationale",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != fields
+        or value["annotation_protocol_id"] != _PATH_AUTHORITY_PROTOCOL
+        or task.get("cwe") != "CWE-22"
+        or task.get("task_family") != "path_access"
+        or value["task_id"] != task.get("task_id")
+        or value["prompt_sha256"] != content_hash(task.get("prompt"))
+        or value["authority_state"] not in _PATH_AUTHORITY_STATES
+        or not isinstance(value["rationale"], str)
+        or not value["rationale"].strip()
+        or value["rationale"] != value["rationale"].strip()
+    ):
+        raise PromptTSGExtractionError("path-authority annotation is invalid or stale")
+    evidence = value["evidence_text"]
+    occurrence = value["occurrence"]
+    state = value["authority_state"]
+    if state == "no_bounding_base":
+        if evidence is not None or occurrence is not None:
+            raise PromptTSGExtractionError(
+                "no-bounding-base annotation cannot cite base evidence"
+            )
+    elif (
+        not isinstance(evidence, str)
+        or not evidence
+        or len(evidence.encode("utf-8")) > 2048
+        or type(occurrence) is not int
+        or occurrence <= 0
+        or not _has_occurrence(task["prompt"], evidence, occurrence)
+    ):
+        raise PromptTSGExtractionError(
+            "path-authority annotation evidence is not an exact prompt occurrence"
+        )
+    return dict(value)
+
+
+def _has_occurrence(prompt: str, evidence: str, occurrence: int) -> bool:
+    offset = -1
+    for _ in range(occurrence):
+        offset = prompt.find(evidence, offset + 1)
+        if offset < 0:
+            return False
+    return True
+
+
+def _strip_model_path_authority(
+    facts: Sequence[Mapping[str, Any]],
+    relations: Sequence[Mapping[str, Any]],
+    unresolved_semantics: Sequence[str],
+) -> tuple[
+    list[Mapping[str, Any]],
+    list[Mapping[str, Any]],
+    list[str],
+    dict[str, Any],
+]:
+    """Remove model opinions for the independently annotated authority coordinate."""
+
+    if isinstance(unresolved_semantics, (str, bytes)) or any(
+        not isinstance(semantic_id, str) for semantic_id in unresolved_semantics
+    ):
+        raise PromptTSGExtractionError("extractor unresolved semantics are invalid")
+
+    removed_facts = [
+        fact for fact in facts if fact["semantic_id"] in _PATH_AUTHORITY_SEMANTICS
+    ]
+    removed_ids = {fact["local_id"] for fact in removed_facts}
+    removed_relations = [
+        relation
+        for relation in relations
+        if relation["source"] in removed_ids or relation["target"] in removed_ids
+    ]
+    removed_unresolved = [
+        semantic_id
+        for semantic_id in unresolved_semantics
+        if semantic_id in _PATH_AUTHORITY_SEMANTICS
+    ]
+    return (
+        [fact for fact in facts if fact["local_id"] not in removed_ids],
+        [relation for relation in relations if relation not in removed_relations],
+        [
+            semantic_id
+            for semantic_id in unresolved_semantics
+            if semantic_id not in _PATH_AUTHORITY_SEMANTICS
+        ],
+        {
+            "model_facts_removed": [
+                {"local_id": fact["local_id"], "semantic_id": fact["semantic_id"]}
+                for fact in removed_facts
+            ],
+            "model_relations_removed": removed_relations,
+            "model_unresolved_removed": sorted(set(removed_unresolved)),
+        },
+    )
+
+
+def _apply_path_authority(
+    task: Mapping[str, Any],
+    *,
+    facts: Sequence[Mapping[str, Any]],
+    relations: Sequence[Mapping[str, Any]],
+    unresolved_semantics: Sequence[str],
+    annotation: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+    model_override: Mapping[str, Any],
+) -> tuple[
+    list[Mapping[str, Any]],
+    list[Mapping[str, Any]],
+    list[str],
+    dict[str, Any],
+]:
+    """Project a frozen four-state authority annotation into one Prompt TSG."""
+
+    kept_facts, kept_relations, kept_unresolved, late_override = (
+        _strip_model_path_authority(facts, relations, unresolved_semantics)
+    )
+    local_ids = {fact["local_id"] for fact in kept_facts}
+    local_id = "path_authority"
+    while local_id in local_ids:
+        local_id = "_" + local_id
+    state = annotation["authority_state"]
+    injected_semantic = None
+    projection_status = "applied"
+    if state in {"application_configured", "caller_supplied"}:
+        injected_semantic = (
+            "constraint.trusted_path_base"
+            if state == "application_configured"
+            else "constraint.caller_supplied_path_base"
+        )
+        fact = {
+            "local_id": local_id,
+            "node_type": "constraint",
+            "semantic_id": injected_semantic,
+            "evidence_text": annotation["evidence_text"],
+            "occurrence": annotation["occurrence"],
+            "attributes": (
+                {"fixed": True, "caller_controlled": False}
+                if state == "application_configured"
+                else {"fixed": False, "caller_controlled": True}
+            ),
+        }
+        projected, _, _ = _project_facts([fact], task["prompt"], catalog)
+        kept_facts.extend(projected)
+        if state == "application_configured":
+            sinks = [
+                item
+                for item in kept_facts
+                if item["semantic_id"] == "sink.file_access"
+            ]
+            if len(sinks) == 1:
+                kept_relations.append(
+                    {
+                        "edge_type": "qualifies",
+                        "source": local_id,
+                        "target": sinks[0]["local_id"],
+                    }
+                )
+            else:
+                kept_facts.pop()
+                injected_semantic = None
+                kept_unresolved.append("constraint.trusted_path_base")
+                projection_status = "unresolved_file_sink_binding"
+    elif state == "unspecified":
+        kept_unresolved.extend(sorted(_PATH_AUTHORITY_SEMANTICS))
+
+    projection = {
+        "annotation_protocol_id": annotation["annotation_protocol_id"],
+        "annotation_sha256": content_hash(annotation),
+        "authority_state": state,
+        "evidence_text": annotation["evidence_text"],
+        "occurrence": annotation["occurrence"],
+        "projection_status": projection_status,
+        "injected_semantic": injected_semantic,
+        "file_access_sink_count": sum(
+            fact["semantic_id"] == "sink.file_access" for fact in kept_facts
+        ),
+        **model_override,
+    }
+    if any(late_override.values()):
+        projection["late_model_override"] = late_override
+    return (
+        list(kept_facts),
+        list(kept_relations),
+        sorted(set(kept_unresolved)),
+        projection,
+    )
 
 
 def _review_catalog_facts(
@@ -456,6 +806,7 @@ def _review_catalog_facts(
         if query["cwe_id"] == task["cwe"]
         and query["task_family"] == task["task_family"]
         for relation in query["required_relations"]
+        if relation[0] in candidate_semantics and relation[2] in candidate_semantics
     }
     request = {
         "schema_version": "1.0",
@@ -481,6 +832,10 @@ def _review_catalog_facts(
             for semantic_id in sorted(candidate_semantics)
         },
         "allowed_relations": [list(item) for item in sorted(required_relations)],
+        "evidence_binding_policy": {
+            "asserted_candidate": "reuse validated proposer evidence and occurrence",
+            "proposer_unresolved_candidate": "require new exact prompt evidence",
+        },
         "arms_or_outcomes_included": False,
         "output_contract": {
             "top_level_keys": ["facts", "relations", "unresolved_semantics"],
@@ -527,12 +882,17 @@ def _review_catalog_facts(
             or len(unresolved) != len(set(unresolved))
         ):
             raise PromptTSGExtractionError("semantic reviewer ambiguity is invalid")
+        stable_review_facts, reused_proposer_evidence = _reuse_proposer_evidence(
+            review["facts"], proposed
+        )
         (
             reviewed_facts,
             rejected_review_facts,
             normalized_review_occurrences,
         ) = _project_facts(
-            review["facts"], task["prompt"], catalog
+            stable_review_facts,
+            task["prompt"],
+            catalog,
         )
         returned_semantics = {
             fact["semantic_id"] for fact in reviewed_facts
@@ -637,7 +997,63 @@ def _review_catalog_facts(
         projection["normalized_evidence_occurrences"] = (
             normalized_review_occurrences
         )
+    if reused_proposer_evidence:
+        projection["reused_proposer_evidence"] = reused_proposer_evidence
     return descriptions + normalized_facts, normalized_relations, projection
+
+
+def _reuse_proposer_evidence(
+    reviewed_facts: Sequence[Mapping[str, Any]],
+    proposed_facts: Sequence[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], list[dict[str, Any]]]:
+    """Keep evidence binding in stage one when stage two accepts its semantic role."""
+
+    by_semantic: dict[str, list[Mapping[str, Any]]] = {}
+    for fact in proposed_facts:
+        by_semantic.setdefault(fact["semantic_id"], []).append(fact)
+    normalized = []
+    reused = []
+    for fact in reviewed_facts:
+        if not isinstance(fact, Mapping):
+            normalized.append(fact)
+            continue
+        candidates = by_semantic.get(fact.get("semantic_id"), [])
+        exact_text = [
+            candidate
+            for candidate in candidates
+            if candidate["evidence_text"] == fact.get("evidence_text")
+        ]
+        source = (
+            exact_text[0]
+            if len(exact_text) == 1
+            else candidates[0]
+            if len(candidates) == 1
+            else None
+        )
+        if source is None:
+            normalized.append(fact)
+            continue
+        stable = {
+            **fact,
+            "evidence_text": source["evidence_text"],
+            "occurrence": source["occurrence"],
+        }
+        normalized.append(stable)
+        if (
+            fact.get("evidence_text") != source["evidence_text"]
+            or fact.get("occurrence") != source["occurrence"]
+        ):
+            reused.append(
+                {
+                    "local_id": fact.get("local_id"),
+                    "semantic_id": fact.get("semantic_id"),
+                    "reviewed_evidence_text": fact.get("evidence_text"),
+                    "reviewed_occurrence": fact.get("occurrence"),
+                    "proposer_evidence_text": source["evidence_text"],
+                    "proposer_occurrence": source["occurrence"],
+                }
+            )
+    return normalized, reused
 
 
 def _proposal(raw: bytes) -> dict[str, Any]:
