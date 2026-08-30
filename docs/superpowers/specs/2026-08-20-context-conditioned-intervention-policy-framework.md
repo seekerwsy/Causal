@@ -208,6 +208,11 @@ digest, CWE, task family, and complete ordered query-ID set must assign every me
 `R_t` exactly one of `PRESENT`, `ABSENT`, or `UNRESOLVED`. A `PRESENT` semantic requires an exact evidence occurrence. An omitted semantic or
 relation is an invalid contract, not evidence of absence. Every decision also carries a bounded
 human-reviewable rationale; absence is never represented by an unexplained empty field. Endpoint
+evidence validation is fail-closed: when an annotator claims `PRESENT` but its evidence text and
+1-based occurrence cannot be found literally in the source prompt, that annotator's semantic row is
+deterministically projected to `UNRESOLVED`, its evidence and attributes are cleared, and the raw
+provider response is retained unchanged for audit. This uncertainty remains in Gate C scoring; it is
+not retried, repaired by another model call, or filtered from the denominator. Endpoint
 state precedence is total: if either endpoint is `ABSENT`, the relation is `ABSENT`; otherwise, if
 either endpoint is `UNRESOLVED`, the relation is `UNRESOLVED`; only two `PRESENT` endpoints permit
 the relation decision itself to be consulted. This endpoint closure is applied deterministically to

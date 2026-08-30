@@ -167,6 +167,54 @@ def _close_relation_endpoint_states(
     return tuple(closed)
 
 
+def _has_exact_prompt_occurrence(
+    prompt: str, evidence_text: object, occurrence: object
+) -> bool:
+    """Return whether a claimed 1-based literal occurrence exists in the prompt."""
+
+    if (
+        not isinstance(evidence_text, str)
+        or not evidence_text
+        or len(evidence_text.encode("utf-8")) > 2048
+        or type(occurrence) is not int
+        or occurrence <= 0
+    ):
+        return False
+    offset = 0
+    for _ in range(occurrence):
+        offset = prompt.find(evidence_text, offset)
+        if offset < 0:
+            return False
+        offset += 1
+    return True
+
+
+def _demote_unverified_present_evidence(
+    prompt: str, semantic_decisions: tuple[SemanticDecision, ...]
+) -> tuple[SemanticDecision, ...]:
+    """Fail closed on unsupported presence without aborting the task batch."""
+
+    return tuple(
+        replace(
+            row,
+            state=QueryState.UNRESOLVED,
+            rationale=(
+                "Deterministic evidence validation: claimed presence lacks an exact "
+                "source-prompt occurrence; conservatively unresolved."
+            ),
+            evidence_text=None,
+            occurrence=None,
+            attributes=(),
+        )
+        if row.state is QueryState.PRESENT
+        and not _has_exact_prompt_occurrence(
+            prompt, row.evidence_text, row.occurrence
+        )
+        else row
+        for row in semantic_decisions
+    )
+
+
 def contract_decision_request(
     task: Mapping[str, Any], catalog: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -310,6 +358,9 @@ def contract_from_response(
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         raise PromptContractExtractionError("contract decision values are invalid") from None
+    semantic_decisions = _demote_unverified_present_evidence(
+        task["prompt"], semantic_decisions
+    )
     relation_decisions = _close_relation_endpoint_states(
         semantic_decisions, relation_decisions
     )

@@ -350,6 +350,43 @@ def test_response_parser_deterministically_closes_relation_endpoint_states():
     assert normalized.rationale.startswith("Deterministic endpoint closure")
 
 
+@pytest.mark.parametrize(
+    ("evidence_text", "occurrence"),
+    [(None, None), ("text absent from the source prompt", 1), ("executes", 99)],
+)
+def test_response_parser_demotes_unverified_present_evidence(
+    evidence_text, occurrence
+):
+    task, catalog = _inputs()
+    value = json.loads(_response(_contract(task, catalog)))
+    semantic_id = "sink.sql_execution"
+    semantic = value["semantic_decisions"][semantic_id]
+    semantic.update(evidence_text=evidence_text, occurrence=occurrence)
+
+    parsed = contract_from_response(
+        json.dumps(value).encode(),
+        task=task,
+        catalog=catalog,
+        annotator_id="proposer",
+        review_status="development_exposed",
+    )
+
+    normalized = next(
+        row for row in parsed.semantic_decisions if row.semantic_id == semantic_id
+    )
+    assert normalized.state is QueryState.UNRESOLVED
+    assert normalized.evidence_text is None
+    assert normalized.occurrence is None
+    assert normalized.attributes == ()
+    assert normalized.rationale.startswith("Deterministic evidence validation")
+    assert all(
+        row.state is not QueryState.PRESENT
+        for row in parsed.relation_decisions
+        if semantic_id in {row.source_semantic_id, row.target_semantic_id}
+    )
+    compile_task_context_contract(parsed, prompt=task["prompt"], catalog=catalog)
+
+
 def test_graph_schema_two_preserves_frozen_schema_one_records():
     frozen = json.loads(
         (ROOT / "data/method/results/prompt-tsg-external-extraction-v4/graphs.json").read_text(

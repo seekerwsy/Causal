@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "status": "PROVIDER_PILOT_FAILED_CLOSED_BEFORE_BUNDLE",
+  "freeze_sha256": "040b33fed67d6fdb78292d742890b7357006c95e3d0c5d40dcbc38e94f2e598d",
+  "method_revision_commit": "30b2d4ce4af1333cd4bb20f7ce14a3d40623b08e",
+  "host": "wsy@121.48.163.133:9086",
+  "deployment_root": "/home/wsy/prompt-mechanism-study-deployments/prompt-contract-concurrency-pilot-v3-9bf49dd-20260831-01",
+  "experiment_root": "/home/wsy/prompt-mechanism-study-experiments/prompt-contract-concurrency-pilot-v3-9bf49dd-20260831-01",
+  "configured_task_workers": 4,
+  "effective_task_workers": 3,
+  "planned_provider_calls": 6,
+  "completed_provider_calls": "unknown; between 1 and 6 because tasks were concurrent",
+  "observed_failure": "PromptContractExtractionError: present semantic decision lacks exact evidence",
+  "bundle_retained": false,
+  "gate_score_computed": false,
+  "diagnosis": "The bounded scheduler reached concurrent provider execution, but one model response asserted PRESENT without a valid exact source-prompt evidence coordinate. The previous parser aborted the entire batch instead of representing that unsupported assertion as uncertainty.",
+  "prospective_fix": "A PRESENT row without a verifiable literal evidence occurrence is deterministically demoted to UNRESOLVED before endpoint closure. The raw response remains auditable, no retry or winner selection is added, and Gate C scores the resulting uncertainty.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
