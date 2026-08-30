@@ -306,6 +306,41 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
     compile_task_context_contract(consensus, prompt=task["prompt"], catalog=catalog)
 
 
+def test_response_parser_deterministically_closes_relation_endpoint_states():
+    task, catalog = _inputs()
+    value = json.loads(_response(_contract(task, catalog)))
+    semantic = next(
+        row
+        for row in value["semantic_decisions"]
+        if row["semantic_id"] == "source.dynamic_sql_identifier"
+    )
+    semantic.update(
+        state="unresolved", evidence_text=None, occurrence=None, attributes=[]
+    )
+    relation = next(
+        row
+        for row in value["relation_decisions"]
+        if row["source_semantic_id"] == "source.dynamic_sql_identifier"
+    )
+    relation["state"] = "present"
+
+    parsed = contract_from_response(
+        json.dumps(value).encode(),
+        task=task,
+        catalog=catalog,
+        annotator_id="proposer",
+        review_status="development_exposed",
+    )
+
+    normalized = next(
+        row
+        for row in parsed.relation_decisions
+        if row.source_semantic_id == "source.dynamic_sql_identifier"
+    )
+    assert normalized.state is QueryState.UNRESOLVED
+    assert normalized.rationale.startswith("Deterministic endpoint closure")
+
+
 def test_graph_schema_two_preserves_frozen_schema_one_records():
     frozen = json.loads(
         (ROOT / "data/method/results/prompt-tsg-external-extraction-v4/graphs.json").read_text(

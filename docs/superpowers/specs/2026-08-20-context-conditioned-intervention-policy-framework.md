@@ -210,7 +210,10 @@ relation is an invalid contract, not evidence of absence. Every decision also ca
 human-reviewable rationale; absence is never represented by an unexplained empty field. Endpoint
 state precedence is total: if either endpoint is `ABSENT`, the relation is `ABSENT`; otherwise, if
 either endpoint is `UNRESOLVED`, the relation is `UNRESOLVED`; only two `PRESENT` endpoints permit
-the relation decision itself to be `PRESENT`. Arms and outcomes are unavailable when
+the relation decision itself to be consulted. This endpoint closure is applied deterministically to
+each raw annotation before graph validation, so an LLM cannot override a logically implied relation
+state and a redundant relation-state mistake cannot abort the task batch. The unmodified raw response
+remains in the artifact for audit. Arms and outcomes are unavailable when
 the contract is produced and reviewed.
 
 Two LLM calls with different frozen seeds independently complete this finite table from the same

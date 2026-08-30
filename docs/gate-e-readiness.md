@@ -151,6 +151,11 @@ and that an unresolved SQL relation remains `unresolved` rather than becoming
 also rejects an incomplete query set and independently replays its contract,
 graph, requests, responses, and Gate calculation.
 
+Relation state is model-authored only when both semantic endpoints are present.
+Before validating either independent annotation, deterministic endpoint closure
+forces `absent` if either endpoint is absent, otherwise `unresolved` if either
+endpoint is unresolved. Raw model tables remain retained for audit.
+
 This is development evidence, not a corrected 4/4 qualification score. The
 prompts and old labels were visible, the contracts were manually authored for
 the architecture check, and no automatic contract producer was evaluated.

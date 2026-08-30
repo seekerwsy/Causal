@@ -53,6 +53,44 @@ class PromptContractExtractionError(RuntimeError):
     """The frozen request, model decision table, or extraction closure is invalid."""
 
 
+def _close_relation_endpoint_states(
+    semantic_decisions: tuple[SemanticDecision, ...],
+    relation_decisions: tuple[RelationDecision, ...],
+) -> tuple[RelationDecision, ...]:
+    """Project relation states implied by their semantic endpoint states."""
+
+    semantic_states = {row.semantic_id: row.state for row in semantic_decisions}
+    closed = []
+    for row in relation_decisions:
+        endpoint_states = {
+            semantic_states.get(row.source_semantic_id),
+            semantic_states.get(row.target_semantic_id),
+        }
+        if QueryState.ABSENT in endpoint_states:
+            closed.append(
+                replace(
+                    row,
+                    state=QueryState.ABSENT,
+                    rationale=(
+                        "Deterministic endpoint closure: at least one endpoint is absent."
+                    ),
+                )
+            )
+        elif QueryState.UNRESOLVED in endpoint_states:
+            closed.append(
+                replace(
+                    row,
+                    state=QueryState.UNRESOLVED,
+                    rationale=(
+                        "Deterministic endpoint closure: at least one endpoint is unresolved."
+                    ),
+                )
+            )
+        else:
+            closed.append(row)
+    return tuple(closed)
+
+
 def contract_decision_request(
     task: Mapping[str, Any], catalog: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -176,6 +214,9 @@ def contract_from_response(
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         raise PromptContractExtractionError("contract decision values are invalid") from None
+    relation_decisions = _close_relation_endpoint_states(
+        semantic_decisions, relation_decisions
+    )
     scope = task_context_scope(
         cwe_id=task["cwe"], task_family=task["task_family"], catalog=catalog
     )

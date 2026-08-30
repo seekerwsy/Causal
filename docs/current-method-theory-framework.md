@@ -98,7 +98,9 @@ Git 保存，不再作为活动输入。当前 task-level 接口已通过聚焦�
 
 relation 的端点状态采用一个总序真值表，而不是两条可冲突的规则：任一端点
 `ABSENT` 时 relation 为 `ABSENT`；否则任一端点 `UNRESOLVED` 时 relation 为
-`UNRESOLVED`；只有两个端点均 `PRESENT` 时才裁决 relation 自身状态。
+`UNRESOLVED`；只有两个端点均 `PRESENT` 时才裁决 relation 自身状态。该闭包在每份
+原始标注进入图校验前由程序执行；LLM 的原始表仍原样保存，因此逻辑冗余字段既不能
+覆盖端点事实，也不会因格式一致但逻辑冗余的误判中断整批任务。
 
 ### 3.3 原子假设
 
