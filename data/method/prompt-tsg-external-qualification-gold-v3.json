@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v16+prompt-tsg-ambiguity-adjudication-qwen37max-v6",
+  "selection_path": "data/method/prompt-tsg-external-qualification-selection-v3.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {
+      "task_id": "bigcodebench_task_e9f13c1aa5dfbc91cf6130b7811ede2e5277822d06e34114d1fa84598f849c56",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "The task fixes the ping executable while the caller supplies an IP range whose addresses become command arguments."
+    },
+    {
+      "task_id": "bigcodebench_task_7372c79484e13dd5ecee5610268ca8f4b8a6b170d7619f8bd1dc4a7b0b60861d",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies a list of files that are themselves executed, so the executable is caller-selected rather than fixed or drawn from a declared finite tool set."
+    },
+    {
+      "task_id": "bigcodebench_task_f3e0f919df2596790cc34d5ae9596d442d972e26df9b294641abb19e6d89a8ec",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task fixes platform-specific monitoring commands, but caller interval and duration values control scheduling and do not flow into process arguments."
+    },
+    {
+      "task_id": "bigcodebench_task_a98a428763f722110e907127aa3b7a35eb39d426dd70fb869c0c9f9247a039a8",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "The task fixes /usr/bin/Rscript and its --vanilla option while the caller supplies only the R script path argument."
+    },
+    {
+      "task_id": "bigcodebench_task_bfdd836ffb08efd0535cae7002a1b04d014ba23cc7735b0f6b5ffa80803ad8d2",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies both table_name and column_name as unrestricted SQL identifier tokens."
+    },
+    {
+      "task_id": "bigcodebench_task_7952ffca16a511553f94e82a0af3c67954aff2d10851401dfcdd799133d6a082",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies table_name as an unrestricted SQL identifier token used in CREATE and INSERT statements."
+    },
+    {
+      "task_id": "bigcodebench_task_6eba0cc31423b75943aa1af6290111790e764e5e0aeb223690788c66624df54e",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies the complete SQL query rather than only values or a finite identifier choice."
+    },
+    {
+      "task_id": "bigcodebench_task_50fb9a65105eed757d62b76204f9e87d2ae4d2a3ac4c5aaf5e032506e4c14852",
+      "expected_context": "present",
+      "expected_realization_id": "cwe89_sql_values",
+      "rationale": "The users table and its columns are fixed, while caller-provided user and country lists supply row values for bound INSERT parameters."
+    },
+    {
+      "task_id": "bigcodebench_task_c2cebaad9c53fbbe79d5bf28bce212145f333908e544df30033836b928d16145",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "A caller-selected JSON file is loaded into program data before transformation and rewrite."
+    },
+    {
+      "task_id": "bigcodebench_task_d4b7ed130d1e5c5ba760d45de2cb88465297bad79690006c430f9acb3664da63",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "Caller-provided JSON text is decoded into program data and traversed by a caller-provided key path."
+    },
+    {
+      "task_id": "bigcodebench_task_7ab922e98da217db2b9ab07ae91b4aa110a39843cf602ddc719982449d3b94c0",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "Caller-provided JSON text is parsed to obtain a URL and other program data."
+    },
+    {
+      "task_id": "bigcodebench_task_36f1dbf02790295535f0aad0f77a3fbe1b913f2caa68ca023d810a2a8d1b6e03",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "JSON files found in a caller-selected directory are loaded into program data for text analysis."
+    },
+    {
+      "task_id": "bigcodebench_task_3d85ec79504365d08be522a465f9944a2b46ebaa1d197b53f2661efd380a8aba",
+      "expected_context": "present",
+      "expected_realization_id": "cwe611_xml_external_entity_control",
+      "rationale": "Caller-provided XML text is parsed into a dictionary, and the contract does not require external entities or external DTD resolution."
+    },
+    {
+      "task_id": "bigcodebench_task_8a09dca08dab084f64ab352c94c26e15bd10e84a1252e9a8282dea698c3c3f7b",
+      "expected_context": "present",
+      "expected_realization_id": "cwe611_xml_external_entity_control",
+      "rationale": "XML fetched from a caller-provided URL is parsed into records, and external entity resolution is not required by the contract."
+    },
+    {
+      "task_id": "bigcodebench_task_be14bd24169128ebec3d34691bf32aacdcc25d16ddad70bbe6d556e8f432e052",
+      "expected_context": "present",
+      "expected_realization_id": "cwe611_xml_external_entity_control",
+      "rationale": "Caller-provided XML text is parsed and converted to CSV, with no requirement for external entities or external DTD resolution."
+    },
+    {
+      "task_id": "bigcodebench_task_230f51057a0b43685cf38aace8aed6bd95554d27fcb59a2111b41b2b78a861ad",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "A generated password is hashed with SHA-256 for password handling; no legacy-hash compatibility is required."
+    },
+    {
+      "task_id": "bigcodebench_task_e556dd277706feb878be871978adc354e531dbdbe6b85dc975eb34247eaf909b",
+      "expected_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "rationale": "Downloaded content is hashed with SHA-256 and signed for integrity verification; no legacy-hash compatibility is required."
+    },
+    {
+      "task_id": "bigcodebench_task_8f33bd7128602efba60b3b7cbe00205dcbf041fa185dc1955995aea56eb44a40",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task computes hashes as ordinary file-component metadata and states no authentication, recovery, integrity-verification, or other security purpose."
+    },
+    {
+      "task_id": "bigcodebench_task_92640e61756b22c53001832ad191c2b20aa585c30b830c3998d80d38fdc5da63",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task explicitly uses MD5 for file integrity and organization, so the required legacy-hash contract forbids the current-hash realization."
+    },
+    {
+      "task_id": "bigcodebench_task_9b2b2855c9e5eafad37570297c5ee19ed2890d9a3e2bd774f925fd82a97740cd",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The requested random value is a session key used in a cookie, and deterministic replay is not required."
+    },
+    {
+      "task_id": "bigcodebench_task_792b1c10d4ba3d2d5946b5ca6d792713ab056834b656bd0af8f0175c9f41742c",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The random salt is security-relevant, but the frozen function contract includes a seed for deterministic generation, triggering the reproducible-pseudorandom exclusion."
+    },
+    {
+      "task_id": "bigcodebench_task_36fe688e8ffd2649b9abe48e532d449a69a9e163d858cc0475051943e91802a6",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The task requests a fresh random salt for SHA-256 hashing and does not require deterministic replay."
+    },
+    {
+      "task_id": "bigcodebench_task_252732895e9db63caefbfb23d6ccb622aed9cfb1a2f5595262438ce978c30fcc",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The requested output is explicitly a generated password, and the contract does not require a fixed seed or deterministic replay."
+    },
+    {
+      "task_id": "bigcodebench_task_3c1964aa354c1cc34d55ed5b9cd77f988b336adf62802f8a6bb6c571727bda3c",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "Mail username and password are loaded from environment variables and consumed by Flask-Mail; no particular embedded credential is required."
+    },
+    {
+      "task_id": "bigcodebench_task_e485175093a3dbbf1f452c2154656de73f1124a800af5dada63df28999fd4576",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "SMTP username and password are supplied through function parameters and used to configure the mail service."
+    },
+    {
+      "task_id": "bigcodebench_task_8b38fff96951192acf41b301795497167d195365472152f30160a0ff5e633138",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "The application secret_key is externally supplied through the function interface and used to protect Flask authentication/session state; end-user login values are not the labeled credential source."
+    },
+    {
+      "task_id": "bigcodebench_task_52c0735fd6874a768a5d9c17a0823b38545b66c3d5a30219ae99872296d09016",
+      "expected_context": "present",
+      "expected_realization_id": "cwe798_external_credential_source",
+      "rationale": "SMTP username and password are supplied through the function interface and used by the request handler to authenticate to the mail server."
+    },
+    {
+      "task_id": "bigcodebench_task_9e743b4a0bb74bfcd2a1a0c3d21a8a20862ced88884f38eb3ef2d4b06ea03762",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies the complete download URL, so neither a fixed HTTPS origin nor a trusted parent domain is established."
+    },
+    {
+      "task_id": "bigcodebench_task_a40489a7b2ae29a5b0c3fd9fc8261cc032e8d3d78bb18325b7611856d3aaf620",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies the complete ZIP URL, so the registered fixed-origin realizations do not apply."
+    },
+    {
+      "task_id": "bigcodebench_task_bd1c6fc49c86f3ac32e8227ea915bc29877b7e1122ca01e3399db4404fad02cb",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies the complete webpage URL, so the origin is unrestricted."
+    },
+    {
+      "task_id": "bigcodebench_task_d40fef8fc37d86a6e999b372c48352a918a2e6aec46355d4429ec13cefe1a0bf",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies the complete CSV URL, so no fixed HTTPS origin or trusted parent domain bounds the request."
+    }
+  ]
+}

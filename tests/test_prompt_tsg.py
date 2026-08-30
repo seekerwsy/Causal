@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -156,6 +158,70 @@ def test_successor_catalog_freezes_pipeline_and_format_boundaries():
     ]
     assert "framework checkpoints" in guidance["source.untrusted_python_literal"]
     assert "framework checkpoint" in guidance["sink.python_literal_deserialization"]
+
+
+@pytest.mark.reviewer
+def test_bigcodebench_external_qualification_freeze_is_self_consistent():
+    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v3.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    selection = json.loads(
+        (
+            ROOT
+            / "data/method/prompt-tsg-external-qualification-selection-v3.json"
+        ).read_text(encoding="utf-8")
+    )
+    gold = json.loads(
+        (ROOT / "data/method/prompt-tsg-external-qualification-gold-v3.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source = json.loads(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-source-v3.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    task_ids = [row["task_id"] for row in tasks]
+    assert len(tasks) == len(set(task_ids)) == 31
+    assert task_ids == selection["task_ids"]
+    assert task_ids == [row["task_id"] for row in gold["cases"]]
+    assert selection["source_tasks_sha256"] == hashlib.sha256(
+        tasks_path.read_bytes()
+    ).hexdigest()
+    assert all(
+        row["prompt_sha256"]
+        == hashlib.sha256(row["prompt"].encode("utf-8")).hexdigest()
+        for row in tasks
+    )
+    assert sum(row["expected_context"] == "present" for row in gold["cases"]) == 19
+    assert source["method_revision_commit"] == "c49956a"
+    assert source["source"]["commit"] == (
+        "a3b89850db670d7302571142b881e4f85eef18e3"
+    )
+    assert source["source"]["source_sha256"] == (
+        "58142744edaf6036387f8761701f1b353432b0ed33f2edec1de8a59e7431ef7a"
+    )
+    assert source["population_rule"]["frozen_task_units"] == 31
+    assert source["overlap_audit"]["against_seven_source"][
+        "normalized_exact_matches"
+    ] == 0
+    assert source["overlap_audit"]["against_prior_external"][
+        "normalized_exact_matches"
+    ] == 0
+
+    exposed_prompt_hashes = {
+        row["prompt_sha256"]
+        for version in ("v1", "v2")
+        for row in json.loads(
+            (
+                ROOT
+                / f"data/method/prompt-tsg-external-qualification-tasks-{version}.json"
+            ).read_text(encoding="utf-8")
+        )
+    }
+    assert exposed_prompt_hashes.isdisjoint(
+        {row["prompt_sha256"] for row in tasks}
+    )
 
 
 @pytest.mark.reviewer

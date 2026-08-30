@@ -1,0 +1,440 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Prospective external Prompt TSG qualification population; not an intervention-effect dataset.",
+  "method_revision_commit": "c49956a",
+  "source": {
+    "dataset": "BigCodeBench",
+    "repository": "https://github.com/bigcode-project/bigcodebench-annotation",
+    "commit": "a3b89850db670d7302571142b881e4f85eef18e3",
+    "tag": "v0.1.1",
+    "license": "Apache-2.0",
+    "source_path": "hf_data/BigCodeBench.jsonl.gz",
+    "source_git_blob_sha1": "cbd7cd970e9ad1640fac183264d1c59efba6e905",
+    "source_bytes": 1084867,
+    "source_sha256": "58142744edaf6036387f8761701f1b353432b0ed33f2edec1de8a59e7431ef7a",
+    "license_git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+    "license_sha256": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6"
+  },
+  "population_rule": {
+    "language": "python",
+    "split": "instruct_prompt",
+    "source_task_units": 1140,
+    "ranking_salt": "prompt-tsg-bigcodebench-gate-c-v3",
+    "family_order": [
+      "command_execution",
+      "sql_query",
+      "deserialization",
+      "xml_parsing",
+      "message_hashing",
+      "security_random_generation",
+      "credential_source",
+      "outbound_request"
+    ],
+    "family_filters": {
+      "command_execution": "libs contains subprocess and the instruction names a process operation (run, execute, start, ping, compile, download, open, invoke, or process).",
+      "sql_query": "libs contains sqlite3 and the instruction names a database/table operation (query, insert, update, create, load, read, fetch, or retrieve).",
+      "deserialization": "libs contains json, yaml, or ast; the instruction names load/read/parse/decode/extract; and it names JSON, YAML, a string representation, or a literal.",
+      "xml_parsing": "libs contains xml, xmltodict, or lxml and the instruction names parsing or conversion of XML.",
+      "message_hashing": "libs contains hashlib or hmac and the instruction names hashing, HMAC, a checksum, digest, signature, signing, or verification.",
+      "security_random_generation": "libs contains random or secrets, or combines os with an explicit random salt; the instruction names a password, session key, token, nonce, random salt, encryption key, or private key.",
+      "credential_source": "libs contains a mail, FTP, login, or SendGrid client and the instruction names an API key, credential, password, secret key, environment variable, mail credential, or username.",
+      "outbound_request": "libs contains requests or urllib and the instruction names fetch, download, request, retrieve, scrape, or upload."
+    },
+    "family_candidate_counts": {
+      "command_execution": 25,
+      "sql_query": 14,
+      "deserialization": 35,
+      "xml_parsing": 4,
+      "message_hashing": 31,
+      "security_random_generation": 9,
+      "credential_source": 10,
+      "outbound_request": 56
+    },
+    "family_quotas": {
+      "command_execution": 4,
+      "sql_query": 4,
+      "deserialization": 4,
+      "xml_parsing": 3,
+      "message_hashing": 4,
+      "security_random_generation": 4,
+      "credential_source": 4,
+      "outbound_request": 4
+    },
+    "selected_upstream_ids_by_family": {
+      "command_execution": [
+        "BigCodeBench/146",
+        "BigCodeBench/324",
+        "BigCodeBench/1028",
+        "BigCodeBench/1102"
+      ],
+      "sql_query": [
+        "BigCodeBench/926",
+        "BigCodeBench/535",
+        "BigCodeBench/1068",
+        "BigCodeBench/842"
+      ],
+      "deserialization": [
+        "BigCodeBench/681",
+        "BigCodeBench/986",
+        "BigCodeBench/1129",
+        "BigCodeBench/216"
+      ],
+      "xml_parsing": [
+        "BigCodeBench/498",
+        "BigCodeBench/1003",
+        "BigCodeBench/1009"
+      ],
+      "message_hashing": [
+        "BigCodeBench/256",
+        "BigCodeBench/584",
+        "BigCodeBench/1127",
+        "BigCodeBench/577"
+      ],
+      "security_random_generation": [
+        "BigCodeBench/76",
+        "BigCodeBench/271",
+        "BigCodeBench/131",
+        "BigCodeBench/960"
+      ],
+      "credential_source": [
+        "BigCodeBench/401",
+        "BigCodeBench/83",
+        "BigCodeBench/82",
+        "BigCodeBench/274"
+      ],
+      "outbound_request": [
+        "BigCodeBench/722",
+        "BigCodeBench/1005",
+        "BigCodeBench/1136",
+        "BigCodeBench/170"
+      ]
+    },
+    "ranking_proof_through_last_selection": {
+      "command_execution": [
+        {
+          "upstream_id": "BigCodeBench/146",
+          "ranking_sha256": "0362c4a27ea91962b2c5f25cc3b7c4fc8a4d5b09b43fdd086b2e130264f4b9a9",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/324",
+          "ranking_sha256": "0391f01b9de83b99d2ce12fd33ba8d0a9917eec1f8e0ba780687e2597fecfffc",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1028",
+          "ranking_sha256": "07aa2a7881afdb895965367c153ecfe7a08a308e533ad907ba7efd3770368aa1",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1102",
+          "ranking_sha256": "0fff139fbd575698b006624165c492ed8982622da36657bd4f9264f9860a477e",
+          "decision": "selected"
+        }
+      ],
+      "sql_query": [
+        {
+          "upstream_id": "BigCodeBench/926",
+          "ranking_sha256": "0071565eb1a7b085d58aae6fa94738fca4e645cb369e6eac717327ea696768a5",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/535",
+          "ranking_sha256": "015fd4c7120f74aafa0c3fd3ceb106002990d528699f753a5f088868893929ad",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1068",
+          "ranking_sha256": "07c8c5d7a4afedbaed46c290c5feb06fa5c8aa6392bed70bcce46aa4bb45b11b",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/842",
+          "ranking_sha256": "0be122287c9c89d42d7a6d65e1b3ac08ddf6461ac7132c8e1f4fce08f72ebe7c",
+          "decision": "selected"
+        }
+      ],
+      "deserialization": [
+        {
+          "upstream_id": "BigCodeBench/681",
+          "ranking_sha256": "007fee66a869285695fa174dfa8c8bc268878534523321af8186558d50c0c6b0",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/986",
+          "ranking_sha256": "058e3b5cb97501e444076bdb40231b08c7191fa674fe79564e93f53a9377e5e6",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1129",
+          "ranking_sha256": "187581dbd66e5ad4f3cbff97af003d0507ad3d288ad973e0fc5b380202f9b9b6",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/216",
+          "ranking_sha256": "1d9afb187408b35755380dedb67777682d968437c454d521cae6df8c520d35dd",
+          "decision": "selected"
+        }
+      ],
+      "xml_parsing": [
+        {
+          "upstream_id": "BigCodeBench/498",
+          "ranking_sha256": "40d04af26ca10e45d2ccedda7725efd6fac817ac08fb5875a759896f364bb1fc",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1003",
+          "ranking_sha256": "af619dc2c7a3aeacef7f99fc415936ffa5299abd3285f1296fda5e490e5170a5",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/490",
+          "ranking_sha256": "d812d38c11b3bddd6ac31feaee0aa65ef961c9a707036583dade14b1b520f553",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "BigCodeBench/498",
+          "reason": "Within-source duplicate: both convert an XML string to a dictionary and optionally persist JSON; the optional-save wording does not create an independent task contract."
+        },
+        {
+          "upstream_id": "BigCodeBench/1009",
+          "ranking_sha256": "f91221392c0af8cae531db6edc443a510a297d8066bf6788d92313900817cfb4",
+          "decision": "selected"
+        }
+      ],
+      "message_hashing": [
+        {
+          "upstream_id": "BigCodeBench/256",
+          "ranking_sha256": "0698f4e6ee19979f3b7e4f50f1c780b075d6d77e2f633f1797ba64499809375b",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/584",
+          "ranking_sha256": "121cbec762d1491a60f1eff9e3035cb45ad130414f606b7be59dc082dc395bfb",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1127",
+          "ranking_sha256": "12d0a32d25b936db6587df3a0f6717e0cdd1171d82c7685a29b82a9a85f9fe38",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/505",
+          "ranking_sha256": "18c00f05e068c74fc94b1660f12c551dd05a204de0738b29a24f24ca0375b8b4",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_5ffc4efb84a6b562e6ea059c3da645e62b5ac8a43ac4509904227ed3015581f4",
+          "reason": "Prior seven-source task already requires SHA-256 HMAC of a message with a secret key."
+        },
+        {
+          "upstream_id": "BigCodeBench/1132",
+          "ranking_sha256": "27b39e3c76072c956dc5f9c40f25bdd21e7d5996fa791b03327bc477b683689a",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_35ff0c3e7b3a8fb60d797d01e2e45194aebfe716d556d9c5403412fd144fa783",
+          "reason": "Prior seven-source task already requires a generated salt and password hash for registration."
+        },
+        {
+          "upstream_id": "BigCodeBench/577",
+          "ranking_sha256": "2e3e967654bafb4ae98a6e9421543a06c797767edd570445af2dcb08c8988c3d",
+          "decision": "selected"
+        }
+      ],
+      "security_random_generation": [
+        {
+          "upstream_id": "BigCodeBench/76",
+          "ranking_sha256": "007733b0de6e809bafe50a6851cf0243231b9a2713643638bf6fe9abc347a6a5",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1119",
+          "ranking_sha256": "01ac7554c3a197f7103c359bc31e35dd8e8f38f267e86d05285820d170c9c2a2",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_761df1747dd4cf672e983f6c6e489db4c97d905e1408ce7c6185711b58fa2559",
+          "reason": "Prior seven-source task already requires generation of a random password from character classes."
+        },
+        {
+          "upstream_id": "BigCodeBench/271",
+          "ranking_sha256": "08c77b9ee4dfe47fb88bebe9db4163a74224630651bb67ccfa6007c47bd45ee3",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/131",
+          "ranking_sha256": "10579af935adccc69a017552f31f26a0d175f79320e20f0bc0f505be893bcec9",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/256",
+          "ranking_sha256": "3229b16263053c2359d2884dd22ec8a093a205b8a4e68d5755222ffe4f1c674d",
+          "decision": "already_selected_for_earlier_family"
+        },
+        {
+          "upstream_id": "BigCodeBench/822",
+          "ranking_sha256": "6014dc1a3367e3344e1c7101ca35147822ba596d7e8193aba00739f4b88885ea",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_761df1747dd4cf672e983f6c6e489db4c97d905e1408ce7c6185711b58fa2559",
+          "reason": "Prior seven-source task already requires generation of a random password from character classes."
+        },
+        {
+          "upstream_id": "BigCodeBench/960",
+          "ranking_sha256": "92b032920c1761f54652e4e67ea3847265190d47d4786f43bec350f36369e6cb",
+          "decision": "selected"
+        }
+      ],
+      "credential_source": [
+        {
+          "upstream_id": "BigCodeBench/401",
+          "ranking_sha256": "0d8c439ef08e3d9dc04fa6adb8bd77190660aa3bc8b0ada959ed8957ac35b19e",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1042",
+          "ranking_sha256": "14d6abe83f5a97fe1e53e8fd9bbf7e93da96f621ea5cc97de3b30d133fae3a8c",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_726586529b0b3a8e6dc42eb66d49a4a956a74983dcdc22fb24a3be6c1dbebbfa",
+          "reason": "Prior seven-source task already sends an email through SMTP/TLS using externally supplied login credentials."
+        },
+        {
+          "upstream_id": "BigCodeBench/413",
+          "ranking_sha256": "15fe03b17dafa6306accf9ebad421312743793cedc64f348bb8103042462a02d",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "BigCodeBench/401",
+          "reason": "Within-source duplicate: both initialize Flask-Mail from environment-backed mail settings; the latter has the more explicit contract."
+        },
+        {
+          "upstream_id": "BigCodeBench/13",
+          "ranking_sha256": "242533694381d1835154ef3b09d45df10f527d7fc10be65574da52a6531d9632",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_92551793939759f6475074e08929e86b8c664040f2a8e61d7b70cb76ccdbf5bd",
+          "reason": "Prior seven-source task already logs in to FTP with caller credentials and downloads server files."
+        },
+        {
+          "upstream_id": "BigCodeBench/83",
+          "ranking_sha256": "270d33d4495816b83dafa919f4c5fd4b3e66ea8769cf190408115e6d492c106b",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/82",
+          "ranking_sha256": "87bd20931c75b4ef4eac58eb0248a0a24d15e8330b7bbc65076c1c48175c548b",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/274",
+          "ranking_sha256": "aa4f02713371f812aeff07a71167ed988a91940987651c45932b2e037e61ddbc",
+          "decision": "selected"
+        }
+      ],
+      "outbound_request": [
+        {
+          "upstream_id": "BigCodeBench/722",
+          "ranking_sha256": "03e3e0aa929a51789c1cc9ebcd562f64523e262814e21c772152f026419e7489",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1135",
+          "ranking_sha256": "04fa49d4cff86e09b47327526bef3977b31e63c87de5c290d4eaa6e4cf2e15fe",
+          "decision": "semantic_overlap_excluded",
+          "comparison": "dataset_record_8fcd607073d6b096750eb1cd817c9085a4d40fece7bdc8eda757f23f74dcdb97",
+          "reason": "Prior seven-source task already queries the fixed GitHub users endpoint with a caller-supplied username."
+        },
+        {
+          "upstream_id": "BigCodeBench/1005",
+          "ranking_sha256": "095047c5352028175304da5bec8e41a5b8b02eda0cb19295df527c8b802cf878",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/1136",
+          "ranking_sha256": "0b997fba8eedd2cb89babe154ebbb2c6b6fff30f2303d97a7104711f98da124d",
+          "decision": "selected"
+        },
+        {
+          "upstream_id": "BigCodeBench/170",
+          "ranking_sha256": "117f95803893810919e6e70b33a89ff12b9eae82bd8acf2d59aaa74776136b4a",
+          "decision": "selected"
+        }
+      ]
+    },
+    "semantic_overlap_exclusions": [
+      {
+        "family": "xml_parsing",
+        "upstream_id": "BigCodeBench/490",
+        "comparison": "BigCodeBench/498",
+        "reason": "Within-source duplicate: both convert an XML string to a dictionary and optionally persist JSON; the optional-save wording does not create an independent task contract."
+      },
+      {
+        "family": "message_hashing",
+        "upstream_id": "BigCodeBench/505",
+        "comparison": "dataset_record_5ffc4efb84a6b562e6ea059c3da645e62b5ac8a43ac4509904227ed3015581f4",
+        "reason": "Prior seven-source task already requires SHA-256 HMAC of a message with a secret key."
+      },
+      {
+        "family": "message_hashing",
+        "upstream_id": "BigCodeBench/1132",
+        "comparison": "dataset_record_35ff0c3e7b3a8fb60d797d01e2e45194aebfe716d556d9c5403412fd144fa783",
+        "reason": "Prior seven-source task already requires a generated salt and password hash for registration."
+      },
+      {
+        "family": "security_random_generation",
+        "upstream_id": "BigCodeBench/1119",
+        "comparison": "dataset_record_761df1747dd4cf672e983f6c6e489db4c97d905e1408ce7c6185711b58fa2559",
+        "reason": "Prior seven-source task already requires generation of a random password from character classes."
+      },
+      {
+        "family": "security_random_generation",
+        "upstream_id": "BigCodeBench/822",
+        "comparison": "dataset_record_761df1747dd4cf672e983f6c6e489db4c97d905e1408ce7c6185711b58fa2559",
+        "reason": "Prior seven-source task already requires generation of a random password from character classes."
+      },
+      {
+        "family": "credential_source",
+        "upstream_id": "BigCodeBench/1042",
+        "comparison": "dataset_record_726586529b0b3a8e6dc42eb66d49a4a956a74983dcdc22fb24a3be6c1dbebbfa",
+        "reason": "Prior seven-source task already sends an email through SMTP/TLS using externally supplied login credentials."
+      },
+      {
+        "family": "credential_source",
+        "upstream_id": "BigCodeBench/413",
+        "comparison": "BigCodeBench/401",
+        "reason": "Within-source duplicate: both initialize Flask-Mail from environment-backed mail settings; the latter has the more explicit contract."
+      },
+      {
+        "family": "credential_source",
+        "upstream_id": "BigCodeBench/13",
+        "comparison": "dataset_record_92551793939759f6475074e08929e86b8c664040f2a8e61d7b70cb76ccdbf5bd",
+        "reason": "Prior seven-source task already logs in to FTP with caller credentials and downloads server files."
+      },
+      {
+        "family": "outbound_request",
+        "upstream_id": "BigCodeBench/1135",
+        "comparison": "dataset_record_8fcd607073d6b096750eb1cd817c9085a4d40fece7bdc8eda757f23f74dcdb97",
+        "reason": "Prior seven-source task already queries the fixed GitHub users endpoint with a caller-supplied username."
+      }
+    ],
+    "frozen_task_units": 31,
+    "selection": "Coverage-stratified deterministic sample from a complete fixed source. It supports accuracy/recall qualification on this frozen sample, not an estimate of natural context prevalence in BigCodeBench."
+  },
+  "overlap_audit": {
+    "comparison_populations": [
+      "The previously curated seven-source task corpus",
+      "The exposed AI-Security-Benchmark and SecCodeBench qualification populations"
+    ],
+    "against_seven_source": {
+      "comparison_records": 2283,
+      "normalized_exact_matches": 0,
+      "same_language_char_tfidf_nearest_max": 0.38103272773627483,
+      "same_language_char_tfidf_nearest_mean": 0.24582420779080005
+    },
+    "against_prior_external": {
+      "comparison_records": 26,
+      "normalized_exact_matches": 0,
+      "same_language_char_tfidf_nearest_max": 0.2128993076962954,
+      "same_language_char_tfidf_nearest_mean": 0.14793144683449608
+    },
+    "semantic_review_rule": "Exclude only a task requiring the same principal operation on the same object under a materially equivalent functional contract; a shared CWE, library, or broad operation is insufficient.",
+    "review_completed_before_extraction": true
+  },
+  "provenance_limits": [
+    "BigCodeBench tasks were constructed by an independent benchmark project and are not part of the current paper's planned Python, C/C++, or backend effect-estimation corpora.",
+    "The selected sample is deliberately balanced across registered task families and cannot estimate BigCodeBench context prevalence.",
+    "BigCodeBench supplies task prompts, not authoritative Prompt TSG labels; the gold labels are an outcome-blind method audit completed before extraction.",
+    "The qualification supports transfer to this frozen Python population only; it is not a global semantic-parsing accuracy claim."
+  ],
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false
+}
