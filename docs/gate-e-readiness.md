@@ -176,9 +176,11 @@ checks the configured and effective worker counts.
 The prospectively frozen v10 run completed all 28 task units, 28 contracts, 28
 graphs, and 56 provider calls without retries. Four workers reduced wall-clock
 time to 506.63 seconds from the approximately 14-minute sequential baseline;
-provider throttling and request-length long tails limited the realized speedup
-to about 1.66x. The content-addressed extraction and independent qualification
-bundles both replayed successfully.
+the realized speedup was about 1.66x. The shortfall from ideal scaling is
+consistent with provider-side concurrency limits and heterogeneous request
+latency, but this run did not separately instrument those causes. The
+content-addressed extraction and independent qualification bundles both
+replayed successfully.
 
 | Metric | Frozen requirement | Contract v10 result |
 | --- | ---: | ---: |
