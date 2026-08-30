@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_TERMINATED_FOR_PROSPECTIVE_SCHEDULER_REPLACEMENT",
+  "freeze_sha256": "f176ce42bf1ad1ae031a312132f26b32d4e023496ada20ed2c45cc4826d6a43d",
+  "method_revision_commit": "27f83821b1ddc6787c2a890a91517700698ce79d",
+  "observed_elapsed_before_termination": "approximately 2 minutes 11 seconds",
+  "provider_calls": "unknown; at least 1 and fewer than the planned 56",
+  "formal_task_units_conservatively_treated_as_exposed": 28,
+  "response_artifacts_retained": false,
+  "graphs_retained": 0,
+  "gate_score_computed": false,
+  "reason": "The project owner requested bounded task concurrency to reduce wall-clock time while preserving the scientific protocol.",
+  "disposition": "v9 remains immutable and unscored. The process identity was checked before SIGTERM and the experiment root contained no files. A prospective successor freezes four task workers, keeps proposer then reviewer sequential within each task, preserves selected-task output order, and keeps the same 56 model calls, tasks, model, seeds, prompts, gold labels, and Gate thresholds.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

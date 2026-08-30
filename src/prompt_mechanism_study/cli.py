@@ -229,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_contract_extract.add_argument("reviewer_prompt", type=Path)
     prompt_contract_extract.add_argument("selection", type=Path)
     prompt_contract_extract.add_argument("output", type=Path)
+    prompt_contract_extract.add_argument("--workers", type=int, default=1)
 
     positivity = commands.add_parser(
         "positivity-audit",
@@ -430,6 +431,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.reviewer_prompt,
             args.selection,
             args.output,
+            max_workers=args.workers,
         )
         print(report["status"])
     elif args.command == "task-partition":

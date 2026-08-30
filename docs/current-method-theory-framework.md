@@ -110,6 +110,11 @@ LLM 到合同的传输层使用由冻结 task scope 确定性生成的 strict JS
 任务级行全集。两次都在 bundle 前失败且未评分。后继版本把有限词表直接编译为任务级
 keyed schema，不通过重试或 parser 放宽掩盖错误。
 
+不同 task unit 可按前瞻冻结的有界 worker 数并发；单个 task 内仍先 proposer、后 reviewer，
+不重试、不择优，最终 artifact 始终按冻结 selection 顺序写入。worker 配置和实际并发上限
+同时进入 report，并由 qualification gold 独立核对，因此它只改变墙钟时间，不改变调用数、
+模型随机种子、共识规则或 Gate 阈值。
+
 ### 3.3 原子假设
 
 可确认假设为：

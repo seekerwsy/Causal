@@ -1,5 +1,6 @@
 import hashlib
 import json
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -511,6 +512,59 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
     assert ("proposer_response_format_sha256" in report) is structured_output
     assert qualification["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION"
     assert qualification["exact_context_accuracy"] == 1.0
+
+
+def test_bounded_task_concurrency_preserves_frozen_output_order(tmp_path):
+    task, catalog = _inputs()
+    second = {**task, "task_id": f"{task['task_id']}_second"}
+    tasks = [task, second]
+    contracts = {row["task_id"]: _contract(row, catalog) for row in tasks}
+    tasks_path = tmp_path / "tasks.json"
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+    selection_path = tmp_path / "selection.json"
+    selection_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "source_tasks_sha256": hashlib.sha256(tasks_path.read_bytes()).hexdigest(),
+                "selection_rule": "Two exposed tasks for bounded concurrency testing.",
+                "task_ids": [row["task_id"] for row in tasks],
+                "arms_or_outcomes_used": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    first_calls = set()
+
+    def provider(request, _evaluator, _prompt):
+        task_id = request["task_id"]
+        with lock:
+            first = task_id not in first_calls
+            first_calls.add(task_id)
+        if first:
+            barrier.wait(timeout=2)
+        return _response(contracts[task_id])
+
+    output = tmp_path / "concurrent-extraction"
+    report = extract_contract_task_file(
+        tasks_path,
+        CATALOG_PATH,
+        ROOT / "data/method/prompt-contract-proposer-qwen37max-v4.json",
+        ROOT / "data/method/prompts/prompt-contract-proposer-v3.txt",
+        ROOT / "data/method/prompt-contract-reviewer-qwen37max-v4.json",
+        ROOT / "data/method/prompts/prompt-contract-reviewer-v3.txt",
+        selection_path,
+        output,
+        provider=provider,
+        max_workers=2,
+    )
+    stored = json.loads((output / "contracts.json").read_text(encoding="utf-8"))
+
+    assert report["task_workers"] == report["effective_task_workers"] == 2
+    assert report["provider_calls"] == 4
+    assert [row["task_id"] for row in stored] == [row["task_id"] for row in tasks]
 
 
 def test_prospective_v5_gate_freeze_is_source_only_and_self_consistent():

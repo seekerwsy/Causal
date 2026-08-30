@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -488,11 +489,14 @@ def extract_contract_task_file(
     *,
     review_status: str = "prospective_frozen",
     provider: Provider = bailian_complete,
+    max_workers: int = 1,
 ) -> dict[str, Any]:
     """Extract one frozen selection into a reviewable contract-and-graph bundle."""
 
     if output.exists():
         raise FileExistsError(output)
+    if type(max_workers) is not int or not 1 <= max_workers <= 8:
+        raise PromptContractExtractionError("task worker count must be between 1 and 8")
     tasks = _rows(read_json(tasks_path), "task file")
     by_id = {task.get("task_id"): task for task in tasks}
     if len(by_id) != len(tasks) or None in by_id:
@@ -526,12 +530,8 @@ def extract_contract_task_file(
     if not proposer_prompt or not reviewer_prompt:
         raise PromptContractExtractionError("contract annotator prompt is empty")
 
-    contracts: list[dict[str, Any]] = []
-    graphs: list[dict[str, Any]] = []
-    requests: list[dict[str, Any]] = []
-    responses: list[dict[str, Any]] = []
-    for task in selected:
-        contract, graph, request, proposer_raw, reviewer_raw = extract_task_contract(
+    def extract(task: Mapping[str, Any]):
+        return extract_task_contract(
             task,
             catalog=catalog,
             proposer_evaluator=proposer_evaluator,
@@ -541,6 +541,19 @@ def extract_contract_task_file(
             review_status=review_status,
             provider=provider,
         )
+
+    if max_workers == 1:
+        extracted = [extract(task) for task in selected]
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            extracted = list(executor.map(extract, selected))
+
+    contracts: list[dict[str, Any]] = []
+    graphs: list[dict[str, Any]] = []
+    requests: list[dict[str, Any]] = []
+    responses: list[dict[str, Any]] = []
+    for task, result in zip(selected, extracted, strict=True):
+        contract, graph, request, proposer_raw, reviewer_raw = result
         contracts.append(task_context_contract_record(contract))
         graphs.append(prompt_tsg_record(graph))
         requests.append(request)
@@ -565,6 +578,8 @@ def extract_contract_task_file(
         "contracts": len(contracts),
         "graphs": len(graphs),
         "provider_calls": 2 * len(selected),
+        "task_workers": max_workers,
+        "effective_task_workers": min(max_workers, len(selected)),
         "candidate_id": candidate_id,
         "task_file_sha256": _sha256(tasks_path),
         "task_selection_sha256": _sha256(selection_path),

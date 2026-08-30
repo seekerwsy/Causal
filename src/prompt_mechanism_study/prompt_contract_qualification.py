@@ -70,9 +70,10 @@ def qualify_prompt_contract_extractor(
         "qualification_rule",
         "cases",
     }
+    allowed_gold = {frozenset(required_gold), frozenset(required_gold | {"execution"})}
     if (
         not isinstance(gold, dict)
-        or set(gold) != required_gold
+        or frozenset(gold) not in allowed_gold
         or gold["schema_version"] != "2.0"
         or gold["contract_protocol_id"]
         != "task_context_contract_v2_dual_blind_consensus"
@@ -80,6 +81,14 @@ def qualify_prompt_contract_extractor(
         or gold["arms_or_outcomes_used"] is not False
     ):
         raise PromptContractQualificationError("Prompt contract qualification gold record is invalid")
+    execution = gold.get("execution", {"task_workers": 1})
+    if (
+        not isinstance(execution, dict)
+        or set(execution) != {"task_workers"}
+        or type(execution["task_workers"]) is not int
+        or not 1 <= execution["task_workers"] <= 8
+    ):
+        raise PromptContractQualificationError("Prompt contract execution policy is invalid")
     rule = gold["qualification_rule"]
     if (
         not isinstance(rule, dict)
@@ -123,6 +132,8 @@ def qualify_prompt_contract_extractor(
         "contracts": len(cases),
         "graphs": len(cases),
         "provider_calls": 2 * len(cases),
+        "task_workers": execution["task_workers"],
+        "effective_task_workers": min(execution["task_workers"], len(cases)),
         "candidate_id": candidate_id,
         "task_file_sha256": _sha256(tasks_path),
         "task_selection_sha256": _sha256(selection_path),

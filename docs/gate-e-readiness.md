@@ -166,6 +166,13 @@ two keyed JSON objects whose complete semantic and relation coordinate sets are
 required and whose additional properties are forbidden. Local completeness,
 evidence, semantic, consensus, and replay checks remain strict.
 
+The first sequential v9 run was deliberately terminated after about two minutes
+at the owner's request to replace scheduling prospectively; its experiment root
+contained no files and no Gate score was computed. The successor freezes four
+task workers. Proposer and reviewer remain sequential within a task, total calls
+remain 56, output remains in selection order, and the independent qualification
+checks the configured and effective worker counts.
+
 This is development evidence, not a corrected 4/4 qualification score. The
 prompts and old labels were visible, the contracts were manually authored for
 the architecture check, and no automatic contract producer was evaluated.

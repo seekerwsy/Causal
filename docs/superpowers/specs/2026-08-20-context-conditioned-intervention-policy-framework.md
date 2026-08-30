@@ -227,6 +227,15 @@ set, exact evidence occurrences, catalog attributes, endpoint closure, consensus
 and graph replay. JSON Object mode or one static row-array schema is insufficient:
 neither can require a task-dependent finite identity set.
 
+Task units may be scheduled with a prospectively frozen bounded worker count.
+Each task still executes proposer then reviewer in that order, each annotator still
+receives the same source-only request and frozen seed, and there is no retry or
+winner selection. The artifact is always serialized in frozen selection order,
+not completion order. The worker count and effective worker count are recorded in
+the extraction report and independently checked against the qualification gold;
+therefore bounded concurrency changes wall-clock scheduling, not the estimand,
+population, call count, consensus rule, or Gate threshold.
+
 Two LLM calls with different frozen seeds independently complete this finite table from the same
 source-only request; neither sees the other's output. State disagreement becomes `UNRESOLVED`.
 When both mark a semantic `PRESENT`, a deterministic rule retains the longer already-validated exact
