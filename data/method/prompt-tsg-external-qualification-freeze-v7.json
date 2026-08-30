@@ -1,0 +1,119 @@
+{
+  "schema_version": "2.0",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "freeze_date": "2026-08-31",
+  "protocol_id": "task_context_contract_v2_dual_blind_consensus_array_attributes_deterministic_endpoint_closure",
+  "method_revision_commit": "d1d51912463da8186982084a7ad0296446e13fff",
+  "extractor_candidate_id": "dual-blind-consensus:prompt-contract-proposer-qwen37max-v2+prompt-contract-reviewer-qwen37max-v2",
+  "response_attribute_schema": "unique array of allowed names asserted true",
+  "relation_endpoint_precedence": [
+    "any_absent_implies_absent",
+    "otherwise_any_unresolved_implies_unresolved",
+    "otherwise_consult_relation_annotation"
+  ],
+  "endpoint_closure_stage": "each independent annotation before graph validation and consensus",
+  "provider_calls_per_task": 2,
+  "frozen_task_units": 28,
+  "prior_provider_exposure": {
+    "conservatively_exposed_task_units": 28,
+    "retained_responses": 0,
+    "retained_graphs": 0,
+    "gate_score_computed": false,
+    "model_state_changed": false,
+    "researcher_inspected_semantic_output": false
+  },
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "candidate_support_realization_ids": [
+    "cwe338_security_sensitive_randomness",
+    "cwe502_json_deserialization",
+    "cwe502_yaml_deserialization",
+    "cwe78_fixed_executable_argv",
+    "cwe89_sql_values"
+  ],
+  "inputs": {
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "mechanism_registry": {
+      "path": "data/method/mechanism-registry-v1.json",
+      "sha256": "f322e27aa1ce7dcc598427f7a0ab608d29ae9d17385a0bbe20e20a3dcd835e10"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37max-v2.json",
+      "sha256": "ada46b86f4be7f32afba4dc04c0443b0d97d3c2da263531604b7d1e604f3974d"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v2.txt",
+      "sha256": "a8f62a150373d5e8bc1e98c4910ac0c04adf5c1b78d7262cd33e2208156a75f6"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37max-v2.json",
+      "sha256": "d02599d030fda8591c658ee4d7bd7f7cbad5b15083d3c418516d85e89ea874d8"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v2.txt",
+      "sha256": "8bf7870fda48fcf7e8bf78a8f0ae5e686c64f9dff43a8d4e39b1925bc132f936"
+    },
+    "predecessor_disposition": {
+      "path": "data/method/prompt-tsg-external-qualification-v6-failure.json",
+      "sha256": "cdbae23be53781a442459305306a6df1d126988efa6c48f18a9e9ccbd2bbc32f"
+    },
+    "source_manifest": {
+      "path": "data/method/prompt-tsg-external-qualification-source-v7.json",
+      "sha256": "406ba3d15686a499f7c748e2dfb25510d682c184505de7491d7b9ddc9040141e"
+    },
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v5.json",
+      "sha256": "6b4aca676b40e765bae8b7fe8477235210caa2c5258ada849aa130af798bdcad"
+    },
+    "selection": {
+      "path": "data/method/prompt-tsg-external-qualification-selection-v7.json",
+      "sha256": "03171fb390caca030c643e5aaa18d98474685c58d15ec5e93dcb8d198c88c29d"
+    },
+    "gold": {
+      "path": "data/method/prompt-tsg-external-qualification-gold-v7.json",
+      "sha256": "acb4d0f4f63e1924bab76bd939184b5d035198fa583d62eee397df5f2b3e570e"
+    },
+    "contract_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract.py",
+      "sha256": "8793512a1892aaaa1f9f6cf04c0b9aac54ae7525c153661f5ecf49aff7eb5b9a"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_extract.py",
+      "sha256": "298da2383483b1d68f5c27264abbb03df0fa740763cf0ab31e5f460740e5169b"
+    },
+    "qualification_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_qualification.py",
+      "sha256": "414c4dcedd8b829fc0b3824f6acbfad9a6f91a657f25aab59d4314cfc2e278b8"
+    },
+    "graph_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_tsg.py",
+      "sha256": "b0131677b94a0dee251986e2cb60f0e3f5a8452c9cd84c67655cf40e3cbd1f27"
+    },
+    "binding_implementation": {
+      "path": "src/prompt_mechanism_study/mechanisms.py",
+      "sha256": "c9b6b3fab1a2ca979b6afab373cd5e28a27a76917e8c4ff16b534e22f8b0d57a"
+    },
+    "provider_adapter": {
+      "path": "src/prompt_mechanism_study/functional_judge.py",
+      "sha256": "ed54cc906bd1580ca96d559b7d0c7969dcf58c4addd721e8833c44f2cdf785b7"
+    },
+    "artifact_io": {
+      "path": "src/prompt_mechanism_study/artifact_io.py",
+      "sha256": "f763219080fb50931ebb5d36a30400cf9a855441152c49fc8d3ab9eaf8779d29"
+    },
+    "records": {
+      "path": "src/prompt_mechanism_study/records.py",
+      "sha256": "a5d47d8344f09b3e239b74b1cb83f733c75afc69e6c0c09fe7230f15e4da594f"
+    }
+  },
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

@@ -555,3 +555,43 @@ def test_prospective_v6_gate_freeze_closes_array_only_successor():
         path = ROOT / item["path"]
         if item["path"].startswith("data/"):
             assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+
+
+def test_prospective_v7_gate_freeze_closes_endpoint_projection_successor():
+    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
+    selection_path = (
+        ROOT / "data/method/prompt-tsg-external-qualification-selection-v7.json"
+    )
+    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v7.json"
+    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v7.json"
+    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v7.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+
+    assert [task["task_id"] for task in tasks] == selection["task_ids"]
+    assert selection["task_ids"] == [case["task_id"] for case in gold["cases"]]
+    assert selection["source_tasks_sha256"] == hashlib.sha256(
+        tasks_path.read_bytes()
+    ).hexdigest()
+    assert gold["extractor_candidate_id"] == freeze["extractor_candidate_id"]
+    assert freeze["relation_endpoint_precedence"] == [
+        "any_absent_implies_absent",
+        "otherwise_any_unresolved_implies_unresolved",
+        "otherwise_consult_relation_annotation",
+    ]
+    assert freeze["endpoint_closure_stage"] == (
+        "each independent annotation before graph validation and consensus"
+    )
+    assert source["predecessor_disposition_path"] == (
+        "data/method/prompt-tsg-external-qualification-v6-failure.json"
+    )
+    assert source["prior_provider_exposure"] == freeze["prior_provider_exposure"]
+    assert all(isinstance(limit, str) for limit in source["provenance_limits"])
+    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert freeze["arms_or_outcomes_used"] is False
+    for item in freeze["inputs"].values():
+        path = ROOT / item["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]

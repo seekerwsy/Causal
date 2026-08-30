@@ -1,0 +1,184 @@
+{
+  "schema_version": "2.0",
+  "contract_protocol_id": "task_context_contract_v2_dual_blind_consensus",
+  "extractor_candidate_id": "dual-blind-consensus:prompt-contract-proposer-qwen37max-v2+prompt-contract-reviewer-qwen37max-v2",
+  "selection_path": "data/method/prompt-tsg-external-qualification-selection-v7.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "cases": [
+    {
+      "task_id": "deveval_task_203aca3fe24f05d4a9bf429a3457e40a9abd1934504258e1b77baee01988a95f",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "The task fixes the rsync executable while source, destination, and flags are caller-supplied arguments."
+    },
+    {
+      "task_id": "deveval_task_280307cf5fc777ee87674f4dbaf0740c35cc43f92bc9732b3b51581d26c88f2f",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "The task fixes the SSH/cat command pipeline while the remote file path is the caller-supplied argument."
+    },
+    {
+      "task_id": "deveval_task_d0b86f441f782a53a8513a5db859d98feb384848920bea0e741fc707e4af07ac",
+      "expected_context": "present",
+      "expected_realization_id": "cwe78_fixed_executable_argv",
+      "rationale": "The task fixes the Hadoop fs -du pipeline while path_glob is the caller-supplied argument."
+    },
+    {
+      "task_id": "deveval_task_e4c84f1c2a118f86794b86f9ff1994f25419cff26900d910f69984b5cd8228b1",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies the path to the ldd executable, so the task does not establish one non-substitutable executable or a finite executable domain."
+    },
+    {
+      "task_id": "deveval_task_790f58699e906e668e7aa4c48bab1bd7193091baeade1d324f380e3f9a7245a7",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The caller supplies tool as the program to execute, which is incompatible with the fixed- or finite-executable contexts."
+    },
+    {
+      "task_id": "deveval_task_fdc96075770aaf5c9b131a734b5ea5dea207601b6c5d155ba24d4a6240225c76",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The interface accepts an unrestricted command or command list rather than one fixed executable or finite program set."
+    },
+    {
+      "task_id": "deveval_task_b391589763cb49b0a947bf3a6227d9d74649bfa1f89dff4f20eca9e8804bc6db",
+      "expected_context": "present",
+      "expected_realization_id": "cwe89_sql_values",
+      "rationale": "The states table and field roles are fixed while name and state are caller-supplied SQL values."
+    },
+    {
+      "task_id": "deveval_task_c3049a3100b06e893a48a079bc6d1d9d1beee265a54f009c51caa5d5e6e34897",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task retrieves all rows without any caller-supplied value or SQL identifier entering the query."
+    },
+    {
+      "task_id": "deveval_task_0603ae0460f3a08f82e87806e6107a42a821a689352c596ef3519022cf3632e3",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task deletes all rows for the instance and exposes no caller-supplied SQL value or identifier."
+    },
+    {
+      "task_id": "deveval_task_591f4aa267434bcc3b8c74c8b6dfa67f10930ff10dca8e99e2b29d3af437e460",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The request supplies a raw _where clause, not a fixed-role SQL value or a finite identifier choice covered by either catalog query."
+    },
+    {
+      "task_id": "deveval_task_d9296bcc4d81aaeab188ac0eab7c22bbeae71f3a54d17754fed3f73126fc1c9b",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task commits existing changes and exposes no caller-supplied value or identifier flowing into SQL execution."
+    },
+    {
+      "task_id": "deveval_task_4de256bde833101645ab12c80d06c7e03b92e027af603a7807d1b0d921beeaa3",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "The caller-provided JSON string is explicitly loaded into the corresponding Python object."
+    },
+    {
+      "task_id": "deveval_task_bab8d8ff0151c26d40dd680b92b8c61d947ee7182b15a48a798532c12e860e71",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "The incoming bytestream is explicitly decoded and parsed as JSON into program data."
+    },
+    {
+      "task_id": "deveval_task_4044ba94196865658e04028da08a61c4d0525e1c1d2efdbd921537001d392fe8",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "rationale": "The JSONField value is explicitly deserialized and converted into a Python object."
+    },
+    {
+      "task_id": "deveval_task_0e9e1223cada80f9e03c0f59b2f3e80ead0a0fcfc7a0a4397c9d8af47f386e13",
+      "expected_context": "present",
+      "expected_realization_id": "cwe502_yaml_deserialization",
+      "rationale": "The requested behavior loads externally stored YAML files into Python paper objects."
+    },
+    {
+      "task_id": "deveval_task_50f56566be9b26bf465bb17a0e1920252dcb158048ed219283c339f71bf3eff3",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task serializes a Python object to JSON and does not deserialize external JSON, YAML, or Python-literal content."
+    },
+    {
+      "task_id": "deveval_task_304eb7fe95f0f7d004f25de06eed3a348c85b03f0c980e4cb56691aa08fb759b",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The parsed format is an RFC 7232 entity-tag rather than JSON, YAML, or Python-literal text."
+    },
+    {
+      "task_id": "deveval_task_1a7da78d1c5b498b29e4ce00c9cd7cf17c96ececf0ca30fe4bb80b61ecdab692",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The requested behavior generates a new CSRF token, an explicitly security-sensitive random value."
+    },
+    {
+      "task_id": "deveval_task_e86e4c20fb0bee8aadc6d206c847c2f5ec8d4807511fbaae8bacb89996bbc04d",
+      "expected_context": "present",
+      "expected_realization_id": "cwe338_security_sensitive_randomness",
+      "rationale": "The task explicitly requests generation of a safe serving token and returns its serve identifier."
+    },
+    {
+      "task_id": "deveval_task_92def91fe58e3d203a39a8daaf90e9a3740836768c6d1eef4c9ec0137028a3da",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The requested random binary blob is generic test data and explicitly supports seeding, not a security-sensitive value."
+    },
+    {
+      "task_id": "deveval_task_702ce7b4b8b6feb4fcb110ac49f5cd67d7478785c73e3e42ddcfa1607c69d056",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The requested randomness generates lorem ipsum presentation text, not a token, nonce, secret, or key."
+    },
+    {
+      "task_id": "deveval_task_6f48fd546cfcbdafab5c8f01fd7b26726bab14f041df401c4c2772c8b852d26a",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The random number generator is used for statistical resampling, not security-sensitive generation."
+    },
+    {
+      "task_id": "deveval_task_12049c21d5dac8037562e3b8f08a19cbbd198a0214baaf7ddb7a10f3745b5f9f",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The hash is used to create a repeatable cache filename, which the catalog explicitly excludes from security-sensitive hashing."
+    },
+    {
+      "task_id": "deveval_task_dbccc037a4c553a46a542240157223620e5aa5e28500b183bf9f78557d574526",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task computes the non-cryptographic Luhn checksum required by the functional contract, not a cryptographic security hash."
+    },
+    {
+      "task_id": "deveval_task_91973aa63df23deaf4817a3607a10b193602b3799e8e6b60cbb6d4624f663dab",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The prompt states only generic algorithm-selected hashing and gives no authentication, recovery, integrity, or other explicit security purpose."
+    },
+    {
+      "task_id": "deveval_task_eaf1f9fc6485160a9d68fd272ea4f9dbd4dd2657689c22519952eb79ee583eb1",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task resolves generic config values from environment or files but does not use an application credential to authenticate to a protected resource."
+    },
+    {
+      "task_id": "deveval_task_4c961d90eb8eb81ad277a6d70162a352373ae1a2e7aeaa97c4419dcca79f85ab",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task redacts values such as api_key and does not source and use an application credential for authentication."
+    },
+    {
+      "task_id": "deveval_task_27956033bffe61632f28d47d83360e70f8a40552e5610df4ee3e3a96d19f77f4",
+      "expected_context": "absent_or_unresolved",
+      "expected_realization_id": null,
+      "rationale": "The task parses an end-user authorization response token and does not use an application credential to authenticate to a protected resource."
+    }
+  ]
+}
