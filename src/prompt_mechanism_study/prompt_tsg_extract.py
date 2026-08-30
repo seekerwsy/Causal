@@ -23,6 +23,13 @@ from prompt_mechanism_study.records import canonical_json, content_hash
 
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
+_MODEL_FACT_KEYS = (
+    "local_id",
+    "semantic_id",
+    "evidence_text",
+    "occurrence",
+    "attributes",
+)
 _PATH_AUTHORITY_PROTOCOL = "explicit_path_base_authority_v1"
 _PATH_AUTHORITY_SEMANTICS = frozenset(
     {
@@ -97,7 +104,7 @@ def extraction_request(task: Mapping[str, Any], catalog: Mapping[str, Any]) -> d
         if item[0] in node_types and item[2] in node_types and item[1] != "contains"
     ]
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "task_id": task["task_id"],
         "cwe_id": task["cwe"],
         "task_family": task["task_family"],
@@ -118,14 +125,7 @@ def extraction_request(task: Mapping[str, Any], catalog: Mapping[str, Any]) -> d
         "arms_or_outcomes_included": False,
         "output_contract": {
             "top_level_keys": ["facts", "relations", "unresolved_semantics"],
-            "fact_keys": [
-                "local_id",
-                "node_type",
-                "semantic_id",
-                "evidence_text",
-                "occurrence",
-                "attributes",
-            ],
+            "fact_keys": list(_MODEL_FACT_KEYS),
             "local_id_type": "string",
             "relation_keys": ["edge_type", "source", "target"],
             "relation_endpoints": "string_local_ids",
@@ -209,6 +209,9 @@ def extract_prompt_tsg(
                 evaluator=reviewer_evaluator,
                 system_prompt=reviewer_prompt,
                 provider=provider,
+                excluded_semantics=(
+                    _PATH_AUTHORITY_SEMANTICS if authority is not None else ()
+                ),
             )
             rejected_facts.extend(review_projection["rejected_facts"])
             rejected_relations.extend(review_projection["rejected_relations"])
@@ -712,7 +715,6 @@ def _apply_path_authority(
         )
         fact = {
             "local_id": local_id,
-            "node_type": "constraint",
             "semantic_id": injected_semantic,
             "evidence_text": annotation["evidence_text"],
             "occurrence": annotation["occurrence"],
@@ -779,8 +781,9 @@ def _review_catalog_facts(
     evaluator: Mapping[str, Any],
     system_prompt: str,
     provider: Provider,
+    excluded_semantics: Sequence[str] = (),
 ) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]], dict[str, Any]]:
-    """Re-annotate asserted and unresolved semantics without widening their set."""
+    """Independently annotate the complete catalog slice for this task family."""
 
     if not system_prompt:
         raise PromptTSGExtractionError("semantic reviewer prompt is empty")
@@ -799,7 +802,8 @@ def _review_catalog_facts(
         or len(proposed_unresolved) != len(set(proposed_unresolved))
     ):
         raise PromptTSGExtractionError("proposer unresolved semantics are invalid")
-    candidate_semantics = proposed_semantics | set(proposed_unresolved)
+    task_slice = set(extraction_request(task, catalog)["candidate_semantics"])
+    candidate_semantics = task_slice - descriptive - set(excluded_semantics)
     required_relations = {
         tuple(relation)
         for query in catalog["queries"]
@@ -809,7 +813,7 @@ def _review_catalog_facts(
         if relation[0] in candidate_semantics and relation[2] in candidate_semantics
     }
     request = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "request_kind": "prompt_tsg_bounded_ambiguity_adjudication",
         "task_id": task["task_id"],
         "source_prompt": task["prompt"],
@@ -821,7 +825,11 @@ def _review_catalog_facts(
                     "Accept only when the source prompt directly entails this role.",
                 ),
                 "proposer_status": (
-                    "asserted" if semantic_id in proposed_semantics else "unresolved"
+                    "asserted"
+                    if semantic_id in proposed_semantics
+                    else "unresolved"
+                    if semantic_id in proposed_unresolved
+                    else "omitted"
                 ),
                 "proposed_evidence": [
                     fact["evidence_text"]
@@ -835,18 +843,12 @@ def _review_catalog_facts(
         "evidence_binding_policy": {
             "asserted_candidate": "reuse validated proposer evidence and occurrence",
             "proposer_unresolved_candidate": "require new exact prompt evidence",
+            "proposer_omitted_candidate": "require new exact prompt evidence",
         },
         "arms_or_outcomes_included": False,
         "output_contract": {
             "top_level_keys": ["facts", "relations", "unresolved_semantics"],
-            "fact_keys": [
-                "local_id",
-                "node_type",
-                "semantic_id",
-                "evidence_text",
-                "occurrence",
-                "attributes",
-            ],
+            "fact_keys": list(_MODEL_FACT_KEYS),
             "relation_keys": ["edge_type", "source", "target"],
             "semantic_scope": "candidate_semantics only",
         },
@@ -986,6 +988,9 @@ def _review_catalog_facts(
         "response_text": raw.decode("utf-8", errors="strict"),
         "provider_called": True,
         "accepted_semantics": sorted(accepted_semantics),
+        "reviewer_recovered_semantics": sorted(
+            accepted_semantics - proposed_semantics
+        ),
         "unresolved_semantics": sorted(unresolved),
         "unsupported_proposer_ambiguities": sorted(
             set(proposed_unresolved) - accepted_semantics - set(unresolved)
@@ -1097,18 +1102,15 @@ def _project_facts(
     normalized_occurrences = []
     seen_local_ids: set[str] = set()
     for fact in facts:
-        if not isinstance(fact, Mapping) or set(fact) != {
-            "local_id",
-            "node_type",
-            "semantic_id",
-            "evidence_text",
-            "occurrence",
-            "attributes",
-        }:
+        if not isinstance(fact, Mapping) or set(fact) != set(_MODEL_FACT_KEYS):
             raise PromptTSGExtractionError("extractor fact fields are invalid")
         local_id = fact.get("local_id")
-        node_type = fact.get("node_type")
         semantic_id = fact.get("semantic_id")
+        node_type = (
+            catalog["semantics"].get(semantic_id)
+            if isinstance(semantic_id, str)
+            else None
+        )
         evidence = fact.get("evidence_text")
         occurrence = fact.get("occurrence")
         attributes = fact.get("attributes")
@@ -1118,7 +1120,7 @@ def _project_facts(
             or local_id in seen_local_ids
             or not isinstance(semantic_id, str)
             or not semantic_id.strip()
-            or catalog["semantics"].get(semantic_id) != node_type
+            or not isinstance(node_type, str)
             or semantic_id == "task.root"
             or not isinstance(evidence, str)
             or not evidence
@@ -1133,17 +1135,18 @@ def _project_facts(
         ):
             raise PromptTSGExtractionError("extractor fact value is invalid")
         seen_local_ids.add(local_id)
+        catalog_typed_fact = {**fact, "node_type": node_type}
         offset = -1
         for _ in range(occurrence):
             offset = prompt.find(evidence, offset + 1)
             if offset < 0:
                 break
         if offset >= 0:
-            accepted.append(fact)
+            accepted.append(catalog_typed_fact)
             continue
         first_offset = prompt.find(evidence)
         if first_offset >= 0 and prompt.find(evidence, first_offset + 1) < 0:
-            accepted.append({**fact, "occurrence": 1})
+            accepted.append({**catalog_typed_fact, "occurrence": 1})
             normalized_occurrences.append(
                 {
                     "local_id": local_id,

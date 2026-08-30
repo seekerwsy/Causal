@@ -45,6 +45,18 @@ def _fact(local_id, node_type, semantic_id, evidence_text, **attributes):
     }
 
 
+def _model_response(value):
+    return json.dumps(
+        {
+            **value,
+            "facts": [
+                {key: item for key, item in fact.items() if key != "node_type"}
+                for fact in value["facts"]
+            ],
+        }
+    ).encode()
+
+
 def _path_authority(task, state, evidence_text, occurrence=1):
     return {
         "annotation_protocol_id": "explicit_path_base_authority_v1",
@@ -123,7 +135,7 @@ def test_catalog_and_graph_are_canonical_and_round_trip():
 
 @pytest.mark.reviewer
 def test_active_catalog_guides_every_query_bound_semantic():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v10.json")
     query_semantics = set()
     for query in catalog["queries"]:
         query_semantics.update(query["required_semantics"])
@@ -150,8 +162,8 @@ def test_prospective_catalog_freezes_xml_and_sql_semantic_boundaries():
 
 
 @pytest.mark.reviewer
-def test_successor_catalog_freezes_pipeline_and_format_boundaries():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v9.json")
+def test_successor_catalog_freezes_compiled_type_and_relation_boundaries():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v10.json")
     guidance = catalog["semantic_guidance"]
 
     assert "predetermined pipeline of named tools" in guidance[
@@ -159,6 +171,61 @@ def test_successor_catalog_freezes_pipeline_and_format_boundaries():
     ]
     assert "framework checkpoints" in guidance["source.untrusted_python_literal"]
     assert "framework checkpoint" in guidance["sink.python_literal_deserialization"]
+
+    queries = {query["query_id"]: query for query in catalog["queries"]}
+    for query_id in (
+        "context.untrusted_yaml_deserialization.v1",
+        "context.untrusted_json_deserialization.v1",
+        "context.untrusted_python_literal_deserialization.v1",
+    ):
+        assert not any(
+            semantic_id.endswith("_format_required")
+            for semantic_id in queries[query_id]["required_semantics"]
+        )
+
+    for query in catalog["queries"]:
+        constraints = [
+            semantic_id
+            for semantic_id in query["required_semantics"]
+            if catalog["semantics"][semantic_id] == "constraint"
+        ]
+        sinks = [
+            semantic_id
+            for semantic_id in query["required_semantics"]
+            if catalog["semantics"][semantic_id] == "sink"
+        ]
+        if constraints:
+            assert len(sinks) == 1
+            for semantic_id in constraints:
+                assert [semantic_id, "qualifies", sinks[0]] in query[
+                    "required_relations"
+                ]
+
+
+@pytest.mark.reviewer
+def test_compiled_extractor_candidate_files_share_the_model_fact_contract():
+    proposer = json.loads(
+        (ROOT / "data/method/prompt-tsg-extractor-qwen37max-v17.json").read_text()
+    )
+    reviewer = json.loads(
+        (
+            ROOT
+            / "data/method/prompt-tsg-ambiguity-adjudication-qwen37max-v7.json"
+        ).read_text()
+    )
+    proposer_prompt = (
+        ROOT / "data/method/prompts/prompt-tsg-facts-v15.txt"
+    ).read_text()
+    reviewer_prompt = (
+        ROOT / "data/method/prompts/prompt-tsg-ambiguity-adjudication-v3.txt"
+    ).read_text()
+
+    assert proposer["candidate_id"].endswith("-v17")
+    assert reviewer["candidate_id"].endswith("-v7")
+    for prompt in (proposer_prompt, reviewer_prompt):
+        assert "exactly local_id, semantic_id, evidence_text, occurrence, attributes" in prompt
+        assert "never copy node_type into a fact" in prompt
+    assert "asserted, unresolved, or omitted" in reviewer_prompt
 
 
 @pytest.mark.reviewer
@@ -457,8 +524,8 @@ def test_structured_authority_overrides_proposer_and_bypasses_semantic_reviewer(
             assert request["evidence_binding_policy"]["asserted_candidate"].startswith(
                 "reuse validated proposer evidence"
             )
-            return json.dumps(review).encode()
-        return json.dumps(response).encode()
+            return _model_response(review)
+        return _model_response(response)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -568,7 +635,7 @@ def test_structured_path_authority_has_total_four_state_projection(
             base_evidence,
             None if state == "no_bounding_base" else 1,
         ),
-        provider=lambda *_: json.dumps(response).encode(),
+        provider=lambda *_: _model_response(response),
     )
     query = query_for_realization(catalog, "cwe22_path_confinement")
 
@@ -647,7 +714,7 @@ def test_path_authority_bundle_is_bound_to_source_population(tmp_path):
         ROOT / "data/method/prompts/prompt-tsg-facts-v1.txt",
         tmp_path / "bundle",
         path_authority_annotations_path=annotation_path,
-        provider=lambda *_: json.dumps(response).encode(),
+        provider=lambda *_: _model_response(response),
     )
 
     assert report["status"] == "PROMPT_TSG_EXTRACTION_COMPLETE"
@@ -702,7 +769,7 @@ def test_semantic_reviewer_drops_relations_outside_query_scope():
     def provider(_request, _evaluator, _prompt):
         import json
 
-        return json.dumps(response).encode()
+        return _model_response(response)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -874,6 +941,8 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
     }
 
     request = extraction_request(task, catalog)
+    assert request["schema_version"] == "2.0"
+    assert "node_type" not in request["output_contract"]["fact_keys"]
     assert "source.untrusted_sql_value" not in request["candidate_semantics"]
     assert request["arms_or_outcomes_included"] is False
 
@@ -881,7 +950,7 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
         assert actual_request == request
         import json
 
-        return json.dumps(response).encode()
+        return _model_response(response)
 
     evaluator = {"candidate_id": "llm-facts-v1"}
     graph, _, _, projection = extract_prompt_tsg(
@@ -892,6 +961,9 @@ def test_llm_facts_extractor_is_task_sliced_and_deterministically_validated(tmp_
         provider=provider,
     )
     assert graph.task_id == "task-1"
+    assert next(
+        node for node in graph.nodes if node.semantic_id == "sink.process_execution"
+    ).node_type == "sink"
     assert projection == {
         "rejected_facts": [],
         "rejected_relations": [],
@@ -958,7 +1030,7 @@ def test_extractor_drops_only_nonverbatim_descriptive_facts():
     def provider(_request, _evaluator, _prompt):
         import json
 
-        return json.dumps(response).encode()
+        return _model_response(response)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -1016,7 +1088,7 @@ def test_extractor_never_drops_nonverbatim_catalog_bound_facts():
     def provider(_request, _evaluator, _prompt):
         import json
 
-        return json.dumps(response).encode()
+        return _model_response(response)
 
     with pytest.raises(ValueError, match="catalog-bound"):
         extract_prompt_tsg(
@@ -1066,7 +1138,7 @@ def test_extractor_normalizes_only_a_unique_exact_evidence_occurrence():
     def provider(_request, _evaluator, _prompt):
         import json
 
-        return json.dumps(response).encode()
+        return _model_response(response)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -1150,7 +1222,7 @@ def test_semantic_reviewer_reuses_validated_proposer_evidence_binding():
             == "prompt_tsg_bounded_ambiguity_adjudication"
             else proposal
         )
-        return json.dumps(value).encode()
+        return _model_response(value)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -1227,9 +1299,9 @@ def test_blind_semantic_reviewer_rejects_unsupported_proposed_facts():
         if request.get("request_kind") == "prompt_tsg_bounded_ambiguity_adjudication":
             assert evaluator["candidate_id"] == "reviewer-v1"
             assert request["arms_or_outcomes_included"] is False
-            return json.dumps(review).encode()
+            return _model_response(review)
         assert evaluator["candidate_id"] == "proposer-v1"
-        return json.dumps(proposal).encode()
+        return _model_response(proposal)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -1267,7 +1339,7 @@ def test_blind_semantic_reviewer_rejects_unsupported_proposed_facts():
 
 
 @pytest.mark.reviewer
-def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
+def test_blind_semantic_reviewer_can_recover_an_omitted_task_slice_fact():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
     prompt = (
         "Write a Python function that takes a job ID as input. "
@@ -1300,7 +1372,7 @@ def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
         "relations": [
             {"edge_type": "flows_to", "source": "source", "target": "sink"}
         ],
-        "unresolved_semantics": ["constraint.fixed_executable"],
+        "unresolved_semantics": [],
     }
 
     def provider(request, evaluator, _prompt):
@@ -1308,17 +1380,17 @@ def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
 
         if request.get("request_kind") != "prompt_tsg_bounded_ambiguity_adjudication":
             assert evaluator["candidate_id"] == "proposer-v1"
-            return json.dumps(proposal).encode()
+            return _model_response(proposal)
         assert evaluator["candidate_id"] == "reviewer-v2"
         assert request["candidate_semantics"]["constraint.fixed_executable"][
             "proposer_status"
-        ] == "unresolved"
+        ] == "omitted"
         assert [
             "source.untrusted_command_argument",
             "flows_to",
             "sink.process_execution",
         ] in request["allowed_relations"]
-        return json.dumps(
+        return _model_response(
             {
                 "facts": [
                     _fact(
@@ -1349,7 +1421,7 @@ def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
                 ],
                 "unresolved_semantics": [],
             }
-        ).encode()
+        )
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -1371,11 +1443,14 @@ def test_blind_semantic_reviewer_can_resolve_only_proposer_declared_ambiguity():
     assert "constraint.fixed_executable" in projection["semantic_review"][
         "accepted_semantics"
     ]
+    assert projection["semantic_review"]["reviewer_recovered_semantics"] == [
+        "constraint.fixed_executable"
+    ]
     assert projection["semantic_review"]["unsupported_proposer_ambiguities"] == []
 
 
 @pytest.mark.reviewer
-def test_empty_catalog_candidate_scope_skips_semantic_provider():
+def test_full_task_slice_review_does_not_force_an_unsupported_format():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
     prompt = "Return deserialized pickled data from the request."
     task = {
@@ -1397,15 +1472,21 @@ def test_empty_catalog_candidate_scope_skips_semantic_provider():
         "relations": [],
         "unresolved_semantics": [],
     }
+    review = {"facts": [], "relations": [], "unresolved_semantics": []}
     calls = []
 
-    def provider(_request, evaluator, _prompt):
+    def provider(request, evaluator, _prompt):
         import json
 
         calls.append(evaluator["candidate_id"])
-        if evaluator["candidate_id"] != "proposer-v1":
-            raise AssertionError("empty candidate scope must not call semantic reviewer")
-        return json.dumps(proposal).encode()
+        if evaluator["candidate_id"] == "proposer-v1":
+            return _model_response(proposal)
+        assert evaluator["candidate_id"] == "reviewer-v2"
+        assert all(
+            value["proposer_status"] == "omitted"
+            for value in request["candidate_semantics"].values()
+        )
+        return _model_response(review)
 
     graph, _, _, projection = extract_prompt_tsg(
         task,
@@ -1417,12 +1498,13 @@ def test_empty_catalog_candidate_scope_skips_semantic_provider():
         provider=provider,
     )
 
-    assert calls == ["proposer-v1"]
+    assert calls == ["proposer-v1", "reviewer-v2"]
     assert {node.semantic_id for node in graph.nodes} == {
         "task.root",
         "task.requirement",
     }
-    assert projection["semantic_review"]["provider_called"] is False
+    assert projection["semantic_review"]["provider_called"] is True
+    assert projection["semantic_review"]["reviewer_recovered_semantics"] == []
 
 
 @pytest.mark.reviewer
