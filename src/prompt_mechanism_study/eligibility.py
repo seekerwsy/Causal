@@ -110,6 +110,8 @@ def qualify_prompt_tsg_extractor(
     registry_path: Path,
     gold_path: Path,
     output: Path,
+    *,
+    path_authority_annotations_path: Path | None = None,
 ) -> dict[str, Any]:
     """Replay a prospectively labeled holdout against one frozen extractor bundle."""
 
@@ -176,6 +178,40 @@ def qualify_prompt_tsg_extractor(
         or bundle_report.get("arms_or_outcomes_used") is not False
     ):
         raise EligibilityError("Prompt TSG qualification inputs do not match the extraction")
+    path_authority_annotations: dict[str, dict[str, Any]] = {}
+    path_authority_protocol_id = None
+    if path_authority_annotations_path is not None:
+        from prompt_mechanism_study.prompt_tsg_extract import (
+            PromptTSGExtractionError,
+            _load_path_authority_annotations,
+        )
+
+        selected_tasks = [task_by_id[task_id] for task_id in case_ids]
+        try:
+            path_authority_annotations = _load_path_authority_annotations(
+                path_authority_annotations_path,
+                tasks_path=tasks_path,
+                tasks=selected_tasks,
+            )
+        except PromptTSGExtractionError as error:
+            raise EligibilityError(str(error)) from None
+        annotation_bundle = read_json(path_authority_annotations_path)
+        path_authority_protocol_id = annotation_bundle["annotation_protocol_id"]
+        if (
+            bundle_report.get("path_authority_annotation_sha256")
+            != _sha256(path_authority_annotations_path)
+            or bundle_report.get("path_authority_protocol_id")
+            != path_authority_protocol_id
+            or bundle_report.get("path_authority_annotated_tasks")
+            != len(path_authority_annotations)
+        ):
+            raise EligibilityError(
+                "Prompt TSG path-authority evidence does not match the extraction"
+            )
+    elif bundle_report.get("path_authority_annotated_tasks") not in {None, 0}:
+        raise EligibilityError(
+            "Prompt TSG qualification requires the extraction's path-authority annotations"
+        )
     if "+" in gold["extractor_candidate_id"] and (
         bundle_report.get("semantic_reviewed_tasks") != len(cases)
         or not isinstance(bundle_report.get("semantic_reviewer_evaluator_sha256"), str)
@@ -217,7 +253,12 @@ def qualify_prompt_tsg_extractor(
             raise EligibilityError("Prompt TSG qualification task is missing")
         graph = graph_by_id[case["task_id"]]
         validate_prompt_tsg(graph, prompt=task["prompt"], catalog=catalog)
-        if graph.extractor_id != gold["extractor_candidate_id"]:
+        expected_extractor_id = gold["extractor_candidate_id"]
+        if case["task_id"] in path_authority_annotations:
+            expected_extractor_id = (
+                f"{expected_extractor_id}+{path_authority_protocol_id}"
+            )
+        if graph.extractor_id != expected_extractor_id:
             raise EligibilityError("Prompt TSG extractor candidate identity drifted")
         binding = tsg_mechanism_binding(task, graph, catalog, registry)
         actual_context = (
@@ -307,6 +348,11 @@ def qualify_prompt_tsg_extractor(
         "semantic_reviewer_prompt_sha256": bundle_report.get(
             "semantic_reviewer_prompt_sha256"
         ),
+        "path_authority_annotation_sha256": bundle_report.get(
+            "path_authority_annotation_sha256"
+        ),
+        "path_authority_protocol_id": path_authority_protocol_id,
+        "path_authority_annotated_tasks": len(path_authority_annotations),
         "catalog_sha256": _sha256(catalog_path),
         "registry_sha256": _sha256(registry_path),
         "gold_sha256": _sha256(gold_path),

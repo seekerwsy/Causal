@@ -162,6 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     tsg_qualification.add_argument("gold", type=Path)
     tsg_qualification.add_argument("output", type=Path)
     tsg_qualification.add_argument("--repository-root", type=Path, default=Path.cwd())
+    tsg_qualification.add_argument("--path-authority-annotations", type=Path)
 
     tsg_selection = commands.add_parser(
         "prompt-tsg-selection",
@@ -430,6 +431,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.registry,
             args.gold,
             args.output,
+            path_authority_annotations_path=args.path_authority_annotations,
         )
         print(report["status"])
         return 0 if report["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION" else 2

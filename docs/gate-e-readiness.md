@@ -27,7 +27,7 @@ The final PHASE plan is implemented under four explicit scope corrections:
 | --- | --- | --- |
 | A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
 | B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
-| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The final prospectively frozen disjoint Prompt TSG qualification was 13/14 exact (92.9%) with 3/4 present recall (75.0%), zero false-positive present states, and zero wrong realization bindings. Accuracy passed, but recall did not reach the frozen 80% requirement. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The structured-authority successor was evaluated once on a prospectively frozen external 16-task population: 14/16 exact (87.5%), 3/5 present recall (60.0%), zero false-positive present states, and one wrong realization. The three path-authority cases were all correct, but the complete frozen Gate failed. |
 | D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
 | E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
@@ -89,7 +89,7 @@ replays to evidence:
 - deterministic unique-span occurrence normalization was then frozen before a
   replacement v4 selection and gold review.
 
-The immutable final result is
+The final same-population predecessor result is
 [`prompt-tsg-evidence-occurrence-qualification-v4`](../data/method/results/prompt-tsg-evidence-occurrence-qualification-v4):
 
 | Metric | Frozen requirement | Result |
@@ -110,7 +110,7 @@ extraction or any active-protocol intervention claim.
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 | implemented/tested; final semantic qualification failed |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 | implemented/tested; the independent external qualification failed, although its three structured path-authority cases were all correct |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -132,6 +132,7 @@ closes an engineering defect but does not change the failed scientific Gate.
 | Prompt TSG trust-boundary v3 | `newly_run` | formal extraction stopped after 2/21 graphs on an impossible occurrence index; no qualification metric; all selected units excluded |
 | Prompt TSG final v4 extraction and qualification | `newly_run` | extraction bundle verified; qualification failed at 13/14 exact and 3/4 present recall |
 | Structured path-authority successor trial | `newly_run` development evidence | real 5-case replay completed at 5/5 exact with no false-positive or wrong realization; all cases and labels were previously exposed, so this is interface validation rather than Gate evidence |
+| Structured-authority external qualification v1 | `newly_run` | independent 16-task extraction closed once at 16/16; qualification failed at 14/16 exact, 3/5 present recall, zero false-positive present states, and one wrong realization; all three path cases matched |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
@@ -139,9 +140,10 @@ closes an engineering defect but does not change the failed scientific Gate.
 
 ## Protocol risks and remaining blockers
 
-1. **Representation recall.** The active extractor retained zero false-positive
-   present states but recovered only 3/4 frozen present contexts. Formal natural
-   discovery cannot start.
+1. **Representation recall and realization identity.** The external Gate
+   retained zero false-positive present states but recovered only 3/5 frozen
+   present contexts and assigned one SQL case to the wrong realization. Formal
+   natural discovery cannot start.
 2. **Gold scope and size.** Exhaustion of the repeatedly exposure-excluded
    CWE-328 stratum limited the final replacement holdout to 14 task units. It
    evaluates that frozen task mixture, not global understanding or per-CWE
@@ -225,11 +227,86 @@ specified and that the two observed failures were fail-closed. A claim-bearing
 Gate still requires a prospectively frozen independent corpus and annotation
 review.
 
+### Prospective external qualification
+
+The independent follow-up used the pinned
+[`AI-Security-Benchmark`](https://github.com/miroku0000/AI-Security-Benchmark)
+source commit `c21cd8b601c85f8a5a32dd77dceb1533a2227104`. The source census mapped
+18 Python prompts to seven already registered CWE/task-family coordinates.
+Before extraction, semantic overlap review excluded two tasks whose principal
+operation and functional contract duplicated the prior seven-source pool: one
+tar extraction task and one username/password login task. All 16 remaining
+tasks were retained; there was no result-based or hash-ranked sampling.
+
+Selection, gold labels, thresholds, and three path-authority annotations were
+committed at `6e452b2` before any extractor request. The only external
+extraction then completed 16/16 graphs on the A800 host. The downloaded bundle
+verified independently and is frozen at
+[`prompt-tsg-external-extraction-v1`](../data/method/results/prompt-tsg-external-extraction-v1).
+Its bundle SHA-256 is
+`76ba792eb90214d8f8e3184d256ec018dd52d7b8036cadad8f6d7699a2cff201`.
+The result is frozen at
+[`prompt-tsg-external-qualification-v1`](../data/method/results/prompt-tsg-external-qualification-v1):
+its bundle SHA-256 is
+`0276830aef300b79b6133d7fd60193f9d67dcee1b3a167e3127f2ec7d4fb2b28`.
+
+Run provenance is deliberately small: input-freeze commit `6e452b2`, source
+archive SHA-256
+`8ebf7836b9caf18dda0d8cd9993d27314dbe8c61e312abbf5dbde1a5fcf179b9`,
+Python 3.12.13 on Linux 6.8.0 x86-64, and one NVIDIA A800 80 GB host. The
+immutable remote coordinates were
+`/home/wsy/prompt-mechanism-study-deployments/gate-c-external-6e452b2-20260830-01`
+and
+`/home/wsy/prompt-mechanism-study-experiments/gate-c-external-6e452b2-20260830-01`.
+The executed stage was the single `prompt-tsg-extract` entry point with catalog
+v5, proposer v12, ambiguity adjudicator v6, the external selection, and the
+structured path-authority annotation bundle. The provider credential remained
+environment-only and is absent from all tracked artifacts.
+
+| Metric | Frozen requirement | External result |
+| --- | ---: | ---: |
+| Exact context/realization accuracy | at least 0.90 | **0.875000** |
+| Present-context recall | at least 0.80 | **0.600000** |
+| False-positive present | at most 0 | **0** |
+| Wrong realization | at most 0 | **1** |
+
+The structured path-authority direction itself transferred: the fixed uploads
+base plus caller filename was present, the fixed uploads base without a stated
+caller path was unresolved, and the root of unspecified authority was
+unresolved (3/3 exact). Gate failure came from two different semantic
+boundaries:
+
+1. A SOAP task required DTD validation but not external entity resolution.
+   The frozen gold treated XXE control as applicable; both LLM stages promoted
+   DTD support to `constraint.external_entities_required`, making the context
+   absent.
+2. A search API accepted any combination of four named filter arguments. The
+   frozen gold treated this as a finite dynamic-identifier context; both LLM
+   stages treated the identifiers as fixed and returned the value-only SQL
+   realization.
+
+The first is a DTD-versus-entity distinction. The second exposes a deeper
+task-semantics rule: optional named filters do not necessarily require caller
+provided SQL identifier text, whereas a generic `field` argument does. These
+cases remain mismatches; neither gold nor output is relabelled after seeing the
+result. The qualification verifier required a separately supplied annotation
+bundle and checked its hash before accepting the heterogeneous extractor IDs;
+this was an identity-closure repair, not a case-label change.
+
 ## Permitted next work
 
-The next valid move is not another holdout from the remaining 373-task source
-population. It must be a new prospectively declared representation study on a
-genuinely independent corpus, for example:
+The v4 internal population and the external 16-task population are both now
+exposed. Neither can be resampled or retuned into a passing Gate. The next
+valid representation study must first freeze two prospective semantic
+clarifications:
+
+- DTD validation is distinct from required external-entity resolution; and
+- a finite set of optional named SQL parameters is not a dynamic identifier
+  source unless the caller supplies an identifier token or the task otherwise
+  requires identifier selection in generated SQL.
+
+After those definitions and extractor behavior are frozen, validation requires
+another genuinely independent corpus. Valid options remain:
 
 - replace free-form context extraction with a more constrained annotation
   protocol and independently qualified adjudication; or
@@ -238,10 +315,11 @@ genuinely independent corpus, for example:
 - freeze a materially new extractor before selecting a new external corpus and
   qualification set.
 
-The structured authority implementation now satisfies the engineering part of
-the second option. The remaining work is scientific: select a genuinely new
-corpus, freeze the annotation and gold before extraction, and run one new Gate
-without further tuning on its outcomes.
+The structured authority implementation now has prospective external support
+for the two authority states actually present in this source
+(`application_configured` and `unspecified`). `caller_supplied` and
+`no_bounding_base` remain engineering-tested only. The complete representation
+Gate remains failed, so discovery and effect estimation are still prohibited.
 
 Only after that new representation Gate passes may the project regenerate the
 formal selection, partition task units, run discovery positivity, and continue
@@ -256,10 +334,10 @@ python -m compileall -q src tests
 # completed without errors
 
 python -m pytest -q
-# 87 passed, 129 deselected
+# 88 passed, 129 deselected
 
 python -m pytest -q tests/test_prompt_tsg.py
-# 20 passed, 5 deselected
+# 21 passed, 5 deselected
 
 python -m pytest -q tests/test_discovery_support.py
 # 4 passed
@@ -269,6 +347,14 @@ python -m pytest -q -m milestone tests/test_factorial_reviewer_smoke.py
 
 prompt-mechanism-study verify \
   data/method/results/prompt-tsg-evidence-occurrence-qualification-v4
+# VERIFIED
+
+prompt-mechanism-study verify \
+  data/method/results/prompt-tsg-external-extraction-v1
+# VERIFIED
+
+prompt-mechanism-study verify \
+  data/method/results/prompt-tsg-external-qualification-v1
 # VERIFIED
 
 prompt-mechanism-study factorial-experiment verify \

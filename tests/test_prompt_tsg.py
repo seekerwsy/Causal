@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from prompt_mechanism_study.eligibility import qualify_prompt_tsg_extractor
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSGError,
     QueryState,
@@ -1291,3 +1292,26 @@ def test_empty_catalog_candidate_scope_skips_semantic_provider():
         "task.requirement",
     }
     assert projection["semantic_review"]["provider_called"] is False
+
+
+@pytest.mark.reviewer
+def test_external_qualification_replays_structured_authority_identity(tmp_path: Path):
+    report = qualify_prompt_tsg_extractor(
+        ROOT,
+        ROOT / "data/method/prompt-tsg-external-qualification-tasks-v1.json",
+        ROOT / "data/method/results/prompt-tsg-external-extraction-v1",
+        ROOT / "data/method/prompt-tsg-catalog-v5.json",
+        ROOT / "data/method/mechanism-registry-v1.json",
+        ROOT / "data/method/prompt-tsg-external-qualification-gold-v1.json",
+        tmp_path / "qualification",
+        path_authority_annotations_path=(
+            ROOT / "data/method/prompt-tsg-external-path-authority-v1.json"
+        ),
+    )
+
+    assert report["status"] == "QUALIFICATION_FAILED"
+    assert report["exact_context_accuracy"] == 0.875
+    assert report["present_recall"] == 0.6
+    assert report["false_positive_present"] == 0
+    assert report["wrong_realization"] == 1
+    assert report["path_authority_annotated_tasks"] == 3
