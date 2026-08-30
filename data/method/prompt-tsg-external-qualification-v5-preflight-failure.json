@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "status": "PREFLIGHT_SCHEMA_FAILED_BEFORE_FORMAL_EXTRACTION",
+  "freeze_sha256": "4fe112221d1a56e4608d29f9c1aaef7714a26f057e3fb243f3a01d0f3c476a40",
+  "method_revision_commit": "0eadfff9d05a1990a007d21b58eb2ad77163672a",
+  "pilot_population": "three exposed DevEval v4 tasks; failure occurred while parsing the first task",
+  "provider_calls": 3,
+  "formal_v5_task_units_sent_to_provider": 0,
+  "diagnostic_proposer_response_sha256": "7aef8eb7217508c1fc559807b7c4c9a1b8afac97f7ffa90a864598a6df70b698",
+  "failure": "The model returned attributes as an array of asserted attribute names, while v5 required a boolean object.",
+  "disposition": "v5 remains immutable and is not qualified. The active successor uses one array-only attribute schema; it does not accept both formats.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

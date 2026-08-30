@@ -107,7 +107,12 @@ def contract_decision_request(
             "present_semantic_evidence": (
                 "exact contiguous source_prompt substring plus 1-based occurrence"
             ),
-            "non_present_evidence": "null evidence_text, null occurrence, empty attributes",
+            "attributes": (
+                "JSON array of unique allowed attribute names asserted true; never an object"
+            ),
+            "non_present_evidence": (
+                "null evidence_text, null occurrence, empty attributes array"
+            ),
         },
     }
 
@@ -137,6 +142,16 @@ def contract_from_response(
         or any(not isinstance(row, dict) or set(row) != _RELATION_FIELDS for row in relation_rows)
     ):
         raise PromptContractExtractionError("contract decision rows are invalid")
+    if any(
+        not isinstance(row["attributes"], list)
+        or any(
+            not isinstance(attribute, str) or not attribute
+            for attribute in row["attributes"]
+        )
+        or len(row["attributes"]) != len(set(row["attributes"]))
+        for row in semantic_rows
+    ):
+        raise PromptContractExtractionError("contract semantic attributes are invalid")
     try:
         semantic_decisions = tuple(
             SemanticDecision(
@@ -145,7 +160,7 @@ def contract_from_response(
                 row["rationale"],
                 row["evidence_text"],
                 row["occurrence"],
-                tuple(sorted(row["attributes"].items())),
+                tuple((attribute, True) for attribute in sorted(row["attributes"])),
             )
             for row in semantic_rows
         )

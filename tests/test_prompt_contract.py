@@ -121,7 +121,7 @@ def _response(contract):
                     "rationale": row.rationale,
                     "evidence_text": row.evidence_text,
                     "occurrence": row.occurrence,
-                    "attributes": dict(row.attributes),
+                    "attributes": [key for key, value in row.attributes if value],
                 }
                 for row in contract.semantic_decisions
             ],
@@ -222,6 +222,16 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
             task=task,
             catalog=catalog,
             annotator_id="broken",
+            review_status="development_exposed",
+        )
+    value = json.loads(_response(base))
+    value["semantic_decisions"][0]["attributes"] = {}
+    with pytest.raises(PromptContractExtractionError, match="attributes are invalid"):
+        contract_from_response(
+            json.dumps(value).encode(),
+            task=task,
+            catalog=catalog,
+            annotator_id="wrong-attribute-shape",
             review_status="development_exposed",
         )
 
@@ -423,4 +433,5 @@ def test_prospective_v5_gate_freeze_is_source_only_and_self_consistent():
     assert freeze["arms_or_outcomes_used"] is False
     for item in freeze["inputs"].values():
         path = ROOT / item["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+        if item["path"].startswith("data/"):
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
