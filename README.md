@@ -92,16 +92,15 @@ confirmatory evidence.
 
 The active successor and schema-1.1 factorial implementations are specified,
 implemented, and reviewer-tested. Fresh semantic curation and functional
-contracts are complete. Three prospectively frozen external Prompt TSG
-attempts nevertheless failed Gate C. The complete 16-task
-AI-Security-Benchmark run failed accuracy, recall, and realization identity; a
-disjoint 10-task SecCodeBench run stopped on task 2 after its first graph made
-the recall Gate unreachable; and the revised 31-task BigCodeBench run stopped
-on task 16 after the first 15 graphs had already produced one false-positive
-present state and one wrong realization, both above the frozen maximum of zero.
-All failed bundles are retained and none of the exposed populations is reused.
-Formal discovery and a new claim-bearing provider run therefore were not
-started. The exact stopping boundary is recorded in the
+contracts are complete. Multiple prospectively frozen external Prompt TSG
+attempts nevertheless failed Gate C. The latest DevEval run completed all 31
+graphs but reached only 27/31 exact matches, with two false-positive present
+states and two wrong realizations. All failed bundles are retained and none of
+the exposed populations is reused. A contract-first replacement now requires
+an exhaustive reviewed decision table and compiles the graph locally; it
+passes a four-case exposed architecture canary but has not passed a fresh
+independent extraction qualification. Formal discovery and a new claim-bearing
+provider run therefore were not started. The exact stopping boundary is recorded in the
 [Gate E readiness audit](docs/gate-e-readiness.md). The tracked schema-1.0 factorial bundles remain
 historical formal evidence and are independently replayable; they are not
 migrated or reinterpreted as active-protocol results:

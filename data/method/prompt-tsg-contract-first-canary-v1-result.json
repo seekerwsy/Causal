@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "status": "DEVELOPMENT_CANARY_PASSED",
+  "evidence_type": "newly_run",
+  "claim_readiness": "blocked",
+  "executed_at": "2026-08-30T22:44:45+08:00",
+  "implementation_base_commit": "03462a9b413cf44d2c22ae800a35022a46419ecf",
+  "working_tree_uncommitted": true,
+  "environment": {
+    "os": "Windows",
+    "python": "3.12.13",
+    "interpreter": ".venv/Scripts/python.exe",
+    "gpu_required": false,
+    "network_or_llm_calls": 0
+  },
+  "inputs": {
+    "canary_path": "data/method/prompt-tsg-contract-first-canary-v1.json",
+    "canary_file_sha256": "4a777c7dd3128ac3e624f663a2407dcd7bbe404e7739d4e25f93a5fbfb8aa9ea",
+    "catalog_path": "data/method/prompt-tsg-catalog-v11.json",
+    "catalog_file_sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09",
+    "catalog_canonical_sha256": "fc8b78e2d67646614d24895f974eafa7cc77c04f0bfa944fb0a8346b921fb2c7",
+    "source_tasks_path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+    "source_tasks_file_sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8"
+  },
+  "implementation": {
+    "contract_module": "src/prompt_mechanism_study/prompt_contract.py",
+    "contract_module_file_sha256": "52805fa91eaee0c32a88ade3137143acd448aebb8f9da380b4d574b2ff01d214",
+    "graph_module": "src/prompt_mechanism_study/prompt_tsg.py",
+    "graph_module_file_sha256": "b0131677b94a0dee251986e2cb60f0e3f5a8452c9cd84c67655cf40e3cbd1f27",
+    "focused_test": "tests/test_prompt_contract.py",
+    "focused_test_file_sha256": "e1160dc279e590cdecf7fe7bfca0fc7fda93f7267a3324310f72b1b195b0cbf4"
+  },
+  "execution": {
+    "focused_command": ".venv/Scripts/python.exe -m pytest -q tests/test_prompt_contract.py",
+    "focused_result": "4 passed",
+    "regression_command": ".venv/Scripts/python.exe -m pytest -q tests/test_prompt_contract.py tests/test_prompt_tsg.py",
+    "regression_result": "31 passed, 5 deselected",
+    "reviewer_suite_command": ".venv/Scripts/python.exe -m pytest -q",
+    "reviewer_suite_result": "98 passed, 129 deselected",
+    "compileall": "passed",
+    "initial_environment_check": "The Windows Store python alias exited without output; all evidence commands used the project .venv interpreter."
+  },
+  "cases": [
+    {
+      "upstream_task_id": "sqlitedict.SqliteDict.update",
+      "contract_id": "task_context_contract_d4aa2ef32b8dfbebc073c6d579d45ea5b697ce2fcd3f367e05fefd57706f3d80",
+      "tsg_id": "prompt_tsg_c4c1c64f85b18f32545e5f31a0ed760c11909c2014264c43d1a714e6684b1351",
+      "query_state": "present",
+      "feature_state": "absent"
+    },
+    {
+      "upstream_task_id": "diffprivlib.utils.check_random_state",
+      "contract_id": "task_context_contract_ba4df2f1b527205b4bc92e783c5457d1026a21caf82355abd5c64f915bdd2ef9",
+      "tsg_id": "prompt_tsg_0ade6d57ca84c6a45139c2634f575a2ccbd3acdbf54eeb7297968fcb5f4d25ce",
+      "query_state": "absent",
+      "feature_state": "present"
+    },
+    {
+      "upstream_task_id": "kinto.plugins.openid.OpenIDConnectPolicy._verify_token",
+      "contract_id": "task_context_contract_d394535518e9aa8723deebd94446a1f065d721f11657114f1315da8499c9bca3",
+      "tsg_id": "prompt_tsg_ae061affe056f4a23e894ccb0220396ec8af104f153054a2bd23553ac5196478",
+      "query_state": "present",
+      "feature_state": "absent"
+    },
+    {
+      "upstream_task_id": "kinto.core.testing.get_user_headers",
+      "contract_id": "task_context_contract_24c1230265dd5629608fc54875c9c652a4e7ff2149cfcd9ff3fbb44136103d66",
+      "tsg_id": "prompt_tsg_5eb866027ea8ddd9c96f7b59ea988b0cba90a24c0d30236932e9ea9b01298445",
+      "query_state": "absent",
+      "feature_state": "absent"
+    }
+  ],
+  "invariants_verified": [
+    "Every query-scoped semantic and required relation must have an explicit state; omissions fail compilation.",
+    "Every decision has a bounded rationale and every present semantic has an exact prompt occurrence.",
+    "An unresolved required relation remains unresolved and is not converted to absent.",
+    "Schema-2.0 graphs serialize unresolved relations while frozen schema-1.0 records retain their original content identity and canonical field set.",
+    "No arm, generated code, Oracle result, Functional Judge result, or experiment outcome was available to contract construction."
+  ],
+  "protocol_risks": [
+    "All four prompts and prior representation labels were exposed; this is implementation evidence, not an accuracy estimate.",
+    "The contracts were manually authored. No LLM proposer or independent reviewer workflow has yet been implemented or qualified for this schema.",
+    "The bearer-token case follows the frozen v4 interpretation; the application-credential versus per-request-token construct boundary still requires prospective source-only definition review.",
+    "A task evaluated under multiple queries may receive duplicated query-scoped decisions; cross-query consistency must be checked before activation without creating a second semantic authority."
+  ],
+  "disposition": "The architecture canary supports replacing direct LLM graph authorship with exhaustive reviewed task-context contracts and deterministic graph compilation. It does not repair, rerun, or reopen Gate C. The next admissible evidence is a prospectively frozen independent qualification of contract production."
+}

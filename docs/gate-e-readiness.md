@@ -130,6 +130,32 @@ The immutable machine-readable disposition is
 This population is fully exposed and is never retried, resampled, relabelled,
 or used to lower the Gate.
 
+### Contract-first architecture canary
+
+The v4 failures motivated one architectural change rather than another
+case-specific prompt patch. Catalog v11 remains the only mechanism vocabulary.
+For each task-query pair, a `TaskContextContract` must now decide every
+required/forbidden semantic, the actionable feature, and every required
+relation as present, absent, or unresolved. Missing rows are invalid. A local
+compiler derives the schema-2.0 Prompt TSG, including an explicit unresolved-
+relation field, while schema-1.0 frozen graph identities remain unchanged.
+
+The four exposed v4 mismatch cases compile to the prospectively intended
+states: SQL `present`, RNG-factory `absent`, bearer-token verification
+`present`, and Basic-Auth header construction `absent`. The focused suite also
+shows that deleting any required semantic or relation decision fails closed,
+and that an unresolved SQL relation remains `unresolved` rather than becoming
+`absent`. Inputs are recorded in
+[`prompt-tsg-contract-first-canary-v1.json`](../data/method/prompt-tsg-contract-first-canary-v1.json),
+and the executed IDs, checks, and protocol risks are recorded in
+[`prompt-tsg-contract-first-canary-v1-result.json`](../data/method/prompt-tsg-contract-first-canary-v1-result.json).
+
+This is development evidence, not a corrected 4/4 qualification score. The
+prompts and old labels were visible, the contracts were manually authored for
+the architecture check, and no automatic contract producer was evaluated.
+Gate C therefore remains failed. A future Gate must freeze a new independent
+population and qualify contract production before any formal discovery run.
+
 The bounded repair sequence remains visible without promoting development
 replays to evidence:
 

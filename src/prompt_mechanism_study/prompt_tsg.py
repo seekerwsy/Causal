@@ -60,10 +60,14 @@ class PromptTSG:
     nodes: tuple[TSGNode, ...]
     edges: tuple[TSGEdge, ...]
     unresolved_semantics: tuple[str, ...]
+    unresolved_relations: tuple[tuple[str, str, str], ...] = ()
 
     @property
     def tsg_id(self) -> str:
-        return content_id("prompt_tsg_", self)
+        payload = canonical_value(self)
+        if self.schema_version == "1.0":
+            payload.pop("unresolved_relations")
+        return content_id("prompt_tsg_", payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,12 +177,17 @@ def catalog_sha256(catalog: Mapping[str, Any]) -> str:
 def prompt_tsg_record(graph: PromptTSG) -> dict[str, Any]:
     """Return the canonical JSON record, including its content identity."""
 
-    return {"tsg_id": graph.tsg_id, **canonical_value(graph)}
+    payload = canonical_value(graph)
+    if graph.schema_version == "1.0":
+        payload.pop("unresolved_relations")
+    return {"tsg_id": graph.tsg_id, **payload}
 
 
 def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
     """Reconstruct a graph record before prompt- and catalog-aware validation."""
 
+    if not isinstance(value, Mapping) or value.get("schema_version") not in {"1.0", "2.0"}:
+        raise PromptTSGError("Prompt TSG serialized schema is invalid")
     expected = {
         "tsg_id",
         "schema_version",
@@ -190,7 +199,9 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
         "edges",
         "unresolved_semantics",
     }
-    if not isinstance(value, Mapping) or set(value) != expected:
+    if value["schema_version"] == "2.0":
+        expected.add("unresolved_relations")
+    if set(value) != expected:
         raise PromptTSGError("Prompt TSG serialized fields are invalid")
     try:
         node_fields = {
@@ -225,6 +236,14 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
             TSGEdge(item["edge_id"], item["source_id"], item["target_id"], item["edge_type"])
             for item in value["edges"]
         )
+        raw_unresolved_relations = value.get("unresolved_relations", [])
+        if any(
+            not isinstance(item, list)
+            or len(item) != 3
+            or any(not isinstance(part, str) or not part.strip() for part in item)
+            for item in raw_unresolved_relations
+        ):
+            raise PromptTSGError("Prompt TSG unresolved relations are invalid")
         graph = PromptTSG(
             value["schema_version"],
             value["task_id"],
@@ -234,6 +253,7 @@ def prompt_tsg_from_record(value: Mapping[str, Any]) -> PromptTSG:
             nodes,
             edges,
             tuple(value["unresolved_semantics"]),
+            tuple(tuple(item) for item in raw_unresolved_relations),
         )
     except (KeyError, TypeError, ValueError):
         raise PromptTSGError("Prompt TSG serialized values are invalid") from None
@@ -251,6 +271,8 @@ def build_prompt_tsg(
     facts: Sequence[Mapping[str, Any]],
     relations: Sequence[Mapping[str, Any]],
     unresolved_semantics: Sequence[str] = (),
+    unresolved_relations: Sequence[Sequence[str]] = (),
+    schema_version: str = "1.0",
 ) -> PromptTSG:
     """Validate evidence-bound facts and deterministically commit one Prompt TSG."""
 
@@ -356,10 +378,34 @@ def build_prompt_tsg(
     unresolved = _unique_strings(unresolved_semantics, "unresolved semantics")
     if any(item not in semantics or item == "task.root" for item in unresolved):
         raise PromptTSGError("Prompt TSG unresolved semantic is outside the catalog")
+    unresolved_relation_values = []
+    for relation in unresolved_relations:
+        if (
+            not isinstance(relation, (list, tuple))
+            or len(relation) != 3
+            or any(not isinstance(item, str) or not item.strip() for item in relation)
+        ):
+            raise PromptTSGError("Prompt TSG unresolved relation is invalid")
+        source_semantic, edge_type, target_semantic = relation
+        if (
+            source_semantic not in semantics
+            or edge_type not in edge_types
+            or target_semantic not in semantics
+            or (semantics[source_semantic], edge_type, semantics[target_semantic])
+            not in allowed
+        ):
+            raise PromptTSGError("Prompt TSG unresolved relation is outside the catalog")
+        unresolved_relation_values.append(tuple(relation))
+    if len(unresolved_relation_values) != len(set(unresolved_relation_values)):
+        raise PromptTSGError("Prompt TSG unresolved relations are duplicated")
+    if schema_version not in {"1.0", "2.0"} or (
+        schema_version == "1.0" and unresolved_relation_values
+    ):
+        raise PromptTSGError("Prompt TSG schema cannot represent unresolved relations")
     ordered_nodes = tuple(sorted(nodes, key=lambda item: item.node_id))
     ordered_edges = tuple(sorted(edges, key=lambda item: item.edge_id))
     graph = PromptTSG(
-        "1.0",
+        schema_version,
         task_id,
         content_hash(prompt),
         extractor_id,
@@ -367,6 +413,7 @@ def build_prompt_tsg(
         ordered_nodes,
         ordered_edges,
         tuple(sorted(unresolved)),
+        tuple(sorted(unresolved_relation_values)),
     )
     validate_prompt_tsg(graph, prompt=prompt, catalog=catalog)
     return graph
@@ -378,7 +425,8 @@ def validate_prompt_tsg(
     """Revalidate graph identity, evidence, endpoints, ordering, and catalog closure."""
 
     if (
-        graph.schema_version != "1.0"
+        graph.schema_version not in {"1.0", "2.0"}
+        or (graph.schema_version == "1.0" and graph.unresolved_relations)
         or graph.prompt_sha256 != content_hash(prompt)
         or graph.catalog_sha256 != catalog_sha256(catalog)
         or not graph.nodes
@@ -392,6 +440,8 @@ def validate_prompt_tsg(
             item not in catalog["semantics"] or item == "task.root"
             for item in graph.unresolved_semantics
         )
+        or graph.unresolved_relations
+        != tuple(sorted(set(graph.unresolved_relations)))
     ):
         raise PromptTSGError("Prompt TSG record identity is invalid")
     node_by_id = {node.node_id: node for node in graph.nodes}
@@ -409,6 +459,21 @@ def validate_prompt_tsg(
         raise PromptTSGError("Prompt TSG task root is invalid")
     semantics = catalog["semantics"]
     allowed = {tuple(item) for item in catalog["allowed_edges"]}
+    unresolved_relation_set = set(graph.unresolved_relations)
+    available_semantics = {node.semantic_id for node in graph.nodes} | set(
+        graph.unresolved_semantics
+    )
+    for relation in graph.unresolved_relations:
+        if (
+            len(relation) != 3
+            or relation[0] not in semantics
+            or relation[2] not in semantics
+            or (semantics[relation[0]], relation[1], semantics[relation[2]])
+            not in allowed
+            or relation[0] not in available_semantics
+            or relation[2] not in available_semantics
+        ):
+            raise PromptTSGError("Prompt TSG unresolved relation is invalid")
     for node in graph.nodes:
         if (
             semantics.get(node.semantic_id) != node.node_type
@@ -435,6 +500,12 @@ def validate_prompt_tsg(
             or edge != _edge(source, target, edge.edge_type, allowed)
         ):
             raise PromptTSGError("Prompt TSG edge is invalid")
+        if (
+            source.semantic_id,
+            edge.edge_type,
+            target.semantic_id,
+        ) in unresolved_relation_set:
+            raise PromptTSGError("Prompt TSG relation cannot be present and unresolved")
 
 
 def query_context(
@@ -462,7 +533,18 @@ def query_context(
     if not required <= set(by_semantic) or forbidden & set(by_semantic):
         return QueryResult(query["query_id"], QueryState.ABSENT, (), ())
     relation_matches = []
+    unresolved_relations = set(graph.unresolved_relations)
     for source_semantic, edge_type, target_semantic in query["required_relations"]:
+        relation = (source_semantic, edge_type, target_semantic)
+        if relation in unresolved_relations:
+            evidence = tuple(
+                sorted(
+                    node.node_id
+                    for semantic in (source_semantic, target_semantic)
+                    for node in by_semantic.get(semantic, ())
+                )
+            )
+            return QueryResult(query["query_id"], QueryState.UNRESOLVED, evidence, ())
         source_ids = {node.node_id for node in by_semantic[source_semantic]}
         target_ids = {node.node_id for node in by_semantic[target_semantic]}
         matches = [
@@ -555,6 +637,7 @@ def apply_feature_patch(
         nodes,
         tuple(sorted(edges, key=lambda item: item.edge_id)),
         graph.unresolved_semantics,
+        graph.unresolved_relations,
     )
     validate_prompt_tsg(result, prompt=variant_prompt, catalog=catalog)
     return result

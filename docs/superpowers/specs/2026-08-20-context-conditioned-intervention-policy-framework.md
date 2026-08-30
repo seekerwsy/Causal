@@ -189,6 +189,42 @@ The finite type system separates task operations, data objects, sources, sinks, 
 Prompt requirements, safety guards, and presentation controls. The catalog, type functions, query
 definitions, extractor policy, and canonicalization rules are content-addressed.
 
+#### Prospective contract-first authority
+
+The post-v4 successor does not let an LLM author the scientific graph directly. For one
+task-query pair, the existing catalog query together with its actionable feature is the sole
+`MechanismDefinition`; no parallel mechanism-definition table is introduced. It determines the
+finite decision scope
+
+\[
+S_q=\operatorname{required}(q)\cup\operatorname{forbidden}(q)\cup\{f_q\},
+\qquad
+R_q=\operatorname{requiredRelations}(q).
+\]
+
+Before graph compilation, a `TaskContextContract` bound to the task, natural-Prompt hash, catalog
+digest, and query ID must assign every member of `S_q` and `R_q` exactly one of `PRESENT`, `ABSENT`,
+or `UNRESOLVED`. A `PRESENT` semantic requires an exact evidence occurrence. An omitted semantic or
+relation is an invalid contract, not evidence of absence. Every decision also carries a bounded
+human-reviewable rationale; absence is never represented by an unexplained empty field. A relation with an unresolved endpoint is
+unresolved, and a relation with an absent endpoint is absent. Arms and outcomes are unavailable when
+the contract is produced and reviewed.
+
+An LLM may propose this finite decision table, but the accepted, reviewed contract is the scientific
+authority. A deterministic compiler derives node types from the catalog, verifies evidence spans and
+logical consistency, and emits the Prompt TSG. Record schema 2.0 preserves unresolved relations
+explicitly; schema-1.0 identities and frozen runs remain compatible and are never migrated in
+place: their canonical field set and content identity are unchanged, and the frozen files are not
+rewritten. If the compiled TSG later proves to add no query or intervention behavior beyond this typed
+contract, the graph layer must be removed instead of retained as a decorative abstraction.
+
+The initial four-case replay is an exposed architecture canary only. It can show that completeness,
+relation uncertainty, and legacy identity preservation work as implemented; it cannot estimate
+automatic extraction accuracy or reopen Gate C. Activation requires a new prospectively frozen,
+independent qualification of contract production. That Gate evaluates the proposed decision table
+against source-only gold and separately reports semantic-state accuracy, relation-state accuracy,
+present recall, false-positive present states, and wrong realization identity.
+
 For compatibility with the reusable PromptTSG 2.1 graph schema, `SANITIZER` is not persisted as a new
 node type or attribute. The separately versioned query catalog interprets a finite reviewed subset of
 existing `GUARD` semantic identities as sanitizing guards and binds that interpretation to the graph
@@ -209,7 +245,9 @@ A graph is publishable only when all of the following hold:
 7. duplicate semantic identities, dangling endpoints, contradictory states, and unbounded traversal
    fail closed; and
 8. query and projection results are recomputed from the canonical graph, never from an LLM-authored
-   flat shadow.
+   flat shadow; and
+9. contract-first graphs enumerate every query-scoped semantic and required relation before
+   compilation; omission is a schema error, never `ABSENT`.
 
 ### 5.3 Four-valued query semantics
 

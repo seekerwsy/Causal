@@ -77,6 +77,22 @@ fact 时复用其已校验 evidence binding，只裁决语义，不再次猜 occ
 这一 successor 已在暴露过的 5 个开发 case 上验证接口行为，但尚未通过新的独立
 Gate，因此不能替代当前失败的正式资格结果。
 
+DevEval v4 又暴露出更一般的结构问题：两层 LLM 可以通过省略一个 relation 把
+`UNRESOLVED` 或本应保留的关系压成 `ABSENT`。下一版前瞻候选因此改为
+contract-first：catalog 中现有的 context query 与 actionable feature 共同充当唯一
+`MechanismDefinition`；每个 task-query pair 的 `TaskContextContract` 必须穷尽列出所有
+required/forbidden semantic、目标 feature 和 required relation，并逐项标为
+`PRESENT / ABSENT / UNRESOLVED`。LLM 只能提出这个有限决策表，经过盲态审查和冻结的
+合同才是科学权威；每项决定都带有有界、可审查 rationale，`PRESENT` semantic 还必须
+绑定精确原文 evidence；Prompt TSG 由本地程序确定性编译。缺项直接拒绝，不能解释为
+`ABSENT`；schema 2.0 还显式保存 unresolved relation，同时保持冻结 schema-1.0 图的
+内容身份不变。
+
+这一接口已在 DevEval v4 暴露的 SQL、RNG 和两个 credential case 上完成 4/4
+development canary，并验证了关系不确定性不会降格为 absence。它只证明架构行为，
+不证明自动合同抽取准确，也不重开 Gate C。下一次独立 Gate 应资格审查合同生成过程，
+而不是再次让 LLM 直接生成图。
+
 ### 3.3 原子假设
 
 可确认假设为：
@@ -297,7 +313,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | compiled successor implemented + tested；formal qualification executed once and failed | catalog v11/proposer v17/reviewer v7 只让 LLM 返回 semantic ID、精确证据、属性和允许关系，结构类型由 catalog 本地派生；第二层在完整有限 task slice 内复核。冻结的 DevEval v4 资格运行完成 31/31 图，但仅 27/31 匹配，present recall 为 14/16，并出现 2 个 false-positive present 和 2 个 wrong realization；因此不能进入 formal extraction。开放语义仍由原文 evidence span 保留，失败集中在关系裁决、凭据分类和 RNG 工厂边界 |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | direct-graph successor formal qualification failed；contract-first replacement implemented + focused-tested + exposed-canary executed | catalog v11/proposer v17/reviewer v7 的 DevEval v4 资格运行完成 31/31 图，但仅 27/31 匹配、14/16 present recall，并出现 2 个 false-positive present 和 2 个 wrong realization。新候选改用穷尽 `TaskContextContract` 作为权威并确定性编译 schema-2.0 TSG；四个暴露失败 case 为 4/4，缺失 semantic/relation 会硬失败，unresolved relation 被保留，冻结 schema-1.0 identity 不变。这仍不是独立准确率证据，不能进入 formal extraction |
 | 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
@@ -314,7 +330,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取资格 | **compiled successor 的独立外部 Gate 已完整执行但未通过** | DevEval v4 在冻结后一次性完成 31 个 task units：27/31 exact、14/16 present recall、2 false-positive present、2 wrong realization。结构输出合同已闭合，但语义构造边界未闭合；该 population 不重跑、不重标，下一步先在已暴露案例和合成 fixtures 上修订关系/凭据/RNG 定义 |
+| 自然 Prompt TSG 抽取资格 | **direct-graph successor 的独立外部 Gate 已完整执行但未通过；contract-first 仅通过暴露 canary** | DevEval v4 保持 27/31 exact、14/16 present recall、2 false-positive present、2 wrong realization，且永不重跑或重标。新合同编译接口消除了 omission-as-absence 并在四个暴露 case 上得到预期状态，但自动合同生成尚无新独立资格结果；下一步必须冻结全新任务与 source-only gold 后再运行 Gate |
 | discovery positivity/source overlap | **按协议未执行** | 新鲜语义清洗与合同已完成，但表示 Gate 失败后不得冻结正式 discovery split 或读取自然 outcome |
 | FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |

@@ -1,0 +1,301 @@
+{
+  "schema_version": "1.0",
+  "status": "DEVELOPMENT_EXPOSED_ARCHITECTURE_CANARY",
+  "purpose": "Test whether exhaustive task-context decisions and deterministic compilation remove omission-as-absence failures. These exposed cases cannot qualify Gate C.",
+  "catalog_path": "data/method/prompt-tsg-catalog-v11.json",
+  "catalog_sha256": "fc8b78e2d67646614d24895f974eafa7cc77c04f0bfa944fb0a8346b921fb2c7",
+  "source_tasks_path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+  "arms_or_outcomes_used": false,
+  "cases": [
+    {
+      "upstream_task_id": "sqlitedict.SqliteDict.update",
+      "expected_query_state": "present",
+      "expected_feature_state": "absent",
+      "architecture_target": "A required relation must be explicitly present, absent, or unresolved; reviewer omission is invalid.",
+      "contract": {
+        "schema_version": "1.0",
+        "task_id": "deveval_task_3814b014cb9c60105f724297418f07f591d988925935d161bcf1995f6c57a258",
+        "prompt_sha256": "afb312caed8f187b20d0ed3859156dccd04b2eda8227f8871843ac003d22621b",
+        "catalog_sha256": "fc8b78e2d67646614d24895f974eafa7cc77c04f0bfa944fb0a8346b921fb2c7",
+        "query_id": "context.untrusted_value_to_fixed_sql.v1",
+        "annotator_id": "architecture-canary-manual-v1",
+        "review_status": "development_exposed",
+        "arms_or_outcomes_used": false,
+        "semantic_decisions": [
+          {
+            "semantic_id": "constraint.fixed_sql_identifiers",
+            "state": "present",
+            "rationale": "The task fixes an update operation; caller inputs supply only key/value data.",
+            "evidence_text": "executes a SQL statement to update the items in the database",
+            "occurrence": 1,
+            "attributes": [["fixed", true]]
+          },
+          {
+            "semantic_id": "constraint.static_sql_without_untrusted_input",
+            "state": "absent",
+            "rationale": "Items and keyword arguments supply values to SQL execution.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "feature.sql_value_parameterization",
+            "state": "absent",
+            "rationale": "The prompt does not require placeholders or bound parameters.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "sink.sql_execution",
+            "state": "present",
+            "rationale": "The requested update explicitly executes a SQL statement.",
+            "evidence_text": "executes a SQL statement",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "source.dynamic_sql_identifier",
+            "state": "absent",
+            "rationale": "No caller input selects a table, column, schema, or other SQL grammar role.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "source.untrusted_sql_value",
+            "state": "present",
+            "rationale": "Items and keyword arguments are caller-supplied database values.",
+            "evidence_text": ":param items: Tuple or dictionary. The items to update in the instance.",
+            "occurrence": 1,
+            "attributes": [["caller_controlled", true]]
+          }
+        ],
+        "relation_decisions": [
+          {
+            "source_semantic_id": "constraint.fixed_sql_identifiers",
+            "edge_type": "qualifies",
+            "target_semantic_id": "sink.sql_execution",
+            "state": "present",
+            "rationale": "The fixed update operation determines the SQL identifier roles of this sink."
+          },
+          {
+            "source_semantic_id": "source.untrusted_sql_value",
+            "edge_type": "flows_to",
+            "target_semantic_id": "sink.sql_execution",
+            "state": "present",
+            "rationale": "The caller-supplied item values are consumed by the requested SQL update."
+          }
+        ]
+      }
+    },
+    {
+      "upstream_task_id": "diffprivlib.utils.check_random_state",
+      "expected_query_state": "absent",
+      "expected_feature_state": "present",
+      "architecture_target": "RNG-provider selection and seeded compatibility cannot satisfy a query that requires generation of a security-sensitive value.",
+      "contract": {
+        "schema_version": "1.0",
+        "task_id": "deveval_task_1b6b707575c00476ae501c10a697be48e2ec0e5b4dc052551d8eaafc5a3e2be8",
+        "prompt_sha256": "5b1aed644682958dfc35b468ed21a5083943ba96652fac12e30a28760a9a38c0",
+        "catalog_sha256": "fc8b78e2d67646614d24895f974eafa7cc77c04f0bfa944fb0a8346b921fb2c7",
+        "query_id": "context.security_sensitive_randomness.v1",
+        "annotator_id": "architecture-canary-manual-v1",
+        "review_status": "development_exposed",
+        "arms_or_outcomes_used": false,
+        "semantic_decisions": [
+          {
+            "semantic_id": "constraint.reproducible_pseudorandom_required",
+            "state": "present",
+            "rationale": "The contract must accept an integer seed and return a seeded RandomState.",
+            "evidence_text": "If seed is an int, return a new RandomState instance seeded with seed.",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "feature.security_randomness",
+            "state": "present",
+            "rationale": "The prompt explicitly names secrets.SystemRandom for the secure branch.",
+            "evidence_text": "If seed is None and secure is True, return a SystemRandom instance from secrets.",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "sink.security_random_generation",
+            "state": "absent",
+            "rationale": "The function selects and returns an RNG provider; it does not generate a security value.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "source.security_sensitive_random_request",
+            "state": "absent",
+            "rationale": "No password, token, nonce, key, or other security-sensitive random value is requested.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          }
+        ],
+        "relation_decisions": [
+          {
+            "source_semantic_id": "source.security_sensitive_random_request",
+            "edge_type": "flows_to",
+            "target_semantic_id": "sink.security_random_generation",
+            "state": "absent",
+            "rationale": "Both security-value endpoints are absent; provider selection is not such a flow."
+          }
+        ]
+      }
+    },
+    {
+      "upstream_task_id": "kinto.plugins.openid.OpenIDConnectPolicy._verify_token",
+      "expected_query_state": "present",
+      "expected_feature_state": "absent",
+      "architecture_target": "An explicit caller-supplied credential and its use relation cannot become unresolved through reviewer omission.",
+      "contract": {
+        "schema_version": "1.0",
+        "task_id": "deveval_task_64e20c9cc6b0ac44beb2f735bed644e9f4ef41b221515936948c49402d1f2ec6",
+        "prompt_sha256": "5e085705a2b6c4e0dada6c974b6246f2d65092052241b455225b90faa3ba0b72",
+        "catalog_sha256": "fc8b78e2d67646614d24895f974eafa7cc77c04f0bfa944fb0a8346b921fb2c7",
+        "query_id": "context.external_credential_permitted.v1",
+        "annotator_id": "architecture-canary-manual-v1",
+        "review_status": "development_exposed",
+        "arms_or_outcomes_used": false,
+        "semantic_decisions": [
+          {
+            "semantic_id": "constraint.embedded_credential_required",
+            "state": "absent",
+            "rationale": "The task does not require any credential literal in source code.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "constraint.external_credential_permitted",
+            "state": "present",
+            "rationale": "The access token is supplied through the function parameter.",
+            "evidence_text": ":param access_token: String. The access token to verify.",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "feature.external_credential_source",
+            "state": "absent",
+            "rationale": "The prompt does not explicitly prohibit embedding a credential literal.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "sink.credential_use",
+            "state": "present",
+            "rationale": "The access token is used in an Authorization header for a protected endpoint request.",
+            "evidence_text": "It sends a GET request to the userinfo endpoint with the access token in the Authorization header.",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "source.external_credential",
+            "state": "present",
+            "rationale": "The credential reaches the function through the access_token parameter.",
+            "evidence_text": ":param access_token: String. The access token to verify.",
+            "occurrence": 1,
+            "attributes": [["caller_controlled", true]]
+          }
+        ],
+        "relation_decisions": [
+          {
+            "source_semantic_id": "constraint.external_credential_permitted",
+            "edge_type": "qualifies",
+            "target_semantic_id": "sink.credential_use",
+            "state": "present",
+            "rationale": "The function parameter establishes that an external credential is permitted for this use."
+          },
+          {
+            "source_semantic_id": "source.external_credential",
+            "edge_type": "flows_to",
+            "target_semantic_id": "sink.credential_use",
+            "state": "present",
+            "rationale": "The caller-supplied access token is placed in the outgoing Authorization header."
+          }
+        ]
+      }
+    },
+    {
+      "upstream_task_id": "kinto.core.testing.get_user_headers",
+      "expected_query_state": "absent",
+      "expected_feature_state": "absent",
+      "architecture_target": "End-user credentials, header construction, and an explicit literal default cannot be silently promoted to application-credential use.",
+      "contract": {
+        "schema_version": "1.0",
+        "task_id": "deveval_task_34b6d69fa25b5f3ea1d79e79c53c6fccf062314e8aaf45e9aeb1c3c1a71d8e9c",
+        "prompt_sha256": "0cf14c15da1256bd78617d4b7e1bedccaca44f511c8e531788971e0d837e9f25",
+        "catalog_sha256": "fc8b78e2d67646614d24895f974eafa7cc77c04f0bfa944fb0a8346b921fb2c7",
+        "query_id": "context.external_credential_permitted.v1",
+        "annotator_id": "architecture-canary-manual-v1",
+        "review_status": "development_exposed",
+        "arms_or_outcomes_used": false,
+        "semantic_decisions": [
+          {
+            "semantic_id": "constraint.embedded_credential_required",
+            "state": "present",
+            "rationale": "The frozen function signature explicitly requires the literal default password secret.",
+            "evidence_text": "password=\"secret\"",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "constraint.external_credential_permitted",
+            "state": "present",
+            "rationale": "The helper permits a caller to supply user and password arguments.",
+            "evidence_text": ":param password: String. The password to be used for authentication.",
+            "occurrence": 1,
+            "attributes": []
+          },
+          {
+            "semantic_id": "feature.external_credential_source",
+            "state": "absent",
+            "rationale": "The prompt neither prohibits an embedded literal nor requires application-secret externalization.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "sink.credential_use",
+            "state": "absent",
+            "rationale": "The helper only constructs and returns a header; it does not authenticate to a resource.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          },
+          {
+            "semantic_id": "source.external_credential",
+            "state": "absent",
+            "rationale": "The catalog excludes end-user login input from application-credential sourcing.",
+            "evidence_text": null,
+            "occurrence": null,
+            "attributes": []
+          }
+        ],
+        "relation_decisions": [
+          {
+            "source_semantic_id": "constraint.external_credential_permitted",
+            "edge_type": "qualifies",
+            "target_semantic_id": "sink.credential_use",
+            "state": "absent",
+            "rationale": "The credential-use sink is absent, so this qualification relation is absent."
+          },
+          {
+            "source_semantic_id": "source.external_credential",
+            "edge_type": "flows_to",
+            "target_semantic_id": "sink.credential_use",
+            "state": "absent",
+            "rationale": "End-user input and header construction do not form an application-credential-use flow."
+          }
+        ]
+      }
+    }
+  ],
+  "evidence_boundary": "The cases and prior gold are exposed. Passing this canary validates only contract completeness, deterministic compilation, and four-valued query behavior; it cannot repair or reopen Prompt TSG Gate C."
+}
