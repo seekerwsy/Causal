@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "freeze_date": "2026-08-31",
+  "purpose": "Provider compatibility pilot for strict JSON Schema transport; not Gate C accuracy evidence.",
+  "method_revision_commit": "4e1be804e673abb3c36f992ce4b3250d485af60a",
+  "task_units": 3,
+  "provider_calls": 6,
+  "task_exposure": "All three tasks were already exposed development tasks from the failed v4 qualification.",
+  "inputs": {
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+      "sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8"
+    },
+    "selection": {
+      "path": "data/method/prompt-contract-json-schema-pilot-selection-v1.json",
+      "sha256": "f7814f4d62bbd4bac51d7c96a34daf042ee6d26571337b0307602031a50128f4"
+    },
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37max-v3.json",
+      "sha256": "b17ec84f24ad323b13765fb4b5733570b0314e6e89c7f1f08057838e48d6395f"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v2.txt",
+      "sha256": "a8f62a150373d5e8bc1e98c4910ac0c04adf5c1b78d7262cd33e2208156a75f6"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37max-v3.json",
+      "sha256": "ff0956889d2c57ad26b565a57a252e039ab8498823fce73e46c34d2812c99125"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v2.txt",
+      "sha256": "8bf7870fda48fcf7e8bf78a8f0ae5e686c64f9dff43a8d4e39b1925bc132f936"
+    },
+    "response_format": {
+      "path": "data/method/prompt-contract-response-format-v1.json",
+      "sha256": "5750e790a510564432b26f79cb753274646e6f063f7f8b6bd581d1b79c676ac9"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_extract.py",
+      "sha256": "b760db6880505fc4d99f5f76d1b1f223f81f0752960c62f6ce626b730ed718b0"
+    },
+    "provider_adapter": {
+      "path": "src/prompt_mechanism_study/functional_judge.py",
+      "sha256": "4030b96b9655dc5842d9dc904c7daf751c3a5711361fdcf11c0c457e0595d163"
+    }
+  },
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
