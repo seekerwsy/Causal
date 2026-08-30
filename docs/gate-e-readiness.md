@@ -27,7 +27,7 @@ The final PHASE plan is implemented under four explicit scope corrections:
 | --- | --- | --- |
 | A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
 | B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
-| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The structured-authority successor was evaluated once on a prospectively frozen external 16-task population: 14/16 exact (87.5%), 3/5 present recall (60.0%), zero false-positive present states, and one wrong realization. The three path-authority cases were all correct, but the complete frozen Gate failed. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The structured-authority successor failed its complete 16-task external qualification at 14/16 exact and 3/5 present recall. A later prospectively revised candidate then stopped on the second task of a disjoint 10-task SecCodeBench population; its first graph already made the frozen recall Gate unreachable. Neither failed population is reused. |
 | D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
 | E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
@@ -110,7 +110,7 @@ extraction or any active-protocol intervention claim.
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 | implemented/tested; the independent external qualification failed, although its three structured path-authority cases were all correct |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 plus prospective catalog v9 | implemented/tested; catalog v5 failed the complete external qualification, while catalog v9 is specified after a second failed external run and has no independent qualification evidence |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -133,6 +133,7 @@ closes an engineering defect but does not change the failed scientific Gate.
 | Prompt TSG final v4 extraction and qualification | `newly_run` | extraction bundle verified; qualification failed at 13/14 exact and 3/4 present recall |
 | Structured path-authority successor trial | `newly_run` development evidence | real 5-case replay completed at 5/5 exact with no false-positive or wrong realization; all cases and labels were previously exposed, so this is interface validation rather than Gate evidence |
 | Structured-authority external qualification v1 | `newly_run` | independent 16-task extraction closed once at 16/16; qualification failed at 14/16 exact, 3/5 present recall, zero false-positive present states, and one wrong realization; all three path cases matched |
+| SecCodeBench successor extraction v2 | `newly_run` development evidence | disjoint 10-task inputs and gold were frozen first; extraction stopped on task 2 after one graph, and task 1 already made present recall mathematically unable to reach 0.80; no qualification metric was produced |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
@@ -140,10 +141,13 @@ closes an engineering defect but does not change the failed scientific Gate.
 
 ## Protocol risks and remaining blockers
 
-1. **Representation recall and realization identity.** The external Gate
-   retained zero false-positive present states but recovered only 3/5 frozen
-   present contexts and assigned one SQL case to the wrong realization. Formal
-   natural discovery cannot start.
+1. **Representation recall, realization identity, and response validity.**
+   The complete external Gate retained zero false-positive present states but
+   recovered only 3/5 frozen present contexts and assigned one SQL case to the
+   wrong realization. The disjoint SecCodeBench attempt additionally left a
+   fixed two-tool pipeline unresolved and returned an impossible evidence
+   occurrence while mapping a framework checkpoint to Python-literal text.
+   Formal natural discovery cannot start.
 2. **Gold scope and size.** Exhaustion of the repeatedly exposure-excluded
    CWE-328 stratum limited the final replacement holdout to 14 task units. It
    evaluates that frozen task mixture, not global understanding or per-CWE
@@ -293,20 +297,58 @@ result. The qualification verifier required a separately supplied annotation
 bundle and checked its hash before accepting the heterogeneous extractor IDs;
 this was an identity-closure repair, not a case-label change.
 
+### SecCodeBench successor attempt
+
+The DTD/entity and SQL-identifier distinctions were prospectively frozen at
+commit `c3f18f2` as catalog v8, proposer prompt v13, and proposer evaluator
+v15. A second source was selected only after that commit. It used the complete
+census of 10 mappable Python `gen` cases in SecCodeBench v2.2.0, pinned at
+commit `67126efb88c6dd75f1fb4963048cab2f7b23d83d`. The three excluded Python
+cases were outside the already registered query scope (two SSTI cases and one
+arbitrary-code-evaluation case). Selection, exact task text, source blobs,
+overlap review, four present labels, six absent-or-unresolved labels, and the
+unchanged thresholds were committed at `aebd3b1` before any request.
+
+The one formal extraction was run on Python 3.12.13 and an NVIDIA A800 80 GB
+host. It stopped on the second selected task and is preserved at
+[`prompt-tsg-external-extraction-v2`](../data/method/results/prompt-tsg-external-extraction-v2),
+whose bundle SHA-256 is
+`a008255615e19891423f35bca1666dce9ab15cd7e32d46b22920b5e912cd1ee2`.
+The immutable remote coordinates were
+`/home/wsy/prompt-mechanism-study-deployments/gate-c-seccodebench-aebd3b1-20260830-01`
+and
+`/home/wsy/prompt-mechanism-study-experiments/gate-c-seccodebench-aebd3b1-20260830-01`.
+The gold file was not deployed to the extraction host, and the provider
+credential remained environment-only.
+
+The first task required a predetermined `sort` then `uniq` pipeline with only
+caller-supplied arguments. The extractor left `constraint.fixed_executable`
+unresolved, so a frozen expected-present case was already missed. Because the
+population had four expected-present cases, the maximum possible recall after
+that miss was `3/4 = 0.75`, below the frozen `0.80` threshold. The second task
+used `torch.load` for a framework checkpoint; the proposer incorrectly mapped
+it to Python-literal deserialization and cited the third occurrence of
+`checkpoint_path` even though the exact substring occurs twice. Strict
+evidence validation stopped the run. No remaining task was called, no retry
+was made, and no qualification metric was manufactured from the partial
+bundle.
+
+These observations motivated prospective catalog v9, proposer prompt v14,
+and evaluator v16: a predetermined multi-tool pipeline is fixed when the
+caller cannot choose tools; unsupported binary/object/checkpoint formats must
+not be mapped to the nearest registered text format; and every occurrence
+index must be checked against the exact substring count. SecCodeBench exposed
+those changes and is prohibited from qualifying them. The population also
+contains no XML task, so it supplies no independent DTD-boundary evidence.
+
 ## Permitted next work
 
-The v4 internal population and the external 16-task population are both now
-exposed. Neither can be resampled or retuned into a passing Gate. The next
-valid representation study must first freeze two prospective semantic
-clarifications:
-
-- DTD validation is distinct from required external-entity resolution; and
-- a finite set of optional named SQL parameters is not a dynamic identifier
-  source unless the caller supplies an identifier token or the task otherwise
-  requires identifier selection in generated SQL.
-
-After those definitions and extractor behavior are frozen, validation requires
-another genuinely independent corpus. Valid options remain:
+The v4 internal population, the 16-task AI-Security-Benchmark population, and
+the 10-task SecCodeBench population are exposed. None may be resampled,
+retried, or retuned into a passing Gate. Catalog v9 and proposer v16 freeze all
+currently diagnosed distinctions, but they remain specified/tested rather
+than externally qualified. Validation now requires another genuinely
+independent corpus. Valid options remain:
 
 - replace free-form context extraction with a more constrained annotation
   protocol and independently qualified adjudication; or

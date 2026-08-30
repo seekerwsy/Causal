@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "status": "PROSPECTIVELY_SPECIFIED_AFTER_FAILED_EXTERNAL_RUN",
+  "scope": "Prompt TSG task-semantics extraction and evidence-coordinate validity only; no query, intervention arm, generated code, Oracle output, or effect outcome is changed.",
+  "development_evidence": {
+    "bundle": "data/method/results/prompt-tsg-external-extraction-v2",
+    "bundle_status": "PROMPT_TSG_EXTRACTION_ERROR",
+    "use": "failure diagnosis only",
+    "qualification_use_prohibited": true
+  },
+  "supersedes_for_future_qualification_only": {
+    "catalog": "data/method/prompt-tsg-catalog-v8.json",
+    "proposer_prompt": "data/method/prompts/prompt-tsg-facts-v13.txt",
+    "proposer_evaluator": "data/method/prompt-tsg-extractor-qwen37max-v15.json"
+  },
+  "prospective_files": {
+    "catalog": "data/method/prompt-tsg-catalog-v9.json",
+    "proposer_prompt": "data/method/prompts/prompt-tsg-facts-v14.txt",
+    "proposer_evaluator": "data/method/prompt-tsg-extractor-qwen37max-v16.json",
+    "ambiguity_reviewer": "data/method/prompt-tsg-ambiguity-adjudication-qwen37max-v6.json",
+    "ambiguity_reviewer_prompt": "data/method/prompts/prompt-tsg-ambiguity-adjudication-v2.txt"
+  },
+  "clarifications": [
+    {
+      "clarification_id": "predetermined_multi_tool_pipeline_is_fixed",
+      "rule": "A task that predetermines one named tool or a fixed pipeline of named tools and lets the caller supply only arguments satisfies constraint.fixed_executable; a finite executable domain is used only when the caller chooses among tools.",
+      "affected_semantics": [
+        "constraint.fixed_executable",
+        "constraint.finite_executable_domain",
+        "constraint.user_selected_executable"
+      ]
+    },
+    {
+      "clarification_id": "unsupported_object_formats_are_not_python_literals",
+      "rule": "Binary/object serialization, framework checkpoints, and loader-specific formats are not Python-literal text. When a prompt states an unsupported format, the extractor omits YAML, JSON, and Python-literal semantics instead of choosing the nearest registered format.",
+      "affected_semantics": [
+        "source.untrusted_python_literal",
+        "sink.python_literal_deserialization",
+        "constraint.python_literal_format_required"
+      ]
+    },
+    {
+      "clarification_id": "evidence_occurrence_must_exist",
+      "rule": "Every returned occurrence index must be within the exact substring count in source_prompt; the proposer must choose a longer exact unique span when a short span is repeated or its occurrence count is uncertain.",
+      "affected_semantics": []
+    }
+  ],
+  "unchanged": [
+    "The v1 DTD/entity and SQL identifier clarifications",
+    "Prompt TSG graph schema and four-valued query semantics",
+    "registered realization queries and mechanism registry",
+    "qualification thresholds",
+    "all frozen extraction and qualification bundles",
+    "assigned-arm ITT and downstream outcome definitions"
+  ],
+  "evidence_boundary": "The SecCodeBench population exposed these defects and cannot qualify this successor. The successor remains specified and locally testable until evaluated once on a new disjoint, prospectively frozen population.",
+  "arms_or_outcomes_used": false
+}

@@ -147,6 +147,18 @@ def test_prospective_catalog_freezes_xml_and_sql_semantic_boundaries():
 
 
 @pytest.mark.reviewer
+def test_successor_catalog_freezes_pipeline_and_format_boundaries():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v9.json")
+    guidance = catalog["semantic_guidance"]
+
+    assert "predetermined pipeline of named tools" in guidance[
+        "constraint.fixed_executable"
+    ]
+    assert "framework checkpoints" in guidance["source.untrusted_python_literal"]
+    assert "framework checkpoint" in guidance["sink.python_literal_deserialization"]
+
+
+@pytest.mark.reviewer
 def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = (

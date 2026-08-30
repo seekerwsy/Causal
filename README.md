@@ -92,12 +92,15 @@ confirmatory evidence.
 
 The active successor and schema-1.1 factorial implementations are specified,
 implemented, and reviewer-tested. Fresh semantic curation and functional
-contracts are complete. A structured-authority Prompt TSG successor was then
-run once on a prospectively frozen external 16-task population. Its three path
-cases all matched, but the complete Gate failed at 14/16 exact, 3/5 present
-recall, zero false-positive present states, and one wrong realization. Formal
-discovery and a new claim-bearing provider run therefore were not started. The
-exact stopping boundary is recorded in the
+contracts are complete. A structured-authority Prompt TSG successor failed a
+prospectively frozen external 16-task Gate at 14/16 exact and 3/5 present
+recall. A later semantic revision was frozen before a disjoint 10-task
+SecCodeBench attempt, but that extraction stopped on task 2 and its first graph
+had already made the frozen recall threshold unreachable. The failed bundles
+are retained, neither population is reused, and the newly specified successor
+still requires an independent qualification. Formal discovery and a new
+claim-bearing provider run therefore were not started. The exact stopping
+boundary is recorded in the
 [Gate E readiness audit](docs/gate-e-readiness.md). The tracked schema-1.0 factorial bundles remain
 historical formal evidence and are independently replayable; they are not
 migrated or reinterpreted as active-protocol results:
