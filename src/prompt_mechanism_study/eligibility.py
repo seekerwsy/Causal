@@ -313,6 +313,16 @@ def qualify_prompt_tsg_extractor(
         and len(false_positive_present) <= rule["maximum_false_positive_present"]
         and len(wrong_realization) <= rule["maximum_wrong_realization"]
     )
+    positive_gold_realization_ids = sorted(
+        {
+            row["expected_realization_id"]
+            for row in cases
+            if row["expected_context"] == "present"
+        }
+    )
+    catalog_realization_ids = sorted(
+        {query["realization_id"] for query in catalog["queries"]}
+    )
     projections = [request.get("deterministic_projection", {}) for request in requests]
     report = {
         "schema_version": "1.0",
@@ -326,6 +336,10 @@ def qualify_prompt_tsg_extractor(
         "false_positive_present": len(false_positive_present),
         "wrong_realization": len(wrong_realization),
         "qualification_rule": rule,
+        "positive_gold_realization_ids": positive_gold_realization_ids,
+        "catalog_realization_ids_without_positive_gold": sorted(
+            set(catalog_realization_ids) - set(positive_gold_realization_ids)
+        ),
         "context_counts": dict(
             sorted(Counter(row["expected_context"] for row in cases).items())
         ),
@@ -359,7 +373,8 @@ def qualify_prompt_tsg_extractor(
         "selection_sha256": _sha256(selection_path),
         "arms_or_outcomes_used": False,
         "claim_boundary": (
-            "Qualification covers the prospectively labeled task-context holdout; "
+            "Qualification covers the prospectively labeled task-context holdout and, "
+            "if passed, only realization IDs represented by expected-present gold cases; "
             "it is not a global semantic-parsing accuracy claim."
         ),
     }

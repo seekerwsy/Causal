@@ -203,6 +203,23 @@ def test_successor_catalog_freezes_compiled_type_and_relation_boundaries():
 
 
 @pytest.mark.reviewer
+def test_prospective_catalog_excludes_fixed_security_values_from_randomness():
+    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v11.json")
+
+    assert "fixed literal security token" in catalog["semantic_guidance"][
+        "constraint.reproducible_pseudorandom_required"
+    ]
+    random_query = next(
+        query
+        for query in catalog["queries"]
+        if query["realization_id"] == "cwe338_security_sensitive_randomness"
+    )
+    assert "constraint.reproducible_pseudorandom_required" in random_query[
+        "forbidden_semantics"
+    ]
+
+
+@pytest.mark.reviewer
 def test_compiled_extractor_candidate_files_share_the_model_fact_contract():
     proposer = json.loads(
         (ROOT / "data/method/prompt-tsg-extractor-qwen37max-v17.json").read_text()
@@ -1528,3 +1545,15 @@ def test_external_qualification_replays_structured_authority_identity(tmp_path: 
     assert report["false_positive_present"] == 0
     assert report["wrong_realization"] == 1
     assert report["path_authority_annotated_tasks"] == 3
+    assert report["positive_gold_realization_ids"] == sorted(
+        {
+            case["expected_realization_id"]
+            for case in json.loads(
+                (
+                    ROOT
+                    / "data/method/prompt-tsg-external-qualification-gold-v1.json"
+                ).read_text(encoding="utf-8")
+            )["cases"]
+            if case["expected_context"] == "present"
+        }
+    )
