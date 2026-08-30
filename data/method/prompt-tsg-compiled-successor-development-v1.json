@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "status": "DEVELOPMENT_ONLY_EXPOSED_REPLAY_COMPLETE",
+  "evidence_type": "newly_run",
+  "claim_readiness": "blocked",
+  "implementation_commit": "5c81bd0",
+  "catalog_path": "data/method/prompt-tsg-catalog-v10.json",
+  "proposer_candidate_id": "prompt-tsg-llm-facts-qwen37max-v17",
+  "reviewer_candidate_id": "prompt-tsg-ambiguity-adjudication-qwen37max-v7",
+  "task_file_sha256": "21cbcc1b569e467d3e82e3bf5cd27fdf480d8ff6f855cb301391004ddc28654e",
+  "development_selection_sha256": "31c861e903d4f2b6b53dacc0a182e85e35ca13b9d4d569dc03d8b21ec1f8f9b8",
+  "source_archive_sha256": "149b1d57205f24d587c290b55a43277c812eaf28af4ae9dca72bb7d42a8b9988",
+  "result_bundle_sha256": "72b0ecbb9966f0672281862b0ab7fd0a169fc5ffaf15495e50a4fdb3a463e2da",
+  "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/prompt-tsg-compiled-dev-5c81bd0-20260830-01",
+  "remote_output": "/home/wsy/prompt-mechanism-study-experiments/prompt-tsg-compiled-dev-5c81bd0-20260830-01/extraction",
+  "environment": {
+    "host_gpu": "2 x NVIDIA A800 80GB PCIe",
+    "python": "3.12.13"
+  },
+  "implementation_checks": {
+    "default_reviewer_suite": "92 passed, 129 deselected",
+    "prompt_tsg_focused_suite": "25 passed, 5 deselected",
+    "compileall": "passed",
+    "ruff": "not run because the development environment does not install ruff"
+  },
+  "development_cases": [
+    {
+      "upstream_task_id": "BigCodeBench/1028",
+      "expected_context": "absent_or_unresolved",
+      "actual_context": "absent",
+      "expected_realization_id": null,
+      "actual_realization_id": null,
+      "diagnosis": "The reviewer retained fixed-executable evidence but did not invent a flow from interval or duration into process execution; the complete context query therefore remained absent."
+    },
+    {
+      "upstream_task_id": "BigCodeBench/681",
+      "expected_context": "present",
+      "actual_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "actual_realization_id": "cwe502_json_deserialization",
+      "diagnosis": "The typed JSON source, JSON sink, and flow are sufficient after removal of the redundant format-required fact."
+    },
+    {
+      "upstream_task_id": "BigCodeBench/216",
+      "expected_context": "present",
+      "actual_context": "present",
+      "expected_realization_id": "cwe502_json_deserialization",
+      "actual_realization_id": "cwe502_json_deserialization",
+      "diagnosis": "The typed JSON source, JSON sink, and flow are sufficient after removal of the redundant format-required fact."
+    },
+    {
+      "upstream_task_id": "BigCodeBench/256",
+      "expected_context": "present",
+      "actual_context": "present",
+      "expected_realization_id": "cwe328_security_sensitive_hash",
+      "actual_realization_id": "cwe328_security_sensitive_hash",
+      "diagnosis": "The model returned only semantic IDs and evidence; the local compiler derived the safety-requirement node type and completed the graph."
+    }
+  ],
+  "response_node_type_occurrences": 0,
+  "arms_or_outcomes_used": false,
+  "qualification_evidence_allowed": false,
+  "disposition": "All four prompts and their gold labels were exposed before this replay. The result validates implementation behavior only, cannot contribute to Gate C metrics, and cannot justify discovery or effect estimation. The next admissible evaluation is one prospectively frozen genuinely independent qualification corpus."
+}

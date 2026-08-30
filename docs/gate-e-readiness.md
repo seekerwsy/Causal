@@ -53,24 +53,39 @@ holdouts after reading these results would be outcome-dependent tuning.
 
 ### Prompt TSG qualification
 
-The active candidate is a two-stage blind extractor:
+The prospective successor is a two-stage blind extractor with a compiled
+catalog boundary:
 
 ```text
-LLM evidence-fact proposal
-  -> deterministic evidence/type projection
+LLM semantic-ID and exact-evidence proposal (no structural node type)
+  -> derive every node type from the frozen catalog
+  -> deterministic evidence projection
   -> normalize an occurrence only when the quoted span is exact and unique
-  -> blind LLM re-annotation within the proposer-declared semantic scope
+  -> blind LLM re-annotation over the complete task-family catalog slice
   -> reject and record relations outside the query-declared semantic triples
   -> normalized Prompt TSG and four-valued queries
 ```
 
-The reviewer cannot widen the proposer-declared catalog scope or invent a
-global semantic ID. A query can use only exact prompt spans, catalog facts, and
-its declared relations. Catalog v9 carries forward the distinction between a
+The reviewer may recover a proposer omission, but only from the finite catalog
+slice computed before either model call and only with a new exact prompt span.
+It cannot invent a global semantic ID or structural type. A query can use only
+exact prompt spans, catalog facts, and its declared relations. Catalog v10
+carries forward the distinction between a
 caller-supplied base and an independently trusted base, and additionally
 freezes the DTD/entity, dynamic-identifier, named-tool, checkpoint-format, and
-evidence-occurrence boundaries diagnosed before the BigCodeBench run. Every
+evidence-occurrence boundaries diagnosed before the BigCodeBench run. It also
+removes redundant format-required facts when a typed deserialization source,
+sink, and flow already identify the format, and requires each query-bound
+constraint to qualify its particular sink. Every
 request, response, projection, and digest is closed in the extraction bundle.
+
+Commit `5c81bd0` implements this successor as catalog v10, proposer v17, and
+reviewer v7. The default reviewer suite closed at 92/92 tests. A four-case
+replay of already exposed BigCodeBench failures completed and agreed with the
+previously visible labels, including the former schema-stop case. This is
+development evidence only, not an accuracy estimate or a reopened Gate. Its
+bounded provenance and disposition are recorded in
+[`prompt-tsg-compiled-successor-development-v1.json`](../data/method/prompt-tsg-compiled-successor-development-v1.json).
 
 The bounded repair sequence remains visible without promoting development
 replays to evidence:
@@ -111,7 +126,7 @@ extraction or any active-protocol intervention claim.
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 plus catalog v9 | implemented/tested; catalog v5 failed the complete external qualification, and catalog v9/proposer v16 failed a later independent BigCodeBench attempt before qualification after already violating both zero-error constraints |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v10 | successor implemented/tested and development-replayed on four exposed failures; every earlier independent qualification failed, so formal use remains prohibited until one new independent qualification passes |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -412,21 +427,20 @@ exposure-excluded. The machine-readable disposition is
 The v4 internal population, the 16-task AI-Security-Benchmark population, the
 10-task SecCodeBench population, and the 31-task BigCodeBench selection are
 exposed. None may be resampled, retried, or retuned into a passing Gate.
-Catalog v9 and proposer v16 have now failed independent external use rather
-than merely lacking evidence. Another holdout alone is not justified until a
-materially simpler response contract is frozen and passes development-only
-adversarial checks. Valid options are:
+Catalog v9 and proposer v16 failed independent external use rather than merely
+lacking evidence. The materially simpler successor now derives catalog-fixed
+`node_type` locally, removes redundant deserialization-format facts, binds
+constraints to their actual sink, rechecks the complete finite task slice, and
+keeps path authority in the explicit four-state task annotation. These choices
+have passed focused tests and an exposed development replay, but neither can
+qualify the extractor.
 
-- derive catalog-fixed structural fields such as `node_type` locally rather
-  than asking an LLM to repeat them;
-- remove logically redundant query facts when the typed source, sink, and flow
-  already entail the same file/format role;
-- replace free-form fixed-boundary inference with an explicit bounded decision
-  whose evidence must name the tool or finite domain; and then
-- qualify that materially revised extractor once on another genuinely
-  independent corpus; or
-- replace trusted-boundary inference with an explicit dataset-side trust field
-  whose annotation is qualified independently.
+The next and only Gate-bearing action is to freeze catalog v10, proposer v17,
+reviewer v7, model settings, thresholds, source population, selection, and gold
+labels before any response is observed, then run the extractor once on another
+genuinely independent corpus. A failed new population is not resampled or
+relabelled. Replacing the LLM with a dataset-side semantic annotation remains a
+future alternative, not a live parallel path.
 
 The structured authority implementation now has prospective external support
 for the two authority states actually present in this source
@@ -443,14 +457,14 @@ through hypothesis, power, policy, canary, and confirmation freezes.
 The following checks were run on the final working tree:
 
 ```text
-python -m compileall -q src tests
+python -m compileall -q src/prompt_mechanism_study
 # completed without errors
 
 python -m pytest -q
-# 91 passed, 129 deselected
+# 92 passed, 129 deselected
 
-python -m pytest -q -m reviewer tests/test_prompt_tsg.py
-# 24 passed, 5 deselected
+python -m pytest -q tests/test_prompt_tsg.py
+# 25 passed, 5 deselected
 
 python -m pytest -q tests/test_discovery_support.py
 # 4 passed

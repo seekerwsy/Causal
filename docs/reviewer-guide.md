@@ -154,7 +154,12 @@ wrong realization, while the frozen maximum for each was zero. Formal
 discovery and confirmation therefore did not start. The complete 31-task
 selection is exposure-excluded and is not retried; any successor now requires
 a materially simpler frozen response contract and another genuinely
-independent qualification population.
+independent qualification population. The compiled successor at commit
+`5c81bd0` now removes model-supplied structural types, derives them from catalog
+v10, and lets the independent reviewer recover omissions only inside the
+precomputed task-family slice with exact evidence. It passes the focused
+reviewer suite and a four-case exposed development replay, but has not passed a
+new qualification population; Gate C therefore remains failed.
 The exact evidence inventory and failed-Gate boundary are in
 [`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
 results are formal historical evidence and remain reproducible through the
