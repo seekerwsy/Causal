@@ -327,6 +327,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="reuse contracts whose representative record and prompt hash still match",
     )
 
+    review_contracts = commands.add_parser(
+        "contract-quality-review",
+        help="blindly triage every functional contract before independent adjudication",
+    )
+    review_contracts.add_argument("prepared_root", type=Path)
+    review_contracts.add_argument("contracts_root", type=Path)
+    review_contracts.add_argument("output", type=Path)
+    review_contracts.add_argument("--repository-root", type=Path, default=Path.cwd())
+    review_contracts.add_argument("--max-new-batches", type=int)
+    review_contracts.add_argument("--workers", type=int, default=1)
+
     eligibility = commands.add_parser(
         "dataset-eligibility",
         help="audit curated clusters for current experiment readiness",
@@ -594,6 +605,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             workers=args.workers,
             reuse_root=args.reuse_root,
             existing_contracts_root=args.existing_contracts_root,
+        )
+        print(report["status"])
+    elif args.command == "contract-quality-review":
+        from prompt_mechanism_study.curation import run_contract_quality_review
+
+        report = run_contract_quality_review(
+            args.repository_root,
+            args.prepared_root,
+            args.contracts_root,
+            args.output,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
         )
         print(report["status"])
     elif args.command == "assemble-semantic-clusters":

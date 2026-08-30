@@ -1,4 +1,4 @@
-"""Outcome-blind semantic clustering and functional-contract extraction."""
+"""Outcome-blind semantic clustering and functional-contract curation."""
 
 from __future__ import annotations
 
@@ -25,9 +25,38 @@ from prompt_mechanism_study.records import canonical_value, content_id
 # response still has to bind every supplied index or the batch is rejected.
 SEMANTIC_MAX_ITEMS = 5
 CONTRACT_MAX_ITEMS = 5
+CONTRACT_REVIEW_MAX_ITEMS = 5
 MAX_BATCH_CHARS = 40_000
 _LABELS = {"same_cluster", "related_but_independent", "different_task", "uncertain"}
 _RESOLUTION = {"resolved", "ambiguous", "unsupported"}
+_CONTRACT_REVIEW_STATUS = {"faithful", "faulty", "uncertain"}
+_FUNCTIONAL_EVALUABILITY = {"sufficient", "limited", "insufficient"}
+_CONTRACT_ISSUES = {
+    "none",
+    "unsupported_requirement",
+    "missing_explicit_requirement",
+    "entrypoint_mismatch",
+    "input_mismatch",
+    "output_mismatch",
+    "side_effect_mismatch",
+    "dependency_mismatch",
+    "security_requirement_injected",
+    "prompt_not_software_task",
+    "external_context_missing",
+    "ambiguous_interface",
+    "uncertain_semantics",
+    "other",
+}
+_RESPONSE_FORMAT_MARKERS = (
+    "only return the code",
+    "only output the code",
+    "output only the code",
+    "return only the code",
+    "without preamble or suffix",
+    "without a preamble or suffix",
+    "don't include any other information",
+    "do not include any other information",
+)
 _CLUSTER_ASSEMBLY_RULE = "exact_prompt_and_frozen_lineage_only_v1"
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 
@@ -215,6 +244,177 @@ def run_contract_curation(
     return report
 
 
+def run_contract_quality_review(
+    repository_root: Path,
+    prepared_root: Path,
+    contracts_root: Path,
+    output: Path,
+    *,
+    max_new_batches: int | None = None,
+    workers: int = 1,
+    provider: Provider = bailian_complete,
+) -> dict[str, Any]:
+    """Blindly triage every extracted contract before independent adjudication."""
+
+    root = repository_root.resolve()
+    prepared = prepared_root.resolve()
+    contracts = contracts_root.resolve()
+    verify_bundle(prepared)
+    verify_bundle(contracts)
+    records = {
+        item["record_id"]: item for item in _rows(read_json(prepared / "records.json"), "records")
+    }
+    contract_rows = sorted(
+        _rows(read_json(contracts / "functional-contracts.json"), "functional contracts"),
+        key=lambda item: item["cluster_id"],
+    )
+    items: list[dict[str, Any]] = []
+    seen_records: set[str] = set()
+    seen_clusters: set[str] = set()
+    for contract in contract_rows:
+        record_id = contract.get("record_id")
+        cluster_id = contract.get("cluster_id")
+        record = records.get(record_id)
+        contract_core = {key: value for key, value in contract.items() if key != "contract_id"}
+        if (
+            record is None
+            or not isinstance(cluster_id, str)
+            or record_id in seen_records
+            or cluster_id in seen_clusters
+            or contract.get("source_prompt_sha256") != record.get("prompt_sha256")
+            or contract.get("contract_id") != content_id("cluster_contract_", contract_core)
+        ):
+            raise CurationError("contract review inputs are not one-to-one and prompt-bound")
+        seen_records.add(record_id)
+        seen_clusters.add(cluster_id)
+        items.append(
+            {
+                "cluster_id": cluster_id,
+                "contract_id": contract["contract_id"],
+                "record_id": record_id,
+                "language": record["language"],
+                "source_prompt": record["prompt"],
+                "deterministic_issue_codes": _deterministic_contract_issues(contract),
+                "contract": {
+                    key: contract[key]
+                    for key in (
+                        "entrypoint",
+                        "requirements",
+                        "inputs",
+                        "outputs",
+                        "side_effects",
+                        "environment_dependencies",
+                    )
+                },
+            }
+        )
+    evaluator, prompt, identities = _policy(
+        root,
+        "functional-contract-review-v1.txt",
+        config_name="qwen37max-contract-review.json",
+    )
+    identities["response_binding"] = "batch_item_index_v1"
+    identities["review_scope"] = "source_prompt_and_contract_only_v1"
+    batches = _batches(
+        items,
+        "cluster_id",
+        CONTRACT_REVIEW_MAX_ITEMS,
+        _contract_review_chars,
+    )
+    plan = {
+        "schema_version": "1.0",
+        "stage": "functional_contract_quality_review",
+        "prepared_bundle_sha256": bundle_digest(prepared),
+        "contracts_bundle_sha256": bundle_digest(contracts),
+        "contract_count": len(items),
+        "batch_item_limit": CONTRACT_REVIEW_MAX_ITEMS,
+        "batch_character_limit": MAX_BATCH_CHARS,
+        "batch_ids": [[item["cluster_id"] for item in batch] for batch in batches],
+        "policy": identities,
+        "cwe_arm_or_outcomes_used": False,
+        "reviewer_candidate_rule": (
+            "no_deterministic_issue_and_faithful_and_functionally_sufficient_v1"
+        ),
+    }
+    run_root = _initialize(output.resolve(), plan)
+    reviews, complete = _execute(
+        run_root,
+        batches,
+        evaluator,
+        prompt,
+        _contract_review_request,
+        _parse_contract_reviews,
+        max_new_batches,
+        workers,
+        provider,
+    )
+    progress = _progress("FUNCTIONAL_CONTRACT_QUALITY_REVIEW", len(batches), reviews, complete)
+    if not complete:
+        return progress
+    final = run_root / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+    review_by_cluster = {item["cluster_id"]: item for item in reviews}
+    if set(review_by_cluster) != {item["cluster_id"] for item in items}:
+        raise CurationError("contract reviews do not cover every cluster")
+    frozen_reviews = []
+    reviewer_qualified_contracts = []
+    contracts_by_cluster = {item["cluster_id"]: item for item in contract_rows}
+    for item in items:
+        review = review_by_cluster[item["cluster_id"]]
+        reviewer_qualified = (
+            not item["deterministic_issue_codes"]
+            and review["contract_status"] == "faithful"
+            and review["functional_evaluability"] == "sufficient"
+        )
+        frozen_reviews.append(
+            {
+                "cluster_id": item["cluster_id"],
+                "contract_id": item["contract_id"],
+                "record_id": item["record_id"],
+                **{key: value for key, value in review.items() if key != "cluster_id"},
+                "deterministic_issue_codes": item["deterministic_issue_codes"],
+                "reviewer_qualified": reviewer_qualified,
+            }
+        )
+        if reviewer_qualified:
+            reviewer_qualified_contracts.append(contracts_by_cluster[item["cluster_id"]])
+    status_counts = Counter(item["contract_status"] for item in frozen_reviews)
+    evaluability_counts = Counter(item["functional_evaluability"] for item in frozen_reviews)
+    issue_counts = Counter(
+        issue for item in frozen_reviews for issue in item["issue_codes"] if issue != "none"
+    )
+    deterministic_issue_counts = Counter(
+        issue for item in frozen_reviews for issue in item["deterministic_issue_codes"]
+    )
+    report = {
+        "schema_version": "1.0",
+        "status": "FUNCTIONAL_CONTRACT_REVIEW_TRIAGE_FROZEN",
+        "contract_count": len(contract_rows),
+        "review_count": len(frozen_reviews),
+        "reviewer_qualified_count": len(reviewer_qualified_contracts),
+        "contract_status_counts": dict(sorted(status_counts.items())),
+        "functional_evaluability_counts": dict(sorted(evaluability_counts.items())),
+        "issue_counts": dict(sorted(issue_counts.items())),
+        "deterministic_issue_counts": dict(sorted(deterministic_issue_counts.items())),
+        "all_contracts_accounted_for": len(frozen_reviews) == len(contract_rows),
+        "cwe_arm_or_outcomes_used": False,
+        "semantic_quality_established": False,
+        "final_experiment_eligibility_established": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        final,
+        {
+            "contract-quality-reviews.json": frozen_reviews,
+            "reviewer-qualified-contracts.json": reviewer_qualified_contracts,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def assemble_semantic_clusters(
     prepared_root: Path,
     candidates_root: Path,
@@ -260,8 +460,13 @@ def assemble_semantic_clusters(
     return _freeze_clusters(prepared, candidates, records, decisions, destination, plan)
 
 
-def _policy(root: Path, prompt_name: str) -> tuple[dict[str, Any], str, dict[str, Any]]:
-    config_path = root / "data/dataset-curation/qwen35flash.json"
+def _policy(
+    root: Path,
+    prompt_name: str,
+    *,
+    config_name: str = "qwen35flash.json",
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    config_path = root / f"data/dataset-curation/{config_name}"
     prompt_path = root / f"data/dataset-curation/{prompt_name}"
     evaluator = _object(read_json(config_path), "curation evaluator")
     prompt = prompt_path.read_text(encoding="utf-8").strip()
@@ -481,6 +686,68 @@ def _contract_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
             for index, item in enumerate(batch, start=1)
         ],
     }
+
+
+def _contract_review_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "request_kind": "blind_functional_contract_quality_review",
+        "cwe_arm_or_outcomes_included": False,
+        "tasks": [
+            {
+                "item_index": index,
+                "language": item["language"],
+                "source_prompt": item["source_prompt"],
+                "proposed_contract": item["contract"],
+            }
+            for index, item in enumerate(batch, start=1)
+        ],
+    }
+
+
+def _parse_contract_reviews(
+    raw: bytes, batch: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    value = _json_object(raw)
+    if set(value) != {"reviews"}:
+        raise CurationError("contract-review response keys are not exact")
+    rows = _last_by_index(_rows(value["reviews"], "contract reviews"), len(batch), "review")
+    required = {
+        "item_index",
+        "contract_status",
+        "functional_evaluability",
+        "issue_codes",
+        "reason",
+    }
+    frozen = []
+    for row, item in zip(rows, batch, strict=True):
+        if set(row) != required:
+            raise CurationError("contract-review keys are invalid")
+        status = row["contract_status"]
+        evaluability = row["functional_evaluability"]
+        issues = row["issue_codes"]
+        if status not in _CONTRACT_REVIEW_STATUS or evaluability not in _FUNCTIONAL_EVALUABILITY:
+            raise CurationError("contract-review status is invalid")
+        if (
+            not isinstance(issues, list)
+            or not issues
+            or len(issues) > 6
+            or len(set(issues)) != len(issues)
+            or any(issue not in _CONTRACT_ISSUES for issue in issues)
+            or ((status == "faithful") != (issues == ["none"]))
+        ):
+            raise CurationError("contract-review issue codes are invalid")
+        _bounded(row["reason"], 1000, "contract-review reason")
+        frozen.append(
+            {
+                "cluster_id": item["cluster_id"],
+                "contract_status": status,
+                "functional_evaluability": evaluability,
+                "issue_codes": issues,
+                "reason": row["reason"],
+            }
+        )
+    return frozen
 
 
 def _parse_contracts(raw: bytes, batch: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -776,6 +1043,24 @@ def _contract_chars(item: dict[str, Any]) -> int:
     return len(item["source_prompt"])
 
 
+def _contract_review_chars(item: dict[str, Any]) -> int:
+    return len(item["source_prompt"]) + len(json.dumps(item["contract"], ensure_ascii=False))
+
+
+def _deterministic_contract_issues(contract: Mapping[str, Any]) -> list[str]:
+    requirements = contract.get("requirements")
+    if not isinstance(requirements, list):
+        raise CurationError("contract requirements are invalid")
+    if any(
+        marker in requirement.lower()
+        for requirement in requirements
+        if isinstance(requirement, str)
+        for marker in _RESPONSE_FORMAT_MARKERS
+    ):
+        return ["response_format_instruction_leak"]
+    return []
+
+
 def _json_object(raw: bytes) -> dict[str, Any]:
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
@@ -834,5 +1119,6 @@ __all__ = [
     "CurationError",
     "assemble_semantic_clusters",
     "run_contract_curation",
+    "run_contract_quality_review",
     "run_semantic_curation",
 ]

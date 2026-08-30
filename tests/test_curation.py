@@ -9,9 +9,11 @@ from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_b
 from prompt_mechanism_study.curation import (
     CurationError,
     _parse_contracts,
+    _parse_contract_reviews,
     _parse_semantic,
     assemble_semantic_clusters,
     run_contract_curation,
+    run_contract_quality_review,
 )
 from prompt_mechanism_study.records import content_id
 
@@ -296,6 +298,101 @@ def test_contract_parser_accepts_a_bound_language_and_nine_requirements() -> Non
 
     assert result[0]["requirements"] == contract["requirements"]
     assert "language" not in result[0]
+
+
+def test_contract_quality_review_freezes_only_faithful_sufficient_contracts(
+    tmp_path: Path,
+) -> None:
+    records = [
+        {
+            "record_id": "record-a",
+            "prompt": "Return A.",
+            "prompt_sha256": "a" * 64,
+            "language": "python",
+        },
+        {
+            "record_id": "record-b",
+            "prompt": "Return B.",
+            "prompt_sha256": "b" * 64,
+            "language": "python",
+        },
+    ]
+    contracts = []
+    for suffix in ("a", "b"):
+        core = {
+            "cluster_id": f"cluster-{suffix}",
+            "entrypoint": None,
+            "environment_dependencies": [],
+            "inputs": [],
+            "outputs": [suffix.upper()],
+            "reason": "Explicit behavior.",
+            "record_id": f"record-{suffix}",
+            "requirements": [f"Return {suffix.upper()}."],
+            "resolution_status": "resolved",
+            "side_effects": [],
+            "source_prompt_sha256": suffix * 64,
+        }
+        contracts.append({**core, "contract_id": content_id("cluster_contract_", core)})
+    prepared = tmp_path / "prepared"
+    contract_root = tmp_path / "contracts"
+    write_bundle(prepared, {"records.json": records})
+    write_bundle(contract_root, {"functional-contracts.json": contracts})
+
+    def provider(request: dict, _config: object, _prompt: str) -> bytes:
+        assert request["cwe_arm_or_outcomes_included"] is False
+        return json.dumps(
+            {
+                "reviews": [
+                    {
+                        "item_index": 1,
+                        "contract_status": "faithful",
+                        "functional_evaluability": "sufficient",
+                        "issue_codes": ["none"],
+                        "reason": "The required return is exact.",
+                    },
+                    {
+                        "item_index": 2,
+                        "contract_status": "faulty",
+                        "functional_evaluability": "sufficient",
+                        "issue_codes": ["output_mismatch"],
+                        "reason": "The proposed output is not supported.",
+                    },
+                ]
+            }
+        ).encode()
+
+    output = tmp_path / "review"
+    report = run_contract_quality_review(
+        Path(__file__).parents[1],
+        prepared,
+        contract_root,
+        output,
+        provider=provider,
+    )
+
+    assert report["review_count"] == 2
+    assert report["reviewer_qualified_count"] == 1
+    assert report["semantic_quality_established"] is False
+    passed = read_json(output / "final/reviewer-qualified-contracts.json")
+    assert [item["cluster_id"] for item in passed] == ["cluster-a"]
+
+
+def test_contract_review_parser_rejects_faithful_rows_with_issue_codes() -> None:
+    raw = json.dumps(
+        {
+            "reviews": [
+                {
+                    "item_index": 1,
+                    "contract_status": "faithful",
+                    "functional_evaluability": "sufficient",
+                    "issue_codes": ["other"],
+                    "reason": "Contradictory coding.",
+                }
+            ]
+        }
+    ).encode()
+    with pytest.raises(CurationError):
+        _parse_contract_reviews(raw, [{"cluster_id": "cluster-a"}])
 
 
 def test_semantic_parser_collapses_only_identical_duplicate_json_keys() -> None:

@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "selection_rule": "First 25 contracts by ascending cluster_id; exposed while developing the contract-review policy.",
+  "arms_or_outcomes_used": false,
+  "task_unit_ids": [
+    "semantic_cluster_0019d2e9902a32f8fcf42ce79bf7369ef9c177afcab3b67c913802f29d783532",
+    "semantic_cluster_001b9638a82e0f1cfca74a36551011c6175aabb945ab8e25f5ca9aded9ba5bb7",
+    "semantic_cluster_004132fa4f5d0d882cdb838b6c5ec204e2c3a8c937b8f0dfec756645662ed349",
+    "semantic_cluster_0046b1d0ab837b83bcd0d0e9b2a0d7594957c567cf6b6b4ee3165d0f6960fdcf",
+    "semantic_cluster_004b3202628ec3c04ef7fa921e3b83e7193d9a0a504dbe2348746f312fbfc90b",
+    "semantic_cluster_006aa1df502e5a165c8ba0c3f2c740be81d6bc03a4aab2bf826aa7e0b2768aa6",
+    "semantic_cluster_00725be8e240b194a3bdd3fba210efca12641aaab4e811c1885b885ec0d791fb",
+    "semantic_cluster_00760b66aa91508c1697f41d2c4f93bdce6974a394cc9e5ff78fa1a6d26f9eb0",
+    "semantic_cluster_0083c30a1a37a2145378e418a9ea3e749eedd7184828940ffeb3693119a04eeb",
+    "semantic_cluster_00cd042370b90f6c4a4c3331d370d74a34fcac804831062a447c2adda64000ea",
+    "semantic_cluster_00cf068d5309050c73357bf887c0e4559bf2ef284f3c056e49922e67f13431d5",
+    "semantic_cluster_00ddff45d6c1bed5a562b31b5b4c9e87477cf2e98a18769ec681b39540709fb9",
+    "semantic_cluster_00ecf9cc654b73bf898a64c8e1ecb8cbd1749a4bdef35757fbdb2054375e9236",
+    "semantic_cluster_0100dbd3d75547d3f1dc55fafd08a54ff786f34c1e3436705e2dc63e8ecde9ed",
+    "semantic_cluster_010a4f3735158cc9b244f6b1a1971b6e030fe89c55f1a90fef62e3ace153c327",
+    "semantic_cluster_011418b75757bb33c596da2208a650c4bf65ff6232a9b6fd7b931e6908be26da",
+    "semantic_cluster_011920820d76ac49bcb91e49d341142058088da6ef0fd25355b4efb9e392f82d",
+    "semantic_cluster_01c61c8d08c3891f39189c65af6ab4d8645b0ba208dea1d0be7d6f70d1a3a1d0",
+    "semantic_cluster_01cac3a2add20b46c1d96a5cbc9cffebe04f9922ce6875736e7aad8686428b74",
+    "semantic_cluster_01d075cbdaaded756d6ed1e162b4f3522c0615dfe97f957d0cc8798ec3731a1c",
+    "semantic_cluster_01d3cd0c129d988caaf1ec23b614abe2a4f33e8986abc6729caf2f24980c2120",
+    "semantic_cluster_01d44625c41586a0659f21dd8529480fa2d829b7bb3af34e3227c8119c214780",
+    "semantic_cluster_01fdba1bf42696ff2d1514f6c7d79faefc5f70f41bc3ac16c71ecbc08384402b",
+    "semantic_cluster_020bdab485179de6c33129898b3c23aa0299df624651e656b69040f959d08927",
+    "semantic_cluster_023a090be380e2821bf6769c77a4bf3d68e9b52b997ec82e63c6b30bff983839"
+  ]
+}

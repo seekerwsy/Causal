@@ -326,6 +326,17 @@ by record ID and prompt hash. The remaining 321 contracts were extracted in 17
 blinded batches and all resolved, so the active contract set now covers all
 2,165 representatives. The frozen local bundles are:
 
+Here, `resolved` means that every representative received a schema-valid extracted
+contract; it does **not** mean that all 2,165 contracts passed an independent
+semantic-quality review. A later outcome-blind 25-contract development pilot found
+that one strong LLM reviewer was not accurate enough to serve as an automatic gate
+(fault precision and recall were both 4/6 on the pilot), while a deterministic scan
+found 71 contracts containing response-format instructions as functional
+requirements. The successor review therefore treats LLM output as triage and
+requires a corrected contract bundle plus independent adjudication for tasks that
+may enter a formal experiment. See
+`docs/experiments/2026-08-31-functional-contract-review-pilot.md`.
+
 - semantic pair decisions:
   `.codex-runtime/semantic-curation-seven-v9-strict-20260823-12/final`,
   SHA-256 `ecd11b14e55241aa5bf912e90abb1b1b65e09c1543d5ffd47b63efdba46dea26`;

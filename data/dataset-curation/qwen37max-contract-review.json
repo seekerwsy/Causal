@@ -1,0 +1,75 @@
+{
+  "api_key_env": "ALI_BAILIAN_API_KEY",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "enable_thinking": true,
+  "max_response_bytes": 65536,
+  "model_id": "qwen3.7-max-2026-05-20",
+  "provider": "ali_bailian_pay_as_you_go",
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "functional_contract_quality_review",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reviews"],
+        "properties": {
+          "reviews": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "item_index",
+                "contract_status",
+                "functional_evaluability",
+                "issue_codes",
+                "reason"
+              ],
+              "properties": {
+                "item_index": {"type": "integer"},
+                "contract_status": {
+                  "type": "string",
+                  "enum": ["faithful", "faulty", "uncertain"]
+                },
+                "functional_evaluability": {
+                  "type": "string",
+                  "enum": ["sufficient", "limited", "insufficient"]
+                },
+                "issue_codes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "unsupported_requirement",
+                      "missing_explicit_requirement",
+                      "entrypoint_mismatch",
+                      "input_mismatch",
+                      "output_mismatch",
+                      "side_effect_mismatch",
+                      "dependency_mismatch",
+                      "security_requirement_injected",
+                      "prompt_not_software_task",
+                      "external_context_missing",
+                      "ambiguous_interface",
+                      "uncertain_semantics",
+                      "other"
+                    ]
+                  }
+                },
+                "reason": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "schema_version": "1.0",
+  "seed": 94002,
+  "temperature": 0.0,
+  "timeout_seconds": 180.0,
+  "top_p": 1.0
+}
