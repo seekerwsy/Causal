@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_FAILED_BEFORE_BUNDLE",
+  "freeze_sha256": "50d11dd4ac28a5aa680a444b917c2a447c23df585c30d6c5b9185f7de8312de2",
+  "method_revision_commit": "4e1be804e673abb3c36f992ce4b3250d485af60a",
+  "provider_calls": "unknown; at least 2 and at most 56",
+  "formal_task_units_conservatively_treated_as_exposed": 28,
+  "response_artifacts_retained": false,
+  "graphs_retained": 0,
+  "gate_score_computed": false,
+  "failure": "One reviewer response omitted or substituted at least one task-scope semantic decision identity.",
+  "root_cause": "The static strict JSON Schema fixed row field types but represented decisions as arrays, so it could not require the task-specific finite set of semantic and relation identities.",
+  "disposition": "v8 remains immutable and is not qualified. A prospective successor derives a strict task-specific keyed schema from the frozen catalog scope, making every semantic and relation coordinate a required property while retaining local semantic, evidence, consensus, and replay checks. No v8 semantic response or gold comparison was inspected.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

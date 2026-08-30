@@ -102,11 +102,13 @@ relation 的端点状态采用一个总序真值表，而不是两条可冲突�
 原始标注进入图校验前由程序执行；LLM 的原始表仍原样保存，因此逻辑冗余字段既不能
 覆盖端点事实，也不会因格式一致但逻辑冗余的误判中断整批任务。
 
-LLM 到合同的传输层使用冻结的 strict JSON Schema，只约束两张表的字段、类型、nullable
-证据坐标、状态枚举和 attributes 数组。任务相关的行全集、语义 ID、evidence occurrence、
-catalog 属性、端点闭包与图重放仍由本地程序独立校验。v7 已越过端点闭包故障，但因
-`json_object` 不能保证行字段稳定而在写 bundle 前失败且未评分；后继版本只把传输模式
-改为百炼原生 `json_schema`，不放宽任何科学字段。
+LLM 到合同的传输层使用由冻结 task scope 确定性生成的 strict JSON Schema：
+`semantic_decisions` 以全部 semantic ID 为必需键，`relation_decisions` 以全部关系坐标为
+必需键，两者都禁止额外键；键值中仍保留开放的 evidence 与 rationale。任务相关的键
+全集、evidence occurrence、catalog 属性、端点闭包、共识与图重放还会由本地程序独立
+复算。v7 证明 `json_object` 不能保证字段；v8 又证明静态 row-array schema 不能保证
+任务级行全集。两次都在 bundle 前失败且未评分。后继版本把有限词表直接编译为任务级
+keyed schema，不通过重试或 parser 放宽掩盖错误。
 
 ### 3.3 原子假设
 

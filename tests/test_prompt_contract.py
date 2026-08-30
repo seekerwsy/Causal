@@ -19,6 +19,7 @@ from prompt_mechanism_study.prompt_contract_extract import (
     consensus_contract,
     contract_decision_request,
     contract_from_response,
+    contract_response_format,
     extract_contract_task_file,
 )
 from prompt_mechanism_study.prompt_contract_qualification import (
@@ -114,9 +115,8 @@ def _contract(task, catalog):
 def _response(contract):
     return json.dumps(
         {
-            "semantic_decisions": [
-                {
-                    "semantic_id": row.semantic_id,
+            "semantic_decisions": {
+                row.semantic_id: {
                     "state": row.state.value,
                     "rationale": row.rationale,
                     "evidence_text": row.evidence_text,
@@ -124,17 +124,14 @@ def _response(contract):
                     "attributes": [key for key, value in row.attributes if value],
                 }
                 for row in contract.semantic_decisions
-            ],
-            "relation_decisions": [
-                {
-                    "source_semantic_id": row.source_semantic_id,
-                    "edge_type": row.edge_type,
-                    "target_semantic_id": row.target_semantic_id,
+            },
+            "relation_decisions": {
+                "|".join(row.relation): {
                     "state": row.state.value,
                     "rationale": row.rationale,
                 }
                 for row in contract.relation_decisions
-            ],
+            },
         }
     ).encode()
 
@@ -197,11 +194,26 @@ def test_blind_request_is_exhaustive_and_contains_no_arm_or_outcome():
 
     assert request["query_ids"] == list(scope["query_ids"])
     assert set(request["candidate_semantics"]) == set(scope["semantic_ids"])
-    assert {tuple(row) for row in request["candidate_relations"]} == set(
+    assert {tuple(row) for row in request["candidate_relations"].values()} == set(
         scope["relations"]
     )
     assert request["arms_or_outcomes_included"] is False
     assert "generated" not in json.dumps(request).lower()
+
+
+def test_task_specific_response_schema_requires_every_finite_decision_key():
+    task, catalog = _inputs()
+    request = contract_decision_request(task, catalog)
+    schema = contract_response_format(request)["json_schema"]["schema"]
+
+    semantic_schema = schema["properties"]["semantic_decisions"]
+    relation_schema = schema["properties"]["relation_decisions"]
+    assert set(semantic_schema["required"]) == set(request["candidate_semantics"])
+    assert set(semantic_schema["properties"]) == set(request["candidate_semantics"])
+    assert set(relation_schema["required"]) == set(request["candidate_relations"])
+    assert set(relation_schema["properties"]) == set(request["candidate_relations"])
+    assert semantic_schema["additionalProperties"] is False
+    assert relation_schema["additionalProperties"] is False
 
 
 def test_absent_endpoint_dominates_unresolved_endpoint_for_relation_state():
@@ -266,7 +278,7 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
         review_status="development_exposed",
     )
     value = json.loads(_response(base))
-    value["semantic_decisions"].pop()
+    value["semantic_decisions"].pop(next(iter(value["semantic_decisions"])))
     with pytest.raises(PromptContractExtractionError, match="not exhaustive"):
         contract_from_response(
             json.dumps(value).encode(),
@@ -276,7 +288,7 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
             review_status="development_exposed",
         )
     value = json.loads(_response(base))
-    value["semantic_decisions"][0]["attributes"] = {}
+    next(iter(value["semantic_decisions"].values()))["attributes"] = {}
     with pytest.raises(PromptContractExtractionError, match="attributes are invalid"):
         contract_from_response(
             json.dumps(value).encode(),
@@ -309,18 +321,14 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
 def test_response_parser_deterministically_closes_relation_endpoint_states():
     task, catalog = _inputs()
     value = json.loads(_response(_contract(task, catalog)))
-    semantic = next(
-        row
-        for row in value["semantic_decisions"]
-        if row["semantic_id"] == "source.dynamic_sql_identifier"
-    )
+    semantic = value["semantic_decisions"]["source.dynamic_sql_identifier"]
     semantic.update(
         state="unresolved", evidence_text=None, occurrence=None, attributes=[]
     )
     relation = next(
         row
-        for row in value["relation_decisions"]
-        if row["source_semantic_id"] == "source.dynamic_sql_identifier"
+        for relation_id, row in value["relation_decisions"].items()
+        if relation_id.startswith("source.dynamic_sql_identifier|")
     )
     relation["state"] = "present"
 
@@ -439,7 +447,10 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
 
     def provider(request, evaluator_record, prompt):
         assert request["arms_or_outcomes_included"] is False
-        assert ("response_format" in evaluator_record) is structured_output
+        response_schema = evaluator_record["response_format"]["json_schema"]["schema"]
+        assert set(
+            response_schema["properties"]["semantic_decisions"]["required"]
+        ) == set(request["candidate_semantics"])
         return _response(contract)
 
     extraction = tmp_path / "extraction"
@@ -497,6 +508,7 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
     )
 
     assert report["provider_calls"] == 2
+    assert ("proposer_response_format_sha256" in report) is structured_output
     assert qualification["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION"
     assert qualification["exact_context_accuracy"] == 1.0
 

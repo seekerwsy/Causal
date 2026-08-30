@@ -216,13 +216,16 @@ state and a redundant relation-state mistake cannot abort the task batch. The un
 remains in the artifact for audit. Arms and outcomes are unavailable when
 the contract is produced and reviewed.
 
-The provider transport uses a frozen strict JSON Schema that fixes the two table
-arrays, every row field, nullable evidence coordinates, state enum, and attribute
-array type. This is a transport constraint only: the local parser still verifies
-the task-dependent row identities and completeness, exact evidence occurrences,
-catalog attributes, endpoint closure, and graph replay. The schema file and both
-evaluator references are content-addressed. JSON Object mode is not sufficient
-because it guarantees valid JSON but not stable keys or types.
+The provider transport uses a deterministic strict JSON Schema derived from the
+frozen task scope. `semantic_decisions` is an object whose required properties are
+exactly `S_t`; `relation_decisions` is an object whose required properties encode
+exactly `R_t`. Each property has the frozen state/evidence/rationale/attribute value
+schema and both objects reject additional properties. This makes omission,
+duplication, and scope widening structurally impossible while leaving evidence and
+rationale text open. The local parser still verifies the independently derived key
+set, exact evidence occurrences, catalog attributes, endpoint closure, consensus,
+and graph replay. JSON Object mode or one static row-array schema is insufficient:
+neither can require a task-dependent finite identity set.
 
 Two LLM calls with different frozen seeds independently complete this finite table from the same
 source-only request; neither sees the other's output. State disagreement becomes `UNRESOLVED`.

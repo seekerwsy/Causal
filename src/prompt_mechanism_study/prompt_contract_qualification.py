@@ -23,9 +23,10 @@ from prompt_mechanism_study.prompt_contract_extract import (
     consensus_contract,
     contract_decision_request,
     contract_from_response,
+    contract_response_format,
 )
 from prompt_mechanism_study.prompt_tsg import load_catalog, prompt_tsg_record
-from prompt_mechanism_study.records import canonical_json
+from prompt_mechanism_study.records import canonical_json, content_hash
 
 
 class PromptContractQualificationError(RuntimeError):
@@ -129,6 +130,7 @@ def qualify_prompt_contract_extractor(
         "proposer_prompt_sha256": _sha256(proposer_prompt_path),
         "reviewer_evaluator_sha256": _sha256(reviewer_evaluator_path),
         "reviewer_prompt_sha256": _sha256(reviewer_prompt_path),
+        "response_protocol_id": "task_keyed_prompt_contract_json_schema_v1",
         "review_status": "prospective_frozen",
         "arms_or_outcomes_used": False,
     }
@@ -188,6 +190,7 @@ def qualify_prompt_contract_extractor(
         response = response_by_task[case["task_id"]]
         response_fields = {
             "task_id",
+            "response_format_sha256",
             "proposer_response_sha256",
             "proposer_response_text",
             "reviewer_response_sha256",
@@ -195,6 +198,11 @@ def qualify_prompt_contract_extractor(
         }
         if set(response) != response_fields:
             raise PromptContractQualificationError("Prompt contract response closure fields are invalid")
+        expected_request = contract_decision_request(task, catalog)
+        if response["response_format_sha256"] != content_hash(
+            contract_response_format(expected_request)
+        ):
+            raise PromptContractQualificationError("Prompt contract response format identity is invalid")
         proposer_raw = response["proposer_response_text"].encode("utf-8")
         reviewer_raw = response["reviewer_response_text"].encode("utf-8")
         if (
@@ -235,7 +243,7 @@ def qualify_prompt_contract_extractor(
         except PromptTSGError as error:
             raise PromptContractQualificationError(str(error)) from None
         if (
-            request_by_task[case["task_id"]] != contract_decision_request(task, catalog)
+            request_by_task[case["task_id"]] != expected_request
             or prompt_tsg_record(graph) != graph_by_task[case["task_id"]]
             or contract.annotator_id != candidate_id
             or contract.review_status != "prospective_frozen"

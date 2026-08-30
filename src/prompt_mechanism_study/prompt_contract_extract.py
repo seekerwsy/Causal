@@ -33,7 +33,6 @@ from prompt_mechanism_study.records import content_hash
 Provider = Callable[[dict[str, Any], Mapping[str, Any], str], bytes]
 _RESPONSE_FIELDS = {"semantic_decisions", "relation_decisions"}
 _SEMANTIC_FIELDS = {
-    "semantic_id",
     "state",
     "rationale",
     "evidence_text",
@@ -41,16 +40,92 @@ _SEMANTIC_FIELDS = {
     "attributes",
 }
 _RELATION_FIELDS = {
-    "source_semantic_id",
-    "edge_type",
-    "target_semantic_id",
     "state",
     "rationale",
 }
+_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v1"
 
 
 class PromptContractExtractionError(RuntimeError):
     """The frozen request, model decision table, or extraction closure is invalid."""
+
+
+def _relation_decision_key(relation: Sequence[str]) -> str:
+    if len(relation) != 3 or any(not value or "|" in value for value in relation):
+        raise PromptContractExtractionError("relation cannot be encoded as a decision key")
+    return "|".join(relation)
+
+
+def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a strict task-specific schema whose required keys close the finite scope."""
+
+    semantics = request.get("candidate_semantics")
+    relations = request.get("candidate_relations")
+    if (
+        not isinstance(semantics, dict)
+        or not semantics
+        or not isinstance(relations, dict)
+        or not relations
+        or any(not isinstance(key, str) or not key for key in (*semantics, *relations))
+    ):
+        raise PromptContractExtractionError("response schema scope is invalid")
+    semantic_value = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": sorted(_SEMANTIC_FIELDS),
+        "properties": {
+            "state": {
+                "type": "string",
+                "enum": ["present", "absent", "unresolved"],
+            },
+            "rationale": {"type": "string"},
+            "evidence_text": {"type": ["string", "null"]},
+            "occurrence": {"type": ["integer", "null"]},
+            "attributes": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    relation_value = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": sorted(_RELATION_FIELDS),
+        "properties": {
+            "state": {
+                "type": "string",
+                "enum": ["present", "absent", "unresolved"],
+            },
+            "rationale": {"type": "string"},
+        },
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "task_keyed_prompt_contract",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": sorted(_RESPONSE_FIELDS),
+                "properties": {
+                    "semantic_decisions": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": sorted(semantics),
+                        "properties": {
+                            semantic_id: semantic_value for semantic_id in semantics
+                        },
+                    },
+                    "relation_decisions": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": sorted(relations),
+                        "properties": {
+                            relation_id: relation_value for relation_id in relations
+                        },
+                    },
+                },
+            },
+        },
+    }
 
 
 def _close_relation_endpoint_states(
@@ -132,16 +207,19 @@ def contract_decision_request(
             }
             for semantic_id in scope["semantic_ids"]
         },
-        "candidate_relations": [list(relation) for relation in scope["relations"]],
+        "candidate_relations": {
+            _relation_decision_key(relation): list(relation)
+            for relation in scope["relations"]
+        },
         "allowed_attributes": list(catalog["attribute_names"]),
         "decision_states": ["present", "absent", "unresolved"],
         "arms_or_outcomes_included": False,
         "output_contract": {
             "top_level_keys": ["semantic_decisions", "relation_decisions"],
-            "semantic_decision_keys": sorted(_SEMANTIC_FIELDS),
-            "relation_decision_keys": sorted(_RELATION_FIELDS),
-            "semantic_rows": "exactly one row for every candidate_semantics key",
-            "relation_rows": "exactly one row for every candidate_relations triple",
+            "semantic_decision_value_keys": sorted(_SEMANTIC_FIELDS),
+            "relation_decision_value_keys": sorted(_RELATION_FIELDS),
+            "semantic_rows": "object keyed exactly by every candidate_semantics key",
+            "relation_rows": "object keyed exactly by every candidate_relations key",
             "present_semantic_evidence": (
                 "exact contiguous source_prompt substring plus 1-based occurrence"
             ),
@@ -171,15 +249,32 @@ def contract_from_response(
         raise PromptContractExtractionError("contract response is not JSON") from None
     if not isinstance(value, dict) or set(value) != _RESPONSE_FIELDS:
         raise PromptContractExtractionError("contract response fields are invalid")
+    scope = task_context_scope(
+        cwe_id=task["cwe"], task_family=task["task_family"], catalog=catalog
+    )
+    expected_semantics = set(scope["semantic_ids"])
+    relation_by_key = {
+        _relation_decision_key(relation): relation for relation in scope["relations"]
+    }
     semantic_rows = value["semantic_decisions"]
     relation_rows = value["relation_decisions"]
-    if (
-        not isinstance(semantic_rows, list)
-        or not isinstance(relation_rows, list)
-        or any(not isinstance(row, dict) or set(row) != _SEMANTIC_FIELDS for row in semantic_rows)
-        or any(not isinstance(row, dict) or set(row) != _RELATION_FIELDS for row in relation_rows)
+    if not isinstance(semantic_rows, dict) or not isinstance(relation_rows, dict):
+        raise PromptContractExtractionError("contract decision tables are invalid")
+    if set(semantic_rows) != expected_semantics or set(relation_rows) != set(
+        relation_by_key
     ):
-        raise PromptContractExtractionError("contract decision rows are invalid")
+        raise PromptContractExtractionError("contract decision rows are not exhaustive")
+    if (
+        any(
+            not isinstance(row, dict) or set(row) != _SEMANTIC_FIELDS
+            for row in semantic_rows.values()
+        )
+        or any(
+            not isinstance(row, dict) or set(row) != _RELATION_FIELDS
+            for row in relation_rows.values()
+        )
+    ):
+        raise PromptContractExtractionError("contract decision row fields are invalid")
     if any(
         not isinstance(row["attributes"], list)
         or any(
@@ -187,38 +282,35 @@ def contract_from_response(
             for attribute in row["attributes"]
         )
         or len(row["attributes"]) != len(set(row["attributes"]))
-        for row in semantic_rows
+        for row in semantic_rows.values()
     ):
         raise PromptContractExtractionError("contract semantic attributes are invalid")
     try:
         semantic_decisions = tuple(
             SemanticDecision(
-                row["semantic_id"],
+                semantic_id,
                 QueryState(row["state"]),
                 row["rationale"],
                 row["evidence_text"],
                 row["occurrence"],
                 tuple((attribute, True) for attribute in sorted(row["attributes"])),
             )
-            for row in semantic_rows
+            for semantic_id, row in semantic_rows.items()
         )
         relation_decisions = tuple(
             RelationDecision(
-                row["source_semantic_id"],
-                row["edge_type"],
-                row["target_semantic_id"],
+                relation_by_key[relation_id][0],
+                relation_by_key[relation_id][1],
+                relation_by_key[relation_id][2],
                 QueryState(row["state"]),
                 row["rationale"],
             )
-            for row in relation_rows
+            for relation_id, row in relation_rows.items()
         )
     except (AttributeError, KeyError, TypeError, ValueError):
         raise PromptContractExtractionError("contract decision values are invalid") from None
     relation_decisions = _close_relation_endpoint_states(
         semantic_decisions, relation_decisions
-    )
-    scope = task_context_scope(
-        cwe_id=task["cwe"], task_family=task["task_family"], catalog=catalog
     )
     contract = TaskContextContract(
         "2.0",
@@ -354,8 +446,13 @@ def extract_task_contract(
     """Run two source-only annotations and compile their deterministic consensus."""
 
     request = contract_decision_request(task, catalog)
-    proposer_raw = provider(request, proposer_evaluator, proposer_prompt)
-    reviewer_raw = provider(request, reviewer_evaluator, reviewer_prompt)
+    response_format = contract_response_format(request)
+    proposer_raw = provider(
+        request, {**proposer_evaluator, "response_format": response_format}, proposer_prompt
+    )
+    reviewer_raw = provider(
+        request, {**reviewer_evaluator, "response_format": response_format}, reviewer_prompt
+    )
     proposer = contract_from_response(
         proposer_raw,
         task=task,
@@ -450,6 +547,9 @@ def extract_contract_task_file(
         responses.append(
             {
                 "task_id": task["task_id"],
+                "response_format_sha256": content_hash(
+                    contract_response_format(request)
+                ),
                 "proposer_response_sha256": hashlib.sha256(proposer_raw).hexdigest(),
                 "proposer_response_text": proposer_raw.decode("utf-8"),
                 "reviewer_response_sha256": hashlib.sha256(reviewer_raw).hexdigest(),
@@ -475,6 +575,7 @@ def extract_contract_task_file(
         "reviewer_prompt_sha256": _sha256(reviewer_prompt_path),
         "extractor_implementation_sha256": _sha256(Path(__file__)),
         "provider_adapter_sha256": _sha256(Path(provider.__code__.co_filename)),
+        "response_protocol_id": _RESPONSE_PROTOCOL_ID,
         "unresolved_task_units": sum(bool(graph["unresolved_semantics"]) for graph in graphs),
         "review_status": review_status,
         "arms_or_outcomes_used": False,
@@ -564,6 +665,7 @@ __all__ = [
     "consensus_contract",
     "contract_decision_request",
     "contract_from_response",
+    "contract_response_format",
     "extract_contract_task_file",
     "extract_task_contract",
 ]
