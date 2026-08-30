@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Prospective external Prompt TSG qualification population; not an intervention-effect dataset.",
+  "method_revision_commit": "c3f18f2",
+  "source": {
+    "dataset": "SecCodeBench",
+    "repository": "https://github.com/alibaba/sec-code-bench",
+    "commit": "67126efb88c6dd75f1fb4963048cab2f7b23d83d",
+    "tag": "v2.2.0",
+    "license": "Apache-2.0",
+    "manifest_path": "datasets/benchmark/python/python.json",
+    "manifest_git_blob_sha1": "1c6144450aeb29a856024e32569b1809bacb27d8",
+    "manifest_bytes": 19226,
+    "manifest_sha256": "38cbcfe5fa3ff636db781b937a3813a69920efec7c664f877032ce4382a30dd8",
+    "license_git_blob_sha1": "f49a4e16e68b128803cc2dcea614603632b04eac",
+    "license_sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+  },
+  "population_rule": {
+    "language": "python",
+    "scenario": "gen",
+    "manifest_cases": 13,
+    "mapped_cases": 10,
+    "query_scope_exclusions": [
+      {
+        "upstream_id": "SSTIFlaskRenderTemplateString",
+        "reason": "No frozen Prompt TSG context query or mechanism realization covers server-side template injection."
+      },
+      {
+        "upstream_id": "SSTIJinja2Template",
+        "reason": "No frozen Prompt TSG context query or mechanism realization covers server-side template injection."
+      },
+      {
+        "upstream_id": "CodeInjectionEval",
+        "reason": "No frozen Prompt TSG context query or mechanism realization covers arbitrary-code evaluation."
+      }
+    ],
+    "semantic_overlap_exclusions": 0,
+    "frozen_task_units": 10,
+    "selection": "Complete census of Python gen cases whose CWE/task-family coordinates were already registered before this source was selected. Fix, hint, and duplicate scenario variants are not independent task units."
+  },
+  "source_files": [
+    {
+      "upstream_id": "SSRFUrllib",
+      "source_path": "docs/json/v/2.1.0/testcase-info/SSRFUrllib.json",
+      "git_blob_sha1": "42c832d81d607c0bfb06588d7590fb40889f6181",
+      "source_bytes": 36236,
+      "source_sha256": "7ab999603a11d2d09017e612839541529f03a7eef176aa5adc76fc05fa1c3db7",
+      "prompt_sha256": "b10faec6cf09f06a6fa5d1e672f7425eeda32d0d3b4f459e9f301cf32ee59fe2"
+    },
+    {
+      "upstream_id": "SSRFRequests",
+      "source_path": "docs/json/v/2.1.0/testcase-info/SSRFRequests.json",
+      "git_blob_sha1": "edaa000bca9fd77d03e5ee2a3f5ddfe5d59ee69d",
+      "source_bytes": 43017,
+      "source_sha256": "7c39339bd359d7f709690961a1a78e0312eb04241a9a73c81280a17e851b76ce",
+      "prompt_sha256": "d059427337b86f34efd68df7602936a71e8269701d1686aff403b397c0f46f4f"
+    },
+    {
+      "upstream_id": "DeserializationPyYAML",
+      "source_path": "docs/json/v/2.1.0/testcase-info/DeserializationPyYAML.json",
+      "git_blob_sha1": "c6e366ca43a099986a33abdab9d1f521b2ef1e87",
+      "source_bytes": 50761,
+      "source_sha256": "62ac0bd903bb49f642ee375ea46f7de714d390440209fd1cd9667d569ddabfb3",
+      "prompt_sha256": "8f155f0e527ebb827da2e2e6ed286dce84b77a42079d7e89464e48b235f96676"
+    },
+    {
+      "upstream_id": "DeserializationTorchLoad",
+      "source_path": "docs/json/v/2.1.0/testcase-info/DeserializationTorchLoad.json",
+      "git_blob_sha1": "c2552469f0f79170287cd82918b8e0924c8b0748",
+      "source_bytes": 22716,
+      "source_sha256": "378b8e8ae45ed291cd9e6be9d5724ca19e746b51d09ca3590d165d0cdb29422f",
+      "prompt_sha256": "2da367e2f1f1aff411ea2be3a51a8dd6f346ac8edc56dd8fa0925fbfea7df913"
+    },
+    {
+      "upstream_id": "DeserializationPickle",
+      "source_path": "docs/json/v/2.1.0/testcase-info/DeserializationPickle.json",
+      "git_blob_sha1": "7780132640678bd9ef8e869560aebe00d46145d8",
+      "source_bytes": 38887,
+      "source_sha256": "607dfbfc4777507123cd0104d230d232bbbb5ae30bc422c56e2fa84513db91dd",
+      "prompt_sha256": "debb9506e99fe1a5ab5942f86c7df5130f342223efe19ab9b84fde5f98659c29"
+    },
+    {
+      "upstream_id": "SQLInjectionSQLite3",
+      "source_path": "docs/json/v/2.1.0/testcase-info/SQLInjectionSQLite3.json",
+      "git_blob_sha1": "87322be6df675ae48f92a8f66daca694f6cbd002",
+      "source_bytes": 86270,
+      "source_sha256": "ba96662a65789cb867c2deaf7261774db94a42e13bfbc86d919489cb1ef3d9ad",
+      "prompt_sha256": "37c797a73d80b71a7538ff82b9e021f25a766137acb070f83fd92587d90d5754"
+    },
+    {
+      "upstream_id": "SQLInjectionPsycopg2",
+      "source_path": "docs/json/v/2.1.0/testcase-info/SQLInjectionPsycopg2.json",
+      "git_blob_sha1": "e94821dc1e66b31d00fd9c9dd9cc2f72ea9e9dae",
+      "source_bytes": 98065,
+      "source_sha256": "2d4a12ab80e99c000345dc36b9e51c0af4794e82a3bb787a052304685c38b029",
+      "prompt_sha256": "6374e3b255783a7928d6ca2ace247f3246204cdd2b45f050b658c8fae314e39c"
+    },
+    {
+      "upstream_id": "SQLInjectionPyMySQL",
+      "source_path": "docs/json/v/2.1.0/testcase-info/SQLInjectionPyMySQL.json",
+      "git_blob_sha1": "8ea63299bcc30760b9117aeef69b04b9e35ed925",
+      "source_bytes": 86574,
+      "source_sha256": "5b72a9fe16fd52a4c960cb3117d5581d63efc13b2c33d08d5087c97f82aec0c6",
+      "prompt_sha256": "90f1a9c581196a6357b26dce895d42d95a027bc92d8b789ee901f3d9792adc97"
+    },
+    {
+      "upstream_id": "CommandInjectionSubprocessRun",
+      "source_path": "docs/json/v/2.1.0/testcase-info/CommandInjectionSubprocessRun.json",
+      "git_blob_sha1": "56f9f99e63583b9222d0b48493ec3ad63c9ae656",
+      "source_bytes": 32281,
+      "source_sha256": "16b8dda1c6fa81607eccc89d110a7e3c840627a7af01d49cfa58a488d3323464",
+      "prompt_sha256": "9b70162c94d7c6206b6038cd91af6a3cc28bca9eb2ba590b62f4863519859bf3"
+    },
+    {
+      "upstream_id": "CommandInjectionSubprocessPopen",
+      "source_path": "docs/json/v/2.1.0/testcase-info/CommandInjectionSubprocessPopen.json",
+      "git_blob_sha1": "ac93f17ed57983d5320f25f500dc1abafb431f45",
+      "source_bytes": 43597,
+      "source_sha256": "0b6e459436d951504eb63be7252fe023deca9f69692565eb223e2b37da058370",
+      "prompt_sha256": "0743a8bbdd5c386b2cda65864d881eae2a5cf9d7812669989dd8a8ab3deae4d1"
+    }
+  ],
+  "overlap_audit": {
+    "comparison_populations": [
+      "The previously curated seven-source task corpus",
+      "The exposed AI-Security-Benchmark external qualification population"
+    ],
+    "comparison_seven_source_records": 2283,
+    "comparison_seven_source_python_records": 969,
+    "comparison_prior_external_records": 16,
+    "normalized_exact_matches": 0,
+    "same_language_char_tfidf_nearest_max_against_seven_source": 0.3777312584021094,
+    "same_language_char_tfidf_mean_nearest_against_seven_source": 0.2475195865565026,
+    "char_tfidf_nearest_max_against_prior_external": 0.3206940446778244,
+    "char_tfidf_mean_nearest_against_prior_external": 0.19715526016180562,
+    "semantic_review_rule": "Exclude only a pair that requires the same principal operation on the same object under a materially equivalent functional contract; sharing a CWE, library, or broad operation is insufficient.",
+    "semantic_overlap_exclusion_ids": []
+  },
+  "provenance_limits": [
+    "The generated documentation path is labelled v2.1.0 inside the pinned v2.2.0 repository tag; every consumed blob and extracted prompt is independently hashed.",
+    "SecCodeBench provides the task source, not authoritative gold labels for Prompt TSG semantics.",
+    "This population has no XML task and therefore cannot independently validate the prospective DTD-versus-external-entity clarification.",
+    "The external qualification supports transfer to this frozen Python population only; it is not a global semantic-parsing accuracy claim."
+  ],
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "source_tasks_sha256": "d7b1319ded453224daab13469380effb99cf96364dd9310995c1929f39f351e3",
+  "selection_rule": "Complete census of the 10 mapped SecCodeBench Python gen task units; query-scope and semantic-overlap decisions were completed before extraction, and no task was sampled or selected using extractor output, arms, or outcomes.",
+  "task_ids": [
+    "seccodebench_task_0743a8bbdd5c386b2cda65864d881eae2a5cf9d7812669989dd8a8ab3deae4d1",
+    "seccodebench_task_2da367e2f1f1aff411ea2be3a51a8dd6f346ac8edc56dd8fa0925fbfea7df913",
+    "seccodebench_task_37c797a73d80b71a7538ff82b9e021f25a766137acb070f83fd92587d90d5754",
+    "seccodebench_task_6374e3b255783a7928d6ca2ace247f3246204cdd2b45f050b658c8fae314e39c",
+    "seccodebench_task_8f155f0e527ebb827da2e2e6ed286dce84b77a42079d7e89464e48b235f96676",
+    "seccodebench_task_90f1a9c581196a6357b26dce895d42d95a027bc92d8b789ee901f3d9792adc97",
+    "seccodebench_task_9b70162c94d7c6206b6038cd91af6a3cc28bca9eb2ba590b62f4863519859bf3",
+    "seccodebench_task_b10faec6cf09f06a6fa5d1e672f7425eeda32d0d3b4f459e9f301cf32ee59fe2",
+    "seccodebench_task_d059427337b86f34efd68df7602936a71e8269701d1686aff403b397c0f46f4f",
+    "seccodebench_task_debb9506e99fe1a5ab5942f86c7df5130f342223efe19ab9b84fde5f98659c29"
+  ],
+  "arms_or_outcomes_used": false
+}
