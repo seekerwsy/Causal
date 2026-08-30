@@ -632,3 +632,52 @@ def test_prospective_v7_gate_freeze_closes_endpoint_projection_successor():
         path = ROOT / item["path"]
         if item["path"].startswith("data/"):
             assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+
+
+def test_prospective_v8_gate_freeze_closes_strict_schema_successor():
+    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
+    selection_path = (
+        ROOT / "data/method/prompt-tsg-external-qualification-selection-v8.json"
+    )
+    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v8.json"
+    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v8.json"
+    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v8.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    response_format_path = ROOT / freeze["inputs"]["response_format"]["path"]
+    response_format = json.loads(response_format_path.read_text(encoding="utf-8"))
+    pilot_report = json.loads(
+        (
+            ROOT
+            / "data/method/results/prompt-contract-json-schema-pilot-v1/report.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert [task["task_id"] for task in tasks] == selection["task_ids"]
+    assert selection["task_ids"] == [case["task_id"] for case in gold["cases"]]
+    assert selection["source_tasks_sha256"] == hashlib.sha256(
+        tasks_path.read_bytes()
+    ).hexdigest()
+    assert gold["extractor_candidate_id"] == freeze["extractor_candidate_id"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert hashlib.sha256(response_format_path.read_bytes()).hexdigest() == freeze[
+        "response_format_sha256"
+    ]
+    assert source["predecessor_disposition_path"] == (
+        "data/method/prompt-tsg-external-qualification-v7-failure.json"
+    )
+    assert source["prior_provider_exposure"] == freeze["prior_provider_exposure"]
+    assert pilot_report["status"] == freeze["provider_schema_pilot"]["status"]
+    assert pilot_report["provider_calls"] == freeze["provider_schema_pilot"][
+        "provider_calls"
+    ]
+    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert freeze["arms_or_outcomes_used"] is False
+    for item in freeze["inputs"].values():
+        if item["path"].startswith("data/"):
+            path = ROOT / item["path"]
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]

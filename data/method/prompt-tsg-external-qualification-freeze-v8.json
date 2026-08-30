@@ -1,0 +1,144 @@
+{
+  "schema_version": "2.0",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "freeze_date": "2026-08-31",
+  "protocol_id": "task_context_contract_v2_dual_blind_consensus_strict_json_schema_endpoint_closure",
+  "method_revision_commit": "4e1be804e673abb3c36f992ce4b3250d485af60a",
+  "extractor_candidate_id": "dual-blind-consensus:prompt-contract-proposer-qwen37max-v3+prompt-contract-reviewer-qwen37max-v3",
+  "response_transport": "provider-native strict JSON Schema followed by local dynamic completeness and evidence validation",
+  "response_format_sha256": "5750e790a510564432b26f79cb753274646e6f063f7f8b6bd581d1b79c676ac9",
+  "relation_endpoint_precedence": [
+    "any_absent_implies_absent",
+    "otherwise_any_unresolved_implies_unresolved",
+    "otherwise_consult_relation_annotation"
+  ],
+  "endpoint_closure_stage": "each independent annotation before graph validation and consensus",
+  "provider_calls_per_task": 2,
+  "provider_schema_pilot": {
+    "status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
+    "exposed_task_units": 3,
+    "provider_calls": 6,
+    "contracts": 3,
+    "graphs": 3,
+    "gate_accuracy_evidence": false
+  },
+  "frozen_task_units": 28,
+  "prior_provider_exposure": {
+    "conservatively_exposed_task_units": 28,
+    "retained_responses": 0,
+    "retained_graphs": 0,
+    "gate_score_computed": false,
+    "model_state_changed": false,
+    "researcher_inspected_semantic_output": false
+  },
+  "qualification_rule": {
+    "minimum_exact_context_accuracy": 0.9,
+    "minimum_present_recall": 0.8,
+    "maximum_false_positive_present": 0,
+    "maximum_wrong_realization": 0
+  },
+  "candidate_support_realization_ids": [
+    "cwe338_security_sensitive_randomness",
+    "cwe502_json_deserialization",
+    "cwe502_yaml_deserialization",
+    "cwe78_fixed_executable_argv",
+    "cwe89_sql_values"
+  ],
+  "inputs": {
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "mechanism_registry": {
+      "path": "data/method/mechanism-registry-v1.json",
+      "sha256": "f322e27aa1ce7dcc598427f7a0ab608d29ae9d17385a0bbe20e20a3dcd835e10"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37max-v3.json",
+      "sha256": "b17ec84f24ad323b13765fb4b5733570b0314e6e89c7f1f08057838e48d6395f"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v2.txt",
+      "sha256": "a8f62a150373d5e8bc1e98c4910ac0c04adf5c1b78d7262cd33e2208156a75f6"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37max-v3.json",
+      "sha256": "ff0956889d2c57ad26b565a57a252e039ab8498823fce73e46c34d2812c99125"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v2.txt",
+      "sha256": "8bf7870fda48fcf7e8bf78a8f0ae5e686c64f9dff43a8d4e39b1925bc132f936"
+    },
+    "response_format": {
+      "path": "data/method/prompt-contract-response-format-v1.json",
+      "sha256": "5750e790a510564432b26f79cb753274646e6f063f7f8b6bd581d1b79c676ac9"
+    },
+    "predecessor_disposition": {
+      "path": "data/method/prompt-tsg-external-qualification-v7-failure.json",
+      "sha256": "821c57320d57246e31ab9aa490b56ac84b84765a77d5f2eb4892130f3f8cd5ab"
+    },
+    "provider_schema_pilot_freeze": {
+      "path": "data/method/prompt-contract-json-schema-pilot-freeze-v1.json",
+      "sha256": "3883922adf90e37b0201f93b6408b436abb1dfaa69c8c3add753af8549189006"
+    },
+    "provider_schema_pilot_manifest": {
+      "path": "data/method/results/prompt-contract-json-schema-pilot-v1/manifest.json",
+      "sha256": "ffaa54eab90c66b9b1f67fb1c73a2ad72fb644aef4985fd6649f95302f90d987"
+    },
+    "provider_schema_pilot_report": {
+      "path": "data/method/results/prompt-contract-json-schema-pilot-v1/report.json",
+      "sha256": "72d2f24e66d8768526103b3d7e8504846c615b095f296bd68c43119037cd484b"
+    },
+    "source_manifest": {
+      "path": "data/method/prompt-tsg-external-qualification-source-v8.json",
+      "sha256": "46f119fc7ef9319bae436f678081851c05db28e24b7f755ec27bd46a76c7005e"
+    },
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v5.json",
+      "sha256": "6b4aca676b40e765bae8b7fe8477235210caa2c5258ada849aa130af798bdcad"
+    },
+    "selection": {
+      "path": "data/method/prompt-tsg-external-qualification-selection-v8.json",
+      "sha256": "fb05ad752893c80db51597b4a0c053934e1cd37746b71748e0b5b21ee08f3fce"
+    },
+    "gold": {
+      "path": "data/method/prompt-tsg-external-qualification-gold-v8.json",
+      "sha256": "8b449a4260b29bd136cc5a3bc380e4525567924cb51b21f960781a3a540a0038"
+    },
+    "contract_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract.py",
+      "sha256": "8793512a1892aaaa1f9f6cf04c0b9aac54ae7525c153661f5ecf49aff7eb5b9a"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_extract.py",
+      "sha256": "b760db6880505fc4d99f5f76d1b1f223f81f0752960c62f6ce626b730ed718b0"
+    },
+    "qualification_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_qualification.py",
+      "sha256": "414c4dcedd8b829fc0b3824f6acbfad9a6f91a657f25aab59d4314cfc2e278b8"
+    },
+    "graph_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_tsg.py",
+      "sha256": "b0131677b94a0dee251986e2cb60f0e3f5a8452c9cd84c67655cf40e3cbd1f27"
+    },
+    "binding_implementation": {
+      "path": "src/prompt_mechanism_study/mechanisms.py",
+      "sha256": "c9b6b3fab1a2ca979b6afab373cd5e28a27a76917e8c4ff16b534e22f8b0d57a"
+    },
+    "provider_adapter": {
+      "path": "src/prompt_mechanism_study/functional_judge.py",
+      "sha256": "4030b96b9655dc5842d9dc904c7daf751c3a5711361fdcf11c0c457e0595d163"
+    },
+    "artifact_io": {
+      "path": "src/prompt_mechanism_study/artifact_io.py",
+      "sha256": "f763219080fb50931ebb5d36a30400cf9a855441152c49fc8d3ab9eaf8779d29"
+    },
+    "records": {
+      "path": "src/prompt_mechanism_study/records.py",
+      "sha256": "a5d47d8344f09b3e239b74b1cb83f733c75afc69e6c0c09fe7230f15e4da594f"
+    }
+  },
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
