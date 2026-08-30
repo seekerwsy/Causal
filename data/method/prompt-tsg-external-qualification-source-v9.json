@@ -1,0 +1,142 @@
+{
+  "schema_version": "2.0",
+  "purpose": "Prospective qualification of the v9 task-level dual-blind Prompt TSG contract producer with task-keyed strict JSON Schema transport; not effect evidence or a prevalence sample.",
+  "method_revision_commit": "27f83821b1ddc6787c2a890a91517700698ce79d",
+  "predecessor_disposition_path": "data/method/prompt-tsg-external-qualification-v8-failure.json",
+  "prior_provider_exposure": {
+    "conservatively_exposed_task_units": 28,
+    "retained_responses": 0,
+    "retained_graphs": 0,
+    "gate_score_computed": false,
+    "model_state_changed": false,
+    "researcher_inspected_semantic_output": false
+  },
+  "source": {
+    "dataset": "DevEval",
+    "repository": "https://github.com/seketeam/DevEval",
+    "commit": "c1653455e0a18480a29aa07ba51636070f113316",
+    "license": "not_declared_in_pinned_repository",
+    "source_path": "Experiments/prompt/without_context/gpt-4-1106_prompt.jsonl",
+    "source_git_blob_sha1": "dbe31d7ef571dfde93c6983ddfa24291c3be8718",
+    "source_bytes": 1533143,
+    "source_sha256": "1798383d278e7dc907f4568cd9369bd424884298e4cf88af8c9ec55a08c5dbab",
+    "source_task_units": 1825
+  },
+  "population_rule": {
+    "language": "python",
+    "split": "without_context_gpt_4_1106",
+    "selection_mode": "source_only_coverage_stratified_challenge_set",
+    "selection_rule": "Reuse the source-only reviewed population after v8's static row-array schema allowed one task-specific semantic identity to be omitted before any response bundle or gold comparison existed. The frozen stateless model, seeds, gold labels, tasks, and thresholds are unchanged. Change transport shape only: deterministically compile each frozen task scope into strict keyed semantic and relation objects already validated on three exposed pilot tasks; conservatively treat all 28 tasks as previously provider-exposed.",
+    "selected_upstream_ids_by_family": {
+      "command_execution": [
+        "pyinfra.operations.files.rsync",
+        "mrjob.fs.ssh.SSHFilesystem._cat_file",
+        "mrjob.fs.hadoop.HadoopFilesystem.du",
+        "exodus_bundler.bundling.run_ldd",
+        "zulipterminal.helper.open_media",
+        "pyinfra.operations.server.shell"
+      ],
+      "credential_source": [
+        "datasette.utils.resolve_env_secrets",
+        "wandb.sdk.wandb_settings._redact_dict",
+        "authlib.oauth2.rfc6749.parameters.parse_implicit_response"
+      ],
+      "deserialization": [
+        "kinto.core.utils.json.loads",
+        "rest_framework.parsers.JSONParser.parse",
+        "rows.fields.JSONField.deserialize",
+        "awesome_autodl.autodl_topic2papers",
+        "kinto.core.utils.json.dumps",
+        "falcon.util.structures.ETag.loads"
+      ],
+      "message_hashing": [
+        "datasets.utils.file_utils.hash_url_to_filename",
+        "faker.utils.checksums.luhn_checksum",
+        "aioxmpp.entitycaps.caps390._calculate_hash"
+      ],
+      "security_random_generation": [
+        "pyramid.csrf.CookieCSRFStoragePolicy.new_csrf_token",
+        "bentoml._internal.utils.analytics.usage_stats.get_serve_info",
+        "faker.providers.misc.Provider.binary",
+        "django.utils.lorem_ipsum.sentence",
+        "pymc.smc.kernels.systematic_resampling"
+      ],
+      "sql_query": [
+        "threatingestor.state.State.save_state",
+        "sqlitedict.SqliteDict.iteritems",
+        "sqlitedict.SqliteDict.clear",
+        "datasette.filters.where_filters",
+        "sqlitedict.SqliteDict.commit"
+      ]
+    },
+    "frozen_task_units": 28
+  },
+  "support_scope": {
+    "candidate_realization_ids_with_expected_present_gold": [
+      "cwe338_security_sensitive_randomness",
+      "cwe502_json_deserialization",
+      "cwe502_yaml_deserialization",
+      "cwe78_fixed_executable_argv",
+      "cwe89_sql_values"
+    ],
+    "catalog_realization_ids_without_expected_present_gold": [
+      "cwe22_archive_extraction",
+      "cwe22_path_confinement",
+      "cwe328_security_sensitive_hash",
+      "cwe502_python_literal_deserialization",
+      "cwe611_xml_external_entity_control",
+      "cwe732_owner_only_file_permissions",
+      "cwe78_allowlisted_executable_argv",
+      "cwe798_external_credential_source",
+      "cwe89_dynamic_identifiers_and_values",
+      "cwe918_fixed_origin_request",
+      "cwe918_trusted_domain_subdomain"
+    ],
+    "rule": "A passing Gate supports only realization IDs represented by expected-present gold. CWE-328 and CWE-798 cases challenge false positives but do not qualify those realizations because this holdout has no unused expected-present DevEval case."
+  },
+  "overlap_audit": {
+    "against_seven_source": {
+      "comparison_records": 2283,
+      "raw_exact_matches": 0,
+      "normalized_exact_matches": 0
+    },
+    "against_prior_prompt_tsg_qualification": {
+      "comparison_task_units": 78,
+      "raw_exact_matches": 0,
+      "normalized_exact_matches": 0,
+      "namespace_matches": 0
+    },
+    "semantic_review_rule": "Exclude a task only when it requires the same principal operation on the same object under a materially equivalent functional contract; shared CWE, library, or broad operation is insufficient.",
+    "semantic_exclusions": [],
+    "review_completed_before_extraction": true
+  },
+  "gold_annotation": {
+    "annotator": "Codex source-only expert review requested by the project owner",
+    "inputs_used": [
+      "official DevEval prompt text",
+      "source namespace",
+      "catalog v11 semantic guidance and queries"
+    ],
+    "inputs_prohibited": [
+      "proposer or reviewer response",
+      "generated code",
+      "arm",
+      "Security Oracle result",
+      "Functional Judge result",
+      "experiment outcome"
+    ],
+    "independent_human_annotation": false,
+    "limitation": "These labels are an auditable expert method check, not an inter-rater-reliability study or a claim of human consensus."
+  },
+  "provenance_limits": [
+    "The selected set is deliberately balanced and adversarial and cannot estimate natural context prevalence in DevEval.",
+    "DevEval supplies prompts, not authoritative Prompt TSG labels; gold is a source-only method audit frozen before model extraction.",
+    "No top-level license file was present at the pinned repository commit; the artifact records the source URL, commit, exact source-file hash, and selected records.",
+    "A passing result is scoped to positively represented realizations and this frozen Python prompt population.",
+    "v9 is an engineering rerun on a conservatively exposed but label-hidden population; claims must disclose this protocol risk."
+  ],
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false
+}
+
+
