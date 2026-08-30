@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "source_manifest": "data/method/prompt-tsg-external-qualification-source-v1.json",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "exclusions": [
+    {
+      "upstream_id": "cmd_001",
+      "reason": "semantic_task_overlap",
+      "prior_record_id": "dataset_record_678402630c9d51f4ac3a591628479ced84fb65d0fb50613eeab7aaed29ae2570",
+      "prior_source": "cweval",
+      "rationale": "Both prompts require extracting a caller-provided tar archive into a caller-provided destination; wording and surface format differ but the principal operation and functional contract are the same."
+    },
+    {
+      "upstream_id": "sql_003",
+      "reason": "semantic_task_overlap",
+      "prior_record_id": "dataset_record_bf8f7d4d956d13c2ec0d9b08015f7aba9811a17ae83b568950054fde4749204a",
+      "prior_source": "llmseceval",
+      "rationale": "Both prompts implement username/password login by checking a users table; the principal operation and functional contract are the same."
+    }
+  ]
+}

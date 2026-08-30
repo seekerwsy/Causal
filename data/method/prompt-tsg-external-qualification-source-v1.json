@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Prospective external Prompt TSG qualification population; not an intervention-effect dataset.",
+  "source": {
+    "dataset": "AI-Security-Benchmark",
+    "repository": "https://github.com/miroku0000/AI-Security-Benchmark",
+    "commit": "c21cd8b601c85f8a5a32dd77dceb1533a2227104",
+    "source_path": "prompts/prompts.yaml",
+    "raw_url": "https://raw.githubusercontent.com/miroku0000/AI-Security-Benchmark/c21cd8b601c85f8a5a32dd77dceb1533a2227104/prompts/prompts.yaml",
+    "source_bytes": 331511,
+    "source_sha256": "071dff6a6f0d147eef585933460a7645f5836e8d574c648d610cf0bbce5cb992"
+  },
+  "population_rule": {
+    "language": "python",
+    "category_to_method_coordinate": {
+      "path_traversal": ["CWE-22", "path_access"],
+      "command_injection": ["CWE-78", "command_execution"],
+      "sql_injection": ["CWE-89", "sql_query"],
+      "insecure_deserialization": ["CWE-502", "deserialization"],
+      "xxe": ["CWE-611", "xml_parsing"],
+      "hardcoded_secrets": ["CWE-798", "credential_source"],
+      "ssrf": ["CWE-918", "outbound_request"]
+    },
+    "mapped_source_records": 18,
+    "semantic_overlap_exclusions": 2,
+    "frozen_task_units": 16,
+    "selection": "Complete census after the pre-extraction overlap exclusions; no outcome-informed or hash-based sampling."
+  },
+  "overlap_audit": {
+    "comparison_population": "The previously curated seven-source task corpus.",
+    "comparison_records": 2283,
+    "comparison_python_records": 969,
+    "normalized_exact_matches": 0,
+    "same_language_char_tfidf_nearest_max_before_semantic_review": 0.5053349000108294,
+    "same_language_char_tfidf_mean_nearest_before_semantic_review": 0.30632577378204223,
+    "semantic_review_rule": "Exclude only a pair that requires the same principal operation on the same object under materially the same functional contract; a shared CWE or mechanism is not enough.",
+    "semantic_overlap_exclusion_ids": ["cmd_001", "sql_003"]
+  },
+  "provenance_limits": [
+    "This source is an independently maintained benchmark repository, not a peer-reviewed accuracy gold standard.",
+    "The external qualification supports transfer to this frozen Python population only; it is not a global semantic-parsing accuracy claim."
+  ],
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false
+}

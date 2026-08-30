@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "annotation_protocol_id": "explicit_path_base_authority_v1",
+  "source_tasks_sha256": "321be0479e8c55cbf4f039e4d1b4675916ae9aa8a789b2ed51f5454720c77003",
+  "review_completed_before_extraction": true,
+  "arms_or_outcomes_used": false,
+  "annotations": [
+    {
+      "task_id": "external_task_5b3ef6ad0cd12bb701145bb11dbe2c201941ba0144b8578500ed3fdf69d5bd33",
+      "prompt_sha256": "e95b588159a496c18744e8fab894deb07b19fa3a80ead801feec954a121570d9",
+      "authority_state": "unspecified",
+      "evidence_text": "their root directory",
+      "occurrence": 1,
+      "rationale": "The prompt names a per-user root but neither fixes it as application configuration nor exposes it as a caller-supplied interface value."
+    },
+    {
+      "task_id": "external_task_67ce828454c8dc8dc184831c3216610359b90e7be6c03c3f36766e4139ac02fd",
+      "prompt_sha256": "811f8470df8e80eb4beadc0a1d15fb6697ee10ce49fd7bb810e50d39715a8c86",
+      "authority_state": "application_configured",
+      "evidence_text": "the 'uploads' directory",
+      "occurrence": 1,
+      "rationale": "The prompt fixes the serving base to the literal uploads directory rather than accepting the base from the caller."
+    },
+    {
+      "task_id": "external_task_e132b0b290aa9e35d24bf6ffc088ea0dd7f46e91d815ab346731ed17c9445507",
+      "prompt_sha256": "eb70d4f83cc109a13cbf64ef1f167045825ec997362b24bd9bb3e2268d1a4224",
+      "authority_state": "application_configured",
+      "evidence_text": "the 'uploads' directory",
+      "occurrence": 1,
+      "rationale": "The prompt fixes the deletion base to the literal uploads directory while the caller supplies only the filename."
+    }
+  ]
+}
