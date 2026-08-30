@@ -252,6 +252,7 @@ def run_contract_quality_review(
     *,
     max_new_batches: int | None = None,
     workers: int = 1,
+    reuse_root: Path | None = None,
     provider: Provider = bailian_complete,
 ) -> dict[str, Any]:
     """Blindly triage every extracted contract before independent adjudication."""
@@ -321,7 +322,7 @@ def run_contract_quality_review(
         CONTRACT_REVIEW_MAX_ITEMS,
         _contract_review_chars,
     )
-    plan = {
+    base_plan = {
         "schema_version": "1.0",
         "stage": "functional_contract_quality_review",
         "prepared_bundle_sha256": bundle_digest(prepared),
@@ -336,7 +337,11 @@ def run_contract_quality_review(
             "no_deterministic_issue_and_faithful_and_functionally_sufficient_v1"
         ),
     }
+    reuse = _reuse_metadata(reuse_root, base_plan) if reuse_root is not None else None
+    plan = {**base_plan, **({"reuse_source": reuse} if reuse is not None else {})}
     run_root = _initialize(output.resolve(), plan)
+    if reuse_root is not None:
+        _import_reuse(reuse_root.resolve(), run_root, reuse)
     reviews, complete = _execute(
         run_root,
         batches,
@@ -737,7 +742,7 @@ def _parse_contract_reviews(
             or ((status == "faithful") != (issues == ["none"]))
         ):
             raise CurationError("contract-review issue codes are invalid")
-        _bounded(row["reason"], 1000, "contract-review reason")
+        _bounded(row["reason"], 2000, "contract-review reason")
         frozen.append(
             {
                 "cluster_id": item["cluster_id"],

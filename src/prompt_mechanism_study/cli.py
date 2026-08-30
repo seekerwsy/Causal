@@ -337,6 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     review_contracts.add_argument("--repository-root", type=Path, default=Path.cwd())
     review_contracts.add_argument("--max-new-batches", type=int)
     review_contracts.add_argument("--workers", type=int, default=1)
+    review_contracts.add_argument("--reuse-root", type=Path)
 
     eligibility = commands.add_parser(
         "dataset-eligibility",
@@ -617,6 +618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output,
             max_new_batches=args.max_new_batches,
             workers=args.workers,
+            reuse_root=args.reuse_root,
         )
         print(report["status"])
     elif args.command == "assemble-semantic-clusters":
