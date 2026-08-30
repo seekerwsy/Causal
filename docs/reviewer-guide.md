@@ -145,15 +145,16 @@ exploration, or temporary checkpoints.
 
 The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
 factorial paths are implemented and reviewer-tested. Fresh seven-source
-semantic curation and all functional contracts are complete, but the final
-disjoint Prompt TSG qualification failed its frozen Gate (13/14 exact and 3/4
-present recall; zero false-positive present states). Formal discovery and
-confirmation therefore did not start.
-After that failure, a development-only successor moved path-base authority to
-a four-state, prompt-hash-bound task annotation and made the LLM stages consume
-it deterministically. It closed 5/5 previously exposed diagnostic cases, but
-those cases were used during repair, so the active Gate remains failed until a
-new independent population is frozen and evaluated.
+semantic curation and all functional contracts are complete, but three
+prospectively frozen external Prompt TSG attempts failed Gate C. The latest
+catalog-v9/proposer-v16 attempt used 31 independent BigCodeBench task units and
+stopped on task 16 after a schema-invalid semantic-review response. The first
+15 closed graphs had already produced one false-positive present state and one
+wrong realization, while the frozen maximum for each was zero. Formal
+discovery and confirmation therefore did not start. The complete 31-task
+selection is exposure-excluded and is not retried; any successor now requires
+a materially simpler frozen response contract and another genuinely
+independent qualification population.
 The exact evidence inventory and failed-Gate boundary are in
 [`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
 results are formal historical evidence and remain reproducible through the

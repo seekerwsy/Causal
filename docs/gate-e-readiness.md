@@ -27,7 +27,7 @@ The final PHASE plan is implemented under four explicit scope corrections:
 | --- | --- | --- |
 | A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
 | B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
-| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The structured-authority successor failed its complete 16-task external qualification at 14/16 exact and 3/5 present recall. A later prospectively revised candidate then stopped on the second task of a disjoint 10-task SecCodeBench population; its first graph already made the frozen recall Gate unreachable. Neither failed population is reused. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The structured-authority successor failed its complete 16-task external qualification. A revised candidate stopped on task 2 of a disjoint 10-task SecCodeBench population. Catalog v9/proposer v16 then stopped on task 16 of a prospectively frozen 31-task BigCodeBench population; the first 15 closed graphs already contained one false-positive present state and one wrong realization, while both frozen maxima were zero. No failed population is reused. |
 | D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
 | E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
@@ -66,10 +66,11 @@ LLM evidence-fact proposal
 
 The reviewer cannot widen the proposer-declared catalog scope or invent a
 global semantic ID. A query can use only exact prompt spans, catalog facts, and
-its declared relations. Catalog v5 also distinguishes a caller-supplied base
-from an independently trusted base and requires the latter to qualify the
-specific file-access sink. Every request, response, projection, and digest is
-closed in the extraction bundle.
+its declared relations. Catalog v9 carries forward the distinction between a
+caller-supplied base and an independently trusted base, and additionally
+freezes the DTD/entity, dynamic-identifier, named-tool, checkpoint-format, and
+evidence-occurrence boundaries diagnosed before the BigCodeBench run. Every
+request, response, projection, and digest is closed in the extraction bundle.
 
 The bounded repair sequence remains visible without promoting development
 replays to evidence:
@@ -110,7 +111,7 @@ extraction or any active-protocol intervention claim.
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 plus prospective catalog v9 | implemented/tested; catalog v5 failed the complete external qualification, while catalog v9 is specified after a second failed external run and has no independent qualification evidence |
+| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v5 plus catalog v9 | implemented/tested; catalog v5 failed the complete external qualification, and catalog v9/proposer v16 failed a later independent BigCodeBench attempt before qualification after already violating both zero-error constraints |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -134,6 +135,7 @@ closes an engineering defect but does not change the failed scientific Gate.
 | Structured path-authority successor trial | `newly_run` development evidence | real 5-case replay completed at 5/5 exact with no false-positive or wrong realization; all cases and labels were previously exposed, so this is interface validation rather than Gate evidence |
 | Structured-authority external qualification v1 | `newly_run` | independent 16-task extraction closed once at 16/16; qualification failed at 14/16 exact, 3/5 present recall, zero false-positive present states, and one wrong realization; all three path cases matched |
 | SecCodeBench successor extraction v2 | `newly_run` development evidence | disjoint 10-task inputs and gold were frozen first; extraction stopped on task 2 after one graph, and task 1 already made present recall mathematically unable to reach 0.80; no qualification metric was produced |
+| BigCodeBench successor extraction v3 | `newly_run` development evidence | disjoint 31-task inputs and gold were frozen first; extraction stopped on task 16 after 15 graphs. The completed prefix already contained one false-positive present state and one wrong realization, so the frozen Gate was unreachable; no qualification metric was produced |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |
@@ -141,13 +143,17 @@ closes an engineering defect but does not change the failed scientific Gate.
 
 ## Protocol risks and remaining blockers
 
-1. **Representation recall, realization identity, and response validity.**
-   The complete external Gate retained zero false-positive present states but
-   recovered only 3/5 frozen present contexts and assigned one SQL case to the
-   wrong realization. The disjoint SecCodeBench attempt additionally left a
-   fixed two-tool pipeline unresolved and returned an impossible evidence
-   occurrence while mapping a framework checkpoint to Python-literal text.
-   Formal natural discovery cannot start.
+1. **Representation recall, precision, realization identity, and response
+   validity.** The complete external Gate recovered only 3/5 frozen present
+   contexts and assigned one SQL case to the wrong realization. SecCodeBench
+   additionally left a fixed two-tool pipeline unresolved and returned an
+   impossible evidence occurrence while mapping a framework checkpoint to
+   Python-literal text. BigCodeBench then exposed all three remaining failure
+   modes in one independent prefix: a platform-dependent but unnamed command
+   was falsely treated as a fixed named executable, two explicit JSON tasks
+   lost their context because a redundant format-constraint fact was missing,
+   and the bounded reviewer changed a catalog-supplied node type. Formal
+   natural discovery cannot start.
 2. **Gold scope and size.** Exhaustion of the repeatedly exposure-excluded
    CWE-328 stratum limited the final replacement holdout to 14 task units. It
    evaluates that frozen task mixture, not global understanding or per-CWE
@@ -341,21 +347,86 @@ index must be checked against the exact substring count. SecCodeBench exposed
 those changes and is prohibited from qualifying them. The population also
 contains no XML task, so it supplies no independent DTD-boundary evidence.
 
+### BigCodeBench catalog-v9 attempt
+
+Catalog v9, proposer prompt v14, and evaluator v16 were frozen before selecting
+a third source. PurpleLlama autocomplete was rejected because all 1,404 local
+Instruct Prime records have the same repository/file/line/pattern coordinates
+in that 1,916-record source; changing prompt presentation would not create an
+independent lineage. The replacement used BigCodeBench v0.1.1 at commit
+`a3b89850db670d7302571142b881e4f85eef18e3`. Its compressed source blob has
+SHA-256
+`58142744edaf6036387f8761701f1b353432b0ed33f2edec1de8a59e7431ef7a`.
+
+Before extraction, fixed library/operation filters and a salted ordering chose
+31 task units across eight registered families: four each for command
+execution, SQL, deserialization, hashing, randomness, credentials, and
+outbound requests, plus three XML tasks. Nineteen labels were present and 12
+were absent-or-unresolved. Exact overlap with both the seven-source pool and
+the earlier two external populations was zero. Source lineage, exclusions,
+tasks, selection, labels, and unchanged thresholds were committed at
+`6fa3688`. The first remote preflight rejected extra provenance keys in the
+selection JSON before reading a credential or calling the provider. Those
+duplicated keys already existed in the source manifest; removing only them and
+adding an exact-schema regression assertion produced input commit `da74834`.
+Tasks, order, gold, catalog, prompts, model, and thresholds did not change.
+
+The one provider run used Python 3.12.13 on the A800 host. It is preserved at
+[`prompt-tsg-external-extraction-v3`](../data/method/results/prompt-tsg-external-extraction-v3),
+whose independently verified bundle SHA-256 is
+`2f0f274d46981570d23f1971ae747a8a9286e8915995625f97ecb550862e93de`.
+The immutable remote coordinates were
+`/home/wsy/prompt-mechanism-study-deployments/gate-c-bigcodebench-da74834-20260830-02`
+and
+`/home/wsy/prompt-mechanism-study-experiments/gate-c-bigcodebench-da74834-20260830-02`.
+The deployed archive excluded gold and had SHA-256
+`070694912fdb25b5c4655489b1fecca79b5ee9c17a9ad7eae253cb48a6c7b829`.
+
+Extraction closed 15 graphs, then stopped on BigCodeBench/256. The bounded
+reviewer returned node type `feature` for
+`feature.current_cryptographic_hash`, although the request supplied the
+catalog type `safety_requirement`; strict validation rejected the response.
+The completed prefix is not a substitute qualification metric, but a blinded
+diagnostic replay against the already frozen gold established that the Gate
+was independently unreachable:
+
+- BigCodeBench/1028 names no executable and says only that different commands
+  are used across operating systems. Both LLM stages nevertheless asserted a
+  fixed named executable, producing one false-positive present state and one
+  wrong realization.
+- BigCodeBench/681 contained a JSON source, JSON-deserialization sink, and
+  their flow, but no separately duplicated JSON-format constraint, so the
+  query returned absent.
+- BigCodeBench/216 exposed the same redundant requirement by leaving the
+  JSON-format constraint unresolved despite explicitly requiring JSON files.
+
+The frozen maximum for false-positive present states and wrong realizations is
+zero. Both counts were already one after the first 15 graphs, so unexecuted
+suffixes cannot rescue the Gate. No formal accuracy or recall statistic is
+reported, no retry is made, and the complete 31-task selection is permanently
+exposure-excluded. The machine-readable disposition is
+[`prompt-tsg-external-qualification-v3-failure.json`](../data/method/prompt-tsg-external-qualification-v3-failure.json).
+
 ## Permitted next work
 
-The v4 internal population, the 16-task AI-Security-Benchmark population, and
-the 10-task SecCodeBench population are exposed. None may be resampled,
-retried, or retuned into a passing Gate. Catalog v9 and proposer v16 freeze all
-currently diagnosed distinctions, but they remain specified/tested rather
-than externally qualified. Validation now requires another genuinely
-independent corpus. Valid options remain:
+The v4 internal population, the 16-task AI-Security-Benchmark population, the
+10-task SecCodeBench population, and the 31-task BigCodeBench selection are
+exposed. None may be resampled, retried, or retuned into a passing Gate.
+Catalog v9 and proposer v16 have now failed independent external use rather
+than merely lacking evidence. Another holdout alone is not justified until a
+materially simpler response contract is frozen and passes development-only
+adversarial checks. Valid options are:
 
-- replace free-form context extraction with a more constrained annotation
-  protocol and independently qualified adjudication; or
+- derive catalog-fixed structural fields such as `node_type` locally rather
+  than asking an LLM to repeat them;
+- remove logically redundant query facts when the typed source, sink, and flow
+  already entail the same file/format role;
+- replace free-form fixed-boundary inference with an explicit bounded decision
+  whose evidence must name the tool or finite domain; and then
+- qualify that materially revised extractor once on another genuinely
+  independent corpus; or
 - replace trusted-boundary inference with an explicit dataset-side trust field
-  whose annotation is qualified independently; or
-- freeze a materially new extractor before selecting a new external corpus and
-  qualification set.
+  whose annotation is qualified independently.
 
 The structured authority implementation now has prospective external support
 for the two authority states actually present in this source
@@ -376,10 +447,10 @@ python -m compileall -q src tests
 # completed without errors
 
 python -m pytest -q
-# 88 passed, 129 deselected
+# 91 passed, 129 deselected
 
-python -m pytest -q tests/test_prompt_tsg.py
-# 21 passed, 5 deselected
+python -m pytest -q -m reviewer tests/test_prompt_tsg.py
+# 24 passed, 5 deselected
 
 python -m pytest -q tests/test_discovery_support.py
 # 4 passed
@@ -397,6 +468,10 @@ prompt-mechanism-study verify \
 
 prompt-mechanism-study verify \
   data/method/results/prompt-tsg-external-qualification-v1
+# VERIFIED
+
+prompt-mechanism-study verify \
+  data/method/results/prompt-tsg-external-extraction-v3
 # VERIFIED
 
 prompt-mechanism-study factorial-experiment verify \

@@ -297,7 +297,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；fresh qualification executed and failed；structured-authority successor 仅 development-tested | 最终候选在完全不相交的替代 holdout 上为 13/14 exact、present recall 3/4、false-positive present=0、wrong realization=0；准确率通过 90% 门槛，但 recall 未达到预冻结的 80%，因此不能进入 formal extraction。后续四状态 authority 接口在 5 个已暴露 case 上为 5/5，只证明实现闭合，不改变 Gate |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | implemented + tested；三次 prospective external attempts 均 executed and failed | 16-task AI-Security-Benchmark 完整资格为 14/16 exact、3/5 recall、1 个 wrong realization；10-task SecCodeBench 在 task 2 严格停止；随后 catalog v9/proposer v16 的 31-task BigCodeBench 尝试在 task 16 严格停止，且前 15 张图已出现 1 个 false-positive present 与 1 个 wrong realization，两个冻结上限均为 0。所有暴露 population 均不重跑，因此不能进入 formal extraction |
 | 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
@@ -314,7 +314,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取资格 | **最终 holdout 未通过** | 14 个完全不相交 task units 中 13 个 exact；accuracy=92.9%、present recall=75.0%、false-positive present=0、wrong realization=0；准确率通过，但冻结 recall 门槛不允许 formal extraction |
+| 自然 Prompt TSG 抽取资格 | **多次独立外部 Gate 均未通过** | 最新 BigCodeBench population 共 31 个 task units；在第 16 个响应违反 catalog node type 后停止，前 15 个闭合结果已含 false-positive present=1、wrong realization=1，故完整 Gate 在数学上已不可达；不报告不完整 population 的正式 accuracy/recall |
 | discovery positivity/source overlap | **按协议未执行** | 新鲜语义清洗与合同已完成，但表示 Gate 失败后不得冻结正式 discovery split 或读取自然 outcome |
 | FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |

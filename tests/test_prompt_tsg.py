@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from prompt_mechanism_study.artifact_io import bundle_digest, verify_bundle
 from prompt_mechanism_study.eligibility import qualify_prompt_tsg_extractor
 from prompt_mechanism_study.prompt_tsg import (
     PromptTSGError,
@@ -229,6 +230,35 @@ def test_bigcodebench_external_qualification_freeze_is_self_consistent():
     assert exposed_prompt_hashes.isdisjoint(
         {row["prompt_sha256"] for row in tasks}
     )
+
+    failure = json.loads(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-v3-failure.json"
+        ).read_text(encoding="utf-8")
+    )
+    extraction = ROOT / failure["extractor_bundle_path"]
+    report = json.loads((extraction / "report.json").read_text(encoding="utf-8"))
+    verify_bundle(extraction)
+    assert bundle_digest(extraction) == failure["extractor_bundle_sha256"]
+    assert failure["tasks_sha256"] == hashlib.sha256(tasks_path.read_bytes()).hexdigest()
+    assert failure["selection_sha256"] == hashlib.sha256(
+        (
+            ROOT / "data/method/prompt-tsg-external-qualification-selection-v3.json"
+        ).read_bytes()
+    ).hexdigest()
+    assert failure["gold_sha256"] == hashlib.sha256(
+        (ROOT / "data/method/prompt-tsg-external-qualification-gold-v3.json").read_bytes()
+    ).hexdigest()
+    assert report["status"] == "PROMPT_TSG_EXTRACTION_ERROR"
+    assert report["graphs"] == failure["completed_graphs"] == 15
+    assert report["failed_task_id"] == failure["failed_task_id"] == task_ids[15]
+    assert failure["partial_diagnostic"]["false_positive_present_completed_graphs"] > gold[
+        "qualification_rule"
+    ]["maximum_false_positive_present"]
+    assert failure["partial_diagnostic"]["wrong_realization_completed_graphs"] > gold[
+        "qualification_rule"
+    ]["maximum_wrong_realization"]
+    assert failure["scientific_claim_allowed"] is False
 
 
 @pytest.mark.reviewer

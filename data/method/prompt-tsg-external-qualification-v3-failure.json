@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_FAILED_BEFORE_QUALIFICATION",
+  "extractor_candidate_id": "prompt-tsg-llm-facts-qwen37max-v16+prompt-tsg-ambiguity-adjudication-qwen37max-v6",
+  "input_freeze_commit": "da74834",
+  "source_manifest_path": "data/method/prompt-tsg-external-qualification-source-v3.json",
+  "tasks_path": "data/method/prompt-tsg-external-qualification-tasks-v3.json",
+  "tasks_sha256": "21cbcc1b569e467d3e82e3bf5cd27fdf480d8ff6f855cb301391004ddc28654e",
+  "selection_path": "data/method/prompt-tsg-external-qualification-selection-v3.json",
+  "selection_sha256": "d6a55cf640a74a09e7190d96548df70d1d7f1cf7f7257150320c487e88110335",
+  "gold_path": "data/method/prompt-tsg-external-qualification-gold-v3.json",
+  "gold_sha256": "27a6fa3acbbbc555faee1d5f5a8e5b79d3626ab5f2d57da31d7a51ade6f4ab17",
+  "extractor_bundle_path": "data/method/results/prompt-tsg-external-extraction-v3",
+  "extractor_bundle_sha256": "2f0f274d46981570d23f1971ae747a8a9286e8915995625f97ecb550862e93de",
+  "source_archive_sha256": "070694912fdb25b5c4655489b1fecca79b5ee9c17a9ad7eae253cb48a6c7b829",
+  "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/gate-c-bigcodebench-da74834-20260830-02",
+  "remote_output": "/home/wsy/prompt-mechanism-study-experiments/gate-c-bigcodebench-da74834-20260830-02/extraction",
+  "selected_task_units": 31,
+  "expected_present_task_units": 19,
+  "completed_graphs": 15,
+  "failed_task_ordinal": 16,
+  "failed_task_id": "bigcodebench_task_230f51057a0b43685cf38aace8aed6bd95554d27fcb59a2111b41b2b78a861ad",
+  "failed_upstream_task_id": "BigCodeBench/256",
+  "error_type": "PromptTSGExtractionError",
+  "error_reason": "The bounded semantic reviewer returned node_type feature for feature.current_cryptographic_hash even though the request supplied safety_requirement. Strict catalog validation rejected the response as an invalid fact value.",
+  "partial_diagnostic": {
+    "status": "NON_QUALIFICATION_DIAGNOSTIC_ONLY",
+    "completed_graphs": 15,
+    "matched_completed_graphs": 12,
+    "expected_present_completed_graphs": 10,
+    "recovered_present_completed_graphs": 8,
+    "false_positive_present_completed_graphs": 1,
+    "wrong_realization_completed_graphs": 1,
+    "gate_already_unreachable": true,
+    "cases": [
+      {
+        "upstream_task_id": "BigCodeBench/1028",
+        "expected_context": "absent_or_unresolved",
+        "actual_context": "present",
+        "actual_realization_id": "cwe78_fixed_executable_argv",
+        "diagnosis": "The prompt says only that platform-specific commands are supported and names no tool. Both LLM stages nevertheless asserted a fixed named executable, violating the frozen named-tool boundary."
+      },
+      {
+        "upstream_task_id": "BigCodeBench/681",
+        "expected_context": "present",
+        "actual_context": "absent",
+        "actual_realization_id": null,
+        "diagnosis": "The graph contained the JSON source, JSON deserialization sink, and their flow but omitted the separately required json-format constraint, so redundant query structure suppressed the otherwise explicit context."
+      },
+      {
+        "upstream_task_id": "BigCodeBench/216",
+        "expected_context": "present",
+        "actual_context": "unresolved",
+        "actual_realization_id": null,
+        "diagnosis": "The graph contained the JSON source, JSON deserialization sink, and their flow but left the explicit json-format constraint unresolved."
+      }
+    ]
+  },
+  "preflight_history": {
+    "commit": "6fa3688",
+    "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/gate-c-bigcodebench-6fa3688-20260830-01",
+    "status": "LOCAL_SELECTION_CONTRACT_REJECTED_BEFORE_PROVIDER_CALL",
+    "cause": "The selection file carried extra provenance keys not accepted by the exact runner schema. The duplicated keys were removed without changing tasks, order, gold, model, catalog, prompts, or thresholds."
+  },
+  "disposition": "No formal qualification metric is computed. The complete 31-task BigCodeBench selection is permanently exposure-excluded and will not be retried. The frozen zero-false-positive and zero-wrong-realization thresholds were already impossible after the first 15 completed graphs.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
