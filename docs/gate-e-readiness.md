@@ -156,6 +156,13 @@ Before validating either independent annotation, deterministic endpoint closure
 forces `absent` if either endpoint is absent, otherwise `unresolved` if either
 endpoint is unresolved. Raw model tables remain retained for audit.
 
+The subsequent v7 formal extraction passed that deterministic boundary but
+stopped before writing a bundle when one reviewer row violated the JSON Object
+field shape. No response artifact or Gate score was retained. The prospective
+successor therefore uses one content-addressed strict JSON Schema supported by
+the frozen provider model. This changes transport enforcement only; the local
+completeness, evidence, semantic, consensus, and replay checks remain strict.
+
 This is development evidence, not a corrected 4/4 qualification score. The
 prompts and old labels were visible, the contracts were manually authored for
 the architecture check, and no automatic contract producer was evaluated.

@@ -418,8 +418,12 @@ def extract_contract_task_file(
         raise PromptContractExtractionError("task selection is invalid or stale")
     selected = [by_id[task_id] for task_id in selection["task_ids"]]
     catalog = load_catalog(catalog_path)
-    proposer_evaluator = _evaluator(read_json(proposer_evaluator_path))
-    reviewer_evaluator = _evaluator(read_json(reviewer_evaluator_path))
+    proposer_evaluator = _evaluator(
+        read_json(proposer_evaluator_path), proposer_evaluator_path
+    )
+    reviewer_evaluator = _evaluator(
+        read_json(reviewer_evaluator_path), reviewer_evaluator_path
+    )
     proposer_prompt = proposer_prompt_path.read_text(encoding="utf-8").strip()
     reviewer_prompt = reviewer_prompt_path.read_text(encoding="utf-8").strip()
     if not proposer_prompt or not reviewer_prompt:
@@ -475,6 +479,14 @@ def extract_contract_task_file(
         "review_status": review_status,
         "arms_or_outcomes_used": False,
     }
+    if "response_format_sha256" in proposer_evaluator:
+        report["proposer_response_format_sha256"] = proposer_evaluator[
+            "response_format_sha256"
+        ]
+    if "response_format_sha256" in reviewer_evaluator:
+        report["reviewer_response_format_sha256"] = reviewer_evaluator[
+            "response_format_sha256"
+        ]
     write_bundle(
         output,
         {
@@ -488,8 +500,8 @@ def extract_contract_task_file(
     return report
 
 
-def _evaluator(value: Any) -> dict[str, Any]:
-    fields = {
+def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
+    base_fields = {
         "schema_version",
         "candidate_id",
         "provider",
@@ -504,16 +516,37 @@ def _evaluator(value: Any) -> dict[str, Any]:
         "max_response_bytes",
         "max_attempts",
     }
+    structured_fields = {"response_format_path", "response_format_sha256"}
     if (
         not isinstance(value, dict)
-        or set(value) != fields
+        or frozenset(value)
+        not in {frozenset(base_fields), frozenset(base_fields | structured_fields)}
         or value["schema_version"] != "1.0"
         or value["api_key_env"] != "ALI_BAILIAN_API_KEY"
         or value["temperature"] != 0.0
         or value["max_attempts"] != 1
     ):
         raise PromptContractExtractionError("contract evaluator is invalid")
-    return value
+    if not structured_fields <= set(value):
+        return value
+    format_path = (evaluator_path.parent / value["response_format_path"]).resolve()
+    try:
+        format_path.relative_to(evaluator_path.parent.resolve())
+    except ValueError:
+        raise PromptContractExtractionError("response format escapes evaluator directory") from None
+    if _sha256(format_path) != value["response_format_sha256"]:
+        raise PromptContractExtractionError("response format identity drifted")
+    response_format = read_json(format_path)
+    if (
+        not isinstance(response_format, dict)
+        or set(response_format) != {"type", "json_schema"}
+        or response_format["type"] != "json_schema"
+        or not isinstance(response_format["json_schema"], dict)
+        or response_format["json_schema"].get("strict") is not True
+        or not isinstance(response_format["json_schema"].get("schema"), dict)
+    ):
+        raise PromptContractExtractionError("contract response format is invalid")
+    return {**value, "response_format": response_format}
 
 
 def _rows(value: Any, label: str) -> list[dict[str, Any]]:

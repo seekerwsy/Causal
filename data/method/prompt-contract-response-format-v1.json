@@ -1,0 +1,102 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "prompt_contract_decision_table",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_decisions",
+        "relation_decisions"
+      ],
+      "properties": {
+        "semantic_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "semantic_id",
+              "state",
+              "rationale",
+              "evidence_text",
+              "occurrence",
+              "attributes"
+            ],
+            "properties": {
+              "semantic_id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "present",
+                  "absent",
+                  "unresolved"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              },
+              "evidence_text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "occurrence": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "attributes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "relation_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_semantic_id",
+              "edge_type",
+              "target_semantic_id",
+              "state",
+              "rationale"
+            ],
+            "properties": {
+              "source_semantic_id": {
+                "type": "string"
+              },
+              "edge_type": {
+                "type": "string"
+              },
+              "target_semantic_id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "present",
+                  "absent",
+                  "unresolved"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

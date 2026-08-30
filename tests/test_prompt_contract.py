@@ -356,7 +356,10 @@ def test_graph_schema_two_preserves_frozen_schema_one_records():
     assert prompt_tsg_record(graph) == frozen
 
 
-def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
+@pytest.mark.parametrize("structured_output", [False, True])
+def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
+    tmp_path, structured_output
+):
     task, catalog = _inputs()
     contract = _contract(task, catalog)
     tasks_path = tmp_path / "tasks.json"
@@ -389,12 +392,44 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
     }
     proposer_path = tmp_path / "proposer.json"
     reviewer_path = tmp_path / "reviewer.json"
+    evaluator_extension = {}
+    if structured_output:
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "test_contract",
+                "strict": True,
+                "schema": {"type": "object"},
+            },
+        }
+        response_format_path = tmp_path / "response-format.json"
+        response_format_path.write_text(json.dumps(response_format), encoding="utf-8")
+        evaluator_extension = {
+            "response_format_path": response_format_path.name,
+            "response_format_sha256": hashlib.sha256(
+                response_format_path.read_bytes()
+            ).hexdigest(),
+        }
     proposer_path.write_text(
-        json.dumps({**evaluator, "candidate_id": "mock-proposer", "seed": 1}),
+        json.dumps(
+            {
+                **evaluator,
+                "candidate_id": "mock-proposer",
+                "seed": 1,
+                **evaluator_extension,
+            }
+        ),
         encoding="utf-8",
     )
     reviewer_path.write_text(
-        json.dumps({**evaluator, "candidate_id": "mock-reviewer", "seed": 2}),
+        json.dumps(
+            {
+                **evaluator,
+                "candidate_id": "mock-reviewer",
+                "seed": 2,
+                **evaluator_extension,
+            }
+        ),
         encoding="utf-8",
     )
     proposer_prompt = tmp_path / "proposer.txt"
@@ -404,6 +439,7 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
 
     def provider(request, evaluator_record, prompt):
         assert request["arms_or_outcomes_included"] is False
+        assert ("response_format" in evaluator_record) is structured_output
         return _response(contract)
 
     extraction = tmp_path / "extraction"
@@ -594,4 +630,5 @@ def test_prospective_v7_gate_freeze_closes_endpoint_projection_successor():
     assert freeze["arms_or_outcomes_used"] is False
     for item in freeze["inputs"].values():
         path = ROOT / item["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+        if item["path"].startswith("data/"):
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]

@@ -424,6 +424,12 @@ def bailian_complete(
     if not api_key.strip():
         raise JudgeGateError("provider credential is unavailable")
     endpoint = evaluator["base_url"].rstrip("/") + "/chat/completions"
+    response_format = evaluator.get("response_format", {"type": "json_object"})
+    if not isinstance(response_format, dict) or response_format.get("type") not in {
+        "json_object",
+        "json_schema",
+    }:
+        raise JudgeGateError("provider response format is invalid")
     body = {
         "model": evaluator["model_id"],
         "messages": [
@@ -434,7 +440,7 @@ def bailian_complete(
         "top_p": evaluator["top_p"],
         "seed": evaluator["seed"],
         "n": 1,
-        "response_format": {"type": "json_object"},
+        "response_format": response_format,
         "enable_thinking": evaluator["enable_thinking"],
     }
     http_request = Request(

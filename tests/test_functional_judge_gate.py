@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+import prompt_mechanism_study.functional_judge as functional_judge_module
 from prompt_mechanism_study.artifact_io import verify_bundle
 from prompt_mechanism_study.functional_judge import (
     JudgeGateError,
+    bailian_complete,
     load_gate_inputs,
     preflight,
     python_syntax_valid,
@@ -28,6 +30,59 @@ def _response(_contract: dict[str, object], status: str) -> bytes:
         "reason": "The cited line establishes or contradicts the requested behavior.",
     }
     return json.dumps(payload, separators=(",", ":")).encode()
+
+
+@pytest.mark.reviewer
+def test_provider_forwards_frozen_json_schema(monkeypatch) -> None:
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "bounded_output",
+            "strict": True,
+            "schema": {"type": "object"},
+        },
+    }
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _maximum):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": "{}"},
+                        }
+                    ]
+                }
+            ).encode()
+
+    def urlopen(request, timeout):
+        assert timeout == 1.0
+        assert json.loads(request.data)["response_format"] == response_format
+        return Response()
+
+    monkeypatch.setenv("ALI_BAILIAN_API_KEY", "test-only")
+    monkeypatch.setattr(functional_judge_module, "urlopen", urlopen)
+    evaluator = {
+        "api_key_env": "ALI_BAILIAN_API_KEY",
+        "base_url": "https://invalid.test/v1",
+        "model_id": "mock",
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "seed": 1,
+        "enable_thinking": True,
+        "timeout_seconds": 1.0,
+        "max_response_bytes": 4096,
+        "response_format": response_format,
+    }
+
+    assert bailian_complete({}, evaluator, "Return JSON.") == b"{}"
 
 
 def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: Path) -> None:

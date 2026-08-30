@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "status": "FORMAL_EXTRACTION_FAILED_BEFORE_BUNDLE",
+  "freeze_sha256": "04287c77b557a8233650748908d2661d4de8f76f265feac620228eac04f83988",
+  "method_revision_commit": "d1d51912463da8186982084a7ad0296446e13fff",
+  "provider_calls": "unknown; at least 2 and at most 56",
+  "formal_task_units_conservatively_treated_as_exposed": 28,
+  "response_artifacts_retained": false,
+  "graphs_retained": 0,
+  "gate_score_computed": false,
+  "failure": "One reviewer response contained a decision row whose field set or row type did not match the frozen contract schema.",
+  "root_cause": "The provider request used JSON Object mode, which guarantees valid JSON but not a fixed key-and-type schema. The strict local parser correctly rejected the malformed transport record.",
+  "disposition": "v7 remains immutable and is not qualified. A prospective successor uses the provider's native strict JSON Schema mode while retaining the same local completeness, evidence, and semantic checks; no v7 semantic response or gold comparison was inspected.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}
