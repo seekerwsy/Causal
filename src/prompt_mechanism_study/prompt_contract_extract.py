@@ -414,6 +414,7 @@ def extract_contract_task_file(
         "reviewer_evaluator_sha256": _sha256(reviewer_evaluator_path),
         "reviewer_prompt_sha256": _sha256(reviewer_prompt_path),
         "extractor_implementation_sha256": _sha256(Path(__file__)),
+        "provider_adapter_sha256": _sha256(Path(provider.__code__.co_filename)),
         "unresolved_task_units": sum(bool(graph["unresolved_semantics"]) for graph in graphs),
         "review_status": review_status,
         "arms_or_outcomes_used": False,
