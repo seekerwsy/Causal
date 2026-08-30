@@ -182,6 +182,13 @@ def test_bigcodebench_external_qualification_freeze_is_self_consistent():
     )
 
     task_ids = [row["task_id"] for row in tasks]
+    assert set(selection) == {
+        "schema_version",
+        "source_tasks_sha256",
+        "selection_rule",
+        "task_ids",
+        "arms_or_outcomes_used",
+    }
     assert len(tasks) == len(set(task_ids)) == 31
     assert task_ids == selection["task_ids"]
     assert task_ids == [row["task_id"] for row in gold["cases"]]
