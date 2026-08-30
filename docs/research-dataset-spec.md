@@ -337,6 +337,25 @@ requires a corrected contract bundle plus independent adjudication for tasks tha
 may enter a formal experiment. See
 `docs/experiments/2026-08-31-functional-contract-review-pilot.md`.
 
+The complete outcome-blind review has now processed all 2,165 contracts in 433
+closed batches. It labels 1,667 contracts `faithful` and 498 `faulty`; functional
+evaluability is 1,378 `sufficient`, 769 `limited`, and 18 `insufficient`. The
+strict conjunction of no deterministic issue, `faithful`, and `sufficient`
+contains 1,203 reviewer-qualified candidates, but the review explicitly records
+that semantic quality and final experiment eligibility are not established. A
+diagnostic audit of 30 reviewer-qualified Python candidates still found a clear
+material omission plus multiple evaluability and CWE/scope concerns. The active
+373-task Python census intersects the strict reviewer-qualified set in 216 task
+units. These are review candidates, not an automatically admitted sample. Full
+counts, evidence identities, and protocol risks are recorded in
+`docs/experiments/2026-08-31-functional-contract-review-full.md`.
+
+A deterministic successor bundle removes the 71 pure response-format requirements,
+retains all 2,165 task units, and gives only the corrected contracts new content
+IDs. This repair does not resolve semantic faults. Its local path is
+`.codex-runtime/contract-repair-7c9dc1c-20260831-05`, with bundle SHA-256
+`1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894`.
+
 - semantic pair decisions:
   `.codex-runtime/semantic-curation-seven-v9-strict-20260823-12/final`,
   SHA-256 `ecd11b14e55241aa5bf912e90abb1b1b65e09c1543d5ffd47b63efdba46dea26`;
@@ -353,8 +372,14 @@ may enter a formal experiment. See
   `.codex-runtime/contract-curation-seven-v7-20260823-20/final`,
   SHA-256 `be661b9121830b4757eae86e766affba57aa59916347d1120b0bb3354b94b2ca`;
 - active complete functional contracts:
-  `.codex-runtime/contract-curation-seven-v8-conservative-20260823-32/final`,
-  SHA-256 `daa6601152a76a20e8bd0fc82e0347c9a31fe0c103ba29754238706c88099fe4`;
+  `.codex-runtime/gate-c-contracts-complete/contracts-full/final`,
+  SHA-256 `eef5ed574bc5bebcbee07ecaee9ff5e7dd24d8c8dba32cd75c5d103be3daa3e0`;
+- full functional-contract quality triage:
+  `.codex-runtime/contract-quality-triage-37acead-20260831-03-r6-closed/final`,
+  SHA-256 `137f94f6b629585f60308d927496b4ae980bd4b8e1efcadc50ebbb71478623cc`;
+- deterministic response-format repair successor:
+  `.codex-runtime/contract-repair-7c9dc1c-20260831-05`,
+  SHA-256 `1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894`;
 - historical combined handoff:
   `.codex-runtime/dataset-curation-seven-final-20260823-21`,
   SHA-256 `e4617233d5c2b805aadcc3f1fe9f2b67ce73c66959e382f0d526ac0b594898d1`.

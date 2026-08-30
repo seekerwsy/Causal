@@ -45,3 +45,6 @@ It explicitly sets `semantic_quality_established=false` and
 `final_experiment_eligibility_established=false`. Final admission additionally
 requires independent adjudication of the experiment-eligible subset and the
 separate language/runtime, Prompt TSG, MechanismSpec, and Security-Oracle gates.
+
+The subsequent 2,165-contract full review and its formal-candidate intersection
+are documented in `docs/experiments/2026-08-31-functional-contract-review-full.md`.

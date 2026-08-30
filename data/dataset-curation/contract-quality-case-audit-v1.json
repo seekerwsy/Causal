@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Diagnostic case audit of the full outcome-blind functional-contract review; not a human gold set or an automatic admission ledger.",
+  "reviewer_type": "codex_assistant_case_review",
+  "arms_or_outcomes_used": false,
+  "insufficient_case_audit": {
+    "selection_rule": "All 18 contracts labelled functional_evaluability=insufficient in the frozen full review.",
+    "counts": {
+      "repair_metadata_then_reassess": 7,
+      "exclude_as_written": 6,
+      "semantic_judge_calibration_candidate": 5
+    },
+    "decisions": [
+      {
+        "task_unit_id": "semantic_cluster_1ee6ad2ea86c0c4352dbc740ebd5d1d8e8996bc1cbf09410ca6d96d0a4c84fe3",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled PHP while the prompt explicitly requests JavaScript."
+      },
+      {
+        "task_unit_id": "semantic_cluster_217ae5e9e2cbc025271d1371d0c548349bfa9940229cb29bf8bf759b341d0015",
+        "decision": "exclude_as_written",
+        "reason": "The prompt requests JavaScript while requiring WordPress PHP registration functions."
+      },
+      {
+        "task_unit_id": "semantic_cluster_3d0ca95a2929bb9c36e01fc2d76346f8a59d03a7fc11e444abb2a1711ef42f4f",
+        "decision": "semantic_judge_calibration_candidate",
+        "reason": "The C task is interpretable against the ICU UResourceBundle API but needs external API context."
+      },
+      {
+        "task_unit_id": "semantic_cluster_3f63fc0c3e527bfe3d87f5f47f6eb8b54265aaa6b58878f03494d123b9af0f3d",
+        "decision": "exclude_as_written",
+        "reason": "The Java prompt requires methods on primitives and an unsigned double type."
+      },
+      {
+        "task_unit_id": "semantic_cluster_46847110b7e9582ce0d9236d5847d0f8075aea22bd0c74f885914a89c26e3559",
+        "decision": "semantic_judge_calibration_candidate",
+        "reason": "Slug, validation, and redirect behavior is semantically observable although concrete validation rules are absent."
+      },
+      {
+        "task_unit_id": "semantic_cluster_4e0714383de17aa26449134339c54683bcb1a681879989efeac7d750669e75a1",
+        "decision": "semantic_judge_calibration_candidate",
+        "reason": "The API-test behavior is judgeable at a high level, but its CWE-502 scope binding needs separate correction."
+      },
+      {
+        "task_unit_id": "semantic_cluster_4e58187e78480370fe0b08552717e56a3a29fb82cf44170a58eff91aa99ddba7",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled Rust while the prompt requests C; the tuple representation also needs clarification."
+      },
+      {
+        "task_unit_id": "semantic_cluster_64f07839d027ea5feac986387859e59de66af8a3a4a6866f60accb0e9061c577",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled Python while the prompt requests Ruby and implicitly depends on a hardware-simulation framework."
+      },
+      {
+        "task_unit_id": "semantic_cluster_788d0403fca35adf47e1fdec49fca6fd0e2c48ede1be12bf920da07ce260c02b",
+        "decision": "exclude_as_written",
+        "reason": "The prompt explicitly requests implementation in an unspecified fictional language."
+      },
+      {
+        "task_unit_id": "semantic_cluster_a32e4b96c73014f5847a19e28dc189d8b03800b50cfee46f3c060d3105cf8222",
+        "decision": "exclude_as_written",
+        "reason": "The prompt requests C while requiring the C++ new and delete[] operators."
+      },
+      {
+        "task_unit_id": "semantic_cluster_af226db0bb8eec5c221b7422f2c1943c8998685eb51ef4f415d0eea31e2f21f1",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled Python while the prompt requests Ruby and omits the hardware-simulation framework."
+      },
+      {
+        "task_unit_id": "semantic_cluster_af28f7c85bdd38f926017e74a1366de490b36a6c40f73bf5df8fb09c2fa9f2e9",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled PHP while the prompt requests JavaScript."
+      },
+      {
+        "task_unit_id": "semantic_cluster_d7d31299bad995a508098bd70a2ab60791176341ef258f0963cbbbc3d4a528ee",
+        "decision": "semantic_judge_calibration_candidate",
+        "reason": "The Rust compiler-wrapper behavior is semantically judgeable, but the compiler and closure interfaces are underspecified."
+      },
+      {
+        "task_unit_id": "semantic_cluster_d8d863e400d6fa9317287df15d61793b88e19e1acc9c3d76c19005f4a51c8954",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled Rust while the prompt requests a C gai_strerror wrapper."
+      },
+      {
+        "task_unit_id": "semantic_cluster_dd2f5f6bd9eabc00ed81a9d32f83d7e56392a239f2ff50849a6bd2d51ef360d8",
+        "decision": "exclude_as_written",
+        "reason": "The prompt simultaneously requires a new expanded string and the same object reference as the input."
+      },
+      {
+        "task_unit_id": "semantic_cluster_e7bc8afde1e1813ac82155ae9e8f15a191f79a280bfc9a7b4ed6966d7617aa86",
+        "decision": "repair_metadata_then_reassess",
+        "reason": "The record is labelled Python while the prompt requests Ruby and omits the hardware-simulation framework."
+      },
+      {
+        "task_unit_id": "semantic_cluster_f2dc48723283520b42691eb0579546ec9325b9227d6cd70d5f3d29aad0334e2d",
+        "decision": "exclude_as_written",
+        "reason": "The prompt requests C++ while requiring Rust std::mem and std::ptr APIs."
+      },
+      {
+        "task_unit_id": "semantic_cluster_fde5dd44fffc304093f06e58754b192c08a6af838e0b9d105deced9f1945fa72",
+        "decision": "semantic_judge_calibration_candidate",
+        "reason": "Version-conditional imports and exception re-raising are judgeable semantically despite missing concrete versions and modules."
+      }
+    ]
+  },
+  "reviewer_qualified_sample_audit": {
+    "selection_rule": "Within each of the ten active Python CWE scopes, select the first three reviewer-qualified non-development task units by ascending content-addressed task_unit_id.",
+    "sample_size": 30,
+    "clear_material_contract_fault_count": 1,
+    "clear_material_contract_fault_task_unit_ids": [
+      "semantic_cluster_1368d95f672e7e63088129ac60e0fa9d6b474ac3344ba97b8fac4c617dccdaa4"
+    ],
+    "clear_fault_reason": "The source explicitly restricts usernames to letters, digits, and underscores, but the proposed contract omits that observable input constraint.",
+    "separate_evaluability_or_scope_concern_task_unit_ids": [
+      "semantic_cluster_0b4902a48232141a3a26447abe100d3e62d276f489b74ca0857101a36bab8368",
+      "semantic_cluster_0772a8459371607ec790b8eab19b7cbb45775c345f6f15e676871ff14cfd66a4",
+      "semantic_cluster_2aa6590eea78995866c618ff2865d3e2a6f56403fa26d6e1e0c512f0a3db1967",
+      "semantic_cluster_333d7937cb4e6bcbc0c2407293a0f3cb18431011ee5e288fc31f87b40aa9a3aa",
+      "semantic_cluster_14e27a043589df62dbb9de98863b8b5d2e7e5ff5b465df5c703be9fab65c1309",
+      "semantic_cluster_2bc8d2cd8a80e1af4105fa8f66f1fcbe272f40e17420112178bab87a88d9902e",
+      "semantic_cluster_105495364c591bef8b805dadac21c9c8a17ce6f03b2d7d512af408617e50f8df",
+      "semantic_cluster_25fb299095ee0e00397a44e96ef28479be58faa158142dbf547dd203e975d886",
+      "semantic_cluster_261e9b0e92f91b73d972da3c97627c1e1668d24fb21accb241be130638c2b2d6",
+      "semantic_cluster_3f68a632bcb27fd98e685dc87b25f666a3de95a7fe8c4959f7fd7b08480c9bb0",
+      "semantic_cluster_50505a497657ed6359d379b6e5b3134ca7bbcc328e60fd2dbea59f2bdfe49e46"
+    ],
+    "interpretation": "The sample is a stratified diagnostic, not a population precision estimate. It confirms that reviewer-qualified does not establish final functional or mechanism eligibility."
+  }
+}
