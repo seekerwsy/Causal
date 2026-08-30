@@ -145,15 +145,19 @@ exploration, or temporary checkpoints.
 
 The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
 factorial paths are implemented and reviewer-tested. Fresh seven-source
-semantic curation and all functional contracts are complete. The compiled
-Prompt TSG successor removes model-supplied structural types, derives them from
-catalog v11, and bounds both LLM stages to catalog IDs plus exact prompt
-evidence. A prospectively frozen DevEval qualification completed all 31 graphs
-once, but failed Gate C at 27/31 exact, 14/16 present recall, two false-positive
-present states, and two wrong realizations. The structural response contract
-therefore works, while relation adjudication and the credential/RNG semantic
-boundaries remain unqualified. The DevEval population is exposure-excluded and
-is not retried or relabelled. Formal discovery and confirmation did not start.
+semantic curation and all functional contracts are complete. The active
+task-level Prompt TSG contract bounds both LLM annotators to the complete
+catalog-v11 task scope, keeps exact prompt evidence, and deterministically
+preserves disagreement as unresolved. Its prospectively frozen v10 DevEval
+qualification completed 28/28 graphs and 56 calls with four task workers in
+506.63 seconds, but failed Gate C at 24/28 exact, 7/10 present recall, one
+false-positive present state, and one wrong realization. The transport,
+completeness, and bounded scheduler therefore close; caller/external-input
+semantics and independently fixed executable identity remain unqualified. The
+failed result is not retried or relabelled. Formal discovery and confirmation
+did not start. All 28 task units are conservatively disclosed as previously
+provider-exposed by aborted, unscored transport/scheduling attempts; no prior
+semantic response bundle or gold comparison was retained or inspected.
 The exact evidence inventory and failed-Gate boundary are in
 [`gate-e-readiness.md`](gate-e-readiness.md). The tracked schema-1.0 factorial
 results are formal historical evidence and remain reproducible through the

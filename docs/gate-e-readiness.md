@@ -1,6 +1,6 @@
 # Gate E readiness and evidence audit
 
-**Cutoff:** 2026-08-30
+**Cutoff:** 2026-08-31
 
 **Role:** implementation and evidence status only. This file is not a second
 method contract. The sole normative protocol remains
@@ -27,7 +27,7 @@ The final PHASE plan is implemented under four explicit scope corrections:
 | --- | --- | --- |
 | A — Protocol-complete | **PASS** | The normative protocol maps representation, support, selector, hypothesis, policy, estimand, evidence status, and permitted claim. Pairwise-only scope and task-bound background are explicit. |
 | B — Method-complete | **PASS under the revised protocol** | Prompt TSG, operation-aware atomic/pair selectors, RD-aligned pair ranking, factorial compatibility, assigned-arm ITT, multi-state outcomes, independent measurement, and result verifiers are implemented and covered by focused tests. This does not claim that a post-result Original arm was implemented. |
-| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The compiled successor completed a prospectively frozen 31-task-unit DevEval qualification, but matched only 27/31 (`0.870968`), with two false-positive present states and two wrong realizations. Only present recall passed (`0.875`). No failed population is reused. |
+| C — Experiment-ready | **FAIL** | Semantic curation, functional contracts, local Security Oracle qualification, and measurement qualifications are closed. The active task-level contract successor completed 28/28 DevEval task units, but matched only 24/28 (`0.857143`), recalled 7/10 present cases (`0.70`), and produced one false-positive present state plus one wrong realization. |
 | D — Claim-bearing | **NOT REACHED** | The failed representation Gate prohibits formal Prompt TSG extraction, discovery measurement, selector freeze, and active-protocol confirmation. No schema-2.1/schema-1.1 claim-bearing provider run was started. |
 | E — Paper-ready | **NOT REACHED** | The active method can be described, but RQ1–RQ3 lack one prospective evidence package under the active protocol. Historical schema-1.0 evidence cannot be relabelled. |
 
@@ -173,11 +173,27 @@ task workers. Proposer and reviewer remain sequential within a task, total calls
 remain 56, output remains in selection order, and the independent qualification
 checks the configured and effective worker counts.
 
-This is development evidence, not a corrected 4/4 qualification score. The
-prompts and old labels were visible, the contracts were manually authored for
-the architecture check, and no automatic contract producer was evaluated.
-Gate C therefore remains failed. A future Gate must freeze a new independent
-population and qualify contract production before any formal discovery run.
+The prospectively frozen v10 run completed all 28 task units, 28 contracts, 28
+graphs, and 56 provider calls without retries. Four workers reduced wall-clock
+time to 506.63 seconds from the approximately 14-minute sequential baseline;
+provider throttling and request-length long tails limited the realized speedup
+to about 1.66x. The content-addressed extraction and independent qualification
+bundles both replayed successfully.
+
+| Metric | Frozen requirement | Contract v10 result |
+| --- | ---: | ---: |
+| Exact context/realization accuracy | at least 0.90 | **0.857143 (24/28)** |
+| Present-context recall | at least 0.80 | **0.700000 (7/10)** |
+| False-positive present | at most 0 | **1** |
+| Wrong realization | at most 0 | **1** |
+
+Three expected-present cases became unresolved because the annotators disagreed
+on whether ordinary function parameters, generic JSON values, or project-local
+YAML files establish caller/external input. The single false positive treated
+`ldd` as fixed even though its executable path is itself a function parameter.
+These are representation-contract ambiguities rather than scheduler or JSON
+transport failures. Gate C therefore remains failed; the frozen result is not
+relabelled, rescored, or rerun.
 
 The bounded repair sequence remains visible without promoting development
 replays to evidence:
@@ -218,7 +234,7 @@ extraction or any active-protocol intervention claim.
 
 | Intended output | Active implementation | Current evidence |
 | --- | --- | --- |
-| Prompt TSG task-security representation | `prompt_tsg_extract.py`, `prompt_tsg.py`, catalog v11 | compiled successor implemented, tested, and executed on a frozen 31-unit DevEval holdout; qualification failed at 27/31 with two false-positive states and two wrong realizations, so formal use remains prohibited |
+| Prompt TSG task-security representation | `prompt_contract_extract.py`, `prompt_contract.py`, `prompt_tsg.py`, catalog v11 | task-level contract successor implemented, tested, and executed on a frozen 28-unit DevEval holdout; qualification failed at 24/28 with 7/10 present recall, one false positive, and one wrong realization, so formal use remains prohibited |
 | Atomic support and selector ranking | `audit_discovery_positivity()`, `build_active_selector_evidence()`, `run_selector_suite()` | implemented/tested; formal execution prohibited by failed representation Gate |
 | Pair selector priority | `build_tsg_pair_universe()`, `run_interaction_selector()` | implemented/tested; no active natural-data freeze |
 | Atomic policy effect | `freeze_successor_experiment()`, `run_successor_experiment()` | implemented/tested; no active-protocol provider result |
@@ -244,6 +260,7 @@ closes an engineering defect but does not change the failed scientific Gate.
 | SecCodeBench successor extraction v2 | `newly_run` development evidence | disjoint 10-task inputs and gold were frozen first; extraction stopped on task 2 after one graph, and task 1 already made present recall mathematically unable to reach 0.80; no qualification metric was produced |
 | BigCodeBench successor extraction v3 | `newly_run` development evidence | disjoint 31-task inputs and gold were frozen first; extraction stopped on task 16 after 15 graphs. The completed prefix already contained one false-positive present state and one wrong realization, so the frozen Gate was unreachable; no qualification metric was produced |
 | DevEval compiled-successor qualification v4 | `newly_run` | 31/31 extraction complete; 27/31 exact, 14/16 present recall, two false-positive present states, and two wrong realizations; frozen Gate failed and the population is exposure-excluded |
+| DevEval task-contract qualification v10 | `newly_run` | 28/28 extraction complete with four task workers and 56 calls in 506.63 seconds; independent qualification failed at 24/28 exact, 7/10 present recall, one false-positive present state, and one wrong realization |
 | Reviewer and focused tests | `newly_run` | recorded in the final verification section after the working tree is frozen |
 | SQL from-scratch factorial v3 | `preexisting_artifact` | schema 1.0; 30 task units / 240 assignments; interaction 0; simultaneous interval `[-0.0833, 0.0833]` |
 | SQL scaffold-repair follow-up | `preexisting_artifact` | schema 1.0; bounded context-specific positive interaction; not universal mechanism synergy |

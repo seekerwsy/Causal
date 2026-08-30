@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0",
+  "status": "QUALIFICATION_FAILED",
+  "freeze_sha256": "ad864c7adef481c453992bfb5158de04ff498bdef1f276f9b1f315a6b1efde47",
+  "method_revision_commit": "70679d490b3b9ad47cba19c53b76c729c3da8110",
+  "freeze_commit": "42b979a6e31142b26dddfa0d8e64b6a491fb2fd8",
+  "host": "wsy@121.48.163.133:9086",
+  "deployment_root": "/home/wsy/prompt-mechanism-study-deployments/prompt-contract-gate-c-v10-42b979a-20260831-01",
+  "extraction_root": "/home/wsy/prompt-mechanism-study-experiments/prompt-contract-gate-c-v10-42b979a-20260831-01",
+  "qualification_root": "/home/wsy/prompt-mechanism-study-experiments/prompt-contract-gate-c-v10-qualification-42b979a-20260831-01",
+  "execution": {
+    "task_units": 28,
+    "task_workers": 4,
+    "effective_task_workers": 4,
+    "provider_calls": 56,
+    "elapsed_seconds": 506.63,
+    "approximate_sequential_baseline_seconds": 840,
+    "approximate_speedup": 1.66
+  },
+  "extraction": {
+    "status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
+    "contracts": 28,
+    "graphs": 28,
+    "unresolved_task_units": 4,
+    "bundle_path": "data/method/results/prompt-contract-gate-c-v10",
+    "manifest_sha256": "66a2f3e6a95d6d8f93742d795aae83ab01ab2818229477a3aa8866edb8e087de",
+    "report_sha256": "2c37ab2a50bad94406930dbee8cebdc9f203f9647f729a553121a99585a9e40a"
+  },
+  "qualification": {
+    "bundle_path": "data/method/results/prompt-contract-gate-c-qualification-v10",
+    "manifest_sha256": "4cb55556132e37e5f013b72a6825602ad7487649ff95a8253c794a9d6b498b1b",
+    "qualification_sha256": "3b92d1917648a227f230d4a466c971268cc61f8661a105e81be3dbe1b5e34aa7",
+    "case_results_sha256": "8638fc8d0081ef7dc702429e3965bfb175d9e9d4a97bac418c5be949607c6a83",
+    "matched_task_units": 24,
+    "holdout_task_units": 28,
+    "exact_context_accuracy": 0.857143,
+    "present_recall": 0.7,
+    "false_positive_present": 1,
+    "wrong_realization": 1,
+    "semantic_annotation_disagreements": 15,
+    "relation_annotation_disagreements": 3
+  },
+  "mismatches": [
+    {
+      "task_id": "deveval_task_203aca3fe24f05d4a9bf429a3457e40a9abd1934504258e1b77baee01988a95f",
+      "upstream_id": "pyinfra.operations.files.rsync",
+      "expected": "present:cwe78_fixed_executable_argv",
+      "actual": "unresolved",
+      "diagnosis": "The annotators disagreed on whether ordinary function parameters constitute caller-provided command arguments when the prompt does not use a trust adjective."
+    },
+    {
+      "task_id": "deveval_task_e4c84f1c2a118f86794b86f9ff1994f25419cff26900d910f69984b5cd8228b1",
+      "upstream_id": "exodus_bundler.bundling.run_ldd",
+      "expected": "absent_or_unresolved",
+      "actual": "present:cwe78_fixed_executable_argv",
+      "diagnosis": "Both annotators treated the named ldd tool as fixed even though the ldd executable path is itself a caller-supplied function parameter. This is the single false-positive present and wrong realization."
+    },
+    {
+      "task_id": "deveval_task_4044ba94196865658e04028da08a61c4d0525e1c1d2efdbd921537001d392fe8",
+      "upstream_id": "rows.fields.JSONField.deserialize",
+      "expected": "present:cwe502_json_deserialization",
+      "actual": "unresolved",
+      "diagnosis": "The annotators disagreed on whether the JSONField name and conversion-to-object contract entail JSON parsing and caller-supplied JSON content."
+    },
+    {
+      "task_id": "deveval_task_0e9e1223cada80f9e03c0f59b2f3e80ead0a0fcfc7a0a4397c9d8af47f386e13",
+      "upstream_id": "awesome_autodl.autodl_topic2papers",
+      "expected": "present:cwe502_yaml_deserialization",
+      "actual": "unresolved",
+      "diagnosis": "The annotators agreed that YAML is loaded but disagreed on whether project-local YAML files count as externally supplied input."
+    }
+  ],
+  "interpretation": "Bounded concurrency closed the extraction faster without changing calls or ordering, but Gate C remains failed. Three misses arise from an unresolved caller/external-input default, and one false positive arises from confusing a named executable with an independently fixed executable. These are representation-contract ambiguities, not evidence-transport failures.",
+  "arms_or_outcomes_used": false,
+  "scientific_claim_allowed": false
+}

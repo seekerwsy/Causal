@@ -335,7 +335,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | direct-graph successor formal qualification failed；task-level contract-first replacement implemented + focused-tested | catalog v11/proposer v17/reviewer v7 的 DevEval v4 资格运行完成 31/31 图，但仅 27/31 匹配、14/16 present recall，并出现 2 个 false-positive present 和 2 个 wrong realization。新候选对每个 task unit 联合穷尽同一 scope 的所有 query，两个盲态 annotator 独立填写完整表并把分歧保留为 unresolved，再确定性编译 schema-2.0 TSG。缺失 query/semantic/relation 会硬失败，旧 schema-1.0 freeze 的文件身份仍逐字节成立。这仍不是独立准确率证据，不能进入 formal extraction |
+| Prompt TSG、有限 catalog、evidence-bound facts、四值查询 | task-level contract successor implemented、tested、executed；Gate C failed | v10 对每个 task unit 联合穷尽同一 scope 的所有 query，两个盲态 annotator 独立填写完整表，缺失行硬失败，不可验证的 present evidence 确定性降为 unresolved，再编译 schema-2.0 TSG。28/28 图、56 次调用以 4 workers 在 506.63 秒内闭合，但仅 24/28 exact、7/10 present recall，并有 1 个 false-positive present 和 1 个 wrong realization。失败集中在 caller/external-input 默认语义和“命名工具”与“独立固定 executable”的区分；因此不得进入 formal discovery |
 | 自然 discovery population 与 positivity audit | implemented + tested；candidate census executed；formal audit not executed | 七源语义清洗和 2,165 份功能合同已闭合，373 条 Python 候选 census 已冻结；由于表示资格失败，正式 task split 与 discovery positivity 按协议未运行 |
 | family-local FCI 与五类 selector 公平比较 | implemented + tested，未在当前自然数据上 executed | 活动 schema 2.1 将 catalog/prompt/Prompt TSG 闭合并重算状态；五类 selector、operation-specific `association.v3`、fixed/two-level/multi-slot 分析、typed-BK/PAG 敏感性、严格 Top-K/空槽、冻结 bridge、ConfirmedYield@K、nested task-unit bootstrap 和独立 verifier 已闭合；当前没有通过 gate 的正式自然 selector freeze，因而没有 selector 优越性结果 |
 | RQ2 direct 与 direct+context representation 比较 | implemented + tested，未 formally executed | runner 只接受两个已经完整验证的 selector result bundles，重算 candidate coverage、protocolization、ConfirmedYield@K 和 effect summary；它比较的是两个端到端 funnel，不是保持候选宇宙不变的纯 selector 效应 |
@@ -352,7 +352,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | Gate | 状态 | 含义 |
 | --- | --- | --- |
 | 理论边界：TSG、selector、randomization、measurement 分离 | **通过** | 概念边界已明确 |
-| 自然 Prompt TSG 抽取资格 | **direct-graph successor 的独立外部 Gate 已完整执行但未通过；task-level contract Gate 待运行** | DevEval v4 保持 27/31 exact、14/16 present recall、2 false-positive present、2 wrong realization，且永不重跑或重标。新合同接口消除了 omission-as-absence 和同一任务跨 query 决策不一致；自动合同生成尚无新独立资格结果，必须冻结全新任务与 source-only gold 后再运行 Gate |
+| 自然 Prompt TSG 抽取资格 | **task-level contract Gate v10 已完整执行但未通过** | 28 个 DevEval task units 全部闭合；exact=24/28（0.857143）、present recall=7/10（0.70）、false-positive present=1、wrong realization=1。合同接口和并发执行已闭合，但表示语义未达冻结阈值；该结果不重跑、不改阈值，也不能作为正式抽取资格 |
 | discovery positivity/source overlap | **按协议未执行** | 新鲜语义清洗与合同已完成，但表示 Gate 失败后不得冻结正式 discovery split 或读取自然 outcome |
 | FCI selector | **实现通过；自然数据未运行** | backend、五类公平 selector、TSG lifting 和 artifact verifier 已测试，但没有通过 support gate 的活动数据，不能形成 selector 效用结论 |
 | RQ2 representation comparison | **工程 Gate 通过；正式比较未运行** | direct 与 direct+context 两条完整 result funnel 的 lineage、adapter identity 和统计摘要可独立重放；尚无新前瞻冻结的双轨 provider 结果 |
@@ -362,7 +362,7 @@ Security Oracle 的结论只覆盖已校准的语言、任务形态和 profile�
 | factorial from-scratch confirmation | **已完成并独立验证；正式零结果** | 30 个 task units、2 个顺序、4 cells，共 240 assignments；A00 安全率已达 96.7%，interaction=0，simultaneous interval=[-8.33,+8.33] 个百分点 |
 | scaffold-repair prospective follow-up | **已完成并独立验证；有界正向结果** | 30 个相同 task units、240 assignments；A00=0%、A11=98.3%、interaction=+70.0pp，simultaneous interval=[+56.7,+83.3]pp；功能差=-1.7pp，通过非劣 Gate |
 
-当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过离线/合成 reviewer tests。Gate C 的 compiled successor 已获得一次完整的新独立资格结果，但以 27/31、2 个 false-positive present 和 2 个 wrong realization 失败。因此 formal discovery、hypothesis/policy freeze、Gate D 与 Gate E 均未启动。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
+当前准确位置是：**Gate A 已按唯一规范闭合；Gate B 的活动最小方法已实现并通过 focused reviewer tests。Gate C 的 task-level contract v10 已完整运行并独立复验，但以 24/28 exact、7/10 present recall、1 个 false-positive present 和 1 个 wrong realization 失败。因此 formal discovery、hypothesis/policy freeze、Gate D 与 Gate E 均未启动。现有论文效果证据仍只有已冻结的历史 schema-1.0 factorial v3 零结果与 scaffold-repair follow-up 有界正向结果，不能重标为新协议结果。**
 
 ## 14. v3 后续研究边界
 
