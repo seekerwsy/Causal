@@ -39,6 +39,21 @@ deployment machinery, or several competing execution paths.
    configuration, implementation function, result field, and table builder.
    Demo, smoke, calibration, and development-canary results cannot be promoted
    to confirmatory evidence.
+7. Treat discovery-population supplementation as optional pre-Discovery data
+   preparation, not a new scientific stage. It may use only independently
+   sourced natural task units, must be bounded to one outcome- and
+   selector-blind round under a frozen coverage target, and must never use
+   paraphrases, interventions, synthetic cell filling, FCI/RD scores, selector
+   ranks, or Prompt-TSG relation support to choose acquisitions.
+8. Use one outcome-blind discoverability Gate family for Atomic and Pair
+   candidates. Pair eligibility never requires either factor to have been
+   selected, ranked, or supported as an Atomic candidate; pure interactions
+   remain admissible when their own context, compatibility, four-cell support,
+   lineage-overlap, and fold requirements pass.
+9. Keep context-modifier inference and Pair response-pattern labels inactive
+   until their exact task assignment, joint bootstrap/multiplicity rule, and
+   deterministic predicates are prospectively frozen. Missing rules must yield
+   an explicit blocked status, never a guessed default, null label, or claim.
 
 ## Minimal Implementation Rules
 

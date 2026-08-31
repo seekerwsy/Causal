@@ -334,6 +334,15 @@ class DataRoleManifest:
             if item.role is DataRole.QUAL_ACCEPT
         )
 
+    @property
+    def discovery_population_sha256(self) -> str:
+        """Bind every exact DISCOVERY dataset and task-unit membership once."""
+
+        discovery = tuple(
+            item for item in self.bindings if item.role is DataRole.DISCOVERY
+        )
+        return content_hash(discovery)
+
     def require_dataset_role(self, data_id: str, role: DataRole) -> DataRoleBinding:
         require_text(data_id, "data_id")
         if type(role) is not DataRole:

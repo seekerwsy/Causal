@@ -9,6 +9,9 @@ from collections import Counter, defaultdict
 
 from prompt_mechanism_study.inference import (
     ConfirmatoryEffectStatus,
+    ContextAnalysisStatus,
+    PairResponsePatternPlanStatus,
+    ResponsePatternStatus,
     SharedEvidenceRecord,
     TargetFamilyStatus,
     TargetSelectorYieldResult,
@@ -33,6 +36,10 @@ def verify_target_shared_evidence(
         raise ValueError("target yield record is not bound to the shared evidence")
     ledger = evidence.ledger
     plan = evidence.plan
+    if plan.context_analysis.status is not ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE:
+        raise ValueError("context analysis lacks an independently implemented frozen rule")
+    if plan.pair_response_patterns.status is not PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE:
+        raise ValueError("Pair response predicates lack an independent implementation")
     outcome_by_id = {item.assignment_id: item for item in ledger.outcomes}
     failed = {item.assignment_id for item in ledger.infrastructure_failures}
     assignments_by_candidate = defaultdict(list)
@@ -105,6 +112,11 @@ def verify_target_shared_evidence(
                 raise ValueError("target assignment or task-unit accounting drift")
             _v3_check_contributions(item.task_unit_contributions, value["contributions"])
             _v3_check_arm_summaries(item.arm_summaries, value["arm_summaries"])
+            _v3_check_response_pattern(
+                item.response_pattern,
+                family.track,
+                value["arm_summaries"],
+            )
     _v3_verify_yields(evidence, yields, status_by_candidate)
     return {
         "status": "TARGET_SHARED_EVIDENCE_VERIFIED",
@@ -495,6 +507,68 @@ def _v3_check_arm_summaries(reported, expected):
             raise ValueError("target arm summary accounting drift")
         for actual_value, expected_value in zip(observed[2:-2], values[2:-2], strict=True):
             _v3_same(actual_value, expected_value, "arm endpoint summary")
+
+
+def _v3_check_response_pattern(reported, track, arm_summaries):
+    if track is PolicyTrack.ATOMIC:
+        if (
+            reported.status is not ResponsePatternStatus.NOT_APPLICABLE
+            or reported.surface is not None
+            or reported.label is not None
+            or reported.predicate_sha256 is not None
+            or reported.reasons
+        ):
+            raise ValueError("Atomic response-pattern status failed independent replay")
+        return
+    if tuple(item[0] for item in arm_summaries) != PAIR_CONFIRMATORY_ARMS:
+        if (
+            reported.status is not ResponsePatternStatus.NON_EVALUABLE
+            or reported.surface is not None
+            or reported.label is not None
+            or reported.predicate_sha256 is not None
+            or reported.reasons != ("pair_response_surface_unavailable",)
+        ):
+            raise ValueError("unavailable Pair response surface failed independent replay")
+        return
+    means = {item[0]: float(item[2]) for item in arm_summaries}
+    mean_00 = means[ConfirmatoryArm.PAIR_00]
+    mean_10 = means[ConfirmatoryArm.PAIR_10]
+    mean_01 = means[ConfirmatoryArm.PAIR_01]
+    mean_11 = means[ConfirmatoryArm.PAIR_11]
+    expected = (
+        mean_00,
+        mean_10,
+        mean_01,
+        mean_11,
+        mean_10 - mean_00,
+        mean_01 - mean_00,
+        mean_11 - mean_00,
+        mean_11 - mean_01,
+        mean_11 - mean_10,
+        mean_11 - mean_10 - mean_01 + mean_00,
+    )
+    if (
+        reported.status is not ResponsePatternStatus.BLOCKED_NO_FROZEN_PREDICATE
+        or reported.surface is None
+        or reported.label is not None
+        or reported.predicate_sha256 is not None
+        or reported.reasons
+    ):
+        raise ValueError("blocked Pair response-pattern status failed independent replay")
+    observed = (
+        reported.surface.mean_00,
+        reported.surface.mean_10,
+        reported.surface.mean_01,
+        reported.surface.mean_11,
+        reported.surface.factor_1_at_0,
+        reported.surface.factor_2_at_0,
+        reported.surface.joint,
+        reported.surface.factor_1_at_1,
+        reported.surface.factor_2_at_1,
+        reported.surface.interaction,
+    )
+    for actual, wanted in zip(observed, expected, strict=True):
+        _v3_same(actual, wanted, "Pair response surface")
 
 
 def _v3_verify_yields(evidence, yields, statuses):

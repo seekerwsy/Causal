@@ -290,6 +290,32 @@ def build_target_rq_tables(
                     "reasons": list(estimate.reasons),
                     "task_units": estimate.task_units,
                     "assignments": estimate.assignments,
+                    "response_pattern_classification_status": (
+                        estimate.response_pattern.status.value
+                    ),
+                    "response_pattern": estimate.response_pattern.label,
+                    "response_pattern_predicate_sha256": (
+                        estimate.response_pattern.predicate_sha256
+                    ),
+                    "response_pattern_reasons": list(
+                        estimate.response_pattern.reasons
+                    ),
+                    "pair_response_surface": (
+                        None
+                        if estimate.response_pattern.surface is None
+                        else {
+                            "mean_00": estimate.response_pattern.surface.mean_00,
+                            "mean_10": estimate.response_pattern.surface.mean_10,
+                            "mean_01": estimate.response_pattern.surface.mean_01,
+                            "mean_11": estimate.response_pattern.surface.mean_11,
+                            "factor_1_at_0": estimate.response_pattern.surface.factor_1_at_0,
+                            "factor_2_at_0": estimate.response_pattern.surface.factor_2_at_0,
+                            "joint": estimate.response_pattern.surface.joint,
+                            "factor_1_at_1": estimate.response_pattern.surface.factor_1_at_1,
+                            "factor_2_at_1": estimate.response_pattern.surface.factor_2_at_1,
+                            "interaction": estimate.response_pattern.surface.interaction,
+                        }
+                    ),
                     "arms": [
                         {
                             "arm": arm.arm.value,
@@ -353,6 +379,11 @@ def build_target_rq_tables(
             else authorization.formal_report_authorization_id
         ),
         "endpoint_order": [item.value for item in evidence.plan.metrics],
+        "context_analysis_status": evidence.plan.context_analysis.status.value,
+        "context_modifier_rows": [],
+        "pair_response_pattern_plan_status": (
+            evidence.plan.pair_response_patterns.status.value
+        ),
         "rq1_selector_rows": selector_rows,
         "rq2_full_minus_ablation_rows": rq2_rows,
         "primary_family_rows": family_rows,

@@ -24,7 +24,17 @@ from prompt_mechanism_study.mechanisms import (
     PairStructuralRelationEvidence,
 )
 from prompt_mechanism_study.prompt_tsg import QueryState
-from prompt_mechanism_study.prioritization import RankedCandidate, SelectorFailure, SelectorSlot, SlotStatus
+from prompt_mechanism_study.prioritization import (
+    CandidateCoverageSummary,
+    CandidateKind,
+    DiscoverabilityDecision,
+    DiscoverabilityReason,
+    DiscoverabilityStatus,
+    RankedCandidate,
+    SelectorFailure,
+    SelectorSlot,
+    SlotStatus,
+)
 from prompt_mechanism_study.records import content_hash, content_id, require_text
 from prompt_mechanism_study.representation import (
     ModelBoundCandidateRecord,
@@ -149,9 +159,11 @@ class PairCandidateUniverseManifest:
 
     policy_keys: tuple[PairPolicyKey, ...]
     compatibility_decisions: tuple[PairCompatibilityDecision, ...]
+    coverage_summaries: tuple[CandidateCoverageSummary, ...]
     model_bound_records: tuple[ModelBoundCandidateRecord, ...]
     candidate_family_ids: tuple[tuple[str, str], ...]
     discovery_data_sha256: str
+    discovery_population_sha256: str
     compatibility_evidence_sha256: str
     information_budget_sha256: str
     top_k: int
@@ -169,6 +181,12 @@ class PairCandidateUniverseManifest:
             for item in self.compatibility_decisions
         ):
             raise TypeError("Pair compatibility decisions must be typed")
+        if tuple(item.candidate_id for item in self.coverage_summaries) != candidate_ids or any(
+            type(item) is not CandidateCoverageSummary
+            or item.candidate_kind is not CandidateKind.PAIR
+            for item in self.coverage_summaries
+        ):
+            raise ValueError("Pair coverage summaries must exactly follow the universe")
         if tuple(item.policy_key for item in self.model_bound_records) != candidate_ids:
             raise ValueError("model-bound records must exactly follow Pair policies")
         if any(
@@ -182,6 +200,7 @@ class PairCandidateUniverseManifest:
             raise ValueError("Pair family bindings must be non-empty")
         for value in (
             self.discovery_data_sha256,
+            self.discovery_population_sha256,
             self.compatibility_evidence_sha256,
             self.information_budget_sha256,
         ):
@@ -416,9 +435,19 @@ class PairPreOutcomeFreeze:
     universe_id: str
     plan_id: str
     preoutcome_data_sha256: str
+    discovery_population_sha256: str
     support_gates: tuple[PairSupportGate, ...]
     fold_manifests: tuple[PairCandidateFoldManifest, ...]
     failures: tuple[SelectorFailure, ...]
+    discoverability: tuple[DiscoverabilityDecision, ...]
+    eligibility_inputs: tuple[str, ...] = (
+        "FACTORIAL_COMPATIBILITY",
+        "NATURAL_FOUR_CELL_SUPPORT",
+        "PAIR_CONTEXT",
+        "PAIR_FOLDS",
+        "SOURCE_LINEAGE_OVERLAP",
+    )
+    atomic_evidence_read: bool = False
 
     def __post_init__(self) -> None:
         for value, name in (
@@ -429,6 +458,10 @@ class PairPreOutcomeFreeze:
         _require_digest(
             self.preoutcome_data_sha256,
             "Pair pre-outcome data",
+        )
+        _require_digest(
+            self.discovery_population_sha256,
+            "Pair pre-outcome Discovery population",
         )
         if tuple(sorted(self.support_gates, key=lambda item: item.pair_id)) != (
             self.support_gates
@@ -464,6 +497,30 @@ class PairPreOutcomeFreeze:
             for item in self.failures
         ):
             raise ValueError("Pair pre-outcome freeze contains a non-fold failure")
+        decision_ids = tuple(item.candidate_id for item in self.discoverability)
+        if decision_ids != tuple(sorted(set(decision_ids))) or any(
+            type(item) is not DiscoverabilityDecision
+            or item.candidate_kind is not CandidateKind.PAIR
+            or item.discovery_population_sha256 != self.discovery_population_sha256
+            or item.universe_id != self.universe_id
+            for item in self.discoverability
+        ):
+            raise ValueError("Pair discoverability decisions are not canonical or bound")
+        discoverable = {
+            item.candidate_id
+            for item in self.discoverability
+            if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+        }
+        if discoverable != set(fold_ids):
+            raise ValueError("Pair discoverability must exactly match frozen fold support")
+        if self.eligibility_inputs != (
+            "FACTORIAL_COMPATIBILITY",
+            "NATURAL_FOUR_CELL_SUPPORT",
+            "PAIR_CONTEXT",
+            "PAIR_FOLDS",
+            "SOURCE_LINEAGE_OVERLAP",
+        ) or self.atomic_evidence_read is not False:
+            raise ValueError("Pair eligibility cannot read Atomic evidence (no heredity)")
 
     @property
     def preoutcome_freeze_id(self) -> str:
@@ -674,8 +731,10 @@ def freeze_pair_candidate_universe(
     compatibility_decisions: Sequence[PairCompatibilityDecision],
     model_bound_records: Sequence[ModelBoundCandidateRecord],
     *,
+    coverage_summaries: Mapping[str, CandidateCoverageSummary],
     candidate_family_ids: Mapping[str, str],
     discovery_data_sha256: str,
+    discovery_population_sha256: str,
     information_budget_sha256: str,
     top_k: int,
 ) -> PairCandidateUniverseManifest:
@@ -693,13 +752,17 @@ def freeze_pair_candidate_universe(
         raise ValueError("model-bound records must bind every Pair policy once")
     if set(candidate_family_ids) != set(candidate_ids):
         raise ValueError("Pair family bindings must bind every policy once")
+    if set(coverage_summaries) != set(candidate_ids):
+        raise ValueError("Pair coverage summaries must bind every policy once")
     frozen_decisions = tuple(decisions[candidate_id] for candidate_id in candidate_ids)
     return PairCandidateUniverseManifest(
         ordered,
         frozen_decisions,
+        tuple(coverage_summaries[candidate_id] for candidate_id in candidate_ids),
         tuple(records[candidate_id] for candidate_id in candidate_ids),
         tuple((candidate_id, candidate_family_ids[candidate_id]) for candidate_id in candidate_ids),
         discovery_data_sha256,
+        discovery_population_sha256,
         content_hash(frozen_decisions),
         information_budget_sha256,
         top_k,
@@ -905,18 +968,70 @@ def freeze_pair_preoutcome_design(
             )
             continue
         folds.append(fold_manifest)
+    frozen_gates = tuple(sorted(gates, key=lambda item: item.pair_id))
+    frozen_folds = tuple(sorted(folds, key=lambda item: item.policy_key))
+    frozen_failures = tuple(
+        sorted(
+            failures,
+            key=lambda item: (item.candidate_id or "", item.reason_code),
+        )
+    )
+    compatibility_by_id = {
+        item.policy_key: item for item in universe.compatibility_decisions
+    }
+    gate_by_id = {item.pair_id: item for item in frozen_gates}
+    fold_by_id = {item.policy_key: item for item in frozen_folds}
+    failure_by_id = {item.candidate_id: item for item in frozen_failures}
+    coverage_by_id = {
+        item.candidate_id: item for item in universe.coverage_summaries
+    }
+    decisions = []
+    for candidate_id in universe.candidate_ids:
+        compatibility = compatibility_by_id[candidate_id]
+        gate = gate_by_id.get(candidate_id)
+        coverage = coverage_by_id[candidate_id]
+        if gate is not None and coverage.state_or_cell_task_units != gate.cell_task_units:
+            raise ValueError("Pair coverage summary drifted from the four-cell support Gate")
+        reasons = []
+        if compatibility.decision is not FactorialCompatibility.COMPATIBLE:
+            reasons.append(DiscoverabilityReason.FACTORIAL_INCOMPATIBLE)
+        elif gate is None:
+            reasons.append(DiscoverabilityReason.MISSING_OBSERVATIONS)
+        else:
+            reasons.extend(_pair_discoverability_reason(item) for item in gate.reasons)
+        if candidate_id in failure_by_id:
+            reasons.append(DiscoverabilityReason.FOLD_NON_EVALUABLE)
+        support_evidence = gate if gate is not None else compatibility
+        fold_evidence = fold_by_id.get(candidate_id) or failure_by_id.get(candidate_id) or {
+            "candidate_id": candidate_id,
+            "fold_status": "NOT_ATTEMPTED_SUPPORT_FAILED",
+        }
+        decisions.append(
+            DiscoverabilityDecision(
+                candidate_id,
+                CandidateKind.PAIR,
+                universe.discovery_population_sha256,
+                universe.universe_id,
+                content_hash(support_evidence),
+                content_hash(fold_evidence),
+                coverage,
+                (
+                    DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+                    if not reasons
+                    else DiscoverabilityStatus.DISCOVERY_INELIGIBLE
+                ),
+                tuple(sorted(set(reasons), key=lambda item: item.value)),
+            )
+        )
     return PairPreOutcomeFreeze(
         universe.universe_id,
         plan.plan_id,
         pair_preoutcome_data_sha256(observations),
-        tuple(sorted(gates, key=lambda item: item.pair_id)),
-        tuple(sorted(folds, key=lambda item: item.policy_key)),
-        tuple(
-            sorted(
-                failures,
-                key=lambda item: (item.candidate_id or "", item.reason_code),
-            )
-        ),
+        universe.discovery_population_sha256,
+        frozen_gates,
+        frozen_folds,
+        frozen_failures,
+        tuple(decisions),
     )
 
 
@@ -969,6 +1084,37 @@ def pair_preoutcome_data_sha256(
     if len(coordinates) != len(frozen):
         raise ValueError("a Pair pre-outcome policy/task coordinate is duplicated")
     return content_hash(frozen)
+
+
+def _pair_discoverability_reason(reason: str) -> DiscoverabilityReason:
+    mapping = {
+        "missing_observations": DiscoverabilityReason.MISSING_OBSERVATIONS,
+        "duplicate_task_unit": DiscoverabilityReason.DUPLICATE_TASK_UNIT,
+        "candidate_coordinate_mismatch": (
+            DiscoverabilityReason.CANDIDATE_COORDINATE_MISMATCH
+        ),
+        "context_not_present": DiscoverabilityReason.CONTEXT_NOT_PRESENT,
+        "covariate_schema_mismatch": (
+            DiscoverabilityReason.COVARIATE_SCHEMA_MISMATCH
+        ),
+        "extractor_reliability_below_threshold": (
+            DiscoverabilityReason.EXTRACTOR_RELIABILITY_BELOW_THRESHOLD
+        ),
+        "factor_state_not_binary": DiscoverabilityReason.FACTOR_STATE_NOT_BINARY,
+        "insufficient_four_cell_support": (
+            DiscoverabilityReason.INSUFFICIENT_FOUR_CELL_SUPPORT
+        ),
+        "source_lineage_separation": (
+            DiscoverabilityReason.INSUFFICIENT_SOURCE_LINEAGE_OVERLAP
+        ),
+        "language_nonoverlap": DiscoverabilityReason.LANGUAGE_NONOVERLAP,
+        "archetype_nonoverlap": DiscoverabilityReason.ARCHETYPE_NONOVERLAP,
+        "api_family_nonoverlap": DiscoverabilityReason.API_FAMILY_NONOVERLAP,
+    }
+    try:
+        return mapping[reason]
+    except KeyError:
+        raise ValueError(f"unknown Pair discoverability reason: {reason}") from None
 
 
 def _pair_shared_support_gate(

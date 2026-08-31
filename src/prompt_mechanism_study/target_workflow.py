@@ -57,9 +57,23 @@ from prompt_mechanism_study.prioritization import (
     AtomicCandidateUniverseManifest,
     AtomicFCIBootstrapEvidence,
     AtomicShadowPlan,
+    CandidateCoverageSummary,
+    CandidateKind,
+    CoverageAcquisitionMode,
+    CoverageCellSupport,
+    CoverageCensusPhase,
+    CoverageTarget,
+    CoverageTargetProfile,
+    DiscoveryCoverageCensus,
     DiscoveryObservation,
+    DiscoveryPopulationLineage,
+    DiscoveryPopulationStatus,
+    DiscoverySupplementationPlan,
+    SupplementationDecision,
     ConfirmationDispatchManifest,
     FixedSlotSource,
+    PairCoverageCellSupport,
+    PairCoverageTarget,
     PolicyTrack,
     atomic_preoutcome_observations,
     discovery_data_sha256,
@@ -168,7 +182,12 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         },
     )
     budget = _smoke_budget(manifest)
-    inputs = _smoke_discovery_inputs()
+    inputs = _smoke_discovery_inputs(manifest.discovery_population_sha256)
+    population_lineage = _smoke_population_lineage(
+        manifest,
+        budget.qualification_bundle,
+        inputs,
+    )
     atomic_folds = freeze_atomic_candidate_folds(
         inputs.atomic_universe,
         atomic_preoutcome_observations(inputs.atomic_observations),
@@ -184,6 +203,13 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
         manifest=manifest,
         qualification_bundle=budget.qualification_bundle,
         budget=budget,
+        population_lineage=population_lineage,
+        atomic_discovery_population_sha256=(
+            inputs.atomic_universe.discovery_population_sha256
+        ),
+        pair_discovery_population_sha256=(
+            inputs.pair_universe.discovery_population_sha256
+        ),
         identity_and_scope_decision=_artifact_reference(
             "reviewer_smoke_identity_scope_",
             (inputs.atomic_policy, inputs.pair_policy),
@@ -198,6 +224,10 @@ def run_target_reviewer_smoke(output: Path) -> dict[str, object]:
                 inputs.atomic_universe.supported_policy_keys,
                 pair_preoutcome.support_gates,
             ),
+        ),
+        discoverability_contract=_artifact_reference(
+            "reviewer_smoke_discoverability_",
+            (atomic_folds.discoverability, pair_preoutcome.discoverability),
         ),
         candidate_fold_manifests=_artifact_reference(
             "reviewer_smoke_candidate_folds_",
@@ -658,7 +688,11 @@ def _smoke_budget(manifest: DataRoleManifest) -> RQ1BudgetQualification:
     )
 
 
-def _smoke_discovery_inputs() -> _SmokeDiscoveryInputs:
+def _smoke_discovery_inputs(
+    discovery_population_sha256: str = content_hash(
+        "reviewer-smoke-discovery-population"
+    ),
+) -> _SmokeDiscoveryInputs:
     outcome_id = "oracle_evaluable_secure_code_yield"
     atomic_policy = AtomicPolicyKey(
         AnalysisScope(
@@ -693,11 +727,25 @@ def _smoke_discovery_inputs() -> _SmokeDiscoveryInputs:
         (atomic_policy,),
         (atomic_record,),
         supported_policy_keys=(atomic_policy.policy_key,),
+        coverage_summaries={
+            atomic_policy.policy_key: CandidateCoverageSummary(
+                atomic_policy.policy_key,
+                CandidateKind.ATOMIC,
+                (("0", 12), ("1", 12)),
+                2,
+                24,
+                24,
+                24,
+                24,
+                12,
+            )
+        },
         realization_policy_ids={
             atomic_policy.policy_key: "reviewer-smoke-atomic-realization-policy"
         },
         candidate_family_ids={atomic_policy.policy_key: "atomic-smoke-family"},
         discovery_data_sha256=discovery_data_sha256(atomic_observations),
+        discovery_population_sha256=discovery_population_sha256,
         positivity_audit_sha256=content_hash("reviewer-smoke-atomic-positivity"),
         information_budget_sha256=content_hash("reviewer-smoke-information-budget"),
         top_k=1,
@@ -770,8 +818,22 @@ def _smoke_discovery_inputs() -> _SmokeDiscoveryInputs:
         (pair_policy,),
         (compatibility,),
         (pair_record,),
+        coverage_summaries={
+            pair_policy.policy_key: CandidateCoverageSummary(
+                pair_policy.policy_key,
+                CandidateKind.PAIR,
+                (("00", 8), ("01", 8), ("10", 8), ("11", 8)),
+                2,
+                32,
+                32,
+                32,
+                32,
+                8,
+            )
+        },
         candidate_family_ids={pair_policy.policy_key: "pair-smoke-family"},
         discovery_data_sha256=pair_shadow_data_sha256(pair_observations),
+        discovery_population_sha256=discovery_population_sha256,
         information_budget_sha256=content_hash("reviewer-smoke-information-budget"),
         top_k=1,
     )
@@ -800,6 +862,156 @@ def _smoke_discovery_inputs() -> _SmokeDiscoveryInputs:
         pair_universe,
         pair_observations,
         pair_plan,
+    )
+
+
+def _smoke_population_lineage(
+    manifest: DataRoleManifest,
+    qualification: QualificationBundle,
+    inputs: _SmokeDiscoveryInputs,
+) -> DiscoveryPopulationLineage:
+    """Build a no-supplement D0 fixture without reading outcomes or selectors."""
+
+    targets = [
+        CoverageTarget(
+            inputs.atomic_policy.analysis_scope.context_query_id,
+            inputs.atomic_policy.factor.actionable_feature_id,
+            2,
+            2,
+            1,
+        )
+    ]
+    targets.extend(
+        CoverageTarget(
+            inputs.pair_policy.analysis_scope.context_query_id,
+            factor.actionable_feature_id,
+            2,
+            2,
+            1,
+        )
+        for factor in inputs.pair_policy.factors
+    )
+    frozen_targets = tuple(sorted(targets, key=lambda item: item.target_id))
+    pair_target = PairCoverageTarget(
+        inputs.pair_policy.policy_key,
+        inputs.pair_policy.analysis_scope.context_query_id,
+        tuple(
+            factor.actionable_feature_id for factor in inputs.pair_policy.factors
+        ),
+        2,
+        1,
+    )
+    qualification_sha256 = content_hash(qualification)
+    profile = CoverageTargetProfile(
+        protocol_id=PROTOCOL_ID,
+        schema_version=SCHEMA_VERSION,
+        representation_profile_id="reviewer-smoke-prompt-tsg-v3",
+        representation_qualification_sha256=qualification_sha256,
+        catalog_sha256=content_hash("reviewer-smoke-catalog"),
+        support_profile_sha256=content_hash("reviewer-smoke-support-profile"),
+        common_candidate_universe_sha256=content_hash(
+            (inputs.atomic_universe.universe_id, inputs.pair_universe.universe_id)
+        ),
+        targets=frozen_targets,
+        pair_targets=(pair_target,),
+        permitted_source_families=("reviewer-smoke-reserved",),
+        acquisition_mode=CoverageAcquisitionMode.CONTEXT_FIRST,
+        maximum_source_records=0,
+        maximum_new_task_units=0,
+        maximum_review_task_units=0,
+        maximum_task_units_per_lineage=1,
+        minimum_source_lineage_diversity=1,
+        minimum_fillable_atomic_slots=1,
+        minimum_fillable_pair_slots=1,
+    )
+    task_unit_ids = tuple(
+        sorted(
+            task.task_unit_id
+            for binding in manifest.bindings
+            if binding.role is DataRole.DISCOVERY
+            for task in binding.task_units
+        )
+    )
+    cells = tuple(
+        CoverageCellSupport(
+            target.target_id,
+            len(task_unit_ids),
+            2,
+            2,
+            ("reviewer-smoke-lineage",),
+            ("reviewer-smoke-lineage",),
+        )
+        for target in frozen_targets
+    )
+    pair_cells = (
+        PairCoverageCellSupport(
+            pair_target.target_id,
+            (("00", 2), ("01", 2), ("10", 2), ("11", 2)),
+            tuple(
+                (cell, ("reviewer-smoke-lineage",))
+                for cell in ("00", "01", "10", "11")
+            ),
+        ),
+    )
+    pre = DiscoveryCoverageCensus(
+        profile.profile_id,
+        manifest.data_role_manifest_id,
+        content_id("reviewer_smoke_discovery_population_", task_unit_ids),
+        profile.representation_profile_id,
+        profile.catalog_sha256,
+        CoverageCensusPhase.PRE_SUPPLEMENT,
+        manifest.discovery_population_sha256,
+        qualification_sha256,
+        task_unit_ids,
+        cells,
+        pair_cells,
+        1,
+        1,
+        1,
+        1,
+    )
+    plan = DiscoverySupplementationPlan(
+        profile.profile_id,
+        pre.census_id,
+        manifest.discovery_population_sha256,
+        SupplementationDecision.NOT_REQUESTED,
+        (),
+        (),
+        content_hash("future-evaluation-reservation-v1/reviewer-smoke"),
+        (),
+        (),
+        content_hash("reviewer-smoke-near-duplicate-rule"),
+        content_hash("reviewer-smoke-exposure-policy"),
+        content_hash("reviewer-smoke-role-allocation-rule"),
+        SMOKE_CODE_COMMIT,
+        False,
+        0,
+    )
+    post = DiscoveryCoverageCensus(
+        profile.profile_id,
+        manifest.data_role_manifest_id,
+        content_id("reviewer_smoke_discovery_population_", task_unit_ids),
+        profile.representation_profile_id,
+        profile.catalog_sha256,
+        CoverageCensusPhase.POST_SUPPLEMENT,
+        manifest.discovery_population_sha256,
+        qualification_sha256,
+        task_unit_ids,
+        cells,
+        pair_cells,
+        1,
+        1,
+        1,
+        1,
+    )
+    return DiscoveryPopulationLineage(
+        profile,
+        pre,
+        plan,
+        None,
+        post,
+        manifest.discovery_population_sha256,
+        DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION,
     )
 
 

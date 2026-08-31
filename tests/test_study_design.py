@@ -24,10 +24,22 @@ from prompt_mechanism_study.randomization import (
 )
 from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.prioritization import (
+    CoverageAcquisitionMode,
+    CoverageCellSupport,
+    CoverageCensusPhase,
+    CoverageTarget,
+    CoverageTargetProfile,
+    DiscoveryCoverageCensus,
+    DiscoveryPopulationLineage,
+    DiscoveryPopulationStatus,
+    DiscoverySupplementationPlan,
     FixedSlotSource,
+    PairCoverageCellSupport,
+    PairCoverageTarget,
     PolicyTrack,
     SelectorSlot,
     SlotStatus,
+    SupplementationDecision,
     freeze_confirmation_dispatch,
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
@@ -169,6 +181,128 @@ def _qualification_manifest(
         "phase-context-policy-v3",
         content_hash("source-manifest"),
         bindings,
+    )
+
+
+def _population_lineage(
+    manifest: DataRoleManifest,
+    qualification: QualificationBundle,
+) -> DiscoveryPopulationLineage:
+    target = CoverageTarget("context.test", "feature.test", 1, 1, 1)
+    pair_target = PairCoverageTarget(
+        "pair-policy-test",
+        "context.test",
+        ("feature.first", "feature.second"),
+        1,
+        1,
+    )
+    profile = CoverageTargetProfile(
+        protocol_id=manifest.protocol_id,
+        schema_version="3.0",
+        representation_profile_id="representation-profile-test",
+        representation_qualification_sha256=content_hash(qualification),
+        catalog_sha256=content_hash("catalog-test"),
+        support_profile_sha256=content_hash("support-profile-test"),
+        common_candidate_universe_sha256=content_hash("candidate-universe-test"),
+        targets=(target,),
+        pair_targets=(pair_target,),
+        permitted_source_families=("test-source",),
+        acquisition_mode=CoverageAcquisitionMode.CONTEXT_FIRST,
+        maximum_source_records=0,
+        maximum_new_task_units=0,
+        maximum_review_task_units=0,
+        maximum_task_units_per_lineage=1,
+        minimum_source_lineage_diversity=1,
+        minimum_fillable_atomic_slots=1,
+        minimum_fillable_pair_slots=1,
+    )
+    task_ids = tuple(
+        sorted(
+            task.task_unit_id
+            for binding in manifest.bindings
+            if binding.role is DataRole.DISCOVERY
+            for task in binding.task_units
+        )
+    )
+    cells = (
+        CoverageCellSupport(
+            target.target_id,
+            len(task_ids),
+            1,
+            1,
+            ("lineage-test",),
+            ("lineage-test",),
+        ),
+    )
+    pair_cells = (
+        PairCoverageCellSupport(
+            pair_target.target_id,
+            (("00", 1), ("01", 1), ("10", 1), ("11", 1)),
+            tuple(
+                (cell, ("lineage-test",))
+                for cell in ("00", "01", "10", "11")
+            ),
+        ),
+    )
+    pre = DiscoveryCoverageCensus(
+        profile.profile_id,
+        manifest.data_role_manifest_id,
+        content_id("test_discovery_population_", task_ids),
+        profile.representation_profile_id,
+        profile.catalog_sha256,
+        CoverageCensusPhase.PRE_SUPPLEMENT,
+        manifest.discovery_population_sha256,
+        content_hash(qualification),
+        task_ids,
+        cells,
+        pair_cells,
+        1,
+        1,
+        1,
+        1,
+    )
+    plan = DiscoverySupplementationPlan(
+        profile.profile_id,
+        pre.census_id,
+        manifest.discovery_population_sha256,
+        SupplementationDecision.NOT_REQUESTED,
+        (),
+        (),
+        content_hash("future-evaluation-reservation-v1"),
+        (),
+        (),
+        content_hash("near-duplicate-rule"),
+        content_hash("exposure-policy"),
+        content_hash("role-allocation-rule"),
+        "0" * 40,
+        False,
+        0,
+    )
+    post = DiscoveryCoverageCensus(
+        profile.profile_id,
+        manifest.data_role_manifest_id,
+        content_id("test_discovery_population_", task_ids),
+        profile.representation_profile_id,
+        profile.catalog_sha256,
+        CoverageCensusPhase.POST_SUPPLEMENT,
+        manifest.discovery_population_sha256,
+        content_hash(qualification),
+        task_ids,
+        cells,
+        pair_cells,
+        1,
+        1,
+        1,
+        1,
+    )
+    return DiscoveryPopulationLineage(
+        profile,
+        pre,
+        plan,
+        None,
+        post,
+        manifest.discovery_population_sha256,
+        DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION,
     )
 
 
@@ -1002,9 +1136,16 @@ def test_target_two_freeze_lineage_closes_and_independently_replays(
         manifest=manifest,
         qualification_bundle=budget.qualification_bundle,
         budget=budget,
+        population_lineage=_population_lineage(
+            manifest,
+            budget.qualification_bundle,
+        ),
+        atomic_discovery_population_sha256=manifest.discovery_population_sha256,
+        pair_discovery_population_sha256=manifest.discovery_population_sha256,
         identity_and_scope_decision=_artifact_ref("identity-and-scope-v1"),
         candidate_universe_contract=_artifact_ref("candidate-universe-v1"),
         support_gate_contract=_artifact_ref("support-gate-v1"),
+        discoverability_contract=_artifact_ref("discoverability-v1"),
         candidate_fold_manifests=_artifact_ref("candidate-folds-v1"),
         selector_contract=_artifact_ref("selector-contract-v1"),
         discovery_outcome_contract=_artifact_ref("discovery-outcome-contract-v1"),
@@ -1380,10 +1521,26 @@ def test_qualification_plan_is_frozen_before_one_shot_acceptance() -> None:
 @pytest.mark.reviewer
 def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
     references = [_artifact_ref(f"artifact-{index}") for index in range(24)]
+    manifest = _qualification_manifest()
+    qualification = _accepted_qualification_bundle(manifest)
+    population = _population_lineage(manifest, qualification)
     discovery = DiscoveryDesignFreeze(
         "phase-context-policy-v3",
         "3.0",
-        *references[:9],
+        references[0],
+        references[1],
+        population,
+        population.accepted_population_manifest_sha256,
+        population.accepted_population_manifest_sha256,
+        population.accepted_population_manifest_sha256,
+        references[3],
+        references[4],
+        references[5],
+        references[6],
+        references[7],
+        references[8],
+        references[9],
+        references[10],
         atomic_top_k=3,
         pair_top_k=2,
         model_ids=("model-a", "model-b"),
@@ -1392,7 +1549,7 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
         "phase-context-policy-v3",
         "3.0",
         _artifact_ref(discovery.discovery_design_freeze_id),
-        *references[9:22],
+        *references[11:24],
     )
     index = StudyFreezeIndex(
         "phase-context-policy-v3",
@@ -1401,7 +1558,7 @@ def test_discovery_and_confirmation_are_two_separate_freeze_moments() -> None:
     )
 
     assert not hasattr(discovery, "fixed_slot_ledger")
-    assert confirmation.fixed_slot_ledger == references[9]
+    assert confirmation.fixed_slot_ledger == references[11]
     assert index.discovery_design_freeze.artifact_id == (
         discovery.discovery_design_freeze_id
     )

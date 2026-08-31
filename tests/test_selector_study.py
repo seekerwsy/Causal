@@ -12,7 +12,10 @@ from prompt_mechanism_study.prioritization import (
     AtomicFCIGateStatus,
     AtomicSelectorVariant,
     AtomicShadowPlan,
+    CandidateCoverageSummary,
+    CandidateKind,
     ConfirmationDispatchManifest,
+    DiscoverabilityStatus,
     DiscoveryObservation,
     FixedSlotSource,
     PolicyTrack,
@@ -108,12 +111,27 @@ def _atomic_shadow_fixture():
         policies,
         records,
         supported_policy_keys=tuple(policy.policy_key for policy in policies),
+        coverage_summaries={
+            policy.policy_key: CandidateCoverageSummary(
+                policy.policy_key,
+                CandidateKind.ATOMIC,
+                (("0", 12), ("1", 12)),
+                2,
+                24,
+                24,
+                24,
+                24,
+                12,
+            )
+            for policy in policies
+        },
         realization_policy_ids={
             policy.policy_key: f"realization-{index}"
             for index, policy in enumerate(policies)
         },
         candidate_family_ids=family_by_policy,
         discovery_data_sha256=discovery_data_sha256(observations),
+        discovery_population_sha256=content_hash("atomic-discovery-population"),
         positivity_audit_sha256=content_hash("atomic-positivity"),
         information_budget_sha256=content_hash("atomic-info-budget"),
         top_k=2,
@@ -144,17 +162,18 @@ def _atomic_shadow_fixture():
 @pytest.mark.extended
 def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
     universe, rows, plan, evidence, positive_id, negative_id = _atomic_shadow_fixture()
+    folds = freeze_atomic_candidate_folds(
+        universe,
+        atomic_preoutcome_observations(rows),
+        plan,
+    )
 
     result = run_atomic_shadow_qualification(
         universe,
         rows,
         plan,
         evidence,
-        fold_freeze=freeze_atomic_candidate_folds(
-            universe,
-            atomic_preoutcome_observations(rows),
-            plan,
-        ),
+        fold_freeze=folds,
     )
     score_by_id = {item.candidate_id: item for item in result.rd_scores}
     gate_by_id = {item.candidate_id: item for item in result.fci_gates}
@@ -178,6 +197,14 @@ def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
     }
     assert result.sole_difference.full_additional_read == "fci_gate"
     assert result.sole_difference.rd_only_additional_reads == ()
+    assert all(
+        item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+        and item.discovery_population_sha256
+        == universe.discovery_population_sha256
+        and item.coverage_summary.representation_resolved_rate == 1.0
+        and item.coverage_summary.confirmation_baseline_task_units == 12
+        for item in folds.discoverability
+    )
     for manifest in result.fold_manifests:
         for fold in range(manifest.fold_count):
             assert {
