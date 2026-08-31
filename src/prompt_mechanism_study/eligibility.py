@@ -784,6 +784,7 @@ def audit_dataset_eligibility(
     contract_reviews_root: Path | None = None,
     development_exclusions_path: Path | None = None,
     case_audit_path: Path | None = None,
+    quality_adjudication_path: Path | None = None,
     extension_policy_path: Path | None = None,
     backend_root: Path | None = None,
 ) -> dict[str, Any]:
@@ -889,7 +890,7 @@ def audit_dataset_eligibility(
         contract_rows,
     )
     development_exclusions = _task_unit_ids(development_exclusions_path)
-    case_flags = _case_audit_flags(case_audit_path)
+    case_flags = _case_audit_flags(case_audit_path, quality_adjudication_path)
     task_unit_population = set(contract_rows)
     if not development_exclusions <= task_unit_population or not set().union(
         *case_flags.values()
@@ -1008,6 +1009,8 @@ def audit_dataset_eligibility(
             blockers.append("known_material_contract_fault")
         if cluster_id in case_flags["scope_or_evaluability_concern"]:
             blockers.append("known_scope_or_evaluability_concern")
+        if cluster_id in case_flags["measurement_scope_concern"]:
+            blockers.append("known_measurement_scope_concern")
         if cluster_id in case_flags["repair_metadata"]:
             blockers.append("metadata_repair_required")
         if cluster_id in case_flags["semantic_calibration"]:
@@ -1232,6 +1235,11 @@ def audit_dataset_eligibility(
         ),
         "case_audit_sha256": (
             None if case_audit_path is None else _sha256(case_audit_path.resolve())
+        ),
+        "quality_adjudication_sha256": (
+            None
+            if quality_adjudication_path is None
+            else _sha256(quality_adjudication_path.resolve())
         ),
         "priority_extension_policy_sha256": _sha256(extension_file),
         "eligibility_implementation_sha256": _sha256(
@@ -1556,17 +1564,23 @@ def _task_unit_ids(path: Path | None) -> set[str]:
     return set(rows)
 
 
-def _case_audit_flags(path: Path | None) -> dict[str, set[str]]:
+def _case_audit_flags(
+    path: Path | None, adjudication_path: Path | None = None
+) -> dict[str, set[str]]:
     flags = {
         "material_contract_fault": set(),
         "scope_or_evaluability_concern": set(),
+        "measurement_scope_concern": set(),
         "repair_metadata": set(),
         "semantic_calibration": set(),
         "source_defect": set(),
     }
     if path is None:
+        if adjudication_path is not None:
+            raise EligibilityError("quality adjudication requires a source case audit")
         return flags
-    value = read_json(path.resolve())
+    source_path = path.resolve()
+    value = read_json(source_path)
     if value.get("arms_or_outcomes_used") is not False:
         raise EligibilityError("case audit is not outcome blind")
     for row in value.get("insufficient_case_audit", {}).get("decisions", []):
@@ -1585,7 +1599,58 @@ def _case_audit_flags(path: Path | None) -> dict[str, set[str]]:
     flags["scope_or_evaluability_concern"].update(
         sample.get("separate_evaluability_or_scope_concern_task_unit_ids", [])
     )
+    if adjudication_path is not None:
+        _apply_quality_adjudication(flags, source_path, adjudication_path.resolve())
     return flags
+
+
+def _apply_quality_adjudication(
+    flags: dict[str, set[str]], source_path: Path, adjudication_path: Path
+) -> None:
+    value = read_json(adjudication_path)
+    if (
+        value.get("schema_version") != "1.0"
+        or value.get("arms_or_outcomes_used") is not False
+        or value.get("source_case_audit_sha256") != _sha256(source_path)
+    ):
+        raise EligibilityError("independent quality adjudication is invalid or stale")
+    rows = value.get("decisions")
+    if not isinstance(rows, list) or not rows:
+        raise EligibilityError("independent quality adjudication decisions are missing")
+    decision_by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        task_id = row.get("task_unit_id") if isinstance(row, dict) else None
+        if (
+            not isinstance(task_id, str)
+            or not task_id
+            or task_id in decision_by_id
+            or not isinstance(row.get("reason"), str)
+            or not row["reason"].strip()
+        ):
+            raise EligibilityError("independent quality adjudication decision is invalid")
+        decision_by_id[task_id] = row
+    diagnostic_ids = (
+        flags["material_contract_fault"] | flags["scope_or_evaluability_concern"]
+    )
+    if set(decision_by_id) != diagnostic_ids:
+        raise EligibilityError("independent quality adjudication population is not exact")
+    for task_id, row in decision_by_id.items():
+        decision = row.get("decision")
+        if decision == "retain_material_contract_fault":
+            if task_id not in flags["material_contract_fault"]:
+                raise EligibilityError("material-fault adjudication has no source fault")
+        elif decision == "retain_quality_concern":
+            if task_id not in flags["scope_or_evaluability_concern"]:
+                raise EligibilityError("quality-concern adjudication has no source concern")
+        elif decision in {"accept_quality", "measurement_scope_concern", "source_defect"}:
+            flags["material_contract_fault"].discard(task_id)
+            flags["scope_or_evaluability_concern"].discard(task_id)
+            if decision == "measurement_scope_concern":
+                flags["measurement_scope_concern"].add(task_id)
+            elif decision == "source_defect":
+                flags["source_defect"].add(task_id)
+        else:
+            raise EligibilityError("independent quality adjudication decision is unknown")
 
 
 def _priority_extension_rows(
@@ -1681,6 +1746,8 @@ def _candidate_readiness(
         for blocker in blockers
     ):
         return "PENDING_INDEPENDENT_REVIEW"
+    if "known_measurement_scope_concern" in blockers:
+        return "PENDING_SCOPE"
     if row["status"] == "eligible":
         if oracle_support != "SUPPORTED":
             return "PENDING_ORACLE"

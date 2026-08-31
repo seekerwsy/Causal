@@ -20,7 +20,7 @@ Oracle qualifications.
 | Targeted outcome-blind contract adjudication, 17 cases | `newly_run` | correct contradictory reviews and bounded contract faults |
 | Blind mechanism-binding run, 220 task units | `newly_run` | resolve finite registered task shapes |
 | Unified 2,165-row candidate ledger | `newly_run` | final data status and blockers |
-| Quality-qualified final dataset, 1,217 task units | `newly_run` | all tasks meeting the frozen data-quality rule, independent of implementation support |
+| Quality-qualified final dataset, 1,222 task units | `newly_run` | all tasks meeting the frozen data-quality rule, independent of implementation support |
 | BaxBench 28-scenario source audit | `newly_run` | backend replication inventory |
 
 No row is an `user_claim`, and no experimental outcome was used.
@@ -53,10 +53,13 @@ No row is an `user_claim`, and no experimental outcome was used.
   SHA-256
   `8d8401ad3c1a45b295d4febdef8a5fb3f524e11b88f28e7a447afcd0b97792fb`;
 - current final quality-data bundle:
-  `64f1241574197ad17e64ae547c9dc611ff01add2ec2393ae2c8ba420d4f8136c`;
+  `2b74784e5917bd6a76f9bddc4aac0f24c0a332cc4ad60cd3113a4ab9c428f143`;
+- independent quality adjudication:
+  `data/dataset-curation/contract-quality-independent-adjudication-v1.json`,
+  SHA-256 `d98983a1af79361a6f6b2d9ff49a3f3ff235f87d0650fd14a4de9bb26a812650`;
 - eligibility implementation:
   `src/prompt_mechanism_study/eligibility.py`, SHA-256
-  `5f14e0fc00fff9b02f06c033632d31a5892e00d389164e99843440127681b8e8`;
+  `dd5f109a3cd5e60019e98fc013cf0a8048c6e6a77bac99d0e114c5917428b024`;
 - curation implementation:
   `src/prompt_mechanism_study/curation.py`, SHA-256
   `4a28c79e45e7accf5f3124cf4bd439d8f2b5ce04835916c7b684447b855d3a6d`;
@@ -70,14 +73,14 @@ The active local paths are:
 - `data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification`;
 - `data/method/phase-context-policy-v3-mechanism-registry-v1.json`;
 - `data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json`;
-- `.codex-runtime/dataset-final-quality-20260831-38-schema3-registry-bound`.
+- `.codex-runtime/dataset-final-quality-20260831-40-independent-quality`.
 
 The earlier `dataset-final-quality-20260831-36-target-oracle-final` bundle is
 retained as development history but superseded because its policy pointed at
 the legacy registry path after adding target-only realizations. The corrected
-audit binds the same registry bytes under a prospective schema-3 path; its two
-independent replays are byte-identical and its substantive task counts are
-unchanged.
+audit binds the same registry bytes under a prospective schema-3 path. The
+subsequent independent quality adjudication supersedes it while preserving the
+same technically ready population.
 
 ## Contract closure
 
@@ -123,9 +126,16 @@ bundle digest was
 on both builds, the adjudicated binding digest was
 `089ac31dd29bb5ba89a4ba5dcd4776f8f6ad2c1e871bf3629d9f0ae59f8eef19`,
 and the current candidate-ledger bundle digest was
-`64f1241574197ad17e64ae547c9dc611ff01add2ec2393ae2c8ba420d4f8136c`
+`2b74784e5917bd6a76f9bddc4aac0f24c0a332cc4ad60cd3113a4ab9c428f143`
 on both builds. The binding adjudication resolved 6 of the prior 21 cases and
 conservatively retained 15 as unresolved.
+
+The subsequent second blind quality adjudication examined all twelve diagnostic
+quality flags without arms, generated code, or outcomes. It admitted five
+functionally coherent tasks while retaining their separate mechanism scope or
+binding blockers, reclassified one unresolved `<language>` placeholder as a
+source defect, and retained six genuine functional-quality concerns. The
+technically ready population therefore remained 164.
 
 ## Unified candidate status
 
@@ -133,15 +143,15 @@ The final ledger contains exactly 2,165 unique task units:
 
 | Final-dataset disposition | Task units | Meaning |
 | --- | ---: | --- |
-| `INCLUDED_FINAL_DATASET` | 1,217 | strict contract and no unresolved quality flag |
-| `PENDING_INDEPENDENT_REVIEW` | 12 | strict contract but a diagnostic quality concern remains |
+| `INCLUDED_FINAL_DATASET` | 1,222 | strict contract and no unresolved quality flag |
+| `PENDING_INDEPENDENT_REVIEW` | 6 | strict contract but a functional-quality concern remains |
 | `PENDING_QUALITY_REPAIR` | 930 | contract is not yet faithful and sufficient under the frozen rule |
-| `EXCLUDED_SOURCE_DEFECT` | 6 | incoherent source prompt |
+| `EXCLUDED_SOURCE_DEFECT` | 7 | incoherent source prompt |
 
 This is the paper-facing data boundary. Mechanism, Oracle, runtime, language,
 current scope, lineage, and development exposure do not remove a
 quality-qualified row from the final dataset. They determine only whether that
-row can be measured in a particular study. The final dataset contains 558
+row can be measured in a particular study. The final dataset contains 563
 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java, 58 Rust, 53 PHP, and 17
 Go task units.
 
@@ -153,10 +163,10 @@ The separate execution-readiness classification is:
 | `PENDING_CONTRACT` | 930 | contract quality/evaluability gate not met |
 | `PENDING_ORACLE` | 209 | mechanism or task-applicable Security Oracle not frozen |
 | `PENDING_RUNTIME` | 174 | non-Python execution/measurement runtime not qualified |
-| `PENDING_BINDING` | 58 | a registered same-CWE mechanism exists but its narrow task shape is not established |
-| `PENDING_INDEPENDENT_REVIEW` | 21 | development exposure or known diagnostic concern |
-| `PENDING_SCOPE` | 603 | outside the currently registered research families |
-| `EXCLUDED_SOURCE_DEFECT` | 6 | internally incoherent prompt as written |
+| `PENDING_BINDING` | 59 | a registered same-CWE mechanism exists but its narrow task shape is not established |
+| `PENDING_INDEPENDENT_REVIEW` | 15 | development exposure or unresolved functional-quality concern |
+| `PENDING_SCOPE` | 607 | outside the registered research families or independently found mechanism-label mismatch |
+| `EXCLUDED_SOURCE_DEFECT` | 7 | internally incoherent prompt as written |
 
 The 164 ready Python task units span seven source lineages and thirteen CWEs.
 Family coverage is 45 injection/interpreter, 60 file/parser/resource, 17
@@ -204,12 +214,12 @@ respectively, also have strict contracts. They remain `PENDING_ORACLE` or
 ## Measurement coverage next steps
 
 Measurement support is not a final-dataset gate. It is needed only when a task
-is sampled into an effect estimate. All 558 Python tasks already have runtime
+is sampled into an effect estimate. All 563 Python tasks already have runtime
 support, so another Python runner is unnecessary. Within the 21 prospectively
-listed Python CWEs, the final dataset contains 346 quality-qualified tasks:
-132 injection/interpreter, 103 file/parser/resource, 48
+listed Python CWEs, the final dataset contains 351 quality-qualified tasks:
+133 injection/interpreter, 104 file/parser/resource, 51
 identity/authorization/permissions, and 63 cryptography/randomness/integrity.
-Of these, 164 are ready. The 58 `PENDING_BINDING` rows include the 15
+Of these, 164 are ready. The 59 `PENDING_BINDING` rows include the 15
 conservatively unresolved prior cases plus newly recognized same-CWE tasks that
 fall outside the narrow code-execution, certificate-validation, and cipher/hash
 shapes. Most of the remainder still need a registered mechanism plus a

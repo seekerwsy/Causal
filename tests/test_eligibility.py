@@ -9,6 +9,7 @@ import pytest
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.eligibility import (
     _backend_candidate_rows,
+    _case_audit_flags,
     apply_binding_adjudications,
     audit_dataset_eligibility,
     freeze_prompt_tsg_holdout_selection,
@@ -23,6 +24,77 @@ from prompt_mechanism_study.prompt_tsg import (
 
 
 pytestmark = pytest.mark.extended
+
+
+def test_independent_quality_adjudication_separates_quality_and_measurement(
+    tmp_path: Path,
+) -> None:
+    case_audit = tmp_path / "case-audit.json"
+    case_audit.write_text(
+        json.dumps(
+            {
+                "arms_or_outcomes_used": False,
+                "insufficient_case_audit": {"decisions": []},
+                "reviewer_qualified_sample_audit": {
+                    "clear_material_contract_fault_task_unit_ids": ["material"],
+                    "separate_evaluability_or_scope_concern_task_unit_ids": [
+                        "quality",
+                        "accepted",
+                        "measurement",
+                        "defect",
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    adjudication = tmp_path / "adjudication.json"
+    adjudication.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "source_case_audit_sha256": hashlib.sha256(
+                    case_audit.read_bytes()
+                ).hexdigest(),
+                "arms_or_outcomes_used": False,
+                "decisions": [
+                    {
+                        "task_unit_id": "material",
+                        "decision": "retain_material_contract_fault",
+                        "reason": "Still missing one explicit requirement.",
+                    },
+                    {
+                        "task_unit_id": "quality",
+                        "decision": "retain_quality_concern",
+                        "reason": "The observable contract remains ambiguous.",
+                    },
+                    {
+                        "task_unit_id": "accepted",
+                        "decision": "accept_quality",
+                        "reason": "The functional contract is independently sufficient.",
+                    },
+                    {
+                        "task_unit_id": "measurement",
+                        "decision": "measurement_scope_concern",
+                        "reason": "The task is coherent but does not instantiate the labelled mechanism.",
+                    },
+                    {
+                        "task_unit_id": "defect",
+                        "decision": "source_defect",
+                        "reason": "The model-visible source retains an unresolved placeholder.",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    flags = _case_audit_flags(case_audit, adjudication)
+
+    assert flags["material_contract_fault"] == {"material"}
+    assert flags["scope_or_evaluability_concern"] == {"quality"}
+    assert flags["measurement_scope_concern"] == {"measurement"}
+    assert flags["source_defect"] == {"defect"}
 
 
 def test_backend_inventory_reads_source_measurements_without_importing_runtime(

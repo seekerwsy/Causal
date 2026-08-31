@@ -457,6 +457,7 @@ def _add_qualification_group(groups: Any) -> None:
     )
     dataset.add_argument("--development-exclusions", type=Path)
     dataset.add_argument("--case-audit", type=Path)
+    dataset.add_argument("--quality-adjudication", type=Path)
     dataset.add_argument("--extension-policy", type=Path)
     dataset.add_argument(
         "--backend-root",
@@ -968,6 +969,7 @@ def _run_dataset_eligibility(args: argparse.Namespace, _: argparse.ArgumentParse
         contract_reviews_root=args.contract_reviews_root,
         development_exclusions_path=args.development_exclusions,
         case_audit_path=args.case_audit,
+        quality_adjudication_path=args.quality_adjudication,
         extension_policy_path=args.extension_policy,
         backend_root=args.backend_root,
     )

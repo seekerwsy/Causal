@@ -5,8 +5,8 @@
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
 coverage target, not a claim of current readiness. The active outcome-blind
-audit admits 1,217 quality-qualified task units into the final dataset. Of its
-558 Python tasks, 164 are currently `READY_CONFIRMATORY`; the remainder stay in
+audit admits 1,222 quality-qualified task units into the final dataset. Of its
+563 Python tasks, 164 are currently `READY_CONFIRMATORY`; the remainder stay in
 the dataset with explicit mechanism, Oracle, scope, or review-readiness fields.
 The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
@@ -430,16 +430,16 @@ and development exposure do not change that data-quality decision. Development
 exposure remains a confirmatory-sampling exclusion, and unsupported measurement
 coordinates remain visible as readiness fields.
 
-Applying that rule to all 2,165 task units admits 1,217 into the final curated
-dataset. It contains 558 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
-58 Rust, 53 PHP, and 17 Go task units. Of the 1,229 strict contracts, 12 remain
+Applying that rule to all 2,165 task units admits 1,222 into the final curated
+dataset. It contains 563 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
+58 Rust, 53 PHP, and 17 Go task units. Of the 1,229 strict contracts, six remain
 outside the final dataset pending independent review of a known material
-omission or a scope/evaluability concern. Another 930 task units remain pending
-contract-quality repair, and six incoherent source prompts are excluded. All
+omission or functional-evaluability concern. Another 930 task units remain pending
+contract-quality repair, and seven incoherent source prompts are excluded. All
 dispositions remain in the complete ledger.
 
 The 164 `READY_CONFIRMATORY` task units are therefore an implementation-ready
-subset of the 1,217-row final dataset, not the definition of that dataset.
+subset of the 1,222-row final dataset, not the definition of that dataset.
 The response-format repair produced 1,215 strict contracts. A bounded
 outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
 that otherwise had mechanism, Oracle, and runtime support: eight stale or
@@ -466,6 +466,15 @@ Requests certificate validation, and explicit cipher/hash selection shapes; it
 did not generalize those profiles to arbitrary code execution, custom TLS
 contexts, dynamic algorithm names, or contextual identity policy.
 
+A second outcome-blind review then adjudicated all twelve quality flags from
+the earlier diagnostic sample. Five functionally coherent tasks were admitted:
+four remain `PENDING_SCOPE` because their source CWE does not match the prompt
+mechanism, and one remains `PENDING_BINDING`. One unresolved literal
+`<language>` prompt was reclassified as a source defect. Five genuinely
+under-specified contracts and one material contract omission remain pending.
+This review therefore increased data-quality coverage without increasing the
+164-task technically ready population.
+
 The final mutually exclusive candidate statuses are:
 
 | Status | Task units |
@@ -474,10 +483,10 @@ The final mutually exclusive candidate statuses are:
 | `PENDING_CONTRACT` | 930 |
 | `PENDING_ORACLE` | 209 |
 | `PENDING_RUNTIME` | 174 |
-| `PENDING_BINDING` | 58 |
-| `PENDING_INDEPENDENT_REVIEW` | 21 |
-| `PENDING_SCOPE` | 603 |
-| `EXCLUDED_SOURCE_DEFECT` | 6 |
+| `PENDING_BINDING` | 59 |
+| `PENDING_INDEPENDENT_REVIEW` | 15 |
+| `PENDING_SCOPE` | 607 |
+| `EXCLUDED_SOURCE_DEFECT` | 7 |
 
 The 164 ready Python task units cover seven source lineages and thirteen CWEs.
 Family coverage is 45 injection/interpreter, 60 file/parser/external-resource,
@@ -532,10 +541,13 @@ The active closed artifacts are:
 - schema-3 eligibility policy:
   `data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json`, SHA-256
   `8d8401ad3c1a45b295d4febdef8a5fb3f524e11b88f28e7a447afcd0b97792fb`;
-- registry-bound candidate-data audit after bounded Oracle expansion:
-  `.codex-runtime/dataset-final-quality-20260831-38-schema3-registry-bound`,
+- independent blind quality adjudication:
+  `data/dataset-curation/contract-quality-independent-adjudication-v1.json`, SHA-256
+  `d98983a1af79361a6f6b2d9ff49a3f3ff235f87d0650fd14a4de9bb26a812650`;
+- candidate-data audit after independent quality adjudication:
+  `.codex-runtime/dataset-final-quality-20260831-40-independent-quality`,
   SHA-256
-  `64f1241574197ad17e64ae547c9dc611ff01add2ec2393ae2c8ba420d4f8136c`;
+  `2b74784e5917bd6a76f9bddc4aac0f24c0a332cc4ad60cd3113a4ab9c428f143`;
 - audit report:
   `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
 
