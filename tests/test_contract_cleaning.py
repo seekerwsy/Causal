@@ -8,7 +8,9 @@ from prompt_mechanism_study.contract_cleaning import (
     _parse_evidence_backfill,
     _parse_semantic_repairs,
     _terminal_quality,
+    _transport_retry,
 )
+from prompt_mechanism_study.functional_judge import JudgeGateError
 from prompt_mechanism_study.records import content_hash
 
 
@@ -181,3 +183,23 @@ def test_review_maps_only_faithful_supported_contracts_to_final_quality() -> Non
         "source_specification_disposition": "insufficient",
     }
     assert _terminal_quality(row) == "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION"
+
+
+def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypatch) -> None:
+    monkeypatch.setattr("prompt_mechanism_study.contract_cleaning.time.sleep", lambda _: None)
+    attempts = []
+
+    def transient(*_):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise JudgeGateError("provider request failed")
+        return b"ok"
+
+    assert _transport_retry(transient)({}, {}, "prompt") == b"ok"
+    assert len(attempts) == 3
+
+    def credential(*_):
+        raise JudgeGateError("provider credential is unavailable")
+
+    with pytest.raises(JudgeGateError):
+        _transport_retry(credential)({}, {}, "prompt")

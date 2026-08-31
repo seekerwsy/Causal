@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -21,7 +22,7 @@ from prompt_mechanism_study.curation import (
     _execute,
     _initialize,
 )
-from prompt_mechanism_study.functional_judge import bailian_complete
+from prompt_mechanism_study.functional_judge import JudgeGateError, bailian_complete
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id
 from prompt_mechanism_study.task_unit_data import (
     _canonical_jsonl,
@@ -468,7 +469,7 @@ def _run_stage(
         parser,
         max_new_batches,
         workers,
-        provider,
+        _transport_retry(provider),
     )
     return results, complete, plan
 
@@ -489,9 +490,34 @@ def _policy(root: Path, prompt_name: str, config_name: str) -> tuple[dict[str, A
         "temperature": evaluator["temperature"],
         "top_p": evaluator["top_p"],
         "seed": evaluator["seed"],
-        "max_attempts": 1,
+        "transport_max_attempts": 3,
     }
     return evaluator, prompt, identity
+
+
+def _transport_retry(provider: Provider) -> Provider:
+    """Retry only empty/invalid provider envelopes; semantic parsing remains single-pass."""
+
+    def wrapped(
+        request: dict[str, Any], evaluator: Mapping[str, Any], prompt: str
+    ) -> bytes:
+        last_failure: JudgeGateError | None = None
+        for attempt in range(1, 4):
+            try:
+                return provider(request, evaluator, prompt)
+            except JudgeGateError as failure:
+                if str(failure) not in {
+                    "provider request failed",
+                    "provider response format is invalid",
+                }:
+                    raise
+                last_failure = failure
+                if attempt < 3:
+                    time.sleep(float(attempt))
+        assert last_failure is not None
+        raise last_failure
+
+    return wrapped
 
 
 def _base_population(
