@@ -10,7 +10,9 @@ from prompt_mechanism_study.interaction_selector import (
     PairShadowPlan,
     build_tsg_pair_universe,
     freeze_pair_candidate_universe,
+    freeze_pair_preoutcome_design,
     pair_shadow_data_sha256,
+    pair_preoutcome_observations,
     run_interaction_selector,
     run_pair_shadow_qualification,
 )
@@ -684,7 +686,17 @@ def _shadow_fixture():
 def test_pair_shadow_has_one_compatibility_first_universe_and_one_rd_path() -> None:
     present, absent, incompatible, rows, universe, plan, evidence = _shadow_fixture()
 
-    result = run_pair_shadow_qualification(universe, rows, evidence, plan)
+    result = run_pair_shadow_qualification(
+        universe,
+        rows,
+        evidence,
+        plan,
+        preoutcome_freeze=freeze_pair_preoutcome_design(
+            universe,
+            pair_preoutcome_observations(rows),
+            plan,
+        ),
+    )
 
     assert present.policy_key in universe.compatible_policy_keys
     assert absent.policy_key in universe.compatible_policy_keys
@@ -716,7 +728,17 @@ def test_pair_rq1_baselines_share_support_gate_and_replay_blind_rankings() -> No
     _present, _absent, _incompatible, rows, universe, plan, evidence = (
         _shadow_fixture()
     )
-    qualification = run_pair_shadow_qualification(universe, rows, evidence, plan)
+    qualification = run_pair_shadow_qualification(
+        universe,
+        rows,
+        evidence,
+        plan,
+        preoutcome_freeze=freeze_pair_preoutcome_design(
+            universe,
+            pair_preoutcome_observations(rows),
+            plan,
+        ),
+    )
     baseline_universe = freeze_pair_baseline_universe(
         universe,
         qualification.support_gates,
@@ -839,7 +861,18 @@ def test_pair_rq1_baselines_share_support_gate_and_replay_blind_rankings() -> No
 @pytest.mark.reviewer
 def test_pair_relation_evidence_cannot_change_common_rd_coordinates() -> None:
     present, absent, _, rows, universe, plan, evidence = _shadow_fixture()
-    original = run_pair_shadow_qualification(universe, rows, evidence, plan)
+    preoutcome = freeze_pair_preoutcome_design(
+        universe,
+        pair_preoutcome_observations(rows),
+        plan,
+    )
+    original = run_pair_shadow_qualification(
+        universe,
+        rows,
+        evidence,
+        plan,
+        preoutcome_freeze=preoutcome,
+    )
     changed_evidence = tuple(
         replace(item, state=QueryState.ABSENT, evidence_node_ids=())
         if item.pair_id == present.policy_key
@@ -847,7 +880,13 @@ def test_pair_relation_evidence_cannot_change_common_rd_coordinates() -> None:
         for item in evidence
     )
 
-    changed = run_pair_shadow_qualification(universe, rows, changed_evidence, plan)
+    changed = run_pair_shadow_qualification(
+        universe,
+        rows,
+        changed_evidence,
+        plan,
+        preoutcome_freeze=preoutcome,
+    )
 
     assert original.full.support_gates_sha256 == changed.full.support_gates_sha256
     assert original.full.fold_manifests_sha256 == changed.full.fold_manifests_sha256

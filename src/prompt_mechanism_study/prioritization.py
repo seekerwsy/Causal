@@ -685,6 +685,36 @@ class AtomicShadowPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class AtomicPreOutcomeObservation:
+    """Atomic fold input whose schema cannot carry a discovery outcome."""
+
+    task_unit_id: str
+    model_id: str
+    family_id: str
+    request_randomness_slot: int
+    candidate_states: tuple[tuple[str, int], ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.task_unit_id, "Atomic pre-outcome task_unit_id")
+        require_text(self.model_id, "Atomic pre-outcome model_id")
+        require_text(self.family_id, "Atomic pre-outcome family_id")
+        if (
+            type(self.request_randomness_slot) is not int
+            or self.request_randomness_slot < 0
+        ):
+            raise ValueError("Atomic pre-outcome request slot must be nonnegative")
+        _validate_numeric_pairs(
+            self.candidate_states,
+            "Atomic pre-outcome candidate states",
+            binary=True,
+        )
+
+    @property
+    def preoutcome_observation_id(self) -> str:
+        return content_id("atomic_preoutcome_observation_", self)
+
+
+@dataclass(frozen=True, slots=True)
 class AtomicFoldAssignment:
     task_unit_id: str
     target_state: int
@@ -728,6 +758,57 @@ class AtomicCandidateFoldManifest:
     @property
     def fold_manifest_id(self) -> str:
         return content_id("atomic_candidate_fold_manifest_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class AtomicFoldFreeze:
+    """Outcome-blind candidate folds sealed before Atomic discovery scoring."""
+
+    universe_id: str
+    plan_id: str
+    preoutcome_data_sha256: str
+    manifests: tuple[AtomicCandidateFoldManifest, ...]
+    failures: tuple[SelectorFailure, ...]
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.universe_id, "Atomic fold-freeze universe_id"),
+            (self.plan_id, "Atomic fold-freeze plan_id"),
+        ):
+            require_text(value, name)
+        _require_digest(
+            self.preoutcome_data_sha256,
+            "Atomic fold-freeze pre-outcome data",
+        )
+        if tuple(
+            sorted(self.manifests, key=lambda item: item.candidate_id)
+        ) != self.manifests:
+            raise ValueError("Atomic frozen folds must use canonical candidate order")
+        if tuple(
+            sorted(
+                self.failures,
+                key=lambda item: (item.candidate_id or "", item.reason_code),
+            )
+        ) != self.failures:
+            raise ValueError("Atomic fold failures must use canonical candidate order")
+        manifest_ids = tuple(item.candidate_id for item in self.manifests)
+        failure_ids = tuple(item.candidate_id for item in self.failures)
+        if (
+            len(set(manifest_ids)) != len(manifest_ids)
+            or any(candidate_id is None for candidate_id in failure_ids)
+            or len(set(failure_ids)) != len(failure_ids)
+            or set(manifest_ids) & set(failure_ids)
+        ):
+            raise ValueError("Atomic fold freeze must account for each candidate once")
+        if any(
+            item.reason_code != "atomic_fold_non_evaluable"
+            for item in self.failures
+        ):
+            raise ValueError("Atomic fold freeze contains a non-fold failure")
+
+    @property
+    def fold_freeze_id(self) -> str:
+        return content_id("atomic_fold_freeze_", self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1439,6 +1520,8 @@ def run_atomic_shadow_qualification(
     observations: Sequence[DiscoveryObservation],
     plan: AtomicShadowPlan,
     fci_evidence: AtomicFCIBootstrapEvidence,
+    *,
+    fold_freeze: AtomicFoldFreeze,
 ) -> AtomicShadowQualificationResult:
     """Run Atomic Full/RD-only with one shared row, fold, and RD path."""
 
@@ -1461,11 +1544,23 @@ def run_atomic_shadow_qualification(
 
     rows = _reference_observations(observations, plan.model_id)
     family_by_candidate = dict(universe.candidate_family_ids)
-    policy_by_id = {item.policy_key: item for item in universe.policy_keys}
-    fold_manifests: list[AtomicCandidateFoldManifest] = []
+    if type(fold_freeze) is not AtomicFoldFreeze:
+        raise TypeError("Atomic prioritization requires an explicit fold freeze")
+    if fold_freeze != freeze_atomic_candidate_folds(
+        universe,
+        atomic_preoutcome_observations(observations),
+        plan,
+    ):
+        raise ValueError("Atomic fold freeze failed outcome-blind replay")
+    frozen_manifest_by_id = {
+        item.candidate_id: item for item in fold_freeze.manifests
+    }
     rd_scores: list[AtomicRDScore] = []
-    failures: list[SelectorFailure] = []
+    failures: list[SelectorFailure] = list(fold_freeze.failures)
     for candidate_id in universe.supported_policy_keys:
+        manifest = frozen_manifest_by_id.get(candidate_id)
+        if manifest is None:
+            continue
         candidate_rows = tuple(
             row
             for row in rows
@@ -1473,23 +1568,15 @@ def run_atomic_shadow_qualification(
             and candidate_id in dict(row.candidate_states)
         )
         try:
-            manifest = _atomic_candidate_fold_manifest(
-                candidate_id,
-                policy_by_id[candidate_id].factor.operation,
-                candidate_rows,
-                plan.cross_fit_folds,
-                plan.fold_seed,
-            )
             score = _atomic_cross_fitted_rd(candidate_id, candidate_rows, manifest, plan)
         except ValueError as exc:
             failures.append(
                 SelectorFailure("atomic_rd_non_evaluable", str(exc), candidate_id)
             )
             continue
-        fold_manifests.append(manifest)
         rd_scores.append(score)
 
-    frozen_folds = tuple(sorted(fold_manifests, key=lambda item: item.candidate_id))
+    frozen_folds = fold_freeze.manifests
     frozen_scores = tuple(sorted(rd_scores, key=lambda item: item.candidate_id))
     frozen_failures = tuple(
         sorted(failures, key=lambda item: (item.candidate_id or "", item.reason_code))
@@ -1549,16 +1636,138 @@ def run_atomic_shadow_qualification(
     )
 
 
+def freeze_atomic_candidate_folds(
+    universe: AtomicCandidateUniverseManifest,
+    observations: Sequence[AtomicPreOutcomeObservation],
+    plan: AtomicShadowPlan,
+) -> AtomicFoldFreeze:
+    """Seal deterministic candidate/state folds from an outcome-free schema."""
+
+    if type(universe) is not AtomicCandidateUniverseManifest:
+        raise TypeError("universe must be an AtomicCandidateUniverseManifest")
+    if type(plan) is not AtomicShadowPlan:
+        raise TypeError("plan must be an AtomicShadowPlan")
+    if any(type(item) is not AtomicPreOutcomeObservation for item in observations):
+        raise TypeError("Atomic fold freeze requires pre-outcome observations")
+    rows = _reference_atomic_preoutcome_observations(observations, plan.model_id)
+    family_by_candidate = dict(universe.candidate_family_ids)
+    policy_by_id = {item.policy_key: item for item in universe.policy_keys}
+    manifests = []
+    failures = []
+    for candidate_id in universe.supported_policy_keys:
+        candidate_rows = tuple(
+            row
+            for row in rows
+            if row.family_id == family_by_candidate[candidate_id]
+            and candidate_id in dict(row.candidate_states)
+        )
+        try:
+            manifest = _atomic_candidate_fold_manifest(
+                candidate_id,
+                policy_by_id[candidate_id].factor.operation,
+                candidate_rows,
+                plan.cross_fit_folds,
+                plan.fold_seed,
+            )
+        except ValueError as exc:
+            failures.append(
+                SelectorFailure("atomic_fold_non_evaluable", str(exc), candidate_id)
+            )
+            continue
+        manifests.append(manifest)
+    return AtomicFoldFreeze(
+        universe.universe_id,
+        plan.plan_id,
+        atomic_preoutcome_data_sha256(observations),
+        tuple(sorted(manifests, key=lambda item: item.candidate_id)),
+        tuple(
+            sorted(
+                failures,
+                key=lambda item: (item.candidate_id or "", item.reason_code),
+            )
+        ),
+    )
+
+
+def atomic_preoutcome_observations(
+    observations: Sequence[DiscoveryObservation],
+) -> tuple[AtomicPreOutcomeObservation, ...]:
+    """Project natural discovery records before their outcome field is opened."""
+
+    if not observations or any(
+        type(item) is not DiscoveryObservation for item in observations
+    ):
+        raise TypeError("Atomic pre-outcome projection requires discovery observations")
+    return tuple(
+        sorted(
+            (
+                AtomicPreOutcomeObservation(
+                    item.task_unit_id,
+                    item.model_id,
+                    item.family_id,
+                    item.request_randomness_slot,
+                    item.candidate_states,
+                )
+                for item in observations
+            ),
+            key=lambda item: item.preoutcome_observation_id,
+        )
+    )
+
+
+def atomic_preoutcome_data_sha256(
+    observations: Sequence[AtomicPreOutcomeObservation],
+) -> str:
+    """Hash only coordinates available before the outcome column is opened."""
+
+    frozen = tuple(
+        sorted(observations, key=lambda item: item.preoutcome_observation_id)
+    )
+    if not frozen or any(
+        type(item) is not AtomicPreOutcomeObservation for item in frozen
+    ):
+        raise TypeError("Atomic pre-outcome data requires typed observations")
+    coordinates = {
+        (item.task_unit_id, item.model_id, item.family_id, item.request_randomness_slot)
+        for item in frozen
+    }
+    if len(coordinates) != len(frozen):
+        raise ValueError("an Atomic pre-outcome coordinate is duplicated")
+    return content_hash(frozen)
+
+
+def _reference_atomic_preoutcome_observations(
+    observations: Sequence[AtomicPreOutcomeObservation],
+    model_id: str,
+) -> tuple[AtomicPreOutcomeObservation, ...]:
+    candidates = [item for item in observations if item.model_id == model_id]
+    if not candidates:
+        raise ValueError("Atomic selector model has no pre-outcome observations")
+    by_unit: dict[tuple[str, str], list[AtomicPreOutcomeObservation]] = {}
+    for item in candidates:
+        by_unit.setdefault((item.family_id, item.task_unit_id), []).append(item)
+    return tuple(
+        min(
+            values,
+            key=lambda item: (
+                item.request_randomness_slot,
+                item.preoutcome_observation_id,
+            ),
+        )
+        for _, values in sorted(by_unit.items())
+    )
+
+
 def _atomic_candidate_fold_manifest(
     candidate_id: str,
     operation: Operation,
-    rows: tuple[DiscoveryObservation, ...],
+    rows: tuple[AtomicPreOutcomeObservation, ...],
     fold_count: int,
     fold_seed: int,
 ) -> AtomicCandidateFoldManifest:
     if not rows or len({row.task_unit_id for row in rows}) != len(rows):
         raise ValueError("Atomic candidate rows are empty or duplicate task units")
-    by_state: dict[int, list[DiscoveryObservation]] = {0: [], 1: []}
+    by_state: dict[int, list[AtomicPreOutcomeObservation]] = {0: [], 1: []}
     for row in rows:
         raw_state = dict(row.candidate_states)[candidate_id]
         target_state = raw_state if operation is Operation.ADD else 1 - raw_state
@@ -3412,7 +3621,9 @@ __all__ = [
     "AtomicFCIBootstrapEvidence",
     "AtomicFCIGate",
     "AtomicFCIGateStatus",
+    "AtomicFoldFreeze",
     "AtomicFoldAssignment",
+    "AtomicPreOutcomeObservation",
     "AtomicRDScore",
     "AtomicSelectorVariant",
     "AtomicShadowPlan",
@@ -3450,9 +3661,12 @@ __all__ = [
     "SharedConfirmationUnion",
     "SlotStatus",
     "audit_discovery_positivity",
+    "atomic_preoutcome_data_sha256",
+    "atomic_preoutcome_observations",
     "discovery_data_sha256",
     "freeze_candidate_universe_manifest",
     "freeze_atomic_candidate_universe",
+    "freeze_atomic_candidate_folds",
     "freeze_confirmation_dispatch",
     "freeze_fixed_slot_ledger",
     "freeze_selection",

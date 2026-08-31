@@ -10,6 +10,7 @@ from prompt_mechanism_study.prioritization import (
     AtomicFCIGateStatus,
     AtomicSelectorVariant,
     AtomicShadowPlan,
+    atomic_preoutcome_observations,
     ConfirmationDispatchManifest,
     DiscoveryObservation,
     ExpertRankingInput,
@@ -21,6 +22,7 @@ from prompt_mechanism_study.prioritization import (
     SelectorSuitePlan,
     SlotStatus,
     discovery_data_sha256,
+    freeze_atomic_candidate_folds,
     freeze_atomic_candidate_universe,
     freeze_candidate_universe_manifest,
     freeze_confirmation_dispatch,
@@ -336,7 +338,17 @@ def test_fci_stability_uses_valid_draw_denominator(monkeypatch) -> None:
 def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
     universe, rows, plan, evidence, positive_id, negative_id = _atomic_shadow_fixture()
 
-    result = run_atomic_shadow_qualification(universe, rows, plan, evidence)
+    result = run_atomic_shadow_qualification(
+        universe,
+        rows,
+        plan,
+        evidence,
+        fold_freeze=freeze_atomic_candidate_folds(
+            universe,
+            atomic_preoutcome_observations(rows),
+            plan,
+        ),
+    )
     score_by_id = {item.candidate_id: item for item in result.rd_scores}
     gate_by_id = {item.candidate_id: item for item in result.fci_gates}
 
@@ -372,7 +384,17 @@ def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None
     universe, rows, plan, evidence, _positive_id, _negative_id = (
         _atomic_shadow_fixture()
     )
-    core = run_atomic_shadow_qualification(universe, rows, plan, evidence)
+    core = run_atomic_shadow_qualification(
+        universe,
+        rows,
+        plan,
+        evidence,
+        fold_freeze=freeze_atomic_candidate_folds(
+            universe,
+            atomic_preoutcome_observations(rows),
+            plan,
+        ),
+    )
     baseline_universe = freeze_atomic_baseline_universe(universe)
     expert_card = BlindExpertRankingCard(
         baseline_universe.protocol_id,
@@ -514,7 +536,17 @@ def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
         evidence_sha256=content_hash("atomic-fci-insufficient-valid-draws"),
     )
 
-    result = run_atomic_shadow_qualification(universe, rows, plan, insufficient)
+    result = run_atomic_shadow_qualification(
+        universe,
+        rows,
+        plan,
+        insufficient,
+        fold_freeze=freeze_atomic_candidate_folds(
+            universe,
+            atomic_preoutcome_observations(rows),
+            plan,
+        ),
+    )
     gate = next(item for item in result.fci_gates if item.candidate_id == positive_id)
 
     assert gate.valid_fraction == 0.7
@@ -527,7 +559,17 @@ def test_atomic_fci_insufficient_valid_fraction_is_non_evaluable() -> None:
 @pytest.mark.reviewer
 def test_fixed_slots_deduplicate_one_model_effect_and_preserve_fanout() -> None:
     universe, observations, plan, evidence, first, second = _atomic_shadow_fixture()
-    atomic = run_atomic_shadow_qualification(universe, observations, plan, evidence)
+    atomic = run_atomic_shadow_qualification(
+        universe,
+        observations,
+        plan,
+        evidence,
+        fold_freeze=freeze_atomic_candidate_folds(
+            universe,
+            atomic_preoutcome_observations(observations),
+            plan,
+        ),
+    )
     pair_record = ModelBoundCandidateRecord(
         "pair-policy-synthetic",
         "model-b",

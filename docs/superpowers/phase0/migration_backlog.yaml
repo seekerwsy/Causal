@@ -250,6 +250,7 @@ tasks:
       - atomic_shadow_qualification_evidence
     progress:
       - candidate_specific_state_stratified_folds_are_implemented
+      - atomic_fold_freeze_is_explicitly_created_before_scoring_and_must_replay_exactly
       - first_order_probability_scale_rd_is_shared_by_full_and_rd_only
       - fci_stability_uses_valid_draws_and_a_minimum_valid_fraction_gate
       - fixed_k_slots_and_the_sole_difference_audit_pass_reviewer_tests
@@ -283,6 +284,7 @@ tasks:
       - same_flow_shared_sink_distinct_control_points_and_alternative_controls_are_executable_outcome_blind_predicates
       - unresolved_multiple_binding_and_path_tamper_cases_fail_closed
       - candidate_cell_stratified_folds_and_second_order_probability_scale_rd_are_shared
+      - pair_support_and_fold_freeze_is_explicitly_created_before_scoring_and_must_replay_exactly
       - relationless_compatible_pairs_remain_rankable_in_no_relation
       - fixed_k_slots_and_the_sole_difference_audit_pass_reviewer_tests
     blocker: The predicates still require labelled relation qualification and accepted thresholds on QUAL_DEV; formal shadow execution also requires the QUAL_DEV role and accepted development envelope.
@@ -304,10 +306,13 @@ tasks:
       - src/prompt_mechanism_study/inference.py
       - src/prompt_mechanism_study/selector_analysis.py
       - src/prompt_mechanism_study/selector_verify.py
+      - src/prompt_mechanism_study/target_workflow.py
+      - src/prompt_mechanism_study/measurement.py
       - src/prompt_mechanism_study/cli.py
       - tests/test_successor_inference.py
       - tests/test_factorial.py
       - tests/test_study_design.py
+      - tests/test_target_workflow.py
     forbidden_changes:
       - post_assignment_denominator_filters
       - candidate_replacement
@@ -337,8 +342,11 @@ tasks:
       - the_exact_schema_3_result_package_persists_roles_budget_both_freezes_randomization_plan_task_bundles_assignments_evidence_yields_authorization_tables_and_receipt
       - the_read_only_target_cli_strictly_reconstructs_typed_records_and_independently_replays_the_package
       - legacy_shaped_packages_and_semantically_tampered_rq_tables_are_rejected
-      - the_default_reviewer_suite_passes_59_tests
-      - the_complete_repository_suite_passes_170_tests
+      - target_study_smoke_traverses_all_seven_stages_with_zero_provider_calls_and_writes_only_tested_non_claim_evidence
+      - every_one_of_80_smoke_assignments_closes_through_measurement_and_outcome_assembly
+      - the_default_reviewer_suite_passes_67_tests
+      - the_milestone_suite_passes_3_tests
+      - the_complete_repository_suite_passes_185_tests
     blocker: Formal evidence cannot be produced until role allocation, qualified margins/inference settings, frozen discovery slots, bridge/protocol records, and confirmation assignments exist.
 
   - id: RQ1-COMPARISON-BASELINES

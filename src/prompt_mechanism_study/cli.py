@@ -21,11 +21,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     target_study = commands.add_parser(
         "target-study",
         help=(
-            "read-only verification for the prospective schema-3.0 result package; "
-            "formal execution is disabled until its scientific inputs are frozen"
+            "zero-network reviewer smoke or read-only verification for schema 3.0; "
+            "formal provider execution remains disabled until scientific inputs are frozen"
         ),
     )
-    target_study.add_argument("phase", choices=("verify-result",))
+    target_study.add_argument("phase", choices=("smoke", "verify-result"))
     target_study.add_argument("output", type=Path)
 
     judge = commands.add_parser("judge-gate", help="run the bounded Functional Judge gate")
@@ -39,8 +39,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     successor = commands.add_parser(
         "successor-experiment",
         help=(
-            "preflight, freeze, run, or independently verify the prospective "
-            "ADD/REMOVE study"
+            "legacy/pre-cutover schema-2 ADD/REMOVE reproduction boundary"
         ),
     )
     successor.add_argument("phase", choices=("preflight", "freeze", "run", "verify"))
@@ -55,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     factorial = commands.add_parser(
         "factorial-experiment",
-        help="freeze, run, or verify the active schema-1.1 factorial study",
+        help="legacy/pre-cutover schema-1.1 factorial reproduction boundary",
     )
     factorial.add_argument(
         "phase",
@@ -69,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     selector_study = commands.add_parser(
         "selector-study",
         help=(
-            "freeze, bridge, evaluate, or verify the active schema-2.1 five-selector study"
+            "legacy/pre-cutover schema-2.1 selector reproduction boundary"
         ),
     )
     selector_study.add_argument(
@@ -469,11 +468,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         verify_bundle(args.root)
         print("VERIFIED")
     elif args.command == "target-study":
-        from prompt_mechanism_study.selector_verify import (
-            load_and_verify_target_result_bundle,
-        )
+        if args.phase == "smoke":
+            from prompt_mechanism_study.target_workflow import (
+                run_target_reviewer_smoke,
+            )
 
-        report = load_and_verify_target_result_bundle(args.output)
+            report = run_target_reviewer_smoke(args.output)
+        else:
+            from prompt_mechanism_study.selector_verify import (
+                load_and_verify_target_result_bundle,
+            )
+
+            report = load_and_verify_target_result_bundle(args.output)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
     elif args.command == "discovery-population":

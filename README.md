@@ -169,13 +169,22 @@ prompt-mechanism-study factorial-experiment verify \
   data/formal/results/factorial-sql-confirm-qwen35-v3
 ```
 
-The prospective target now has one read-only result-package boundary:
+The prospective target now has one bounded zero-network execution path and one
+read-only result-package boundary:
 
 ```text
+prompt-mechanism-study target-study smoke REVIEWER_SMOKE_RESULT
 prompt-mechanism-study target-study verify-result TARGET_SCHEMA_3_RESULT
 ```
 
-That command requires the exact schema-3.0 package containing the data-role
+`smoke` traverses representation, prioritization, hypothesis freeze,
+intervention/randomization, measurement, outcome assembly, and
+inference/reporting once. It uses deterministic synthetic measurements, makes
+zero provider calls, writes `evidence_level=tested`, and can only produce a
+`NON_CLAIM_TEST_ARTIFACT`. The same package is then independently reloaded.
+It is implementation evidence, not qualification or a formal study run.
+
+`verify-result` requires the exact schema-3.0 package containing the data-role
 manifest, accepted budget lineage, both timed freezes, the target randomization
 plan, shared model-invariant task-policy bundles, canonical assignments, shared
 evidence, fixed-slot yields, report authorization (or explicit null), RQ tables,
@@ -198,12 +207,13 @@ Run the complete retained repository suite separately:
 .venv\Scripts\python.exe -m pytest -q -o addopts=""
 ```
 
-The current expected results are 59 reviewer tests and 170 total tests. The
-reviewer suite includes a synthetic end-to-end target closure through both
-timed freezes, assigned-arm ITT, exact on-disk package writing, read-only CLI
-verification, independent scientific replay, and report authorization. That
-fixture writes only to a temporary test directory, validates implementation
-only, and is never reported as a study result.
+The current expected results are 67 reviewer tests, 3 milestone tests, and 185
+total tests. The reviewer suite includes the CLI-driven seven-stage smoke,
+explicit pre-outcome Atomic/Pair fold freezing, both timed freezes,
+assigned-arm ITT, exact on-disk package writing, read-only CLI verification,
+independent scientific replay, and report authorization. Test packages write
+only to temporary directories, validate implementation only, and are never
+reported as study results.
 
 Historical execution code is kept in Git history and historical result bundles,
 not as a second live runner. Deployment incidents, provider tuning, calibration

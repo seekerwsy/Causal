@@ -29,18 +29,22 @@ is their recovery boundary.
 | Representation | normalized source records, five-role manifest, and Prompt TSG catalog | deduplicated task units, canonical scope/policy identity, Prompt TSG and control bindings | `representation.py`, `mechanisms.py` |
 | Prioritization | DISCOVERY task units plus accepted Atomic/Pair/baseline profiles | sole-difference Full/Ablation and qualified optional baseline fixed slots | `prioritization.py`, `interaction_selector.py`, `rq1_baselines.py` |
 | Hypothesis freeze | accepted qualification, budget, fixed slots, unique union and bridge/protocolization | two correctly timed freezes, model-bound dispatch, tasks, realizations, assignments, and ITT plan | `study_design.py`, `prioritization.py` |
-| Intervention/randomization | frozen model-effect coordinates and task-policy bundles | complete assigned-arm blocks with unique request-randomness slots | `intervention.py`, `randomization.py` |
+| Intervention/randomization | frozen model-effect coordinates and task-policy bundles | complete assigned-arm blocks with unique request-randomness slots | `inference.py` |
 | Measurement | assigned prompt plus frozen adapters | raw responses, code validity, Security Oracle result, Functional Judge result | `measurement.py` |
 | Outcome assembly | every randomized assignment and measurement | total assigned-arm evidence ledger with outcome-or-infrastructure-failure partition | `outcomes.py`, `inference.py` |
 | Inference/reporting | frozen ITT plan, total ledger, and study-freeze index | separate Atomic/Pair max-\|T\| families, five statuses, fixed-K RQ tables, and formal report authorization | `inference.py`, `selector_analysis.py`, `selector_verify.py` |
 
 The target implementation is a transparent sequence of typed stage functions,
-not a configurable orchestration framework. Shared exact-JSON, hashing,
+not a configurable orchestration framework. `target_workflow.py` invokes this
+sequence once for the zero-network reviewer smoke and cannot emit claim-bearing
+evidence. Shared exact-JSON, hashing,
 path-confinement, and bundle operations live in `artifact_io.py`. Qualification,
 power/budget, both timed freezes, preflight, and claim authorization live in
 `study_design.py`. Target result verification does not reuse the production
-estimator or table builder. `target-study verify-result` is the sole read-only
-schema-3.0 package boundary and rejects any package that omits or substitutes
+estimator or table builder. `target-study smoke` is the sole executable target
+command before protocol freeze; `target-study verify-result` is the read-only
+schema-3.0 package boundary. The former always writes `tested` evidence, makes
+zero provider calls, and disallows scientific claims; the latter rejects any package that omits or substitutes
 the target role, freeze, assignment, evidence, authorization, table, or receipt
 records. The formal execution CLI cutover remains disabled until the
 prospective role manifest and numeric qualification artifacts are accepted.
@@ -104,11 +108,11 @@ The target scientific core can be reviewed in ten files:
 
 1. `docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md`
 2. `src/prompt_mechanism_study/representation.py`
-3. `src/prompt_mechanism_study/mechanisms.py`
-4. `src/prompt_mechanism_study/prioritization.py`
-5. `src/prompt_mechanism_study/interaction_selector.py`
+3. `src/prompt_mechanism_study/prioritization.py`
+4. `src/prompt_mechanism_study/interaction_selector.py`
+5. `src/prompt_mechanism_study/rq1_baselines.py`
 6. `src/prompt_mechanism_study/study_design.py`
-7. `src/prompt_mechanism_study/rq1_baselines.py`
+7. `src/prompt_mechanism_study/target_workflow.py`
 8. `src/prompt_mechanism_study/inference.py`
 9. `src/prompt_mechanism_study/selector_analysis.py`
 10. `src/prompt_mechanism_study/selector_verify.py`
@@ -126,27 +130,28 @@ Run the target reviewer-facing invariant suite:
 .venv\Scripts\python.exe -m pytest -m reviewer -q
 ```
 
-The current expected result is 65 passing tests. Run the complete retained
+The current expected result is 67 passing tests. Run the complete retained
 repository suite separately:
 
 ```text
 .venv\Scripts\python.exe -m pytest -q -o addopts=""
 ```
 
-The current expected result is 183 passing tests. The smallest zero-network
-target-method closure is:
+The current expected result is 185 passing tests. The smallest zero-network
+target-method closure is the CLI-driven seven-stage smoke:
 
 ```text
-.venv\Scripts\python.exe -m pytest -q -o addopts="" \
-  tests/test_study_design.py::test_target_two_freeze_lineage_closes_and_independently_replays
+prompt-mechanism-study target-study smoke REVIEWER_SMOKE_RESULT
+prompt-mechanism-study target-study verify-result REVIEWER_SMOKE_RESULT
 ```
 
-This synthetic fixture closes accepted-profile lineage, budget, fixed slots,
-unique dispatch, balanced assigned arms, both timed freezes, task-unit ITT,
-exact on-disk package writing, read-only CLI verification, independent
-scientific replay, and the report-authorization boundary. Its authorization
-object and temporary bundle are implementation checks only; they are not a
-formal run or scientific evidence.
+This deterministic fixture closes the data-role firewall, explicit pre-outcome
+Atomic/Pair support and fold freezes, accepted synthetic test lineage, fixed
+slots, unique dispatch, balanced assigned arms, both timed freezes, the shared
+measurement contract, outcome assembly, task-unit ITT, exact package writing,
+and independent replay. It makes zero provider calls and writes only
+`NON_CLAIM_TEST_ARTIFACT`; it is not qualification, a formal run, or scientific
+evidence.
 
 Verify an actual target package after one exists:
 
@@ -211,7 +216,10 @@ model-independent Atomic/Pair policy identity; Atomic Full/RD-only; Pair
   deterministic complete-block randomization; assigned-arm task-unit ITT; separate Atomic
 and Pair max-\|T\| families; five statuses; assumption-conditional power;
 joint provider budget/preflight; two timed freezes; RQ1/RQ2 tables; and formal
-report authorization with independent replay. This is `implemented/tested`,
+report authorization with independent replay. Candidate support/fold artifacts
+are now explicitly sealed before their selector scoring calls, and one
+CLI-driven reviewer smoke traverses all seven stages into an independently
+reloaded non-claim package. This is `implemented/tested`,
 not `executed` or `reported`.
 
 Formal activation is blocked for substantive, prospective reasons rather than

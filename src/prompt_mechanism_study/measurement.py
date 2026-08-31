@@ -263,15 +263,69 @@ def close_measurements(
     failures = tuple(infrastructure_failures)
     if failures:
         raise ValueError("infrastructure failures require repair or replay before analysis")
-    frozen = tuple(sorted(measurements, key=lambda item: item.assignment_id))
-    observed = tuple(item.assignment_id for item in frozen)
     expected = {item.assignment_id for item in randomization.assignments}
+    return _close_measurement_ledger(
+        expected,
+        measurements,
+        study_id,
+        randomization.randomization_id,
+        adapters.adapter_bundle_id,
+    )
+
+
+def close_target_measurements(
+    assignments: Iterable[object],
+    measurements: Iterable[Measurement],
+    *,
+    study_id: str,
+    randomization_id: str,
+    adapter_bundle_id: str,
+    infrastructure_failures: Iterable[InfrastructureFailure] = (),
+) -> MeasurementLedger:
+    """Close target assigned arms through the shared measurement contract."""
+
+    failures = tuple(infrastructure_failures)
+    if failures:
+        raise ValueError("infrastructure failures require repair or replay before analysis")
+    frozen_assignments = tuple(assignments)
+    if not frozen_assignments or any(
+        not isinstance(getattr(item, "assignment_id", None), str)
+        or not item.assignment_id
+        for item in frozen_assignments
+    ):
+        raise TypeError("target assignments must expose non-empty assignment identities")
+    expected = {item.assignment_id for item in frozen_assignments}
+    if len(expected) != len(frozen_assignments):
+        raise ValueError("target assignment identities must be unique")
+    return _close_measurement_ledger(
+        expected,
+        measurements,
+        study_id,
+        randomization_id,
+        adapter_bundle_id,
+    )
+
+
+def _close_measurement_ledger(
+    expected: set[str],
+    measurements: Iterable[Measurement],
+    study_id: str,
+    randomization_id: str,
+    adapter_bundle_id: str,
+) -> MeasurementLedger:
+    require_text(study_id, "measurement study_id")
+    require_text(randomization_id, "measurement randomization_id")
+    require_text(adapter_bundle_id, "measurement adapter_bundle_id")
+    frozen = tuple(sorted(measurements, key=lambda item: item.assignment_id))
+    if any(type(item) is not Measurement for item in frozen):
+        raise TypeError("measurements must contain Measurement values")
+    observed = tuple(item.assignment_id for item in frozen)
     if len(observed) != len(set(observed)) or set(observed) != expected:
         raise ValueError("measurements must close every randomized assignment exactly once")
     return MeasurementLedger(
         study_id,
-        randomization.randomization_id,
-        adapters.adapter_bundle_id,
+        randomization_id,
+        adapter_bundle_id,
         frozen,
     )
 
@@ -304,5 +358,6 @@ __all__ = [
     "MeasurementLedger",
     "OracleStatus",
     "close_measurements",
+    "close_target_measurements",
     "measure_generated_code",
 ]

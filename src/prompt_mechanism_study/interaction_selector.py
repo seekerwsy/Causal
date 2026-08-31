@@ -484,47 +484,76 @@ class PairShadowObservation:
     outcome: int
 
     def __post_init__(self) -> None:
-        for name in (
-            "policy_key",
-            "task_unit_id",
-            "model_id",
-            "source_lineage_id",
-            "language",
-            "task_archetype",
-            "api_family",
-            "context_query_id",
-        ):
-            require_text(getattr(self, name), name)
-        if type(self.context_state) is not QueryState:
-            raise TypeError("Pair context_state must be typed")
-        if len(self.factor_states) != 2 or any(
-            not isinstance(feature, str)
-            or not feature
-            or type(state) is not QueryState
-            for feature, state in self.factor_states
-        ):
-            raise ValueError("Pair shadow observation requires two factor states")
-        if tuple(feature for feature, _ in self.factor_reliabilities) != tuple(
-            feature for feature, _ in self.factor_states
-        ) or any(
-            type(value) not in {int, float}
-            or not math.isfinite(float(value))
-            or not 0 <= value <= 1
-            for _, value in self.factor_reliabilities
-        ):
-            raise ValueError("Pair reliability must bind both factors on [0, 1]")
-        names = tuple(name for name, _ in self.covariates)
-        if names != tuple(sorted(set(names))) or any(
-            type(value) not in {int, float} or not math.isfinite(float(value))
-            for _, value in self.covariates
-        ):
-            raise ValueError("Pair covariates must be finite and canonical")
+        _validate_pair_preoutcome_fields(self)
         if type(self.outcome) is not int or self.outcome not in {0, 1}:
             raise ValueError("Pair discovery outcome must be binary")
 
     @property
     def observation_id(self) -> str:
         return content_id("pair_shadow_observation_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class PairPreOutcomeObservation:
+    """Pair support/fold input whose schema cannot carry an outcome."""
+
+    policy_key: str
+    task_unit_id: str
+    model_id: str
+    source_lineage_id: str
+    language: str
+    task_archetype: str
+    api_family: str
+    context_query_id: str
+    context_state: QueryState
+    factor_states: tuple[tuple[str, QueryState], tuple[str, QueryState]]
+    factor_reliabilities: tuple[tuple[str, float], tuple[str, float]]
+    covariates: tuple[tuple[str, float], ...]
+
+    def __post_init__(self) -> None:
+        _validate_pair_preoutcome_fields(self)
+
+    @property
+    def preoutcome_observation_id(self) -> str:
+        return content_id("pair_preoutcome_observation_", self)
+
+
+def _validate_pair_preoutcome_fields(item: object) -> None:
+    for name in (
+        "policy_key",
+        "task_unit_id",
+        "model_id",
+        "source_lineage_id",
+        "language",
+        "task_archetype",
+        "api_family",
+        "context_query_id",
+    ):
+        require_text(getattr(item, name), name)
+    if type(item.context_state) is not QueryState:
+        raise TypeError("Pair context_state must be typed")
+    if len(item.factor_states) != 2 or any(
+        not isinstance(feature, str)
+        or not feature
+        or type(state) is not QueryState
+        for feature, state in item.factor_states
+    ):
+        raise ValueError("Pair observation requires two factor states")
+    if tuple(feature for feature, _ in item.factor_reliabilities) != tuple(
+        feature for feature, _ in item.factor_states
+    ) or any(
+        type(value) not in {int, float}
+        or not math.isfinite(float(value))
+        or not 0 <= value <= 1
+        for _, value in item.factor_reliabilities
+    ):
+        raise ValueError("Pair reliability must bind both factors on [0, 1]")
+    names = tuple(name for name, _ in item.covariates)
+    if names != tuple(sorted(set(names))) or any(
+        type(value) not in {int, float} or not math.isfinite(float(value))
+        for _, value in item.covariates
+    ):
+        raise ValueError("Pair covariates must be finite and canonical")
 
 
 @dataclass(frozen=True, slots=True)
@@ -637,6 +666,67 @@ class PairCandidateFoldManifest:
     @property
     def fold_manifest_id(self) -> str:
         return content_id("pair_candidate_fold_manifest_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class PairPreOutcomeFreeze:
+    """Support decisions and folds sealed before Pair discovery scoring."""
+
+    universe_id: str
+    plan_id: str
+    preoutcome_data_sha256: str
+    support_gates: tuple[PairSupportGate, ...]
+    fold_manifests: tuple[PairCandidateFoldManifest, ...]
+    failures: tuple[SelectorFailure, ...]
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.universe_id, "Pair pre-outcome universe_id"),
+            (self.plan_id, "Pair pre-outcome plan_id"),
+        ):
+            require_text(value, name)
+        _require_digest(
+            self.preoutcome_data_sha256,
+            "Pair pre-outcome data",
+        )
+        if tuple(sorted(self.support_gates, key=lambda item: item.pair_id)) != (
+            self.support_gates
+        ):
+            raise ValueError("Pair support gates must use canonical policy order")
+        if tuple(
+            sorted(self.fold_manifests, key=lambda item: item.policy_key)
+        ) != self.fold_manifests:
+            raise ValueError("Pair frozen folds must use canonical policy order")
+        if tuple(
+            sorted(
+                self.failures,
+                key=lambda item: (item.candidate_id or "", item.reason_code),
+            )
+        ) != self.failures:
+            raise ValueError("Pair pre-outcome failures must use canonical order")
+        support_ids = tuple(item.pair_id for item in self.support_gates)
+        fold_ids = tuple(item.policy_key for item in self.fold_manifests)
+        failure_ids = tuple(item.candidate_id for item in self.failures)
+        if (
+            len(set(support_ids)) != len(support_ids)
+            or len(set(fold_ids)) != len(fold_ids)
+            or any(candidate_id is None for candidate_id in failure_ids)
+            or len(set(failure_ids)) != len(failure_ids)
+            or set(fold_ids) & set(failure_ids)
+        ):
+            raise ValueError("Pair pre-outcome freeze has duplicate candidate accounting")
+        passed = {item.pair_id for item in self.support_gates if item.passed}
+        if set(fold_ids) | set(failure_ids) != passed:
+            raise ValueError("Pair passing support must have one fold or fold failure")
+        if any(
+            item.reason_code != "pair_fold_non_evaluable"
+            for item in self.failures
+        ):
+            raise ValueError("Pair pre-outcome freeze contains a non-fold failure")
+
+    @property
+    def preoutcome_freeze_id(self) -> str:
+        return content_id("pair_preoutcome_freeze_", self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -893,6 +983,8 @@ def run_pair_shadow_qualification(
     observations: Sequence[PairShadowObservation],
     relation_evidence: Sequence[PairRelationEvidenceRecord],
     plan: PairShadowPlan,
+    *,
+    preoutcome_freeze: PairPreOutcomeFreeze,
 ) -> PairShadowQualificationResult:
     """Run Pair Full/No-Relation from one compatibility-first RD table."""
 
@@ -914,10 +1006,19 @@ def run_pair_shadow_qualification(
     rows_by_policy = {candidate_id: [] for candidate_id in universe.compatible_policy_keys}
     for row in observations:
         rows_by_policy[row.policy_key].append(row)
-    support_gates = []
-    fold_manifests = []
+    if type(preoutcome_freeze) is not PairPreOutcomeFreeze:
+        raise TypeError("Pair prioritization requires an explicit pre-outcome freeze")
+    if preoutcome_freeze != freeze_pair_preoutcome_design(
+        universe,
+        pair_preoutcome_observations(observations),
+        plan,
+    ):
+        raise ValueError("Pair pre-outcome freeze failed outcome-blind replay")
+    frozen_fold_by_id = {
+        item.policy_key: item for item in preoutcome_freeze.fold_manifests
+    }
     rd_scores = []
-    failures = []
+    failures = list(preoutcome_freeze.failures)
     for candidate_id in universe.compatible_policy_keys:
         policy = policy_by_id[candidate_id]
         candidate = _PairPolicyAdapter(
@@ -926,23 +1027,27 @@ def run_pair_shadow_qualification(
             tuple(item.operation for item in policy.factors),
         )
         rows = tuple(rows_by_policy[candidate_id])
-        gate = _pair_shared_support_gate(policy, candidate, rows, plan)
-        support_gates.append(gate)
+        gate = next(
+            item
+            for item in preoutcome_freeze.support_gates
+            if item.pair_id == candidate_id
+        )
         if not gate.passed:
             continue
+        folds = frozen_fold_by_id.get(candidate_id)
+        if folds is None:
+            continue
         try:
-            folds = _pair_candidate_fold_manifest(candidate, rows, plan)
             score = _pair_cross_fitted_rd(candidate, rows, folds, plan)
         except ValueError as exc:
             failures.append(
                 SelectorFailure("pair_rd_non_evaluable", str(exc), candidate_id)
             )
             continue
-        fold_manifests.append(folds)
         rd_scores.append(score)
 
-    frozen_support = tuple(sorted(support_gates, key=lambda item: item.pair_id))
-    frozen_folds = tuple(sorted(fold_manifests, key=lambda item: item.policy_key))
+    frozen_support = preoutcome_freeze.support_gates
+    frozen_folds = preoutcome_freeze.fold_manifests
     frozen_scores = tuple(sorted(rd_scores, key=lambda item: item.policy_key))
     frozen_failures = tuple(
         sorted(failures, key=lambda item: (item.candidate_id or "", item.reason_code))
@@ -1016,10 +1121,119 @@ def run_pair_shadow_qualification(
     )
 
 
+def freeze_pair_preoutcome_design(
+    universe: PairCandidateUniverseManifest,
+    observations: Sequence[PairPreOutcomeObservation],
+    plan: PairShadowPlan,
+) -> PairPreOutcomeFreeze:
+    """Seal Pair support and four-cell folds from an outcome-free schema."""
+
+    if type(universe) is not PairCandidateUniverseManifest:
+        raise TypeError("universe must be a PairCandidateUniverseManifest")
+    if type(plan) is not PairShadowPlan:
+        raise TypeError("plan must be a PairShadowPlan")
+    if any(type(item) is not PairPreOutcomeObservation for item in observations):
+        raise TypeError("Pair pre-outcome freeze requires outcome-free observations")
+    compatible = set(universe.compatible_policy_keys)
+    if any(row.policy_key not in compatible for row in observations):
+        raise ValueError("Pair fold row falls outside the compatible common universe")
+    policy_by_id = {item.policy_key: item for item in universe.policy_keys}
+    rows_by_policy = {candidate_id: [] for candidate_id in universe.compatible_policy_keys}
+    for row in observations:
+        rows_by_policy[row.policy_key].append(row)
+    gates = []
+    folds = []
+    failures = []
+    for candidate_id in universe.compatible_policy_keys:
+        policy = policy_by_id[candidate_id]
+        candidate = _PairPolicyAdapter(
+            candidate_id,
+            tuple(item.actionable_feature_id for item in policy.factors),
+            tuple(item.operation for item in policy.factors),
+        )
+        rows = tuple(rows_by_policy[candidate_id])
+        gate = _pair_shared_support_gate(policy, candidate, rows, plan)
+        gates.append(gate)
+        if not gate.passed:
+            continue
+        try:
+            fold_manifest = _pair_candidate_fold_manifest(candidate, rows, plan)
+        except ValueError as exc:
+            failures.append(
+                SelectorFailure("pair_fold_non_evaluable", str(exc), candidate_id)
+            )
+            continue
+        folds.append(fold_manifest)
+    return PairPreOutcomeFreeze(
+        universe.universe_id,
+        plan.plan_id,
+        pair_preoutcome_data_sha256(observations),
+        tuple(sorted(gates, key=lambda item: item.pair_id)),
+        tuple(sorted(folds, key=lambda item: item.policy_key)),
+        tuple(
+            sorted(
+                failures,
+                key=lambda item: (item.candidate_id or "", item.reason_code),
+            )
+        ),
+    )
+
+
+def pair_preoutcome_observations(
+    observations: Sequence[PairShadowObservation],
+) -> tuple[PairPreOutcomeObservation, ...]:
+    """Project Pair discovery records before their outcome field is opened."""
+
+    if not observations or any(
+        type(item) is not PairShadowObservation for item in observations
+    ):
+        raise TypeError("Pair pre-outcome projection requires discovery observations")
+    return tuple(
+        sorted(
+            (
+                PairPreOutcomeObservation(
+                    item.policy_key,
+                    item.task_unit_id,
+                    item.model_id,
+                    item.source_lineage_id,
+                    item.language,
+                    item.task_archetype,
+                    item.api_family,
+                    item.context_query_id,
+                    item.context_state,
+                    item.factor_states,
+                    item.factor_reliabilities,
+                    item.covariates,
+                )
+                for item in observations
+            ),
+            key=lambda item: item.preoutcome_observation_id,
+        )
+    )
+
+
+def pair_preoutcome_data_sha256(
+    observations: Sequence[PairPreOutcomeObservation],
+) -> str:
+    """Hash Pair support/fold inputs without admitting an outcome field."""
+
+    frozen = tuple(
+        sorted(observations, key=lambda item: item.preoutcome_observation_id)
+    )
+    if not frozen or any(
+        type(item) is not PairPreOutcomeObservation for item in frozen
+    ):
+        raise TypeError("Pair pre-outcome data requires typed observations")
+    coordinates = {(item.policy_key, item.task_unit_id) for item in frozen}
+    if len(coordinates) != len(frozen):
+        raise ValueError("a Pair pre-outcome policy/task coordinate is duplicated")
+    return content_hash(frozen)
+
+
 def _pair_shared_support_gate(
     policy: PairPolicyKey,
     candidate: _PairPolicyAdapter,
-    rows: tuple[PairShadowObservation, ...],
+    rows: tuple[PairPreOutcomeObservation, ...],
     plan: PairShadowPlan,
 ) -> PairSupportGate:
     reasons = set()
@@ -1027,7 +1241,7 @@ def _pair_shared_support_gate(
         reasons.add("missing_observations")
     if len({row.task_unit_id for row in rows}) != len(rows):
         reasons.add("duplicate_task_unit")
-    cells: dict[str, list[PairShadowObservation]] = {
+    cells: dict[str, list[PairPreOutcomeObservation]] = {
         cell: [] for cell in ("00", "01", "10", "11")
     }
     for row in rows:
@@ -1081,10 +1295,10 @@ def _pair_shared_support_gate(
 
 def _pair_candidate_fold_manifest(
     candidate: _PairPolicyAdapter,
-    rows: tuple[PairShadowObservation, ...],
+    rows: tuple[PairPreOutcomeObservation, ...],
     plan: PairShadowPlan,
 ) -> PairCandidateFoldManifest:
-    cells: dict[str, list[PairShadowObservation]] = {
+    cells: dict[str, list[PairPreOutcomeObservation]] = {
         cell: [] for cell in ("00", "01", "10", "11")
     }
     for row in rows:
@@ -1525,8 +1739,11 @@ def _support_gate(
 
 
 def _shared_count(
-    cells: Mapping[str, Sequence[PairDiscoveryObservation]],
-    value: Callable[[PairDiscoveryObservation], str],
+    cells: Mapping[
+        str,
+        Sequence[PairDiscoveryObservation | PairPreOutcomeObservation],
+    ],
+    value: Callable[[PairDiscoveryObservation | PairPreOutcomeObservation], str],
 ) -> int:
     sets = [{value(row) for row in cells[cell]} for cell in ("00", "01", "10", "11")]
     return len(set.intersection(*sets)) if all(sets) else 0
@@ -1795,6 +2012,8 @@ __all__ = [
     "PairCandidateFoldManifest",
     "PairCandidateUniverseManifest",
     "PairFoldAssignment",
+    "PairPreOutcomeObservation",
+    "PairPreOutcomeFreeze",
     "PairRDScore",
     "PairRelationGate",
     "PairRelationGateStatus",
@@ -1807,7 +2026,10 @@ __all__ = [
     "PairSupportGate",
     "build_tsg_pair_universe",
     "freeze_pair_candidate_universe",
+    "freeze_pair_preoutcome_design",
+    "pair_preoutcome_data_sha256",
     "pair_shadow_data_sha256",
+    "pair_preoutcome_observations",
     "run_interaction_selector",
     "run_pair_shadow_qualification",
 ]

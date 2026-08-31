@@ -7,7 +7,7 @@ Default reviewer layer:
     python -m pytest -q
 
 The default layer is intentionally limited to the paper-facing scientific
-invariants (65 tests at the 2026-08-31 implementation checkpoint):
+invariants (67 tests at the 2026-08-31 implementation checkpoint):
 
 - exact-byte artifact closure and rejection of unlisted evidence;
 - conservative semantic task-unit merge authority and discover/confirm separation;
@@ -23,6 +23,8 @@ invariants (65 tests at the 2026-08-31 implementation checkpoint):
 - selector support-gate closure without retaining the superseded five-selector,
   expected-direction, or rank-pair RQ2 contracts;
 - Atomic Full/RD-only and Pair Full/No-Relation sole-difference selectors,
+  explicit pre-outcome Atomic fold and Pair support/fold freezes with mutation
+  replay,
   both-track blinded Expert and seeded Random shared-universe baselines with
   typed candidate cards, fixed-slot/union replay, and per-selector/model
   qualification coverage,
@@ -46,16 +48,16 @@ Milestone tests exercise optional backend capabilities and the smallest linear
 artifact reproductions. They are not run for mechanical edits and do not stand
 in for a frozen provider experiment.
 
-The target v3 zero-network closure is:
+The target v3 zero-network closure is the production CLI smoke:
 
-    python -m pytest -q -o addopts="" \
-      tests/test_study_design.py::test_target_two_freeze_lineage_closes_and_independently_replays
+    prompt-mechanism-study target-study smoke REVIEWER_SMOKE_RESULT
+    prompt-mechanism-study target-study verify-result REVIEWER_SMOKE_RESULT
 
-It exercises synthetic inputs through shared task-policy materialization,
-deterministic randomization, budget preflight, both timed freezes, assigned-arm
-ITT, exact bundle writing, read-only CLI replay, independent
-verification, and the claim-authorization boundary. It is implementation
-evidence only. The retained historical
+It exercises deterministic synthetic inputs through all seven target stages,
+including shared measurement/outcome closure for 80 assignments, both timed
+freezes, assigned-arm ITT, exact bundle writing, and independent replay. It
+makes zero provider calls and is hard-bound to `tested` non-claim evidence.
+The retained historical
 factorial smoke remains in `test_factorial_reviewer_smoke.py`:
 two task units, one pair, two application orders, four cells, and one offline
 fixture model (16 assignments). It uses the real local Security Oracle but
