@@ -4,6 +4,7 @@ import pytest
 
 from prompt_mechanism_study.contract_cleaning import (
     ContractCleaningError,
+    _parse_contract_repairs,
     _parse_content_reviews,
     _parse_evidence_backfill,
     _parse_semantic_repairs,
@@ -154,6 +155,31 @@ def test_semantic_repair_requires_evidence_for_every_contract_value() -> None:
         _parse_semantic_repairs(
             json.dumps({"items": [response]}, ensure_ascii=False).encode(), _batch()
         )
+
+
+def test_semantic_contract_repair_does_not_mix_evidence_bookkeeping() -> None:
+    response = {
+        "item_index": 1,
+        "resolution_status": "resolved",
+        "entrypoint": "solve",
+        "requirements": ["Return the input value unchanged."],
+        "inputs": ["value"],
+        "outputs": ["the unchanged input value"],
+        "side_effects": [],
+        "environment_dependencies": [],
+        "source_specification_assessment": "sufficient",
+        "repair_category": "CONTRACT_EXTRACTION_ERROR",
+        "reason": "The source directly specifies the behavior.",
+    }
+    row = _parse_contract_repairs(
+        json.dumps({"items": [response]}).encode(), _batch()
+    )[0]
+    assert row["requirements"] == ["Return the input value unchanged."]
+    assert "content_evidence" not in row
+
+    response["evidence_bindings"] = []
+    with pytest.raises(ContractCleaningError):
+        _parse_contract_repairs(json.dumps({"items": [response]}).encode(), _batch())
 
 
 def test_review_keeps_producer_failure_nonterminal() -> None:

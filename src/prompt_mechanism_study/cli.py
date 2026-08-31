@@ -222,6 +222,20 @@ def _add_curation_group(groups: Any) -> None:
     semantic_repairs.add_argument("--max-new-batches", type=int)
     semantic_repairs.add_argument("--workers", type=int, default=1)
 
+    repair_evidence = _leaf(
+        actions,
+        "contract-repair-evidence",
+        _run_contract_repair_evidence,
+        "bind exact source evidence to immutable repaired contracts",
+    )
+    repair_evidence.add_argument("base_bundle", type=Path)
+    repair_evidence.add_argument("repairs_root", type=Path)
+    repair_evidence.add_argument("output", type=Path)
+    repair_evidence.add_argument("--repository-root", type=Path, default=Path.cwd())
+    repair_evidence.add_argument("--producer-commit", required=True)
+    repair_evidence.add_argument("--max-new-batches", type=int)
+    repair_evidence.add_argument("--workers", type=int, default=1)
+
     assemble_proposals = _leaf(
         actions,
         "assemble-contract-content",
@@ -231,6 +245,7 @@ def _add_curation_group(groups: Any) -> None:
     assemble_proposals.add_argument("base_bundle", type=Path)
     assemble_proposals.add_argument("evidence_root", type=Path)
     assemble_proposals.add_argument("repairs_root", type=Path)
+    assemble_proposals.add_argument("repair_evidence_root", type=Path)
     assemble_proposals.add_argument("output", type=Path)
     assemble_proposals.add_argument("--producer-commit", required=True)
 
@@ -817,6 +832,24 @@ def _run_contract_semantic_repairs(
     )
 
 
+def _run_contract_repair_evidence(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import run_repaired_contract_evidence
+
+    return _emit_status(
+        run_repaired_contract_evidence(
+            args.repository_root,
+            args.base_bundle,
+            args.repairs_root,
+            args.output,
+            producer_commit=args.producer_commit,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
+        )
+    )
+
+
 def _run_assemble_contract_content(
     args: argparse.Namespace, _: argparse.ArgumentParser
 ) -> int:
@@ -829,6 +862,7 @@ def _run_assemble_contract_content(
             args.base_bundle,
             args.evidence_root,
             args.repairs_root,
+            args.repair_evidence_root,
             args.output,
             producer_commit=args.producer_commit,
         )

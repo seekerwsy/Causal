@@ -244,7 +244,7 @@ def run_contract_content_proposals(
         repository_root,
         root / "repair",
         repair_items,
-        prompt_name="contract-semantic-repair-v1.txt",
+        prompt_name="contract-semantic-repair-v2.txt",
         config_name="contract-cleaning-producer-qwen35flash.json",
         stage="contract_semantic_repair",
         base_identity={**base_identity, "evidence_plan_sha256": content_hash(evidence_plan)},
@@ -512,7 +512,7 @@ def run_single_task_semantic_repairs(
         repair_items,
         prompt_name="contract-semantic-repair-v1.txt",
         config_name="contract-cleaning-producer-qwen35flash.json",
-        stage="single_task_contract_semantic_repair",
+        stage="single_task_contract_semantic_repair_without_evidence",
         base_identity={
             "schema_version": "1.0",
             "base_bundle_sha256": _manifest_digest(base),
@@ -524,7 +524,7 @@ def run_single_task_semantic_repairs(
             "formal_roles_used": False,
         },
         request_builder=_repair_request,
-        parser=_parse_semantic_repairs,
+        parser=_parse_contract_repairs,
         max_new_batches=max_new_batches,
         workers=workers,
         provider=provider,
@@ -558,7 +558,105 @@ def run_single_task_semantic_repairs(
         "formal_roles_used": False,
         "scientific_claim_allowed": False,
     }
-    write_bundle(final, {"semantic-repairs.json": repairs, "report.json": report})
+    write_bundle(final, {"semantic-contract-repairs.json": repairs, "report.json": report})
+    return report
+
+
+def run_repaired_contract_evidence(
+    repository_root: Path,
+    base_bundle: Path,
+    repairs_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+    max_new_batches: int | None = None,
+    workers: int = 1,
+    provider: Provider = bailian_complete,
+) -> dict[str, Any]:
+    """Bind exact source spans to immutable repaired contracts, one task per request."""
+
+    base = base_bundle.resolve()
+    repairs_bundle = repairs_root.resolve()
+    verify_task_unit_data(base)
+    verify_bundle(repairs_bundle)
+    tasks, _, _ = _base_population(base)
+    repairs = _unique_by(
+        read_json(repairs_bundle / "semantic-contract-repairs.json"),
+        "task_unit_id",
+        "semantic contract repairs",
+    )
+    if not set(repairs) <= set(tasks):
+        raise ContractCleaningError("semantic repairs leave the base task population")
+    items = []
+    for task_id, repair in sorted(repairs.items()):
+        task = tasks[task_id]
+        items.append(
+            {
+                "task_unit_id": task_id,
+                "language": task["declared_execution_context"]["language"],
+                "source_prompt": task["model_visible_input"]["natural_prompt"],
+                "source_prompt_sha256": task["model_visible_input"][
+                    "natural_prompt_content_sha256"
+                ],
+                "old_contract": {
+                    key: repair[key]
+                    for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+                },
+            }
+        )
+    results, complete, plan = _run_stage(
+        repository_root,
+        output.resolve(),
+        items,
+        prompt_name="contract-evidence-backfill-v1.txt",
+        config_name="contract-cleaning-producer-qwen35flash.json",
+        stage="single_task_repaired_contract_evidence",
+        base_identity={
+            "schema_version": "1.0",
+            "base_bundle_sha256": _manifest_digest(base),
+            "repairs_bundle_sha256": bundle_digest(repairs_bundle),
+            "repair_item_count": len(items),
+            "producer_commit": producer_commit,
+            "arms_or_outcomes_used": False,
+            "formal_roles_used": False,
+        },
+        request_builder=_evidence_request,
+        parser=_parse_evidence_backfill,
+        max_new_batches=max_new_batches,
+        workers=workers,
+        provider=provider,
+        batch_items=1,
+    )
+    if not complete:
+        return {
+            "schema_version": "1.0",
+            "status": "REPAIRED_CONTRACT_EVIDENCE_IN_PROGRESS",
+            "repair_item_count": len(items),
+            "completed_item_count": len(results),
+            "complete": False,
+        }
+    final = output.resolve() / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+    evidence = [row for _, row in sorted(_unique_results(results, "repair evidence").items())]
+    bound = sum(row["binding_status"] == "bound" for row in evidence)
+    report = {
+        "schema_version": "1.0",
+        "status": "REPAIRED_CONTRACT_EVIDENCE_FROZEN",
+        "repair_item_count": len(evidence),
+        "evidence_bound_count": bound,
+        "evidence_unbound_count": len(evidence) - bound,
+        "evidence_plan_sha256": content_hash(plan),
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        final,
+        {"repaired-contract-evidence.json": evidence, "report.json": report},
+    )
     return report
 
 
@@ -566,6 +664,7 @@ def assemble_contract_content_proposals(
     base_bundle: Path,
     evidence_root: Path,
     repairs_root: Path,
+    repair_evidence_root: Path,
     output: Path,
     *,
     producer_commit: str,
@@ -574,8 +673,10 @@ def assemble_contract_content_proposals(
 
     base = base_bundle.resolve()
     repairs_bundle = repairs_root.resolve()
+    repair_evidence_bundle = repair_evidence_root.resolve()
     verify_task_unit_data(base)
     verify_bundle(repairs_bundle)
+    verify_bundle(repair_evidence_bundle)
     tasks, contracts, quality = _base_population(base)
     items = _cleaning_items(tasks, contracts, quality)
     evidence_items = [item for item in items if item["mode"] == "EVIDENCE_BACKFILL_ONLY"]
@@ -586,7 +687,7 @@ def assemble_contract_content_proposals(
     )
     evidence_by_task = _unique_results(evidence_results, "evidence backfill")
     repair_by_task = _unique_by(
-        read_json(repairs_bundle / "semantic-repairs.json"),
+        read_json(repairs_bundle / "semantic-contract-repairs.json"),
         "task_unit_id",
         "semantic repairs",
     )
@@ -602,6 +703,15 @@ def assemble_contract_content_proposals(
     }
     if set(repair_by_task) != expected_repairs:
         raise ContractCleaningError("semantic repair population is incomplete")
+    repair_evidence_by_task = _unique_by(
+        read_json(repair_evidence_bundle / "repaired-contract-evidence.json"),
+        "task_unit_id",
+        "repaired contract evidence",
+    )
+    if set(repair_evidence_by_task) != expected_repairs or any(
+        row.get("binding_status") != "bound" for row in repair_evidence_by_task.values()
+    ):
+        raise ContractCleaningError("repaired contract evidence is incomplete")
     proposed = []
     ledger = []
     for item in items:
@@ -621,7 +731,7 @@ def assemble_contract_content_proposals(
                 key: repair[key]
                 for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
             }
-            evidence = repair["content_evidence"]
+            evidence = repair_evidence_by_task[task_id]["content_evidence"]
             assessment = repair["source_specification_assessment"]
             category = repair["repair_category"]
             reason = repair["reason"]
@@ -678,6 +788,7 @@ def assemble_contract_content_proposals(
         "producer_commit": producer_commit,
         "evidence_plan_bundle_sha256": bundle_digest(evidence_root.resolve() / "plan"),
         "repairs_bundle_sha256": bundle_digest(repairs_bundle),
+        "repair_evidence_bundle_sha256": bundle_digest(repair_evidence_bundle),
         "all_task_units_accounted_for": len(proposed) == len(items),
         "arms_or_outcomes_used": False,
         "formal_roles_used": False,
@@ -1804,6 +1915,42 @@ def _parse_semantic_repairs(
     return frozen
 
 
+def _parse_contract_repairs(
+    raw: bytes, batch: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    rows = _response_rows(raw, "items", len(batch))
+    required = {
+        "item_index",
+        "resolution_status",
+        "entrypoint",
+        *_CONTENT_FIELDS,
+        "source_specification_assessment",
+        "repair_category",
+        "reason",
+    }
+    frozen = []
+    for row, item in zip(rows, batch, strict=True):
+        if (
+            set(row) != required
+            or row["resolution_status"] not in {"resolved", "ambiguous", "unsupported"}
+            or row["source_specification_assessment"] not in _SOURCE_ASSESSMENTS
+            or row["repair_category"] not in _REPAIR_CATEGORIES - {"EVIDENCE_BACKFILL_ONLY"}
+        ):
+            raise ContractCleaningError("semantic contract repair response is malformed")
+        frozen.append(
+            {
+                "task_unit_id": item["task_unit_id"],
+                **_validate_contract_values(row),
+                "source_specification_assessment": row[
+                    "source_specification_assessment"
+                ],
+                "repair_category": row["repair_category"],
+                "reason": _normalize_reason(row["reason"]),
+            }
+        )
+    return frozen
+
+
 def _parse_content_reviews(
     raw: bytes, batch: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -2047,6 +2194,7 @@ __all__ = [
     "freeze_future_evaluation_reservation",
     "run_contract_content_proposals",
     "run_contract_content_review",
+    "run_repaired_contract_evidence",
     "run_single_task_semantic_repairs",
     "verify_contract_content_data",
 ]

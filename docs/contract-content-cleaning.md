@@ -78,8 +78,11 @@ prompt-mechanism-study curate contract-content-proposals BASE PROPOSALS `
 prompt-mechanism-study curate contract-semantic-repairs `
   BASE PROPOSALS/evidence REPAIRS --producer-commit COMMIT --workers 6
 
+prompt-mechanism-study curate contract-repair-evidence `
+  BASE REPAIRS/final REPAIR-EVIDENCE --producer-commit COMMIT --workers 6
+
 prompt-mechanism-study curate assemble-contract-content `
-  BASE PROPOSALS/evidence REPAIRS/final PROPOSALS-FINAL `
+  BASE PROPOSALS/evidence REPAIRS/final REPAIR-EVIDENCE/final PROPOSALS-FINAL `
   --producer-commit COMMIT
 
 prompt-mechanism-study curate contract-content-review `
@@ -93,9 +96,10 @@ prompt-mechanism-study curate finalize-contract-content build FINAL `
 prompt-mechanism-study curate finalize-contract-content verify FINAL
 ```
 
-Semantic repair uses one task unit per provider request; this keeps the
-contract fields and their exact evidence target list jointly auditable without
-forcing the model to track several unrelated contracts in one response. Run
+Semantic repair and repaired-contract evidence binding each use one task unit
+per provider request. The first LLM call decides only the semantic contract;
+deterministic code then constructs its exact target list, and the second call
+only binds source spans to that immutable list. Run
 one batch of each producer mode and one review batch before scaling. Runs
 are resumable only from closed successful batches with the same frozen plan.
 Raw requests and provider responses remain in the run directory; credentials
