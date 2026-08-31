@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -24,6 +25,370 @@ class Operation(StrEnum):
 class ExpectedDirection(StrEnum):
     INCREASE = "increase"
     DECREASE = "decrease"
+
+
+class DataRole(StrEnum):
+    """Prospectively distinct uses of task-unit data in the active method."""
+
+    QUAL_DEV = "QUAL_DEV"
+    QUAL_ACCEPT = "QUAL_ACCEPT"
+    DISCOVERY = "DISCOVERY"
+    CONFIRMATION = "CONFIRMATION"
+    LEGACY_ONLY = "LEGACY_ONLY"
+
+
+def _require_canonical_scope(values: tuple[str, ...], name: str) -> None:
+    if not values:
+        raise ValueError(f"{name} cannot be empty")
+    for value in values:
+        require_text(value, name)
+    require_unique(values, name)
+    if tuple(sorted(values)) != values:
+        raise ValueError(f"{name} must use canonical order")
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisScope:
+    """The outcome-blind population on which one semantic policy is defined.
+
+    Scope fields are deliberately limited to coordinates that partition the
+    paper-facing task population. Selector scores, model identity, expected
+    direction, and post-assignment information do not belong here.
+    """
+
+    security_pattern_id: str
+    context_query_id: str
+    language_scope: tuple[str, ...]
+    api_scope: tuple[str, ...]
+    task_archetype_scope: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.security_pattern_id, "security_pattern_id")
+        require_text(self.context_query_id, "context_query_id")
+        _require_canonical_scope(self.language_scope, "language_scope")
+        _require_canonical_scope(self.api_scope, "api_scope")
+        _require_canonical_scope(
+            self.task_archetype_scope,
+            "task_archetype_scope",
+        )
+
+    @property
+    def analysis_scope_id(self) -> str:
+        return content_id("analysis_scope_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyFactor:
+    """One atomic feature/operation coordinate inside a semantic policy."""
+
+    actionable_feature_id: str
+    operation: Operation
+
+    def __post_init__(self) -> None:
+        require_text(self.actionable_feature_id, "actionable_feature_id")
+        if type(self.operation) is not Operation:
+            raise TypeError("operation must be an Operation")
+
+    @property
+    def sort_key(self) -> tuple[str, str]:
+        return self.actionable_feature_id, self.operation.value
+
+
+@dataclass(frozen=True, slots=True)
+class AtomicPolicyKey:
+    """Model-independent semantic identity of one first-order policy question."""
+
+    analysis_scope: AnalysisScope
+    factor: PolicyFactor
+    outcome_id: str
+
+    def __post_init__(self) -> None:
+        if type(self.analysis_scope) is not AnalysisScope:
+            raise TypeError("analysis_scope must be an AnalysisScope")
+        if type(self.factor) is not PolicyFactor:
+            raise TypeError("factor must be a PolicyFactor")
+        require_text(self.outcome_id, "outcome_id")
+
+    @property
+    def policy_key(self) -> str:
+        return content_id("atomic_policy_key_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class PairPolicyKey:
+    """Model-independent semantic identity of one second-order policy question."""
+
+    analysis_scope: AnalysisScope
+    factors: tuple[PolicyFactor, PolicyFactor]
+    outcome_id: str
+
+    def __post_init__(self) -> None:
+        if type(self.analysis_scope) is not AnalysisScope:
+            raise TypeError("analysis_scope must be an AnalysisScope")
+        if len(self.factors) != 2 or any(type(item) is not PolicyFactor for item in self.factors):
+            raise TypeError("pair policy must contain exactly two PolicyFactor values")
+        if self.factors[0].actionable_feature_id == self.factors[1].actionable_feature_id:
+            raise ValueError("pair policy factors must be distinct")
+        if tuple(sorted(self.factors, key=lambda item: item.sort_key)) != self.factors:
+            raise ValueError("pair policy factors must use canonical order")
+        require_text(self.outcome_id, "outcome_id")
+
+    @property
+    def policy_key(self) -> str:
+        return content_id("pair_policy_key_", self)
+
+
+def pair_policy_key(
+    analysis_scope: AnalysisScope,
+    factors: Iterable[PolicyFactor],
+    *,
+    outcome_id: str,
+) -> PairPolicyKey:
+    """Canonicalize input order without making factor order scientific identity."""
+
+    ordered = tuple(sorted(factors, key=lambda item: item.sort_key))
+    if len(ordered) != 2:
+        raise ValueError("pair policy requires exactly two factors")
+    return PairPolicyKey(analysis_scope, ordered, outcome_id)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelEffectCoordinate:
+    """One model-specific effect of a model-independent semantic policy."""
+
+    policy_key: str
+    model_id: str
+
+    def __post_init__(self) -> None:
+        require_text(self.policy_key, "policy_key")
+        require_text(self.model_id, "model_id")
+
+    @property
+    def effect_coordinate_id(self) -> str:
+        return content_id("model_effect_coordinate_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelBoundCandidateRecord:
+    """Protocol-bound Stage-II record dispatched to exactly one model effect."""
+
+    policy_key: str
+    discovery_model_id: str
+    protocol_id: str
+    schema_version: str
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.policy_key, "policy_key"),
+            (self.discovery_model_id, "discovery_model_id"),
+            (self.protocol_id, "protocol_id"),
+            (self.schema_version, "schema_version"),
+        ):
+            require_text(value, name)
+
+    @property
+    def effect_coordinate(self) -> ModelEffectCoordinate:
+        return ModelEffectCoordinate(self.policy_key, self.discovery_model_id)
+
+    @property
+    def candidate_record_id(self) -> str:
+        return content_id("model_bound_candidate_record_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class TaskUnitDataRoleRecord:
+    """Outcome-blind provenance for one task unit at role-assignment time."""
+
+    task_unit_id: str
+    near_duplicate_group_id: str
+    source_lineage_id: str
+    exposure_history: tuple[str, ...]
+    role_assignment_version: str
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.task_unit_id, "task_unit_id"),
+            (self.near_duplicate_group_id, "near_duplicate_group_id"),
+            (self.source_lineage_id, "source_lineage_id"),
+            (self.role_assignment_version, "role_assignment_version"),
+        ):
+            require_text(value, name)
+        for event in self.exposure_history:
+            require_text(event, "exposure_history event")
+        require_unique(self.exposure_history, "exposure_history events")
+
+
+@dataclass(frozen=True, slots=True)
+class DataRoleBinding:
+    """One named dataset and exact task-unit provenance under one data role."""
+
+    data_id: str
+    role: DataRole
+    task_units: tuple[TaskUnitDataRoleRecord, ...]
+    task_manifest_sha256: str
+
+    def __post_init__(self) -> None:
+        require_text(self.data_id, "data_id")
+        if type(self.role) is not DataRole:
+            raise TypeError("role must be a DataRole")
+        if not self.task_units or any(
+            type(item) is not TaskUnitDataRoleRecord for item in self.task_units
+        ):
+            raise TypeError("task_units must contain TaskUnitDataRoleRecord values")
+        task_unit_ids = tuple(item.task_unit_id for item in self.task_units)
+        require_unique(task_unit_ids, "task_unit_ids")
+        if tuple(sorted(self.task_units, key=lambda item: item.task_unit_id)) != self.task_units:
+            raise ValueError("task_units must use canonical task-unit order")
+        _require_digest(self.task_manifest_sha256, "task_manifest_sha256")
+        if self.role is DataRole.QUAL_ACCEPT and any(
+            item.exposure_history for item in self.task_units
+        ):
+            raise ValueError(
+                "QUAL_ACCEPT task units must be unexposed when the role manifest is frozen"
+            )
+
+    @property
+    def task_unit_ids(self) -> tuple[str, ...]:
+        return tuple(item.task_unit_id for item in self.task_units)
+
+
+@dataclass(frozen=True, slots=True)
+class DataRoleManifest:
+    """Task-unit and near-duplicate firewall for all prospective data uses.
+
+    A task unit may occur in several development-qualification datasets, but it
+    may never cross data roles. QUAL_ACCEPT is a single, unexposed, one-shot
+    acceptance resource. Near-duplicate groups obey the same role boundary.
+    """
+
+    protocol_id: str
+    source_manifest_sha256: str
+    bindings: tuple[DataRoleBinding, ...]
+    declared_roles: tuple[DataRole, ...] = tuple(DataRole)
+
+    def __post_init__(self) -> None:
+        require_text(self.protocol_id, "protocol_id")
+        _require_digest(self.source_manifest_sha256, "source_manifest_sha256")
+        if self.declared_roles != tuple(DataRole):
+            raise ValueError("data-role manifest must explicitly declare all five roles")
+        if not self.bindings:
+            raise ValueError("data-role manifest cannot be empty")
+        if any(type(item) is not DataRoleBinding for item in self.bindings):
+            raise TypeError("bindings must contain DataRoleBinding values")
+        require_unique((item.data_id for item in self.bindings), "data ids")
+        if tuple(sorted(self.bindings, key=lambda item: item.data_id)) != self.bindings:
+            raise ValueError("data-role bindings must use canonical data-id order")
+        required = {
+            DataRole.QUAL_DEV,
+            DataRole.QUAL_ACCEPT,
+            DataRole.DISCOVERY,
+            DataRole.CONFIRMATION,
+            DataRole.LEGACY_ONLY,
+        }
+        if not required <= {item.role for item in self.bindings}:
+            raise ValueError(
+                "bindings for all five data roles are required"
+            )
+        acceptance = [
+            item for item in self.bindings if item.role is DataRole.QUAL_ACCEPT
+        ]
+        if len(acceptance) != 1:
+            raise ValueError("exactly one QUAL_ACCEPT dataset must be frozen")
+
+        roles_by_task: dict[str, set[DataRole]] = defaultdict(set)
+        provenance_by_task: dict[str, set[tuple[str, str, str]]] = defaultdict(set)
+        roles_by_near_duplicate_group: dict[str, set[DataRole]] = defaultdict(set)
+        for binding in self.bindings:
+            for task_unit in binding.task_units:
+                roles_by_task[task_unit.task_unit_id].add(binding.role)
+                provenance_by_task[task_unit.task_unit_id].add(
+                    (
+                        task_unit.near_duplicate_group_id,
+                        task_unit.source_lineage_id,
+                        task_unit.role_assignment_version,
+                    )
+                )
+                roles_by_near_duplicate_group[
+                    task_unit.near_duplicate_group_id
+                ].add(binding.role)
+        if any(len(roles) != 1 for roles in roles_by_task.values()):
+            raise ValueError("a task unit cannot cross data roles")
+        if any(len(values) != 1 for values in provenance_by_task.values()):
+            raise ValueError("task-unit role provenance must be stable across datasets")
+        if any(len(roles) != 1 for roles in roles_by_near_duplicate_group.values()):
+            raise ValueError("a near-duplicate group cannot cross data roles")
+
+    @property
+    def data_role_manifest_id(self) -> str:
+        return content_id("data_role_manifest_", self)
+
+    @property
+    def qualification_data_ids(self) -> tuple[str, ...]:
+        return tuple(
+            item.data_id
+            for item in self.bindings
+            if item.role in {DataRole.QUAL_DEV, DataRole.QUAL_ACCEPT}
+        )
+
+    @property
+    def qualification_dev_data_ids(self) -> tuple[str, ...]:
+        return tuple(
+            item.data_id for item in self.bindings if item.role is DataRole.QUAL_DEV
+        )
+
+    @property
+    def qualification_accept_data_id(self) -> str:
+        return next(
+            item.data_id
+            for item in self.bindings
+            if item.role is DataRole.QUAL_ACCEPT
+        )
+
+    def require_dataset_role(self, data_id: str, role: DataRole) -> DataRoleBinding:
+        require_text(data_id, "data_id")
+        if type(role) is not DataRole:
+            raise TypeError("role must be a DataRole")
+        matches = [item for item in self.bindings if item.data_id == data_id]
+        if len(matches) != 1 or matches[0].role is not role:
+            raise ValueError(f"dataset {data_id!r} is not authorized for role {role.value}")
+        return matches[0]
+
+
+def validate_data_role_firewall(
+    manifest: DataRoleManifest,
+    requested_datasets: Mapping[str, DataRole],
+) -> dict[str, object]:
+    """Authorize named inputs before a target runner reads any outcome data."""
+
+    if type(manifest) is not DataRoleManifest:
+        raise TypeError("manifest must be a DataRoleManifest")
+    if not requested_datasets:
+        raise ValueError("requested_datasets cannot be empty")
+    authorized = []
+    for data_id, role in sorted(requested_datasets.items()):
+        binding = manifest.require_dataset_role(data_id, role)
+        authorized.append(
+            {
+                "data_id": data_id,
+                "data_role": role.value,
+                "task_manifest_sha256": binding.task_manifest_sha256,
+                "task_unit_count": len(binding.task_units),
+            }
+        )
+    report: dict[str, object] = {
+        "schema_version": "1.0",
+        "status": "PASS",
+        "data_role_manifest_id": manifest.data_role_manifest_id,
+        "authorized_datasets": authorized,
+        "task_unit_cross_role_overlap_count": 0,
+        "near_duplicate_cross_role_overlap_count": 0,
+        "outcome_data_read": False,
+    }
+    report["firewall_validation_id"] = content_id(
+        "data_role_firewall_validation_",
+        report,
+    )
+    return report
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,19 +758,31 @@ def freeze_universe(
 
 
 __all__ = [
+    "AnalysisScope",
+    "AtomicPolicyKey",
     "Candidate",
     "CandidateSkeletonV2",
     "CandidateUniverse",
+    "DataRole",
+    "DataRoleBinding",
+    "DataRoleManifest",
     "EligibilityDecisionV2",
     "ExpectedDirection",
     "FrozenHypothesisV2",
+    "ModelBoundCandidateRecord",
+    "ModelEffectCoordinate",
     "Operation",
+    "PairPolicyKey",
+    "PolicyFactor",
     "Population",
     "SourceEligibilityV2",
     "Split",
+    "TaskUnitDataRoleRecord",
     "TargetSpecV2",
     "Task",
     "freeze_population",
     "freeze_universe",
+    "pair_policy_key",
     "source_eligibility_v2",
+    "validate_data_role_firewall",
 ]

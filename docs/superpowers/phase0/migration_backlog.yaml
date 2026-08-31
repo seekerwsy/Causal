@@ -1,0 +1,545 @@
+schema_version: "1.0"
+protocol_id: phase-context-policy-v3
+protocol_status: SPECIFIED_DRAFT
+execution_policy: task_card_only
+active_path_cutover_authorized: false
+freeze_points:
+  discovery_design:
+    timing: before_formal_discovery_outcomes
+    artifact: discovery_design_freeze.json
+  confirmation:
+    timing: after_discovery_slots_before_confirmation_outcomes
+    artifact: confirmation_freeze.json
+  index:
+    artifact: study_freeze_index.json
+    references:
+      - discovery_design_freeze.json
+      - confirmation_freeze.json
+slices:
+  - id: SLICE-0
+    name: governance_foundation
+  - id: SLICE-1
+    name: atomic_end_to_end
+  - id: SLICE-2
+    name: pair_end_to_end
+  - id: SLICE-3
+    name: shared_evidence_path
+  - id: SLICE-4
+    name: qualify_and_accept
+  - id: SLICE-5
+    name: discovery_freeze_and_execute
+  - id: SLICE-6
+    name: confirmation_freeze_execute_and_report
+tasks:
+  - id: LEGACY-V5-DISPOSITION
+    slice: SLICE-0
+    status: TESTED_COMPLETE
+    depends_on: []
+    objective: Inventory the three v5 task populations as LEGACY_ONLY, remove only byte-identical runtime duplicates, and retain every unique evidence bundle.
+    authoritative_sources:
+      - protocol_sections_4_21
+      - traceability_T05
+    allowed_files:
+      - configs/formal/qualification_data_manifest.json
+      - tests/test_discovery_support.py
+      - data/method/archive/legacy-v5
+    forbidden_changes:
+      - tracked_v5_frozen_artifacts
+      - unique_provider_request_or_response_bundles
+      - any_existing_v5_acceptance_relabel
+      - selector_ranking_behavior
+      - default_cli
+    acceptance:
+      - three_v5_task_populations_are_legacy_only
+      - all_69_task_units_have_source_lineage_and_exposure_history
+      - task_unit_overlap_across_v5_bindings_is_zero
+      - unresolved_near_duplicate_groups_block_formal_use
+      - byte_identical_runtime_duplicates_are_recoverably_removed
+      - one_raw_two_stage_v5_bundle_and_all_tracked_qualification_results_remain
+    outputs:
+      - qualification_data_manifest.json
+      - focused_test_evidence
+      - two_exact_repository_archive_copies_of_legacy_v5_provider_evidence
+    progress:
+      - both_unique_ignored_runtime_bundles_verify_under_their_original_exact_manifests
+      - both_bundles_are_byte_identically_preserved_in_the_repository_legacy_archive_for_the_current_checkpoint
+      - the_role_manifest_now_hashes_repository_archive_files_instead_of_ignored_runtime_paths
+
+  - id: GOV-ROLE-MANIFEST
+    slice: SLICE-0
+    status: PROSPECTIVE_CENSUS_COMPLETE_BLOCKED_ROLE_ALLOCATION_AND_POWER
+    depends_on:
+      - LEGACY-V5-DISPOSITION
+    objective: Freeze QUAL_DEV, one-shot QUAL_ACCEPT, DISCOVERY, CONFIRMATION, and LEGACY_ONLY task-unit roles with near-duplicate firewalls.
+    authoritative_sources:
+      - protocol_sections_3_4_18_19
+      - traceability_T05
+    allowed_files:
+      - src/prompt_mechanism_study/datasets.py
+      - src/prompt_mechanism_study/representation.py
+      - tests/test_datasets.py
+      - tests/test_discovery_support.py
+      - configs/formal/qualification_data_manifest.json
+      - data/method/legacy-v5-role-bindings-v2
+      - data/method/phase-context-policy-v3-role-census-v6
+    forbidden_changes:
+      - data/method/prompt-tsg-external-qualification-freeze-v4.json
+      - any_existing_v5_acceptance_relabel
+      - selector_ranking_behavior
+      - default_cli
+    acceptance:
+      - every_live_role_has_an_exact_task_manifest
+      - qual_accept_exposure_history_is_empty_at_freeze
+      - task_unit_cross_role_overlap_count_is_zero
+      - near_duplicate_cross_role_overlap_count_is_zero
+      - existing_deveval_v4_is_legacy_only
+    outputs:
+      - qualification_data_manifest.json
+      - firewall_validation_report
+    progress:
+      - three_v5_legacy_bindings_with_69_unique_task_units_are_inventoried
+      - v5_source_lineage_and_exposure_evidence_are_bound_by_sha256
+      - outcome_blind_ready_population_census_contains_164_task_units
+      - twenty_three_exact_legacy_overlaps_are_excluded_before_role_assignment
+      - one_hundred_forty_one_unexposed_ready_task_units_remain
+      - semantic_and_diagnostic_near_duplicate_groups_are_content_addressed
+      - the_v5_census_replays_from_a_stable_non_circular_legacy_role_manifest_and_repository_archive_references
+      - formal_use_and_acceptance_attempts_remain_disabled
+      - the_complete_current_scope_ledger_has_318_exact_unexposed_quality_units_including_159_pending_oracle_16_pending_binding_and_2_pending_independent_review
+      - equal_60_task_family_targets_still_require_at_least_17_new_identity_and_4_new_cryptography_units_before_near_duplicate_reserve
+    blocker: >-
+      The current unexposed ready population has 141 task units versus the existing 240-task target.
+      The complete current-scope quality ledger has an exact-unexposed ceiling of 318, so qualifying
+      missing Oracle/binding/review support can close the 240 total without a CWE-scope change.
+      However, the equal family ceilings are 128/91/43/56, so the current 60/60/60/60 target still
+      requires at least 17 new identity and 4 new cryptography units plus near-duplicate reserve.
+      The author must choose whether to retain or amend those family targets, power-qualified role
+      sizes remain unselected, and no independent QUAL_ACCEPT subset is sealed.
+
+  - id: GOV-IDENTITY-SCOPE
+    slice: SLICE-0
+    status: FOUNDATION_TESTED
+    depends_on: []
+    objective: Record model-independent policy identity, canonical analysis scope, model-bound effects, and one-realization-per-task dispatch.
+    authoritative_sources:
+      - protocol_sections_3_6_9_10_23
+      - traceability_T02_T03_T04
+    allowed_files:
+      - configs/formal/identity_and_scope_decision.json
+      - src/prompt_mechanism_study/representation.py
+      - src/prompt_mechanism_study/study_design.py
+      - tests/test_successor_core.py
+      - tests/test_study_design.py
+    forbidden_changes:
+      - legacy_candidate_identity
+      - all_model_cross_product_dispatch
+    acceptance:
+      - pair_factor_order_is_canonical
+      - policy_key_is_model_independent
+      - model_effect_coordinate_is_policy_key_plus_model_id
+      - model_square_dispatch_fails
+      - each_task_policy_coordinate_has_one_realization
+    outputs:
+      - identity_and_scope_decision.json
+      - focused_test_evidence
+
+  - id: GOV-QUALIFICATION-DEV-ENVELOPE
+    slice: SLICE-0
+    status: BLOCKED_PROSPECTIVE_ROLE_MANIFEST
+    depends_on:
+      - GOV-ROLE-MANIFEST
+      - GOV-IDENTITY-SCOPE
+    objective: Lock the candidate profiles, development metrics, thresholds, selection rule, tie-break, and failure behavior before QUAL_DEV is read, without selecting the final profiles or reading QUAL_ACCEPT.
+    authoritative_sources:
+      - protocol_sections_7_12_19
+      - parameter_qualification_register
+    allowed_files:
+      - src/prompt_mechanism_study/study_design.py
+      - tests/test_study_design.py
+      - configs/formal/qualification_plan_bundle.json
+    forbidden_changes:
+      - selected_profile_before_qual_dev
+      - qual_accept_access_during_development
+      - acceptance_metrics_after_exposure
+      - second_candidate_fallback
+      - acceptance_seed_or_fold_retry
+      - default_cli
+    acceptance:
+      - all_five_profile_kinds_are_present
+      - candidate_profiles_are_locked_before_qual_dev
+      - development_metrics_thresholds_selection_rule_tie_break_and_failure_behavior_are_locked
+      - selected_profile_is_absent_until_qual_dev_evidence_exists
+      - qual_accept_identity_is_bound_but_its_observations_are_unread
+    outputs:
+      - qualification_plan_bundle.json#DEV_ENVELOPE_LOCKED
+    blocker: The prospective role manifest and the exact candidate-profile envelopes are not yet available.
+
+  - id: GOV-TWO-FREEZE-CONTRACT
+    slice: SLICE-0
+    status: IMPLEMENTATION_TESTED_BLOCKED_FORMAL_INPUTS
+    depends_on:
+      - GOV-IDENTITY-SCOPE
+    objective: Keep discovery-design and confirmation freeze coordinates in two correctly timed immutable objects.
+    authoritative_sources:
+      - protocol_sections_8_18_21_22
+    allowed_files:
+      - src/prompt_mechanism_study/study_design.py
+      - tests/test_study_design.py
+    forbidden_changes:
+      - fixed_slots_in_discovery_design_freeze
+      - confirmation_outcomes_in_confirmation_freeze
+    acceptance:
+      - discovery_design_freeze_contains_rules_profiles_folds_budget_and_outcome_contract
+      - confirmation_freeze_contains_slots_union_bridge_tasks_allocations_assignments_and_analysis
+      - study_freeze_index_references_both_by_id_and_sha256
+    outputs:
+      - discovery_design_freeze_schema
+      - confirmation_freeze_schema
+      - study_freeze_index_schema
+    progress:
+      - discovery_freeze_binds_the_exact_role_manifest_accepted_qualification_budget_k_models_selectors_and_pre_outcome_contracts
+      - confirmation_freeze_binds_the_exact_fixed_slots_unique_union_fanout_dispatch_tasks_realizations_assignments_budget_preflight_and_itt_plan
+      - confirmation_freeze_now_binds_the_exact_target_randomization_plan_and_model_invariant_task_policy_bundles
+      - the_study_index_binds_both_freezes_by_content_id_and_sha256
+      - an_independent_verifier_replays_the_complete_chain_and_rejects_assignment_digest_tampering
+    blocker: Actual freeze artifacts cannot be emitted until the prospective roles, integrated qualification, author-approved numeric budget, and formal discovery outputs exist.
+
+  - id: LEGACY-V4-ISOLATION
+    slice: SLICE-0
+    status: FOUNDATION_TESTED
+    depends_on:
+      - GOV-ROLE-MANIFEST
+    objective: Preserve the v4 freeze against its original commit while rejecting it from the target protocol.
+    authoritative_sources:
+      - protocol_section_21
+      - traceability_T22
+    allowed_files:
+      - tests/test_prompt_tsg.py
+      - tests/test_discovery_support.py
+      - src/prompt_mechanism_study/representation.py
+    forbidden_changes:
+      - data/method/prompt-tsg-external-qualification-freeze-v4.json
+      - frozen_v4_hashes
+    acceptance:
+      - historical_source_hashes_verify_at_method_revision_commit
+      - current_target_firewall_rejects_legacy_dataset_as_discovery_or_qualification
+    outputs:
+      - legacy_verification_test
+      - target_rejection_test
+
+  - id: ATOMIC-SHADOW-QUALIFICATION
+    slice: SLICE-1
+    status: IMPLEMENTATION_TESTED_BLOCKED_FORMAL_QUAL_DEV
+    depends_on:
+      - GOV-QUALIFICATION-DEV-ENVELOPE
+    objective: Implement candidate-specific folds, shared first-order RD, valid-draw FCI Gate, and Full/RD-only slots in qualification-only mode.
+    authoritative_sources:
+      - protocol_sections_7_8_19
+    allowed_files:
+      - src/prompt_mechanism_study/prioritization.py
+      - tests/test_selector_study.py
+    forbidden_changes:
+      - active_selector_ranking
+      - default_cli
+      - legacy_hashes
+    acceptance:
+      - full_and_rd_only_share_rows_folds_scores_tie_break_and_k
+      - only_full_reads_fci_gate
+      - invalid_fci_draws_are_excluded_from_the_denominator
+    outputs:
+      - atomic_shadow_qualification_evidence
+    progress:
+      - candidate_specific_state_stratified_folds_are_implemented
+      - first_order_probability_scale_rd_is_shared_by_full_and_rd_only
+      - fci_stability_uses_valid_draws_and_a_minimum_valid_fraction_gate
+      - fixed_k_slots_and_the_sole_difference_audit_pass_reviewer_tests
+    blocker: Formal shadow qualification cannot execute until the QUAL_DEV role and accepted development envelope exist.
+
+  - id: PAIR-SHADOW-QUALIFICATION
+    slice: SLICE-2
+    status: IMPLEMENTATION_TESTED_BLOCKED_FORMAL_QUAL_DEV
+    depends_on:
+      - GOV-QUALIFICATION-DEV-ENVELOPE
+    objective: Implement compatibility-first Pair universe, executable relation predicates, shared second-order RD, and Full/No-Relation slots in qualification-only mode.
+    authoritative_sources:
+      - protocol_sections_24_1_through_24_4
+    allowed_files:
+      - src/prompt_mechanism_study/mechanisms.py
+      - src/prompt_mechanism_study/interaction_selector.py
+      - tests/test_interaction_selector.py
+    forbidden_changes:
+      - relation_first_candidate_identity
+      - active_pair_cli
+      - legacy_hashes
+    acceptance:
+      - compatibility_defines_one_common_universe
+      - relation_does_not_change_rd_rows_or_folds
+      - only_full_reads_relation_gate
+    outputs:
+      - pair_shadow_qualification_evidence
+    progress:
+      - factorial_compatibility_defines_the_common_pair_universe_before_relation_evidence
+      - prompt_tsg_control_bindings_and_canonical_paths_are_content_addressed_and_replayable
+      - same_flow_shared_sink_distinct_control_points_and_alternative_controls_are_executable_outcome_blind_predicates
+      - unresolved_multiple_binding_and_path_tamper_cases_fail_closed
+      - candidate_cell_stratified_folds_and_second_order_probability_scale_rd_are_shared
+      - relationless_compatible_pairs_remain_rankable_in_no_relation
+      - fixed_k_slots_and_the_sole_difference_audit_pass_reviewer_tests
+    blocker: The predicates still require labelled relation qualification and accepted thresholds on QUAL_DEV; formal shadow execution also requires the QUAL_DEV role and accepted development envelope.
+
+  - id: SHARED-EVIDENCE-PATH
+    slice: SLICE-3
+    status: IMPLEMENTATION_TESTED_BLOCKED_FORMAL_INPUTS_AND_POWER
+    depends_on:
+      - ATOMIC-SHADOW-QUALIFICATION
+      - PAIR-SHADOW-QUALIFICATION
+      - RQ1-COMPARISON-BASELINES
+    objective: Produce fixed slots, unique union, one shared confirmation, five-level statuses, evidence records, and independent verification.
+    authoritative_sources:
+      - protocol_sections_9_through_16_20_24_5_through_24_10
+    allowed_files:
+      - src/prompt_mechanism_study/prioritization.py
+      - src/prompt_mechanism_study/successor_experiment.py
+      - src/prompt_mechanism_study/factorial_experiment.py
+      - src/prompt_mechanism_study/inference.py
+      - src/prompt_mechanism_study/selector_analysis.py
+      - src/prompt_mechanism_study/selector_verify.py
+      - src/prompt_mechanism_study/cli.py
+      - tests/test_successor_inference.py
+      - tests/test_factorial.py
+      - tests/test_study_design.py
+    forbidden_changes:
+      - post_assignment_denominator_filters
+      - candidate_replacement
+      - duplicated_model_dispatch
+    acceptance:
+      - empty_and_failed_slots_remain_in_k
+      - each_unique_effect_is_confirmed_once
+      - assigned_arm_task_unit_itt_is_preserved
+      - all_five_statuses_recompute_independently
+    outputs:
+      - confirmation_freeze_inputs
+      - evidence_record
+      - independent_verifier_evidence
+    progress:
+      - fixed_atomic_and_pair_slot_sources_are_combined_without_replacement
+      - the_unique_model_effect_union_and_candidate_to_slots_fanout_replay_exactly
+      - successful_model_bound_records_dispatch_once_and_failures_dispatch_zero_times
+      - same_policy_model_effects_share_one_bridge_protocolization_result_and_one_task_policy_bundle_per_task
+      - target_complete_block_assignments_are_built_deterministically_from_the_frozen_plan_and_replayed_independently_including_variants_and_provider_seeds
+      - assigned_arm_task_unit_itt_preserves_all_five_endpoints_and_repair_failures
+      - atomic_and_pair_max_t_families_emit_direction_free_five_level_statuses
+      - an_independent_verifier_recomputes_contributions_intervals_statuses_and_yield_at_k
+      - target_rq1_rq2_tables_replay_from_the_shared_record_and_keep_test_evidence_non_claim_bearing
+      - two_timed_freezes_and_their_independent_lineage_verifier_replay_the_shared_dispatch_and_assignment_path
+      - formal_report_authorization_requires_executed_evidence_confirmation_role_membership_exact_freeze_and_evidence_digests_and_two_independent_verification_receipts
+      - executed_evidence_without_authorization_remains_non_claim_bearing_and_test_evidence_is_rejected
+      - the_exact_schema_3_result_package_persists_roles_budget_both_freezes_randomization_plan_task_bundles_assignments_evidence_yields_authorization_tables_and_receipt
+      - the_read_only_target_cli_strictly_reconstructs_typed_records_and_independently_replays_the_package
+      - legacy_shaped_packages_and_semantically_tampered_rq_tables_are_rejected
+      - the_default_reviewer_suite_passes_59_tests
+      - the_complete_repository_suite_passes_170_tests
+    blocker: Formal evidence cannot be produced until role allocation, qualified margins/inference settings, frozen discovery slots, bridge/protocol records, and confirmation assignments exist.
+
+  - id: RQ1-COMPARISON-BASELINES
+    slice: SLICE-3
+    status: CORE_IMPLEMENTATION_TESTED_BLOCKED_AUTHOR_BASELINE_SET
+    depends_on:
+      - ATOMIC-SHADOW-QUALIFICATION
+      - PAIR-SHADOW-QUALIFICATION
+    objective: Implement and qualify every comparison method and external baseline selected for the frozen RQ1 set without removing the mandatory Core contrasts.
+    authoritative_sources:
+      - protocol_sections_8_16_17
+      - parameter_qualification_register
+      - rq1_worst_case_budget
+    allowed_files:
+      - src/prompt_mechanism_study/prioritization.py
+      - src/prompt_mechanism_study/interaction_selector.py
+      - src/prompt_mechanism_study/study_design.py
+      - src/prompt_mechanism_study/selector_verify.py
+      - tests/test_selector_study.py
+      - tests/test_interaction_selector.py
+      - tests/test_study_design.py
+      - configs/formal
+    forbidden_changes:
+      - required_core_comparison_removal
+      - budget_only_baseline_promotion
+      - legacy_result_relabelling
+      - outcome_driven_baseline_selection
+      - unequal_candidate_space_or_confirmation_protocol
+    acceptance:
+      - atomic_full_rd_only_pair_full_and_no_relation_remain_mandatory
+      - every_author_selected_external_baseline_emits_target_fixed_slots
+      - every_selected_baseline_has_frozen_ranking_information_and_blindness_or_seed_provenance
+      - all_approved_variants_share_universe_k_bridge_confirmation_status_and_evidence_accounting
+      - independent_verifier_rejects_missing_budget_only_legacy_or_tampered_baselines
+      - rq1_claim_strength_matches_the_frozen_external_baseline_set
+    outputs:
+      - rq1_comparison_set_qualification.json
+      - target_baseline_selector_artifacts
+      - independent_baseline_verifier_evidence
+    progress:
+      - mandatory_core_comparisons_are_implemented_and_reviewer_tested
+      - core_expert_and_random_budget_envelopes_are_replayable
+    blocker: The author has not frozen the external RQ1 baseline set; Expert/Random lack target ranking implementations and Association/Prediction remain legacy Atomic selectors without a target Pair/fairness contract.
+
+  - id: POWER-BUDGET-QUALIFICATION
+    slice: SLICE-4
+    status: IMPLEMENTATION_TESTED_BLOCKED_AUTHOR_VALUES_AND_QUAL_DEV
+    depends_on:
+      - SHARED-EVIDENCE-PATH
+    objective: Qualify practical margins, inference settings, fixed selector budgets, task counts, model-bound dispatch, and worst-case provider ceilings on development evidence only.
+    authoritative_sources:
+      - protocol_sections_17_18_19
+      - parameter_qualification_register
+      - rq1_worst_case_budget
+    allowed_files:
+      - src/prompt_mechanism_study/inference.py
+      - src/prompt_mechanism_study/study_design.py
+      - tests/test_successor_inference.py
+      - tests/test_study_design.py
+      - configs/formal/power_and_margin_memo.json
+      - configs/formal/rq1_budget_qualification.json
+    forbidden_changes:
+      - confirmation_outcome_driven_margin
+      - outcome_driven_variant_removal
+      - duplicated_model_dispatch
+      - provider_calls_before_approval
+    acceptance:
+      - practical_margins_and_five_status_boundaries_are_fixed
+      - core_atomic_and_pair_variants_fit_the_approved_cap
+      - every_task_policy_coordinate_has_one_realization
+      - worst_case_calls_are_exactly_recomputable
+    outputs:
+      - power_and_margin_memo.json
+      - rq1_budget_qualification.json
+    progress:
+      - outcome_blind_atomic_and_pair_max_t_power_grids_are_deterministically_replayable
+      - power_memo_alone_materializes_the_direction_free_target_itt_plan
+      - core_expert_and_random_envelopes_bind_family_size_tasks_realizations_slots_calls_and_cost
+      - formal_preflight_replays_model_bound_dispatch_one_realization_balanced_four_arm_blocks_and_caps
+      - independent_verifier_recomputes_power_reservations_costs_and_blockers
+      - accepted_budget_requires_the_exact_power_memo_artifact_digest_acceptance_data_manifest_and_code_commit_from_the_integrated_profile
+      - every_provider_rate_binds_one_currency_region_named_tier_token_ceilings_microunit_prices_and_frozen_reference_and_independent_replay_rejects_tier_cost_or_currency_drift
+    blocker: Exact margins, assumption grids, models, K values, task counts, realization support, slots, provider rates, and ceilings require author approval plus QUAL_DEV qualification; the current role census cannot supply the planned prospective roles.
+
+  - id: GOV-QUALIFICATION-PLANS
+    slice: SLICE-4
+    status: BLOCKED_DEPENDENCY
+    depends_on:
+      - ATOMIC-SHADOW-QUALIFICATION
+      - PAIR-SHADOW-QUALIFICATION
+      - POWER-BUDGET-QUALIFICATION
+    objective: Select and freeze one integrated FCI, Atomic RD, Relation, Pair RD, and power-and-margin profile after QUAL_DEV and before QUAL_ACCEPT is read.
+    authoritative_sources:
+      - protocol_sections_7_12_19
+      - parameter_qualification_register
+    allowed_files:
+      - src/prompt_mechanism_study/study_design.py
+      - tests/test_study_design.py
+      - configs/formal/qualification_plan_bundle.json
+    forbidden_changes:
+      - acceptance_metrics_after_exposure
+      - second_candidate_fallback
+      - acceptance_seed_or_fold_retry
+      - default_cli
+    acceptance:
+      - all_five_profile_kinds_are_present
+      - candidate_profiles_and_one_selected_profile_are_frozen
+      - selection_rule_thresholds_tie_break_and_failure_behavior_are_frozen
+      - all_plans_bind_one_code_commit_and_one_unexposed_acceptance_data_id
+      - acceptance_attempts_per_dataset_equals_one
+    outputs:
+      - qualification_plan_bundle.json#ACCEPT_PLAN_FROZEN
+    progress:
+      - acceptance_results_must_match_each_frozen_selected_profile_acceptance_dataset_and_code_commit
+      - accepted_bundles_cannot_be_constructed_without_verified_plan_binding
+
+  - id: QUAL-ACCEPT-ONCE
+    slice: SLICE-4
+    status: BLOCKED_DEPENDENCY
+    depends_on:
+      - GOV-QUALIFICATION-PLANS
+    objective: Execute the integrated qualification bundle exactly once on the sealed QUAL_ACCEPT population and independently verify every required profile result.
+    authoritative_sources:
+      - protocol_section_19
+      - parameter_qualification_register
+    allowed_files:
+      - src/prompt_mechanism_study/qualification.py
+      - src/prompt_mechanism_study/selector_verify.py
+      - configs/formal
+    forbidden_changes:
+      - acceptance_retry_on_same_dataset
+      - profile_seed_fold_or_threshold_change_after_exposure
+      - failed_candidate_replacement
+      - partial_acceptance_promotion
+    acceptance:
+      - exactly_one_acceptance_attempt_is_recorded
+      - every_profile_and_independent_verifier_passes
+      - accepted_bundle_binds_the_frozen_plan_data_and_code
+      - any_failure_blocks_formal_use_and_retires_the_exposed_acceptance_set
+    outputs:
+      - qualification_bundle.json
+      - independent_qualification_verifier_evidence
+
+  - id: DISCOVERY-FREEZE-AND-ACTIVATE
+    slice: SLICE-5
+    status: BLOCKED_DEPENDENCY
+    depends_on:
+      - QUAL-ACCEPT-ONCE
+      - SHARED-EVIDENCE-PATH
+      - GOV-TWO-FREEZE-CONTRACT
+    objective: Write and verify DiscoveryDesignFreeze, activate the single seven-stage target entry point, and only then execute formal discovery once.
+    authoritative_sources:
+      - protocol_sections_18_19_21_22
+    allowed_files:
+      - docs/superpowers/specs/2026-08-20-context-conditioned-intervention-policy-framework.md
+      - docs/reviewer-guide.md
+      - src/prompt_mechanism_study/cli.py
+      - configs/formal
+    forbidden_changes:
+      - protocol_status_frozen_before_all_gates_pass
+      - selected_slots_or_discovery_outcomes_in_discovery_design_freeze
+      - legacy_artifact_reinterpretation
+      - multiple_active_formal_entry_points
+    acceptance:
+      - qualification_bundle_is_accepted_and_independently_verified
+      - rq1_budget_fits_the_approved_cap
+      - discovery_design_freeze_verifies_before_formal_discovery
+      - formal_discovery_preserves_all_fixed_empty_failed_and_non_evaluable_slots
+      - exactly_one_active_seven_stage_path_is_documented
+    outputs:
+      - discovery_design_freeze.json
+      - formal_discovery_fixed_slot_ledger.json
+
+  - id: CONFIRMATION-FREEZE-EXECUTE-REPORT
+    slice: SLICE-6
+    status: BLOCKED_DEPENDENCY
+    depends_on:
+      - DISCOVERY-FREEZE-AND-ACTIVATE
+    objective: Freeze the post-discovery candidate union and assigned-arm ITT design before confirmation outcomes, execute randomized confirmation, report verified RQs, and package the reviewer artifact.
+    authoritative_sources:
+      - protocol_sections_9_through_18_20_22_24_5_through_24_10
+    allowed_files:
+      - docs/reviewer-guide.md
+      - src/prompt_mechanism_study
+      - configs/formal
+      - results
+    forbidden_changes:
+      - confirmation_outcomes_in_confirmation_freeze
+      - post_assignment_denominator_filters
+      - candidate_replacement_or_budget_reallocation
+      - demo_smoke_or_canary_result_promotion
+    acceptance:
+      - confirmation_freeze_verifies_before_any_confirmation_outcome
+      - assigned_arm_deduplicated_task_unit_itt_accounts_for_every_assignment
+      - every_unique_effect_is_confirmed_once_and_fanned_out_to_fixed_slots
+      - all_five_statuses_and_rq_tables_recompute_independently
+      - claim_bearing_tables_require_the_verified_formal_report_authorization
+      - reviewer_smoke_full_reproduction_and_result_verifier_pass
+    outputs:
+      - confirmation_freeze.json
+      - study_freeze_index.json
+      - formal_report_authorization.json
+      - verified_rq_outputs
+      - reviewer_reproduction_evidence

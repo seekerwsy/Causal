@@ -2,8 +2,13 @@
 
 **Date:** 2026-08-20
 
-**Status:** User-authorized revision for third-round review; prospectively amended
-2026-08-27 with the pairwise factorial extension in Section 24
+**Status:** `SPECIFIED_DRAFT`
+
+**Prospective protocol ID:** `phase-context-policy-v3`
+
+**Prospective schema family:** `3.x` (not yet authorized for formal execution)
+
+**Draft revision:** 2026-08-31 identity, data-role, and budget-envelope decision patch
 
 **Scope:** Prospective theory, discovery, hypothesis selection, randomized confirmation,
 inference, and paper-facing research questions
@@ -36,9 +41,12 @@ algorithm boundaries. It prospectively supersedes the following clauses:
 7. the expert-perception study being used to validate computational causal or repair claims.
 
 The previous files and every artifact produced under them remain immutable historical records. They
-must not be edited in place or represented as having been generated under this framework. Once this
-framework is approved, a run must declare either the legacy protocol or this protocol; it may not
-silently mix their hypotheses, estimands, schemas, or evidence labels.
+must not be edited in place or represented as having been generated under this framework. This
+framework remains `SPECIFIED_DRAFT` until every author decision, qualification artifact, budget
+Gate, implementation, independent verifier, and reviewer reproduction required below closes. Only
+then may its status become `FROZEN`. A run must declare either a legacy protocol or the frozen form
+of this protocol; it may not silently mix their hypotheses, estimands, schemas, data roles, or
+evidence labels.
 
 ## 2. Scientific Positioning
 
@@ -53,9 +61,14 @@ typed context-conditioned intervention hypotheses
 ```
 
 The central scientific problem is budgeted hypothesis selection. Given a fixed discovery dataset and
-a finite intervention vocabulary, a selector must choose at most `K` hypotheses that are most likely
-to exhibit a held-out randomized policy effect. FCI is one selector, not the source of the final
-causal conclusion. Random assignment identifies the policy effect.
+a finite intervention vocabulary, a selector receives exactly `K` slots and prioritizes policies for
+held-out randomized confirmation. In the Atomic Full selector, FCI supplies a latent-confounding-
+aware local structural-admissibility Gate and the shared cross-fitted first-order risk-difference
+score supplies the rank. Atomic RD-only uses the same universe, rows, folds, score, tie-break, slots,
+bridge, and confirmation but does not read the FCI Gate. Pair Full and Pair No-Relation analogously
+share an independently compatible universe and one second-order risk-difference score; only Pair
+Full reads the qualified Prompt-TSG relation Gate. Neither FCI nor a Prompt-TSG relation identifies
+the final effect. Random assignment identifies the frozen Prompt-policy effect.
 
 The main contribution is therefore the combination of:
 
@@ -80,19 +93,67 @@ stages, their immutable boundaries, and one linear execution path.
    committed functional evaluator.
 5. Optional implementation markers derived from generated code are post-assignment diagnostics.
    They are not mediators, intervention targets, Oracle substitutes, or primary discovery variables.
-6. Discovery uses only the discover split. Confirmation uses only held-out confirm tasks.
-7. Candidate universes, selector configurations, mappings, directions, realization distributions,
-   outcomes, contrasts, multiplicity families, and analysis code are frozen before confirm outcomes
-   exist.
-8. `target_changed`, semantic compliance, and non-target drift remain diagnostics and never filter
+6. Every task unit is governed by a content-addressed role manifest. `QUAL_DEV`, `QUAL_ACCEPT`,
+   `DISCOVERY`, `CONFIRMATION`, and `LEGACY_ONLY` are distinct roles; task units and frozen
+   near-duplicate groups cannot cross roles. Profile development may use only `QUAL_DEV`; the single
+   integrated acceptance may use one previously unexposed `QUAL_ACCEPT` dataset exactly once;
+   discovery and randomized confirmation may use only their respective held-out roles.
+7. The semantic `policy_key` is model-independent. A model-specific scientific effect coordinate is
+   `(policy_key, model_id)`. A model-bound Stage-II candidate record is dispatched only to its bound
+   model; confirmation must not cross it with every configured model a second time.
+8. Candidate universes, selector configurations, mappings, realization distributions, outcomes,
+   contrasts, multiplicity families, analysis scope, model dispatch, data roles, budget slots, and
+   analysis code are frozen before confirmation outcomes exist. Expected direction is not an
+   identity coordinate or a ranking orientation.
+9. `target_changed`, semantic compliance, and non-target drift remain diagnostics and never filter
    the assigned-arm ITT denominator.
-9. A valid terminal no-code, parse failure, functional failure, or Oracle-unknown result remains
+10. A valid terminal no-code, parse failure, functional failure, or Oracle-unknown result remains
    assigned-arm data under its predeclared outcome encoding. Missing or corrupt required evidence is
    an infrastructure/provenance failure and must be repaired or replayed.
-10. No outcome-dependent threshold relaxation, candidate replacement, realization replacement,
+11. No outcome-dependent threshold relaxation, candidate replacement, realization replacement,
     extractor selection, Oracle tuning, or favorable reranking is permitted.
+12. `K_A`, `K_I`, selector baselines, model sets, task counts, realization counts, block slots, and
+    provider ceilings are one joint budget decision. Empty, failed, and non-evaluable slots stay in
+    the fixed denominator and cannot be replaced.
 
 ## 4. Two Explicit Data-Generating Regimes
+
+The method has two scientific data-generating regimes—natural discovery and randomized
+confirmation—but five immutable data-use roles:
+
+```text
+QUAL_DEV       repeatable profile development and debugging only
+QUAL_ACCEPT    one previously unexposed, one-shot integrated acceptance only
+DISCOVERY      natural-Prompt candidate support and prioritization only
+CONFIRMATION   held-out randomized policy-effect estimation only
+LEGACY_ONLY    historical verification only; never an input to target-protocol claims
+```
+
+Each named dataset has a `data_id`, role, exact sorted `task_unit_id` manifest, source digest, and
+task-manifest digest. Each task-unit record additionally binds its near-duplicate group, source
+lineage, exposure history, and role-assignment version. A single content-addressed
+`DataRoleManifest` records these bindings. A task unit may participate in more than one `QUAL_DEV`
+exercise, but it may not cross roles; a near-duplicate group may not cross roles either. The one
+`QUAL_ACCEPT` binding must have empty exposure histories when frozen. Every formal runner calls the
+shared `validate_data_role_firewall` preflight before reading discovery outcomes, assignments, or
+confirmation outcomes. At minimum:
+
+\[
+D_{qdev}\cap D_{qaccept}=\varnothing,
+\qquad
+D_{qual}\cap D_{disc}=\varnothing,
+\qquad
+D_{qual}\cap D_{confirm}=\varnothing,
+\qquad
+D_{disc}\cap D_{confirm}=\varnothing.
+\]
+
+Here `D_qual=D_qdev\cup D_qaccept`. `LEGACY_ONLY` is disjoint from all four prospective roles.
+Qualification is not pilot evidence for the target effect and cannot be promoted to discovery or
+confirmation after results are seen. Before `QUAL_ACCEPT` is opened, all candidate profiles,
+selection rules, thresholds, tie-breaks, failure behavior, code commit, and the role manifest are
+frozen. A failed acceptance sets `qualification_status=BLOCKED`; that dataset becomes exposed and
+cannot be reused after any implementation or profile change.
 
 ### 4.1 Discovery regime
 
@@ -160,7 +221,7 @@ The two regimes are joined by an explicit, audited bridge rather than by equatin
 `X^{A,R}`:
 
 \[
-B:\widetilde h=(C_q,f,a,\mathcal Q_h,Y)
+B:\widetilde h=(k_h,\mathcal Q_h)
 \longmapsto
 \bigl(\text{TargetSpec},\Gamma,Q_h,\text{ArmProtocol}\bigr).
 \]
@@ -170,6 +231,13 @@ result confirms the bridged Prompt policy for its declared population and realiz
 it does not directly prove an edge in the observational PAG.
 Discovery evidence, selector identity, and rank reference the skeleton through selection artifacts;
 they do not change bridge behavior or final-hypothesis identity.
+
+Here `k_h` is the model-independent semantic policy key defined in Section 6. Materialization is
+deduplicated by the frozen semantic-policy/protocol lineage, while each model-specific effect remains
+the separate coordinate `(k_h,m)`. If Stage II ranks the same semantic key for two models, it creates
+two model-bound candidate records but confirmation dispatches each record only to its bound model.
+The current all-policy-by-all-model cross-product is forbidden for those records because it would
+create an unintended `M^2` design.
 
 ## 5. Prompt TSG as a Formal Intervention Language
 
@@ -336,7 +404,9 @@ coordinate.
 An exposed development replay cannot qualify this successor. Before it becomes the active
 extractor, the annotation protocol, task population, labels, catalog, model settings, and
 thresholds must be frozen on a genuinely independent corpus, and the existing Prompt-TSG
-qualification verifier must pass without changing the v4 record.
+qualification verifier must pass without changing the v4 record. The DevEval v4 freeze and its
+tasks are `LEGACY_ONLY` for this protocol: its implementation hashes are verified against the
+recorded historical commit, never against or by rewriting current active source.
 
 For existential motifs, multiple matches aggregate to `PRESENT`. A negative condition such as
 "without a guard" is satisfied only after the matcher has checked the same bounded flow for a valid
@@ -423,51 +493,99 @@ a theorem that two unrestricted natural-language texts are semantically identica
 
 ## 6. Context-Conditioned Hypotheses
 
-The shared selector universe contains immutable candidate skeletons:
+### 6.1 Canonical analysis scope
+
+One `AnalysisScope` defines the outcome-blind population on which a policy question is asked:
+
+```text
+analysis_scope = {
+  security_pattern_id,
+  context_query_id,
+  language_scope,
+  api_scope,
+  task_archetype_scope
+}
+```
+
+Each scope collection is a non-empty, unique, lexicographically sorted finite tuple. These are the
+only population fields admitted to the target semantic identity. Selector results, discovery model,
+expected direction, rank, score, support status, relation result, compatibility result, and any
+post-assignment field are excluded. Adding another scope field requires a prospective protocol
+amendment and collision audit; it cannot be inferred from observed effects.
+
+### 6.2 Model-independent semantic policy keys
+
+For one Atomic policy, let `S` denote the canonical analysis scope, `f` one actionable feature,
+`a in {ADD,REMOVE}`, and `Y` the pre-registered outcome. Its semantic key is:
 
 \[
-\widetilde h=(C_q,f,a,\mathcal Q_h,Y),
+k_A=\operatorname{Key}(\texttt{atomic},S,(f,a),Y).
 \]
 
-where `\mathcal Q_h` is a `RealizationPolicySpec` that fixes `K_R`, probabilities, matching rules,
-executor/extractor policies, and failure semantics without yet generating every arm text. Skeleton
-identity and the universe digest are frozen before selectors run.
-
-After selector rankings are frozen, take the unique union of their top-`K` skeletons. The common,
-selector-invariant intervention bridge attempts to instantiate each skeleton's finite global
-realization specifications. A successful bridge produces the only confirmable hypothesis form:
+For a Pair policy, attach each operation to its feature, sort the two `(feature,operation)` records
+canonically, and define:
 
 \[
-h=(C_q,f,a,Q_h,Y),
+k_I=\operatorname{Key}(\texttt{pair},S,
+\operatorname{sort}((f_1,a_1),(f_2,a_2)),Y).
 \]
 
-where:
+Pair input order therefore cannot create a second scientific question. Relation type, relation
+support, compatibility result, lane, selector, rank, score, Oracle qualification record, expected
+direction, and model are not part of either semantic key. Outcome and analysis scope remain explicit,
+so scientifically different populations or endpoints do not collide.
 
-- `C_q` is a frozen non-actionable context query and defines the eligible task population;
-- `f` is one catalog-bound actionable feature;
-- `a` is `ADD` or `REMOVE`;
-- `Q_h` is a frozen distribution over a finite set of task-independent `RealizationSpecRecord`s; and
-- `Y` is one pre-registered outcome.
+### 6.3 Model effect and protocol-record coordinates
 
-The remaining semantic coordinates—CWE, task archetype, model scope, expected direction, outcome,
-policy, and producer digests—are frozen hypothesis metadata. Selector, method, rank, candidate
-universe, and method-specific discovery evidence are excluded from the hypothesis and bridge
-semantic digests; they live in selector-slot and selection-freeze references.
+The semantic policy key is shared across models. The effect coordinate is:
 
-`SelectionFreezeManifest` records the immutable skeleton-to-final-hypothesis mapping. A bridge or
-protocolization failure leaves the original selector slot as zero yield; it cannot mutate the
-skeleton, universe digest, rank, or policy specification. For the frozen top-`K` union, task-specific
-arm texts are subsequently materialized as `TaskRealizationBundleRecord`s that reference the global
-specification. Neither specifications nor task bundles are chosen or changed using code-generation
-outcomes.
+\[
+e_{h,m}=(k_h,m),
+\qquad
+\tau_{h,m}.
+\]
+
+When Stage II performs model-specific discovery, its immutable record identity is:
+
+```text
+candidate_record_id = hash(policy_key, discovery_model_id, protocol_id, schema_version)
+```
+
+That record is dispatched only to `discovery_model_id`. A replication model receives its own
+prospectively frozen effect-coordinate record; confirmation never loops a model-bound record over
+the complete model list. This separates scientific policy reuse from model-specific effects and
+prevents accidental `M^2` requests.
+
+The semantic key deliberately excludes realization wording and producer details. Those coordinates
+belong to a protocol-bound hypothesis record containing `RealizationPolicySpec`, `TargetSpec`,
+executor/extractor policies, arm protocol, and their digests. Two protocol records can refer to the
+same semantic question, but they are not pooled or substituted when their intervention distribution
+or protocol differs. An effect-coordinate identifier is meaningful only together with its frozen
+protocol record.
+
+### 6.4 Bridge and fixed-slot consequences
+
+The shared selector universe contains immutable model-bound candidate records plus their semantic
+keys. After selector rankings are frozen, take the unique union of all filled `K_A` or `K_I` slots.
+The common selector-invariant bridge protocolizes each unique semantic-policy/protocol record once
+and retains a `candidate_to_slots` fan-out. A bridge or protocolization failure leaves every original
+slot as zero yield; it cannot mutate the semantic key, record, universe digest, rank, model binding,
+or realization policy.
+
+For a successful bridge, task-specific arm texts are materialized as
+`TaskRealizationBundleRecord`s that reference the global specification. Neither specifications nor
+task bundles are chosen or changed using code-generation outcomes. Reuse across model-effect records
+is allowed only through an explicit frozen policy-lineage map; equality of generated text after the
+fact is not deduplication authority.
 
 A relational motif can support `C_q`; it cannot itself be assigned. The observation that a motif is
 associated with an outcome does not authorize changing its task-context nodes. Only `f` enters the
 `TargetSpec` and graph/text rewrite.
 
-Each operation is atomic: `(C_q,f,ADD,Q_h,Y)` and `(C_q,f,REMOVE,Q_h,Y)` are different hypotheses,
-candidate-budget slots, protocols, and multiplicity coordinates. A record that merely lists both
-operations as permissions is not yet a confirmable hypothesis.
+Each operation is atomic: `ADD` and `REMOVE` create different semantic keys, candidate-budget slots,
+protocols, and multiplicity coordinates. A record that merely lists both operations as permissions
+is not yet a confirmable hypothesis. Expected direction may be retained only as a blinded forecast
+diagnostic; changing it never changes semantic identity, rank orientation, or inferential status.
 
 ## 7. Observational Prioritization
 
@@ -562,17 +680,20 @@ For a candidate universe `\mathcal H`, model-specific discover data `D_{disc,m}`
 `\ell`, the frozen selector run returns:
 
 \[
-s_{\ell m}(D_{\mathrm{disc},m},\mathcal H)\subseteq\mathcal H,
-\qquad |s_{\ell m}|\le K.
+S_{\ell m}=\{s_{\ell m1},\ldots,s_{\ell mK}\},
 \]
+
+where each slot contains one model-bound candidate record or a typed `EMPTY` value. Every selector
+always retains exactly `K` slots; Gate failure, non-evaluable score, bridge failure, and an exhausted
+universe never reduce the denominator or trigger replacement.
 
 Its prospective utility is:
 
 \[
 U_{\ell m}=
 \mathbb E\!\left[
-\sum_{h\in s_{\ell m}(D_{\mathrm{disc},m},\mathcal H)}
-I\{h\text{ is confirmed for model }m\text{ in held-out randomization}\}
+\sum_{k=1}^{K}
+I\{s_{\ell mk}\text{ has a meaningful held-out randomized status}\}
 \right].
 \]
 
@@ -581,65 +702,63 @@ objective used to tune FCI on confirm outcomes.
 
 ### 8.2 Selector-only comparison
 
-One `CandidateUniverseManifest` freezes identical
-`\widetilde h=(C_q,f,a,\mathcal Q_h,Y)` skeletons, variables, eligibility rules, outcome,
-realization-policy specification, and information budget for:
+One Atomic `CandidateUniverseManifest` freezes identical semantic keys, model-bound records,
+eligibility rules, natural-state rows, candidate-specific folds, outcome, realization-policy
+specification, and information budget for exactly two required variants:
 
-- TSG-constrained FCI;
-- pre-registered univariate/conditional association;
-- pre-registered regularized prediction;
-- blinded expert ranking; and
-- a pre-registered distribution of seeded random rankings.
+```text
+Atomic Full     qualified FCI adjacency Gate + shared first-order RD rank
+Atomic RD-only  no FCI Gate                  + shared first-order RD rank
+```
 
-Every selector returns only candidate scores, ranks, tie breaks, and failure records. No selector may
-add, remove, remap, or rewrite a candidate. Experts receive standardized candidate cards and the
-same frozen discovery summaries permitted to other selectors; they do not see confirm data.
+Both variants use the operation-specific target-minus-baseline probability-scale RD, rank by its
+absolute magnitude with one deterministic tie-break, and retain the signed value for interpretation.
+They do not use expected direction. An automated sole-difference record proves that only Atomic Full
+reads the FCI Gate; universe, support, folds, RD model/score, `K_A`, bridge, model dispatch,
+confirmation, and inferential status are otherwise byte-identical.
 
-The union of unique top-`K` skeletons passes through the bridge once; successfully instantiated final
-hypotheses are randomized once. A shared skeleton/final hypothesis is not rerun or double-counted
-merely because several selectors selected it. Each method's slot manifest references the same frozen
-protocolization and confirmation status.
+Pair Full and Pair No-Relation follow the Section 24 sole-difference contract with `K_I`. Optional
+blinded Expert and seeded Random baselines enter RQ1 only if the jointly frozen budget qualification
+selects the corresponding envelope. They never become silent defaults. Expert cards and Random
+seeds are frozen before discovery outcomes are scored; no best random draw is selected.
 
-Random rankings use a fixed list of seeds and report their complete distribution; no best random
-ranking is selected. Association, prediction, expert-information, scoring, calibration, and tie-break
-rules are frozen in the implementation protocol before discovery.
+Selecting an RQ1 comparison envelope creates an implementation obligation, not merely a budget
+label. Every listed comparison method or baseline must emit a target-schema selector artifact with
+fixed slots, blindness or seed provenance, the same frozen candidate universe, `K`, bridge,
+confirmation protocol, status vocabulary, and independent-verifier coverage before the
+`DiscoveryDesignFreeze` is written. Legacy association, prediction, expert, or random outputs do not
+satisfy this obligation without an explicit target-schema definition and migration. Conversely,
+scope control prohibits only methods outside the author-approved RQ1 set; it never permits a required
+comparison or selected baseline to be omitted for speed.
 
-The association selector is operation-aware. For ADD, `PRESENT` is the target state and `ABSENT`
-is baseline; for REMOVE those labels are reversed. It first records the signed target-minus-baseline
-conditional risk difference, then orients that value by the hypothesis's prospectively frozen
-expected direction for ranking. It never takes an absolute value before direction is recorded and
-never treats raw `PRESENT` as treatment for a REMOVE candidate. FCI remains a separate selector;
-there is no hidden composite "FCI plus association" score.
-
-Within supported covariate strata, those conditional differences are standardized to the frozen
-operation-specific baseline task-unit distribution. Strata without both states fail support rather
-than being extrapolated, and this observational score is not described as a randomized effect.
+Across every approved variant, the union of unique filled slots passes through the bridge once and
+is confirmed once per model effect coordinate. A `candidate_to_slots` map fans that single result
+back to every referencing slot. Selector overlap can reduce unique confirmation cost but never a
+selector's fixed denominator.
 
 Primary selector metrics are:
 
 \[
-\operatorname{strict\ confirmed\ yield@K}_{\ell m}
-=\frac{N_{\ell m,\mathrm{confirmed}}}{K},
+\operatorname{meaningful\ yield@K}_{\ell m}
+=\frac{1}{K}\sum_{k=1}^{K}
+I\{s_{\ell mk}\text{ is positive- or negative-meaningful}\},
 \]
 
-paired selector-utility differences, and semantic-task-cluster simultaneous intervals. This name
-reflects that empty, bridge-failed, and protocolization-failed budget slots remain in denominator
-`K`. Filled-slot conditional precision, candidate yield, protocolization, and failure composition are
-secondary.
-With one frozen discover split, this is a conditional held-out benchmark claim. A claim about
+and the primary RQ2 selector contrast is the descriptive fixed-denominator Full-minus-Ablation
+difference. Empty, bridge-failed, protocolization-failed, and non-evaluable slots contribute zero.
+Overlap is resolved through the shared candidate result rather than rank-position pairing. A
+continuous selector-utility interval is outside the frozen protocol until separately qualified.
+Filled-slot precision, protocolization, and failure composition are secondary.
+With one frozen discovery role manifest, this is a conditional held-out benchmark claim. A claim about
 expected selector performance over arbitrary discovery samples requires repeated outer splits,
 cross-fitting, or an independent replication and is outside the minimum main protocol.
 
 ### 8.3 Representation comparison
 
-Representation is evaluated separately using:
-
-- `\mathcal H_direct`: direct actionable features with broad catalog context; and
-- `\mathcal H_direct+context`: direct features conditioned by relational context motifs.
-
-Because these universes differ, this track reports end-to-end candidate coverage, unique confirmed
-hypotheses, protocolization, strict confirmed yield at `K`, and effect distributions. It must not be
-described as a pure selector comparison.
+The former direct-versus-direct+context representation comparison is not an active RQ2 track. Its
+existing implementation and artifacts are `LEGACY_ONLY`. A future representation study requires a
+separate prospective protocol, budget, candidate universes, and confirmation family; it cannot be
+reintroduced through an active configuration flag.
 
 ### 8.4 Native-system track
 
@@ -669,29 +788,40 @@ template or execution policy, matching rules, validation requirements, and execu
 provenance. The primary design uses a uniform `Q_h` unless a nonuniform policy is justified and
 frozen before generation. A specification contains no task-specific arm text.
 
-For each context/operation-eligible task `i` and every `r`, the bridge materializes exactly one
-`TaskRealizationBundleRecord(h,i,r)`. It binds `semantic_task_cluster_id`, `task_instance_id`,
-`realization_spec_id`, the complete arm-to-`PromptVariant` mapping, exact texts/digests, and
-variant-validation evidence. Thus actual text may differ across tasks while all tasks implement the
-same global realization coordinate and probability. The task bundle does not alter `Q_h` or final
-hypothesis identity.
+Before task-specific text is materialized, a frozen outcome-blind allocator assigns each eligible
+task `i` exactly one realization `r_{hi}` from `Q_h`. The allocation is deterministic from the
+policy/task/seed manifest, is balanced or weighted to the frozen `q_{hr}` within predeclared strata,
+and is shared across model-effect records. Global realization count therefore affects allocation,
+minimum task support, and robustness power; it does not multiply every task into `K_R` request
+families.
+
+The bridge materializes exactly one `TaskRealizationBundleRecord(h,i,r_{hi})` for that task-policy
+coordinate. It binds `task_unit_id`, `task_instance_id`, `realization_spec_id`, the complete
+arm-to-`PromptVariant` mapping, exact texts/digests, and variant-validation evidence. Thus actual text
+may differ across tasks while the allocated task population implements the same frozen `Q_h`. The
+task bundle does not alter `Q_h` or semantic policy identity.
 
 Every task bundle independently passes provenance, security neutrality, AllowedDelta, context
 invariance, task invariance, and length/control matching. A failed task bundle is a pre-randomization
 protocolization failure and cannot be replaced after any code outcome exists.
 
 The support of `Q_h` is immutable. A failed global `RealizationSpecRecord` makes the hypothesis
-unprotocolizable. A task-specific failure in any required arm or realization excludes that complete
-task-by-hypothesis protocol from every preregistered model before assignment. Let `G_{hi}=1` exactly
-when the frozen context gate, operation-source gate, and complete task-bundle support gate all pass;
-otherwise its distinct pre-outcome reason is retained. The eligible `\mathcal P_h^C` contains the
-semantic clusters with at least one `G_{hi}=1` task, and `Q_{h,I\mid C}` has support only on those
-passed tasks inside the cluster. This is one common-support population frozen before assignment, and
-each context state, operation exclusion, gate-entry count, and gate-pass cluster/task count is
-reported. A model-specific availability problem must be repaired before assignment or retained under
-the predeclared post-assignment failure semantics; it cannot create a more favorable model-specific
-task population. The implementation may not delete the failed `r`, renormalize `Q_h`, or randomize a
-favorable subset of realization specifications or task bundles.
+unprotocolizable. A task-specific failure in any required arm excludes that allocated
+task-by-hypothesis bundle from every preregistered model before assignment and retains its typed
+pre-outcome reason. It is never reassigned to another realization or replaced by another task. Let
+`G_{hi}=1` exactly when the frozen context Gate, operation-source Gate, allocated bundle Gate, and
+minimum realization-support Gate pass. The eligible `\mathcal P_h^C` contains task units with
+`G_{hi}=1`; estimation first averages tasks within their assigned realization and then applies the
+original frozen `q_{hr}` weights. If any realization lacks its frozen independent-task support or
+the target weighting cannot be evaluated, the effect coordinate is `NON_EVALUABLE` rather than
+renormalizing `Q_h`.
+
+This is one common-support population and one realization allocation frozen before arm assignment.
+Each context state, operation exclusion, allocated realization, Gate-entry count, Gate-pass task
+count, and realization-specific failure is reported. A model-specific availability problem must be
+repaired before assignment or retained under predeclared post-assignment failure semantics; it cannot
+create a more favorable model-specific population. The implementation may not delete a failed `r`,
+rerun the allocator, renormalize `Q_h`, or select favorable realization/task bundles.
 
 ### 9.2 Arms
 
@@ -755,14 +885,14 @@ specification, task realization bundle, model, arm protocol, variant, request sl
 any, generation parameters, and RNG provenance. Arms are balanced inside every feasible complete
 block. The task bundle must resolve to the same `(h,i,r)` as the other block coordinates.
 
-The same semantic task cluster may appear under multiple hypotheses, models, methods, task
-instances, and realizations. These records are dependent. Any simultaneous interval, selector
+The same task unit may appear under multiple hypotheses, models, methods, and task instances, but it
+has only one allocated realization within a given policy. These records are dependent. Any simultaneous interval, selector
 comparison, cross-model comparison, representation comparison, or overall RQ result resamples the
 top-level `semantic_task_cluster_id` and carries all descendant records together.
 
 The task-to-cluster manifest freezes the clustering algorithm/model, normalization policy, thresholds,
-manual-adjudication sample and decisions, and content digest. No semantic cluster may cross the
-discover/confirm boundary. Primary point estimates weight semantic clusters equally and use frozen
+manual-adjudication sample and decisions, and content digest. No task unit or near-duplicate group may
+cross data roles. Primary point estimates weight task units equally and use frozen
 within-cluster task weights. Overall comparisons use a frozen CWE/task-archetype-stratified cluster
 resample when multiple strata are combined, preserving each stratum's cluster count.
 
@@ -994,36 +1124,36 @@ The bootstrap count, centering, studentization, interpolation, minimum valid fra
 simulation-validated and frozen before confirmation. Unadjusted intervals and FDR-adjusted
 exploratory results may be reported but cannot replace this rule.
 
-Selector ranks and slots remain fixed from the single frozen discover split. The point value of
-strict confirmed yield at `K` uses the oriented full-confirmation-data status:
+Each unique Atomic effect coordinate receives exactly one of five statuses from its simultaneous
+two-sided interval `[L_{hm},U_{hm}]`, frozen practical margin `epsilon_A >= 0`, support, and
+provenance:
+
+```text
+POSITIVE_MEANINGFUL  L_hm >  epsilon_A
+NEGATIVE_MEANINGFUL  U_hm < -epsilon_A
+PRACTICALLY_NULL     -epsilon_A <= L_hm and U_hm <= epsilon_A
+INCONCLUSIVE         valid evidence not satisfying any preceding interval rule
+NON_EVALUABLE        invalid/missing provenance, support, or bootstrap family
+```
+
+Pair interaction uses the same vocabulary with `epsilon_I`; its sign is reported as positive or
+negative interaction and is not automatically renamed synergy or antagonism. Exact boundary
+operators, `epsilon_A`, `epsilon_I`, alpha, and multiplicity families remain qualification-blocked
+until the prospective power-and-margin memo is frozen.
+
+Selector ranks and slots remain fixed from the single discovery split. Let `Z_{hm}=1` only for
+`POSITIVE_MEANINGFUL` or `NEGATIVE_MEANINGFUL`, and zero for every other status or empty/failed slot:
 
 \[
-Z_{hm}=I\!\left[
-\inf CI_{hm}^{\mathrm{adj}}(d_h\tau_{hm})>0,
-\ C_h\ge C_{\min},
-\ \text{and provenance is complete}
-\right],
+\widehat U_{\ell m}(K)=\frac{1}{K}\sum_{k=1}^{K}
+Z_{\eta(\ell,m,k),m}.
 \]
 
-\[
-\widehat U_{\ell m}(K)=\frac{1}{K}\sum_{k=1}^{K}Z_{\eta(\ell,m,k),m},
-\]
-
-where frozen direction `d_h` is `+1` or `-1`, and an empty, unmapped, or unprotocolized slot
-contributes zero. The frozen slot map `\eta(\ell,m,k)` returns the hypothesis referenced by selector
-`\ell` for model `m` at budget slot `k`. Its uncertainty
-uses a pre-registered nested cluster bootstrap: each outer confirm-cluster draw recomputes all
-hypothesis effects and multiplicity-adjusted statuses using a bounded inner max-|T| bootstrap, then
-recomputes each selector's confirmed slots and paired utility differences. It never reruns or
-reranks discovery. The selector comparison is explicitly conditional on the frozen discover split;
-discovery-split variability is reported separately through Section 7.4.
-
-For every frozen within-model selector pair `p=(\ell,\ell',m)`, each outer draw produces
-`\Delta_p^{*(b)}=\widehat U_{\ell m}^{*(b)}-\widehat U_{\ell' m}^{*(b)}`. Let `\widehat{se}_p` be its outer-draw
-standard deviation and define
-`M_b^{\mathrm{selector}}=\max_p|\Delta_p^{*(b)}-\widehat\Delta_p|/\widehat{se}_p`.
-The frozen quantile rule yields simultaneous paired-difference intervals. Zero variance or too few
-valid outer draws prevents an inferential selector-pair claim but does not erase the point summaries.
+The frozen slot map `\eta(\ell,m,k)` references the one shared effect record; it does not pair
+candidates by rank position. RQ2 reports the Full-minus-Ablation `Yield@K` point difference as a
+descriptive, fixed-discovery-split comparison. No nested selector-utility confidence interval is
+claim-bearing in the minimum protocol. Discovery-split variability and status composition are
+reported separately.
 
 No hypothesis-specific effects are pooled into an ATE merely to obtain a smaller standard error.
 
@@ -1051,15 +1181,15 @@ and, after omitting realization `r`,
 \]
 
 1. `K_R` and minimum independent semantic-cluster support per realization were frozen;
-2. every realization-specific point estimate has the frozen expected direction;
-3. the pre-registered direction-consistency proportion threshold is met; the default strong label
-   requires all realizations;
+2. every realization-specific point estimate and status is reported without direction filtering;
+3. the pre-registered sign-consistency proportion relative to the `Q_h`-average estimate is met; the
+   strong label requires every evaluable realization to agree in sign;
 4. the simultaneous one-sided upper bound on
    `max_r |tau_{hmr}-tau_{hm}|` does not exceed a frozen practical-equivalence margin `delta_h`;
 5. the arm-by-realization interaction statistic and its semantic-cluster randomization reference
    distribution are reported; and
-6. every leave-one-realization-out policy estimate has an oriented simultaneous interval excluding
-   zero in the frozen expected direction.
+6. every leave-one-realization-out policy estimate retains the same positive- or
+   negative-meaningful status as the `Q_h`-average estimate.
 
 Across every randomized `(h,m)`, all `K_R` realization-specific contrasts, all `K_R`
 leave-one-realization-out contrasts, interaction statistics, and heterogeneity-equivalence
@@ -1095,21 +1225,32 @@ only when provenance and joint measurement-error calibration are complete.
 
 ## 15. Evidence Levels
 
-1. **Observational Candidate:** frozen discover-split evidence under one declared selector; not a
-   causal confirmation.
-2. **Randomized Policy Effect:** target-versus-no-op assigned-arm ITT has the frozen direction and a
-   multiplicity-adjusted interval excluding zero for the declared `Q_h`, model, population, and
-   outcome.
-3. **Target-Specific Policy Effect:** level 2 plus the preregistered target-versus-placebo and, when
-   family-valid, target-versus-generic contrasts.
-4. **Realization-Robust Policy Effect:** level 2 or 3 plus every criterion in Section 13.
-5. **Cross-Model Replication:** separate model-specific estimates meet the frozen replication rule.
-6. **Bidirectional Support:** separately randomized ADD and REMOVE policies support opposite expected
-   directions; this is not a mediation claim.
-7. **Directionally Consistent but Inconclusive:** expected point direction without adjusted interval
-   exclusion or sufficient support.
-8. **Null / Conflicting / Non-Evaluable:** respectively no detectable effect, an effect inconsistent
-   with the frozen direction, or absence of a valid preregistered randomization/evidence universe.
+Every artifact and paper-facing table cell states one engineering/evidence maturity:
+
+1. **Specified:** the prospective contract exists, but implementation or qualification is incomplete.
+2. **Implemented:** the active-schema function and artifact fields exist.
+3. **Tested:** scientific invariants and independent tamper checks pass in a supported environment.
+4. **Executed:** the exact frozen command produced a verified run artifact.
+5. **Reported:** a table/claim builder maps that verified artifact into the paper.
+
+These labels are cumulative provenance states, not scientific-effect results. A unit test cannot
+promote an artifact to `Executed`, and a smoke, demo, calibration, or development canary cannot be
+promoted to confirmatory evidence.
+
+Scientific labels remain separate:
+
+- **Observational Candidate:** frozen discovery evidence under one declared selector; not a causal
+  confirmation.
+- **Randomized Policy Effect:** one of the five Section 12 statuses from assigned-arm task-unit ITT
+  for the declared `Q_h`, model, population, and outcome.
+- **Target-Specific Policy Effect:** a meaningful target-versus-no-op status plus the preregistered
+  placebo/generic specificity contrasts when that arm family applies.
+- **Realization-Robust Policy Effect:** a meaningful average-policy status plus every Section 13
+  condition.
+- **Cross-Model Replication:** separate model-specific effect coordinates meet the frozen replication
+  rule; no pooled universal-model effect is implied.
+- **Bidirectional Evidence:** separately randomized ADD and REMOVE policies have prospectively
+  interpretable opposite signed statuses; this is not mediation.
 
 Treatment fidelity, implementation markers, per-protocol analyses, JCI, and RFCI cannot promote an
 evidence level.
@@ -1122,14 +1263,17 @@ sections rather than the RQ sentences.
 > **RQ1. How effectively can different methods prioritize prompt interventions that generalize to
 > held-out tasks?**
 
-RQ1's primary comparison is the shared-universe selector track. Native-system funnels are secondary
-end-to-end evidence.
+RQ1's primary comparison is the jointly budget-qualified shared-universe selector set. Core contains
+Atomic Full/RD-only and Pair Full/No-Relation. Expert and Random enter only if the frozen RQ1 budget
+selects their envelope. Native-system funnels are secondary end-to-end evidence.
 
-> **RQ2. How do Prompt Mechanism Study's structured representation and causal prioritization contribute to
-> successful intervention selection?**
+> **RQ2. Do the frozen structural Gates improve fixed-budget intervention selection beyond the
+> shared observational risk-difference rankings?**
 
-RQ2 separates representation comparison from selector comparison and reports the complete
-candidate-to-confirmation funnel.
+RQ2a compares Atomic Full with RD-only; RQ2b compares Pair Full with No-Relation. Each is a
+sole-difference, fixed-`K`, shared-confirmation comparison and reports descriptive meaningful
+`Yield@K`, overlap, empty/failure composition, and the complete candidate-to-confirmation funnel.
+The former representation comparison is not part of active RQ2.
 
 > **RQ3. Which prompt-side security interventions reliably improve secure code generation?**
 
@@ -1147,10 +1291,14 @@ code-side mediation, or individual causal flips.
 
 ## 17. JCI, RFCI, and Expert Study Scope
 
-Observational FCI and randomized ITT are the main method. JCI is retained only as an exploratory
-appendix analysis of randomized contexts; it cannot affect candidate selection, rank, assignment,
-outcome, ITT, or evidence. RFCI remains an optional appendix sensitivity backend and never blocks the
-no-Java minimum pipeline.
+Qualified FCI adjacency is only the Atomic Full structural Gate; randomized ITT remains the source
+of policy-effect evidence. JCI is retained only as an exploratory appendix analysis of randomized
+contexts; it cannot affect candidate selection, rank, assignment, outcome, ITT, or evidence. RFCI
+remains an optional appendix sensitivity backend and never blocks the minimum pipeline.
+
+A blinded selector Expert baseline is distinct from RQ4's explanation-perception study and is
+included only when named by the frozen RQ1 budget. It receives the same policy cards and permissible
+discovery evidence as its comparison track, never confirmation outcomes.
 
 RQ4 remains in the main paper but outside the computational causal-evidence path. It retains its own
 ethics determination, preregistration, participant and case manifests, blinded presentation,
@@ -1162,53 +1310,92 @@ validate causal discovery, randomized security effects, or objective repair accu
 The prospective protocol adds immutable artifacts for:
 
 - `ContextQuerySpec`, `ActionableFeatureSpec`, and composite mapping;
-- discovery/confirmation regime identity;
-- `CandidateSkeleton`, `RealizationPolicySpec`, `CandidateUniverseManifest`, and selector score/rank
-  manifests;
+- canonical `AnalysisScope`, Atomic/Pair semantic policy keys, model effect coordinates, and
+  protocol-bound candidate records;
+- data-role bindings/manifests and qualification-data identities;
+- `RealizationPolicySpec`, `CandidateUniverseManifest`, candidate-specific fold manifests, qualified
+  FCI/RD/relation profiles, and fixed selector-slot manifests;
 - `InterventionBridgeRecord`;
 - `SelectionFreezeManifest`, finite `RealizationSpecRecord`s, task-specific
   `TaskRealizationBundleRecord`s, and instantiated `Q_h`;
 - semantic-task-cluster membership;
-- v2 randomization blocks and request-randomness slots;
+- target `3.x` randomization blocks, model-bound dispatch, and request-randomness slots;
 - decomposed outcomes and coverage/bound manifests;
 - cluster-bootstrap and simultaneous-inference draws;
 - background-knowledge derivation and sensitivity deltas; and
 - optional implementation-marker effects with separate provenance.
 
-### 18.1 Required freeze coordinates
+### 18.1 `DiscoveryDesignFreeze`
 
-The pre-confirmation freeze contains, at minimum:
+The first immutable freeze is written before any formal discovery outcome is read. It contains:
 
-- **Hypothesis/bridge:** hypothesis, context-query, actionable-feature, operation, outcome, expected
-  direction, CWE/archetype/model scope, `TargetSpec`, rewrite, arm protocol, contrasts, and every
-  policy/catalog digest. Selector/method/rank are excluded from these semantic digests.
-- **Selection:** candidate-universe, selector score/rank, method/rank slot, selected skeleton,
-  skeleton-to-final-hypothesis reference, mapping/protocolization status, and selection-freeze digest.
-- **Realizations:** `K_R`, every global realization-specification ID and `q_{hr}`, every task-bundle
-  and arm-variant ID, the exact `(h,i,r)` reference, uniform/nonuniform rationale, matching
-  constraints, executor/extractor provenance, full-support requirement, and the
-  no-deletion/no-renormalization failure policy.
-- **Population:** semantic-cluster membership and construction digest, split, four-valued context
-  state, operation source state, target-evidence/counterpart attestation, typed exclusion reason,
-  eligibility-function digest, complete-support gate-entry/gate-pass manifests, cluster/task weights,
-  minimum support, and resampling strata.
-- **Assignment:** complete block key, request-randomness slot, nullable provider seed and guarantee,
-  assigned arm, variant, RNG/balance rule, request order, model parameters, and manifest digest.
-- **Outcomes:** code production/validity, Oracle determinate-support state, secure/insecure/unknown,
-  functional status, secure yield, joint outcome, terminal reason, and infrastructure-failure
-  distinction, with all producer versions/digests.
-- **Inference:** target population, `Q_h^R`, `Q_{h,I|C}`, `Q_m^U`, weights, estimands, outcomes,
-  contrasts, unknown/bound rules, cluster key/strata, bootstrap algorithm/RNG/counts, studentization,
-  invalid-replicate policy, exact multiplicity families, alpha/sidedness, minimum support, selector
-  status rule, and nested-bootstrap budget.
-- **Robustness:** direction-consistency rule, `delta_h`, per-realization support, interaction test,
-  leave-one-realization-out rule, and cross-model replication rule.
+- the `DataRoleManifest` ID, accepted `qualification_bundle` ID, and
+  `identity_and_scope_decision` ID;
+- the candidate-universe construction contract, support Gates, and candidate-specific fold
+  manifests;
+- the sole-difference Atomic Full/RD-only and Pair Full/No-Relation selector contracts, fixed
+  `K_A`/`K_I`, qualified optional RQ1 baseline set, tie-break rules, and failure semantics;
+- the RQ2 comparison semantic `descriptive_fixed_denominator_full_minus_ablation_no_interval`,
+  which rejects rank pairing and any continuous selector-utility interval in the target freeze;
+- exact model strata, model-bound dispatch, discovery outcome definition, approved pre-Prompt
+  covariates, missing/unresolved handling, and all implementation/configuration digests; and
+- the accepted RQ1 budget qualification, including task counts, global realization policy, total
+  block slots, provider ceilings, and the no-`M^2` preflight. Every provider call kind binds one
+  currency, deployment region, named pricing tier and tier input boundary, maximum input/output
+  tokens, input/output microunit prices per million tokens, and a frozen pricing reference. Its
+  maximum per-call cost is the ceiling of the two token-price products divided by one million;
+  the stored rate and independent verifier must both replay that value. All call kinds use one
+  budget currency, and a mixed-provider materialization class uses a conservative bound covering
+  every call in that class.
+
+It contains no selected slots, ranks computed from formal outcomes, selected union, bridge result,
+or confirmation assignment. Candidate-specific folds are outcome-blind and are frozen here before
+their discovery scores are computed.
+
+### 18.2 `ConfirmationFreeze`
+
+The second immutable freeze is written after formal discovery has produced its fixed slots, but
+before any confirmation outcome exists. It contains:
+
+- every Full/Ablation/baseline slot, including typed empty and failure slots, the unique candidate
+  union, and exact `candidate_to_slots` fan-out;
+- each semantic policy key, model effect coordinate, protocol-bound record, bridge result,
+  protocolization result, and semantic-policy-to-protocol lineage;
+- eligible task units and their support/attestation evidence, global realization specifications,
+  the exact one-realization-per-task allocation, materialized task bundles, and no-reallocation
+  policy;
+- complete model-bound randomization assignments, block keys, request-randomness slots, nullable
+  provider seeds, arm/cell variants, RNG/balance rules, request order, and model parameters; and
+- outcome definitions, assigned-arm task-unit ITT estimands, unknown/bound rules, multiplicity
+  families, bootstrap/inference configuration, practical margins, five-status rules, robustness
+  analyses, and reporting/table contracts.
+
+It contains outcome *definitions* but no observed confirmation outcomes. A lightweight
+`study_freeze_index.json` references `DiscoveryDesignFreeze` and `ConfirmationFreeze` by ID and
+SHA-256; it does not merge their timing semantics into a third protocol.
 
 Every join is exact and content-addressed. Discovery producers cannot read confirm manifests.
 Extractor, bridge, intervention executor, code generator, Oracle, functional evaluator, marker
 producer, and analyst are separately identified. Secrets are never persisted.
 
 ## 19. Prospective Sample-Size and Data Gate
+
+No Stage-II or Stage-III tuning parameter becomes active merely because it appears in code or this
+draft. Each accepted profile cites a `qualification_data_id` and exact task-manifest digest from the
+Section 4 role manifest. The FCI profile freezes backend/version, CI test, alpha, encoding, allowed
+`W`, missing/unresolved policy, typed background knowledge, bootstrap count/seed, valid-draw rule,
+minimum valid fraction, adjacency threshold, and software digest. Atomic and Pair RD profiles freeze
+fold count, candidate-specific outcome-blind fold construction, model family, regularization,
+covariates, training-only preprocessing, fit-failure policy, cross-fitting seed, support, bootstrap,
+and tie-break rules. The relation profile freezes the four executable predicates, aggregation,
+minimum resolved tasks/support, maximum unresolved fraction, and labelled qualification evidence.
+
+`QUAL_DEV`, `QUAL_ACCEPT`, discovery, and confirmation task units remain disjoint. Candidate
+profiles may be developed repeatedly on `QUAL_DEV`, but all five selected profile plans are sealed
+together before the one-shot integrated `QUAL_ACCEPT` run. A fold manifest is frozen before the
+corresponding discovery outcome score is computed. A candidate whose frozen folds or support are
+inadequate is `NON_EVALUABLE`; the implementation never retries another fold count or seed after
+observing its score.
 
 The final CWE set, `K`, number of semantic clusters, request slots, models, and `K_R` are frozen only
 after simulation under plausible:
@@ -1223,9 +1410,43 @@ after simulation under plausible:
 
 The primary study should prefer three to four CWE families with executable functional contracts,
 sufficient distinct semantic task clusters, and calibrated Oracle support over shallow coverage of
-many sparse CWEs. Discover and confirm tasks are split by semantic cluster, not row or near-duplicate
+many sparse CWEs. Discovery and confirmation tasks are split by task unit, not row or near-duplicate
 Prompt. Simulation code, assumptions, seeds, curves, and the selected design are frozen before the
 main run.
+
+RQ1 baseline choice, `K_A`, `K_I`, models, task counts, realizations, and total block slots are one
+joint budget decision. Before choosing among them, the budget qualification reports three
+worst-case envelopes:
+
+```text
+Core                    Atomic Full + RD-only; Pair Full + No-Relation
+Core + Expert           Core plus one blinded expert baseline per approved track
+Core + Expert + Random  the preceding variants plus seeded random
+```
+
+For `c in {2,3,4}` variants per track, `M` model-bound effect strata, and no assumed selector
+overlap:
+
+\[
+U_A\le c M K_A,
+\qquad
+U_I\le c M K_I.
+\]
+
+With uniform task counts `T`, realizations `R`, and total four-arm/cell block slots `Q`, the
+generation-call upper bound is:
+
+\[
+N_{gen}\le cM(K_AT_AQ_A+K_IT_IQ_I).
+\]
+
+Each task is assigned one frozen realization draw rather than automatically running all
+realizations. Independent task units take priority over additional request slots in the power
+design. The conservative external-call reservation includes two materialization calls per unique
+task-policy-realization bundle, one generation call per assignment, and at most one functional-judge
+call per assignment. The local Security Oracle is not counted as a provider call. The preflight
+rejects both budget overflow and any configuration that would cross model-bound records with all
+models again, even if that erroneous `M^2` design fits the financial ceiling.
 
 The active prospective dataset design, source-lineage constraints, admission contract, replication
 boundaries, and freeze sequence are specified in
@@ -1254,8 +1475,10 @@ alone.
 Implementation must add new schema versions rather than mutate legacy content-addressed records.
 At minimum, new or upgraded contracts are required for:
 
-1. candidate skeletons, realization-policy specs, frozen hypotheses, and the intervention bridge;
-2. candidate universes, selector ranks, and skeleton-to-hypothesis selection freezes;
+1. canonical analysis scopes, semantic policy keys, model effect coordinates, protocol-bound
+   candidate records, realization-policy specs, frozen hypotheses, and the intervention bridge;
+2. data-role bindings/manifests, candidate universes, selector ranks, candidate-to-slots maps, and
+   semantic-policy-to-protocol selection freezes;
 3. global realization specifications and task-specific realization bundles;
 4. experimental units, block IDs, assignments, and randomization manifests;
 5. semantic task-cluster manifests;
@@ -1270,9 +1493,23 @@ They must carry the appropriate `regime_id`, `semantic_task_cluster_id`,
 `provider_seed`. Existing required `seed_id` fields cannot be reinterpreted as request slots or made
 nullable inside a shared v1 validator.
 
-Keep v1 classes/readers intact and add semantically independent v2 classes and stage fingerprints.
+Keep existing v1/v2 classes and readers intact for historical interpretation. The target `3.x`
+schema adds semantically independent identity, role, selection, dispatch, and stage fingerprints.
 Any allowed migration is an explicit pure function that records source-artifact and migration-rule
-digests. New stages and run directories never overwrite legacy output.
+digests. New stages and run directories never overwrite legacy output. A legacy artifact may verify
+under its own reader but is rejected by every target-protocol report builder.
+
+The target result index is one exact schema-3.0 bundle. It contains the five-role manifest, accepted
+RQ1 budget, discovery design freeze, fixed-slot ledger, shared union and dispatch, the frozen target
+randomization plan, model-invariant task-policy bundles, canonical assignments, formal budget
+preflight, confirmation freeze and study index, shared assigned-arm evidence, fixed-slot Yield result,
+formal report authorization or explicit null, RQ tables, and an independent verification receipt.
+Its read-only target verifier must reject missing or extra files, strictly reconstruct every typed
+record, and independently replay policy-level protocolization reuse, deterministic complete-block arm
+order, variant digests, provider seeds, and all downstream scientific fields rather than trusting the
+stored receipt. A claim-authorized index does not replace its referenced raw responses,
+measurement artifacts, execution environment, command, provider ledger, or frozen input bundles;
+those exact referenced artifacts must accompany the reviewer distribution and clean reproduction.
 
 Legacy Prompt TSG/extraction artifacts may be reused only when task, Prompt, extractor, catalog,
 schema, and policy digests remain exactly compatible. Natural-Prompt queries, causal tables,
@@ -1295,35 +1532,46 @@ be migrated into one atomic v3 hypothesis.
 
 ## 22. Acceptance Criteria
 
-The revised framework is ready for implementation only when tests and spec audits prove:
+The revised framework may move from `SPECIFIED_DRAFT` to `FROZEN` only when tests, independent
+verification, qualification artifacts, and spec audits prove:
 
-1. discovery `X^0`, randomized arm `A`, and diagnostic `X^{A,R}` cannot be conflated in schemas or
+1. canonical scope and Atomic/Pair semantic keys replay exactly; direction, relation, compatibility,
+   rank, score, and model cannot enter the semantic key;
+2. model effects are `(policy_key,model_id)`, model-bound records dispatch exactly once, and a
+   deliberate model-square configuration fails preflight;
+3. every `QUAL_DEV`, `QUAL_ACCEPT`, discovery, confirmation, and legacy dataset has an immutable
+   role binding; `QUAL_ACCEPT` is unexposed at freeze and one-shot; task-unit and near-duplicate
+   overlaps across roles fail before outcomes are loaded;
+4. discovery `X^0`, randomized arm `A`, and diagnostic `X^{A,R}` cannot be conflated in schemas or
    estimators;
-2. every confirmable motif maps one context query to exactly one actionable feature;
-3. changing the target guard state does not change `C_q`, and context/task/non-target projections
-   remain invariant for every frozen arm realization;
-4. Prompt features share one temporal tier and same-tier direction is not presented as mediation;
-5. every selector in the primary comparison consumes the exact same universe digest;
-6. representation comparisons are labeled end-to-end rather than selector-only;
-7. discovery accepts only natural unmanipulated feature states; ADD and REMOVE require their
-   respective frozen source states and neutral-counterpart rule, and
-   produce distinct skeleton, hypothesis, protocol, and multiplicity identities;
-8. global realization specification, task realization bundle, model, request slot, task instance,
-   and semantic cluster are all explicit;
-   mutation of any canonical block-key coordinate changes its block ID;
-9. adversarial tests show that all descendants of one semantic cluster resample together;
-10. `provider_seed=null` leaves `request_randomness_slot` intact across generation, Oracle, and
-    outcome records;
-11. `Y_C`, `Y_E`, secure yield, joint outcome, unknown, and bounds are hand-checkable and cannot be
-    substituted for one another;
-12. cross-realization and cross-model labels fail when any frozen robustness condition fails;
-13. background-knowledge derivation, raw/full PAG deltas, and wrong-BK sensitivity are reproducible;
-14. v1 readers reject v2 records, explicit migrators never overwrite old run directories, and legacy
-    combined-operation hypotheses are rejected rather than coerced;
-15. JCI, RFCI, implementation markers, fidelity, and per-protocol diagnostics cannot change primary
-    evidence status;
-16. the four RQs, main-text scope, and appendix scope are enforced by paper contract tests; and
-17. small synthetic and canary runs pass before any scale-up or final paper experiment.
+5. every confirmable motif maps one context query to exactly one Atomic target; Pair factors remain
+   independently editable and canonically ordered;
+6. discovery accepts only natural unmanipulated states; ADD and REMOVE use their respective frozen
+   source-state and neutral-counterpart rules;
+7. Atomic Full/RD-only share universe, support, fold manifest, RD score, tie-break, `K_A`, bridge,
+   confirmation, and status; only Full reads the qualified FCI Gate;
+8. Pair compatibility creates one common universe; Pair Full/No-Relation share rows, folds, RD score,
+   tie-break, and `K_I`; only Full reads relation support;
+9. failed FCI draws alter valid fraction rather than adjacency count, and inadequate valid fraction
+   produces `NON_EVALUABLE` without threshold relaxation;
+10. fixed Atomic and Pair slot ledgers retain empty/failure slots, while the union and
+    `candidate_to_slots` map confirm each unique model effect once;
+11. the RQ1 Core, +Expert, and +Random budget envelopes replay exactly, and formal preflight rejects
+    any unqualified dimension or provider-ceiling overflow;
+12. global realization specification, task bundle, model effect, request slot, task instance, and
+    task unit are explicit; mutation of any block coordinate changes its block ID;
+13. assigned-arm deduplicated-task-unit ITT retains every assignment and preserves code validity,
+    Oracle evaluability, secure yield, unknown coverage, functionality, and joint success separately;
+14. independent inference reproduces simultaneous intervals and all five Atomic/Pair statuses,
+    including exact margin boundaries and non-evaluable rules;
+15. all descendants of one task unit resample together, and cross-realization/cross-model labels fail
+    when any frozen robustness condition fails;
+16. existing v1/v2 artifacts remain verifiable only under legacy readers, never enter target reports,
+    and no migrator overwrites a frozen run;
+17. JCI, RFCI, implementation markers, fidelity, semantic compliance, generation success, and
+    per-protocol diagnostics cannot change primary evidence or denominators;
+18. one reviewer smoke run, one clean frozen reproduction, the independent result verifier, RQ table
+    builders, and a reading guide of at most ten core files agree on the single seven-stage path.
 
 ## 23. Conflict-and-Decision Ledger
 
@@ -1345,6 +1593,11 @@ The revised framework is ready for implementation only when tests and spec audit
 | add an unedited Original arm to improve the current result | post-result design discussion | keep Target versus operation-matched No-op primary; Original requires a new prospective arm-family freeze |
 | every statistically supported pair is mechanism synergy | pairwise draft | freeze `policy_only` or `mechanism_eligible` per pair and report the narrower supported claim |
 | response surfaces receive mechanism names automatically | pairwise draft | use neutral paper-facing response-pattern labels; named mechanisms require independent evidence |
+| candidate identity may absorb `model_id` | Phase 0 author decision, 2026-08-31 | semantic `policy_key` is model-independent; the effect coordinate is `(policy_key, model_id)` and a model-bound candidate record is dispatched exactly once |
+| scope coordinates are distributed across metadata | Phase 0 author decision, 2026-08-31 | canonical `AnalysisScope` contains security pattern, context query, sorted language/API/archetype scopes, and no selector or outcome-derived fields |
+| pilot/discovery/confirm partitions are sufficient for tuning | Phase 0 author decision plus qualification review, 2026-08-31 | use named `QUAL_DEV`, one-shot `QUAL_ACCEPT`, `DISCOVERY`, `CONFIRMATION`, and `LEGACY_ONLY` roles with task-unit, exposure-history, and near-duplicate firewalls |
+| one pre-confirmation object can freeze both design and selected hypotheses | qualification review, 2026-08-31 | use `DiscoveryDesignFreeze` before formal discovery outcomes and `ConfirmationFreeze` after fixed slots but before confirmation outcomes; index both by ID and SHA-256 |
+| RQ1 baselines and `K` can be selected independently | Phase 0 author decision, 2026-08-31 | compare Core, Core+Expert, and Core+Expert+Random worst-case envelopes first; exact baseline set, `K_A`, `K_I`, models, tasks, realizations, slots, margins, and provider cap remain qualification-blocked |
 
 This ledger is prospective. It does not relabel or reinterpret completed legacy experiments.
 
@@ -1368,13 +1621,16 @@ Let `f_1` and `f_2` be distinct catalog-bound atomic actionable features, with o
 `a_1,a_2 in {ADD,REMOVE}`. A confirmable pair is:
 
 \[
-h_{12}=(C_{q,12},(f_1,a_1),(f_2,a_2),r_{12},Q_{12},Y,\kappa),
+k_{12}=\operatorname{Key}(\texttt{pair},S_{12},
+\operatorname{sort}((f_1,a_1),(f_2,a_2)),Y),
 \]
 
-where `C_{q,12}` is a target-state-independent pair context query, `r_{12}` is one reviewed
-Prompt-TSG structural relation, `Q_{12}` is the finite joint-realization distribution, `Y` is the
-primary outcome, and `kappa` is the frozen interaction scale. The primary scale is the risk
-difference.
+where `S_{12}` contains the target-state-independent pair context query and the remaining canonical
+Section 6 scope fields. `k_{12}` is model-independent and factor input order is not identity. The
+model effect is `(k_{12},m)`. A protocol-bound pair hypothesis additionally freezes the finite
+joint-realization distribution `Q_{12}`, the risk-difference interaction scale, target specifications,
+Oracle profile, compatibility evidence, relation evidence, and all producer digests. Those protocol
+and eligibility coordinates do not alter `k_{12}`.
 
 The permitted structural relation vocabulary is finite:
 
@@ -1396,10 +1652,13 @@ its Target operation necessarily changes the other factor. In particular, SQL va
 parameterization and SQL identifier allow-listing, and structured argument-vector construction and
 executable allow-listing, are separate atomic factors.
 
-Every `MechanismRelationSpec` also freezes one factorial-compatibility decision from
+Factorial compatibility is evaluated independently of relation support and freezes one decision from
 `COMPATIBLE`, `NESTED`, `MUTUALLY_EXCLUSIVE`, `ENTAILMENT_COLLAPSE`, `CONFLICTING`, or `UNRESOLVED`.
-Only `COMPATIBLE` relations enter the active pair universe; all other decisions fail closed before
-outcomes or arm texts are available.
+Only `COMPATIBLE` pairs enter the common Pair universe. The No-Relation selector ranks every pair in
+that universe that passes shared support/fold/RD Gates. Pair Full applies the qualified Prompt-TSG
+relation Gate afterward. Consequently, a compatible relationless pair can enter No-Relation, while a
+relation-supported incompatible pair enters neither selector. Changing relation evidence cannot
+change the pair's task rows, fold manifest, RD score, or semantic key.
 
 ### 24.3 Pair eligibility and optional observational prioritization
 
@@ -1430,6 +1689,13 @@ are standardized over held-out baseline-eligible task units. The ridge-logit int
 coefficient is a diagnostic only. Bootstrap sign stability and median absolute score are ranking
 diagnostics, not confirmatory confidence intervals. The randomized `2 x 2` experiment remains the
 only source of a causal interaction estimate.
+
+Pair Full and Pair No-Relation use byte-identical compatible-pair rows, candidate-specific folds,
+support decisions, second-order RD scores, absolute-value rank rule, tie-break, and `K_I`. Only Pair
+Full reads the candidate-level relation Gate. Each selector has exactly `K_I` slots; Gate failures,
+non-evaluable scores, and an exhausted universe create typed empty slots with no replacement. The
+unique union of filled slots is protocolized and confirmed once per model effect coordinate, and its
+single randomized result fans out to every selector slot that named it.
 
 ### 24.4 Factorial cells and assigned treatment
 

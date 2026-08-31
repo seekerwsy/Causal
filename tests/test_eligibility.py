@@ -186,7 +186,9 @@ def test_eligibility_separates_ready_calibration_and_out_of_scope_clusters(
         cluster_root,
         contract_root,
         output,
-        policy_path=Path("data/dataset-curation/eligibility-policy-v2-target.json"),
+        policy_path=Path(
+            "data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json"
+        ),
         bindings_root=bindings,
     )
     decisions = {row["cluster_id"]: row for row in read_json(output / "eligibility-decisions.json")}
@@ -258,7 +260,9 @@ def test_eligibility_uses_frozen_task_binding_for_multi_profile_cwe(tmp_path: Pa
         clusters,
         contracts,
         output,
-        policy_path=Path("data/dataset-curation/eligibility-policy-v2-target.json"),
+        policy_path=Path(
+            "data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json"
+        ),
         bindings_root=bindings,
     )
     decision = read_json(output / "eligibility-decisions.json")[0]
@@ -315,7 +319,7 @@ def test_binding_adjudication_requires_exact_prompt_evidence(tmp_path: Path) -> 
             ]
         },
     )
-    registry = Path("data/method/mechanism-registry-v1.json")
+    registry = Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json")
     adjudications = tmp_path / "adjudications.json"
     adjudications.write_text(
         json.dumps(
@@ -468,7 +472,9 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
         clusters,
         contracts,
         output,
-        policy_path=Path("data/dataset-curation/eligibility-policy-v2-target.json"),
+        policy_path=Path(
+            "data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json"
+        ),
         bindings_root=bindings,
         contract_reviews_root=reviews,
     )
@@ -488,7 +494,9 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
 @pytest.mark.reviewer
 def test_tsg_bindings_align_catalog_registry_and_local_oracle_scope(tmp_path: Path) -> None:
     catalog_path = Path("data/method/prompt-tsg-catalog-v1.json")
-    registry_path = Path("data/method/mechanism-registry-v1.json")
+    registry_path = Path(
+        "data/method/phase-context-policy-v3-mechanism-registry-v1.json"
+    )
     catalog = load_catalog(catalog_path)
     registry = load_mechanism_registry(registry_path)
     assert set(registry) == {row["realization_id"] for row in catalog["queries"]}

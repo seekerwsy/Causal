@@ -91,7 +91,7 @@ Target 60 task units, approximately 10 per leaf:
 
 ### 2.3 Identity, authorization, permissions, and sensitive information
 
-Target 60 task units, approximately 10 per leaf:
+The original planning target was 60 task units, approximately 10 per leaf:
 
 - CWE-200: exposure of sensitive information;
 - CWE-287: improper authentication;
@@ -99,6 +99,17 @@ Target 60 task units, approximately 10 per leaf:
 - CWE-732: incorrect permission assignment;
 - CWE-798: hard-coded credentials; and
 - CWE-862: missing authorization.
+
+The completed outcome-blind quality census contains 48 task units: 11
+CWE-200, 0 CWE-287, 5 CWE-306, 7 CWE-732, 10 CWE-798, and 15 CWE-862. Because
+the seven-source census is complete, 60 is no longer treated as an admission
+gate or a reason to manufacture, duplicate, or weaken tasks. The prospective
+family scope is all 48 quality-qualified units, with measurement support
+recorded separately: 17 already have qualified static profiles, 20 have
+audited task-specific source safety tests pending executable-Oracle
+qualification, and 11 remain contextual or lack a usable security test. The
+frozen identities and source-test audit are in
+`data/dataset-curation/identity-family-scope-v1.json`.
 
 ### 2.4 Cryptography, randomness, and integrity
 
@@ -123,6 +134,12 @@ the study may either acquire additional tasks, document an outcome-blind
 within-family redistribution, or narrow the prospective coverage. It may not
 duplicate tasks, count variants as independent, or pool unrelated CWEs to hide
 the shortfall.
+
+For Identity, the third option has now been taken prospectively: the paper may
+claim coverage of the observed 48-task census, but not balanced six-leaf or
+60-task coverage. Oracle qualification still controls which stratum can enter
+a particular confirmatory estimate; it does not remove the other units from
+the quality-qualified data set.
 
 ## 3. Replication layers
 
@@ -509,10 +526,16 @@ The active closed artifacts are:
   `data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification`,
   SHA-256
   `fc4216dc7cb6e8f8e0377e69e300bded30485f1725b7d855504adab3b396ab75`;
-- unified candidate-data audit after bounded Oracle expansion:
-  `.codex-runtime/dataset-final-quality-20260831-36-target-oracle-final`,
+- schema-3 mechanism registry:
+  `data/method/phase-context-policy-v3-mechanism-registry-v1.json`, SHA-256
+  `bff8b78e67520725d7cdd644b77ad7c2d6df64531bee0479a2c08ba9d1874970`;
+- schema-3 eligibility policy:
+  `data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json`, SHA-256
+  `8d8401ad3c1a45b295d4febdef8a5fb3f524e11b88f28e7a447afcd0b97792fb`;
+- registry-bound candidate-data audit after bounded Oracle expansion:
+  `.codex-runtime/dataset-final-quality-20260831-38-schema3-registry-bound`,
   SHA-256
-  `bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886`;
+  `64f1241574197ad17e64ae547c9dc611ff01add2ec2393ae2c8ba420d4f8136c`;
 - audit report:
   `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
 

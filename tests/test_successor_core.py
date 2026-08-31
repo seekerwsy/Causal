@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -29,15 +31,127 @@ from prompt_mechanism_study.randomization import (
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.representation import (
+    AnalysisScope,
+    AtomicPolicyKey,
     CandidateSkeletonV2,
     EligibilityDecisionV2,
     ExpectedDirection,
     FrozenHypothesisV2,
+    ModelBoundCandidateRecord,
+    ModelEffectCoordinate,
     Operation,
+    PolicyFactor,
     SourceEligibilityV2,
     TargetSpecV2,
+    pair_policy_key,
     source_eligibility_v2,
 )
+
+
+ROOT = Path(__file__).parents[1]
+
+
+@pytest.mark.reviewer
+def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
+    decision = json.loads(
+        (ROOT / "configs/formal/identity_and_scope_decision.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert decision["protocol_id"] == "phase-context-policy-v3"
+    assert decision["status"] == "DECISION_RECORDED"
+    assert decision["formal_execution_authorized"] is False
+    assert decision["analysis_scope"]["fields"] == [
+        "security_pattern_id",
+        "context_query_id",
+        "language_scope",
+        "api_scope",
+        "task_archetype_scope",
+    ]
+    assert decision["policy_identity"]["model_independent"] is True
+    assert decision["model_effect_coordinate"] == ["policy_key", "model_id"]
+    assert decision["model_dispatch"]["confirmation_cross_product_models"] is False
+    assert (
+        decision["realization_allocation"][
+            "assignments_per_task_policy_coordinate"
+        ]
+        == 1
+    )
+
+
+@pytest.mark.reviewer
+@pytest.mark.extended
+def test_semantic_policy_is_model_independent_and_dispatch_is_model_bound() -> None:
+    scope = AnalysisScope(
+        "SQL_VALUE_FLOW",
+        "context.sql.external_value_reaches_value_slot",
+        ("python",),
+        ("raw_sql", "supported_db_api"),
+        ("database_query",),
+    )
+    parameterization = PolicyFactor(
+        "SQL_PARAMETER_BINDING",
+        Operation.ADD,
+    )
+    atomic = AtomicPolicyKey(
+        scope,
+        parameterization,
+        "oracle_evaluable_secure_code_yield",
+    )
+    first = ModelEffectCoordinate(atomic.policy_key, "model-a")
+    second = ModelEffectCoordinate(atomic.policy_key, "model-b")
+    record = ModelBoundCandidateRecord(
+        atomic.policy_key,
+        "model-a",
+        "phase-context-policy-v3",
+        "3.0-draft",
+    )
+
+    assert first.policy_key == second.policy_key == atomic.policy_key
+    assert first.effect_coordinate_id != second.effect_coordinate_id
+    assert record.effect_coordinate == first
+    assert AtomicPolicyKey(
+        scope,
+        PolicyFactor("SQL_PARAMETER_BINDING", Operation.REMOVE),
+        "oracle_evaluable_secure_code_yield",
+    ).policy_key != atomic.policy_key
+    assert AtomicPolicyKey(
+        scope,
+        parameterization,
+        "functionality",
+    ).policy_key != atomic.policy_key
+    assert AtomicPolicyKey(
+        AnalysisScope(
+            "SQL_VALUE_FLOW",
+            "context.sql.external_value_reaches_value_slot",
+            ("python",),
+            ("raw_sql",),
+            ("database_query",),
+        ),
+        parameterization,
+        "oracle_evaluable_secure_code_yield",
+    ).policy_key != atomic.policy_key
+    assert record.candidate_record_id != ModelBoundCandidateRecord(
+        atomic.policy_key,
+        "model-a",
+        "phase-context-policy-v3",
+        "3.1-draft",
+    ).candidate_record_id
+
+    allow_listing = PolicyFactor("SQL_IDENTIFIER_ALLOW_LIST", Operation.ADD)
+    forward = pair_policy_key(
+        scope,
+        (parameterization, allow_listing),
+        outcome_id="oracle_evaluable_secure_code_yield",
+    )
+    reverse = pair_policy_key(
+        scope,
+        (allow_listing, parameterization),
+        outcome_id="oracle_evaluable_secure_code_yield",
+    )
+    assert forward == reverse
+    assert forward.policy_key == reverse.policy_key
 
 
 @pytest.mark.extended

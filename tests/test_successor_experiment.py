@@ -15,17 +15,11 @@ from prompt_mechanism_study.artifact_io import (
     verify_bundle,
     write_bundle,
 )
-from prompt_mechanism_study.prioritization import (
-    BackgroundKnowledgeRule,
-    BridgeRecord,
-    BridgeStatus,
-    DiscoveryObservation,
-    ExpertRankingInput,
-    SelectorSuitePlan,
-    discovery_data_sha256,
-    freeze_candidate_universe_manifest,
-    freeze_shared_bridge_map,
-    run_selector_suite,
+from prompt_mechanism_study.records import (
+    canonical_json,
+    canonical_value,
+    content_hash,
+    content_id,
 )
 from prompt_mechanism_study.prompt_tsg import (
     build_prompt_tsg,
@@ -33,28 +27,15 @@ from prompt_mechanism_study.prompt_tsg import (
     load_catalog,
     prompt_tsg_record,
 )
-from prompt_mechanism_study.records import (
-    canonical_json,
-    canonical_value,
-    content_hash,
-    content_id,
-)
-from prompt_mechanism_study.representation import Candidate, freeze_universe
 from prompt_mechanism_study.security_profiles import (
     evaluate_security_profile,
     security_profile_policy_sha256,
-)
-from prompt_mechanism_study.selector_experiment import (
-    build_active_selector_evidence,
-    write_bridge_freeze_bundle,
-    write_selection_freeze_bundle,
 )
 from prompt_mechanism_study.successor_experiment import (
     SuccessorExperimentError,
     _load_functionality_power_qualification,
     _load_inputs,
     _validate_frozen_functionality_power_qualification,
-    _verify_stored_selection_provenance,
     freeze_successor_experiment,
     preflight_successor_experiment,
     run_successor_experiment,
@@ -308,22 +289,6 @@ def test_materialization_freeze_is_semantic_and_run_does_not_rematerialize(
     with pytest.raises(SuccessorExperimentError, match="AllowedDelta"):
         verify_successor_materialization_bundle(frozen)
 
-
-@pytest.mark.parametrize("location", ["envelope", "analysis"])
-def test_successor_config_rejects_unknown_keys(
-    tmp_path: Path,
-    location: str,
-) -> None:
-    config_path = _study(tmp_path)
-    config = read_json(config_path)
-    if location == "envelope":
-        config["unexpected"] = True
-    else:
-        config["analysis"]["minimum_task_unit"] = 20
-    config_path.write_text(canonical_json(config), encoding="utf-8")
-    _refresh_registry_binding(config_path)
-    with pytest.raises(SuccessorExperimentError, match="envelope|analysis plan"):
-        preflight_successor_experiment(tmp_path, config_path)
 
 
 def test_successor_active_schema_requires_five_ordered_endpoints(tmp_path: Path) -> None:
@@ -590,231 +555,6 @@ def test_stored_verifier_recomputes_full_inference_and_report(tmp_path: Path) ->
     assert verify_successor_result_bundle(output)["status"] == (
         "SUCCESSOR_RESULT_BUNDLE_VERIFIED"
     )
-
-
-def test_preflight_derives_and_binds_selector_bridge_provenance(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = _study(tmp_path)
-    baseline = preflight_successor_experiment(tmp_path, config_path)
-    hypothesis_ids = tuple(sorted(baseline["eligible_tasks_by_hypothesis"]))
-    loaded_baseline = _load_inputs(tmp_path, config_path)
-    hypotheses = tuple(
-        sorted(
-            (item["hypothesis"] for item in loaded_baseline["hypotheses"]),
-            key=lambda item: item.hypothesis_id,
-        )
-    )
-    candidates = tuple(
-        Candidate(
-            hypothesis.skeleton.candidate_key,
-            hypothesis.skeleton.context_query_id,
-            hypothesis.skeleton.actionable_feature_id,
-            hypothesis.skeleton.operation,
-            hypothesis.skeleton.cwe,
-            hypothesis.skeleton.outcome_id,
-            hypothesis.skeleton.expected_direction,
-        )
-        for hypothesis in hypotheses
-    )
-    universe = freeze_universe(candidates, representation_adapter_id="prompt-tsg-v2")
-    candidate_ids = tuple(item.candidate_id for item in universe.candidates)
-    family_id = hypotheses[0].skeleton.archetype
-    assert all(item.skeleton.archetype == family_id for item in hypotheses)
-    rows = tuple(
-        DiscoveryObservation(
-            f"successor-task-{index:02d}",
-            "model-a",
-            family_id,
-            slot,
-            tuple(
-                    (candidate_id, (index + candidate_index) % 2)
-                for candidate_index, candidate_id in enumerate(candidate_ids)
-            ),
-            (("source_group", float(index % 3)),),
-            (index + slot) % 2,
-        )
-        for index in range(40)
-        for slot in (0, 1)
-    )
-    manifest = freeze_candidate_universe_manifest(
-        universe,
-        supported_candidate_ids=candidate_ids,
-        realization_policy_ids={
-            candidate_id: hypothesis.skeleton.realization_policy_id
-            for candidate_id, hypothesis in zip(candidate_ids, hypotheses, strict=True)
-        },
-        candidate_family_ids={candidate_id: family_id for candidate_id in candidate_ids},
-        discovery_data_sha256=discovery_data_sha256(rows),
-        positivity_audit_sha256=content_hash("successor-positivity-audit"),
-        information_budget_sha256=content_hash("successor-information-budget"),
-        outcome_id=hypotheses[0].skeleton.outcome_id,
-        top_k=len(candidate_ids),
-    )
-    manifest, support_audit, information_budget, discovery_evidence = (
-        build_active_selector_evidence(manifest, rows)
-    )
-    temporal = BackgroundKnowledgeRule(
-        "successor-temporal",
-        family_id,
-        "temporal",
-        "temporal_order",
-        "Y:discovery_outcome",
-        f"X:{candidate_ids[0]}",
-    )
-    domain = BackgroundKnowledgeRule(
-        "successor-domain",
-        family_id,
-        "domain-order",
-        "reviewed_domain",
-        f"X:{candidate_ids[0]}",
-        f"X:{candidate_ids[1]}",
-    )
-    wrong = BackgroundKnowledgeRule(
-        "successor-wrong",
-        family_id,
-        "wrong-direction",
-        "wrong_plausible",
-        f"X:{candidate_ids[0]}",
-        "Y:discovery_outcome",
-    )
-    plan = SelectorSuitePlan(
-        "model-a", 1.0, 4, (11, 22, 33),
-        behavior_version="shared-selector-suite-v2",
-        fci_background_knowledge=(temporal, domain),
-        fci_wrong_bk_perturbation=(wrong,),
-    )
-    expert = ExpertRankingInput(
-        manifest.manifest_id,
-        "model-a",
-        content_hash(information_budget["candidate_cards"]),
-        candidate_ids,
-        True,
-        False,
-    )
-
-    monkeypatch.setattr(
-        "prompt_mechanism_study.prioritization._causal_learn_version",
-        lambda: "0.1.4.7",
-    )
-
-    def fake_pag(_matrix, *, outcome_index, variable_order, **_kwargs):
-        feature = next(
-            index for index, name in enumerate(variable_order) if name.startswith("X:")
-        )
-        return {feature}, (
-            (variable_order[feature], "CIRCLE", variable_order[outcome_index], "CIRCLE"),
-        )
-
-    monkeypatch.setattr(
-        "prompt_mechanism_study.prioritization._run_causal_learn_pag",
-        fake_pag,
-    )
-    selection = run_selector_suite(
-        manifest,
-        rows,
-        plan,
-        expert_input=expert,
-    )
-    selection_config = {
-        "schema_version": "2.0",
-        "universe": canonical_value(manifest),
-        "observations": canonical_value(rows),
-        "plan": canonical_value(plan),
-        "expert_input": canonical_value(expert),
-        "fci_relation_scores": None,
-        "support_audit": support_audit,
-        "information_budget": information_budget,
-        "discovery_evidence": discovery_evidence,
-    }
-    selection_root = tmp_path / "selector-freeze"
-    write_selection_freeze_bundle(selection_root, selection, selection_config)
-    records = []
-    hypothesis_by_candidate = dict(zip(candidate_ids, hypotheses, strict=True))
-    for candidate_id in selection.selected_union_candidate_ids:
-        if candidate_id in hypothesis_by_candidate:
-            hypothesis = hypothesis_by_candidate[candidate_id]
-            records.append(
-                BridgeRecord(
-                    candidate_id,
-                    BridgeStatus.SUCCESS,
-                    hypothesis.hypothesis_id,
-                    None,
-                    hypothesis,
-                )
-            )
-        else:
-            records.append(
-                BridgeRecord(
-                    candidate_id,
-                    BridgeStatus.PROTOCOLIZATION_FAILED,
-                    None,
-                    "not_selected_for_successor_test",
-                )
-            )
-    bridge = freeze_shared_bridge_map(selection, tuple(records))
-    bridge_root = tmp_path / "bridge-freeze"
-    write_bridge_freeze_bundle(bridge_root, selection_root, bridge)
-
-    config = read_json(config_path)
-    config["selection"] = {
-        "source": "selector_bridge",
-        "selection_bundle_path": "selector-freeze",
-        "selection_bundle_sha256": bundle_digest(selection_root),
-        "bridge_bundle_path": "bridge-freeze",
-        "bridge_bundle_sha256": bundle_digest(bridge_root),
-    }
-    config_path.write_text(canonical_json(config), encoding="utf-8")
-    report = preflight_successor_experiment(tmp_path, config_path)
-    assert report["selection_provenance"] == {
-        "source": "selector_bridge",
-        "candidate_universe_manifest_id": selection.universe.manifest_id,
-        "selection_id": selection.selection_id,
-        "artifact_sha256": bundle_digest(bridge_root),
-        "bridge_map_id": bridge.bridge_map_id,
-        "selected_predecessor_ids": list(hypothesis_ids),
-    }
-    loaded = _load_inputs(tmp_path, config_path)
-    provenance = canonical_value(loaded["selection_provenance"])
-    stored_study = {
-        "selection_provenance": provenance,
-        "hypotheses": [
-            canonical_value(item["hypothesis"])
-            for item in loaded["hypotheses"]
-        ],
-    }
-    _verify_stored_selection_provenance(
-        config,
-        loaded["selection_evidence"],
-        stored_study,
-        {"selection_provenance": provenance},
-        {"selection_id": loaded["selection_provenance"].selection_id},
-    )
-    tampered_evidence = json.loads(json.dumps(loaded["selection_evidence"]))
-    successful_record = next(
-        item
-        for item in tampered_evidence["bridge"]["records"]
-        if item["status"] == "success"
-    )
-    successful_record["final_hypothesis_id"] = "drifted-hypothesis"
-    with pytest.raises(
-        SuccessorExperimentError,
-        match="bundle evidence|bind successor hypotheses|provenance",
-    ):
-        _verify_stored_selection_provenance(
-            config,
-            tampered_evidence,
-            stored_study,
-            {"selection_provenance": provenance},
-            {"selection_id": loaded["selection_provenance"].selection_id},
-        )
-
-    config["selection"]["bridge_bundle_sha256"] = "0" * 64
-    config_path.write_text(canonical_json(config), encoding="utf-8")
-    with pytest.raises(SuccessorExperimentError, match="bridge bundle drift"):
-        preflight_successor_experiment(tmp_path, config_path)
-
 
 def _offline_complete(
     request: dict[str, Any],

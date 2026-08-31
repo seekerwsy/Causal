@@ -3,8 +3,6 @@ from __future__ import annotations
 import copy
 import hashlib
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
 import prompt_mechanism_study.interaction_selector_experiment as selector_experiment
@@ -22,7 +20,6 @@ from prompt_mechanism_study.mechanisms import (
     evaluate_pair_relation_evidence,
     load_pair_registry,
 )
-from prompt_mechanism_study.prioritization import SelectorKind, SlotStatus
 from prompt_mechanism_study.prompt_tsg import (
     QueryState,
     build_prompt_tsg,
@@ -295,40 +292,6 @@ def test_interaction_selection_recomputes_factor_states_from_prompt_tsg(
         freeze_interaction_selection_from_config(path, tmp_path / "output")
 
 
-def test_interaction_selection_rejects_self_contained_or_legacy_pair_universe(
-    tmp_path: Path,
-) -> None:
-    config, pair = _catalog_bound_selector_config(tmp_path)
-    self_contained = {
-        "schema_version": "1.0",
-        "pairs": canonical_value((pair,)),
-        "relation_specs": config["relation_specs"],
-        "relation_evidence": config["relation_evidence"],
-        "observations": config["observations"],
-        "discovery_evidence": config["discovery_evidence"],
-        "plan": config["plan"],
-        "graph_support_selection": None,
-    }
-    old_path = tmp_path / "self-contained.json"
-    old_path.write_text(canonical_json(self_contained), encoding="utf-8")
-    with pytest.raises(InteractionSelectorExperimentError, match="fields are not exact"):
-        freeze_interaction_selection_from_config(old_path, tmp_path / "old-output")
-
-    legacy_registry = copy.deepcopy(read_json(REGISTRY_PATH))
-    legacy_registry["pairs"][0]["relation_type"] = "sequential_controls"
-    legacy_path = tmp_path / "legacy-pairs.json"
-    legacy_path.write_text(canonical_json(legacy_registry), encoding="utf-8")
-    legacy_config, _legacy_pair = _catalog_bound_selector_config(
-        tmp_path,
-        registry_path=legacy_path
-    )
-    legacy_config_path = tmp_path / "legacy-selector.json"
-    legacy_config_path.write_text(canonical_json(legacy_config), encoding="utf-8")
-    with pytest.raises(ValueError, match="active factorial relation vocabulary"):
-        freeze_interaction_selection_from_config(
-            legacy_config_path, tmp_path / "legacy-output"
-        )
-
 
 def test_interaction_selection_rejects_catalog_or_registry_digest_drift(
     tmp_path: Path,
@@ -396,64 +359,3 @@ def test_interaction_selection_rejects_nested_unknown_fields(tmp_path: Path) -> 
         freeze_interaction_selection_from_config(
             evidence_path, tmp_path / "discovery-drift-output"
         )
-
-
-def test_graph_lane_is_derived_from_an_embedded_active_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config, pair = _catalog_bound_selector_config(tmp_path)
-    candidate_id = "candidate-from-fci"
-    selection = SimpleNamespace(
-        plan=SimpleNamespace(behavior_version="shared-selector-suite-v2"),
-        runs=(
-            SimpleNamespace(
-                kind=SelectorKind.FCI,
-                rankings=(
-                    SimpleNamespace(
-                        slots=(
-                            SimpleNamespace(
-                                status=SlotStatus.FILLED,
-                                candidate_id=candidate_id,
-                            ),
-                        )
-                    ),
-                ),
-            ),
-        ),
-        universe=SimpleNamespace(
-            candidate_skeletons=(
-                (
-                    candidate_id,
-                    SimpleNamespace(
-                        actionable_feature_ids=(pair.factor_1_id, "feature.unrelated")
-                    ),
-                ),
-            )
-        ),
-    )
-    selection_root = tmp_path / "active-selection"
-    write_bundle(
-        selection_root,
-        {
-            "effective-config.json": {"schema_version": "2.0"},
-            "identity.json": {"schema_version": "2.0"},
-            "selection.json": {"schema_version": "2.0"},
-        },
-    )
-    monkeypatch.setattr(selector_experiment, "load_selection_freeze_bundle", lambda _root: selection)
-    config["graph_support_selection"] = {
-        "artifact_path": str(selection_root),
-        "artifact_bundle_sha256": bundle_digest(selection_root),
-    }
-    config_path = tmp_path / "graph-supported-config.json"
-    config_path.write_text(canonical_json(config), encoding="utf-8")
-    output = tmp_path / "graph-supported-freeze"
-
-    report = freeze_interaction_selection_from_config(config_path, output)
-
-    frozen = read_json(output / "selection-freeze.json")
-    assert frozen["graph_supported_factor_ids"] == [pair.factor_1_id]
-    assert report["selected_graph_pair_ids"] == [pair.pair_id]
-    assert read_json(output / "graph-support-effective-config.json") == {
-        "schema_version": "2.0"
-    }

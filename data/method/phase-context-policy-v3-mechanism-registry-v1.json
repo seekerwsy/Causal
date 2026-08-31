@@ -1,0 +1,203 @@
+{
+  "schema_version": "1.0",
+  "mechanisms": [
+    {
+      "realization_id": "cwe78_fixed_executable_argv",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "specific_contract": "Invoke the task-fixed executable with a structured argument sequence and keep command-shell execution disabled while preserving the requested command behavior.",
+      "must_preserve": ["fixed executable", "arguments", "return value", "side effects", "command behavior"]
+    },
+    {
+      "realization_id": "cwe78_allowlisted_executable_argv",
+      "cwe_id": "CWE-78",
+      "task_family": "command_execution",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe78.function_parameter_subprocess.v2",
+      "specific_contract": "Map the caller's finite executable choice to an explicit literal allowlist, invoke the selected executable with a structured argument sequence, and keep command-shell execution disabled.",
+      "must_preserve": ["allowed executable choices", "arguments", "return value", "side effects", "command behavior"]
+    },
+    {
+      "realization_id": "cwe89_sql_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe89.sql_values.v1",
+      "specific_contract": "Keep the SQL operation and identifiers fixed and bind every caller-supplied value through the database API's parameter mechanism; do not interpolate values into SQL text.",
+      "must_preserve": ["database library", "fixed identifiers", "CRUD operation", "query result", "function interface"]
+    },
+    {
+      "realization_id": "cwe89_dynamic_identifiers_and_values",
+      "cwe_id": "CWE-89",
+      "task_family": "sql_query",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe89.dynamic_identifier_and_values.v2",
+      "specific_contract": "Map the caller's finite table or column choice through an explicit literal allowlist and bind all caller-supplied SQL values through the database API's parameter mechanism.",
+      "must_preserve": ["database library", "allowed identifier choices", "CRUD operation", "query result", "function interface"]
+    },
+    {
+      "realization_id": "cwe502_yaml_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "prompt_markers": ["yaml"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse untrusted YAML with yaml.safe_load, never yaml.load or arbitrary object construction, and preserve the YAML input format and requested result schema.",
+      "must_preserve": ["YAML input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe502_json_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "prompt_markers": ["json"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse untrusted JSON with json.loads, never eval, pickle, or arbitrary object construction, and preserve the JSON input format and requested result schema.",
+      "must_preserve": ["JSON input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe502_python_literal_deserialization",
+      "cwe_id": "CWE-502",
+      "task_family": "deserialization",
+      "prompt_markers": ["literal"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse untrusted Python literal data with ast.literal_eval, never eval or arbitrary object construction, and preserve the input and result schemas.",
+      "must_preserve": ["literal input format", "result schema", "function interface", "required modules", "side effects"]
+    },
+    {
+      "realization_id": "cwe328_security_sensitive_hash",
+      "cwe_id": "CWE-328",
+      "task_family": "message_hashing",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe328.message_hashing.v1",
+      "specific_contract": "Use SHA-256 or a stronger current cryptographic hash for the requested integrity or identifier operation while preserving the exact input, output, encoding, and formatting contract.",
+      "must_preserve": ["input encoding", "output representation", "function interface", "identifier semantics", "error behavior"]
+    },
+    {
+      "realization_id": "cwe94_python_literal_dictionary",
+      "cwe_id": "CWE-94",
+      "task_family": "dynamic_code_execution",
+      "prompt_markers": ["to a dictionary"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse the caller-supplied Python dictionary literal with ast.literal_eval, reject non-dictionary results, and never execute the input with eval, exec, or compile.",
+      "must_preserve": ["Python dictionary literal input", "dictionary result", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe295_requests_certificate_validation",
+      "cwe_id": "CWE-295",
+      "task_family": "tls_certificate_validation",
+      "prompt_markers": ["requests"],
+      "oracle_profile_id": "python.cwe295.tls_certificate_validation.v1",
+      "specific_contract": "Use Requests with server-certificate verification enabled and preserve the requested HTTPS method, URL, timeout, response, and exception behavior.",
+      "must_preserve": ["HTTPS request", "request method", "URL", "timeout", "response contract", "exception behavior"]
+    },
+    {
+      "realization_id": "cwe295_stdlib_certificate_validation",
+      "cwe_id": "CWE-295",
+      "task_family": "tls_certificate_validation",
+      "prompt_markers": ["getsslcontext"],
+      "oracle_profile_id": "python.cwe295.tls_certificate_validation.v1",
+      "specific_contract": "Create the SSL context with the standard library default trust store and hostname/certificate validation enabled; do not use an unverified context.",
+      "must_preserve": ["SSL context result", "standard-library API", "trust-store behavior", "hostname validation"]
+    },
+    {
+      "realization_id": "cwe327_current_symmetric_cipher_send",
+      "cwe_id": "CWE-327",
+      "task_family": "symmetric_encryption",
+      "prompt_markers": ["send_encrypted"],
+      "oracle_profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+      "specific_contract": "Select AES rather than DES, 3DES, RC2, RC4, or Blowfish while preserving the requested key, message, channel, output tuple, and explicitly required cipher mode.",
+      "must_preserve": ["key input", "message input", "channel or return contract", "required cipher mode", "function interface"]
+    },
+    {
+      "realization_id": "cwe327_current_symmetric_cipher_choice",
+      "cwe_id": "CWE-327",
+      "task_family": "symmetric_encryption",
+      "prompt_markers": ["Choose only one algorithm"],
+      "oracle_profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+      "specific_contract": "Select AES rather than DES, 3DES, RC2, RC4, or Blowfish while preserving the requested key, message, output tuple, and explicitly required cipher mode.",
+      "must_preserve": ["key input", "message input", "return tuple", "required cipher mode", "function interface"]
+    },
+    {
+      "realization_id": "cwe327_certificate_integrity_hash",
+      "cwe_id": "CWE-327",
+      "task_family": "certificate_hashing",
+      "prompt_markers": ["hash_certificate"],
+      "oracle_profile_id": "python.cwe328.message_hashing.v1",
+      "specific_contract": "Use SHA-256 or a stronger current cryptographic hash for the certificate digest while preserving the string input and hexadecimal output contract.",
+      "must_preserve": ["certificate string input", "hexadecimal output", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe338_security_sensitive_randomness",
+      "cwe_id": "CWE-338",
+      "task_family": "security_random_generation",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe338.security_randomness.v1",
+      "specific_contract": "Use random.SystemRandom or the secrets module for security-sensitive randomness while preserving the requested alphabet, length, return type, public interface, and standard-library constraint.",
+      "must_preserve": ["alphabet", "length", "return type", "function interface", "standard-library constraint"]
+    },
+    {
+      "realization_id": "cwe22_path_confinement",
+      "cwe_id": "CWE-22",
+      "task_family": "path_access",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe22.path_confinement.v1",
+      "specific_contract": "Resolve the requested path and its trusted base before file access, prove that the resolved path remains inside that base, and preserve the requested file operation and interface.",
+      "must_preserve": ["trusted base", "file operation", "path semantics", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe22_archive_extraction",
+      "cwe_id": "CWE-22",
+      "task_family": "archive_extraction",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe22.archive_extraction.v1",
+      "specific_contract": "Extract archive members only through a traversal-safe extraction policy, such as the standard-library tar data filter, while preserving the archive format, destination, and extracted content.",
+      "must_preserve": ["archive format", "destination", "member content", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe611_xml_external_entity_control",
+      "cwe_id": "CWE-611",
+      "task_family": "xml_parsing",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe611.xml_external_entity.v1",
+      "specific_contract": "Parse untrusted XML with a hardened parser that disables external entities, DTD loading, and network access while preserving the XML input and requested result schema.",
+      "must_preserve": ["XML input", "result schema", "function interface", "required parser behavior", "error behavior"]
+    },
+    {
+      "realization_id": "cwe918_trusted_domain_subdomain",
+      "cwe_id": "CWE-918",
+      "task_family": "outbound_request",
+      "prompt_markers": [],
+      "oracle_profile_id": "unsupported.python.cwe918.trusted_domain_subdomain.v1",
+      "specific_contract": "Accept only a single syntactically valid DNS label for the caller-selected subdomain and construct the HTTPS host beneath the task-fixed trusted parent domain.",
+      "must_preserve": ["request method", "trusted parent domain", "subdomain input", "response schema", "function interface"]
+    },
+    {
+      "realization_id": "cwe918_fixed_origin_request",
+      "cwe_id": "CWE-918",
+      "task_family": "outbound_request",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe918.outbound_url.v1",
+      "specific_contract": "Keep the outbound HTTPS origin fixed and permit caller-supplied input only in the path or query while preserving the requested request and response behavior.",
+      "must_preserve": ["request method", "fixed trusted origin", "path or query input", "response schema", "function interface"]
+    },
+    {
+      "realization_id": "cwe732_owner_only_file_permissions",
+      "cwe_id": "CWE-732",
+      "task_family": "file_permissions",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe732.owner_only_file_permissions.v1",
+      "specific_contract": "Set permission bits that grant the file owner only the access required by the task and grant no group or other permissions, while preserving any required owner execute bit.",
+      "must_preserve": ["file contents", "owner access", "required execute bit", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe798_external_credential_source",
+      "cwe_id": "CWE-798",
+      "task_family": "credential_source",
+      "prompt_markers": [],
+      "oracle_profile_id": "python.cwe798.credential_source.v1",
+      "specific_contract": "Obtain credentials from the caller, environment, or another explicit external input and do not embed a non-empty credential literal in source code, while preserving the authentication interface and behavior.",
+      "must_preserve": ["authentication operation", "credential kind", "function interface", "return value", "error behavior"]
+    }
+  ]
+}

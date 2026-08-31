@@ -12,7 +12,13 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 
-from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import (
+    bundle_digest,
+    file_sha256,
+    read_json,
+    verify_bundle,
+    write_bundle,
+)
 from prompt_mechanism_study.records import canonical_value, content_hash, content_id, require_text
 
 _CWE = re.compile(r"(?i)cwe[-_ ]?0*(\d+)")
@@ -487,6 +493,237 @@ def prepare_dedup_candidates(
     return report
 
 
+def build_prospective_role_census(
+    candidate_population_root: Path,
+    clusters_root: Path,
+    legacy_manifest_path: Path,
+    output: Path,
+    *,
+    candidate_artifact: str = "ready-confirmatory-task-units.json",
+    population_target_task_units: int = 240,
+) -> dict[str, Any]:
+    """Census an outcome-blind population before any prospective role split.
+
+    This step deliberately does not assign ``QUAL_DEV``, ``QUAL_ACCEPT``,
+    ``DISCOVERY``, or ``CONFIRMATION``.  It closes exact and diagnostic
+    near-duplicate leakage against every historical ``LEGACY_ONLY`` task and
+    emits the remaining unexposed population on which sample-size and role
+    allocation decisions can later be made.
+    """
+
+    if (
+        type(population_target_task_units) is not int
+        or population_target_task_units <= 0
+    ):
+        raise ValueError("population_target_task_units must be positive")
+    verify_bundle(candidate_population_root)
+    verify_bundle(clusters_root)
+    candidates = read_json(candidate_population_root / candidate_artifact)
+    clusters = read_json(clusters_root / "semantic-clusters.json")
+    diagnostic_edges = read_json(
+        clusters_root / "diagnostic-semantic-edges.json"
+    )
+    legacy_manifest = read_json(legacy_manifest_path)
+    if not isinstance(candidates, list) or not candidates:
+        raise TypeError("candidate population must be a non-empty JSON list")
+    if not isinstance(clusters, list) or not isinstance(diagnostic_edges, list):
+        raise TypeError("semantic-cluster census inputs must be JSON lists")
+    if not isinstance(legacy_manifest, dict):
+        raise TypeError("legacy role manifest must be a JSON object")
+
+    candidate_by_task: dict[str, dict[str, Any]] = {}
+    required_candidate_fields = {
+        "arms_or_outcomes_used",
+        "blocker_codes",
+        "candidate_status",
+        "final_dataset_status",
+        "language",
+        "mechanism_realization_id",
+        "oracle_profile_id",
+        "primary_cwe",
+        "representative_record_id",
+        "source_dataset",
+        "source_lineage_family",
+        "task_unit_id",
+    }
+    for value in candidates:
+        row = _object(value)
+        if not required_candidate_fields <= set(row):
+            raise ValueError("candidate population row is missing census fields")
+        task_unit_id = _text(row.get("task_unit_id"))
+        if task_unit_id in candidate_by_task:
+            raise ValueError("candidate task-unit identities are duplicated")
+        if (
+            row.get("arms_or_outcomes_used") is not False
+            or row.get("candidate_status") != "READY_CONFIRMATORY"
+            or row.get("final_dataset_status") != "INCLUDED_FINAL_DATASET"
+            or row.get("language") != "python"
+            or row.get("blocker_codes") != []
+        ):
+            raise ValueError(
+                "prospective census accepts only outcome-blind ready Python tasks"
+            )
+        candidate_by_task[task_unit_id] = row
+
+    cluster_by_record: dict[str, str] = {}
+    cluster_ids: set[str] = set()
+    for value in clusters:
+        cluster = _object(value)
+        cluster_id = _text(cluster.get("cluster_id"))
+        record_ids = cluster.get("record_ids")
+        if (
+            cluster_id in cluster_ids
+            or not isinstance(record_ids, list)
+            or not record_ids
+        ):
+            raise ValueError("semantic cluster is duplicated or empty")
+        cluster_ids.add(cluster_id)
+        for record_id in record_ids:
+            record_id = _text(record_id)
+            if record_id in cluster_by_record:
+                raise ValueError("a source record belongs to multiple task units")
+            cluster_by_record[record_id] = cluster_id
+    if not set(candidate_by_task) <= cluster_ids:
+        raise ValueError("candidate population is not covered by semantic clusters")
+
+    parent = {cluster_id: cluster_id for cluster_id in cluster_ids}
+
+    def find(value: str) -> str:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    def union(left: str, right: str) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            keep, drop = min(left_root, right_root), max(left_root, right_root)
+            parent[drop] = keep
+
+    for value in diagnostic_edges:
+        edge = _object(value)
+        if edge.get("label") not in {"same_cluster", "uncertain"}:
+            raise ValueError("diagnostic near-duplicate edge has an invalid label")
+        left = cluster_by_record.get(edge.get("left"))
+        right = cluster_by_record.get(edge.get("right"))
+        if left is None or right is None:
+            raise ValueError("diagnostic near-duplicate edge leaves the cluster universe")
+        union(left, right)
+
+    component_members: dict[str, list[str]] = defaultdict(list)
+    for cluster_id in sorted(cluster_ids):
+        component_members[find(cluster_id)].append(cluster_id)
+    group_by_cluster = {
+        cluster_id: content_id("near_duplicate_group_", tuple(members))
+        for members in component_members.values()
+        for cluster_id in members
+    }
+
+    legacy_task_events: dict[str, set[str]] = defaultdict(set)
+    legacy_task_data_ids: dict[str, set[str]] = defaultdict(set)
+    for value in legacy_manifest.get("bindings", []):
+        binding = _object(value)
+        if binding.get("data_role") != "LEGACY_ONLY":
+            raise ValueError("census input may contain only frozen legacy bindings")
+        data_id = _text(binding.get("data_id"))
+        events = binding.get("exposure_history_applies_to_all_task_units")
+        lineage = binding.get("task_unit_source_lineage")
+        if not isinstance(events, list) or not isinstance(lineage, dict):
+            raise ValueError("legacy binding lacks exposure or task provenance")
+        for task_unit_id in lineage:
+            task_unit_id = _text(task_unit_id)
+            legacy_task_data_ids[task_unit_id].add(data_id)
+            legacy_task_events[task_unit_id].update(_text(item) for item in events)
+
+    legacy_groups: dict[str, set[str]] = defaultdict(set)
+    for task_unit_id in legacy_task_events:
+        group_id = (
+            group_by_cluster[task_unit_id]
+            if task_unit_id in group_by_cluster
+            else content_id("near_duplicate_group_", (task_unit_id,))
+        )
+        legacy_groups[group_id].add(task_unit_id)
+
+    rows = []
+    exact_overlap_count = 0
+    near_duplicate_only_overlap_count = 0
+    for task_unit_id, source in sorted(candidate_by_task.items()):
+        group_id = group_by_cluster[task_unit_id]
+        exact_legacy_ids = tuple(sorted(legacy_task_data_ids.get(task_unit_id, ())))
+        near_legacy_tasks = tuple(sorted(legacy_groups.get(group_id, ())))
+        exact_overlap = bool(exact_legacy_ids)
+        near_duplicate_overlap = bool(near_legacy_tasks)
+        exact_overlap_count += exact_overlap
+        near_duplicate_only_overlap_count += near_duplicate_overlap and not exact_overlap
+        exclusion_reasons = []
+        exposure_history = set(legacy_task_events.get(task_unit_id, ()))
+        if exact_overlap:
+            exclusion_reasons.append("exact_task_unit_in_legacy_only")
+        elif near_duplicate_overlap:
+            exclusion_reasons.append("near_duplicate_group_intersects_legacy_only")
+            exposure_history.add("near_duplicate_of_legacy_exposed_task")
+        rows.append(
+            {
+                "task_unit_id": task_unit_id,
+                "near_duplicate_group_id": group_id,
+                "representative_record_id": source["representative_record_id"],
+                "source_dataset": source["source_dataset"],
+                "source_lineage_id": (
+                    f"{source['source_dataset']}:{source['source_lineage_family']}"
+                ),
+                "primary_cwe": source["primary_cwe"],
+                "mechanism_realization_id": source["mechanism_realization_id"],
+                "oracle_profile_id": source["oracle_profile_id"],
+                "exposure_history": sorted(exposure_history),
+                "legacy_data_ids": list(exact_legacy_ids),
+                "legacy_near_duplicate_task_unit_ids": list(near_legacy_tasks),
+                "prospective_role_eligible": not exclusion_reasons,
+                "prospective_exclusion_reasons": exclusion_reasons,
+                "arms_or_outcomes_used": False,
+            }
+        )
+
+    available = sum(bool(row["prospective_role_eligible"]) for row in rows)
+    report: dict[str, Any] = {
+        "schema_version": "1.0",
+        "status": "PROSPECTIVE_ROLE_CENSUS_COMPLETE_ROLE_ALLOCATION_BLOCKED",
+        "candidate_task_units": len(rows),
+        "prospective_unexposed_task_units": available,
+        "legacy_exact_overlap_count": exact_overlap_count,
+        "legacy_near_duplicate_only_overlap_count": near_duplicate_only_overlap_count,
+        "population_target_task_units": population_target_task_units,
+        "population_target_met": available >= population_target_task_units,
+        "role_assignment_frozen": False,
+        "formal_use_authorized": False,
+        "unassigned_roles": [
+            "QUAL_DEV",
+            "QUAL_ACCEPT",
+            "DISCOVERY",
+            "CONFIRMATION",
+        ],
+        "candidate_population_bundle_sha256": bundle_digest(
+            candidate_population_root
+        ),
+        "candidate_artifact": candidate_artifact,
+        "semantic_clusters_bundle_sha256": bundle_digest(clusters_root),
+        "legacy_manifest_sha256": file_sha256(legacy_manifest_path),
+        "near_duplicate_rule": (
+            "semantic_task_unit_plus_same_or_uncertain_diagnostic_components_v1"
+        ),
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        output,
+        {
+            "legacy-bindings.json": legacy_manifest.get("bindings", []),
+            "task-units.json": rows,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def _load_sallm(root: Path) -> _Batch:
     source = root / "Dataset/dataset.jsonl"
     payload = source.read_bytes()
@@ -904,5 +1141,8 @@ __all__ = [
     "DatasetExclusion",
     "DatasetRecord",
     "ProvisionalCluster",
+    "build_prospective_role_census",
+    "freeze_contracts",
+    "prepare_dedup_candidates",
     "prepare_datasets",
 ]

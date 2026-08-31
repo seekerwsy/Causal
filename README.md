@@ -10,7 +10,13 @@ The normative design is the
 The [reviewer guide](docs/reviewer-guide.md) maps that design to the active
 entry point, artifacts, implementation, and verification commands.
 
-## One active method
+The normative successor is currently `SPECIFIED_DRAFT`, prospective protocol
+`phase-context-policy-v3`. It is not authorized for formal discovery or
+confirmation. Existing schema-2.x selector/successor and schema-1.x factorial
+commands remain reviewable pre-cutover/legacy boundaries; they do not establish
+that the target method was executed.
+
+## One normative method
 
 The method is one linear, seven-stage path:
 
@@ -50,6 +56,15 @@ frozen files retain physical fields such as `semantic_cluster_id`; those names
 are immutable coordinates, not a second analysis unit. A **Prompt TSG** is a
 typed semantic representation of the prompt. Its edges are not causal edges,
 and generated code is neither a primary-PAG variable nor a causal mediator.
+
+The draft target separates repeatable `QUAL_DEV`, one-shot unexposed
+`QUAL_ACCEPT`, formal `DISCOVERY`, held-out `CONFIRMATION`, and `LEGACY_ONLY`
+data with task-unit and near-duplicate firewalls. It also uses two correctly
+timed freezes: discovery rules are sealed before formal discovery outcomes;
+selected slots, the shared confirmation union, assignments, and analysis are
+sealed afterward but before confirmation outcomes. Both freeze builders and
+their independent verifier are implemented and tested, but no formal freeze
+artifact exists because the prospective inputs have not passed qualification.
 
 ## Intervention families
 
@@ -91,16 +106,18 @@ coverage. Demo, smoke, calibration, and development-canary outputs are never
 confirmatory evidence.
 
 The current outcome-blind candidate-data audit accounts for all 2,165
-conservative task units. It identifies 1,229 strict contracts and 150 Python
-task units that presently satisfy the contract, mechanism, runtime, and local
-Oracle gates. The planned 240-task Python population is therefore not yet
-filled. Separate inventories retain 102 quality-cleared C/C++ memory-safety
+conservative task units. Its quality-only final dataset contains 1,217 task
+units across nine languages; mechanism, Oracle, runtime, and current study
+scope do not control this admission. Within that dataset, 164 Python task units
+presently satisfy the contract, mechanism, runtime, and local Oracle gates. The
+planned 240-task Python population is therefore not yet filled. Separate
+inventories retain 102 quality-cleared C/C++ memory-safety
 candidates and all 28 BaxBench scenarios, but both replication runtimes remain
 unqualified. Exact counts, hashes, Oracle choices, and blockers are in the
 [final candidate-data audit](docs/experiments/2026-08-31-final-candidate-data-audit.md).
 
-The active successor and schema-1.1 factorial implementations are specified,
-implemented, and reviewer-tested. Fresh semantic curation and functional
+The pre-cutover successor and schema-1.1 factorial implementations are
+specified, implemented, and reviewer-tested under their own contracts. Fresh semantic curation and functional
 contracts are complete. Multiple prospectively frozen external Prompt TSG
 attempts nevertheless failed Gate C. The latest DevEval run completed all 31
 graphs but reached only 27/31 exact matches, with two false-positive present
@@ -121,8 +138,9 @@ migrated or reinterpreted as active-protocol results:
 
 ## Entry point and reproduction
 
-The package installs one command: `prompt-mechanism-study`. Its subcommands are
-explicit stage boundaries in the same method:
+The package installs one command: `prompt-mechanism-study`. Until the `3.x`
+cutover, its selector/runner subcommands expose reviewable migration and legacy
+stage boundaries rather than a claim-bearing execution of the draft target:
 
 ```text
 prompt-mechanism-study selector-study --help
@@ -131,7 +149,7 @@ prompt-mechanism-study successor-experiment --help
 prompt-mechanism-study factorial-experiment --help
 ```
 
-An active factorial run requires a separately verified pre-outcome freeze:
+A pre-cutover factorial run requires a separately verified pre-outcome freeze:
 
 ```text
 prompt-mechanism-study factorial-experiment freeze FREEZE \
@@ -151,22 +169,41 @@ prompt-mechanism-study factorial-experiment verify \
   data/formal/results/factorial-sql-confirm-qwen35-v3
 ```
 
-Run the maintained reviewer invariant suite only when needed:
+The prospective target now has one read-only result-package boundary:
 
 ```text
-python -m pytest -q
+prompt-mechanism-study target-study verify-result TARGET_SCHEMA_3_RESULT
 ```
 
-After a method-level change, the smallest zero-network active-path reproduction
-is:
+That command requires the exact schema-3.0 package containing the data-role
+manifest, accepted budget lineage, both timed freezes, the target randomization
+plan, shared model-invariant task-policy bundles, canonical assignments, shared
+evidence, fixed-slot yields, report authorization (or explicit null), RQ tables,
+and an independently replayed receipt. The verifier reconstructs the complete
+four-arm ordering, variant digests, and nullable provider seeds and rejects legacy-shaped
+bundles. No tracked formal target package exists yet, so this command does not
+authorize or start discovery, provider calls, or confirmation. The index does
+not replace the raw responses, measurement records, frozen inputs, execution
+environment, command, or provider ledger that its formal references require.
+
+Run the target reviewer invariant suite:
 
 ```text
-python -m pytest -q -m milestone tests/test_factorial_reviewer_smoke.py
+.venv\Scripts\python.exe -m pytest -m reviewer -q
 ```
 
-It closes 16 assignments through freeze, generation fixtures, the real local
-Security Oracle, outcome assembly, inference, and independent verification.
-It writes only temporary artifacts and has `scientific_claim_allowed=false`.
+Run the complete retained repository suite separately:
+
+```text
+.venv\Scripts\python.exe -m pytest -q -o addopts=""
+```
+
+The current expected results are 59 reviewer tests and 170 total tests. The
+reviewer suite includes a synthetic end-to-end target closure through both
+timed freezes, assigned-arm ITT, exact on-disk package writing, read-only CLI
+verification, independent scientific replay, and report authorization. That
+fixture writes only to a temporary test directory, validates implementation
+only, and is never reported as a study result.
 
 Historical execution code is kept in Git history and historical result bundles,
 not as a second live runner. Deployment incidents, provider tuning, calibration

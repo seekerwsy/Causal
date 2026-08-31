@@ -45,7 +45,7 @@ def test_legacy_profile_qualification_rejects_target_extensions(tmp_path: Path) 
     output = tmp_path / "qualification"
     report = qualify_local_security_profiles(
         Path.cwd(),
-        Path("data/method/mechanism-registry-v1.json"),
+        Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json"),
         Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),
         output,
     )
@@ -67,7 +67,7 @@ def test_target_profile_qualification_extends_without_mutating_legacy(
     output = tmp_path / "target-qualification"
     report = qualify_target_security_profiles(
         Path.cwd(),
-        Path("data/method/mechanism-registry-v1.json"),
+        Path("data/method/phase-context-policy-v3-mechanism-registry-v1.json"),
         (
             Path("data/oracle-calibration/prompt-tsg-security-profiles-v2-cases.json"),
             Path(

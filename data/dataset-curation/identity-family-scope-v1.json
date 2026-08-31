@@ -1,0 +1,127 @@
+{
+  "schema_version": "1.0",
+  "decision_id": "identity-family-scope-v1",
+  "decided_on": "2026-08-31",
+  "decision_basis": "complete_outcome_blind_quality_census",
+  "arms_or_outcomes_used": false,
+  "source_candidate_bundle_sha256": "bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886",
+  "family_definition": {
+    "language": "python",
+    "planned_cwes": ["CWE-200", "CWE-287", "CWE-306", "CWE-732", "CWE-798", "CWE-862"],
+    "observed_cwes": ["CWE-200", "CWE-306", "CWE-732", "CWE-798", "CWE-862"],
+    "zero_count_cwes": ["CWE-287"],
+    "quality_qualified_task_units": 48,
+    "former_planning_target": 60,
+    "planning_target_is_admission_gate": false,
+    "scope_rule": "retain all 48 quality-qualified task units; measurement support determines the analysis stratum, not data-set membership"
+  },
+  "measurement_strata": {
+    "qualified_static": {
+      "count": 17,
+      "formal_status": "READY_CONFIRMATORY",
+      "task_unit_ids": [
+        "semantic_cluster_261f07d724b3a7cff31109a969d565374c8e12c41af7a152876ecb6575d93d13",
+        "semantic_cluster_3b12df710780def37b3c9958c4e15f0129c3393bd221aa5f09bd9a044ca66528",
+        "semantic_cluster_4aaf9d9afc405698809e446f0b069843902b9e89484505d72d9e8608a4bbf1c2",
+        "semantic_cluster_59812182b7a9aae4fffa4e8f662c193bffa742382b32043b2f9da469c7d348b7",
+        "semantic_cluster_5bf57b0a8a76d03aab8c8fbb1024166b839a8783c869ce146bce9309df05d6b6",
+        "semantic_cluster_7e2372392768cd39ec885579cae5a9523b6f860d24423620f41c5e5fa1a6377e",
+        "semantic_cluster_817f2ea3bf7772ffdcc137f79d40410b25d660b6d7c9c8cc1c3bf041a8b6c55b",
+        "semantic_cluster_81b13accc5cd0403b4aaba17bc6d23cf290e6f3f804631f21eeae32c3aec78cd",
+        "semantic_cluster_9613b4d5826e71f6642517e271efa88cb79a499e5e7a57ad238988e67cbaae28",
+        "semantic_cluster_9e8ce345bed6c59f82c354b8bdb06987f129c2b5051ab2af0849a3d1334ec2a4",
+        "semantic_cluster_af5736a2ac71f6afb140d19663bdf50f8d6df54bfa1a01f4934b616214d0560c",
+        "semantic_cluster_b0c74c45c90f4e8dcceb4566c5383b5069bfa7b6c9052aa4f149e571b9c2bf67",
+        "semantic_cluster_b76b696ba150261b9e3286aaf1e0683733cba108b19ca20f524c2d34ef8b53ea",
+        "semantic_cluster_bc06aa59a4c5ee901a93477c5cf2d38661acc78e3b0160538cd6d842958f8d1c",
+        "semantic_cluster_c6fbb2439d38fbabc71ed78f0e8da1621c581d7a79b30237873f35a8399fe0f0",
+        "semantic_cluster_d217f85d2fe0f72a3281e1621e6c7cec3da5111bcbaed4bc37b45defaddf2ce5",
+        "semantic_cluster_d9400b72a49991c18f02d85eb77819daae5203e1fcdad49384fc458606e5657c"
+      ]
+    },
+    "source_native_safety_test_candidate": {
+      "count": 20,
+      "formal_status": "PENDING_EXECUTABLE_ORACLE_QUALIFICATION",
+      "qualification_rule": "the source contains a task-specific unauthorized or sensitive-data safety boundary separable from allowed behavior; source identity and test polarity were inspected without model outcomes",
+      "task_unit_ids": [
+        "semantic_cluster_04795bb3b3275d79ab8dfcac74eeb07f3d0f6dd2149832a73ee5097e8f5f243e",
+        "semantic_cluster_06e2191c5a245f0052de00e79e89a0990e672e8c678cb173aad8bfc9525a14a0",
+        "semantic_cluster_2fa86f9dcd82b4e2e08c5adbd1fa65118f319191b6ca399b7d29798745c16c34",
+        "semantic_cluster_50277bc647c4ee670418ad1b072c83034a91debeed36cddbf6483fa1f88dbb71",
+        "semantic_cluster_5f1fcf9b1840384e52b9bff6e5e160c1cd16cbc7c98e0d2e2d51a7bc98a25fe3",
+        "semantic_cluster_65aa3517879267c6bd32fbade433b779e8acda26a60a35f1b31c92b0987d3dc6",
+        "semantic_cluster_6a6edc5abe3a8988c1b1fa68d432e09cebe035a2fc2717ee8852c6adfe8cdd21",
+        "semantic_cluster_7334921ff11eae081d4b64e643c3a3d198103257fa848727a456be5b98abf2d6",
+        "semantic_cluster_8e25a4cb524cd05bcec346848350c1d78b5cdc6e9a0a0afaf7196054162fce48",
+        "semantic_cluster_955623612c857f63b92341d7b6b68e230b14324281a2a491d0b4aa7cd79bae86",
+        "semantic_cluster_9f0f71879905ba207ef08c9332b8121846b8f5f4fefa2ec9da8d7542056b80f4",
+        "semantic_cluster_ae02724b842795c28fc3461e62b4c8c313627096e599e2372916c7e9413ac0d9",
+        "semantic_cluster_b8daab81c5dc7bd154ad3321522975503bb60eddf046383ec7d2f3bf70d7d19a",
+        "semantic_cluster_b9146f51dcb40cf557973086d2239ce7ee467256484ad30f498f4f12ff488676",
+        "semantic_cluster_e3672a50702f03d9e4fcf18aa977ccc68438c252c2a622c2ab69cd1b082dffa4",
+        "semantic_cluster_e3a303d724af6b5d998f9cd2b2f307de8bda606d64741000c6485b8018df33a4",
+        "semantic_cluster_f2d4e0b00f0a2ce70b706712a6e84b4a47f0583f4b9ca5e151f9a0ec0a247429",
+        "semantic_cluster_f34bc6a683503e54d50c4d97a3eb2993c6409ece077a6e5265518e7a7fae5cab",
+        "semantic_cluster_f38e72f23734d7156ee928426deedeee17d4029f144b47649eaa394c84e0650c",
+        "semantic_cluster_ff9f45d7aa26dec4f3b202aef92d6fd93d4ef6b8a4ba78946c9702f795a76523"
+      ]
+    },
+    "contextual_or_incomplete_oracle": {
+      "count": 11,
+      "formal_status": "PENDING_ORACLE",
+      "task_unit_ids": [
+        "semantic_cluster_04edfe5279ca598fc628c4912a60c5657c0f80d6aa90b0518073c78bbe2a3457",
+        "semantic_cluster_24e1a214df5104580a881cfa4d4906c56159463d0240f87b6556d092f4bdd178",
+        "semantic_cluster_4ac3917181f237708d7bdb690a6d366c3807920693733c218171ae10a0fdf4b5",
+        "semantic_cluster_50665e20f2b687d49439725feb5be30778edd451716422d6fb6bb998e302f862",
+        "semantic_cluster_7b5f41f891c5be07462234797d64ef4e9c6ae8cb0c0561c22376351b68f947fc",
+        "semantic_cluster_b573be695397af3d2248ca0d47b36fad6c1042f64d453ccdf166a61520d53892",
+        "semantic_cluster_b72759b6d0101a1a16b8b6228fc589d61a12eb17e887394e6a2e7efb4d6c6b7c",
+        "semantic_cluster_d3acdf9a5d6553b8d9fa68a64f93a5842137f19267c4d2091b4a555342e83783",
+        "semantic_cluster_d41534c6490631fe3dfe41dcc023236efa2e905bba6ad067e1b0c9e147f11558",
+        "semantic_cluster_d467b9fc9a57b2b32fca930cf68f075c534050f921e5acfcf92c23079f8198b3",
+        "semantic_cluster_f24512ad0ff750ef3ab5e8419cd40604e1bd1504b1b334e2f4b00fbaac1752ac"
+      ]
+    }
+  },
+  "source_test_audit": {
+    "accepted_by_cwe": {"CWE-200": 5, "CWE-862": 15},
+    "accepted_by_format": {
+      "secodeplt_explicit_capability_safety_split": 9,
+      "codesec_eval_audited_assertion_split_required": 11
+    },
+    "rejected_or_incomplete": [
+      {
+        "task_unit_id": "semantic_cluster_b72759b6d0101a1a16b8b6228fc589d61a12eb17e887394e6a2e7efb4d6c6b7c",
+        "reason": "the SALLM CWE-200 vulnerability assertions expect leaked values to be present and therefore cannot directly serve as a secure-label Oracle"
+      },
+      {
+        "task_unit_id": "semantic_cluster_d41534c6490631fe3dfe41dcc023236efa2e905bba6ad067e1b0c9e147f11558",
+        "reason": "the SALLM CWE-306 source snapshot contains the Dockerfile and requirements but no referenced executable test module"
+      }
+    ],
+    "source_files": [
+      {
+        "path": "datasets/source-inventory/CodeSecEval-HF-c3ffce09269f2d7b092888efe05d070b6fcb97f5/data/SecEvalBase/test.jsonl",
+        "sha256": "5022bea555e8afb4020e1e1091f64706e8658a317fd1dd9b809cff9f20f3275f"
+      },
+      {
+        "path": "datasets/source-inventory/CodeSecEval-HF-c3ffce09269f2d7b092888efe05d070b6fcb97f5/data/SecEvalPlus/test.jsonl",
+        "sha256": "52f66e3f2df24355e8097278ef6519fa2d6f78c220740b0de73090c1930e2584"
+      },
+      {
+        "path": "datasets/source-inventory/SeCodePLT-1f3da9ee48e0046359903cba0cc48d03665f96d5/generate_dataset/data/200/succeed_python_list.json",
+        "sha256": "544444f35eca9992556874d19ded5f4376bfbada697d108e33cd7dc0b226bc1e"
+      },
+      {
+        "path": "datasets/source-inventory/SeCodePLT-1f3da9ee48e0046359903cba0cc48d03665f96d5/generate_dataset/data/862/succeed_python_list.json",
+        "sha256": "8dd860c8be028608e2baf83674a800c1ea4e357ac41e5be421a7b6b9155c7584"
+      }
+    ]
+  },
+  "next_gate": {
+    "required": "qualify one task-bound executable Security Oracle that reports safety separately from capability",
+    "forbidden_shortcut": "do not classify the combined source test as a security outcome and do not treat a failed capability assertion as insecure",
+    "formal_execution_authorized": false
+  }
+}

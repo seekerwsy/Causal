@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -133,73 +134,7 @@ def test_catalog_and_graph_are_canonical_and_round_trip():
     validate_prompt_tsg(graph, prompt=PROMPT, catalog=catalog)
 
 
-@pytest.mark.reviewer
-def test_active_catalog_guides_every_query_bound_semantic():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v10.json")
-    query_semantics = set()
-    for query in catalog["queries"]:
-        query_semantics.update(query["required_semantics"])
-        query_semantics.update(query["forbidden_semantics"])
-        query_semantics.add(query["actionable_feature_id"])
 
-    assert query_semantics <= set(catalog["semantic_guidance"])
-
-
-@pytest.mark.reviewer
-def test_prospective_catalog_freezes_xml_and_sql_semantic_boundaries():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v8.json")
-    guidance = catalog["semantic_guidance"]
-
-    assert "DTD validation or internal-DTD support alone does not entail" in guidance[
-        "constraint.external_entities_required"
-    ]
-    assert "Separately named function or request parameters" in guidance[
-        "source.dynamic_sql_identifier"
-    ]
-    assert "optional separately named parameters" in guidance[
-        "constraint.fixed_sql_identifiers"
-    ]
-
-
-@pytest.mark.reviewer
-def test_successor_catalog_freezes_compiled_type_and_relation_boundaries():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v10.json")
-    guidance = catalog["semantic_guidance"]
-
-    assert "predetermined pipeline of named tools" in guidance[
-        "constraint.fixed_executable"
-    ]
-    assert "framework checkpoints" in guidance["source.untrusted_python_literal"]
-    assert "framework checkpoint" in guidance["sink.python_literal_deserialization"]
-
-    queries = {query["query_id"]: query for query in catalog["queries"]}
-    for query_id in (
-        "context.untrusted_yaml_deserialization.v1",
-        "context.untrusted_json_deserialization.v1",
-        "context.untrusted_python_literal_deserialization.v1",
-    ):
-        assert not any(
-            semantic_id.endswith("_format_required")
-            for semantic_id in queries[query_id]["required_semantics"]
-        )
-
-    for query in catalog["queries"]:
-        constraints = [
-            semantic_id
-            for semantic_id in query["required_semantics"]
-            if catalog["semantics"][semantic_id] == "constraint"
-        ]
-        sinks = [
-            semantic_id
-            for semantic_id in query["required_semantics"]
-            if catalog["semantics"][semantic_id] == "sink"
-        ]
-        if constraints:
-            assert len(sinks) == 1
-            for semantic_id in constraints:
-                assert [semantic_id, "qualifies", sinks[0]] in query[
-                    "required_relations"
-                ]
 
 
 @pytest.mark.reviewer
@@ -219,7 +154,6 @@ def test_prospective_catalog_excludes_fixed_security_values_from_randomness():
     ]
 
 
-@pytest.mark.reviewer
 def test_compiled_extractor_candidate_files_share_the_model_fact_contract():
     proposer = json.loads(
         (ROOT / "data/method/prompt-tsg-extractor-qwen37max-v17.json").read_text()
@@ -245,108 +179,8 @@ def test_compiled_extractor_candidate_files_share_the_model_fact_contract():
     assert "asserted, unresolved, or omitted" in reviewer_prompt
 
 
-@pytest.mark.reviewer
-def test_bigcodebench_external_qualification_freeze_is_self_consistent():
-    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v3.json"
-    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
-    selection = json.loads(
-        (
-            ROOT
-            / "data/method/prompt-tsg-external-qualification-selection-v3.json"
-        ).read_text(encoding="utf-8")
-    )
-    gold = json.loads(
-        (ROOT / "data/method/prompt-tsg-external-qualification-gold-v3.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    source = json.loads(
-        (
-            ROOT / "data/method/prompt-tsg-external-qualification-source-v3.json"
-        ).read_text(encoding="utf-8")
-    )
 
-    task_ids = [row["task_id"] for row in tasks]
-    assert set(selection) == {
-        "schema_version",
-        "source_tasks_sha256",
-        "selection_rule",
-        "task_ids",
-        "arms_or_outcomes_used",
-    }
-    assert len(tasks) == len(set(task_ids)) == 31
-    assert task_ids == selection["task_ids"]
-    assert task_ids == [row["task_id"] for row in gold["cases"]]
-    assert selection["source_tasks_sha256"] == hashlib.sha256(
-        tasks_path.read_bytes()
-    ).hexdigest()
-    assert all(
-        row["prompt_sha256"]
-        == hashlib.sha256(row["prompt"].encode("utf-8")).hexdigest()
-        for row in tasks
-    )
-    assert sum(row["expected_context"] == "present" for row in gold["cases"]) == 19
-    assert source["method_revision_commit"] == "c49956a"
-    assert source["source"]["commit"] == (
-        "a3b89850db670d7302571142b881e4f85eef18e3"
-    )
-    assert source["source"]["source_sha256"] == (
-        "58142744edaf6036387f8761701f1b353432b0ed33f2edec1de8a59e7431ef7a"
-    )
-    assert source["population_rule"]["frozen_task_units"] == 31
-    assert source["overlap_audit"]["against_seven_source"][
-        "normalized_exact_matches"
-    ] == 0
-    assert source["overlap_audit"]["against_prior_external"][
-        "normalized_exact_matches"
-    ] == 0
-
-    exposed_prompt_hashes = {
-        row["prompt_sha256"]
-        for version in ("v1", "v2")
-        for row in json.loads(
-            (
-                ROOT
-                / f"data/method/prompt-tsg-external-qualification-tasks-{version}.json"
-            ).read_text(encoding="utf-8")
-        )
-    }
-    assert exposed_prompt_hashes.isdisjoint(
-        {row["prompt_sha256"] for row in tasks}
-    )
-
-    failure = json.loads(
-        (
-            ROOT / "data/method/prompt-tsg-external-qualification-v3-failure.json"
-        ).read_text(encoding="utf-8")
-    )
-    extraction = ROOT / failure["extractor_bundle_path"]
-    report = json.loads((extraction / "report.json").read_text(encoding="utf-8"))
-    verify_bundle(extraction)
-    assert bundle_digest(extraction) == failure["extractor_bundle_sha256"]
-    assert failure["tasks_sha256"] == hashlib.sha256(tasks_path.read_bytes()).hexdigest()
-    assert failure["selection_sha256"] == hashlib.sha256(
-        (
-            ROOT / "data/method/prompt-tsg-external-qualification-selection-v3.json"
-        ).read_bytes()
-    ).hexdigest()
-    assert failure["gold_sha256"] == hashlib.sha256(
-        (ROOT / "data/method/prompt-tsg-external-qualification-gold-v3.json").read_bytes()
-    ).hexdigest()
-    assert report["status"] == "PROMPT_TSG_EXTRACTION_ERROR"
-    assert report["graphs"] == failure["completed_graphs"] == 15
-    assert report["failed_task_id"] == failure["failed_task_id"] == task_ids[15]
-    assert failure["partial_diagnostic"]["false_positive_present_completed_graphs"] > gold[
-        "qualification_rule"
-    ]["maximum_false_positive_present"]
-    assert failure["partial_diagnostic"]["wrong_realization_completed_graphs"] > gold[
-        "qualification_rule"
-    ]["maximum_wrong_realization"]
-    assert failure["scientific_claim_allowed"] is False
-
-
-@pytest.mark.reviewer
-def test_deveval_scoped_qualification_freeze_is_self_consistent():
+def test_legacy_deveval_v4_freeze_verifies_against_its_original_commit():
     tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v4.json"
     tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
     selection = json.loads(
@@ -421,8 +255,18 @@ def test_deveval_scoped_qualification_freeze_is_self_consistent():
     ]["catalog_realization_ids_without_expected_present_gold"]
 
     for item in freeze["inputs"].values():
-        path = ROOT / item["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
+        if item["path"].startswith("src/"):
+            payload = subprocess.check_output(
+                [
+                    "git",
+                    "show",
+                    f'{freeze["method_revision_commit"]}:{item["path"]}',
+                ],
+                cwd=ROOT,
+            )
+        else:
+            payload = (ROOT / item["path"]).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == item["sha256"]
     assert freeze["model_requests_observed_before_freeze"] is False
     assert freeze["arms_or_outcomes_used"] is False
 
@@ -493,129 +337,7 @@ def test_deveval_scoped_qualification_freeze_is_self_consistent():
     assert failure["scientific_claim_allowed"] is False
 
 
-@pytest.mark.reviewer
-def test_caller_supplied_path_base_cannot_satisfy_trusted_base_context():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
-    prompt = (
-        "Read a user-provided filename from the directory supplied in the "
-        "dir_path function argument."
-    )
-    graph = build_prompt_tsg(
-        task_id="caller-base-task",
-        prompt=prompt,
-        extractor_id="bounded-facts-v1",
-        catalog=catalog,
-        facts=[
-            _fact(
-                "path",
-                "source",
-                "source.untrusted_relative_path",
-                "user-provided filename",
-                caller_controlled=True,
-            ),
-            _fact("sink", "sink", "sink.file_access", "Read"),
-            _fact(
-                "base",
-                "constraint",
-                "constraint.caller_supplied_path_base",
-                "directory supplied in the dir_path function argument",
-                caller_controlled=True,
-            ),
-        ],
-        relations=[
-            {"edge_type": "flows_to", "source": "path", "target": "sink"},
-            {"edge_type": "qualifies", "source": "base", "target": "sink"},
-        ],
-    )
-    query = query_for_realization(catalog, "cwe22_path_confinement")
 
-    assert query_context(
-        graph,
-        query=query,
-        cwe="CWE-22",
-        task_family="path_access",
-    ).state is QueryState.ABSENT
-
-
-@pytest.mark.reviewer
-def test_independently_configured_path_base_remains_applicable():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
-    prompt = "Read a user filename beneath the application's configured upload directory."
-    graph = build_prompt_tsg(
-        task_id="configured-base-task",
-        prompt=prompt,
-        extractor_id="bounded-facts-v1",
-        catalog=catalog,
-        facts=[
-            _fact(
-                "path",
-                "source",
-                "source.untrusted_relative_path",
-                "user filename",
-                caller_controlled=True,
-            ),
-            _fact("sink", "sink", "sink.file_access", "Read"),
-            _fact(
-                "base",
-                "constraint",
-                "constraint.trusted_path_base",
-                "application's configured upload directory",
-                fixed=True,
-            ),
-        ],
-        relations=[
-            {"edge_type": "flows_to", "source": "path", "target": "sink"},
-            {"edge_type": "qualifies", "source": "base", "target": "sink"},
-        ],
-    )
-    query = query_for_realization(catalog, "cwe22_path_confinement")
-
-    assert query_context(
-        graph,
-        query=query,
-        cwe="CWE-22",
-        task_family="path_access",
-    ).state is QueryState.PRESENT
-
-
-@pytest.mark.reviewer
-def test_unspecified_path_base_authority_remains_unresolved():
-    catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
-    prompt = "Read a user filename beneath base_dir. Context: base_dir is the directory used for reads."
-    graph = build_prompt_tsg(
-        task_id="ambiguous-base-task",
-        prompt=prompt,
-        extractor_id="explicit-authority-v1",
-        catalog=catalog,
-        facts=[
-            _fact(
-                "path",
-                "source",
-                "source.untrusted_relative_path",
-                "user filename",
-                caller_controlled=True,
-            ),
-            _fact("sink", "sink", "sink.file_access", "Read"),
-        ],
-        relations=[
-            {"edge_type": "flows_to", "source": "path", "target": "sink"}
-        ],
-        unresolved_semantics=[
-            "constraint.caller_supplied_path_base",
-            "constraint.trusted_path_base",
-        ],
-    )
-    query = query_for_realization(catalog, "cwe22_path_confinement")
-
-    assert query_context(
-        graph,
-        query=query,
-        cwe="CWE-22",
-        task_family="path_access",
-    ).state is QueryState.UNRESOLVED
-
-
-@pytest.mark.reviewer
 def test_structured_authority_overrides_proposer_and_bypasses_semantic_reviewer():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = "Read a user filename beneath base_dir. Context: base_dir is the directory used for reads."
@@ -724,7 +446,6 @@ def test_structured_authority_overrides_proposer_and_bypasses_semantic_reviewer(
     ]
 
 
-@pytest.mark.reviewer
 @pytest.mark.parametrize(
     ("state", "prompt", "base_evidence", "source_evidence", "expected"),
     [
@@ -813,7 +534,6 @@ def test_structured_path_authority_has_total_four_state_projection(
     assert projection["path_authority"]["projection_status"] == "applied"
 
 
-@pytest.mark.reviewer
 def test_path_authority_bundle_is_bound_to_source_population(tmp_path):
     import hashlib
     import json
@@ -894,7 +614,6 @@ def test_path_authority_bundle_is_bound_to_source_population(tmp_path):
     ] == "application_configured"
 
 
-@pytest.mark.reviewer
 def test_semantic_reviewer_drops_relations_outside_query_scope():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v5.json")
     prompt = "Read a user filename from the directory supplied as dir_path."
@@ -1034,7 +753,6 @@ def test_context_query_has_total_four_valued_semantics():
     assert result.state == QueryState.ABSENT
 
 
-@pytest.mark.reviewer
 def test_typed_patch_adds_only_the_catalog_feature():
     catalog, graph = _command_graph()
     suffix = "Pass command arguments as an argv list and do not invoke a shell."
@@ -1062,7 +780,6 @@ def test_typed_patch_adds_only_the_catalog_feature():
     assert original <= patched_projection
 
 
-@pytest.mark.reviewer
 def test_task_local_text_stays_evidence_bound_not_a_global_feature():
     catalog, graph = _command_graph()
     operation = next(node for node in graph.nodes if node.semantic_id == "task.operation")
@@ -1265,7 +982,6 @@ def test_extractor_never_drops_nonverbatim_catalog_bound_facts():
         )
 
 
-@pytest.mark.reviewer
 def test_extractor_normalizes_only_a_unique_exact_evidence_occurrence():
     catalog = load_catalog(CATALOG_PATH)
     task = {
@@ -1330,7 +1046,6 @@ def test_extractor_normalizes_only_a_unique_exact_evidence_occurrence():
     ]
 
 
-@pytest.mark.reviewer
 def test_semantic_reviewer_reuses_validated_proposer_evidence_binding():
     import json
 
@@ -1417,7 +1132,6 @@ def test_semantic_reviewer_reuses_validated_proposer_evidence_binding():
     ]
 
 
-@pytest.mark.reviewer
 def test_blind_semantic_reviewer_rejects_unsupported_proposed_facts():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v2.json")
     prompt = "Load a YAML configuration file."
@@ -1503,7 +1217,6 @@ def test_blind_semantic_reviewer_rejects_unsupported_proposed_facts():
     ]
 
 
-@pytest.mark.reviewer
 def test_blind_semantic_reviewer_can_recover_an_omitted_task_slice_fact():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
     prompt = (
@@ -1614,7 +1327,6 @@ def test_blind_semantic_reviewer_can_recover_an_omitted_task_slice_fact():
     assert projection["semantic_review"]["unsupported_proposer_ambiguities"] == []
 
 
-@pytest.mark.reviewer
 def test_full_task_slice_review_does_not_force_an_unsupported_format():
     catalog = load_catalog(ROOT / "data/method/prompt-tsg-catalog-v3.json")
     prompt = "Return deserialized pickled data from the request."

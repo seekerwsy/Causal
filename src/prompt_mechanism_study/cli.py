@@ -18,6 +18,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify = commands.add_parser("verify", help="verify an exact artifact bundle")
     verify.add_argument("root", type=Path)
 
+    target_study = commands.add_parser(
+        "target-study",
+        help=(
+            "read-only verification for the prospective schema-3.0 result package; "
+            "formal execution is disabled until its scientific inputs are frozen"
+        ),
+    )
+    target_study.add_argument("phase", choices=("verify-result",))
+    target_study.add_argument("output", type=Path)
+
     judge = commands.add_parser("judge-gate", help="run the bounded Functional Judge gate")
     judge.add_argument("phase", choices=("preflight", "pilot", "remaining", "finalize"))
     judge.add_argument("output", type=Path)
@@ -458,6 +468,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "verify":
         verify_bundle(args.root)
         print("VERIFIED")
+    elif args.command == "target-study":
+        from prompt_mechanism_study.selector_verify import (
+            load_and_verify_target_result_bundle,
+        )
+
+        report = load_and_verify_target_result_bundle(args.output)
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0
     elif args.command == "discovery-population":
         from prompt_mechanism_study.prioritization import prepare_discovery_population
 

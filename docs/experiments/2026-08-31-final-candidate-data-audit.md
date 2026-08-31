@@ -45,15 +45,18 @@ No row is an `user_claim`, and no experimental outcome was used.
   `6286a2f091322b90bc7b9af28b5aafd1078d9dbe3a4a219a7af9afa19cbd634c`;
 - target Security-Oracle qualification bundle:
   `fc4216dc7cb6e8f8e0377e69e300bded30485f1725b7d855504adab3b396ab75`;
-- target eligibility policy:
-  `8360ef3f7238ad94c01b048a6be364e2f1e0199af3b507b3b8e52ec35f13466a`;
+- schema-3 mechanism registry:
+  `data/method/phase-context-policy-v3-mechanism-registry-v1.json`, SHA-256
+  `bff8b78e67520725d7cdd644b77ad7c2d6df64531bee0479a2c08ba9d1874970`;
+- schema-3 target eligibility policy:
+  `data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json`,
+  SHA-256
+  `8d8401ad3c1a45b295d4febdef8a5fb3f524e11b88f28e7a447afcd0b97792fb`;
 - current final quality-data bundle:
-  `bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886`;
-- eligibility policy:
-  `29acf991090278a109b23ea358342f4e266e24d2153409abf594a25fddbed17e`;
+  `64f1241574197ad17e64ae547c9dc611ff01add2ec2393ae2c8ba420d4f8136c`;
 - eligibility implementation:
   `src/prompt_mechanism_study/eligibility.py`, SHA-256
-  `41d6957cbb7e6e57e520af2c4007338460e92aa7562a0a346718f384b373a34b`;
+  `5f14e0fc00fff9b02f06c033632d31a5892e00d389164e99843440127681b8e8`;
 - curation implementation:
   `src/prompt_mechanism_study/curation.py`, SHA-256
   `4a28c79e45e7accf5f3124cf4bd439d8f2b5ce04835916c7b684447b855d3a6d`;
@@ -65,7 +68,16 @@ The active local paths are:
 - `.codex-runtime/mechanism-binding-adjudication-20260831-19`;
 - `.codex-runtime/contract-recovery-adjudication-20260831-10`;
 - `data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification`;
-- `.codex-runtime/dataset-final-quality-20260831-36-target-oracle-final`.
+- `data/method/phase-context-policy-v3-mechanism-registry-v1.json`;
+- `data/dataset-curation/phase-context-policy-v3-eligibility-policy-v1.json`;
+- `.codex-runtime/dataset-final-quality-20260831-38-schema3-registry-bound`.
+
+The earlier `dataset-final-quality-20260831-36-target-oracle-final` bundle is
+retained as development history but superseded because its policy pointed at
+the legacy registry path after adding target-only realizations. The corrected
+audit binds the same registry bytes under a prospective schema-3 path; its two
+independent replays are byte-identical and its substantive task counts are
+unchanged.
 
 ## Contract closure
 
@@ -102,7 +114,7 @@ finite registry candidates.
 - 2 weak evidence candidates were downgraded to unresolved.
 
 An independent replay found zero accepted evidence spans absent from the source
-prompt, zero unknown realization IDs, and zero accepted profiles outside the 12
+prompt, zero unknown realization IDs, and zero accepted profiles outside the 14
 qualified local profiles.
 
 The deterministic stages reproduced byte-for-byte: the contract-recovery
@@ -111,7 +123,7 @@ bundle digest was
 on both builds, the adjudicated binding digest was
 `089ac31dd29bb5ba89a4ba5dcd4776f8f6ad2c1e871bf3629d9f0ae59f8eef19`,
 and the current candidate-ledger bundle digest was
-`bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886`
+`64f1241574197ad17e64ae547c9dc611ff01add2ec2393ae2c8ba420d4f8136c`
 on both builds. The binding adjudication resolved 6 of the prior 21 cases and
 conservatively retained 15 as unresolved.
 
@@ -210,13 +222,31 @@ code execution, custom OpenSSL contexts, dynamic hash names, and contextual
 identity policy remain non-ready rather than being forced through a broad
 static rule.
 
+The prospective Identity population decision is now frozen in
+`data/dataset-curation/identity-family-scope-v1.json`. The former 60-task number
+is a planning target, not an admission gate. All 48 quality-qualified Identity
+tasks remain in the final data set and are partitioned without outcomes into:
+
+- 17 `READY_CONFIRMATORY` tasks with qualified static profiles (CWE-732/798);
+- 20 source-native safety-test candidates (5 CWE-200 and 15 CWE-862); and
+- 11 contextual or incomplete-Oracle tasks (6 CWE-200 and 5 CWE-306).
+
+The source-native audit is deliberately narrower than “a test file exists.”
+The four accepted SeCodePLT CWE-200 tasks and five accepted SeCodePLT CWE-862
+tasks expose explicit `capability` and `safety` partitions. The ten CWE-862 and
+one CWE-200 CodeSecEval tasks contain concrete allowed/denied or
+non-disclosure assertions, but require a frozen assertion split before they
+can be a Security Oracle. A SALLM CWE-200 test was not accepted because its
+vulnerability assertions expect leaked values to be present; the SALLM
+CWE-306 snapshot has no executable test module. Neither was relabeled merely
+to increase coverage.
+
 The remaining implementation order is therefore:
 
-1. make a prospective population decision for the identity family, whose 48
-   quality-qualified tasks cannot meet a target of 60 even with perfect
-   implementation support;
-2. review only the bounded injection and crypto task shapes that could close
-   the remaining 15- and 18-unit READY gaps with an honest Oracle;
+1. qualify one task-bound executable Security Oracle for the 20 audited cases,
+   keeping safety results separate from capability results;
+2. review only bounded injection and crypto task shapes that can close their
+   READY gaps with an honest Oracle;
 3. implement non-Python runtimes only for a separately claimed replication.
 
 The 659 non-Python final-dataset tasks remain valid data without those runtimes.
@@ -243,8 +273,7 @@ study and would not repair its identity-family population shortfall.
 The data-preparation stage is complete: every source task has a typed
 disposition, every quality-qualified task is in the final dataset, every
 currently supported Oracle is explicit, and both replication inventories are
-closed. The next scientific choice is not another curation pass. It is a
-prospective measurement-population decision: extend only defensible Oracle
-coverage, add an outcome-blind identity-family scope extension or new tasks, or
-freeze a documented shortfall amendment and power the study on the measurable
-population.
+closed. The Identity shortfall decision is no longer open. The next step is a
+bounded measurement qualification for the already identified 20 source-native
+cases; it is not another corpus-wide curation pass and it does not authorize a
+generation experiment by itself.

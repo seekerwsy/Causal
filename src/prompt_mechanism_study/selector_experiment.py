@@ -701,7 +701,7 @@ def _universe(value: Mapping[str, Any]) -> CandidateUniverseManifest:
 
 
 def _suite_plan(value: Mapping[str, Any]) -> SelectorSuitePlan:
-    _require_exact_keys(value, {"model_id", "ridge_lambda", "prediction_folds", "random_seeds", "fci_alpha", "fci_backend_version", "fci_ci_test", "fci_bootstrap_draws", "fci_depth", "fci_max_path_length", "behavior_version", "fci_background_knowledge", "fci_wrong_bk_perturbation"}, "selector suite plan")
+    _require_exact_keys(value, {"model_id", "ridge_lambda", "prediction_folds", "random_seeds", "fci_alpha", "fci_backend_version", "fci_ci_test", "fci_bootstrap_draws", "fci_depth", "fci_max_path_length", "behavior_version", "fci_background_knowledge", "fci_wrong_bk_perturbation", "fci_minimum_valid_fraction", "fci_adjacency_threshold"}, "selector suite plan")
     def rules(name):
         return tuple(
             BackgroundKnowledgeRule(item["rule_id"], item["scope_family_id"], item["bk_family_id"], item["provenance_class"], item["forbidden_from"], item["forbidden_to"])
@@ -710,7 +710,23 @@ def _suite_plan(value: Mapping[str, Any]) -> SelectorSuitePlan:
                 for raw in value[name]
             )
         )
-    return SelectorSuitePlan(value["model_id"], value["ridge_lambda"], value["prediction_folds"], tuple(value["random_seeds"]), value["fci_alpha"], value["fci_backend_version"], value["fci_ci_test"], value["fci_bootstrap_draws"], value["fci_depth"], value["fci_max_path_length"], value["behavior_version"], rules("fci_background_knowledge"), rules("fci_wrong_bk_perturbation"))
+    return SelectorSuitePlan(
+        value["model_id"],
+        value["ridge_lambda"],
+        value["prediction_folds"],
+        tuple(value["random_seeds"]),
+        value["fci_alpha"],
+        value["fci_backend_version"],
+        value["fci_ci_test"],
+        value["fci_bootstrap_draws"],
+        value["fci_depth"],
+        value["fci_max_path_length"],
+        value["behavior_version"],
+        rules("fci_background_knowledge"),
+        rules("fci_wrong_bk_perturbation"),
+        value["fci_minimum_valid_fraction"],
+        value["fci_adjacency_threshold"],
+    )
 
 
 def _selector_run(value: Mapping[str, Any]) -> SelectorRun:

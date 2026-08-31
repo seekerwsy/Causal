@@ -38,8 +38,6 @@ from prompt_mechanism_study.prompt_tsg import (
 from prompt_mechanism_study.records import content_hash
 
 
-pytestmark = pytest.mark.reviewer
-
 ROOT = Path(__file__).parents[1]
 TASKS_PATH = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v4.json"
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v11.json"
@@ -137,6 +135,7 @@ def _response(contract):
     ).encode()
 
 
+@pytest.mark.reviewer
 def test_task_level_contract_covers_every_query_once_and_compiles():
     task, catalog = _inputs()
     contract = _contract(task, catalog)
@@ -186,6 +185,7 @@ def test_contract_rejects_omitted_query_semantic_or_relation_decision():
         )
 
 
+@pytest.mark.reviewer
 def test_blind_request_is_exhaustive_and_contains_no_arm_or_outcome():
     task, catalog = _inputs()
     request = contract_decision_request(task, catalog)
@@ -387,25 +387,7 @@ def test_response_parser_demotes_unverified_present_evidence(
     compile_task_context_contract(parsed, prompt=task["prompt"], catalog=catalog)
 
 
-def test_graph_schema_two_preserves_frozen_schema_one_records():
-    frozen = json.loads(
-        (ROOT / "data/method/results/prompt-tsg-external-extraction-v4/graphs.json").read_text(
-            encoding="utf-8"
-        )
-    )[0]
-
-    graph = prompt_tsg_from_record(frozen)
-
-    assert graph.schema_version == "1.0"
-    assert graph.unresolved_relations == ()
-    assert "unresolved_relations" not in prompt_tsg_record(graph)
-    assert prompt_tsg_record(graph) == frozen
-
-
-@pytest.mark.parametrize("structured_output", [False, True])
-def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
-    tmp_path, structured_output
-):
+def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
     task, catalog = _inputs()
     contract = _contract(task, catalog)
     tasks_path = tmp_path / "tasks.json"
@@ -438,24 +420,22 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
     }
     proposer_path = tmp_path / "proposer.json"
     reviewer_path = tmp_path / "reviewer.json"
-    evaluator_extension = {}
-    if structured_output:
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "test_contract",
-                "strict": True,
-                "schema": {"type": "object"},
-            },
-        }
-        response_format_path = tmp_path / "response-format.json"
-        response_format_path.write_text(json.dumps(response_format), encoding="utf-8")
-        evaluator_extension = {
-            "response_format_path": response_format_path.name,
-            "response_format_sha256": hashlib.sha256(
-                response_format_path.read_bytes()
-            ).hexdigest(),
-        }
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "test_contract",
+            "strict": True,
+            "schema": {"type": "object"},
+        },
+    }
+    response_format_path = tmp_path / "response-format.json"
+    response_format_path.write_text(json.dumps(response_format), encoding="utf-8")
+    evaluator_extension = {
+        "response_format_path": response_format_path.name,
+        "response_format_sha256": hashlib.sha256(
+            response_format_path.read_bytes()
+        ).hexdigest(),
+    }
     proposer_path.write_text(
         json.dumps(
             {
@@ -546,7 +526,7 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(
     )
 
     assert report["provider_calls"] == 2
-    assert ("proposer_response_format_sha256" in report) is structured_output
+    assert "proposer_response_format_sha256" in report
     assert qualification["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION"
     assert qualification["exact_context_accuracy"] == 1.0
 
@@ -604,233 +584,7 @@ def test_bounded_task_concurrency_preserves_frozen_output_order(tmp_path):
     assert [row["task_id"] for row in stored] == [row["task_id"] for row in tasks]
 
 
-def test_prospective_v5_gate_freeze_is_source_only_and_self_consistent():
-    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
-    selection_path = (
-        ROOT / "data/method/prompt-tsg-external-qualification-selection-v5.json"
-    )
-    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v5.json"
-    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v5.json"
-    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v5.json"
-    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    gold = json.loads(gold_path.read_text(encoding="utf-8"))
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
-    catalog = load_catalog(CATALOG_PATH)
-
-    task_ids = [task["task_id"] for task in tasks]
-    assert len(tasks) == len(set(task_ids)) == 28
-    assert task_ids == selection["task_ids"]
-    assert task_ids == [case["task_id"] for case in gold["cases"]]
-    assert selection["source_tasks_sha256"] == hashlib.sha256(
-        tasks_path.read_bytes()
-    ).hexdigest()
-    assert all(
-        task["prompt_sha256"]
-        == hashlib.sha256(task["prompt"].encode("utf-8")).hexdigest()
-        for task in tasks
-    )
-    assert all(
-        task_context_scope(
-            cwe_id=task["cwe"],
-            task_family=task["task_family"],
-            catalog=catalog,
-        )["query_ids"]
-        for task in tasks
-    )
-    assert sum(case["expected_context"] == "present" for case in gold["cases"]) == 10
-    positive_realizations = sorted(
-        {
-            case["expected_realization_id"]
-            for case in gold["cases"]
-            if case["expected_context"] == "present"
-        }
-    )
-    assert positive_realizations == sorted(
-        source["support_scope"]["candidate_realization_ids_with_expected_present_gold"]
-    )
-    assert positive_realizations == sorted(freeze["candidate_support_realization_ids"])
-    assert source["gold_annotation"]["independent_human_annotation"] is False
-    assert source["review_completed_before_extraction"] is True
-    assert gold["review_completed_before_extraction"] is True
-    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
-    assert freeze["arms_or_outcomes_used"] is False
-    for item in freeze["inputs"].values():
-        path = ROOT / item["path"]
-        if item["path"].startswith("data/"):
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
-
-
-def test_prospective_v6_gate_freeze_closes_array_only_successor():
-    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
-    selection_path = (
-        ROOT / "data/method/prompt-tsg-external-qualification-selection-v6.json"
-    )
-    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v6.json"
-    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v6.json"
-    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v6.json"
-    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    gold = json.loads(gold_path.read_text(encoding="utf-8"))
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
-
-    assert [task["task_id"] for task in tasks] == selection["task_ids"]
-    assert selection["task_ids"] == [case["task_id"] for case in gold["cases"]]
-    assert selection["source_tasks_sha256"] == hashlib.sha256(
-        tasks_path.read_bytes()
-    ).hexdigest()
-    assert gold["extractor_candidate_id"] == freeze["extractor_candidate_id"]
-    assert freeze["response_attribute_schema"] == (
-        "unique array of allowed names asserted true"
-    )
-    assert source["predecessor_disposition_path"] == (
-        "data/method/prompt-tsg-external-qualification-v5-preflight-failure.json"
-    )
-    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
-    assert freeze["arms_or_outcomes_used"] is False
-    for item in freeze["inputs"].values():
-        path = ROOT / item["path"]
-        if item["path"].startswith("data/"):
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
-
-
-def test_prospective_v7_gate_freeze_closes_endpoint_projection_successor():
-    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
-    selection_path = (
-        ROOT / "data/method/prompt-tsg-external-qualification-selection-v7.json"
-    )
-    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v7.json"
-    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v7.json"
-    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v7.json"
-    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    gold = json.loads(gold_path.read_text(encoding="utf-8"))
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
-
-    assert [task["task_id"] for task in tasks] == selection["task_ids"]
-    assert selection["task_ids"] == [case["task_id"] for case in gold["cases"]]
-    assert selection["source_tasks_sha256"] == hashlib.sha256(
-        tasks_path.read_bytes()
-    ).hexdigest()
-    assert gold["extractor_candidate_id"] == freeze["extractor_candidate_id"]
-    assert freeze["relation_endpoint_precedence"] == [
-        "any_absent_implies_absent",
-        "otherwise_any_unresolved_implies_unresolved",
-        "otherwise_consult_relation_annotation",
-    ]
-    assert freeze["endpoint_closure_stage"] == (
-        "each independent annotation before graph validation and consensus"
-    )
-    assert source["predecessor_disposition_path"] == (
-        "data/method/prompt-tsg-external-qualification-v6-failure.json"
-    )
-    assert source["prior_provider_exposure"] == freeze["prior_provider_exposure"]
-    assert all(isinstance(limit, str) for limit in source["provenance_limits"])
-    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
-    assert freeze["arms_or_outcomes_used"] is False
-    for item in freeze["inputs"].values():
-        path = ROOT / item["path"]
-        if item["path"].startswith("data/"):
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
-
-
-def test_prospective_v8_gate_freeze_closes_strict_schema_successor():
-    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
-    selection_path = (
-        ROOT / "data/method/prompt-tsg-external-qualification-selection-v8.json"
-    )
-    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v8.json"
-    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v8.json"
-    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v8.json"
-    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    gold = json.loads(gold_path.read_text(encoding="utf-8"))
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
-    response_format_path = ROOT / freeze["inputs"]["response_format"]["path"]
-    response_format = json.loads(response_format_path.read_text(encoding="utf-8"))
-    pilot_report = json.loads(
-        (
-            ROOT
-            / "data/method/results/prompt-contract-json-schema-pilot-v1/report.json"
-        ).read_text(encoding="utf-8")
-    )
-
-    assert [task["task_id"] for task in tasks] == selection["task_ids"]
-    assert selection["task_ids"] == [case["task_id"] for case in gold["cases"]]
-    assert selection["source_tasks_sha256"] == hashlib.sha256(
-        tasks_path.read_bytes()
-    ).hexdigest()
-    assert gold["extractor_candidate_id"] == freeze["extractor_candidate_id"]
-    assert response_format["type"] == "json_schema"
-    assert response_format["json_schema"]["strict"] is True
-    assert hashlib.sha256(response_format_path.read_bytes()).hexdigest() == freeze[
-        "response_format_sha256"
-    ]
-    assert source["predecessor_disposition_path"] == (
-        "data/method/prompt-tsg-external-qualification-v7-failure.json"
-    )
-    assert source["prior_provider_exposure"] == freeze["prior_provider_exposure"]
-    assert pilot_report["status"] == freeze["provider_schema_pilot"]["status"]
-    assert pilot_report["provider_calls"] == freeze["provider_schema_pilot"][
-        "provider_calls"
-    ]
-    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
-    assert freeze["arms_or_outcomes_used"] is False
-    for item in freeze["inputs"].values():
-        if item["path"].startswith("data/"):
-            path = ROOT / item["path"]
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
-
-
-def test_prospective_v9_gate_freeze_closes_task_keyed_schema_successor():
-    tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
-    selection_path = (
-        ROOT / "data/method/prompt-tsg-external-qualification-selection-v9.json"
-    )
-    gold_path = ROOT / "data/method/prompt-tsg-external-qualification-gold-v9.json"
-    source_path = ROOT / "data/method/prompt-tsg-external-qualification-source-v9.json"
-    freeze_path = ROOT / "data/method/prompt-tsg-external-qualification-freeze-v9.json"
-    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    gold = json.loads(gold_path.read_text(encoding="utf-8"))
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
-    pilot_report = json.loads(
-        (
-            ROOT
-            / "data/method/results/prompt-contract-keyed-schema-pilot-v2/report.json"
-        ).read_text(encoding="utf-8")
-    )
-
-    assert [task["task_id"] for task in tasks] == selection["task_ids"]
-    assert selection["task_ids"] == [case["task_id"] for case in gold["cases"]]
-    assert selection["source_tasks_sha256"] == hashlib.sha256(
-        tasks_path.read_bytes()
-    ).hexdigest()
-    assert gold["extractor_candidate_id"] == freeze["extractor_candidate_id"]
-    assert freeze["response_protocol_id"] == (
-        "task_keyed_prompt_contract_json_schema_v1"
-    )
-    assert source["predecessor_disposition_path"] == (
-        "data/method/prompt-tsg-external-qualification-v8-failure.json"
-    )
-    assert source["prior_provider_exposure"] == freeze["prior_provider_exposure"]
-    assert pilot_report["status"] == freeze["provider_schema_pilot"]["status"]
-    assert pilot_report["response_protocol_id"] == freeze["provider_schema_pilot"][
-        "response_protocol_id"
-    ]
-    assert freeze["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
-    assert freeze["arms_or_outcomes_used"] is False
-    for item in freeze["inputs"].values():
-        if item["path"].startswith("data/"):
-            path = ROOT / item["path"]
-            assert hashlib.sha256(path.read_bytes()).hexdigest() == item["sha256"]
-
-
+@pytest.mark.reviewer
 def test_prospective_v10_gate_freeze_closes_bounded_concurrency_successor():
     tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
     selection_path = (

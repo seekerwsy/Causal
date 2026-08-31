@@ -1,0 +1,79 @@
+{
+  "analysis_scope": {
+    "canonical_ordered_set_fields": [
+      "api_scope",
+      "language_scope",
+      "task_archetype_scope"
+    ],
+    "fields": [
+      "security_pattern_id",
+      "context_query_id",
+      "language_scope",
+      "api_scope",
+      "task_archetype_scope"
+    ],
+    "forbidden_fields": [
+      "expected_direction",
+      "model_id",
+      "rank",
+      "score",
+      "selector_id"
+    ]
+  },
+  "candidate_record_identity": {
+    "fields": [
+      "schema_version",
+      "protocol_id",
+      "policy_key",
+      "discovery_model_id"
+    ],
+    "model_bound": true
+  },
+  "decision_id": "identity-and-scope.phase-context-policy-v3.v1",
+  "decided_on": "2026-08-31",
+  "formal_execution_authorized": false,
+  "model_dispatch": {
+    "confirmation_cross_product_models": false,
+    "primary_candidate_rule": "confirm_only_at_bound_primary_model",
+    "replication_rule": "replication_models_receive_only_separately_frozen_replication_hypotheses"
+  },
+  "model_effect_coordinate": [
+    "policy_key",
+    "model_id"
+  ],
+  "policy_identity": {
+    "atomic_fields": [
+      "analysis_scope",
+      "actionable_feature_id",
+      "operation",
+      "outcome_id"
+    ],
+    "excluded_fields": [
+      "compatibility_result",
+      "expected_direction",
+      "lane",
+      "model_id",
+      "qualification_status",
+      "rank",
+      "relation_result",
+      "score",
+      "selector_id"
+    ],
+    "model_independent": true,
+    "pair_factor_order": "canonical_by_actionable_feature_id_then_operation",
+    "pair_fields": [
+      "analysis_scope",
+      "canonical_factor_operation_pair",
+      "outcome_id"
+    ]
+  },
+  "protocol_id": "phase-context-policy-v3",
+  "realization_allocation": {
+    "arms_share_assigned_realization": true,
+    "assignments_per_task_policy_coordinate": 1,
+    "global_realization_count_is_not_a_per_task_multiplier": true
+  },
+  "schema_version": "1.0",
+  "scientific_effect_claim_allowed": false,
+  "status": "DECISION_RECORDED"
+}

@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.artifact_io import read_json, verify_bundle
+from prompt_mechanism_study.artifact_io import read_json, verify_bundle, write_bundle
 from prompt_mechanism_study.datasets import (
+    build_prospective_role_census,
     freeze_contracts,
     prepare_datasets,
     prepare_dedup_candidates,
@@ -109,6 +110,108 @@ def test_contract_freeze_and_dedup_candidates_are_separate_closed_steps(
     assert contract_report["contract_count"] == len(requests)
     assert dedup_report["adjudication_required"] is True
     assert dedup_report["semantic_clustering_complete"] is False
+
+
+@pytest.mark.reviewer
+def test_prospective_role_census_excludes_exact_and_near_legacy_leakage(
+    tmp_path: Path,
+) -> None:
+    def candidate(task_unit_id: str, record_id: str) -> dict[str, object]:
+        return {
+            "arms_or_outcomes_used": False,
+            "blocker_codes": [],
+            "candidate_status": "READY_CONFIRMATORY",
+            "final_dataset_status": "INCLUDED_FINAL_DATASET",
+            "language": "python",
+            "mechanism_realization_id": "mechanism-a",
+            "oracle_profile_id": "oracle-a",
+            "primary_cwe": "CWE-78",
+            "representative_record_id": record_id,
+            "source_dataset": "source-a",
+            "source_lineage_family": "lineage-a",
+            "task_unit_id": task_unit_id,
+        }
+
+    population = tmp_path / "population"
+    write_bundle(
+        population,
+        {
+            "ready-confirmatory-task-units.json": [
+                candidate("cluster-1", "record-1"),
+                candidate("cluster-2", "record-2"),
+                candidate("cluster-3", "record-3"),
+                candidate("cluster-4", "record-4"),
+            ]
+        },
+    )
+    clusters = tmp_path / "clusters"
+    write_bundle(
+        clusters,
+        {
+            "semantic-clusters.json": [
+                {"cluster_id": f"cluster-{index}", "record_ids": [f"record-{index}"]}
+                for index in range(1, 5)
+            ],
+            "diagnostic-semantic-edges.json": [
+                {
+                    "left": "record-2",
+                    "right": "record-3",
+                    "label": "same_cluster",
+                }
+            ],
+        },
+    )
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "bindings": [
+                    {
+                        "data_id": "legacy-v5",
+                        "data_role": "LEGACY_ONLY",
+                        "exposure_history_applies_to_all_task_units": [
+                            "historical_profile_development"
+                        ],
+                        "task_unit_source_lineage": {
+                            "cluster-1": "legacy-lineage",
+                            "cluster-3": "legacy-lineage",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_prospective_role_census(
+        population,
+        clusters,
+        legacy,
+        tmp_path / "census",
+        population_target_task_units=4,
+    )
+    rows = {
+        row["task_unit_id"]: row
+        for row in read_json(tmp_path / "census/task-units.json")
+    }
+
+    assert report["candidate_task_units"] == 4
+    assert report["prospective_unexposed_task_units"] == 1
+    assert report["legacy_exact_overlap_count"] == 2
+    assert report["legacy_near_duplicate_only_overlap_count"] == 1
+    assert report["population_target_met"] is False
+    assert report["formal_use_authorized"] is False
+    assert rows["cluster-1"]["prospective_exclusion_reasons"] == [
+        "exact_task_unit_in_legacy_only"
+    ]
+    assert rows["cluster-2"]["prospective_exclusion_reasons"] == [
+        "near_duplicate_group_intersects_legacy_only"
+    ]
+    assert rows["cluster-2"]["near_duplicate_group_id"] == rows["cluster-3"][
+        "near_duplicate_group_id"
+    ]
+    assert rows["cluster-4"]["prospective_role_eligible"] is True
+    verify_bundle(tmp_path / "census")
 
 
 def _sources(tmp_path: Path, *, shared_prompt: str | None = None) -> dict[str, Path]:

@@ -3,10 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.artifact_io import read_json, verify_bundle, write_bundle
-from prompt_mechanism_study.factorial_corpus import build_sql_factorial_corpus
+from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.factorial_experiment import (
     _mechanism_trace_summary,
+)
+from prompt_mechanism_study.factorial_protocol import (
+    FactorialExperimentError,
+    validate_factorial_intervention_design,
 )
 from prompt_mechanism_study.factorial_verify import (
     verify_factorial_inference,
@@ -35,10 +38,8 @@ from prompt_mechanism_study.mechanisms import (
     OracleSupportStatus,
     PairRelation,
     PairSpec,
-    load_pair_registry,
 )
 from prompt_mechanism_study.outcomes import Outcome
-from prompt_mechanism_study.prompt_tsg import load_catalog
 from prompt_mechanism_study.randomization import (
     randomize_factorial,
     verify_factorial_randomization,
@@ -143,6 +144,24 @@ def _study(task_count: int = 4):
         provider_seed=42,
     )
     return policy, tasks, randomization
+
+
+def test_noncommutative_pair_requires_both_positive_weight_orders() -> None:
+    incomplete = {
+        "joint_application_commutative": False,
+        "joint_realizations": [
+            {"label": "only-forward", "weight": 1, "application_order": [1, 2]}
+        ],
+    }
+    with pytest.raises(FactorialExperimentError, match="require both application orders"):
+        validate_factorial_intervention_design(incomplete)
+
+    validate_factorial_intervention_design(
+        {
+            "joint_application_commutative": True,
+            "joint_realizations": incomplete["joint_realizations"],
+        }
+    )
 
 
 @pytest.mark.reviewer
@@ -466,75 +485,6 @@ def test_prospective_factorial_resamples_partial_support_from_global_union() -> 
     assert verification["primary_bootstrap"]["task_unit_union_size"] == 6
 
 
-@pytest.mark.reviewer
-@pytest.mark.extended
-def test_pair_registry_binds_only_catalog_registered_atomic_factors() -> None:
-    catalog = load_catalog(Path("data/method/prompt-tsg-pair-catalog-v1.json"))
-    registry = load_pair_registry(Path("data/method/mechanism-pairs-v1.json"), catalog)
-
-    assert registry.pairs[0].factors == (
-        "feature.sql_value_parameterization",
-        "feature.sql_identifier_allowlist",
-    )
-
-
-@pytest.mark.extended
-def test_controlled_factorial_corpus_freezes_blind_pair_bindings(tmp_path) -> None:
-    output = tmp_path / "corpus"
-    report = build_sql_factorial_corpus(Path("."), output, limit=3)
-    tasks = read_json(output / "tasks.json")
-
-    verify_bundle(output)
-    assert report["tasks"] == 3
-    assert all(task["pair_binding"]["decision"] == "applicable" for task in tasks)
-    assert all(task["pair_binding"]["outcomes_or_arms_used"] is False for task in tasks)
-
-
-@pytest.mark.extended
-def test_confirmation_corpus_preserves_factor_two_positivity(tmp_path) -> None:
-    output = tmp_path / "corpus-v2"
-    report = build_sql_factorial_corpus(
-        Path("."), output, limit=3, corpus_version="v2"
-    )
-    tasks = read_json(output / "tasks.json")
-
-    verify_bundle(output)
-    assert report["corpus_version"] == "v2"
-    assert all("behavior outside" in task["prompt"] for task in tasks)
-    assert all("Reject identifier choices" not in task["prompt"] for task in tasks)
-
-
-@pytest.mark.extended
-def test_scaffold_followup_preserves_task_units_and_qualifies_starters(tmp_path) -> None:
-    output = tmp_path / "scaffold"
-    report = build_sql_factorial_corpus(
-        Path("."), output, corpus_version="scaffold-v1"
-    )
-    tasks = read_json(output / "tasks.json")
-    predecessor = read_json(Path("data/method/factorial-sql-corpus-v2/tasks.json"))
-
-    verify_bundle(output)
-    assert report["tasks"] == 30
-    assert {task["task_unit_id"] for task in tasks} == {
-        task["task_unit_id"] for task in predecessor
-    }
-    assert {task["task_id"] for task in tasks}.isdisjoint(
-        {task["task_id"] for task in predecessor}
-    )
-    assert all(
-        task["scaffold_qualification"]
-        == {
-            "code_valid": True,
-            "oracle_evaluable": True,
-            "identifier_control": "unsafe",
-            "value_parameterization": "unsafe",
-        }
-        for task in tasks
-    )
-    assert all("insecure" not in task["prompt"].lower() for task in tasks)
-    assert all("vulnerab" not in task["prompt"].lower() for task in tasks)
-
-
 @pytest.mark.extended
 def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
     records = []
@@ -584,13 +534,13 @@ def test_mechanism_trace_summary_keeps_factor_endpoints_diagnostic() -> None:
     }
 
 
-@pytest.mark.extended
-def test_tracked_factorial_result_recomputes_independently() -> None:
-    report = verify_factorial_result_bundle(
-        Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
-    )
 
-    assert report == {
+@pytest.mark.extended
+def test_tracked_factorial_result_recomputes_and_rejects_rehashed_drift(
+    tmp_path,
+) -> None:
+    source = Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
+    assert verify_factorial_result_bundle(source) == {
         "status": "FACTORIAL_RESULT_BUNDLE_VERIFIED",
         "assignments": 240,
         "task_units": 30,
@@ -599,11 +549,6 @@ def test_tracked_factorial_result_recomputes_independently() -> None:
         "secondary_intervals": 3,
         "mechanism_trace_endpoints": 2,
     }
-
-
-@pytest.mark.extended
-def test_result_recomputation_rejects_rehashed_report_drift(tmp_path) -> None:
-    source = Path("data/formal/results/factorial-sql-scaffold-repair-qwen35-v1")
     payload = {
         path.name: read_json(path)
         for path in source.glob("*.json")

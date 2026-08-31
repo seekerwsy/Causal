@@ -824,21 +824,53 @@ def audit_dataset_eligibility(
     qualification = read_json(qualification_file)
     if qualification.get("status") != "QUALIFIED_FOR_EXPERIMENT":
         raise EligibilityError("functional Oracle is not qualified")
+    security_qualification_root = security_qualification_file.parent
+    verify_bundle(security_qualification_root)
     security_qualification = read_json(security_qualification_file)
-    qualification_status = security_qualification.get("status")
+    target_security_policy = policy["schema_version"] == "2.0"
+    expected_qualification_status = (
+        policy["security_oracle_qualification_status"]
+        if target_security_policy
+        else "QUALIFIED_FOR_EXPERIMENT"
+    )
     expected_security_implementation = (
         target_security_profile_producer_sha256()
-        if qualification_status == "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
+        if target_security_policy
         else _sha256(root / "src/prompt_mechanism_study/security_profiles.py")
     )
     if (
-        qualification_status
-        not in {"QUALIFIED_FOR_EXPERIMENT", "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"}
+        security_qualification.get("status") != expected_qualification_status
         or security_qualification.get("registry_sha256") != _sha256(registry_file)
         or security_qualification.get("implementation_sha256")
         != expected_security_implementation
     ):
         raise EligibilityError("security Oracle qualification is invalid or stale")
+    if target_security_policy:
+        if (
+            policy["security_oracle_producer"] != "target_security_profiles_v1"
+            or security_qualification.get("artifact_kind")
+            != "target_security_profile_qualification"
+            or security_qualification.get("protocol_id") != "phase-context-policy-v3"
+            or security_qualification.get("formal_execution_authorized") is not False
+            or security_qualification.get("scientific_claim_allowed") is not False
+            or security_qualification.get("arms_or_outcomes_used") is not False
+        ):
+            raise EligibilityError("target security Oracle qualification contract is invalid")
+        case_sources = security_qualification.get("case_sources")
+        if not isinstance(case_sources, list) or not case_sources:
+            raise EligibilityError("target security Oracle case sources are missing")
+        for source in case_sources:
+            if not isinstance(source, dict) or set(source) != {"path", "sha256"}:
+                raise EligibilityError("target security Oracle case source is invalid")
+            source_path = (root / str(source["path"])).resolve()
+            try:
+                source_path.relative_to(root)
+            except ValueError as exc:
+                raise EligibilityError(
+                    "target security Oracle case source escapes the repository"
+                ) from exc
+            if not source_path.is_file() or _sha256(source_path) != source["sha256"]:
+                raise EligibilityError("target security Oracle case source is stale")
 
     records = {row["record_id"]: row for row in _rows(read_json(prepared / "records.json"))}
     cluster_rows = _rows(read_json(clusters / "semantic-clusters.json"))
@@ -1183,6 +1215,9 @@ def audit_dataset_eligibility(
         "functional_oracle_qualification_sha256": _sha256(qualification_file),
         "security_oracle_qualification_sha256": _sha256(
             security_qualification_file
+        ),
+        "security_oracle_qualification_bundle_sha256": bundle_digest(
+            security_qualification_root
         ),
         "realization_binding_bundle_sha256": (
             None if bindings is None else bundle_digest(bindings)
@@ -1967,7 +2002,7 @@ def _mechanism_from_binding(
 
 
 def _policy(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {
+    base_fields = {
         "schema_version",
         "policy_id",
         "active_layer",
@@ -1981,10 +2016,31 @@ def _policy(value: Any) -> dict[str, Any]:
         "functional_oracle_qualification_path",
         "security_oracle_qualification_path",
         "layers",
-    }:
+    }
+    if not isinstance(value, dict):
         raise EligibilityError("eligibility policy fields are invalid")
-    if value["schema_version"] != "1.3" or value["source_tests_required"] is not False:
+    schema_version = value.get("schema_version")
+    expected_fields = (
+        base_fields
+        if schema_version == "1.3"
+        else base_fields
+        | {
+            "security_oracle_qualification_status",
+            "security_oracle_producer",
+        }
+        if schema_version == "2.0"
+        else set()
+    )
+    if set(value) != expected_fields:
+        raise EligibilityError("eligibility policy fields are invalid")
+    if schema_version not in {"1.3", "2.0"} or value["source_tests_required"] is not False:
         raise EligibilityError("eligibility policy version or test rule is invalid")
+    if schema_version == "2.0" and (
+        value["security_oracle_qualification_status"]
+        != "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
+        or value["security_oracle_producer"] != "target_security_profiles_v1"
+    ):
+        raise EligibilityError("target security Oracle policy binding is invalid")
     lineage_policy = value["lineage_policy"]
     if not isinstance(lineage_policy, dict) or lineage_policy != {
         "admission_role": "diagnostic_only",
