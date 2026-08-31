@@ -1,8 +1,14 @@
+import hashlib
 import json
 
 import pytest
 
 from prompt_mechanism_study.artifact_io import write_bundle
+from prompt_mechanism_study.contract_cleaning import (
+    finalize_contract_content_data,
+    freeze_future_evaluation_reservation,
+    verify_contract_content_data,
+)
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.task_unit_data import (
     compile_task_unit_data,
@@ -243,3 +249,127 @@ def test_task_unit_compiler_keeps_tasks_quality_roles_and_tsg_separate(tmp_path)
     }
     assert result["prompt_tsg_status"] == "NOT_GENERATED_PENDING_METHOD_FREEZE"
     assert verify_task_unit_data(output) == result
+
+    compiled_tasks = {
+        row["task_unit_id"]: row
+        for row in (
+            json.loads(line)
+            for line in (output / "task-units.jsonl").read_text(encoding="utf-8").splitlines()
+        )
+    }
+    proposals = []
+    repair_ledger = []
+    reviews = []
+    for task_id, task in sorted(compiled_tasks.items()):
+        prompt = task["model_visible_input"]["natural_prompt"]
+        evidence = {
+            "offset_basis": "utf8_bytes_of_exact_natural_prompt_v1",
+            "entrypoint": [],
+            "requirements": [
+                [
+                    {
+                        "source_prompt_sha256": content_hash(prompt),
+                        "start_byte": 0,
+                        "end_byte": len(prompt.encode("utf-8")),
+                        "quoted_text": prompt,
+                        "span_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                    }
+                ]
+            ],
+            "inputs": [],
+            "outputs": [],
+            "side_effects": [],
+            "environment_dependencies": [],
+        }
+        core = {
+            "schema_version": "functional-contract-cleaning-proposal-1.0",
+            "task_unit_id": task_id,
+            "record_id": task["representative_record_id"],
+            "source_prompt_sha256": content_hash(prompt),
+            "resolution_status": "resolved",
+            "entrypoint": None,
+            "requirements": [prompt],
+            "inputs": [],
+            "outputs": [],
+            "side_effects": [],
+            "environment_dependencies": [],
+            "content_evidence": evidence,
+            "proposal_mode": "SEMANTIC_REPAIR",
+            "producer_source_assessment": "sufficient",
+            "producer_reason": "Exact source-bound fixture.",
+            "arms_or_outcomes_used": False,
+        }
+        contract_id = content_id("functional_contract_", core)
+        proposals.append({**core, "contract_id": contract_id})
+        repair_ledger.append(
+            {
+                "schema_version": "contract-repair-ledger-1.0",
+                "task_unit_id": task_id,
+                "old_contract_id": "old-" + task_id,
+                "new_contract_id": contract_id,
+                "repair_status": "PROPOSED_PENDING_INDEPENDENT_REVIEW",
+                "review_status": "PENDING",
+                "review_issue_codes": [],
+                "repair_ledger_record_sha256": content_hash(task_id),
+            }
+        )
+        review_core = {
+            "schema_version": "contract-content-review-1.0",
+            "task_unit_id": task_id,
+            "contract_id": contract_id,
+            "contract_status": "faithful",
+            "evidence_status": "supported",
+            "source_specification_disposition": "sufficient",
+            "issue_codes": ["none"],
+            "repair_category": "EVIDENCE_BACKFILL_ONLY",
+            "reason": "The source fully supports the contract.",
+            "terminal_quality_decision": "QUALITY_INCLUDED",
+            "arms_or_outcomes_used": False,
+        }
+        reviews.append(
+            {
+                **review_core,
+                "contract_content_review_record_sha256": content_hash(review_core),
+            }
+        )
+    proposal_root = write_bundle(
+        tmp_path / "content-proposals",
+        {
+            "proposed-contracts.json": proposals,
+            "contract-repair-ledger.json": repair_ledger,
+            "report.json": {"status": "fixture"},
+        },
+    )
+    content_review_root = write_bundle(
+        tmp_path / "content-reviews",
+        {
+            "contract-content-reviews.json": reviews,
+            "report.json": {"status": "fixture"},
+        },
+    )
+    reservation_root = tmp_path / "reservation"
+    freeze_future_evaluation_reservation(
+        output, reservation_root, producer_commit="fixture"
+    )
+    final_a = tmp_path / "final-a"
+    final_b = tmp_path / "final-b"
+    verified = finalize_contract_content_data(
+        output,
+        proposal_root,
+        content_review_root,
+        reservation_root,
+        final_a,
+        producer_commit="fixture",
+    )
+    finalize_contract_content_data(
+        output,
+        proposal_root,
+        content_review_root,
+        reservation_root,
+        final_b,
+        producer_commit="fixture",
+    )
+    assert verified["quality_disposition_counts"] == {"QUALITY_INCLUDED": 3}
+    assert verified["future_evaluation_reserved_task_unit_count"] == 1
+    assert verify_contract_content_data(final_a) == verified
+    assert (final_a / "manifest.json").read_bytes() == (final_b / "manifest.json").read_bytes()

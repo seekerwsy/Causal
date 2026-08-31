@@ -208,6 +208,20 @@ def _add_curation_group(groups: Any) -> None:
     content_review.add_argument("--max-new-batches", type=int)
     content_review.add_argument("--workers", type=int, default=1)
 
+    finalize_content = _leaf(
+        actions,
+        "finalize-contract-content",
+        _run_finalize_contract_content,
+        "assemble or verify the terminal content-cleaned reviewer data set",
+    )
+    finalize_content.add_argument("phase", choices=("build", "verify"))
+    finalize_content.add_argument("output", type=Path)
+    finalize_content.add_argument("--base-bundle", type=Path)
+    finalize_content.add_argument("--proposals-root", type=Path)
+    finalize_content.add_argument("--reviews-root", type=Path)
+    finalize_content.add_argument("--reservation-root", type=Path)
+    finalize_content.add_argument("--producer-commit")
+
     review_bindings = _leaf(
         actions,
         "review-bindings",
@@ -756,6 +770,41 @@ def _run_contract_content_review(
         max_new_batches=args.max_new_batches,
         workers=args.workers,
     )
+    return _emit_status(report)
+
+
+def _run_finalize_contract_content(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import (
+        finalize_contract_content_data,
+        verify_contract_content_data,
+    )
+
+    if args.phase == "verify":
+        report = verify_contract_content_data(args.output)
+    else:
+        required = (
+            "base_bundle",
+            "proposals_root",
+            "reviews_root",
+            "reservation_root",
+            "producer_commit",
+        )
+        missing = [name for name in required if getattr(args, name) is None]
+        if missing:
+            parser.error(
+                "curate finalize-contract-content build requires "
+                + ", ".join("--" + name.replace("_", "-") for name in missing)
+            )
+        report = finalize_contract_content_data(
+            args.base_bundle,
+            args.proposals_root,
+            args.reviews_root,
+            args.reservation_root,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
     return _emit_status(report)
 
 

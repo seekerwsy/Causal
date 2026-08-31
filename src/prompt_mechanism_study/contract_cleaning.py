@@ -23,9 +23,14 @@ from prompt_mechanism_study.curation import (
     _initialize,
 )
 from prompt_mechanism_study.functional_judge import JudgeGateError, bailian_complete
-from prompt_mechanism_study.records import canonical_value, content_hash, content_id
+from prompt_mechanism_study.records import (
+    canonical_json,
+    content_hash,
+    content_id,
+)
 from prompt_mechanism_study.task_unit_data import (
     _canonical_jsonl,
+    _readiness_action,
     _unique_by,
     verify_task_unit_data,
 )
@@ -66,6 +71,22 @@ _REVIEW_ISSUES = {
     "ambiguous_interface",
     "uncertain_semantics",
     "other",
+}
+_FINAL_JSONL_FILES = {
+    "contract-repair-ledger.jsonl",
+    "functional-contracts.jsonl",
+    "near-duplicate-groups.jsonl",
+    "readiness-worklist.jsonl",
+    "source-lineages.jsonl",
+    "task-quality.jsonl",
+    "task-roles.jsonl",
+    "task-units.jsonl",
+}
+_FINAL_FILES = _FINAL_JSONL_FILES | {"report.json"}
+_TERMINAL_QUALITY = {
+    "QUALITY_INCLUDED",
+    "QUALITY_EXCLUDED_SOURCE_DEFECT",
+    "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION",
 }
 
 
@@ -447,6 +468,430 @@ def run_contract_content_review(
     return report
 
 
+def finalize_contract_content_data(
+    base_bundle: Path,
+    proposals_root: Path,
+    reviews_root: Path,
+    reservation_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+) -> dict[str, Any]:
+    """Build the single terminal reviewer data set after outcome-blind contract review."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    proposals = proposals_root.resolve()
+    reviews = reviews_root.resolve()
+    reservation = reservation_root.resolve()
+    verify_task_unit_data(base)
+    for root in (proposals, reviews, reservation):
+        verify_bundle(root)
+    tasks = _unique_by(
+        _canonical_jsonl(base / "task-units.jsonl", "tasks"), "task_unit_id", "tasks"
+    )
+    old_roles = _unique_by(
+        _canonical_jsonl(base / "task-roles.jsonl", "roles"), "task_unit_id", "roles"
+    )
+    old_readiness = _unique_by(
+        _canonical_jsonl(base / "readiness-worklist.jsonl", "readiness"),
+        "task_unit_id",
+        "readiness",
+    )
+    proposals_by_task = _unique_by(
+        read_json(proposals / "proposed-contracts.json"),
+        "task_unit_id",
+        "proposed contracts",
+    )
+    proposal_ledger = _unique_by(
+        read_json(proposals / "contract-repair-ledger.json"),
+        "task_unit_id",
+        "proposal ledger",
+    )
+    reviews_by_task = _unique_by(
+        read_json(reviews / "contract-content-reviews.json"),
+        "task_unit_id",
+        "content reviews",
+    )
+    reservations = _unique_by(
+        read_json(reservation / "reservations.json"),
+        "task_unit_id",
+        "future-evaluation reservations",
+    )
+    population = set(tasks)
+    if (
+        set(old_roles) != population
+        or set(old_readiness) != population
+        or set(proposals_by_task) != population
+        or set(proposal_ledger) != population
+        or set(reviews_by_task) != population
+        or not set(reservations) <= population
+    ):
+        raise ContractCleaningError("final contract-cleaning populations differ")
+    group_rows = _canonical_jsonl(
+        base / "near-duplicate-groups.jsonl", "near-duplicate groups"
+    )
+    reserved_groups = {row["near_duplicate_group_id"] for row in reservations.values()}
+    if len(reserved_groups) != len(reservations):
+        raise ContractCleaningError("future-evaluation reservation groups are duplicated")
+
+    contracts = []
+    quality = []
+    roles = []
+    readiness = []
+    ledger = []
+    for task_id in sorted(population):
+        task = tasks[task_id]
+        proposal = proposals_by_task[task_id]
+        review = reviews_by_task[task_id]
+        disposition = review.get("terminal_quality_decision")
+        if disposition not in _TERMINAL_QUALITY:
+            raise ContractCleaningError(
+                "nonterminal contract review cannot enter the final data foundation"
+            )
+        if (
+            proposal.get("contract_id") != review.get("contract_id")
+            or proposal.get("record_id") != task.get("representative_record_id")
+            or proposal.get("source_prompt_sha256")
+            != task["model_visible_input"]["natural_prompt_content_sha256"]
+        ):
+            raise ContractCleaningError("final contract source or review binding is stale")
+        _validate_frozen_evidence(task, proposal)
+        review_payload = {
+            key: review[key]
+            for key in (
+                "contract_status",
+                "evidence_status",
+                "source_specification_disposition",
+                "issue_codes",
+                "repair_category",
+                "reason",
+                "terminal_quality_decision",
+            )
+        }
+        contract_core = {
+            "schema_version": "functional-contract-reviewer-5.0",
+            "task_unit_id": task_id,
+            "contract_id": proposal["contract_id"],
+            "record_id": proposal["record_id"],
+            "source_prompt_sha256": proposal["source_prompt_sha256"],
+            **_proposal_payload(proposal),
+            "producer_reason": proposal["producer_reason"],
+            "proposal_mode": proposal["proposal_mode"],
+            "requirement_evidence_status": "SOURCE_SPANS_COMPLETE_UTF8_BYTES",
+            "review": review_payload,
+            "provenance": {
+                "base_bundle_sha256": _manifest_digest(base),
+                "proposals_bundle_sha256": bundle_digest(proposals),
+                "reviews_bundle_sha256": bundle_digest(reviews),
+            },
+            "arms_or_outcomes_used": False,
+        }
+        contract_row = {
+            **contract_core,
+            "functional_contract_record_sha256": content_hash(contract_core),
+        }
+        contracts.append(contract_row)
+
+        quality_core = {
+            "schema_version": "task-quality-5.0",
+            "task_unit_id": task_id,
+            "quality_disposition": disposition,
+            "contract_id": proposal["contract_id"],
+            "contract_quality": "STRICT_SOURCE_BOUND",
+            "review_contract_status": review["contract_status"],
+            "functional_evaluability": (
+                "sufficient" if disposition == "QUALITY_INCLUDED" else "insufficient"
+            ),
+            "reason_codes": {
+                "QUALITY_INCLUDED": [],
+                "QUALITY_EXCLUDED_SOURCE_DEFECT": ["source_defect"],
+                "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION": [
+                    "insufficient_specification"
+                ],
+            }[disposition],
+            "authority_boundary": (
+                "source_and_contract_quality_only_not_scope_measurement_exposure_or_role"
+            ),
+            "decision_provenance": {
+                "contract_record_sha256": contract_row[
+                    "functional_contract_record_sha256"
+                ],
+                "contract_content_review_record_sha256": review[
+                    "contract_content_review_record_sha256"
+                ],
+            },
+            "arms_or_outcomes_used": False,
+        }
+        quality.append(
+            {**quality_core, "task_quality_record_sha256": content_hash(quality_core)}
+        )
+
+        old_role = old_roles[task_id]
+        categories = sorted(
+            set(old_role["exposure_categories"]) | {"CONTRACT_REPAIR_VIEWED"}
+        )
+        reserved = task_id in reservations
+        role_core = {
+            **{
+                key: value
+                for key, value in old_role.items()
+                if key
+                not in {
+                    "schema_version",
+                    "task_role_record_sha256",
+                    "exposure_categories",
+                    "prospective_confirmatory_reuse_status",
+                }
+            },
+            "schema_version": "task-role-5.0",
+            "exposure_categories": categories,
+            "prospective_confirmatory_reuse_status": (
+                "RESERVED_CURATION_ONLY_PENDING_FORMAL_ALLOCATION"
+                if reserved
+                else old_role["prospective_confirmatory_reuse_status"]
+            ),
+            "future_evaluation_reservation_id": (
+                reservations[task_id]["future_evaluation_reservation_record_sha256"]
+                if reserved
+                else None
+            ),
+        }
+        roles.append(
+            {**role_core, "task_role_record_sha256": content_hash(role_core)}
+        )
+
+        readiness_row = _final_readiness_row(
+            old_readiness[task_id], disposition, proposal["contract_id"]
+        )
+        readiness.append(readiness_row)
+
+        old_ledger = proposal_ledger[task_id]
+        ledger_core = {
+            **{
+                key: value
+                for key, value in old_ledger.items()
+                if key != "repair_ledger_record_sha256"
+            },
+            "schema_version": "contract-repair-ledger-1.1",
+            "repair_status": "INDEPENDENTLY_REVIEWED_TERMINAL",
+            "review_status": "TERMINAL",
+            "review_issue_codes": review["issue_codes"],
+            "final_quality_disposition": disposition,
+            "independent_review_record_sha256": review[
+                "contract_content_review_record_sha256"
+            ],
+        }
+        ledger.append(
+            {**ledger_core, "repair_ledger_record_sha256": content_hash(ledger_core)}
+        )
+
+    quality_counts = dict(
+        sorted(Counter(row["quality_disposition"] for row in quality).items())
+    )
+    readiness_counts = dict(sorted(Counter(row["workstream"] for row in readiness).items()))
+    report = {
+        "schema_version": "5.0",
+        "status": "DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED",
+        "source_record_count": read_json(base / "report.json")["source_record_count"],
+        "task_unit_count": len(tasks),
+        "functional_contract_count": len(contracts),
+        "content_evidence_complete_count": len(contracts),
+        "contract_repair_ledger_count": len(ledger),
+        "quality_disposition_counts": quality_counts,
+        "pending_quality_count": 0,
+        "future_evaluation_reserved_task_unit_count": len(reservations),
+        "future_evaluation_reserved_group_count": len(reserved_groups),
+        "readiness_workstream_counts": readiness_counts,
+        "readiness_axis_counts": {
+            field: dict(sorted(Counter(row[field] for row in readiness).items()))
+            for field in (
+                "quality_gate",
+                "scope_status",
+                "mechanism_registration_status",
+                "binding_status",
+                "oracle_status",
+                "runtime_status",
+                "functional_measurement_status",
+                "independent_quality_review_status",
+            )
+        },
+        "prompt_tsg": {
+            "status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
+            "extractor_id": None,
+            "catalog_sha256": None,
+            "task_count": 0,
+        },
+        "input_bundles": {
+            "base_bundle_sha256": _manifest_digest(base),
+            "proposals_bundle_sha256": bundle_digest(proposals),
+            "reviews_bundle_sha256": bundle_digest(reviews),
+            "reservation_bundle_sha256": bundle_digest(reservation),
+        },
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_role_assignment_frozen": False,
+        "formal_execution_authorized": False,
+        "scientific_effect_claim_allowed": False,
+    }
+    artifacts = {
+        "task-units.jsonl": [tasks[task_id] for task_id in sorted(tasks)],
+        "functional-contracts.jsonl": contracts,
+        "task-quality.jsonl": quality,
+        "task-roles.jsonl": roles,
+        "source-lineages.jsonl": _canonical_jsonl(
+            base / "source-lineages.jsonl", "source lineages"
+        ),
+        "near-duplicate-groups.jsonl": group_rows,
+        "readiness-worklist.jsonl": readiness,
+        "contract-repair-ledger.jsonl": ledger,
+    }
+    _write_final_data_bundle(output.resolve(), artifacts, report)
+    return verify_contract_content_data(output.resolve())
+
+
+def verify_contract_content_data(root: Path) -> dict[str, Any]:
+    """Independently verify the terminal content-cleaned data foundation."""
+
+    bundle = root.resolve()
+    manifest = _canonical_json_object(bundle / "manifest.json", "manifest")
+    if (
+        manifest.get("schema_version") != "5.0"
+        or manifest.get("artifact_kind") != "reviewer_task_unit_dataset"
+        or set(manifest.get("files", {})) != _FINAL_FILES
+    ):
+        raise ContractCleaningError("final data manifest is invalid")
+    actual = {
+        path.name for path in bundle.iterdir() if path.is_file() and path.name != "manifest.json"
+    }
+    if actual != _FINAL_FILES:
+        raise ContractCleaningError("final data file set is not exact")
+    rows_by_file = {}
+    for name in sorted(_FINAL_JSONL_FILES):
+        rows = _canonical_jsonl(bundle / name, name)
+        descriptor = manifest["files"][name]
+        if (
+            descriptor.get("format") != "canonical-jsonl"
+            or descriptor.get("record_count") != len(rows)
+            or descriptor.get("sha256")
+            != hashlib.sha256((bundle / name).read_bytes()).hexdigest()
+        ):
+            raise ContractCleaningError(f"{name} manifest identity drift")
+        rows_by_file[name] = rows
+    report = _canonical_json_object(bundle / "report.json", "report")
+    if (
+        manifest["files"]["report.json"].get("format") != "canonical-json"
+        or manifest["files"]["report.json"].get("sha256")
+        != hashlib.sha256((bundle / "report.json").read_bytes()).hexdigest()
+    ):
+        raise ContractCleaningError("final report manifest identity drift")
+    tasks = _unique_by(rows_by_file["task-units.jsonl"], "task_unit_id", "tasks")
+    contracts = _unique_by(
+        rows_by_file["functional-contracts.jsonl"], "task_unit_id", "contracts"
+    )
+    quality = _unique_by(rows_by_file["task-quality.jsonl"], "task_unit_id", "quality")
+    roles = _unique_by(rows_by_file["task-roles.jsonl"], "task_unit_id", "roles")
+    readiness = _unique_by(
+        rows_by_file["readiness-worklist.jsonl"], "task_unit_id", "readiness"
+    )
+    ledger = _unique_by(
+        rows_by_file["contract-repair-ledger.jsonl"], "task_unit_id", "repair ledger"
+    )
+    if any(set(rows) != set(tasks) for rows in (contracts, quality, roles, readiness, ledger)):
+        raise ContractCleaningError("final data populations differ")
+    for task_id, task in tasks.items():
+        contract = contracts[task_id]
+        quality_row = quality[task_id]
+        role = roles[task_id]
+        readiness_row = readiness[task_id]
+        ledger_row = ledger[task_id]
+        _validate_frozen_evidence(task, contract)
+        if (
+            contract.get("schema_version") != "functional-contract-reviewer-5.0"
+            or contract.get("functional_contract_record_sha256")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in contract.items()
+                    if key != "functional_contract_record_sha256"
+                }
+            )
+            or quality_row.get("schema_version") != "task-quality-5.0"
+            or quality_row.get("quality_disposition") not in _TERMINAL_QUALITY
+            or quality_row.get("contract_id") != contract.get("contract_id")
+            or quality_row.get("task_quality_record_sha256")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in quality_row.items()
+                    if key != "task_quality_record_sha256"
+                }
+            )
+            or role.get("schema_version") != "task-role-5.0"
+            or "CONTRACT_REPAIR_VIEWED" not in role.get("exposure_categories", [])
+            or role.get("prospective_formal_role_assigned") is not False
+            or role.get("task_role_record_sha256")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in role.items()
+                    if key != "task_role_record_sha256"
+                }
+            )
+            or readiness_row.get("schema_version") != "readiness-work-item-5.0"
+            or readiness_row.get("contract_id") != contract.get("contract_id")
+            or readiness_row.get("readiness_record_sha256")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in readiness_row.items()
+                    if key != "readiness_record_sha256"
+                }
+            )
+            or ledger_row.get("repair_status") != "INDEPENDENTLY_REVIEWED_TERMINAL"
+            or ledger_row.get("final_quality_disposition")
+            != quality_row.get("quality_disposition")
+            or ledger_row.get("repair_ledger_record_sha256")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in ledger_row.items()
+                    if key != "repair_ledger_record_sha256"
+                }
+            )
+        ):
+            raise ContractCleaningError("final data record binding is invalid")
+    if (
+        report.get("status") != "DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED"
+        or report.get("task_unit_count") != len(tasks)
+        or report.get("functional_contract_count") != len(contracts)
+        or report.get("content_evidence_complete_count") != len(contracts)
+        or report.get("contract_repair_ledger_count") != len(ledger)
+        or report.get("pending_quality_count") != 0
+        or report.get("quality_disposition_counts")
+        != dict(sorted(Counter(row["quality_disposition"] for row in quality.values()).items()))
+        or report.get("arms_or_outcomes_used") is not False
+        or report.get("formal_execution_authorized") is not False
+        or report.get("prompt_tsg", {}).get("status")
+        != "NOT_GENERATED_PENDING_METHOD_FREEZE"
+    ):
+        raise ContractCleaningError("final data report is invalid")
+    return {
+        "status": "VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED",
+        "bundle_sha256": hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest(),
+        "task_units": len(tasks),
+        "functional_contracts": len(contracts),
+        "quality_disposition_counts": report["quality_disposition_counts"],
+        "future_evaluation_reserved_task_unit_count": report[
+            "future_evaluation_reserved_task_unit_count"
+        ],
+        "prompt_tsg_status": report["prompt_tsg"]["status"],
+        "arms_or_outcomes_used": False,
+        "formal_execution_authorized": False,
+    }
+
+
 def _run_stage(
     repository_root: Path,
     output: Path,
@@ -552,6 +997,170 @@ def _base_population(
 
 def _manifest_digest(root: Path) -> str:
     return hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()
+
+
+def _validate_frozen_evidence(
+    task: Mapping[str, Any], contract: Mapping[str, Any]
+) -> None:
+    prompt = task["model_visible_input"]["natural_prompt"]
+    prompt_bytes = prompt.encode("utf-8")
+    prompt_sha256 = task["model_visible_input"]["natural_prompt_content_sha256"]
+    if contract.get("source_prompt_sha256") != prompt_sha256:
+        raise ContractCleaningError("contract evidence prompt identity is stale")
+    evidence = contract.get("content_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("offset_basis") != "utf8_bytes_of_exact_natural_prompt_v1"
+        or set(evidence) != {"offset_basis", "entrypoint", *_CONTENT_FIELDS}
+    ):
+        raise ContractCleaningError("contract content evidence envelope is invalid")
+    expected_groups: list[tuple[Any, Any]] = []
+    expected_groups.append((contract.get("entrypoint"), evidence["entrypoint"]))
+    for field in _CONTENT_FIELDS:
+        values = contract.get(field)
+        groups = evidence[field]
+        if not isinstance(values, list) or not isinstance(groups, list) or len(values) != len(groups):
+            raise ContractCleaningError("contract content evidence target count is invalid")
+        expected_groups.extend(zip(values, groups, strict=True))
+    for value, group in expected_groups:
+        if value is None:
+            if group != []:
+                raise ContractCleaningError("absent contract value carries source evidence")
+            continue
+        if not isinstance(value, str) or not value.strip() or not isinstance(group, list) or not group:
+            raise ContractCleaningError("contract value lacks source evidence")
+        for span in group:
+            if not isinstance(span, dict) or set(span) != {
+                "source_prompt_sha256",
+                "start_byte",
+                "end_byte",
+                "quoted_text",
+                "span_sha256",
+            }:
+                raise ContractCleaningError("contract evidence span is malformed")
+            start, end, quoted = span["start_byte"], span["end_byte"], span["quoted_text"]
+            if (
+                type(start) is not int
+                or type(end) is not int
+                or start < 0
+                or end <= start
+                or end > len(prompt_bytes)
+                or not isinstance(quoted, str)
+                or span["source_prompt_sha256"] != prompt_sha256
+            ):
+                raise ContractCleaningError("contract evidence byte coordinates are invalid")
+            try:
+                actual = prompt_bytes[start:end].decode("utf-8")
+            except UnicodeDecodeError:
+                raise ContractCleaningError("contract evidence splits a UTF-8 sequence") from None
+            if (
+                actual != quoted
+                or span["span_sha256"]
+                != hashlib.sha256(quoted.encode("utf-8")).hexdigest()
+            ):
+                raise ContractCleaningError("contract evidence is not an exact prompt span")
+
+
+def _final_readiness_row(
+    old: Mapping[str, Any], disposition: str, contract_id: str
+) -> dict[str, Any]:
+    quality_gate = "PASSED" if disposition == "QUALITY_INCLUDED" else "EXCLUDED"
+    action_input = {
+        "quality_gate": quality_gate,
+        "quality_disposition": disposition,
+        "scope_status": old["scope_status"],
+        "mechanism_registration_status": old["mechanism_registration_status"],
+        "binding_status": old["binding_status"],
+        "oracle_status": old["oracle_status"],
+        "runtime_status": old["runtime_status"],
+        "functional_measurement_status": old["functional_measurement_status"],
+        "independent_quality_review_status": "NOT_REQUIRED_OR_COMPLETE",
+    }
+    summary, workstream, action, evidence = _readiness_action(action_input)
+    coordinates = [workstream, str(old.get("language")), str(old.get("primary_cwe"))]
+    core = {
+        **{
+            key: value
+            for key, value in old.items()
+            if key
+            not in {
+                "schema_version",
+                "readiness_record_sha256",
+                "quality_gate",
+                "quality_disposition",
+                "independent_quality_review_status",
+                "readiness_summary_status",
+                "workstream",
+                "work_group_id",
+                "grouping_coordinates",
+                "action_status",
+                "primary_next_action",
+                "required_evidence",
+                "contract_id",
+            }
+        },
+        "schema_version": "readiness-work-item-5.0",
+        **action_input,
+        "readiness_summary_status": summary,
+        "workstream": workstream,
+        "work_group_id": content_id("readiness_work_group_", coordinates),
+        "grouping_coordinates": coordinates,
+        "action_status": {
+            "QUALITY_EXCLUDED": "CLOSED_EXCLUDED",
+            "TECHNICALLY_READY_PENDING_METHOD_FREEZE": "WAITING_METHOD_FREEZE",
+        }.get(summary, "OPEN"),
+        "primary_next_action": action,
+        "required_evidence": evidence,
+        "contract_id": contract_id,
+    }
+    return {**core, "readiness_record_sha256": content_hash(core)}
+
+
+def _write_final_data_bundle(
+    root: Path,
+    artifacts: Mapping[str, Sequence[Mapping[str, Any]]],
+    report: Mapping[str, Any],
+) -> None:
+    if root.exists():
+        raise FileExistsError(root)
+    if set(artifacts) != _FINAL_JSONL_FILES:
+        raise ContractCleaningError("final data artifact set is incomplete")
+    root.mkdir(parents=True)
+    descriptors = {}
+    for name, values in sorted(artifacts.items()):
+        rows = list(values)
+        payload = "".join(canonical_json(row) + "\n" for row in rows).encode("utf-8")
+        (root / name).write_bytes(payload)
+        descriptors[name] = {
+            "format": "canonical-jsonl",
+            "record_count": len(rows),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    report_payload = (canonical_json(report) + "\n").encode("utf-8")
+    (root / "report.json").write_bytes(report_payload)
+    descriptors["report.json"] = {
+        "format": "canonical-json",
+        "sha256": hashlib.sha256(report_payload).hexdigest(),
+    }
+    manifest = {
+        "schema_version": "5.0",
+        "artifact_kind": "reviewer_task_unit_dataset",
+        "files": descriptors,
+    }
+    (root / "manifest.json").write_bytes(
+        (canonical_json(manifest) + "\n").encode("utf-8")
+    )
+
+
+def _canonical_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        payload = path.read_bytes()
+        value = json.loads(payload)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ContractCleaningError(f"{label} is unreadable") from None
+    if not isinstance(value, dict) or payload != (canonical_json(value) + "\n").encode("utf-8"):
+        raise ContractCleaningError(f"{label} is not canonical JSON")
+    return value
 
 
 def _contract_payload(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -950,7 +1559,9 @@ def _proposal_progress(
 
 __all__ = [
     "ContractCleaningError",
+    "finalize_contract_content_data",
     "freeze_future_evaluation_reservation",
     "run_contract_content_proposals",
     "run_contract_content_review",
+    "verify_contract_content_data",
 ]
