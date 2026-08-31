@@ -104,8 +104,6 @@ def freeze_study_design(
         family_ids,
         per_family=targets,
         seed=seed,
-        maximum_lineage_fraction=policy["maximum_lineage_fraction"],
-        minimum_lineages=policy["minimum_lineages_per_python_family"],
     )
     power = _power_design(
         len(sample),
@@ -153,7 +151,10 @@ def freeze_study_design(
             "lineage_counts": dict(sorted(lineage_counts.items())),
             "lineages_per_family": dict(sorted(lineages_per_family.items())),
             "maximum_lineage_count": max(lineage_counts.values()),
-            "maximum_lineage_fraction": policy["maximum_lineage_fraction"],
+            "observed_maximum_lineage_fraction": round(
+                max(lineage_counts.values()) / len(sample), 6
+            ),
+            "lineage_policy": policy["lineage_policy"],
             "arms": ["target", "noop", "placebo", "generic"],
             "assignments_per_model": len(sample) * 4,
             "primary_contrast": "target_minus_noop",
@@ -278,8 +279,6 @@ def _balanced_sample(
     *,
     per_family: int | Mapping[str, int],
     seed: int,
-    maximum_lineage_fraction: float,
-    minimum_lineages: int,
 ) -> list[dict[str, Any]]:
     targets = (
         {family: per_family for family in family_ids}
@@ -288,8 +287,6 @@ def _balanced_sample(
     )
     if set(targets) != set(family_ids) or any(value <= 0 for value in targets.values()):
         raise StudyDesignError("family sampling targets are invalid")
-    total = sum(targets.values())
-    lineage_cap = math.floor(total * maximum_lineage_fraction)
     conflicts = defaultdict(set)
     for row in exclusions:
         left, right = row["task_unit_ids"]
@@ -311,20 +308,7 @@ def _balanced_sample(
                 row
                 for row in remaining.values()
                 if row["family_id"] == family
-                and lineage_counts[row["representative_lineage_family"]] < lineage_cap
                 and not (conflicts[row["task_unit_id"]] & selected_ids)
-                and _lineage_slot_available(
-                    row["representative_lineage_family"],
-                    family,
-                    remaining.values(),
-                    conflicts,
-                    selected_ids,
-                    family_ids,
-                    family_counts,
-                    targets,
-                    lineage_counts,
-                    lineage_cap,
-                )
             ]
             if not choices:
                 raise StudyDesignError(f"cannot satisfy frozen sample constraints for {family}")
@@ -348,44 +332,11 @@ def _balanced_sample(
             progressed = True
         if not progressed:
             raise StudyDesignError("sample selection made no progress")
-    for family in family_ids:
-        if len(family_lineages[family]) < minimum_lineages:
-            raise StudyDesignError(f"sample lacks lineage diversity for {family}")
     result = []
     for index, row in enumerate(selected, start=1):
         core = {"sample_order": index, **row, "selection_seed": seed}
         result.append({"sample_id": content_id("python_sample_", core), **core})
     return result
-
-
-def _lineage_slot_available(
-    lineage: str,
-    choosing_family: str,
-    remaining: Any,
-    conflicts: Mapping[str, set[str]],
-    selected_ids: set[str],
-    family_ids: Sequence[str],
-    family_counts: Mapping[str, int],
-    targets: Mapping[str, int],
-    lineage_counts: Mapping[str, int],
-    lineage_cap: int,
-) -> bool:
-    """Reserve scarce lineage capacity for families that have no alternative lineage."""
-
-    available = list(remaining)
-    mandatory_for_other_families = 0
-    for family in family_ids:
-        if family == choosing_family:
-            continue
-        needed = targets[family] - family_counts[family]
-        alternatives = sum(
-            row["family_id"] == family
-            and row["representative_lineage_family"] != lineage
-            and not (conflicts[row["task_unit_id"]] & selected_ids)
-            for row in available
-        )
-        mandatory_for_other_families += max(0, needed - alternatives)
-    return lineage_counts[lineage] < lineage_cap - mandatory_for_other_families
 
 
 def _power_design(

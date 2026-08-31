@@ -307,6 +307,19 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
                     "repair_code": "remove_response_format_instruction_v1",
                 }
             ],
+            "review-overrides.json": [
+                {
+                    "cluster_id": cluster["cluster_id"],
+                    "record_id": record["record_id"],
+                    "source_review_contract_id": "contract-old",
+                    "current_contract_id": "contract-new",
+                    "contract_status": "faithful",
+                    "functional_evaluability": "sufficient",
+                    "issue_codes": ["none"],
+                    "adjudication_id": "fixture-v1",
+                    "reason": "The successor contract removed the only unsupported requirement.",
+                }
+            ],
         },
     )
     write_bundle(
@@ -317,8 +330,9 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
                     "cluster_id": cluster["cluster_id"],
                     "record_id": record["record_id"],
                     "contract_id": "contract-old",
-                    "contract_status": "faithful",
+                    "contract_status": "faulty",
                     "functional_evaluability": "sufficient",
+                    "issue_codes": ["unsupported_requirement"],
                     "deterministic_issue_codes": ["response_format_instruction_leak"],
                 }
             ]
@@ -331,7 +345,7 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
                 {
                     "cluster_id": cluster["cluster_id"],
                     "representative_record_id": record["record_id"],
-                    "contract_id": "contract-new",
+                    "contract_id": "contract-old",
                     "primary_cwe": "CWE-78",
                     "decision": "profile_candidate",
                     "realization_id": "cwe78_fixed_executable_argv",

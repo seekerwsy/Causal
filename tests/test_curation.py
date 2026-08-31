@@ -12,6 +12,7 @@ from prompt_mechanism_study.curation import (
     _parse_contract_reviews,
     _parse_mechanism_bindings,
     _parse_semantic,
+    apply_contract_recovery_adjudications,
     assemble_semantic_clusters,
     repair_response_format_contract_leaks,
     run_contract_curation,
@@ -475,6 +476,101 @@ def test_response_format_leak_repair_preserves_task_and_rekeys_contract(
         "contract_id"
     ]
     assert read_json(contracts / "functional-contracts.json") == [original]
+
+
+def test_contract_recovery_freezes_review_override_and_contract_lineage(
+    tmp_path: Path,
+) -> None:
+    core = {
+        "cluster_id": "cluster-a",
+        "entrypoint": "solve",
+        "environment_dependencies": [],
+        "inputs": ["value"],
+        "outputs": ["result"],
+        "reason": "Initial extraction.",
+        "record_id": "record-a",
+        "requirements": ["Return a result."],
+        "resolution_status": "resolved",
+        "side_effects": [],
+        "source_prompt_sha256": "a" * 64,
+    }
+    original = {**core, "contract_id": content_id("cluster_contract_", core)}
+    contracts = tmp_path / "contracts"
+    reviews = tmp_path / "reviews"
+    write_bundle(
+        contracts,
+        {
+            "functional-contracts.json": [original],
+            "repairs.json": [],
+            "report.json": {"status": "FUNCTIONAL_CONTRACT_FORMAT_REPAIRS_FROZEN"},
+        },
+    )
+    write_bundle(
+        reviews,
+        {
+            "contract-quality-reviews.json": [
+                {
+                    "cluster_id": "cluster-a",
+                    "contract_id": original["contract_id"],
+                    "record_id": "record-a",
+                    "contract_status": "faulty",
+                    "functional_evaluability": "sufficient",
+                    "issue_codes": ["missing_explicit_requirement"],
+                    "reason": "The explicit exception is missing.",
+                    "deterministic_issue_codes": [],
+                }
+            ]
+        },
+    )
+    adjudication = tmp_path / "adjudication.json"
+    adjudication.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "adjudication_id": "fixture-v1",
+                "source_contract_bundle_sha256": bundle_digest(contracts),
+                "source_review_bundle_sha256": bundle_digest(reviews),
+                "selection_rule": "fixture",
+                "reviewer_type": "fixture",
+                "arms_or_outcomes_used": False,
+                "decisions": [
+                    {
+                        "task_unit_id": "cluster-a",
+                        "decision": "replace_contract",
+                        "reason": "Restore the explicit exception behavior.",
+                        "replacement": {
+                            "entrypoint": "solve",
+                            "requirements": [
+                                "Return a result.",
+                                "Raise an exception on invalid input.",
+                            ],
+                            "inputs": ["value"],
+                            "outputs": ["result"],
+                            "side_effects": [],
+                            "environment_dependencies": [],
+                            "reason": "Both behaviors are explicit.",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "recovered"
+    report = apply_contract_recovery_adjudications(
+        contracts, reviews, adjudication, output
+    )
+
+    recovered = read_json(output / "functional-contracts.json")[0]
+    repair = read_json(output / "repairs.json")[0]
+    override = read_json(output / "review-overrides.json")[0]
+    assert report["replaced_contracts"] == report["review_overrides"] == 1
+    assert recovered["contract_id"] != original["contract_id"]
+    assert repair["old_contract_id"] == original["contract_id"]
+    assert repair["new_contract_id"] == recovered["contract_id"]
+    assert override["current_contract_id"] == recovered["contract_id"]
+    assert override["contract_status"] == "faithful"
 
 
 def test_semantic_parser_collapses_only_identical_duplicate_json_keys() -> None:

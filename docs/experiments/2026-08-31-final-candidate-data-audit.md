@@ -17,6 +17,7 @@ Oracle qualifications.
 | Conservative task units, 2,165 units | `preexisting_artifact` | independent sampling coordinates |
 | Repaired functional contracts, 2,165 contracts | `preexisting_artifact` | task semantics |
 | Complete blind contract review, 2,165 reviews | `preexisting_artifact` | contract quality/evaluability |
+| Targeted outcome-blind contract adjudication, 17 cases | `newly_run` | correct contradictory reviews and bounded contract faults |
 | Blind mechanism-binding run, 220 task units | `newly_run` | resolve finite registered task shapes |
 | Unified 2,165-row candidate ledger | `newly_run` | final data status and blockers |
 | BaxBench 28-scenario source audit | `newly_run` | backend replication inventory |
@@ -29,8 +30,10 @@ No row is an `user_claim`, and no experimental outcome was used.
   `c391c7a13603542e5edd725dcc4018b4abaae0bfaa75177067561a166f7816d4`;
 - conservative task-unit bundle:
   `88e22630523f571070be6427d91ad34106c72343ccdfed1b584da3790eccd263`;
-- repaired contract bundle:
+- response-format-repaired contract bundle:
   `1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894`;
+- adjudicated successor contract bundle:
+  `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`;
 - complete contract-review bundle:
   `137f94f6b629585f60308d927496b4ae980bd4b8e1efcadc50ebbb71478623cc`;
 - mechanism-binding plan:
@@ -38,31 +41,41 @@ No row is an `user_claim`, and no experimental outcome was used.
 - mechanism-binding result:
   `aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed`;
 - final candidate-data bundle:
-  `32f7d0e18801de99a0bc670ae4c517792e8cfbc51f3bb294b204452bd3c2e442`;
+  `c29040da2274c413cac6ecd37d8fcc12811278595deae6dc0c14233e6ff97fd2`;
+- eligibility policy:
+  `83305113ec7c8e51dfe035102263494309138e958aee616d5e1e7e6a43f58271`;
 - eligibility implementation:
   `src/prompt_mechanism_study/eligibility.py`, SHA-256
-  `eb88d855c88a902e0b21770c65fd414d41c62307dadebdd0494ebf22daaf8444`;
+  `7d536f378b2f5e86ad802e43d871365ddd78f7cb81f54b7c359b6cb562c58e9a`;
+- curation implementation:
+  `src/prompt_mechanism_study/curation.py`, SHA-256
+  `4a28c79e45e7accf5f3124cf4bd439d8f2b5ce04835916c7b684447b855d3a6d`;
 - BaxBench source-tree snapshot:
   `d438c3c484e352a74f34ab0f177c2f9dfd0cea418f995712eee79d6e31624ae2`.
 
 The active local paths are:
 
 - `.codex-runtime/mechanism-binding-review-f2f115f-20260831-01`;
-- `.codex-runtime/dataset-candidate-ledger-20260831-06`.
+- `.codex-runtime/contract-recovery-adjudication-20260831-10`;
+- `.codex-runtime/dataset-candidate-ledger-20260831-11-contract-recovery`.
 
 ## Contract closure
 
 Every task unit has one current contract and one traceable blind review. The 71
 response-format-only defects were removed through explicit old/new contract
-lineage. After that repair, 1,215 contracts satisfy the strict conjunction:
+lineage. After that deterministic repair, 1,215 contracts satisfied the strict
+conjunction:
 
 ```text
 faithful AND functionally sufficient AND no remaining deterministic issue
 ```
 
-The other 950 remain in the ledger as `REPAIRABLE`; they are not silently
-discarded and do not enter a formal denominator. This follows the prior decision
-not to expand limited or insufficient contracts merely to increase sample size.
+The targeted recovery pass then reviewed all 17 faulty+sufficient Python tasks
+that already had mechanism, Oracle, and runtime support. Eight frozen reviews
+were self-contradictory or stale, six contracts needed bounded corrections, and
+three source tasks remained inconsistent or metadata-misaligned. This yields
+1,229 strict and 936 repairable contracts. Limited or insufficient prompts were
+not expanded merely to increase sample size.
 
 ## Blind mechanism binding
 
@@ -84,14 +97,21 @@ An independent replay found zero accepted evidence spans absent from the source
 prompt, zero unknown realization IDs, and zero accepted profiles outside the 12
 qualified local profiles.
 
+Both new deterministic stages reproduced byte-for-byte: the contract-recovery
+bundle digest was
+`6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`
+on both builds, and the successor candidate-ledger digest was
+`c29040da2274c413cac6ecd37d8fcc12811278595deae6dc0c14233e6ff97fd2`
+on both builds.
+
 ## Unified candidate status
 
 The final ledger contains exactly 2,165 unique task units:
 
 | Status | Task units | Meaning |
 | --- | ---: | --- |
-| `READY_CONFIRMATORY` | 136 | strict contract, supported Python runtime, registered mechanism, qualified local Security Oracle |
-| `PENDING_CONTRACT` | 944 | contract quality/evaluability gate not met |
+| `READY_CONFIRMATORY` | 150 | strict contract, supported Python runtime, registered mechanism, qualified local Security Oracle |
+| `PENDING_CONTRACT` | 930 | contract quality/evaluability gate not met |
 | `PENDING_ORACLE` | 260 | mechanism or task-applicable Security Oracle not frozen |
 | `PENDING_RUNTIME` | 174 | non-Python execution/measurement runtime not qualified |
 | `PENDING_BINDING` | 21 | registered mechanism shape remains unresolved |
@@ -99,12 +119,13 @@ The final ledger contains exactly 2,165 unique task units:
 | `PENDING_SCOPE` | 603 | outside the currently registered research families |
 | `EXCLUDED_SOURCE_DEFECT` | 6 | internally incoherent prompt as written |
 
-The 136 ready Python task units span seven source lineages and ten CWEs. Family
-coverage is 35 injection/interpreter, 54 file/parser/resource, 15
-identity/permission, and 32 cryptography/randomness task units. All families meet
-the minimum lineage-diversity rule, but none reaches the prospective target of
-60. The maximum ready sample under the 25% lineage cap is 116. Therefore the
-240-task Python population gate remains closed.
+The 150 ready Python task units span seven source lineages and ten CWEs. Family
+coverage is 38 injection/interpreter, 59 file/parser/resource, 17
+identity/permission, and 36 cryptography/randomness task units. Lineage count
+and share are diagnostics rather than admission gates, so all 150 remain
+eligible on task quality. The largest ready lineage is CyberSecEval at 54/150
+(36.0%). No family reaches the prospective target of 60; that count shortfall,
+not lineage composition, keeps the 240-task Python population gate closed.
 
 ## Oracle choice by layer
 
@@ -146,6 +167,9 @@ respectively, also have strict contracts. They remain `PENDING_ORACLE` or
 - Contract quality is also based on a blind model review plus deterministic and
   targeted case audits. `STRICT` means the frozen audit criteria passed, not
   universal semantic correctness.
+- Source lineage can encode shared templates or annotation conventions. It is
+  retained for source-specific reporting and leave-one-lineage-out sensitivity,
+  but an arbitrary count or percentage no longer rejects a qualified task.
 - Static Python profiles may miss runtime vulnerabilities and can return
   `unknown`; source-native executable replication is therefore reported
   separately.

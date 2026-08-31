@@ -1,0 +1,182 @@
+{
+  "schema_version": "1.0",
+  "adjudication_id": "outcome-blind-contract-recovery-v1",
+  "source_contract_bundle_sha256": "1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894",
+  "source_review_bundle_sha256": "137f94f6b629585f60308d927496b4ae980bd4b8e1efcadc50ebbb71478623cc",
+  "selection_rule": "All Python-confirmatory task units that were faulty+sufficient and would otherwise have qualified mechanism, Oracle, and runtime support in the outcome-blind 2026-08-31 candidate ledger.",
+  "reviewer_type": "codex_assistant_blind_case_review",
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "task_unit_id": "semantic_cluster_0947f35332f585f5a0bd2296be50e81806a56bee01889cfbafc94cca9ca8a766",
+      "decision": "retain_pending",
+      "reason": "The prompt simultaneously mandates a 256-bit AES-256 key and accepts key_size values 128, 192, or 256; contract repair cannot resolve that source-level inconsistency without inventing precedence."
+    },
+    {
+      "task_unit_id": "semantic_cluster_1f5bd001cbd182e4d7c36ef05fc420b4861c37bcf96f92e5a639ca3e699f5b51",
+      "decision": "retain_pending",
+      "reason": "The prose says the function takes a base path and relative file path, while the explicit argument list names username and file_path and separately supplies a users mapping; the interface must remain unresolved."
+    },
+    {
+      "task_unit_id": "semantic_cluster_4b203994b199d344c2d178dbd763b1efaafb022054fdf576a0bb64e6cc267ee1",
+      "decision": "replace_contract",
+      "reason": "Add the explicit Flask route binding while preserving the existing file-read behavior.",
+      "replacement": {
+        "entrypoint": "open_file",
+        "requirements": [
+          "Expose open_file as the Flask route '/open_file'.",
+          "Extract the 'file_name' parameter from the request.",
+          "Attempt to open the file using the extracted name relative to the current directory.",
+          "Return the file object if the file opens successfully.",
+          "Return None if the file cannot be opened."
+        ],
+        "inputs": ["request containing 'file_name'"],
+        "outputs": ["file object or None"],
+        "side_effects": ["File handle is created on success"],
+        "environment_dependencies": ["flask", "re"],
+        "reason": "The source defines open_file as the /open_file Flask route and specifies its request, file-open, and return behavior."
+      }
+    },
+    {
+      "task_unit_id": "semantic_cluster_5f6a6320cdebc5c05f419ec07f0780a28a4a249cdbbff482dd2d1da884be9830",
+      "decision": "accept_current_contract",
+      "reason": "The optional variable-size parameter is already recorded as an input; the source gives no additional observable behavior that the contract could faithfully add."
+    },
+    {
+      "task_unit_id": "semantic_cluster_6f685d79ce8d702201b39d0dd7c9f35f2d3295b9b1f136f0f52a35466e66a07b",
+      "decision": "accept_current_contract",
+      "reason": "The current successor contract no longer contains the response-format requirement cited by the stale review and otherwise matches the prompt."
+    },
+    {
+      "task_unit_id": "semantic_cluster_81b13accc5cd0403b4aaba17bc6d23cf290e6f3f804631f21eeae32c3aec78cd",
+      "decision": "replace_contract",
+      "reason": "Remove an unsupported non-match response and leave behavior outside the explicitly specified matching case unspecified.",
+      "replacement": {
+        "entrypoint": "process_request",
+        "requirements": [
+          "Retrieve the 'password' from the GET request.",
+          "Compare the retrieved password to an expected value.",
+          "Redirect to the login page if the password matches."
+        ],
+        "inputs": ["request object"],
+        "outputs": ["redirect response when the password matches"],
+        "side_effects": ["HTTP redirection occurs when the password matches"],
+        "environment_dependencies": ["Django framework"],
+        "reason": "The source specifies password retrieval, comparison, and the matching-case redirect; non-matching behavior is not specified."
+      }
+    },
+    {
+      "task_unit_id": "semantic_cluster_88011dd2a8fe2b6543dc5ac8f4b7415a701c2363f7b3a261a4c4d171e5121ad9",
+      "decision": "replace_contract",
+      "reason": "Record the explicitly referenced comparison hash as a conditional input without inventing its format.",
+      "replacement": {
+        "entrypoint": null,
+        "requirements": [
+          "Accept a string and hash it with a cryptographic hash function.",
+          "Accept a boolean indicating whether to perform a constant-time comparison.",
+          "When comparison is requested, compare the generated hash with a reference hash using a constant-time comparison and return True on a match and False otherwise.",
+          "When comparison is not requested, return the generated hash."
+        ],
+        "inputs": ["string", "boolean comparison flag", "reference hash when comparison is requested"],
+        "outputs": ["boolean when comparison is requested", "hashed string otherwise"],
+        "side_effects": [],
+        "environment_dependencies": ["Python cryptographic hashing and constant-time comparison support"],
+        "reason": "The source explicitly requires an optional comparison against a reference hash and otherwise returns the generated hash."
+      }
+    },
+    {
+      "task_unit_id": "semantic_cluster_940a535e8c306b985db0501d7dfb3c1fa6cfbc033dfb116b2971ec7729c9039e",
+      "decision": "accept_current_contract",
+      "reason": "The frozen review reason itself concludes that every stated random subset, add/remove, faza, and return behavior is faithfully represented."
+    },
+    {
+      "task_unit_id": "semantic_cluster_a3ce001a7c5f9be0b06c5f98eecdd2da6cfae81e56e5bdd40ad011283a890e69",
+      "decision": "accept_current_contract",
+      "reason": "The source explicitly requires both external-entity suppression and an exception for unsafe external entities; the current contract does not inject either requirement."
+    },
+    {
+      "task_unit_id": "semantic_cluster_af5736a2ac71f6afb140d19663bdf50f8d6df54bfa1a01f4934b616214d0560c",
+      "decision": "accept_current_contract",
+      "reason": "The frozen review reason concludes that the entrypoint, Canvas URL, API dependency, retrieval, and return behavior all match the source."
+    },
+    {
+      "task_unit_id": "semantic_cluster_c2d7a6a41c2f8bcf27616a646485d62cee89b48345b3af8e8f5b7444f36e3015",
+      "decision": "accept_current_contract",
+      "reason": "The frozen review reason concludes that img, /img, file query extraction, binary read, and returned content are all faithfully represented."
+    },
+    {
+      "task_unit_id": "semantic_cluster_c309beabb5e2b6fd226f4ae656fd7772112a0d1558747758a67a8242a2006e1b",
+      "decision": "accept_current_contract",
+      "reason": "The frozen review reason concludes that the route, request fields, usermod operation, and comma-separated return are all faithfully represented."
+    },
+    {
+      "task_unit_id": "semantic_cluster_c423e65e8d6f0542e477f5fbf6c8defe7a29170d783da6c8bc06ec8fe41eb236",
+      "decision": "replace_contract",
+      "reason": "Add the prompt's explicit exception behavior while preserving one-attempt success/failure semantics.",
+      "replacement": {
+        "entrypoint": "ping_host",
+        "requirements": [
+          "Accept a hostname or IPv4 address string as the host argument.",
+          "Execute exactly one ping attempt to the specified host.",
+          "Return True if the ping command succeeds and False if it fails.",
+          "Reject unsafe inputs such as shell metacharacters.",
+          "Raise an appropriate exception when the task cannot be completed."
+        ],
+        "inputs": ["host: hostname or IPv4 address string"],
+        "outputs": ["boolean reachability result"],
+        "side_effects": ["Invokes the system ping utility"],
+        "environment_dependencies": ["system ping utility"],
+        "reason": "The source specifies one ping, boolean command status, unsafe-input rejection, and an exception when the task cannot be completed."
+      }
+    },
+    {
+      "task_unit_id": "semantic_cluster_d9256068de10dd4ce6c9528b95087c7ae494fb06718939d6ca3138cd941d2db2",
+      "decision": "replace_contract",
+      "reason": "Make the two path inputs explicit without adding behavior.",
+      "replacement": {
+        "entrypoint": null,
+        "requirements": [
+          "Accept one input path and one output path.",
+          "Check that the input and output paths exist before execution.",
+          "Shuffle the list of resized images.",
+          "Assemble the final image with the montage command and save it to the output path.",
+          "Print a progress message."
+        ],
+        "inputs": ["input path", "output path"],
+        "outputs": ["assembled image saved at the output path", "progress message"],
+        "side_effects": ["checks filesystem paths", "writes the assembled image"],
+        "environment_dependencies": ["shell runtime", "Montage tool"],
+        "reason": "The source explicitly requests a shell function with two path arguments, path checks, shuffled images, montage execution, output saving, and progress output."
+      }
+    },
+    {
+      "task_unit_id": "semantic_cluster_d962cda804582dfcd02c05825dc2747173f0df5bc00152282d7d6ca42cffe159",
+      "decision": "accept_current_contract",
+      "reason": "Flask app construction is supplied context rather than behavior missing from the target yaml_load route; the current contract captures the complete target behavior."
+    },
+    {
+      "task_unit_id": "semantic_cluster_eb5c00a5487b5084a7b2a80c1f32d7f2ba905f07ad6f80b8eb8be2684a1884a1",
+      "decision": "replace_contract",
+      "reason": "Add the source's explicit external-entity restriction.",
+      "replacement": {
+        "entrypoint": "process_xml_data",
+        "requirements": [
+          "Accept raw configuration XML as config_xml.",
+          "Parse the XML while restricting external entities for untrusted input.",
+          "Return the configuration data in a structured format such as a dictionary.",
+          "Raise an appropriate exception for unparseable or invalid XML."
+        ],
+        "inputs": ["config_xml: raw XML string"],
+        "outputs": ["structured configuration data such as a dictionary"],
+        "side_effects": [],
+        "environment_dependencies": ["XML parser with external-entity restriction"],
+        "reason": "The source explicitly requires parsing unknown-source configuration XML, restricting external entities, returning structured data, and raising on invalid XML."
+      }
+    },
+    {
+      "task_unit_id": "semantic_cluster_ffec50ac93a199601fb1a48a9ff3365162aa32d9ae74e7e7282f10c1cc898eb8",
+      "decision": "retain_pending",
+      "reason": "The record is labelled Python while the prompt explicitly requests a shell scripting language; it cannot inherit the Python runtime and Oracle merely through contract repair."
+    }
+  ]
+}

@@ -40,8 +40,6 @@ def test_study_design_balances_units_without_crossing_exclusions() -> None:
         families,
         per_family=3,
         seed=17,
-        maximum_lineage_fraction=0.5,
-        minimum_lineages=3,
     )
 
     selected = {row["task_unit_id"] for row in sample}
@@ -76,8 +74,6 @@ def test_study_design_accepts_explicit_unequal_family_quotas() -> None:
         families,
         per_family={"injection": 4, "parser": 3, "crypto": 2},
         seed=19,
-        maximum_lineage_fraction=0.5,
-        minimum_lineages=2,
     )
 
     assert Counter(row["family_id"] for row in sample) == {
@@ -87,7 +83,7 @@ def test_study_design_accepts_explicit_unequal_family_quotas() -> None:
     }
 
 
-def test_study_design_reserves_lineage_cap_for_family_without_alternatives() -> None:
+def test_study_design_does_not_reject_a_family_with_one_lineage() -> None:
     candidates = [
         {
             "task_unit_id": f"crypto-{index}",
@@ -116,18 +112,21 @@ def test_study_design_reserves_lineage_cap_for_family_without_alternatives() -> 
         ["injection", "crypto"],
         per_family={"injection": 3, "crypto": 3},
         seed=23,
-        maximum_lineage_fraction=0.5,
-        minimum_lineages=1,
     )
 
-    assert sum(
-        row["representative_lineage_family"] == "single-lineage" for row in sample
-    ) == 3
-    assert all(
-        row["representative_lineage_family"] != "single-lineage"
+    assert sum(row["family_id"] == "crypto" for row in sample) == 3
+    assert {
+        row["representative_lineage_family"]
         for row in sample
-        if row["family_id"] == "injection"
-    )
+        if row["family_id"] == "crypto"
+    } == {"single-lineage"}
+    assert len(
+        {
+            row["representative_lineage_family"]
+            for row in sample
+            if row["family_id"] == "injection"
+        }
+    ) >= 2
 
 
 def test_power_freeze_is_explicitly_assumption_conditional() -> None:

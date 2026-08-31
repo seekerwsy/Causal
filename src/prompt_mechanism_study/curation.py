@@ -725,6 +725,188 @@ def repair_response_format_contract_leaks(
     return report
 
 
+def apply_contract_recovery_adjudications(
+    contracts_root: Path,
+    reviews_root: Path,
+    adjudications_path: Path,
+    output: Path,
+) -> dict[str, Any]:
+    """Apply bounded outcome-blind contract and review corrections."""
+
+    contracts = contracts_root.resolve()
+    reviews = reviews_root.resolve()
+    adjudications_file = adjudications_path.resolve()
+    verify_bundle(contracts)
+    verify_bundle(reviews)
+    policy = _object(read_json(adjudications_file), "contract recovery adjudications")
+    if (
+        policy.get("schema_version") != "1.0"
+        or policy.get("arms_or_outcomes_used") is not False
+        or policy.get("source_contract_bundle_sha256") != bundle_digest(contracts)
+        or policy.get("source_review_bundle_sha256") != bundle_digest(reviews)
+    ):
+        raise CurationError("contract recovery adjudication provenance is invalid")
+    decisions = _rows(policy.get("decisions"), "contract recovery decisions")
+    decision_by_cluster = {row.get("task_unit_id"): row for row in decisions}
+    if len(decision_by_cluster) != len(decisions) or None in decision_by_cluster:
+        raise CurationError("contract recovery decisions have duplicate task units")
+
+    contract_rows = _rows(
+        read_json(contracts / "functional-contracts.json"), "functional contracts"
+    )
+    review_rows = _rows(
+        read_json(reviews / "contract-quality-reviews.json"), "contract reviews"
+    )
+    contract_by_cluster = {row.get("cluster_id"): row for row in contract_rows}
+    review_by_cluster = {row.get("cluster_id"): row for row in review_rows}
+    if (
+        len(contract_by_cluster) != len(contract_rows)
+        or len(review_by_cluster) != len(review_rows)
+        or set(contract_by_cluster) != set(review_by_cluster)
+        or not set(decision_by_cluster) <= set(contract_by_cluster)
+    ):
+        raise CurationError("contract recovery populations do not align")
+    source_repairs = {
+        row["cluster_id"]: row
+        for row in _rows(read_json(contracts / "repairs.json"), "source contract repairs")
+    }
+    if len(source_repairs) != len(read_json(contracts / "repairs.json")):
+        raise CurationError("source contract repairs contain duplicate task units")
+
+    replacement_keys = {
+        "entrypoint",
+        "requirements",
+        "inputs",
+        "outputs",
+        "side_effects",
+        "environment_dependencies",
+        "reason",
+    }
+    corrected: list[dict[str, Any]] = []
+    corrected_only: list[dict[str, Any]] = []
+    consolidated_repairs: list[dict[str, Any]] = []
+    overrides: list[dict[str, Any]] = []
+    frozen_decisions: list[dict[str, Any]] = []
+    for cluster_id in sorted(contract_by_cluster):
+        current = contract_by_cluster[cluster_id]
+        review = review_by_cluster[cluster_id]
+        source_repair = source_repairs.get(cluster_id)
+        if review.get("record_id") != current.get("record_id"):
+            raise CurationError("contract recovery review record binding is stale")
+        if review.get("contract_id") != current.get("contract_id"):
+            if (
+                source_repair is None
+                or source_repair.get("old_contract_id") != review.get("contract_id")
+                or source_repair.get("new_contract_id") != current.get("contract_id")
+            ):
+                raise CurationError("contract recovery source lineage is invalid")
+
+        decision = decision_by_cluster.get(cluster_id)
+        final_contract = current
+        repair_codes = (
+            [] if source_repair is None else [source_repair["repair_code"]]
+        )
+        if decision is not None:
+            kind = decision.get("decision")
+            if (
+                kind not in {"accept_current_contract", "replace_contract", "retain_pending"}
+                or not isinstance(decision.get("reason"), str)
+                or not decision["reason"].strip()
+                or review.get("contract_status") != "faulty"
+                or review.get("functional_evaluability") != "sufficient"
+            ):
+                raise CurationError("contract recovery decision is invalid")
+            if kind == "replace_contract":
+                replacement = decision.get("replacement")
+                if not isinstance(replacement, dict) or set(replacement) != replacement_keys:
+                    raise CurationError("replacement contract fields are invalid")
+                for key in (
+                    "requirements",
+                    "inputs",
+                    "outputs",
+                    "side_effects",
+                    "environment_dependencies",
+                ):
+                    values = replacement[key]
+                    if not isinstance(values, list) or any(
+                        not isinstance(value, str) or not value.strip() for value in values
+                    ):
+                        raise CurationError("replacement contract lists are invalid")
+                final_core = {
+                    **{
+                        key: value
+                        for key, value in current.items()
+                        if key not in replacement_keys | {"contract_id"}
+                    },
+                    **replacement,
+                }
+                final_contract = {
+                    **final_core,
+                    "contract_id": content_id("cluster_contract_", final_core),
+                }
+                corrected_only.append(final_contract)
+                repair_codes.append("outcome_blind_contract_adjudication_v1")
+            if kind != "retain_pending":
+                overrides.append(
+                    {
+                        "cluster_id": cluster_id,
+                        "record_id": current["record_id"],
+                        "source_review_contract_id": review["contract_id"],
+                        "current_contract_id": final_contract["contract_id"],
+                        "contract_status": "faithful",
+                        "functional_evaluability": "sufficient",
+                        "issue_codes": ["none"],
+                        "adjudication_id": policy["adjudication_id"],
+                        "reason": decision["reason"],
+                    }
+                )
+            frozen_decisions.append(canonical_value(decision))
+
+        corrected.append(final_contract)
+        if final_contract["contract_id"] != review["contract_id"]:
+            consolidated_repairs.append(
+                {
+                    "cluster_id": cluster_id,
+                    "record_id": current["record_id"],
+                    "old_contract_id": review["contract_id"],
+                    "new_contract_id": final_contract["contract_id"],
+                    "repair_codes": sorted(set(repair_codes)),
+                }
+            )
+
+    report = {
+        "schema_version": "1.0",
+        "status": "OUTCOME_BLIND_CONTRACT_RECOVERY_FROZEN",
+        "source_contract_bundle_sha256": bundle_digest(contracts),
+        "source_review_bundle_sha256": bundle_digest(reviews),
+        "adjudication_sha256": hashlib.sha256(adjudications_file.read_bytes()).hexdigest(),
+        "contract_count": len(corrected),
+        "adjudicated_task_units": len(frozen_decisions),
+        "accepted_current_contracts": sum(
+            row["decision"] == "accept_current_contract" for row in frozen_decisions
+        ),
+        "replaced_contracts": len(corrected_only),
+        "retained_pending": sum(
+            row["decision"] == "retain_pending" for row in frozen_decisions
+        ),
+        "review_overrides": len(overrides),
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        output.resolve(),
+        {
+            "functional-contracts.json": corrected,
+            "repaired-contracts.json": corrected_only,
+            "repairs.json": consolidated_repairs,
+            "review-overrides.json": overrides,
+            "adjudication-decisions.json": frozen_decisions,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def assemble_semantic_clusters(
     prepared_root: Path,
     candidates_root: Path,
@@ -1590,6 +1772,7 @@ __all__ = [
     "run_contract_curation",
     "run_contract_quality_review",
     "run_mechanism_binding_review",
+    "apply_contract_recovery_adjudications",
     "repair_response_format_contract_leaks",
     "run_semantic_curation",
 ]

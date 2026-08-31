@@ -1,12 +1,16 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "policy_id": "seven-source-dataset-eligibility-v1",
   "active_layer": "python_confirmatory",
   "source_tests_required": false,
   "functional_oracle_languages": ["python"],
   "security_oracle_languages": ["python"],
-  "maximum_lineage_fraction": 0.25,
-  "minimum_lineages_per_python_family": 3,
+  "lineage_policy": {
+    "admission_role": "diagnostic_only",
+    "selection_priority": "prefer_underrepresented_lineages_after_family_and_cwe_balance",
+    "report_source_specific_estimates": true,
+    "report_leave_one_lineage_out": true
+  },
   "python_families": [
     {
       "family_id": "injection_and_interpreter",

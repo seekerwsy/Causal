@@ -782,6 +782,12 @@ def audit_dataset_eligibility(
                 representative,
                 contract,
                 registry,
+                contract_lineage_ids={
+                    contract["contract_id"],
+                    review_rows.get(cluster["cluster_id"], {}).get(
+                        "contract_id", contract["contract_id"]
+                    ),
+                },
             )
         contract_complete = bool(
             contract.get("resolution_status") == "resolved" and contract.get("requirements")
@@ -936,15 +942,10 @@ def audit_dataset_eligibility(
                 "eligible_clusters": len(members),
                 "target_clusters": family["target_clusters"],
                 "eligible_lineages": len(lineages),
-                "minimum_lineages": policy["minimum_lineages_per_python_family"],
                 "cluster_target_met": len(members) >= family["target_clusters"],
-                "lineage_target_met": len(lineages) >= policy["minimum_lineages_per_python_family"],
             }
         )
     lineage_counts = Counter(row["representative_lineage_family"] for row in eligible)
-    maximum_lineage_capped_sample = _maximum_capped_sample(
-        lineage_counts, policy["maximum_lineage_fraction"]
-    )
     ready_confirmatory = [
         row for row in candidate_ledger if row["candidate_status"] == "READY_CONFIRMATORY"
     ]
@@ -971,15 +972,12 @@ def audit_dataset_eligibility(
                 "ready_task_units": len(members),
                 "target_task_units": family["target_clusters"],
                 "ready_lineages": len(lineages),
-                "minimum_lineages": policy["minimum_lineages_per_python_family"],
                 "task_target_met": len(members) >= family["target_clusters"],
-                "lineage_target_met": len(lineages)
-                >= policy["minimum_lineages_per_python_family"],
             }
         )
     ready_lineage_counts = Counter(row["source_lineage_family"] for row in ready_confirmatory)
     report = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "status": "DATASET_ELIGIBILITY_AUDIT_COMPLETE",
         "cluster_count": len(decisions),
         "candidate_ledger_complete": len(candidate_ledger) == len(decisions),
@@ -1002,14 +1000,12 @@ def audit_dataset_eligibility(
             row["target_clusters"] for row in policy["python_families"]
         ),
         "python_population_gate_passed": all(
-            row["task_target_met"] and row["lineage_target_met"]
-            for row in ready_family_rows
+            row["task_target_met"] for row in ready_family_rows
         ),
-        "maximum_sample_under_lineage_cap": maximum_lineage_capped_sample,
-        "maximum_ready_sample_under_lineage_cap": _maximum_capped_sample(
-            ready_lineage_counts, policy["maximum_lineage_fraction"]
-        ),
-        "maximum_lineage_fraction": policy["maximum_lineage_fraction"],
+        "lineage_policy": policy["lineage_policy"],
+        "largest_eligible_lineage_fraction": _largest_fraction(lineage_counts),
+        "largest_ready_lineage_fraction": _largest_fraction(ready_lineage_counts),
+        "ready_lineage_counts": dict(sorted(ready_lineage_counts.items())),
         "eligible_with_source_tests": sum(row["source_test_available"] for row in eligible),
         "ready_with_source_tests": sum(
             row["source_test_available"] for row in ready_confirmatory
@@ -1112,6 +1108,11 @@ def _contract_review_rows(
     repairs = {row["cluster_id"]: row for row in repair_rows}
     if len(repairs) != len(repair_rows):
         raise EligibilityError("contract repair lineage contains duplicate task units")
+    overrides_path = contracts / "review-overrides.json"
+    override_rows = [] if not overrides_path.is_file() else _rows(read_json(overrides_path))
+    overrides = {row.get("cluster_id"): row for row in override_rows}
+    if len(overrides) != len(override_rows) or not set(overrides) <= population:
+        raise EligibilityError("contract review overrides contain invalid task units")
     augmented = {}
     for cluster_id in sorted(population):
         review = by_cluster[cluster_id]
@@ -1124,23 +1125,68 @@ def _contract_review_rows(
                 raise EligibilityError("contract review does not bind the current contract")
             remaining = list(review.get("deterministic_issue_codes", []))
         else:
+            repair_codes = repair.get("repair_codes")
+            if repair_codes is None and isinstance(repair.get("repair_code"), str):
+                repair_codes = [repair["repair_code"]]
             if (
                 review.get("contract_id") != repair.get("old_contract_id")
                 or current.get("contract_id") != repair.get("new_contract_id")
                 or current.get("record_id") != repair.get("record_id")
-                or repair.get("repair_code") != "remove_response_format_instruction_v1"
+                or not isinstance(repair_codes, list)
+                or not repair_codes
+                or not set(repair_codes)
+                <= {
+                    "remove_response_format_instruction_v1",
+                    "outcome_blind_contract_adjudication_v1",
+                }
             ):
                 raise EligibilityError("contract repair lineage is invalid")
             remaining = [
                 code
                 for code in review.get("deterministic_issue_codes", [])
-                if code != "response_format_instruction_leak"
+                if not (
+                    code == "response_format_instruction_leak"
+                    and "remove_response_format_instruction_v1" in repair_codes
+                )
             ]
+        override = overrides.get(cluster_id)
+        effective_review = review
+        if override is not None:
+            if (
+                set(override)
+                != {
+                    "cluster_id",
+                    "record_id",
+                    "source_review_contract_id",
+                    "current_contract_id",
+                    "contract_status",
+                    "functional_evaluability",
+                    "issue_codes",
+                    "adjudication_id",
+                    "reason",
+                }
+                or override.get("record_id") != current.get("record_id")
+                or override.get("source_review_contract_id") != review.get("contract_id")
+                or override.get("current_contract_id") != current.get("contract_id")
+                or override.get("contract_status") != "faithful"
+                or override.get("functional_evaluability") != "sufficient"
+                or override.get("issue_codes") != ["none"]
+                or not isinstance(override.get("adjudication_id"), str)
+                or not isinstance(override.get("reason"), str)
+            ):
+                raise EligibilityError("contract review override is invalid")
+            effective_review = {
+                **review,
+                "contract_status": override["contract_status"],
+                "functional_evaluability": override["functional_evaluability"],
+                "issue_codes": override["issue_codes"],
+            }
         augmented[cluster_id] = {
-            **review,
+            **effective_review,
             "current_contract_id": current["contract_id"],
             "remaining_deterministic_issue_codes": sorted(set(remaining)),
             "repair_applied": repair is not None,
+            "review_override_applied": override is not None,
         }
     return augmented
 
@@ -1576,10 +1622,13 @@ def _mechanism_from_binding(
     representative: dict[str, Any],
     contract: dict[str, Any],
     registry: dict[str, dict[str, Any]],
+    *,
+    contract_lineage_ids: set[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
+    accepted_contract_ids = contract_lineage_ids or {contract["contract_id"]}
     if (
         binding.get("representative_record_id") != representative["record_id"]
-        or binding.get("contract_id") != contract["contract_id"]
+        or binding.get("contract_id") not in accepted_contract_ids
         or binding.get("primary_cwe") != representative["cwe"]
     ):
         raise EligibilityError("realization binding does not match its frozen cluster")
@@ -1606,8 +1655,7 @@ def _policy(value: Any) -> dict[str, Any]:
         "source_tests_required",
         "functional_oracle_languages",
         "security_oracle_languages",
-        "maximum_lineage_fraction",
-        "minimum_lineages_per_python_family",
+        "lineage_policy",
         "python_families",
         "mechanism_registry_path",
         "functional_oracle_qualification_path",
@@ -1615,15 +1663,16 @@ def _policy(value: Any) -> dict[str, Any]:
         "layers",
     }:
         raise EligibilityError("eligibility policy fields are invalid")
-    if value["schema_version"] != "1.1" or value["source_tests_required"] is not False:
+    if value["schema_version"] != "1.2" or value["source_tests_required"] is not False:
         raise EligibilityError("eligibility policy version or test rule is invalid")
-    if (
-        type(value["maximum_lineage_fraction"]) is not float
-        or not 0 < value["maximum_lineage_fraction"] <= 1
-        or type(value["minimum_lineages_per_python_family"]) is not int
-        or value["minimum_lineages_per_python_family"] <= 0
-    ):
-        raise EligibilityError("eligibility population constraints are invalid")
+    lineage_policy = value["lineage_policy"]
+    if not isinstance(lineage_policy, dict) or lineage_policy != {
+        "admission_role": "diagnostic_only",
+        "selection_priority": "prefer_underrepresented_lineages_after_family_and_cwe_balance",
+        "report_source_specific_estimates": True,
+        "report_leave_one_lineage_out": True,
+    }:
+        raise EligibilityError("lineage policy must remain diagnostic-only")
     families = value["python_families"]
     if not isinstance(families, list) or not families:
         raise EligibilityError("Python family policy is empty")
@@ -1663,12 +1712,9 @@ def _policy(value: Any) -> dict[str, Any]:
     return value
 
 
-def _maximum_capped_sample(counts: Counter[str], maximum_fraction: float) -> int:
-    for size in range(sum(counts.values()), 0, -1):
-        cap = int(size * maximum_fraction)
-        if cap and sum(min(count, cap) for count in counts.values()) >= size:
-            return size
-    return 0
+def _largest_fraction(counts: Counter[str]) -> float:
+    total = sum(counts.values())
+    return 0.0 if not total else round(max(counts.values()) / total, 6)
 
 
 def _rows(value: Any) -> list[dict[str, Any]]:

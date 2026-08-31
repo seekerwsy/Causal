@@ -5,7 +5,7 @@
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
 coverage target, not a claim of current readiness. The active outcome-blind
-audit currently identifies 136 `READY_CONFIRMATORY` Python task units and keeps
+audit currently identifies 150 `READY_CONFIRMATORY` Python task units and keeps
 the 240-task population gate closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
 power-planning canary; it is not a frozen successor assignment manifest or
@@ -143,10 +143,10 @@ generation outcome is read.
 
 ## 4. Candidate source policy
 
-The Python-core inventory should draw from at least five independently derived
-benchmark lineages, with candidates from the current cleaned SecurityEval,
-LLMSecEval, SALLM, CWEval, CodeSecEval/SeCodePLT, and CyberSecEval Instruct
-collections where eligible.
+The Python-core inventory retains eligible candidates from the current cleaned
+SecurityEval, LLMSecEval, SALLM, CWEval, CodeSecEval/SeCodePLT, and CyberSecEval
+Instruct collections. Source breadth is reported rather than used as a task
+quality threshold.
 
 `source_lineage_family` records derivation and task overlap, not merely dataset
 name or author institution. A copied, translated, reformatted, or mutated task
@@ -154,8 +154,11 @@ remains in the same lineage unless independence is demonstrated.
 
 For the Python core:
 
-- no source lineage may contribute more than 25 percent of frozen task units;
-- every mechanism family must contain at least three source lineages;
+- lineage identity and concentration are diagnostics, not admission gates;
+- selection prefers an underrepresented lineage only after family and leaf-CWE
+  balance, without rejecting an otherwise qualified task;
+- the paper reports source-specific estimates and leave-one-lineage-out
+  sensitivity when the frozen sample makes them estimable;
 - exact and semantic duplicates across all sources count once; and
 - dataset availability or previous model performance cannot change the
   selection rule after outcomes are visible.
@@ -174,8 +177,8 @@ The study treats this 1,404-record file directly as the external dataset version
 it received; it does not need to reconstruct how that external version was
 created.  The paper and artifact report the snapshot name, size, path, digest,
 citation, and upstream address, without calling it an official `instruct-v2`
-release.  Our own outcome-blind lineage, deduplication, contract, Oracle, and
-25-percent source-cap gates start from these 1,404 records.  Bundled model
+release.  Our own outcome-blind lineage, deduplication, contract, and Oracle
+gates start from these 1,404 records.  Bundled model
 responses, statistics, logs, and notebooks are never selection inputs.
 
 SecurityEval, CodeSecEval, and SeCodePLT follow the same scientific admission
@@ -400,8 +403,12 @@ The active audit emits one record for each of the 2,165 task units. Contract
 quality, mechanism binding, Security-Oracle support, functionality evidence,
 runtime support, development exposure, candidate status, and blocker codes are
 separate fields; a failure at one gate does not erase the task from the ledger.
-The repaired contract population contains 1,215 strict and 950 repairable
-contracts.
+The response-format repair produced 1,215 strict contracts. A bounded
+outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
+that otherwise had mechanism, Oracle, and runtime support: eight stale or
+self-contradictory review labels were corrected, six contracts were repaired,
+and three source-inconsistent cases remained pending. The active population now
+contains 1,229 strict and 936 repairable contracts.
 
 The deterministic registry matcher left 220 task units ambiguous or unresolved.
 A blind Qwen3.7-Max review saw only the source prompt, repaired functional
@@ -417,8 +424,8 @@ The final mutually exclusive candidate statuses are:
 
 | Status | Task units |
 | --- | ---: |
-| `READY_CONFIRMATORY` | 136 |
-| `PENDING_CONTRACT` | 944 |
+| `READY_CONFIRMATORY` | 150 |
+| `PENDING_CONTRACT` | 930 |
 | `PENDING_ORACLE` | 260 |
 | `PENDING_RUNTIME` | 174 |
 | `PENDING_BINDING` | 21 |
@@ -426,12 +433,13 @@ The final mutually exclusive candidate statuses are:
 | `PENDING_SCOPE` | 603 |
 | `EXCLUDED_SOURCE_DEFECT` | 6 |
 
-The 136 ready Python task units cover seven source lineages and ten CWEs. Family
-coverage is 35 injection/interpreter, 54 file/parser/external-resource, 15
-identity/permission, and 32 cryptography/randomness task units. Every family
-meets the three-lineage minimum, but none meets its 60-task target. The maximum
-ready sample under the 25-percent lineage cap is 116, so the prospective
-240-task-unit population gate remains closed.
+The 150 ready Python task units cover seven source lineages and ten CWEs. Family
+coverage is 38 injection/interpreter, 59 file/parser/external-resource, 17
+identity/permission, and 36 cryptography/randomness task units. All 150 remain
+admissible on task quality; no lineage count or share removes a task. None of
+the four families meets its 60-task target, so the prospective 240-task-unit
+population gate remains closed. CyberSecEval contributes 54/150 (36.0%) of the
+ready pool; this is reported as a transportability diagnostic.
 
 The Security-Oracle registry published with the audit distinguishes 12
 qualified deterministic Python profiles, one registered contextual profile
@@ -465,9 +473,13 @@ The active closed artifacts are:
   `f2f8556a4fad016413aa0f4585f4769ea81b0fa11bc2632c2e32a159cb77690e`
   and final-result SHA-256
   `aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed`;
+- targeted outcome-blind contract recovery:
+  `.codex-runtime/contract-recovery-adjudication-20260831-10`, SHA-256
+  `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`;
 - unified candidate-data audit:
-  `.codex-runtime/dataset-candidate-ledger-20260831-06`, SHA-256
-  `32f7d0e18801de99a0bc670ae4c517792e8cfbc51f3bb294b204452bd3c2e442`;
+  `.codex-runtime/dataset-candidate-ledger-20260831-11-contract-recovery`,
+  SHA-256
+  `c29040da2274c413cac6ecd37d8fcc12811278595deae6dc0c14233e6ff97fd2`;
 - audit report:
   `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
 
@@ -493,18 +505,18 @@ CWE-338 (33). Their family support is:
 
 | Python family | Eligible | Target | Gate |
 | --- | ---: | ---: | --- |
-| injection and interpreter | 126 | 60 | count/lineage pass |
+| injection and interpreter | 126 | 60 | count pass |
 | file, parser, external resource | 22 | 60 | count fail |
-| identity, authorization, permissions | 0 | 60 | count/lineage fail |
+| identity, authorization, permissions | 0 | 60 | count fail |
 | cryptography, randomness, integrity | 56 | 60 | count fail |
 
 These counts are not valid for sampling from the new 2,165-cluster population.
 Before the correction, the prospective 240-task-unit Python population gate did
 **not pass**. In addition, 148 of the 204 eligible representatives came from the
-CyberSecEval Instruct Prime lineage. Under the frozen 25-percent per-lineage
-cap, at most 64 of the currently eligible clusters can be selected, even before
-family balancing. This is a corpus/method-coverage shortfall, not an experiment
-result and not a reason to sample selectively from previously favorable tasks.
+CyberSecEval Instruct Prime lineage. That concentration remains evidence of a
+narrow source mixture, but it no longer invalidates otherwise qualified tasks.
+This is a transportability diagnostic, not an experiment result and not a
+reason to sample selectively from previously favorable tasks.
 
 The closed audit bundle is
 `.codex-runtime/dataset-eligibility-seven-v3-final-20260823-24`, SHA-256
@@ -563,11 +575,13 @@ response to the observed effect.
 The active outcome-blind design bundle is
 `.codex-runtime/study-design-python-four-arm-v1-20260823-48`, SHA-256
 `f9df3a6ff55698914e9f515ab07249b8aea70c8c838be665544d9c2d36aeebe0`.
-It selects 60 unique task units with no co-selection violation, exactly 15 per
-family, at least three lineages per family, and a maximum lineage contribution
-of 15/60. Within each family, the deterministic selector also balances the
-available leaf CWEs before breaking ties by lineage and frozen hash order.
-Selection used only frozen task, contract, lineage, mechanism, and
+It selects 60 unique task units with no co-selection violation and exactly 15
+per family. That immutable historical artifact happened to include at least
+three lineages per family and a maximum lineage contribution of 15/60 under its
+then-active hard constraints. Those constraints are not carried into the
+prospective successor. The active selector balances family and leaf CWE first,
+uses lineage only as a non-excluding tie-breaker, and then uses frozen hash
+order. Selection uses only frozen task, contract, lineage, mechanism, and
 Oracle-profile fields.
 
 The existing paired `specific - placebo` planning calculation used a
@@ -614,7 +628,8 @@ The planned design is accepted only when:
   before outcomes;
 - the primary hypothesis-specific power gate passes;
 - development, calibration, and all scientific layers are task-unit-disjoint;
-- source-lineage caps and family diversity constraints pass;
+- source-lineage composition is published and the prespecified source
+  sensitivity analyses are run when estimable;
 - every admitted task has a functional contract and calibrated Oracle profile;
 - the assignment budget is recomputed from the frozen hypothesis and arm
   manifests; and

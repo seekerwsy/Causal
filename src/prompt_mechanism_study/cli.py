@@ -361,6 +361,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     repair_contracts.add_argument("contracts_root", type=Path)
     repair_contracts.add_argument("output", type=Path)
 
+    adjudicate_contracts = commands.add_parser(
+        "apply-contract-adjudications",
+        help="apply bounded outcome-blind contract and review corrections",
+    )
+    adjudicate_contracts.add_argument("contracts_root", type=Path)
+    adjudicate_contracts.add_argument("reviews_root", type=Path)
+    adjudicate_contracts.add_argument("adjudications", type=Path)
+    adjudicate_contracts.add_argument("output", type=Path)
+
     eligibility = commands.add_parser(
         "dataset-eligibility",
         help="audit curated clusters for current experiment readiness",
@@ -677,6 +686,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         report = repair_response_format_contract_leaks(
             args.contracts_root,
+            args.output,
+        )
+        print(report["status"])
+    elif args.command == "apply-contract-adjudications":
+        from prompt_mechanism_study.curation import apply_contract_recovery_adjudications
+
+        report = apply_contract_recovery_adjudications(
+            args.contracts_root,
+            args.reviews_root,
+            args.adjudications,
             args.output,
         )
         print(report["status"])

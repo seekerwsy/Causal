@@ -91,7 +91,7 @@ coverage. Demo, smoke, calibration, and development-canary outputs are never
 confirmatory evidence.
 
 The current outcome-blind candidate-data audit accounts for all 2,165
-conservative task units. It identifies 1,215 strict contracts and 136 Python
+conservative task units. It identifies 1,229 strict contracts and 150 Python
 task units that presently satisfy the contract, mechanism, runtime, and local
 Oracle gates. The planned 240-task Python population is therefore not yet
 filled. Separate inventories retain 102 quality-cleared C/C++ memory-safety
