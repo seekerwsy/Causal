@@ -1991,12 +1991,19 @@ def _parse_evidence_backfill(
     raw: bytes, batch: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     rows = _evidence_response_rows(raw, batch)
-    required = {"item_index", "binding_status", "evidence_bindings", "reason"}
+    core_fields = {"item_index", "binding_status", "evidence_bindings"}
     frozen = []
     for row, item in zip(rows, batch, strict=True):
-        if set(row) != required or row["binding_status"] not in {"bound", "needs_repair"}:
+        if (
+            set(row) not in {frozenset(core_fields), frozenset(core_fields | {"reason"})}
+            or row["binding_status"] not in {"bound", "needs_repair"}
+        ):
             raise ContractCleaningError("evidence backfill response is malformed")
-        normalized_reason = _normalize_reason(row["reason"])
+        normalized_reason = (
+            _normalize_reason(row["reason"])
+            if "reason" in row
+            else "No diagnostic reason supplied."
+        )
         evidence = row["evidence_bindings"]
         if row["binding_status"] == "bound":
             try:

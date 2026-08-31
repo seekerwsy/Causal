@@ -130,6 +130,25 @@ def test_incomplete_bound_evidence_is_deterministically_escalated() -> None:
     assert row["content_evidence"] is None
 
 
+def test_evidence_reason_is_optional_but_unknown_fields_are_rejected() -> None:
+    response = {
+        "item_index": 1,
+        "binding_status": "bound",
+        "evidence_bindings": _evidence(),
+    }
+    row = _parse_evidence_backfill(
+        json.dumps({"items": [response]}, ensure_ascii=False).encode(), _batch()
+    )[0]
+    assert row["binding_status"] == "bound"
+    assert row["reason"] == "No diagnostic reason supplied."
+
+    response["unexpected"] = True
+    with pytest.raises(ContractCleaningError):
+        _parse_evidence_backfill(
+            json.dumps({"items": [response]}, ensure_ascii=False).encode(), _batch()
+        )
+
+
 def test_single_task_evidence_projects_only_exact_target_echoes() -> None:
     decision = {
         "item_index": 1,
