@@ -171,6 +171,40 @@ def _add_curation_group(groups: Any) -> None:
     review_contracts.add_argument("output", type=Path)
     _add_curation_runtime_options(review_contracts)
 
+    content_proposals = _leaf(
+        actions,
+        "contract-content-proposals",
+        _run_contract_content_proposals,
+        "backfill faithful contracts and repair faulty contracts without outcomes",
+    )
+    content_proposals.add_argument("base_bundle", type=Path)
+    content_proposals.add_argument("output", type=Path)
+    content_proposals.add_argument("--producer-commit", required=True)
+    content_proposals.add_argument("--max-new-batches", type=int)
+    content_proposals.add_argument("--workers", type=int, default=1)
+
+    reserve_future = _leaf(
+        actions,
+        "reserve-future-evaluation",
+        _run_reserve_future_evaluation,
+        "seal one prompt-blind candidate per fully unexposed near-duplicate group",
+    )
+    reserve_future.add_argument("base_bundle", type=Path)
+    reserve_future.add_argument("output", type=Path)
+    reserve_future.add_argument("--producer-commit", required=True)
+
+    content_review = _leaf(
+        actions,
+        "contract-content-review",
+        _run_contract_content_review,
+        "independently review every evidence-complete proposed contract",
+    )
+    content_review.add_argument("base_bundle", type=Path)
+    content_review.add_argument("proposals_root", type=Path)
+    content_review.add_argument("output", type=Path)
+    content_review.add_argument("--max-new-batches", type=int)
+    content_review.add_argument("--workers", type=int, default=1)
+
     review_bindings = _leaf(
         actions,
         "review-bindings",
@@ -669,6 +703,54 @@ def _run_contract_review(args: argparse.Namespace, _: argparse.ArgumentParser) -
         max_new_batches=args.max_new_batches,
         workers=args.workers,
         reuse_root=args.reuse_root,
+    )
+    return _emit_status(report)
+
+
+def _run_contract_content_proposals(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import run_contract_content_proposals
+
+    report = run_contract_content_proposals(
+        args.repository_root,
+        args.base_bundle,
+        args.output,
+        producer_commit=args.producer_commit,
+        max_new_batches=args.max_new_batches,
+        workers=args.workers,
+    )
+    return _emit_status(report)
+
+
+def _run_reserve_future_evaluation(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import (
+        freeze_future_evaluation_reservation,
+    )
+
+    return _emit_status(
+        freeze_future_evaluation_reservation(
+            args.base_bundle,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
+    )
+
+
+def _run_contract_content_review(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import run_contract_content_review
+
+    report = run_contract_content_review(
+        args.repository_root,
+        args.base_bundle,
+        args.proposals_root,
+        args.output,
+        max_new_batches=args.max_new_batches,
+        workers=args.workers,
     )
     return _emit_status(report)
 
