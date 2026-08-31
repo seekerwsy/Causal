@@ -818,6 +818,205 @@ def adjudicate_unbound_repaired_contract_evidence(
     return report
 
 
+def correct_unbound_contract_evidence(
+    repository_root: Path,
+    base_bundle: Path,
+    repairs_root: Path,
+    prior_evidence_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+    max_new_batches: int | None = None,
+    workers: int = 1,
+    provider: Provider = bailian_complete,
+) -> dict[str, Any]:
+    """Correct only non-empty contracts that an independent binder rejected."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    repairs_bundle = repairs_root.resolve()
+    prior_bundle = prior_evidence_root.resolve()
+    destination = output.resolve()
+    verify_task_unit_data(base)
+    verify_bundle(repairs_bundle)
+    verify_bundle(prior_bundle)
+    tasks, _, _ = _base_population(base)
+    repairs = _unique_by(
+        read_json(repairs_bundle / "semantic-contract-repairs.json"),
+        "task_unit_id",
+        "semantic contract repairs",
+    )
+    prior = _unique_by(
+        read_json(prior_bundle / "repaired-contract-evidence.json"),
+        "task_unit_id",
+        "prior repaired contract evidence",
+    )
+    if set(repairs) != set(prior) or not set(repairs) <= set(tasks):
+        raise ContractCleaningError("contract correction populations differ")
+    disputed_ids = sorted(
+        task_id
+        for task_id, row in prior.items()
+        if row.get("binding_status") == "needs_repair"
+    )
+    if any(
+        not _evidence_targets(repairs[task_id])
+        for task_id in disputed_ids
+    ):
+        raise ContractCleaningError("empty evidence dispute reached semantic correction")
+    items = []
+    for task_id in disputed_ids:
+        task = tasks[task_id]
+        items.append(
+            {
+                "task_unit_id": task_id,
+                "language": task["declared_execution_context"]["language"],
+                "source_prompt": task["model_visible_input"]["natural_prompt"],
+                "source_prompt_sha256": task["model_visible_input"][
+                    "natural_prompt_content_sha256"
+                ],
+                "old_contract": {
+                    key: repairs[task_id][key]
+                    for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+                },
+                "evidence_dispute_reason": prior[task_id]["reason"],
+            }
+        )
+    correction_results, corrections_complete, correction_plan = _run_stage(
+        repository_root,
+        destination / "contracts",
+        items,
+        prompt_name="contract-semantic-repair-v2.txt",
+        config_name="contract-cleaning-reviewer-qwen37max.json",
+        stage="unbound_contract_semantic_correction",
+        base_identity={
+            "schema_version": "1.0",
+            "base_bundle_sha256": _manifest_digest(base),
+            "repairs_bundle_sha256": bundle_digest(repairs_bundle),
+            "prior_evidence_bundle_sha256": bundle_digest(prior_bundle),
+            "correction_item_count": len(items),
+            "producer_commit": producer_commit,
+            "arms_or_outcomes_used": False,
+            "formal_roles_used": False,
+        },
+        request_builder=_evidence_dispute_correction_request,
+        parser=_parse_contract_repairs,
+        max_new_batches=max_new_batches,
+        workers=workers,
+        provider=provider,
+        batch_items=1,
+    )
+    if not corrections_complete:
+        return {
+            "schema_version": "1.0",
+            "status": "UNBOUND_CONTRACT_CORRECTION_IN_PROGRESS",
+            "correction_item_count": len(items),
+            "completed_correction_item_count": len(correction_results),
+            "complete": False,
+        }
+    corrected = _unique_results(correction_results, "contract corrections")
+    if set(corrected) != set(disputed_ids):
+        raise ContractCleaningError("contract corrections do not cover every dispute")
+    evidence_items = []
+    for task_id in disputed_ids:
+        task = tasks[task_id]
+        contract = {
+            key: corrected[task_id][key]
+            for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+        }
+        evidence_items.append(
+            {
+                "task_unit_id": task_id,
+                "language": task["declared_execution_context"]["language"],
+                "source_prompt": task["model_visible_input"]["natural_prompt"],
+                "source_prompt_sha256": task["model_visible_input"][
+                    "natural_prompt_content_sha256"
+                ],
+                "old_contract": contract,
+            }
+        )
+    evidence_results, evidence_complete, evidence_plan = _run_stage(
+        repository_root,
+        destination / "evidence",
+        evidence_items,
+        prompt_name="contract-evidence-backfill-v1.txt",
+        config_name="contract-cleaning-reviewer-qwen37max.json",
+        stage="corrected_contract_evidence_binding",
+        base_identity={
+            "schema_version": "1.0",
+            "base_bundle_sha256": _manifest_digest(base),
+            "correction_plan_sha256": content_hash(correction_plan),
+            "correction_results_sha256": content_hash(correction_results),
+            "correction_item_count": len(evidence_items),
+            "producer_commit": producer_commit,
+            "arms_or_outcomes_used": False,
+            "formal_roles_used": False,
+        },
+        request_builder=_evidence_request,
+        parser=_parse_evidence_backfill,
+        max_new_batches=max_new_batches,
+        workers=workers,
+        provider=provider,
+        batch_items=1,
+    )
+    if not evidence_complete:
+        return {
+            "schema_version": "1.0",
+            "status": "CORRECTED_CONTRACT_EVIDENCE_IN_PROGRESS",
+            "correction_item_count": len(items),
+            "completed_correction_item_count": len(correction_results),
+            "completed_evidence_item_count": len(evidence_results),
+            "complete": False,
+        }
+    final = destination / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+    corrected_evidence = _unique_results(evidence_results, "corrected contract evidence")
+    if set(corrected_evidence) != set(disputed_ids):
+        raise ContractCleaningError("corrected evidence does not cover every dispute")
+    merged_repairs = {task_id: dict(row) for task_id, row in repairs.items()}
+    merged_evidence = {task_id: dict(row) for task_id, row in prior.items()}
+    for task_id in disputed_ids:
+        merged_repairs[task_id] = {
+            **corrected[task_id],
+            "correction_provenance": "INDEPENDENT_EVIDENCE_DISPUTE_CORRECTION",
+        }
+        merged_evidence[task_id] = {
+            **corrected_evidence[task_id],
+            "evidence_adjudication": "POST_CORRECTION_QWEN37MAX_BINDING",
+        }
+    frozen_repairs = [row for _, row in sorted(merged_repairs.items())]
+    frozen_evidence = [row for _, row in sorted(merged_evidence.items())]
+    remaining = sum(row["binding_status"] != "bound" for row in frozen_evidence)
+    report = {
+        "schema_version": "1.0",
+        "status": "UNBOUND_CONTRACT_CORRECTION_FROZEN",
+        "repair_item_count": len(frozen_repairs),
+        "corrected_contract_count": len(disputed_ids),
+        "corrected_evidence_bound_count": sum(
+            row["binding_status"] == "bound" for row in corrected_evidence.values()
+        ),
+        "evidence_bound_count": len(frozen_evidence) - remaining,
+        "evidence_unbound_count": remaining,
+        "correction_plan_sha256": content_hash(correction_plan),
+        "evidence_plan_sha256": content_hash(evidence_plan),
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        final,
+        {
+            "semantic-contract-repairs.json": frozen_repairs,
+            "repaired-contract-evidence.json": frozen_evidence,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def assemble_contract_content_proposals(
     base_bundle: Path,
     evidence_root: Path,
@@ -1970,6 +2169,26 @@ def _repair_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _evidence_dispute_correction_request(
+    batch: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "request_kind": "blind_contract_correction_after_evidence_dispute",
+        "arms_outcomes_roles_included": False,
+        "tasks": [
+            {
+                "item_index": index,
+                "language": item["language"],
+                "source_prompt": item["source_prompt"],
+                "previous_contract": item["old_contract"],
+                "evidence_dispute_reason": item["evidence_dispute_reason"],
+            }
+            for index, item in enumerate(batch, start=1)
+        ],
+    }
+
+
 def _review_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
@@ -2387,6 +2606,7 @@ __all__ = [
     "ContractCleaningError",
     "adjudicate_unbound_repaired_contract_evidence",
     "assemble_contract_content_proposals",
+    "correct_unbound_contract_evidence",
     "finalize_contract_content_data",
     "freeze_future_evaluation_reservation",
     "run_contract_content_proposals",

@@ -87,8 +87,14 @@ prompt-mechanism-study curate adjudicate-contract-repair-evidence `
   BASE REPAIRS/final REPAIR-EVIDENCE/final REPAIR-EVIDENCE-ADJUDICATED `
   --producer-commit COMMIT --workers 6
 
+# Run only when independent evidence adjudication still rejects non-empty values.
+prompt-mechanism-study curate correct-unbound-contract-evidence `
+  BASE REPAIRS/final REPAIR-EVIDENCE-ADJUDICATED/final CONTRACT-CORRECTIONS `
+  --producer-commit COMMIT --workers 6
+
 prompt-mechanism-study curate assemble-contract-content `
-  BASE PROPOSALS/evidence REPAIRS/final REPAIR-EVIDENCE-ADJUDICATED/final PROPOSALS-FINAL `
+  BASE PROPOSALS/evidence CONTRACT-CORRECTIONS/final CONTRACT-CORRECTIONS/final `
+  PROPOSALS-FINAL `
   --producer-commit COMMIT
 
 prompt-mechanism-study curate contract-content-review `
@@ -116,6 +122,12 @@ non-empty values. If the first binder disputes a non-empty contract, only that
 subset is sent once to the independent reviewer model. Remaining disputes stay
 nonterminal and require contract correction; they are never relabeled as source
 insufficiency or silently dropped.
+
+Contract correction is restricted to those remaining non-empty disputes. It
+freezes a source-only replacement contract before a separate evidence call and
+then merges only those task IDs back into the full repair/evidence population.
+If any corrected contract remains unbound, the final proposal assembler still
+refuses the bundle.
 
 The finalizer accepts no nonterminal review. It converts the evidence to no
 other offset system, recomputes quality and the derived readiness view, records
