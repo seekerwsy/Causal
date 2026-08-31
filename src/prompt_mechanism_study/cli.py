@@ -208,6 +208,32 @@ def _add_curation_group(groups: Any) -> None:
     content_review.add_argument("--max-new-batches", type=int)
     content_review.add_argument("--workers", type=int, default=1)
 
+    semantic_repairs = _leaf(
+        actions,
+        "contract-semantic-repairs",
+        _run_contract_semantic_repairs,
+        "repair faulty or evidence-escalated contracts one task per request",
+    )
+    semantic_repairs.add_argument("base_bundle", type=Path)
+    semantic_repairs.add_argument("evidence_root", type=Path)
+    semantic_repairs.add_argument("output", type=Path)
+    semantic_repairs.add_argument("--repository-root", type=Path, default=Path.cwd())
+    semantic_repairs.add_argument("--producer-commit", required=True)
+    semantic_repairs.add_argument("--max-new-batches", type=int)
+    semantic_repairs.add_argument("--workers", type=int, default=1)
+
+    assemble_proposals = _leaf(
+        actions,
+        "assemble-contract-content",
+        _run_assemble_contract_content,
+        "combine closed evidence and semantic repairs into reviewed proposals",
+    )
+    assemble_proposals.add_argument("base_bundle", type=Path)
+    assemble_proposals.add_argument("evidence_root", type=Path)
+    assemble_proposals.add_argument("repairs_root", type=Path)
+    assemble_proposals.add_argument("output", type=Path)
+    assemble_proposals.add_argument("--producer-commit", required=True)
+
     finalize_content = _leaf(
         actions,
         "finalize-contract-content",
@@ -771,6 +797,42 @@ def _run_contract_content_review(
         workers=args.workers,
     )
     return _emit_status(report)
+
+
+def _run_contract_semantic_repairs(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import run_single_task_semantic_repairs
+
+    return _emit_status(
+        run_single_task_semantic_repairs(
+            args.repository_root,
+            args.base_bundle,
+            args.evidence_root,
+            args.output,
+            producer_commit=args.producer_commit,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
+        )
+    )
+
+
+def _run_assemble_contract_content(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import (
+        assemble_contract_content_proposals,
+    )
+
+    return _emit_status(
+        assemble_contract_content_proposals(
+            args.base_bundle,
+            args.evidence_root,
+            args.repairs_root,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
+    )
 
 
 def _run_finalize_contract_content(

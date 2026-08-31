@@ -468,6 +468,232 @@ def run_contract_content_review(
     return report
 
 
+def run_single_task_semantic_repairs(
+    repository_root: Path,
+    base_bundle: Path,
+    evidence_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+    max_new_batches: int | None = None,
+    workers: int = 1,
+    provider: Provider = bailian_complete,
+) -> dict[str, Any]:
+    """Repair only faulty or evidence-escalated contracts, one task per request."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    verify_task_unit_data(base)
+    tasks, contracts, quality = _base_population(base)
+    items = _cleaning_items(tasks, contracts, quality)
+    evidence_items = [item for item in items if item["mode"] == "EVIDENCE_BACKFILL_ONLY"]
+    evidence_results, evidence_plan = _load_closed_stage(
+        evidence_root.resolve(),
+        expected_stage="contract_evidence_backfill",
+        expected_task_ids={item["task_unit_id"] for item in evidence_items},
+    )
+    if evidence_plan.get("base_bundle_sha256") != _manifest_digest(base):
+        raise ContractCleaningError("evidence stage does not bind the base data bundle")
+    evidence_by_task = _unique_results(evidence_results, "evidence backfill")
+    escalated = {
+        task_id
+        for task_id, row in evidence_by_task.items()
+        if row["binding_status"] == "needs_repair"
+    }
+    repair_items = sorted(
+        [item for item in items if item["mode"] == "SEMANTIC_REPAIR"]
+        + [item for item in evidence_items if item["task_unit_id"] in escalated],
+        key=lambda item: item["task_unit_id"],
+    )
+    results, complete, plan = _run_stage(
+        repository_root,
+        output.resolve(),
+        repair_items,
+        prompt_name="contract-semantic-repair-v1.txt",
+        config_name="contract-cleaning-producer-qwen35flash.json",
+        stage="single_task_contract_semantic_repair",
+        base_identity={
+            "schema_version": "1.0",
+            "base_bundle_sha256": _manifest_digest(base),
+            "evidence_plan_bundle_sha256": bundle_digest(evidence_root.resolve() / "plan"),
+            "evidence_result_count": len(evidence_results),
+            "repair_item_count": len(repair_items),
+            "producer_commit": producer_commit,
+            "arms_or_outcomes_used": False,
+            "formal_roles_used": False,
+        },
+        request_builder=_repair_request,
+        parser=_parse_semantic_repairs,
+        max_new_batches=max_new_batches,
+        workers=workers,
+        provider=provider,
+        batch_items=1,
+    )
+    if not complete:
+        return {
+            "schema_version": "1.0",
+            "status": "SINGLE_TASK_SEMANTIC_REPAIR_IN_PROGRESS",
+            "repair_item_count": len(repair_items),
+            "completed_repair_item_count": len(results),
+            "complete": False,
+        }
+    final = output.resolve() / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+    repairs = [row for _, row in sorted(_unique_results(results, "semantic repairs").items())]
+    report = {
+        "schema_version": "1.0",
+        "status": "SINGLE_TASK_SEMANTIC_REPAIRS_FROZEN",
+        "base_bundle_sha256": _manifest_digest(base),
+        "evidence_plan_bundle_sha256": bundle_digest(evidence_root.resolve() / "plan"),
+        "repair_item_count": len(repairs),
+        "source_specification_assessment_counts": dict(
+            sorted(Counter(row["source_specification_assessment"] for row in repairs).items())
+        ),
+        "repair_plan_sha256": content_hash(plan),
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(final, {"semantic-repairs.json": repairs, "report.json": report})
+    return report
+
+
+def assemble_contract_content_proposals(
+    base_bundle: Path,
+    evidence_root: Path,
+    repairs_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+) -> dict[str, Any]:
+    """Combine the closed evidence and one-task repair stages into one proposal bundle."""
+
+    base = base_bundle.resolve()
+    repairs_bundle = repairs_root.resolve()
+    verify_task_unit_data(base)
+    verify_bundle(repairs_bundle)
+    tasks, contracts, quality = _base_population(base)
+    items = _cleaning_items(tasks, contracts, quality)
+    evidence_items = [item for item in items if item["mode"] == "EVIDENCE_BACKFILL_ONLY"]
+    evidence_results, _ = _load_closed_stage(
+        evidence_root.resolve(),
+        expected_stage="contract_evidence_backfill",
+        expected_task_ids={item["task_unit_id"] for item in evidence_items},
+    )
+    evidence_by_task = _unique_results(evidence_results, "evidence backfill")
+    repair_by_task = _unique_by(
+        read_json(repairs_bundle / "semantic-repairs.json"),
+        "task_unit_id",
+        "semantic repairs",
+    )
+    escalated = {
+        task_id
+        for task_id, row in evidence_by_task.items()
+        if row["binding_status"] == "needs_repair"
+    }
+    expected_repairs = {
+        item["task_unit_id"]
+        for item in items
+        if item["mode"] == "SEMANTIC_REPAIR" or item["task_unit_id"] in escalated
+    }
+    if set(repair_by_task) != expected_repairs:
+        raise ContractCleaningError("semantic repair population is incomplete")
+    proposed = []
+    ledger = []
+    for item in items:
+        task_id = item["task_unit_id"]
+        evidence_row = evidence_by_task.get(task_id)
+        if evidence_row is not None and evidence_row["binding_status"] == "bound":
+            mode = "EVIDENCE_BACKFILL_ONLY"
+            values = item["old_contract"]
+            evidence = evidence_row["content_evidence"]
+            assessment = "sufficient"
+            category = "EVIDENCE_BACKFILL_ONLY"
+            reason = evidence_row["reason"]
+        else:
+            repair = repair_by_task[task_id]
+            mode = "SEMANTIC_REPAIR"
+            values = {
+                key: repair[key]
+                for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+            }
+            evidence = repair["content_evidence"]
+            assessment = repair["source_specification_assessment"]
+            category = repair["repair_category"]
+            reason = repair["reason"]
+        core = {
+            "schema_version": "functional-contract-cleaning-proposal-1.0",
+            "task_unit_id": task_id,
+            "record_id": tasks[task_id]["representative_record_id"],
+            "source_prompt_sha256": item["source_prompt_sha256"],
+            **values,
+            "content_evidence": evidence,
+            "proposal_mode": mode,
+            "producer_source_assessment": assessment,
+            "producer_reason": reason,
+            "arms_or_outcomes_used": False,
+        }
+        contract_id = content_id("functional_contract_", core)
+        proposal = {**core, "contract_id": contract_id}
+        proposed.append(proposal)
+        ledger_core = {
+            "schema_version": "contract-repair-ledger-1.0",
+            "task_unit_id": task_id,
+            "old_contract_id": item["old_contract_id"],
+            "repair_category": category,
+            "repair_status": "PROPOSED_PENDING_INDEPENDENT_REVIEW",
+            "new_contract_id": contract_id,
+            "source_specification_disposition": assessment,
+            "evidence_span_count": _evidence_span_count(evidence),
+            "review_status": "PENDING",
+            "review_issue_codes": [],
+            "input_sha256": content_hash(
+                {
+                    "task_unit_id": task_id,
+                    "source_prompt_sha256": item["source_prompt_sha256"],
+                    "old_contract_id": item["old_contract_id"],
+                }
+            ),
+            "output_sha256": content_hash(proposal),
+            "producer_commit": producer_commit,
+        }
+        ledger.append(
+            {**ledger_core, "repair_ledger_record_sha256": content_hash(ledger_core)}
+        )
+    report = {
+        "schema_version": "1.0",
+        "status": "CONTRACT_CONTENT_PROPOSALS_FROZEN",
+        "base_bundle_sha256": _manifest_digest(base),
+        "task_unit_count": len(items),
+        "evidence_only_count": len(items) - len(expected_repairs),
+        "semantic_repair_count": len(expected_repairs),
+        "evidence_escalation_count": len(escalated),
+        "producer_source_assessment_counts": dict(
+            sorted(Counter(row["producer_source_assessment"] for row in proposed).items())
+        ),
+        "producer_commit": producer_commit,
+        "evidence_plan_bundle_sha256": bundle_digest(evidence_root.resolve() / "plan"),
+        "repairs_bundle_sha256": bundle_digest(repairs_bundle),
+        "all_task_units_accounted_for": len(proposed) == len(items),
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        output.resolve(),
+        {
+            "proposed-contracts.json": proposed,
+            "contract-repair-ledger.json": ledger,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def finalize_contract_content_data(
     base_bundle: Path,
     proposals_root: Path,
@@ -1041,13 +1267,14 @@ def _run_stage(
     max_new_batches: int | None,
     workers: int,
     provider: Provider,
+    batch_items: int = _BATCH_ITEMS,
 ) -> tuple[list[dict[str, Any]], bool, dict[str, Any]]:
     evaluator, prompt, policy = _policy(repository_root, prompt_name, config_name)
-    batches = _batches(items, "task_unit_id", _BATCH_ITEMS, _item_chars)
+    batches = _batches(items, "task_unit_id", batch_items, _item_chars)
     plan = {
         **base_identity,
         "stage": stage,
-        "batch_item_limit": _BATCH_ITEMS,
+        "batch_item_limit": batch_items,
         "batch_ids": [[item["task_unit_id"] for item in batch] for batch in batches],
         "policy": policy,
     }
@@ -1128,6 +1355,65 @@ def _base_population(
     if set(tasks) != set(contracts) or set(tasks) != set(quality):
         raise ContractCleaningError("base data populations differ")
     return tasks, contracts, quality
+
+
+def _cleaning_items(
+    tasks: Mapping[str, dict[str, Any]],
+    contracts: Mapping[str, dict[str, Any]],
+    quality: Mapping[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    items = []
+    for task_id in sorted(tasks):
+        task = tasks[task_id]
+        contract = contracts[task_id]
+        item = {
+            "task_unit_id": task_id,
+            "language": task["declared_execution_context"]["language"],
+            "source_prompt": task["model_visible_input"]["natural_prompt"],
+            "source_prompt_sha256": task["model_visible_input"][
+                "natural_prompt_content_sha256"
+            ],
+            "old_contract": _contract_payload(contract),
+            "old_contract_id": contract["contract_id"],
+            "old_review": contract["review"],
+            "old_quality_disposition": quality[task_id]["quality_disposition"],
+            "mode": (
+                "EVIDENCE_BACKFILL_ONLY"
+                if contract["review"]["contract_status"] == "faithful"
+                else "SEMANTIC_REPAIR"
+            ),
+        }
+        items.append(item)
+    return items
+
+
+def _load_closed_stage(
+    root: Path, *, expected_stage: str, expected_task_ids: set[str]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    verify_bundle(root / "plan")
+    plan = read_json(root / "plan/plan.json")
+    if plan.get("stage") != expected_stage:
+        raise ContractCleaningError("closed curation stage identity is invalid")
+    expected_batches = {
+        f"batch-{index:04d}" for index in range(1, len(plan.get("batch_ids", [])) + 1)
+    }
+    batch_root = root / "batches"
+    if not batch_root.is_dir() or {path.name for path in batch_root.iterdir()} != expected_batches:
+        raise ContractCleaningError("closed curation stage batch set is incomplete")
+    results = []
+    for name in sorted(expected_batches):
+        current = batch_root / name
+        verify_bundle(current)
+        result = read_json(current / "result.json")
+        if result.get("status") != "COMPLETE":
+            raise ContractCleaningError("closed curation stage contains an error")
+        values = result.get("items")
+        if not isinstance(values, list) or any(not isinstance(row, dict) for row in values):
+            raise ContractCleaningError("closed curation stage result is invalid")
+        results.extend(values)
+    if set(_unique_results(results, "closed curation stage")) != expected_task_ids:
+        raise ContractCleaningError("closed curation stage population is invalid")
+    return results, plan
 
 
 def _manifest_digest(root: Path) -> str:
@@ -1756,9 +2042,11 @@ def _proposal_progress(
 
 __all__ = [
     "ContractCleaningError",
+    "assemble_contract_content_proposals",
     "finalize_contract_content_data",
     "freeze_future_evaluation_reservation",
     "run_contract_content_proposals",
     "run_contract_content_review",
+    "run_single_task_semantic_repairs",
     "verify_contract_content_data",
 ]

@@ -73,20 +73,30 @@ prompt-mechanism-study curate reserve-future-evaluation BASE RESERVATION `
   --producer-commit COMMIT
 
 prompt-mechanism-study curate contract-content-proposals BASE PROPOSALS `
-  --producer-commit COMMIT --workers 6
+  --producer-commit COMMIT --workers 6 --stop-after-evidence
+
+prompt-mechanism-study curate contract-semantic-repairs `
+  BASE PROPOSALS/evidence REPAIRS --producer-commit COMMIT --workers 6
+
+prompt-mechanism-study curate assemble-contract-content `
+  BASE PROPOSALS/evidence REPAIRS/final PROPOSALS-FINAL `
+  --producer-commit COMMIT
 
 prompt-mechanism-study curate contract-content-review `
-  BASE PROPOSALS/final REVIEW --workers 6
+  BASE PROPOSALS-FINAL REVIEW --workers 6
 
 prompt-mechanism-study curate finalize-contract-content build FINAL `
-  --base-bundle BASE --proposals-root PROPOSALS/final `
+  --base-bundle BASE --proposals-root PROPOSALS-FINAL `
   --reviews-root REVIEW/final --reservation-root RESERVATION `
   --producer-commit COMMIT
 
 prompt-mechanism-study curate finalize-contract-content verify FINAL
 ```
 
-Run one batch of each producer mode and one review batch before scaling. Runs
+Semantic repair uses one task unit per provider request; this keeps the
+contract fields and their exact evidence target list jointly auditable without
+forcing the model to track several unrelated contracts in one response. Run
+one batch of each producer mode and one review batch before scaling. Runs
 are resumable only from closed successful batches with the same frozen plan.
 Raw requests and provider responses remain in the run directory; credentials
 are never recorded.
