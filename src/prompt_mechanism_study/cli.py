@@ -339,6 +339,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     review_contracts.add_argument("--workers", type=int, default=1)
     review_contracts.add_argument("--reuse-root", type=Path)
 
+    binding_review = commands.add_parser(
+        "mechanism-binding-review",
+        help="blindly bind ambiguous task units to registered mechanism realizations",
+    )
+    binding_review.add_argument("prepared_root", type=Path)
+    binding_review.add_argument("clusters_root", type=Path)
+    binding_review.add_argument("contracts_root", type=Path)
+    binding_review.add_argument("eligibility_root", type=Path)
+    binding_review.add_argument("registry", type=Path)
+    binding_review.add_argument("output", type=Path)
+    binding_review.add_argument("--repository-root", type=Path, default=Path.cwd())
+    binding_review.add_argument("--max-new-batches", type=int)
+    binding_review.add_argument("--workers", type=int, default=1)
+    binding_review.add_argument("--reuse-root", type=Path)
+
     repair_contracts = commands.add_parser(
         "repair-contract-format-leaks",
         help="freeze a successor contract bundle without response-format requirements",
@@ -360,6 +375,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--bindings-root",
         type=Path,
         help="optional outcome-blind task-to-mechanism binding bundle",
+    )
+    eligibility.add_argument(
+        "--contract-reviews-root",
+        type=Path,
+        help="optional complete blind functional-contract review bundle",
+    )
+    eligibility.add_argument("--development-exclusions", type=Path)
+    eligibility.add_argument("--case-audit", type=Path)
+    eligibility.add_argument("--extension-policy", type=Path)
+    eligibility.add_argument(
+        "--backend-root",
+        type=Path,
+        help="optional BaxBench-compatible source snapshot for backend data inventory",
     )
 
     study_design = commands.add_parser(
@@ -628,6 +656,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             reuse_root=args.reuse_root,
         )
         print(report["status"])
+    elif args.command == "mechanism-binding-review":
+        from prompt_mechanism_study.curation import run_mechanism_binding_review
+
+        report = run_mechanism_binding_review(
+            args.repository_root,
+            args.prepared_root,
+            args.clusters_root,
+            args.contracts_root,
+            args.eligibility_root,
+            args.registry,
+            args.output,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
+            reuse_root=args.reuse_root,
+        )
+        print(report["status"])
     elif args.command == "repair-contract-format-leaks":
         from prompt_mechanism_study.curation import repair_response_format_contract_leaks
 
@@ -657,6 +701,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output,
             policy_path=args.policy,
             bindings_root=args.bindings_root,
+            contract_reviews_root=args.contract_reviews_root,
+            development_exclusions_path=args.development_exclusions,
+            case_audit_path=args.case_audit,
+            extension_policy_path=args.extension_policy,
+            backend_root=args.backend_root,
         )
         print(report["status"])
     elif args.command == "study-design":

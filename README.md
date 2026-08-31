@@ -90,6 +90,15 @@ review of a frozen functional contract and is not presented as executable test
 coverage. Demo, smoke, calibration, and development-canary outputs are never
 confirmatory evidence.
 
+The current outcome-blind candidate-data audit accounts for all 2,165
+conservative task units. It identifies 1,215 strict contracts and 136 Python
+task units that presently satisfy the contract, mechanism, runtime, and local
+Oracle gates. The planned 240-task Python population is therefore not yet
+filled. Separate inventories retain 102 quality-cleared C/C++ memory-safety
+candidates and all 28 BaxBench scenarios, but both replication runtimes remain
+unqualified. Exact counts, hashes, Oracle choices, and blockers are in the
+[final candidate-data audit](docs/experiments/2026-08-31-final-candidate-data-audit.md).
+
 The active successor and schema-1.1 factorial implementations are specified,
 implemented, and reviewer-tested. Fresh semantic curation and functional
 contracts are complete. Multiple prospectively frozen external Prompt TSG

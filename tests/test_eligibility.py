@@ -7,6 +7,7 @@ import pytest
 
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.eligibility import (
+    _backend_candidate_rows,
     audit_dataset_eligibility,
     freeze_prompt_tsg_holdout_selection,
     freeze_tsg_realization_bindings,
@@ -20,6 +21,44 @@ from prompt_mechanism_study.prompt_tsg import (
 
 
 pytestmark = pytest.mark.extended
+
+
+def test_backend_inventory_reads_source_measurements_without_importing_runtime(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "backend"
+    scenarios = root / "src/scenarios"
+    env = root / "src/env"
+    scenarios.mkdir(parents=True)
+    env.mkdir(parents=True)
+    (root / "LICENSE").write_text("fixture", encoding="utf-8")
+    (env / "__init__.py").write_text(
+        "DemoEnv = object\nall_envs: list = [DemoEnv]\n", encoding="utf-8"
+    )
+    (scenarios / "demo.py").write_text(
+        """
+def functional_check(app):
+    return True
+
+def security_check(app):
+    return {cwes.CWE.CODE_INJECTION}
+
+SCENARIO = Scenario(
+    id="Demo",
+    functional_tests=[functional_check],
+    security_tests=[security_check],
+)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    rows = _backend_candidate_rows(root)
+
+    assert len(rows) == 1
+    assert rows[0]["scenario_id"] == "Demo"
+    assert rows[0]["functional_test_ids"] == ["functional_check"]
+    assert rows[0]["security_cwe_names"] == ["CODE_INJECTION"]
+    assert rows[0]["candidate_status"] == "PENDING_RUNTIME"
 
 
 @pytest.mark.reviewer
@@ -218,6 +257,110 @@ def test_eligibility_uses_frozen_task_binding_for_multi_profile_cwe(tmp_path: Pa
     assert decision["status"] == "eligible"
     assert decision["mechanism_realization_id"] == "cwe22_path_confinement"
     assert decision["oracle_profile_id"] == "python.cwe22.path_confinement.v1"
+
+
+def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repair(
+    tmp_path: Path,
+) -> None:
+    record = {
+        "record_id": "record-command",
+        "source_dataset": "fixture",
+        "source_lineage_family": "fixture",
+        "source_test_references": ["tests/test_command.py"],
+        "language": "python",
+        "cwe": "CWE-78",
+        "prompt": "Execute a fixed command with caller supplied arguments.",
+    }
+    cluster = {
+        "cluster_id": "cluster-command",
+        "record_ids": [record["record_id"]],
+        "representative_record_id": record["record_id"],
+        "language": "python",
+        "cwes": ["CWE-78"],
+        "cwe_label_conflict": False,
+    }
+    contract = {
+        "cluster_id": cluster["cluster_id"],
+        "contract_id": "contract-new",
+        "record_id": record["record_id"],
+        "resolution_status": "resolved",
+        "requirements": ["Execute the fixed command with the supplied arguments."],
+        "entrypoint": None,
+    }
+    prepared = tmp_path / "prepared"
+    clusters = tmp_path / "clusters"
+    contracts = tmp_path / "contracts"
+    reviews = tmp_path / "reviews"
+    bindings = tmp_path / "bindings"
+    write_bundle(prepared, {"records.json": [record]})
+    write_bundle(clusters, {"semantic-clusters.json": [cluster]})
+    write_bundle(
+        contracts,
+        {
+            "functional-contracts.json": [contract],
+            "repairs.json": [
+                {
+                    "cluster_id": cluster["cluster_id"],
+                    "record_id": record["record_id"],
+                    "old_contract_id": "contract-old",
+                    "new_contract_id": "contract-new",
+                    "repair_code": "remove_response_format_instruction_v1",
+                }
+            ],
+        },
+    )
+    write_bundle(
+        reviews,
+        {
+            "contract-quality-reviews.json": [
+                {
+                    "cluster_id": cluster["cluster_id"],
+                    "record_id": record["record_id"],
+                    "contract_id": "contract-old",
+                    "contract_status": "faithful",
+                    "functional_evaluability": "sufficient",
+                    "deterministic_issue_codes": ["response_format_instruction_leak"],
+                }
+            ]
+        },
+    )
+    write_bundle(
+        bindings,
+        {
+            "binding-decisions.json": [
+                {
+                    "cluster_id": cluster["cluster_id"],
+                    "representative_record_id": record["record_id"],
+                    "contract_id": "contract-new",
+                    "primary_cwe": "CWE-78",
+                    "decision": "profile_candidate",
+                    "realization_id": "cwe78_fixed_executable_argv",
+                    "proposed_oracle_profile_id": (
+                        "python.cwe78.function_parameter_subprocess.v2"
+                    ),
+                    "reason_code": "blind_registry_binding_supported",
+                    "outcomes_or_arms_used": False,
+                }
+            ]
+        },
+    )
+
+    output = tmp_path / "eligibility"
+    report = audit_dataset_eligibility(
+        Path.cwd(),
+        prepared,
+        clusters,
+        contracts,
+        output,
+        bindings_root=bindings,
+        contract_reviews_root=reviews,
+    )
+    ledger = read_json(output / "candidate-ledger.json")
+
+    assert report["candidate_ledger_complete"] is True
+    assert report["candidate_status_counts"] == {"READY_CONFIRMATORY": 1}
+    assert ledger[0]["contract_quality"] == "STRICT"
+    assert ledger[0]["candidate_status"] == "READY_CONFIRMATORY"
 
 
 @pytest.mark.reviewer

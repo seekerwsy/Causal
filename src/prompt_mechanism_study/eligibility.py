@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 from collections import Counter
 from pathlib import Path
@@ -666,6 +667,11 @@ def audit_dataset_eligibility(
     *,
     policy_path: Path | None = None,
     bindings_root: Path | None = None,
+    contract_reviews_root: Path | None = None,
+    development_exclusions_path: Path | None = None,
+    case_audit_path: Path | None = None,
+    extension_policy_path: Path | None = None,
+    backend_root: Path | None = None,
 ) -> dict[str, Any]:
     """Classify every semantic cluster without generated-code outcomes."""
 
@@ -674,6 +680,7 @@ def audit_dataset_eligibility(
     clusters = clusters_root.resolve()
     contracts = contracts_root.resolve()
     bindings = None if bindings_root is None else bindings_root.resolve()
+    reviews = None if contract_reviews_root is None else contract_reviews_root.resolve()
     destination = output.resolve()
     if destination.exists():
         raise EligibilityError("eligibility output already exists")
@@ -681,6 +688,8 @@ def audit_dataset_eligibility(
         verify_bundle(bundle)
     if bindings is not None:
         verify_bundle(bindings)
+    if reviews is not None:
+        verify_bundle(reviews)
 
     policy_file = (
         policy_path or root / "data/dataset-curation/eligibility-policy-v1.json"
@@ -719,6 +728,25 @@ def audit_dataset_eligibility(
         row["cluster_id"] for row in cluster_rows
     }:
         raise EligibilityError("cluster and functional-contract populations differ")
+
+    review_rows = _contract_review_rows(
+        reviews,
+        contracts,
+        cluster_rows,
+        contract_rows,
+    )
+    development_exclusions = _task_unit_ids(development_exclusions_path)
+    case_flags = _case_audit_flags(case_audit_path)
+    task_unit_population = set(contract_rows)
+    if not development_exclusions <= task_unit_population or not set().union(
+        *case_flags.values()
+    ) <= task_unit_population:
+        raise EligibilityError("review exclusion or case-audit id is outside the population")
+    extension_file = (
+        extension_policy_path
+        or root / "data/dataset-curation/priority-extension-policy-v1.json"
+    ).resolve()
+    extension_policy = read_json(extension_file)
 
     layers = {
         (language, cwe): row["layer_id"]
@@ -806,6 +834,95 @@ def audit_dataset_eligibility(
         }
         decisions.append({"eligibility_id": content_id("eligibility_", core), **core})
 
+    extensions = _priority_extension_rows(decisions, extension_policy)
+    extension_by_cluster = {row["cluster_id"]: row for row in extensions}
+    active_profiles = set(security_qualification["active_local_profiles"])
+    candidate_ledger = []
+    for row in decisions:
+        cluster_id = row["cluster_id"]
+        review = review_rows.get(cluster_id)
+        quality, quality_blockers = _contract_quality(review)
+        blockers = list(quality_blockers)
+        if cluster_id in development_exclusions:
+            blockers.append("development_exposed")
+        if cluster_id in case_flags["material_contract_fault"]:
+            blockers.append("known_material_contract_fault")
+        if cluster_id in case_flags["scope_or_evaluability_concern"]:
+            blockers.append("known_scope_or_evaluability_concern")
+        if cluster_id in case_flags["repair_metadata"]:
+            blockers.append("metadata_repair_required")
+        if cluster_id in case_flags["semantic_calibration"]:
+            blockers.append("semantic_calibration_required")
+        if cluster_id in case_flags["source_defect"]:
+            blockers.append("source_prompt_incoherent")
+
+        extension = extension_by_cluster.get(cluster_id)
+        profile_id = row["oracle_profile_id"]
+        if profile_id in active_profiles:
+            oracle_support = "SUPPORTED"
+            oracle_type = "DETERMINISTIC_STATIC_PROFILE"
+        elif profile_id is not None:
+            oracle_support = "UNSUPPORTED"
+            oracle_type = "CONTEXTUAL_ORACLE_REQUIRED"
+        else:
+            oracle_support = "PENDING"
+            oracle_type = None
+        binding_status = _binding_status(row)
+        runtime_status = "SUPPORTED" if row["language"] == "python" else "PENDING"
+        if row["source_test_available"]:
+            functional_measurement = "SOURCE_TEST_REFERENCE_AVAILABLE"
+        elif row["language"] == "python":
+            functional_measurement = "AST_COMPILE_AND_BLIND_LLM_PLAUSIBILITY"
+        else:
+            functional_measurement = "PENDING_RUNTIME_FUNCTIONAL_TEST"
+        readiness = _candidate_readiness(
+            row,
+            quality,
+            blockers,
+            extension,
+            oracle_support,
+            runtime_status,
+        )
+        if readiness.startswith("PENDING_"):
+            blockers.append(readiness.casefold())
+        ledger_core = {
+            "task_unit_id": cluster_id,
+            "representative_record_id": row["representative_record_id"],
+            "source_dataset": row["representative_source"],
+            "source_lineage_family": row["representative_lineage_family"],
+            "language": row["language"],
+            "primary_cwe": row["primary_cwe"],
+            "study_layer": row["layer"],
+            "eligibility_reason": row["reason"],
+            "contract_id": row["contract_id"],
+            "contract_quality": quality,
+            "review_contract_status": None if review is None else review["contract_status"],
+            "functional_evaluability": (
+                None if review is None else review["functional_evaluability"]
+            ),
+            "functional_measurement": functional_measurement,
+            "source_test_available": row["source_test_available"],
+            "source_test_reference_count": row["source_test_reference_count"],
+            "mechanism_binding_status": binding_status,
+            "mechanism_realization_id": row["mechanism_realization_id"],
+            "oracle_profile_id": profile_id,
+            "oracle_type": oracle_type,
+            "oracle_support_status": oracle_support,
+            "runtime_support_status": runtime_status,
+            "priority_extension_tier": (
+                None if extension is None else extension["priority_tier"]
+            ),
+            "priority_extension_family": (
+                None if extension is None else extension["extension_family"]
+            ),
+            "candidate_status": readiness,
+            "blocker_codes": sorted(set(blockers)),
+            "arms_or_outcomes_used": False,
+        }
+        candidate_ledger.append(
+            {"candidate_record_id": content_id("candidate_record_", ledger_core), **ledger_core}
+        )
+
     statuses = Counter(row["status"] for row in decisions)
     reasons = Counter(row["reason"] for row in decisions)
     eligible = [row for row in decisions if row["status"] == "eligible"]
@@ -828,12 +945,50 @@ def audit_dataset_eligibility(
     maximum_lineage_capped_sample = _maximum_capped_sample(
         lineage_counts, policy["maximum_lineage_fraction"]
     )
+    ready_confirmatory = [
+        row for row in candidate_ledger if row["candidate_status"] == "READY_CONFIRMATORY"
+    ]
+    candidate_statuses = Counter(row["candidate_status"] for row in candidate_ledger)
+    contract_qualities = Counter(row["contract_quality"] for row in candidate_ledger)
+    blocker_counts = Counter(
+        blocker for row in candidate_ledger for blocker in row["blocker_codes"]
+    )
+    oracle_profile_rows = _oracle_profile_rows(
+        security_qualification,
+        decisions,
+        registry,
+    )
+    memory_replication = _memory_replication_rows(candidate_ledger)
+    backend_replication = _backend_candidate_rows(backend_root)
+    oracle_profile_rows.extend(_backend_oracle_profile_rows(backend_replication))
+    ready_family_rows = []
+    for family in policy["python_families"]:
+        members = [row for row in ready_confirmatory if row["primary_cwe"] in family["cwes"]]
+        lineages = sorted({row["source_lineage_family"] for row in members})
+        ready_family_rows.append(
+            {
+                "family_id": family["family_id"],
+                "ready_task_units": len(members),
+                "target_task_units": family["target_clusters"],
+                "ready_lineages": len(lineages),
+                "minimum_lineages": policy["minimum_lineages_per_python_family"],
+                "task_target_met": len(members) >= family["target_clusters"],
+                "lineage_target_met": len(lineages)
+                >= policy["minimum_lineages_per_python_family"],
+            }
+        )
+    ready_lineage_counts = Counter(row["source_lineage_family"] for row in ready_confirmatory)
     report = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "status": "DATASET_ELIGIBILITY_AUDIT_COMPLETE",
         "cluster_count": len(decisions),
+        "candidate_ledger_complete": len(candidate_ledger) == len(decisions),
         "status_counts": dict(sorted(statuses.items())),
         "reason_counts": dict(sorted(reasons.items())),
+        "candidate_status_counts": dict(sorted(candidate_statuses.items())),
+        "contract_quality_counts": dict(sorted(contract_qualities.items())),
+        "blocker_counts": dict(sorted(blocker_counts.items())),
+        "ready_confirmatory_task_units": len(ready_confirmatory),
         "eligible_cwe_counts": dict(
             sorted(Counter(row["primary_cwe"] for row in eligible).items())
         ),
@@ -842,15 +997,41 @@ def audit_dataset_eligibility(
         ),
         "eligible_lineage_counts": dict(sorted(lineage_counts.items())),
         "python_family_gate": family_rows,
+        "ready_python_family_gate": ready_family_rows,
         "prospective_python_cluster_target": sum(
             row["target_clusters"] for row in policy["python_families"]
         ),
         "python_population_gate_passed": all(
-            row["cluster_target_met"] and row["lineage_target_met"] for row in family_rows
+            row["task_target_met"] and row["lineage_target_met"]
+            for row in ready_family_rows
         ),
         "maximum_sample_under_lineage_cap": maximum_lineage_capped_sample,
+        "maximum_ready_sample_under_lineage_cap": _maximum_capped_sample(
+            ready_lineage_counts, policy["maximum_lineage_fraction"]
+        ),
         "maximum_lineage_fraction": policy["maximum_lineage_fraction"],
         "eligible_with_source_tests": sum(row["source_test_available"] for row in eligible),
+        "ready_with_source_tests": sum(
+            row["source_test_available"] for row in ready_confirmatory
+        ),
+        "priority_extension_counts": dict(
+            sorted(Counter(row["priority_tier"] for row in extensions).items())
+        ),
+        "memory_replication_candidate_task_units": len(memory_replication),
+        "memory_replication_by_cwe": dict(
+            sorted(Counter(row["primary_cwe"] for row in memory_replication).items())
+        ),
+        "memory_replication_with_source_tests": sum(
+            row["source_test_available"] for row in memory_replication
+        ),
+        "memory_replication_data_gate_passed": all(
+            sum(row["primary_cwe"] == cwe for row in memory_replication) >= 4
+            for cwe in _MEMORY_REPLICATION_CWES
+        ),
+        "memory_replication_runtime_gate_passed": False,
+        "backend_replication_candidate_task_units": len(backend_replication),
+        "backend_replication_data_gate_passed": len(backend_replication) == 28,
+        "backend_replication_runtime_gate_passed": False,
         "prepared_bundle_sha256": bundle_digest(prepared),
         "clusters_bundle_sha256": bundle_digest(clusters),
         "contracts_bundle_sha256": bundle_digest(contracts),
@@ -866,6 +1047,24 @@ def audit_dataset_eligibility(
         "realization_binding_bundle_sha256": (
             None if bindings is None else bundle_digest(bindings)
         ),
+        "contract_review_bundle_sha256": (
+            None if reviews is None else bundle_digest(reviews)
+        ),
+        "development_exclusions_sha256": (
+            None
+            if development_exclusions_path is None
+            else _sha256(development_exclusions_path.resolve())
+        ),
+        "case_audit_sha256": (
+            None if case_audit_path is None else _sha256(case_audit_path.resolve())
+        ),
+        "priority_extension_policy_sha256": _sha256(extension_file),
+        "eligibility_implementation_sha256": _sha256(
+            root / "src/prompt_mechanism_study/eligibility.py"
+        ),
+        "backend_source_tree_sha256": (
+            None if backend_root is None else _source_tree_sha256(backend_root.resolve())
+        ),
         "generated_code_or_outcomes_used": False,
         "scientific_claim_allowed": False,
     }
@@ -878,10 +1077,461 @@ def audit_dataset_eligibility(
                 row for row in decisions if row["status"] == "calibration_only"
             ],
             "excluded-clusters.json": [row for row in decisions if row["status"] == "excluded"],
+            "candidate-ledger.json": candidate_ledger,
+            "ready-confirmatory-task-units.json": ready_confirmatory,
+            "priority-extension-candidates.json": extensions,
+            "oracle-profile-summary.json": oracle_profile_rows,
+            "memory-replication-candidates.json": memory_replication,
+            "backend-replication-candidates.json": backend_replication,
+            "blocker-summary.json": [
+                {"blocker_code": blocker, "task_units": count}
+                for blocker, count in sorted(blocker_counts.items())
+            ],
             "report.json": report,
         },
     )
     return report
+
+
+def _contract_review_rows(
+    reviews: Path | None,
+    contracts: Path,
+    cluster_rows: list[dict[str, Any]],
+    contract_rows: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if reviews is None:
+        return {}
+    rows = _rows(read_json(reviews / "contract-quality-reviews.json"))
+    by_cluster = {row.get("cluster_id"): row for row in rows}
+    population = {row["cluster_id"] for row in cluster_rows}
+    if len(by_cluster) != len(rows) or set(by_cluster) != population:
+        raise EligibilityError("contract reviews do not exactly cover the task-unit population")
+
+    repairs_path = contracts / "repairs.json"
+    repair_rows = [] if not repairs_path.is_file() else _rows(read_json(repairs_path))
+    repairs = {row["cluster_id"]: row for row in repair_rows}
+    if len(repairs) != len(repair_rows):
+        raise EligibilityError("contract repair lineage contains duplicate task units")
+    augmented = {}
+    for cluster_id in sorted(population):
+        review = by_cluster[cluster_id]
+        current = contract_rows[cluster_id]
+        if review.get("record_id") != current.get("record_id"):
+            raise EligibilityError("contract review record binding is stale")
+        repair = repairs.get(cluster_id)
+        if repair is None:
+            if review.get("contract_id") != current.get("contract_id"):
+                raise EligibilityError("contract review does not bind the current contract")
+            remaining = list(review.get("deterministic_issue_codes", []))
+        else:
+            if (
+                review.get("contract_id") != repair.get("old_contract_id")
+                or current.get("contract_id") != repair.get("new_contract_id")
+                or current.get("record_id") != repair.get("record_id")
+                or repair.get("repair_code") != "remove_response_format_instruction_v1"
+            ):
+                raise EligibilityError("contract repair lineage is invalid")
+            remaining = [
+                code
+                for code in review.get("deterministic_issue_codes", [])
+                if code != "response_format_instruction_leak"
+            ]
+        augmented[cluster_id] = {
+            **review,
+            "current_contract_id": current["contract_id"],
+            "remaining_deterministic_issue_codes": sorted(set(remaining)),
+            "repair_applied": repair is not None,
+        }
+    return augmented
+
+
+def _contract_quality(review: dict[str, Any] | None) -> tuple[str, list[str]]:
+    if review is None:
+        return "UNREVIEWED", ["missing_contract_review"]
+    blockers = []
+    if review.get("contract_status") != "faithful":
+        blockers.append("contract_not_faithful")
+    if review.get("functional_evaluability") != "sufficient":
+        blockers.append(
+            f"functional_evaluability_{review.get('functional_evaluability', 'unknown')}"
+        )
+    blockers.extend(review.get("remaining_deterministic_issue_codes", []))
+    return ("STRICT", []) if not blockers else ("REPAIRABLE", sorted(set(blockers)))
+
+
+def _task_unit_ids(path: Path | None) -> set[str]:
+    if path is None:
+        return set()
+    value = read_json(path.resolve())
+    if isinstance(value, dict):
+        rows = value.get("task_unit_ids", [])
+    else:
+        rows = value
+    if not isinstance(rows, list) or any(not isinstance(row, str) or not row for row in rows):
+        raise EligibilityError("task-unit exclusion list is invalid")
+    return set(rows)
+
+
+def _case_audit_flags(path: Path | None) -> dict[str, set[str]]:
+    flags = {
+        "material_contract_fault": set(),
+        "scope_or_evaluability_concern": set(),
+        "repair_metadata": set(),
+        "semantic_calibration": set(),
+        "source_defect": set(),
+    }
+    if path is None:
+        return flags
+    value = read_json(path.resolve())
+    if value.get("arms_or_outcomes_used") is not False:
+        raise EligibilityError("case audit is not outcome blind")
+    for row in value.get("insufficient_case_audit", {}).get("decisions", []):
+        destination = {
+            "repair_metadata_then_reassess": "repair_metadata",
+            "exclude_as_written": "source_defect",
+            "semantic_judge_calibration_candidate": "semantic_calibration",
+        }.get(row.get("decision"))
+        if destination is None or not isinstance(row.get("task_unit_id"), str):
+            raise EligibilityError("case-audit decision is invalid")
+        flags[destination].add(row["task_unit_id"])
+    sample = value.get("reviewer_qualified_sample_audit", {})
+    flags["material_contract_fault"].update(
+        sample.get("clear_material_contract_fault_task_unit_ids", [])
+    )
+    flags["scope_or_evaluability_concern"].update(
+        sample.get("separate_evaluability_or_scope_concern_task_unit_ids", [])
+    )
+    return flags
+
+
+def _priority_extension_rows(
+    rows: list[dict[str, Any]], policy: dict[str, Any]
+) -> list[dict[str, Any]]:
+    requirements = policy.get("common_requirements", {})
+    tiers = policy.get("tiers", [])
+    if len(tiers) != 2 or policy.get("generated_code_or_outcomes_used") is not False:
+        raise EligibilityError("priority-extension policy is invalid")
+    python_tier, cross_language_tier = tiers
+    family_by_cwe = {
+        cwe: family
+        for family, cwes in python_tier.get("families", {}).items()
+        for cwe in cwes
+    }
+    candidates = []
+    for row in rows:
+        if (
+            not row["source_test_available"]
+            or not row["contract_id"]
+            or row["requirement_count"] < requirements.get("minimum_requirements", 1)
+            or row["source_test_reference_count"]
+            < requirements.get("minimum_source_test_references", 1)
+        ):
+            continue
+        family = family_by_cwe.get(row["primary_cwe"])
+        if row["language"] == python_tier.get("language") and family is not None:
+            tier = python_tier
+        elif row["language"] in cross_language_tier.get("languages", []):
+            tier = cross_language_tier
+            family = None
+        else:
+            continue
+        core = {
+            "cluster_id": row["cluster_id"],
+            "contract_id": row["contract_id"],
+            "language": row["language"],
+            "primary_cwe": row["primary_cwe"],
+            "representative_record_id": row["representative_record_id"],
+            "representative_source": row["representative_source"],
+            "representative_lineage_family": row["representative_lineage_family"],
+            "source_test_reference_count": row["source_test_reference_count"],
+            "priority_tier": tier["tier_id"],
+            "extension_family": family,
+            "admission_blocker": tier["admission_blocker"],
+            "current_formal_sample_eligible": False,
+        }
+        candidates.append(
+            {"extension_candidate_id": content_id("extension_candidate_", core), **core}
+        )
+    return sorted(
+        candidates,
+        key=lambda row: (
+            row["priority_tier"], row["language"], row["primary_cwe"], row["cluster_id"]
+        ),
+    )
+
+
+def _binding_status(row: dict[str, Any]) -> str:
+    if row["mechanism_realization_id"] is not None:
+        return "BOUND"
+    return {
+        "mechanism_realization_ambiguous": "PENDING_BLIND_REVIEW",
+        "mechanism_realization_not_resolved": "PENDING_BLIND_REVIEW",
+        "mechanism_not_registered": "UNREGISTERED",
+        "cwe_label_conflict": "CONFLICT",
+        "outside_frozen_study_layers": "OUTSIDE_CURRENT_SCOPE",
+        "replication_runtime_not_implemented": "PENDING_RUNTIME",
+    }.get(row["reason"], "NOT_APPLICABLE")
+
+
+def _candidate_readiness(
+    row: dict[str, Any],
+    contract_quality: str,
+    blockers: list[str],
+    extension: dict[str, Any] | None,
+    oracle_support: str,
+    runtime_status: str,
+) -> str:
+    if "source_prompt_incoherent" in blockers:
+        return "EXCLUDED_SOURCE_DEFECT"
+    if contract_quality != "STRICT":
+        return "PENDING_CONTRACT"
+    if any(
+        blocker
+        in {
+            "development_exposed",
+            "known_material_contract_fault",
+            "known_scope_or_evaluability_concern",
+            "metadata_repair_required",
+            "semantic_calibration_required",
+        }
+        for blocker in blockers
+    ):
+        return "PENDING_INDEPENDENT_REVIEW"
+    if row["status"] == "eligible":
+        if oracle_support != "SUPPORTED":
+            return "PENDING_ORACLE"
+        if runtime_status != "SUPPORTED":
+            return "PENDING_RUNTIME"
+        return "READY_CONFIRMATORY"
+    if row["reason"] in {
+        "mechanism_realization_ambiguous",
+        "mechanism_realization_not_resolved",
+    }:
+        return "PENDING_BINDING"
+    if row["reason"] in {"mechanism_not_registered", "cwe_label_conflict"}:
+        return "PENDING_ORACLE"
+    if row["reason"] == "replication_runtime_not_implemented":
+        return "PENDING_RUNTIME"
+    if extension is not None:
+        return "PENDING_ORACLE" if row["language"] == "python" else "PENDING_RUNTIME"
+    return "PENDING_SCOPE"
+
+
+def _oracle_profile_rows(
+    qualification: dict[str, Any],
+    decisions: list[dict[str, Any]],
+    registry: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    active = set(qualification["active_local_profiles"])
+    registered = {row["oracle_profile_id"] for row in registry.values()}
+    assigned = Counter(
+        row["oracle_profile_id"] for row in decisions if row["oracle_profile_id"] is not None
+    )
+    rows = []
+    for profile_id in sorted(active | registered):
+        realizations = sorted(
+            row["realization_id"]
+            for row in registry.values()
+            if row["oracle_profile_id"] == profile_id
+        )
+        cwes = sorted(
+            {row["cwe_id"] for row in registry.values() if row["oracle_profile_id"] == profile_id}
+        )
+        supported = profile_id in active
+        rows.append(
+            {
+                "oracle_profile_id": profile_id,
+                "oracle_type": (
+                    "DETERMINISTIC_STATIC_PROFILE"
+                    if supported
+                    else "CONTEXTUAL_ORACLE_REQUIRED"
+                ),
+                "support_status": "QUALIFIED" if supported else "UNSUPPORTED",
+                "registered_realization_ids": realizations,
+                "registered_cwes": cwes,
+                "assigned_task_units": assigned[profile_id],
+                "gold_boundary_labels": (
+                    qualification["required_labels"] if supported else []
+                ),
+                "qualification_claim_boundary": qualification["claim_boundary"],
+                "arms_or_outcomes_used": False,
+            }
+        )
+    return rows
+
+
+_MEMORY_REPLICATION_CWES = {
+    "CWE-119",
+    "CWE-120",
+    "CWE-125",
+    "CWE-190",
+    "CWE-416",
+    "CWE-476",
+    "CWE-787",
+}
+
+
+def _memory_replication_rows(
+    candidate_ledger: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in candidate_ledger
+        if row["language"] in {"c", "cpp"}
+        and row["primary_cwe"] in _MEMORY_REPLICATION_CWES
+        and row["candidate_status"] == "PENDING_RUNTIME"
+    ]
+
+
+def _backend_candidate_rows(root: Path | None) -> list[dict[str, Any]]:
+    if root is None:
+        return []
+    source = root.resolve()
+    scenario_root = source / "src/scenarios"
+    env_init = source / "src/env/__init__.py"
+    if not scenario_root.is_dir() or not env_init.is_file() or not (source / "LICENSE").is_file():
+        raise EligibilityError("backend replication source is incomplete")
+    frameworks = _assigned_names(env_init, "all_envs")
+    if not frameworks:
+        raise EligibilityError("backend replication source has no framework realizations")
+
+    rows = []
+    for path in sorted(scenario_root.glob("*.py")):
+        if path.stem in {"__init__", "base"}:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        call = _assigned_call(tree, "SCENARIO", "Scenario")
+        keywords = {item.arg: item.value for item in call.keywords if item.arg is not None}
+        try:
+            scenario_id = ast.literal_eval(keywords["id"])
+        except (KeyError, ValueError, TypeError, SyntaxError) as error:
+            raise EligibilityError("backend scenario id is not a literal") from error
+        functional_tests = _expression_names(keywords.get("functional_tests"))
+        security_tests = _expression_names(keywords.get("security_tests"))
+        if (
+            not isinstance(scenario_id, str)
+            or not scenario_id
+            or not functional_tests
+            or not security_tests
+        ):
+            raise EligibilityError("backend scenario lacks source-native measurements")
+        function_defs = {
+            node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+        }
+        security_cwes = sorted(
+            {
+                node.attr
+                for name in security_tests
+                for node in ast.walk(function_defs.get(name, ast.Pass()))
+                if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "cwes"
+                and node.value.attr == "CWE"
+            }
+        )
+        relative = path.relative_to(source).as_posix()
+        core = {
+            "scenario_id": scenario_id,
+            "source_file": relative,
+            "source_file_sha256": _sha256(path),
+            "functional_test_ids": functional_tests,
+            "security_test_ids": security_tests,
+            "security_cwe_names": security_cwes,
+            "framework_realization_ids": frameworks,
+            "functional_oracle_type": "SOURCE_NATIVE_EXECUTABLE_TEST",
+            "security_oracle_type": "SOURCE_NATIVE_EXPLOIT_TEST",
+            "oracle_profile_id": f"baxbench.{path.stem}.source_security_tests.v1",
+            "runtime_support_status": "PENDING_DOCKER_QUALIFICATION",
+            "candidate_status": "PENDING_RUNTIME",
+            "framework_realization_status": "PENDING_OUTCOME_BLIND_FREEZE",
+            "arms_or_outcomes_used": False,
+        }
+        rows.append(
+            {"backend_task_unit_id": content_id("backend_task_unit_", core), **core}
+        )
+    if len({row["scenario_id"] for row in rows}) != len(rows):
+        raise EligibilityError("backend scenario ids are duplicated")
+    return rows
+
+
+def _backend_oracle_profile_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "oracle_profile_id": row["oracle_profile_id"],
+            "oracle_type": row["security_oracle_type"],
+            "support_status": "PENDING_RUNTIME_QUALIFICATION",
+            "registered_realization_ids": [row["scenario_id"]],
+            "registered_cwes": row["security_cwe_names"],
+            "assigned_task_units": 1,
+            "gold_boundary_labels": [],
+            "qualification_claim_boundary": (
+                "The source defines executable attacks, but this snapshot has not yet "
+                "passed the frozen Docker runtime replay."
+            ),
+            "arms_or_outcomes_used": False,
+        }
+        for row in rows
+    ]
+
+
+def _assigned_call(tree: ast.Module, name: str, constructor: str) -> ast.Call:
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == constructor
+        ):
+            return node.value
+    raise EligibilityError(f"backend source lacks {name} = {constructor}(...)")
+
+
+def _assigned_names(path: Path, name: str) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        ) or (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+        ):
+            return _expression_names(node.value)
+    return []
+
+
+def _expression_names(value: ast.expr | None) -> list[str]:
+    if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+        return []
+    names = []
+    for item in value.elts:
+        if isinstance(item, ast.Name):
+            names.append(item.id)
+        elif isinstance(item, ast.Attribute):
+            names.append(item.attr)
+        else:
+            raise EligibilityError("backend registry list contains a non-name expression")
+    return names
+
+
+def _source_tree_sha256(root: Path) -> str:
+    paths = sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and not {"__pycache__", ".git"}.intersection(path.parts)
+        and path.suffix != ".pyc"
+    )
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _mechanism_for_prompt(

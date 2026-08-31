@@ -146,6 +146,16 @@ exploration, or temporary checkpoints.
 The successor, schema-2.1 selector, pair selector, and generalized schema-1.1
 factorial paths are implemented and reviewer-tested. Fresh seven-source
 semantic curation and all functional contracts are complete. The active
+outcome-blind candidate-data audit gives every one of the 2,165 task units a
+typed disposition: 1,215 contracts pass the strict review rule and 136 Python
+task units currently satisfy all confirmatory data gates. The 240-task Python
+population gate remains closed. The C/C++ and 28-scenario BaxBench data
+inventories are complete, but their executable runtimes remain unqualified.
+The closed inputs, result hashes, Oracle profile inventory, and protocol risks
+are recorded in
+[`2026-08-31-final-candidate-data-audit.md`](experiments/2026-08-31-final-candidate-data-audit.md).
+
+The active
 task-level Prompt TSG contract bounds both LLM annotators to the complete
 catalog-v11 task scope, keeps exact prompt evidence, and deterministically
 preserves disagreement as unresolved. Its prospectively frozen v10 DevEval

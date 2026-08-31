@@ -10,6 +10,7 @@ from prompt_mechanism_study.curation import (
     CurationError,
     _parse_contracts,
     _parse_contract_reviews,
+    _parse_mechanism_bindings,
     _parse_semantic,
     assemble_semantic_clusters,
     repair_response_format_contract_leaks,
@@ -394,6 +395,48 @@ def test_contract_review_parser_rejects_faithful_rows_with_issue_codes() -> None
     ).encode()
     with pytest.raises(CurationError):
         _parse_contract_reviews(raw, [{"cluster_id": "cluster-a"}])
+
+
+def test_mechanism_binding_parser_normalizes_or_downgrades_prompt_evidence() -> None:
+    batch = [
+        {
+            "cluster_id": "cluster-a",
+            "source_prompt": "Execute a fixed command with caller supplied arguments.",
+            "candidates": [{"realization_id": "fixed-argv"}],
+        }
+    ]
+    accepted = json.dumps(
+        {
+            "bindings": [
+                {
+                    "item_index": 1,
+                    "decision": "profile_candidate",
+                    "realization_id": "fixed-argv",
+                    "evidence_text": "fixed command",
+                    "evidence_occurrence": 1,
+                    "reason": "The executable is fixed while arguments are supplied.",
+                }
+            ]
+        }
+    ).encode()
+    assert _parse_mechanism_bindings(accepted, batch)[0]["realization_id"] == "fixed-argv"
+
+    paraphrased = json.loads(accepted)
+    paraphrased["bindings"][0]["evidence_text"] = (
+        "Run the fixed command for caller supplied arguments"
+    )
+    normalized = _parse_mechanism_bindings(json.dumps(paraphrased).encode(), batch)[0]
+    assert normalized["evidence_text"] == "fixed command"
+    assert normalized["model_evidence_text"].startswith("Run the")
+    assert normalized["evidence_normalization"] == "casefold_contiguous_subspan_v1"
+
+    missing = json.loads(accepted)
+    missing["bindings"][0]["evidence_text"] = "trusted executable"
+    downgraded = _parse_mechanism_bindings(json.dumps(missing).encode(), batch)[0]
+    assert downgraded["decision"] == "unresolved"
+    assert downgraded["realization_id"] is None
+    assert downgraded["model_realization_id"] == "fixed-argv"
+    assert downgraded["evidence_normalization"] == "weak_evidence_rejected_v1"
 
 
 def test_response_format_leak_repair_preserves_task_and_rekeys_contract(

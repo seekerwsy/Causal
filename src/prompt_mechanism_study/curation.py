@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +18,9 @@ from prompt_mechanism_study.artifact_io import (
     write_bundle,
 )
 from prompt_mechanism_study.functional_judge import bailian_complete
+from prompt_mechanism_study.mechanisms import load_mechanism_registry
 from prompt_mechanism_study.records import canonical_value, content_id
+from prompt_mechanism_study.security_profiles import LOCAL_PROFILE_IDS
 
 # The frozen provider twice returned only the first ten items from 24-item
 # requests and later returned eight of ten on a mixed-language batch.  Five is
@@ -26,11 +29,13 @@ from prompt_mechanism_study.records import canonical_value, content_id
 SEMANTIC_MAX_ITEMS = 5
 CONTRACT_MAX_ITEMS = 5
 CONTRACT_REVIEW_MAX_ITEMS = 5
+MECHANISM_BINDING_MAX_ITEMS = 5
 MAX_BATCH_CHARS = 40_000
 _LABELS = {"same_cluster", "related_but_independent", "different_task", "uncertain"}
 _RESOLUTION = {"resolved", "ambiguous", "unsupported"}
 _CONTRACT_REVIEW_STATUS = {"faithful", "faulty", "uncertain"}
 _FUNCTIONAL_EVALUABILITY = {"sufficient", "limited", "insufficient"}
+_MECHANISM_BINDING_DECISIONS = {"profile_candidate", "not_applicable", "unresolved"}
 _CONTRACT_ISSUES = {
     "none",
     "unsupported_requirement",
@@ -420,6 +425,221 @@ def run_contract_quality_review(
     return report
 
 
+def run_mechanism_binding_review(
+    repository_root: Path,
+    prepared_root: Path,
+    clusters_root: Path,
+    contracts_root: Path,
+    eligibility_root: Path,
+    registry_path: Path,
+    output: Path,
+    *,
+    max_new_batches: int | None = None,
+    workers: int = 1,
+    reuse_root: Path | None = None,
+    provider: Provider = bailian_complete,
+) -> dict[str, Any]:
+    """Blindly bind ambiguous task units to one registered mechanism realization."""
+
+    root = repository_root.resolve()
+    prepared = prepared_root.resolve()
+    clusters = clusters_root.resolve()
+    contracts = contracts_root.resolve()
+    eligibility = eligibility_root.resolve()
+    registry_file = registry_path.resolve()
+    for bundle in (prepared, clusters, contracts, eligibility):
+        verify_bundle(bundle)
+    registry = load_mechanism_registry(registry_file)
+    records = {
+        row["record_id"]: row
+        for row in _rows(read_json(prepared / "records.json"), "prepared records")
+    }
+    cluster_rows = {
+        row["cluster_id"]: row
+        for row in _rows(read_json(clusters / "semantic-clusters.json"), "task units")
+    }
+    contract_rows = {
+        row["cluster_id"]: row
+        for row in _rows(read_json(contracts / "functional-contracts.json"), "contracts")
+    }
+    decisions = _rows(
+        read_json(eligibility / "eligibility-decisions.json"), "eligibility decisions"
+    )
+    candidates_by_cwe: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for mechanism in registry.values():
+        candidates_by_cwe[mechanism["cwe_id"]].append(mechanism)
+
+    review_reasons = {
+        "mechanism_realization_ambiguous",
+        "mechanism_realization_not_resolved",
+    }
+    items = []
+    for decision in sorted(decisions, key=lambda row: row["cluster_id"]):
+        if decision.get("reason") not in review_reasons:
+            continue
+        cluster_id = decision["cluster_id"]
+        cluster = cluster_rows.get(cluster_id)
+        contract = contract_rows.get(cluster_id)
+        if cluster is None or contract is None:
+            raise CurationError("mechanism binding inputs do not cover an eligibility task")
+        record = records.get(cluster["representative_record_id"])
+        candidates = candidates_by_cwe.get(decision["primary_cwe"], [])
+        if record is None or not candidates:
+            raise CurationError("mechanism binding task has no record or registry candidates")
+        items.append(
+            {
+                "cluster_id": cluster_id,
+                "record_id": record["record_id"],
+                "language": record["language"],
+                "cwe": decision["primary_cwe"],
+                "source_prompt": record["prompt"],
+                "contract_id": contract["contract_id"],
+                "functional_contract": {
+                    key: contract.get(key)
+                    for key in (
+                        "entrypoint",
+                        "requirements",
+                        "inputs",
+                        "outputs",
+                        "side_effects",
+                        "environment_dependencies",
+                    )
+                },
+                "candidates": [
+                    {
+                        key: mechanism[key]
+                        for key in (
+                            "realization_id",
+                            "task_family",
+                            "specific_contract",
+                            "must_preserve",
+                            "oracle_profile_id",
+                        )
+                    }
+                    for mechanism in sorted(candidates, key=lambda row: row["realization_id"])
+                ],
+            }
+        )
+    if not items:
+        raise CurationError("mechanism binding review has no ambiguous task units")
+
+    evaluator, prompt, identities = _policy(
+        root,
+        "mechanism-binding-review-v1.txt",
+        config_name="qwen37max-mechanism-binding.json",
+    )
+    identities["review_scope"] = "prompt_contract_and_same_cwe_registry_only_v1"
+    identities["response_binding"] = "batch_item_index_v1"
+    batches = _batches(
+        items,
+        "cluster_id",
+        MECHANISM_BINDING_MAX_ITEMS,
+        _mechanism_binding_chars,
+    )
+    base_plan = {
+        "schema_version": "1.0",
+        "stage": "blind_mechanism_binding_review",
+        "prepared_bundle_sha256": bundle_digest(prepared),
+        "clusters_bundle_sha256": bundle_digest(clusters),
+        "contracts_bundle_sha256": bundle_digest(contracts),
+        "eligibility_bundle_sha256": bundle_digest(eligibility),
+        "mechanism_registry_sha256": hashlib.sha256(registry_file.read_bytes()).hexdigest(),
+        "task_units": len(items),
+        "batch_item_limit": MECHANISM_BINDING_MAX_ITEMS,
+        "batch_character_limit": MAX_BATCH_CHARS,
+        "batch_ids": [[item["cluster_id"] for item in batch] for batch in batches],
+        "policy": identities,
+        "arms_or_outcomes_used": False,
+    }
+    reuse = _reuse_metadata(reuse_root, base_plan) if reuse_root is not None else None
+    plan = {**base_plan, **({"reuse_source": reuse} if reuse is not None else {})}
+    run_root = _initialize(output.resolve(), plan)
+    if reuse_root is not None:
+        _import_reuse(reuse_root.resolve(), run_root, reuse)
+    reviewed, complete = _execute(
+        run_root,
+        batches,
+        evaluator,
+        prompt,
+        _mechanism_binding_request,
+        _parse_mechanism_bindings,
+        max_new_batches,
+        workers,
+        provider,
+    )
+    progress = _progress("MECHANISM_BINDING_REVIEW", len(batches), reviewed, complete)
+    if not complete:
+        return progress
+    final = run_root / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+
+    reviewed_by_cluster = {row["cluster_id"]: row for row in reviewed}
+    if set(reviewed_by_cluster) != {item["cluster_id"] for item in items}:
+        raise CurationError("mechanism binding reviews do not close the selected population")
+    frozen = []
+    for item in items:
+        review = reviewed_by_cluster[item["cluster_id"]]
+        realization_id = review["realization_id"]
+        mechanism = registry.get(realization_id) if realization_id is not None else None
+        if review["decision"] == "profile_candidate" and mechanism is None:
+            raise CurationError("mechanism binding selected an unknown realization")
+        profile_id = None if mechanism is None else mechanism["oracle_profile_id"]
+        if review["decision"] == "profile_candidate" and profile_id not in LOCAL_PROFILE_IDS:
+            decision = "contextual_oracle_required"
+            reason_code = "local_security_oracle_not_qualified"
+        elif review["decision"] == "profile_candidate":
+            decision = "profile_candidate"
+            reason_code = "blind_registry_binding_supported"
+        else:
+            decision = "not_applicable"
+            reason_code = (
+                "mechanism_realization_not_resolved"
+                if review["decision"] == "unresolved"
+                else "mechanism_not_registered"
+            )
+        frozen.append(
+            {
+                "cluster_id": item["cluster_id"],
+                "representative_record_id": item["record_id"],
+                "contract_id": item["contract_id"],
+                "primary_cwe": item["cwe"],
+                "decision": decision,
+                "realization_id": realization_id,
+                "proposed_oracle_profile_id": profile_id,
+                "reason_code": reason_code,
+                "evidence_text": review["evidence_text"],
+                "evidence_occurrence": review["evidence_occurrence"],
+                "model_evidence_text": review["model_evidence_text"],
+                "model_realization_id": review["model_realization_id"],
+                "evidence_normalization": review["evidence_normalization"],
+                "review_reason": review["reason"],
+                "outcomes_or_arms_used": False,
+            }
+        )
+    report = {
+        "schema_version": "1.0",
+        "status": "BLIND_MECHANISM_BINDINGS_FROZEN",
+        "task_units": len(frozen),
+        "decision_counts": dict(sorted(Counter(row["decision"] for row in frozen).items())),
+        "realization_counts": dict(
+            sorted(
+                Counter(
+                    row["realization_id"]
+                    for row in frozen
+                    if row["realization_id"] is not None
+                ).items()
+            )
+        ),
+        "plan_bundle_sha256": bundle_digest(run_root / "plan"),
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(final, {"binding-decisions.json": frozen, "report.json": report})
+    return report
+
+
 def repair_response_format_contract_leaks(
     contracts_root: Path,
     output: Path,
@@ -795,6 +1015,25 @@ def _contract_review_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _mechanism_binding_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "request_kind": "blind_task_to_registered_mechanism_binding",
+        "arms_or_outcomes_included": False,
+        "tasks": [
+            {
+                "item_index": index,
+                "language": item["language"],
+                "cwe": item["cwe"],
+                "source_prompt": item["source_prompt"],
+                "functional_contract": item["functional_contract"],
+                "candidate_realizations": item["candidates"],
+            }
+            for index, item in enumerate(batch, start=1)
+        ],
+    }
+
+
 def _parse_contract_reviews(
     raw: bytes, batch: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -835,6 +1074,75 @@ def _parse_contract_reviews(
                 "functional_evaluability": evaluability,
                 "issue_codes": issues,
                 "reason": row["reason"],
+            }
+        )
+    return frozen
+
+
+def _parse_mechanism_bindings(
+    raw: bytes, batch: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    value = _json_object(raw)
+    if set(value) != {"bindings"}:
+        raise CurationError("mechanism-binding response keys are not exact")
+    rows = _last_by_index(
+        _rows(value["bindings"], "mechanism bindings"), len(batch), "mechanism binding"
+    )
+    required = {
+        "item_index",
+        "decision",
+        "realization_id",
+        "evidence_text",
+        "evidence_occurrence",
+        "reason",
+    }
+    frozen = []
+    for row, item in zip(rows, batch, strict=True):
+        if set(row) != required or row["decision"] not in _MECHANISM_BINDING_DECISIONS:
+            raise CurationError("mechanism-binding decision is malformed")
+        reason = row["reason"]
+        _bounded(reason, 4000, "mechanism-binding reason")
+        realization_id = row["realization_id"]
+        evidence = row["evidence_text"]
+        occurrence = row["evidence_occurrence"]
+        allowed = {candidate["realization_id"] for candidate in item["candidates"]}
+        if row["decision"] == "profile_candidate":
+            if realization_id not in allowed or not isinstance(evidence, str) or not evidence:
+                raise CurationError("profile candidate lacks a valid realization or evidence")
+            if type(occurrence) is not int or occurrence <= 0:
+                raise CurationError("profile candidate evidence occurrence is invalid")
+            canonical = _canonical_evidence_span(
+                item["source_prompt"], evidence, occurrence
+            )
+            if canonical is None:
+                frozen_decision = "unresolved"
+                frozen_realization_id = None
+                canonical_evidence = None
+                canonical_occurrence = None
+                normalization = "weak_evidence_rejected_v1"
+            else:
+                frozen_decision = row["decision"]
+                frozen_realization_id = realization_id
+                canonical_evidence, canonical_occurrence, normalization = canonical
+        elif any(value is not None for value in (realization_id, evidence, occurrence)):
+            raise CurationError("non-candidate mechanism decision must not carry evidence")
+        else:
+            frozen_decision = row["decision"]
+            frozen_realization_id = None
+            canonical_evidence = None
+            canonical_occurrence = None
+            normalization = "not_applicable"
+        frozen.append(
+            {
+                "cluster_id": item["cluster_id"],
+                "decision": frozen_decision,
+                "realization_id": frozen_realization_id,
+                "evidence_text": canonical_evidence,
+                "evidence_occurrence": canonical_occurrence,
+                "model_evidence_text": evidence,
+                "model_realization_id": realization_id,
+                "evidence_normalization": normalization,
+                "reason": reason,
             }
         )
     return frozen
@@ -1137,6 +1445,74 @@ def _contract_review_chars(item: dict[str, Any]) -> int:
     return len(item["source_prompt"]) + len(json.dumps(item["contract"], ensure_ascii=False))
 
 
+def _mechanism_binding_chars(item: dict[str, Any]) -> int:
+    return (
+        len(item["source_prompt"])
+        + len(json.dumps(item["functional_contract"], ensure_ascii=False))
+        + len(json.dumps(item["candidates"], ensure_ascii=False))
+    )
+
+
+def _evidence_occurrence(prompt: str, evidence: str, occurrence: int) -> int | None:
+    start = -1
+    for _ in range(occurrence):
+        start = prompt.find(evidence, start + 1)
+        if start < 0:
+            return None
+    return start
+
+
+def _canonical_evidence_span(
+    prompt: str, evidence: str, occurrence: int
+) -> tuple[str, int, str] | None:
+    """Return a literal prompt span without accepting a weak semantic paraphrase."""
+
+    if _evidence_occurrence(prompt, evidence, occurrence) is not None:
+        return evidence, occurrence, "exact"
+    prompt_folded = prompt.casefold()
+    tokens = list(re.finditer(r"\S+", evidence))
+    spans = []
+    for left in range(len(tokens)):
+        for right in range(left, len(tokens)):
+            candidate = evidence[tokens[left].start() : tokens[right].end()].strip()
+            if not _strong_evidence_span(candidate, evidence):
+                continue
+            folded = candidate.casefold()
+            starts = []
+            offset = 0
+            while True:
+                start = prompt_folded.find(folded, offset)
+                if start < 0:
+                    break
+                starts.append(start)
+                offset = start + 1
+            if starts:
+                spans.append((left, len(candidate), candidate, starts))
+    if not spans:
+        return None
+    _, _, candidate, starts = min(
+        spans, key=lambda value: (value[0], -value[1], value[2])
+    )
+    selected = occurrence if occurrence <= len(starts) else 1
+    start = starts[selected - 1]
+    literal = prompt[start : start + len(candidate)]
+    return literal, selected, "casefold_contiguous_subspan_v1"
+
+
+def _strong_evidence_span(candidate: str, original: str) -> bool:
+    lexical = re.findall(r"[A-Za-z0-9_./<>-]+", candidate)
+    if len(candidate) < 8 or not lexical:
+        return False
+    distinctive = (
+        len(lexical) >= 2
+        or any(character in candidate for character in "./_<>`")
+        or max(map(len, lexical)) >= 8
+    )
+    return distinctive and (
+        len(candidate) >= 24 or len(candidate) / max(len(original), 1) >= 0.20
+    )
+
+
 def _deterministic_contract_issues(contract: Mapping[str, Any]) -> list[str]:
     requirements = contract.get("requirements")
     if not isinstance(requirements, list):
@@ -1213,6 +1589,7 @@ __all__ = [
     "assemble_semantic_clusters",
     "run_contract_curation",
     "run_contract_quality_review",
+    "run_mechanism_binding_review",
     "repair_response_format_contract_leaks",
     "run_semantic_curation",
 ]

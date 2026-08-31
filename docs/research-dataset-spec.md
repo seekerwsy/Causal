@@ -4,9 +4,12 @@
 
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
-coverage target. Section 8 records a smaller, outcome-blind 60-task-unit sample
-as a population-feasibility and power-planning canary; it is not a frozen
-successor assignment manifest or evidence that an intervention effect exists.
+coverage target, not a claim of current readiness. The active outcome-blind
+audit currently identifies 136 `READY_CONFIRMATORY` Python task units and keeps
+the 240-task population gate closed. Section 8 records a smaller,
+outcome-blind 60-task-unit sample as a historical population-feasibility and
+power-planning canary; it is not a frozen successor assignment manifest or
+evidence that an intervention effect exists.
 
 Generator identities, assignment records, and the pilot split remain unfrozen.
 No generated-code outcome, model score, or historical per-task result may
@@ -344,9 +347,9 @@ strict conjunction of no deterministic issue, `faithful`, and `sufficient`
 contains 1,203 reviewer-qualified candidates, but the review explicitly records
 that semantic quality and final experiment eligibility are not established. A
 diagnostic audit of 30 reviewer-qualified Python candidates still found a clear
-material omission plus multiple evaluability and CWE/scope concerns. The active
-373-task Python census intersects the strict reviewer-qualified set in 216 task
-units. These are review candidates, not an automatically admitted sample. Full
+material omission plus multiple evaluability and CWE/scope concerns. The
+pre-successor 373-task Python census intersected the original strict set in 216
+task units. These were review candidates, not an automatically admitted sample. Full
 counts, evidence identities, and protocol risks are recorded in
 `docs/experiments/2026-08-31-functional-contract-review-full.md`.
 
@@ -355,6 +358,9 @@ retains all 2,165 task units, and gives only the corrected contracts new content
 IDs. This repair does not resolve semantic faults. Its local path is
 `.codex-runtime/contract-repair-7c9dc1c-20260831-05`, with bundle SHA-256
 `1b081f1f693fdd68ab1cf14c1caf42f91afa35372f844d8addae64860111e894`.
+Replaying the complete review against that explicit repair lineage yields 1,215
+strict contracts; the additional 12 are cases whose only deterministic issue
+was the removed response-format instruction.
 
 - semantic pair decisions:
   `.codex-runtime/semantic-curation-seven-v9-strict-20260823-12/final`,
@@ -363,15 +369,15 @@ IDs. This repair does not resolve semantic faults. Its local path is
   `.codex-runtime/semantic-clusters-seven-v10-constrained-20260823-13`,
   SHA-256 `f592bfcaf77b3c86a1bc96c2f191b65afbb2f4f3c74b4a6c87dc46e4f0c179da`;
 - active conservative clusters:
-  `.codex-runtime/semantic-clusters-seven-v11-conservative-20260823-29`,
-  SHA-256 `88c03c9dd609779d5301d03bcabdb80533b7d0aa84a3877a8c6933f758ea4e0e`;
+  `.codex-runtime/semantic-problem-pilot-final`,
+  SHA-256 `88e22630523f571070be6427d91ad34106c72343ccdfed1b584da3790eccd263`;
 - independent outcome-blind review:
   `.codex-runtime/semantic-cluster-independent-review-20260823-28`,
   SHA-256 `3f663654595f342cf432f9ecebc357db0437c08285b5152c557a24d777a83d42`;
 - historical functional contracts available for exact representative reuse:
   `.codex-runtime/contract-curation-seven-v7-20260823-20/final`,
   SHA-256 `be661b9121830b4757eae86e766affba57aa59916347d1120b0bb3354b94b2ca`;
-- active complete functional contracts:
+- pre-repair complete functional contracts:
   `.codex-runtime/gate-c-contracts-complete/contracts-full/final`,
   SHA-256 `eef5ed574bc5bebcbee07ecaee9ff5e7dd24d8c8dba32cd75c5d103be3daa3e0`;
 - full functional-contract quality triage:
@@ -388,92 +394,87 @@ No generated program, experimental arm, Security Oracle output, or experiment
 outcome was supplied to curation. The artifacts are preparation evidence and
 do not themselves support a scientific effect claim.
 
-### 6.2 Active outcome-blind eligibility and under-merge audit
+### 6.2 Active outcome-blind candidate ledger
 
-The active eligibility pass classifies all 2,165 conservative clusters. It
-finds 306 `eligible`, 497 `calibration_only`, and 1,362 `excluded` clusters.
-In addition to the original five CWE classes, an outcome-blind task-level
-audit binds 71 clusters to six bounded local profiles for path confinement,
-archive extraction, XML external entities, outbound URL origins, file
-permissions, and credential sources. The audit does not promote 29 clusters
-whose CWE label does not match the frozen functional contract, or 15 CWE-862
-clusters whose authorization correctness requires framework or caller
-context.
+The active audit emits one record for each of the 2,165 task units. Contract
+quality, mechanism binding, Security-Oracle support, functionality evidence,
+runtime support, development exposure, candidate status, and blocker codes are
+separate fields; a failure at one gate does not erase the task from the ledger.
+The repaired contract population contains 1,215 strict and 950 repairable
+contracts.
 
-At the family level, injection/interpreter has 144 eligible clusters,
-file/parser/external-resource has 79, identity/authorization/permissions has
-22, and cryptography/randomness/integrity has 61. Three families now meet the
-60-task-unit target. The identity family remains below target, so the
-prospective four-family population gate remains closed rather than treating
-context-dependent authorization as locally proven.
+The deterministic registry matcher left 220 task units ambiguous or unresolved.
+A blind Qwen3.7-Max review saw only the source prompt, repaired functional
+contract, and finite same-CWE registry candidates. It produced 86 bindings to
+qualified local profiles, two bindings to a registered but unsupported
+contextual profile, and 132 not-applicable or unresolved decisions. All accepted
+bindings carry a literal source-prompt evidence span. Three spans were recovered
+by a deterministic case-insensitive contiguous-subspan projection; two weak
+anchors were conservatively downgraded to unresolved. This binding review is a
+single-model curation decision, not human gold.
 
-To check whether the conservative rule split paraphrases too aggressively, an
-outcome-blind requirements review examined every original eligible-pool
-LLM-positive diagnostic pair (44) and every BGE top-10 pair absent from the
-frozen lexical candidate set (123). A focused expansion then examined 19
-same-CWE TF-IDF nearest-neighbor pairs involving the 71 newly eligible
-clusters. Ten accepted duplicate edges form five components overall.
-Collapsing them reduces the 306 eligible clusters to 299 task units. Two
-borderline pairs remain separate but carry an
-`at_most_one_unit_may_be_selected` constraint. This review changes only the
-prospective sampling units; it does not retroactively give LLM or retrieval
-edges general merge authority.
+The final mutually exclusive candidate statuses are:
+
+| Status | Task units |
+| --- | ---: |
+| `READY_CONFIRMATORY` | 136 |
+| `PENDING_CONTRACT` | 944 |
+| `PENDING_ORACLE` | 260 |
+| `PENDING_RUNTIME` | 174 |
+| `PENDING_BINDING` | 21 |
+| `PENDING_INDEPENDENT_REVIEW` | 21 |
+| `PENDING_SCOPE` | 603 |
+| `EXCLUDED_SOURCE_DEFECT` | 6 |
+
+The 136 ready Python task units cover seven source lineages and ten CWEs. Family
+coverage is 35 injection/interpreter, 54 file/parser/external-resource, 15
+identity/permission, and 32 cryptography/randomness task units. Every family
+meets the three-lineage minimum, but none meets its 60-task target. The maximum
+ready sample under the 25-percent lineage cap is 116, so the prospective
+240-task-unit population gate remains closed.
+
+The Security-Oracle registry published with the audit distinguishes 12
+qualified deterministic Python profiles, one registered contextual profile
+that remains unsupported, and 28 BaxBench source-native profiles pending Docker
+qualification. A task can be `READY_CONFIRMATORY` only with a qualified profile;
+an unsupported or missing profile remains `PENDING_ORACLE`.
+
+The priority-extension inventory contains 207 source-tested task units:
+
+| Priority tier | All candidates | Strict-contract subset | Remaining gate |
+| --- | ---: | ---: | --- |
+| Python mechanism extension | 113 | 89 | freeze a task-applicable MechanismSpec and Oracle profile |
+| C/C++/Go/JavaScript extension | 94 | 80 | freeze language runtime, intervention realization, and Oracle |
+
+The C/C++ memory-safety data pool contains 102 strict, non-exposed candidates
+across the seven planned CWEs and has at least four per CWE. Only six reference a
+source functional test, so compilation, frozen functional tests, and
+task-applicable sanitizer/exploit measurement remain a runtime gate. The audit
+does not prematurely choose four per CWE before those measurements exist.
+
+The BaxBench snapshot contains exactly 28 independent scenario files, 34
+source-native functional tests, 70 source-native security tests, and 14
+dependent framework realizations. Its data-coverage target is met, but every
+scenario remains `PENDING_RUNTIME_QUALIFICATION` until the frozen Docker replay
+passes and one framework realization per scenario is selected before outcomes.
 
 The active closed artifacts are:
 
-- task-to-profile binding audit:
-  `.codex-runtime/realization-binding-audit-seven-v1-20260823-38`,
-  SHA-256 `970efdf5d916dbf8256b2725b422d4396a54adcbaf2b50db8f092c0306fb1adf`;
-- eligibility:
-  `.codex-runtime/dataset-eligibility-seven-v6-realization-profiles-20260823-42`,
-  SHA-256 `208794e253ab91679ca2d27260d5bbf7042c02c35a9cb6eaaca26967584a588c`;
-- complete embedding-only candidate reconstruction:
-  `.codex-runtime/eligible-undermerge-embedding-complete-seven-v1-20260823-36`,
-  SHA-256 `42914bd58129ca442df48368433aa8886c6b508751654b359fa1c6dee15667ec`;
-- expanded eligible under-merge review and sampling-unit ledger:
-  `.codex-runtime/eligible-undermerge-review-seven-v4-profile-bound-20260823-43`,
-  SHA-256 `da61093463e252a3eb0c5dd040cab890381bcba9310bfd5abd8cf1736a19b96e`.
+- blind mechanism-binding run:
+  `.codex-runtime/mechanism-binding-review-f2f115f-20260831-01`, plan SHA-256
+  `f2f8556a4fad016413aa0f4585f4769ea81b0fa11bc2632c2e32a159cb77690e`
+  and final-result SHA-256
+  `aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed`;
+- unified candidate-data audit:
+  `.codex-runtime/dataset-candidate-ledger-20260831-06`, SHA-256
+  `32f7d0e18801de99a0bc670ae4c517792e8cfbc51f3bb294b204452bd3c2e442`;
+- audit report:
+  `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
 
-The 1,362 excluded clusters have still been normalized, clustered, and given
-functional contracts. They are outside the current frozen Python mechanisms
-or language layers, so they are inventory for later extensions rather than
-part of the next formal denominator. Separately, 229 C/C++ memory-safety
-clusters are retained as replication candidates. The outcome-blind readiness
-audit selects four per target CWE (28 total), but only 6 currently carry a
-source functional test. The C/C++ replication therefore remains gated on 22
-frozen functional tests plus a compiler/sanitizer execution adapter.
-
-An outcome-blind quality screen now retains 201 of the 1,362 outside clusters
-as explicit priority-extension candidates. Admission to this pool requires a
-nonempty frozen functional contract and at least one source test reference; it
-uses no generated code, arm, Oracle output, or experiment outcome. The pool has
-two tiers:
-
-| Priority tier | Clusters | Scope | Remaining admission gate |
-| --- | ---: | --- | --- |
-| Python mechanism extension | 113 | 49 injection, 18 file/resource, 35 identity/permission, 11 crypto/transport | freeze a task-applicable MechanismSpec and Oracle profile |
-| Cross-language replication extension | 88 | C 25, C++ 21, Go 19, JavaScript 23 | freeze the language runtime, intervention realization, and Oracle |
-
-The Python tier covers source-tested adjacent mechanisms rather than arbitrary
-new CWE labels: CWE-74/77/95/113/117/643/943; CWE-377/379/601;
-CWE-250/259/269/276/352/522/863; and CWE-319/321/326/329/760. Every included
-CWE has at least two candidates. These tasks are the first pool to examine when
-the study prospectively expands its mechanism scope, but they remain excluded
-from the current 60-task-unit denominator until their measurement gate passes.
-The remaining 1,161 outside clusters stay in the inventory at lower priority;
-most lack a source test, a supported language runtime, or a mechanism close to
-the frozen research question.
-
-The frozen selection policy is
-`data/dataset-curation/priority-extension-policy-v1.json`, SHA-256
-`b0f3439f07b7027e571f9cb34925b498c58bf467cd7bfc892525562f73a3b5fd`.
-The selected record IDs and blockers are published in
-`priority-extension-candidates.json` inside the active study-design bundle.
-
-The review used prompts and frozen functional contracts only. It did not use
-generated programs, assigned arms, Security Oracle outputs, or experiment
-outcomes. It is a Codex requirements audit rather than an independent human
-annotation study; that limitation is retained in the artifact report.
+No generated program, assigned arm, Security-Oracle output, Functional-Judge
+verdict, or experiment outcome was consulted. The ledger completes data
+disposition, but it does not authorize confirmatory generation while the Python
+population and both replication runtime gates remain closed.
 
 ### 6.3 Historical outcome-blind eligibility audit (superseded)
 
