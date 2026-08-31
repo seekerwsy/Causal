@@ -10,6 +10,7 @@ from prompt_mechanism_study.contract_cleaning import (
     _parse_content_reviews,
     _parse_evidence_backfill,
     _parse_semantic_repairs,
+    _full_prompt_content_evidence,
     _terminal_quality,
     _transport_retry,
 )
@@ -89,6 +90,28 @@ def test_evidence_backfill_uses_utf8_byte_offsets_and_multiple_spans() -> None:
     assert len(spans) == 2
     assert prompt_bytes[spans[0]["start_byte"] : spans[0]["end_byte"]].decode() == "输入值"
     assert prompt_bytes[spans[1]["start_byte"] : spans[1]["end_byte"]].decode() == "原样返回"
+
+
+def test_full_prompt_review_evidence_is_exact_but_not_a_support_decision() -> None:
+    item = _batch()[0]
+    prompt = item["source_prompt"]
+    evidence = _full_prompt_content_evidence(
+        item["old_contract"], prompt, item["source_prompt_sha256"]
+    )
+    groups = [evidence["entrypoint"]] + [
+        group
+        for field in (
+            "requirements",
+            "inputs",
+            "outputs",
+            "side_effects",
+            "environment_dependencies",
+        )
+        for group in evidence[field]
+    ]
+    assert groups
+    assert all(group[0]["start_byte"] == 0 for group in groups)
+    assert all(group[0]["end_byte"] == len(prompt.encode("utf-8")) for group in groups)
 
 
 def test_unbound_evidence_cannot_carry_partial_spans() -> None:

@@ -92,8 +92,13 @@ prompt-mechanism-study curate correct-unbound-contract-evidence `
   BASE REPAIRS/final REPAIR-EVIDENCE-ADJUDICATED/final CONTRACT-CORRECTIONS `
   --producer-commit COMMIT --workers 6
 
+# Use only after bounded correction still leaves span-localization disputes.
+prompt-mechanism-study curate materialize-contract-review-evidence `
+  BASE CONTRACT-CORRECTIONS/final CONTRACT-CORRECTIONS/final REVIEW-EVIDENCE `
+  --producer-commit COMMIT
+
 prompt-mechanism-study curate assemble-contract-content `
-  BASE PROPOSALS/evidence CONTRACT-CORRECTIONS/final CONTRACT-CORRECTIONS/final `
+  BASE PROPOSALS/evidence REVIEW-EVIDENCE/final REVIEW-EVIDENCE/final `
   PROPOSALS-FINAL `
   --producer-commit COMMIT
 
@@ -109,9 +114,10 @@ prompt-mechanism-study curate finalize-contract-content verify FINAL
 ```
 
 Semantic repair and repaired-contract evidence binding each use one task unit
-per provider request. The first LLM call decides only the semantic contract;
-deterministic code then constructs its exact target list, and the second call
-only binds source spans to that immutable list. Run
+per provider request. Only the semantic contract is consumed from the first
+LLM call; the v1 producer sometimes emitted an auxiliary evidence array, which
+is deterministically discarded and counted. Code then constructs the exact
+target list, and the second call alone supplies the frozen source spans. Run
 one batch of each producer mode and one review batch before scaling. Runs
 are resumable only from closed successful batches with the same frozen plan.
 Raw requests and provider responses remain in the run directory; credentials
@@ -126,8 +132,15 @@ insufficiency or silently dropped.
 Contract correction is restricted to those remaining non-empty disputes. It
 freezes a source-only replacement contract before a separate evidence call and
 then merges only those task IDs back into the full repair/evidence population.
-If any corrected contract remains unbound, the final proposal assembler still
-refuses the bundle.
+Until a dispute is either bound or explicitly marked for whole-prompt semantic
+review, the final proposal assembler refuses the bundle.
+
+After bounded correction, a remaining localization dispute may receive exact
+whole-prompt UTF-8 spans with status `full_prompt_pending_review`. This is not a
+semantic support decision. The independent final reviewer must still judge both
+contract faithfulness and whether the cited prompt supports every value. The
+fallback status and route are retained in the repair ledger; any unsupported
+review remains nonterminal.
 
 The finalizer accepts no nonterminal review. It converts the evidence to no
 other offset system, recomputes quality and the derived readiness view, records

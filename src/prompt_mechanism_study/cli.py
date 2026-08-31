@@ -266,6 +266,18 @@ def _add_curation_group(groups: Any) -> None:
     correct_repair_evidence.add_argument("--max-new-batches", type=int)
     correct_repair_evidence.add_argument("--workers", type=int, default=1)
 
+    review_evidence = _leaf(
+        actions,
+        "materialize-contract-review-evidence",
+        _run_materialize_contract_review_evidence,
+        "supply exact whole-prompt spans for unresolved independent review",
+    )
+    review_evidence.add_argument("base_bundle", type=Path)
+    review_evidence.add_argument("repairs_root", type=Path)
+    review_evidence.add_argument("prior_evidence_root", type=Path)
+    review_evidence.add_argument("output", type=Path)
+    review_evidence.add_argument("--producer-commit", required=True)
+
     assemble_proposals = _leaf(
         actions,
         "assemble-contract-content",
@@ -920,6 +932,25 @@ def _run_correct_unbound_contract_evidence(
             workers=args.workers,
         )
     )
+
+
+def _run_materialize_contract_review_evidence(
+    args: argparse.Namespace, _: argparse.ArgumentParser
+) -> int:
+    from prompt_mechanism_study.contract_cleaning import (
+        materialize_full_prompt_evidence_for_review,
+    )
+
+    return _emit_status(
+        materialize_full_prompt_evidence_for_review(
+            args.base_bundle,
+            args.repairs_root,
+            args.prior_evidence_root,
+            args.output,
+            producer_commit=args.producer_commit,
+        )
+    )
+
 
 def _run_assemble_contract_content(
     args: argparse.Namespace, _: argparse.ArgumentParser

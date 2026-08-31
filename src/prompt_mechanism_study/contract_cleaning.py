@@ -1017,6 +1017,103 @@ def correct_unbound_contract_evidence(
     return report
 
 
+def materialize_full_prompt_evidence_for_review(
+    base_bundle: Path,
+    repairs_root: Path,
+    prior_evidence_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+) -> dict[str, Any]:
+    """Give unresolved values exact whole-prompt spans for independent semantic review."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    repairs_bundle = repairs_root.resolve()
+    prior_bundle = prior_evidence_root.resolve()
+    verify_task_unit_data(base)
+    verify_bundle(repairs_bundle)
+    verify_bundle(prior_bundle)
+    tasks, _, _ = _base_population(base)
+    repairs = _unique_by(
+        read_json(repairs_bundle / "semantic-contract-repairs.json"),
+        "task_unit_id",
+        "semantic contract repairs",
+    )
+    prior = _unique_by(
+        read_json(prior_bundle / "repaired-contract-evidence.json"),
+        "task_unit_id",
+        "prior repaired contract evidence",
+    )
+    if set(repairs) != set(prior) or not set(repairs) <= set(tasks):
+        raise ContractCleaningError("review evidence populations differ")
+    frozen = []
+    fallback = 0
+    for task_id, repair in sorted(repairs.items()):
+        row = prior[task_id]
+        if row.get("binding_status") == "bound":
+            frozen.append(dict(row))
+            continue
+        if row.get("binding_status") != "needs_repair":
+            raise ContractCleaningError("review evidence input status is invalid")
+        task = tasks[task_id]
+        contract = {
+            key: repair[key]
+            for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+        }
+        evidence = _full_prompt_content_evidence(
+            contract,
+            task["model_visible_input"]["natural_prompt"],
+            task["model_visible_input"]["natural_prompt_content_sha256"],
+        )
+        frozen.append(
+            {
+                "task_unit_id": task_id,
+                "binding_status": "full_prompt_pending_review",
+                "model_binding_status": row.get("model_binding_status"),
+                "content_evidence": evidence,
+                "reason": (
+                    "Exact whole-prompt spans are supplied for independent semantic review; "
+                    "model support was not inferred."
+                ),
+                "evidence_adjudication": "FULL_PROMPT_PENDING_INDEPENDENT_REVIEW",
+            }
+        )
+        fallback += 1
+    final = output.resolve() / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+    report = {
+        "schema_version": "1.0",
+        "status": "FULL_PROMPT_REVIEW_EVIDENCE_FROZEN",
+        "repair_item_count": len(repairs),
+        "model_bound_count": len(frozen) - fallback,
+        "full_prompt_pending_review_count": fallback,
+        "structurally_evidence_complete_count": len(frozen),
+        "semantic_review_required_count": fallback,
+        "base_bundle_sha256": _manifest_digest(base),
+        "repairs_bundle_sha256": bundle_digest(repairs_bundle),
+        "prior_evidence_bundle_sha256": bundle_digest(prior_bundle),
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        final,
+        {
+            "semantic-contract-repairs.json": [
+                row for _, row in sorted(repairs.items())
+            ],
+            "repaired-contract-evidence.json": frozen,
+            "report.json": report,
+        },
+    )
+    return report
+
+
 def assemble_contract_content_proposals(
     base_bundle: Path,
     evidence_root: Path,
@@ -1065,8 +1162,10 @@ def assemble_contract_content_proposals(
         "task_unit_id",
         "repaired contract evidence",
     )
+    allowed_evidence_statuses = {"bound", "full_prompt_pending_review"}
     if set(repair_evidence_by_task) != expected_repairs or any(
-        row.get("binding_status") != "bound" for row in repair_evidence_by_task.values()
+        row.get("binding_status") not in allowed_evidence_statuses
+        for row in repair_evidence_by_task.values()
     ):
         raise ContractCleaningError("repaired contract evidence is incomplete")
     proposed = []
@@ -1116,6 +1215,18 @@ def assemble_contract_content_proposals(
             "new_contract_id": contract_id,
             "source_specification_disposition": assessment,
             "evidence_span_count": _evidence_span_count(evidence),
+            "evidence_binding_status": (
+                evidence_row["binding_status"]
+                if mode == "EVIDENCE_BACKFILL_ONLY"
+                else repair_evidence_by_task[task_id]["binding_status"]
+            ),
+            "evidence_adjudication": (
+                evidence_row.get("evidence_adjudication", "INITIAL_BINDER_BOUND")
+                if mode == "EVIDENCE_BACKFILL_ONLY"
+                else repair_evidence_by_task[task_id].get(
+                    "evidence_adjudication", "INITIAL_BINDER_BOUND"
+                )
+            ),
             "review_status": "PENDING",
             "review_issue_codes": [],
             "input_sha256": content_hash(
@@ -1146,6 +1257,10 @@ def assemble_contract_content_proposals(
         "evidence_plan_bundle_sha256": bundle_digest(evidence_root.resolve() / "plan"),
         "repairs_bundle_sha256": bundle_digest(repairs_bundle),
         "repair_evidence_bundle_sha256": bundle_digest(repair_evidence_bundle),
+        "full_prompt_pending_review_count": sum(
+            row.get("binding_status") == "full_prompt_pending_review"
+            for row in repair_evidence_by_task.values()
+        ),
         "all_task_units_accounted_for": len(proposed) == len(items),
         "arms_or_outcomes_used": False,
         "formal_roles_used": False,
@@ -2504,6 +2619,23 @@ def _normalize_evidence_bindings(
     return frozen
 
 
+def _full_prompt_content_evidence(
+    contract: Mapping[str, Any], prompt: str, source_prompt_sha256: str
+) -> dict[str, Any]:
+    if not prompt:
+        raise ContractCleaningError("full-prompt review evidence requires a non-empty source")
+    bindings = [
+        {
+            "target_id": target["target_id"],
+            "spans": [{"evidence_text": prompt, "evidence_occurrence": 1}],
+        }
+        for target in _evidence_targets(contract)
+    ]
+    return _normalize_evidence_bindings(
+        bindings, contract, prompt, source_prompt_sha256
+    )
+
+
 def _normalize_span_group(
     group: Any, prompt: str, source_prompt_sha256: str
 ) -> list[dict[str, Any]]:
@@ -2611,6 +2743,7 @@ __all__ = [
     "correct_unbound_contract_evidence",
     "finalize_contract_content_data",
     "freeze_future_evaluation_reservation",
+    "materialize_full_prompt_evidence_for_review",
     "run_contract_content_proposals",
     "run_contract_content_review",
     "run_repaired_contract_evidence",
