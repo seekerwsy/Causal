@@ -5,8 +5,10 @@
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
 coverage target, not a claim of current readiness. The active outcome-blind
-audit currently identifies 150 `READY_CONFIRMATORY` Python task units and keeps
-the 240-task population gate closed. Section 8 records a smaller,
+audit admits 1,217 quality-qualified task units into the final dataset. Of its
+558 Python tasks, 150 are currently `READY_CONFIRMATORY`; the remainder stay in
+the dataset with explicit mechanism, Oracle, scope, or review-readiness fields.
+The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
 power-planning canary; it is not a frozen successor assignment manifest or
 evidence that an intervention effect exists.

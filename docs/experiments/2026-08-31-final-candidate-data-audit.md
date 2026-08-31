@@ -176,6 +176,31 @@ extensions and 94 C/C++/Go/JavaScript extensions. Of these, 89 and 80,
 respectively, also have strict contracts. They remain `PENDING_ORACLE` or
 `PENDING_RUNTIME`; the audit does not invent a profile merely to fill a quota.
 
+## Measurement coverage next steps
+
+Measurement support is not a final-dataset gate. It is needed only when a task
+is sampled into an effect estimate. All 558 Python tasks already have runtime
+support, so another Python runner is unnecessary. Within the 21 prospectively
+listed Python CWEs, the final dataset contains 346 quality-qualified tasks:
+132 injection/interpreter, 103 file/parser/resource, 48
+identity/authorization/permissions, and 63 cryptography/randomness/integrity.
+Of these, 150 are ready, 21 need only a frozen binding decision, and most of the
+remainder need a registered mechanism plus a qualified task-applicable Oracle.
+
+The implementation order is therefore:
+
+1. resolve the 21 existing finite-registry binding cases;
+2. qualify only locally measurable missing profiles, beginning with bounded
+   code-execution and cryptographic API cases rather than contextual Web policy;
+3. make a prospective population decision for the identity family, whose 48
+   quality-qualified tasks cannot meet a target of 60 even with perfect
+   implementation support;
+4. implement non-Python runtimes only for a separately claimed replication.
+
+The 659 non-Python final-dataset tasks remain valid data without those runtimes.
+Building every language environment is not required for the Python primary
+study and would not repair its identity-family population shortfall.
+
 ## Protocol risks and gate decision
 
 - Mechanism binding is a single-model blind review, not human gold. Exact source
@@ -193,9 +218,11 @@ respectively, also have strict contracts. They remain `PENDING_ORACLE` or
 - The Python population, C/C++ runtime, and backend runtime gates are still
   closed. No confirmatory generation is authorized by this audit.
 
-The data-preparation stage is complete in the narrower sense that every source
-task has a typed disposition, every currently supported Oracle is explicit, and
-both replication inventories are closed. The next scientific choice must be
-made prospectively: acquire/qualify more tasks to retain the 240-task target, or
-freeze a documented shortfall amendment and power the study on the actually
-ready population.
+The data-preparation stage is complete: every source task has a typed
+disposition, every quality-qualified task is in the final dataset, every
+currently supported Oracle is explicit, and both replication inventories are
+closed. The next scientific choice is not another curation pass. It is a
+prospective measurement-population decision: extend only defensible Oracle
+coverage, add an outcome-blind identity-family scope extension or new tasks, or
+freeze a documented shortfall amendment and power the study on the measurable
+population.
