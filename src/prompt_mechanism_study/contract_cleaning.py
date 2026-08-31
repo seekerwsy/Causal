@@ -72,6 +72,12 @@ _REVIEW_ISSUES = {
     "uncertain_semantics",
     "other",
 }
+_SOURCE_ONLY_REVIEW_ISSUES = {
+    "prompt_not_software_task",
+    "external_context_missing",
+    "ambiguous_interface",
+    "uncertain_semantics",
+}
 _FINAL_JSONL_FILES = {
     "contract-repair-ledger.jsonl",
     "functional-contracts.jsonl",
@@ -2497,20 +2503,30 @@ def _parse_content_reviews(
     frozen = []
     for row, item in zip(rows, batch, strict=True):
         issues = row.get("issue_codes")
+        faithful_supported = (
+            row.get("contract_status") == "faithful"
+            and row.get("evidence_status") == "supported"
+        )
+        source_only_issues = (
+            faithful_supported
+            and row.get("source_specification_disposition")
+            in {"insufficient", "defect", "uncertain"}
+            and isinstance(issues, list)
+            and bool(issues)
+            and set(issues) <= _SOURCE_ONLY_REVIEW_ISSUES
+        )
+        normalized_issues = ["none"] if source_only_issues else issues
         if (
             set(row) != required
             or row["contract_status"] not in {"faithful", "faulty", "uncertain"}
             or row["evidence_status"] not in {"supported", "unsupported"}
             or row["source_specification_disposition"] not in _SOURCE_ASSESSMENTS
             or row["repair_category"] not in _REPAIR_CATEGORIES
-            or not isinstance(issues, list)
-            or not 1 <= len(issues) <= 6
-            or len(set(issues)) != len(issues)
-            or any(issue not in _REVIEW_ISSUES for issue in issues)
-            or (
-                (row["contract_status"] == "faithful" and row["evidence_status"] == "supported")
-                != (issues == ["none"])
-            )
+            or not isinstance(normalized_issues, list)
+            or not 1 <= len(normalized_issues) <= 6
+            or len(set(normalized_issues)) != len(normalized_issues)
+            or any(issue not in _REVIEW_ISSUES for issue in normalized_issues)
+            or faithful_supported != (normalized_issues == ["none"])
         ):
             raise ContractCleaningError("contract content review response is malformed")
         normalized_reason = _normalize_reason(row["reason"])
@@ -2518,7 +2534,13 @@ def _parse_content_reviews(
             {
                 "task_unit_id": item["task_unit_id"],
                 **{
-                    key: (normalized_reason if key == "reason" else value)
+                    key: (
+                        normalized_reason
+                        if key == "reason"
+                        else normalized_issues
+                        if key == "issue_codes"
+                        else value
+                    )
                     for key, value in row.items()
                     if key != "item_index"
                 },

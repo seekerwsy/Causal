@@ -318,6 +318,29 @@ def test_review_maps_only_faithful_supported_contracts_to_final_quality() -> Non
     assert _terminal_quality(row) == "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION"
 
 
+def test_review_normalizes_only_source_level_issues_after_contract_support() -> None:
+    response = {
+        "item_index": 1,
+        "contract_status": "faithful",
+        "evidence_status": "supported",
+        "source_specification_disposition": "insufficient",
+        "issue_codes": ["ambiguous_interface"],
+        "repair_category": "SOURCE_SPECIFICATION_INSUFFICIENT",
+        "reason": "The contract is faithful, but the source leaves the interface ambiguous.",
+    }
+    row = _parse_content_reviews(
+        json.dumps({"reviews": [response]}).encode(), _batch()
+    )[0]
+    assert row["issue_codes"] == ["none"]
+    assert _terminal_quality(row) == "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION"
+
+    response["issue_codes"] = ["missing_explicit_requirement"]
+    with pytest.raises(ContractCleaningError):
+        _parse_content_reviews(
+            json.dumps({"reviews": [response]}).encode(), _batch()
+        )
+
+
 def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypatch) -> None:
     monkeypatch.setattr("prompt_mechanism_study.contract_cleaning.time.sleep", lambda _: None)
     attempts = []
