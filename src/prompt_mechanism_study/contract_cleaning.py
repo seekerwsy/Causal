@@ -558,6 +558,10 @@ def finalize_contract_content_data(
             != task["model_visible_input"]["natural_prompt_content_sha256"]
         ):
             raise ContractCleaningError("final contract source or review binding is stale")
+        _validate_proposal_identity(proposal)
+        _validate_terminal_review(review)
+        if proposal_ledger[task_id].get("new_contract_id") != proposal["contract_id"]:
+            raise ContractCleaningError("proposal ledger does not bind the cleaned contract")
         _validate_frozen_evidence(task, proposal)
         task_core = {
             **{
@@ -838,6 +842,8 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
         readiness_row = readiness[task_id]
         ledger_row = ledger[task_id]
         _validate_frozen_evidence(task, contract)
+        _validate_final_contract_identity(contract)
+        review_identity = _review_identity_from_final_contract(contract)
         if (
             task.get("schema_version") != "task-unit-5.0"
             or task.get("task_unit_record_sha256")
@@ -894,6 +900,8 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
             or ledger_row.get("repair_status") != "INDEPENDENTLY_REVIEWED_TERMINAL"
             or ledger_row.get("final_quality_disposition")
             != quality_row.get("quality_disposition")
+            or ledger_row.get("independent_review_record_sha256")
+            != content_hash(review_identity)
             or ledger_row.get("repair_ledger_record_sha256")
             != content_hash(
                 {
@@ -1050,6 +1058,68 @@ def _base_population(
 
 def _manifest_digest(root: Path) -> str:
     return hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()
+
+
+def _validate_proposal_identity(proposal: Mapping[str, Any]) -> None:
+    core = {key: value for key, value in proposal.items() if key != "contract_id"}
+    if (
+        proposal.get("schema_version")
+        != "functional-contract-cleaning-proposal-1.0"
+        or proposal.get("contract_id") != content_id("functional_contract_", core)
+        or proposal.get("arms_or_outcomes_used") is not False
+    ):
+        raise ContractCleaningError("cleaned contract proposal identity is invalid")
+
+
+def _validate_terminal_review(review: Mapping[str, Any]) -> None:
+    core = {
+        key: value
+        for key, value in review.items()
+        if key != "contract_content_review_record_sha256"
+    }
+    if (
+        review.get("schema_version") != "contract-content-review-1.0"
+        or review.get("contract_content_review_record_sha256") != content_hash(core)
+        or review.get("arms_or_outcomes_used") is not False
+        or review.get("terminal_quality_decision") != _terminal_quality(review)
+        or review.get("terminal_quality_decision") not in _TERMINAL_QUALITY
+        or review.get("issue_codes") != ["none"]
+    ):
+        raise ContractCleaningError("independent contract review is not terminal or valid")
+
+
+def _proposal_identity_from_final_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": "functional-contract-cleaning-proposal-1.0",
+        "task_unit_id": contract["task_unit_id"],
+        "record_id": contract["record_id"],
+        "source_prompt_sha256": contract["source_prompt_sha256"],
+        "resolution_status": contract["resolution_status"],
+        "entrypoint": contract["entrypoint"],
+        **{field: contract[field] for field in _CONTENT_FIELDS},
+        "content_evidence": contract["content_evidence"],
+        "proposal_mode": contract["proposal_mode"],
+        "producer_source_assessment": contract["producer_source_assessment"],
+        "producer_reason": contract["producer_reason"],
+        "arms_or_outcomes_used": False,
+    }
+
+
+def _validate_final_contract_identity(contract: Mapping[str, Any]) -> None:
+    if contract.get("contract_id") != content_id(
+        "functional_contract_", _proposal_identity_from_final_contract(contract)
+    ):
+        raise ContractCleaningError("final cleaned contract identity is invalid")
+
+
+def _review_identity_from_final_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": "contract-content-review-1.0",
+        "task_unit_id": contract["task_unit_id"],
+        "contract_id": contract["contract_id"],
+        **contract["review"],
+        "arms_or_outcomes_used": False,
+    }
 
 
 def _validate_frozen_evidence(
