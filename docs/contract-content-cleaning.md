@@ -81,8 +81,14 @@ prompt-mechanism-study curate contract-semantic-repairs `
 prompt-mechanism-study curate contract-repair-evidence `
   BASE REPAIRS/final REPAIR-EVIDENCE --producer-commit COMMIT --workers 6
 
+# Run only when the first evidence pass contains unresolved non-empty targets.
+# Empty-target contracts close deterministically; only disputes reach the reviewer.
+prompt-mechanism-study curate adjudicate-contract-repair-evidence `
+  BASE REPAIRS/final REPAIR-EVIDENCE/final REPAIR-EVIDENCE-ADJUDICATED `
+  --producer-commit COMMIT --workers 6
+
 prompt-mechanism-study curate assemble-contract-content `
-  BASE PROPOSALS/evidence REPAIRS/final REPAIR-EVIDENCE/final PROPOSALS-FINAL `
+  BASE PROPOSALS/evidence REPAIRS/final REPAIR-EVIDENCE-ADJUDICATED/final PROPOSALS-FINAL `
   --producer-commit COMMIT
 
 prompt-mechanism-study curate contract-content-review `
@@ -104,6 +110,12 @@ one batch of each producer mode and one review batch before scaling. Runs
 are resumable only from closed successful batches with the same frozen plan.
 Raw requests and provider responses remain in the run directory; credentials
 are never recorded.
+
+Evidence binding is vacuously complete when the immutable contract contains no
+non-empty values. If the first binder disputes a non-empty contract, only that
+subset is sent once to the independent reviewer model. Remaining disputes stay
+nonterminal and require contract correction; they are never relabeled as source
+insufficiency or silently dropped.
 
 The finalizer accepts no nonterminal review. It converts the evidence to no
 other offset system, recomputes quality and the derived readiness view, records

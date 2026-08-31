@@ -663,6 +663,161 @@ def run_repaired_contract_evidence(
     return report
 
 
+def adjudicate_unbound_repaired_contract_evidence(
+    repository_root: Path,
+    base_bundle: Path,
+    repairs_root: Path,
+    prior_evidence_root: Path,
+    output: Path,
+    *,
+    producer_commit: str,
+    max_new_batches: int | None = None,
+    workers: int = 1,
+    provider: Provider = bailian_complete,
+) -> dict[str, Any]:
+    """Close vacuous evidence and independently recheck only non-empty disputes."""
+
+    if not producer_commit or any(character.isspace() for character in producer_commit):
+        raise ValueError("producer_commit must be one non-empty token")
+    base = base_bundle.resolve()
+    repairs_bundle = repairs_root.resolve()
+    prior_bundle = prior_evidence_root.resolve()
+    verify_task_unit_data(base)
+    verify_bundle(repairs_bundle)
+    verify_bundle(prior_bundle)
+    tasks, _, _ = _base_population(base)
+    repairs = _unique_by(
+        read_json(repairs_bundle / "semantic-contract-repairs.json"),
+        "task_unit_id",
+        "semantic contract repairs",
+    )
+    prior = _unique_by(
+        read_json(prior_bundle / "repaired-contract-evidence.json"),
+        "task_unit_id",
+        "prior repaired contract evidence",
+    )
+    if set(repairs) != set(prior) or not set(repairs) <= set(tasks):
+        raise ContractCleaningError("evidence adjudication populations differ")
+
+    carried: dict[str, dict[str, Any]] = {}
+    items = []
+    vacuous = 0
+    for task_id, repair in sorted(repairs.items()):
+        task = tasks[task_id]
+        contract = {
+            key: repair[key]
+            for key in ("resolution_status", "entrypoint", *_CONTENT_FIELDS)
+        }
+        prior_row = prior[task_id]
+        if prior_row.get("binding_status") == "bound":
+            carried[task_id] = {**prior_row, "evidence_adjudication": "PRIOR_BOUND"}
+            continue
+        if prior_row.get("binding_status") != "needs_repair":
+            raise ContractCleaningError("prior evidence status is invalid")
+        if not _evidence_targets(contract):
+            empty = _normalize_evidence_bindings(
+                [],
+                contract,
+                task["model_visible_input"]["natural_prompt"],
+                task["model_visible_input"]["natural_prompt_content_sha256"],
+            )
+            carried[task_id] = {
+                "task_unit_id": task_id,
+                "binding_status": "bound",
+                "model_binding_status": prior_row.get("model_binding_status"),
+                "content_evidence": empty,
+                "reason": "No non-empty contract value requires a source span.",
+                "evidence_adjudication": "VACUOUS_NO_TARGETS",
+            }
+            vacuous += 1
+            continue
+        items.append(
+            {
+                "task_unit_id": task_id,
+                "language": task["declared_execution_context"]["language"],
+                "source_prompt": task["model_visible_input"]["natural_prompt"],
+                "source_prompt_sha256": task["model_visible_input"][
+                    "natural_prompt_content_sha256"
+                ],
+                "old_contract": contract,
+            }
+        )
+
+    results, complete, plan = _run_stage(
+        repository_root,
+        output.resolve(),
+        items,
+        prompt_name="contract-evidence-backfill-v1.txt",
+        config_name="contract-cleaning-reviewer-qwen37max.json",
+        stage="unbound_repaired_contract_evidence_adjudication",
+        base_identity={
+            "schema_version": "1.0",
+            "base_bundle_sha256": _manifest_digest(base),
+            "repairs_bundle_sha256": bundle_digest(repairs_bundle),
+            "prior_evidence_bundle_sha256": bundle_digest(prior_bundle),
+            "prior_bound_count": len(carried) - vacuous,
+            "vacuous_no_target_count": vacuous,
+            "adjudication_item_count": len(items),
+            "producer_commit": producer_commit,
+            "arms_or_outcomes_used": False,
+            "formal_roles_used": False,
+        },
+        request_builder=_evidence_request,
+        parser=_parse_evidence_backfill,
+        max_new_batches=max_new_batches,
+        workers=workers,
+        provider=provider,
+        batch_items=1,
+    )
+    if not complete:
+        return {
+            "schema_version": "1.0",
+            "status": "REPAIRED_CONTRACT_EVIDENCE_ADJUDICATION_IN_PROGRESS",
+            "repair_item_count": len(repairs),
+            "prior_bound_count": len(carried) - vacuous,
+            "vacuous_no_target_count": vacuous,
+            "adjudication_item_count": len(items),
+            "completed_adjudication_item_count": len(results),
+            "complete": False,
+        }
+    final = output.resolve() / "final"
+    if final.exists():
+        verify_bundle(final)
+        return read_json(final / "report.json")
+    adjudicated = {
+        task_id: {**row, "evidence_adjudication": "QWEN37MAX_ADJUDICATION"}
+        for task_id, row in _unique_results(results, "evidence adjudication").items()
+    }
+    merged = {**carried, **adjudicated}
+    if set(merged) != set(repairs):
+        raise ContractCleaningError("evidence adjudication does not cover every repair")
+    evidence = [row for _, row in sorted(merged.items())]
+    bound = sum(row["binding_status"] == "bound" for row in evidence)
+    report = {
+        "schema_version": "1.0",
+        "status": "REPAIRED_CONTRACT_EVIDENCE_ADJUDICATION_FROZEN",
+        "repair_item_count": len(evidence),
+        "prior_bound_count": len(carried) - vacuous,
+        "vacuous_no_target_count": vacuous,
+        "adjudication_item_count": len(items),
+        "adjudication_bound_count": sum(
+            row["binding_status"] == "bound" for row in adjudicated.values()
+        ),
+        "evidence_bound_count": bound,
+        "evidence_unbound_count": len(evidence) - bound,
+        "adjudication_plan_sha256": content_hash(plan),
+        "producer_commit": producer_commit,
+        "arms_or_outcomes_used": False,
+        "formal_roles_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        final,
+        {"repaired-contract-evidence.json": evidence, "report.json": report},
+    )
+    return report
+
+
 def assemble_contract_content_proposals(
     base_bundle: Path,
     evidence_root: Path,
@@ -2223,6 +2378,7 @@ def _proposal_progress(
 
 __all__ = [
     "ContractCleaningError",
+    "adjudicate_unbound_repaired_contract_evidence",
     "assemble_contract_content_proposals",
     "finalize_contract_content_data",
     "freeze_future_evaluation_reservation",
