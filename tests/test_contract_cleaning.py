@@ -203,3 +203,28 @@ def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypa
 
     with pytest.raises(JudgeGateError):
         _transport_retry(credential)({}, {}, "prompt")
+
+
+def test_response_binding_uses_last_duplicate_only_when_index_set_is_complete() -> None:
+    batch = _batch()
+    needs_repair = {
+        "item_index": 1,
+        "binding_status": "needs_repair",
+        "evidence_bindings": None,
+        "reason": "First diagnostic.",
+    }
+    bound = {
+        "item_index": 1,
+        "binding_status": "bound",
+        "evidence_bindings": _evidence(),
+        "reason": "Corrected complete response.",
+    }
+    row = _parse_evidence_backfill(
+        json.dumps({"items": [needs_repair, bound]}, ensure_ascii=False).encode(), batch
+    )[0]
+    assert row["model_binding_status"] == "bound"
+
+    with pytest.raises(ContractCleaningError):
+        _parse_evidence_backfill(
+            json.dumps({"items": [{**needs_repair, "item_index": 2}]}).encode(), batch
+        )

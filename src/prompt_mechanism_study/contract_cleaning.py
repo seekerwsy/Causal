@@ -503,6 +503,7 @@ def _policy(root: Path, prompt_name: str, config_name: str) -> tuple[dict[str, A
         "top_p": evaluator["top_p"],
         "seed": evaluator["seed"],
         "transport_max_attempts": 3,
+        "duplicate_index_policy": "last_occurrence_wins_if_all_indices_covered_v1",
     }
     return evaluator, prompt, identity
 
@@ -765,14 +766,17 @@ def _response_rows(raw: bytes, field: str, expected: int) -> list[dict[str, Any]
     if not isinstance(value, dict) or set(value) != {field}:
         raise ContractCleaningError("model response top-level fields are invalid")
     rows = value[field]
-    if (
-        not isinstance(rows, list)
-        or len(rows) != expected
-        or any(not isinstance(row, dict) for row in rows)
-        or [row.get("item_index") for row in rows] != list(range(1, expected + 1))
+    if not isinstance(rows, list) or not rows or len(rows) > expected * 2 or any(
+        not isinstance(row, dict)
+        or type(row.get("item_index")) is not int
+        or not 1 <= row["item_index"] <= expected
+        for row in rows
     ):
         raise ContractCleaningError("model response item binding is invalid")
-    return rows
+    by_index = {row["item_index"]: row for row in rows}
+    if set(by_index) != set(range(1, expected + 1)):
+        raise ContractCleaningError("model response item binding is incomplete")
+    return [by_index[index] for index in range(1, expected + 1)]
 
 
 def _validate_contract_values(row: Mapping[str, Any]) -> dict[str, Any]:
