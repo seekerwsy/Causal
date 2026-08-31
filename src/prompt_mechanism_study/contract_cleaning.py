@@ -72,12 +72,6 @@ _REVIEW_ISSUES = {
     "uncertain_semantics",
     "other",
 }
-_SOURCE_ONLY_REVIEW_ISSUES = {
-    "prompt_not_software_task",
-    "external_context_missing",
-    "ambiguous_interface",
-    "uncertain_semantics",
-}
 _FINAL_JSONL_FILES = {
     "contract-repair-ledger.jsonl",
     "functional-contracts.jsonl",
@@ -2513,7 +2507,6 @@ def _parse_content_reviews(
             in {"insufficient", "defect", "uncertain"}
             and isinstance(issues, list)
             and bool(issues)
-            and set(issues) <= _SOURCE_ONLY_REVIEW_ISSUES
         )
         normalized_issues = ["none"] if source_only_issues else issues
         if (

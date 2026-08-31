@@ -335,6 +335,12 @@ def test_review_normalizes_only_source_level_issues_after_contract_support() -> 
     assert _terminal_quality(row) == "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION"
 
     response["issue_codes"] = ["missing_explicit_requirement"]
+    row = _parse_content_reviews(
+        json.dumps({"reviews": [response]}).encode(), _batch()
+    )[0]
+    assert row["issue_codes"] == ["none"]
+
+    response["source_specification_disposition"] = "sufficient"
     with pytest.raises(ContractCleaningError):
         _parse_content_reviews(
             json.dumps({"reviews": [response]}).encode(), _batch()
