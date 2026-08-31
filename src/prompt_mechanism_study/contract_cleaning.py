@@ -2509,12 +2509,15 @@ def _parse_content_reviews(
             and bool(issues)
         )
         normalized_issues = ["none"] if source_only_issues else issues
+        normalized_category = _canonical_review_repair_category(
+            row, normalized_issues
+        )
         if (
             set(row) != required
             or row["contract_status"] not in {"faithful", "faulty", "uncertain"}
             or row["evidence_status"] not in {"supported", "unsupported"}
             or row["source_specification_disposition"] not in _SOURCE_ASSESSMENTS
-            or row["repair_category"] not in _REPAIR_CATEGORIES
+            or normalized_category not in _REPAIR_CATEGORIES
             or not isinstance(normalized_issues, list)
             or not 1 <= len(normalized_issues) <= 6
             or len(set(normalized_issues)) != len(normalized_issues)
@@ -2532,6 +2535,8 @@ def _parse_content_reviews(
                         if key == "reason"
                         else normalized_issues
                         if key == "issue_codes"
+                        else normalized_category
+                        if key == "repair_category"
                         else value
                     )
                     for key, value in row.items()
@@ -2540,6 +2545,39 @@ def _parse_content_reviews(
             }
         )
     return frozen
+
+
+def _canonical_review_repair_category(
+    row: Mapping[str, Any], issues: Any
+) -> str:
+    category = row.get("repair_category")
+    if not isinstance(category, str) or not isinstance(issues, list):
+        return "INVALID"
+    faithful_supported = (
+        row.get("contract_status") == "faithful"
+        and row.get("evidence_status") == "supported"
+    )
+    source = row.get("source_specification_disposition")
+    if faithful_supported:
+        return {
+            "sufficient": "EVIDENCE_BACKFILL_ONLY",
+            "insufficient": "SOURCE_SPECIFICATION_INSUFFICIENT",
+            "defect": "SOURCE_DEFECT",
+            "uncertain": "INDEPENDENT_ADJUDICATION_REQUIRED",
+        }.get(source, "INVALID")
+    if source == "defect":
+        return "SOURCE_DEFECT"
+    if source == "insufficient":
+        return "SOURCE_SPECIFICATION_INSUFFICIENT"
+    if source == "uncertain":
+        return "INDEPENDENT_ADJUDICATION_REQUIRED"
+    if category in _REPAIR_CATEGORIES - {"EVIDENCE_BACKFILL_ONLY"}:
+        return category
+    if "missing_explicit_requirement" in issues:
+        return "OMITTED_EXPLICIT_REQUIREMENT"
+    if "unsupported_requirement" in issues:
+        return "UNSUPPORTED_ADDITION"
+    return "CONTRACT_EXTRACTION_ERROR"
 
 
 def _response_rows(raw: bytes, field: str, expected: int) -> list[dict[str, Any]]:

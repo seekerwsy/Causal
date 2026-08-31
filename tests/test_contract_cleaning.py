@@ -347,6 +347,23 @@ def test_review_normalizes_only_source_level_issues_after_contract_support() -> 
         )
 
 
+def test_review_derives_diagnostic_repair_category_from_primary_decisions() -> None:
+    response = {
+        "item_index": 1,
+        "contract_status": "faulty",
+        "evidence_status": "unsupported",
+        "source_specification_disposition": "insufficient",
+        "issue_codes": ["unsupported_requirement", "ambiguous_interface"],
+        "repair_category": "EXTERNAL_CONTEXT_MISSING",
+        "reason": "The source lacks external context and the contract adds a claim.",
+    }
+    row = _parse_content_reviews(
+        json.dumps({"reviews": [response]}).encode(), _batch()
+    )[0]
+    assert row["repair_category"] == "SOURCE_SPECIFICATION_INSUFFICIENT"
+    assert _terminal_quality(row) is None
+
+
 def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypatch) -> None:
     monkeypatch.setattr("prompt_mechanism_study.contract_cleaning.time.sleep", lambda _: None)
     attempts = []
