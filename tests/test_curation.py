@@ -253,6 +253,13 @@ def test_contract_curation_reuses_matching_representatives_and_extracts_only_mis
                         "resolution_status": "resolved",
                         "entrypoint": None,
                         "requirements": ["Return B."],
+                        "requirement_evidence": [
+                            {
+                                "requirement_index": 1,
+                                "evidence_text": "Return B.",
+                                "evidence_occurrence": 1,
+                            }
+                        ],
                         "inputs": [],
                         "outputs": ["B"],
                         "side_effects": [],
@@ -281,11 +288,20 @@ def test_contract_curation_reuses_matching_representatives_and_extracts_only_mis
 
 
 def test_contract_parser_accepts_a_bound_language_and_nine_requirements() -> None:
+    prompt = "\n".join(f"requirement {index}" for index in range(9))
     contract = {
         "item_index": 1,
         "resolution_status": "resolved",
         "entrypoint": "run",
         "requirements": [f"requirement {index}" for index in range(9)],
+        "requirement_evidence": [
+            {
+                "requirement_index": index + 1,
+                "evidence_text": f"requirement {index}",
+                "evidence_occurrence": 1,
+            }
+            for index in range(9)
+        ],
         "inputs": [],
         "outputs": [],
         "side_effects": [],
@@ -296,7 +312,14 @@ def test_contract_parser_accepts_a_bound_language_and_nine_requirements() -> Non
 
     result = _parse_contracts(
         json.dumps({"contracts": [contract]}).encode(),
-        [{"record_id": "record", "source_prompt_sha256": "sha", "language": "python"}],
+        [
+            {
+                "record_id": "record",
+                "source_prompt_sha256": "sha",
+                "language": "python",
+                "source_prompt": prompt,
+            }
+        ],
     )
 
     assert result[0]["requirements"] == contract["requirements"]

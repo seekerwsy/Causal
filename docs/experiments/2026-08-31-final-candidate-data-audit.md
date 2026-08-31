@@ -1,10 +1,11 @@
-# Final Candidate-Data Audit (Outcome Blind)
+# Candidate-Data Audit (Outcome Blind)
 
 ## Scope
 
 This audit completes the data-preparation path requested before any new
 generation experiment. It does not freeze assignments, inspect generated code,
-or establish an intervention effect. Every admission decision uses only source
+or establish an intervention effect. Every quality and provisional-readiness
+decision uses only source
 records, conservative task units, repaired functional contracts, blind contract
 reviews, registered mechanism realizations, source-native tests, and frozen
 Oracle qualifications.
@@ -20,7 +21,7 @@ Oracle qualifications.
 | Targeted outcome-blind contract adjudication, 17 cases | `newly_run` | correct contradictory reviews and bounded contract faults |
 | Blind mechanism-binding run, 220 task units | `newly_run` | resolve finite registered task shapes |
 | Unified 2,165-row candidate ledger | `newly_run` | final data status and blockers |
-| Quality-qualified final dataset, 1,222 task units | `newly_run` | all tasks meeting the frozen data-quality rule, independent of implementation support |
+| Quality-qualified curated corpus, 1,222 task units | `newly_run` | all tasks meeting the frozen data-quality rule, independent of implementation support |
 | BaxBench 28-scenario source audit | `newly_run` | backend replication inventory |
 
 No row is an `user_claim`, and no experimental outcome was used.
@@ -29,6 +30,8 @@ No row is an `user_claim`, and no experimental outcome was used.
 
 - prepared corpus bundle:
   `c391c7a13603542e5edd725dcc4018b4abaae0bfaa75177067561a166f7816d4`;
+- self-contained reviewer task-unit bundle v4:
+  `b61634973f0279522c06cd299389776828b74c2c298947a48e881fc94963e690`;
 - conservative task-unit bundle:
   `88e22630523f571070be6427d91ad34106c72343ccdfed1b584da3790eccd263`;
 - response-format-repaired contract bundle:
@@ -131,31 +134,34 @@ on both builds. The binding adjudication resolved 6 of the prior 21 cases and
 conservatively retained 15 as unresolved.
 
 The subsequent second blind quality adjudication examined all twelve diagnostic
-quality flags without arms, generated code, or outcomes. It admitted five
+quality flags without arms, generated code, or outcomes. It cleared five
 functionally coherent tasks while retaining their separate mechanism scope or
 binding blockers, reclassified one unresolved `<language>` placeholder as a
 source defect, and retained six genuine functional-quality concerns. The
-technically ready population therefore remained 164.
+legacy ledger therefore reported 164 technically ready tasks. That figure
+conflated technical readiness with development exposure; the corrected v4
+derived view contains 166 technically ready tasks, of which 141 are unexposed.
 
-## Unified candidate status
+## Quality disposition and provisional readiness
 
-The final ledger contains exactly 2,165 unique task units:
+The legacy candidate ledger contains exactly 2,165 unique task units:
 
-| Final-dataset disposition | Task units | Meaning |
+| Reviewer-facing quality disposition | Task units | Meaning |
 | --- | ---: | --- |
-| `INCLUDED_FINAL_DATASET` | 1,222 | strict contract and no unresolved quality flag |
-| `PENDING_INDEPENDENT_REVIEW` | 6 | strict contract but a functional-quality concern remains |
-| `PENDING_QUALITY_REPAIR` | 930 | contract is not yet faithful and sufficient under the frozen rule |
-| `EXCLUDED_SOURCE_DEFECT` | 7 | incoherent source prompt |
+| `QUALITY_INCLUDED` | 1,222 | strict contract and no unresolved quality flag |
+| `QUALITY_PENDING_INDEPENDENT_REVIEW` | 6 | strict contract but a functional-quality concern remains |
+| `QUALITY_PENDING_CONTRACT_REPAIR` | 930 | contract is not yet faithful and sufficient under the frozen rule |
+| `QUALITY_EXCLUDED_SOURCE_DEFECT` | 7 | incoherent source prompt |
 
 This is the paper-facing data boundary. Mechanism, Oracle, runtime, language,
 current scope, lineage, and development exposure do not remove a
-quality-qualified row from the final dataset. They determine only whether that
-row can be measured in a particular study. The final dataset contains 563
+quality-qualified row from the curated corpus. They determine only whether that
+row can be measured in a particular study. The corpus contains 563
 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java, 58 Rust, 53 PHP, and 17
 Go task units.
 
-The separate execution-readiness classification is:
+The following mutually exclusive statuses are retained only as the upstream
+legacy candidate-ledger view:
 
 | Status | Task units | Meaning |
 | --- | ---: | --- |
@@ -164,18 +170,32 @@ The separate execution-readiness classification is:
 | `PENDING_ORACLE` | 209 | mechanism or task-applicable Security Oracle not frozen |
 | `PENDING_RUNTIME` | 174 | non-Python execution/measurement runtime not qualified |
 | `PENDING_BINDING` | 59 | a registered same-CWE mechanism exists but its narrow task shape is not established |
-| `PENDING_INDEPENDENT_REVIEW` | 15 | development exposure or unresolved functional-quality concern |
+| `PENDING_INDEPENDENT_REVIEW` | 15 | legacy field that conflated development exposure with unresolved functional quality |
 | `PENDING_SCOPE` | 607 | outside the registered research families or independently found mechanism-label mismatch |
 | `EXCLUDED_SOURCE_DEFECT` | 7 | internally incoherent prompt as written |
 
-The 164 ready Python task units span seven source lineages and thirteen CWEs.
-Family coverage is 45 injection/interpreter, 60 file/parser/resource, 17
-identity/permission, and 42 cryptography/randomness task units. Lineage count
-and share are diagnostics rather than admission gates, so all 164 remain
-eligible on task quality. The largest ready lineage is CyberSecEval at 57/164
-(34.8%). The file/parser family now reaches 60; the other three count
-shortfalls, not lineage composition, keep the 240-task Python population gate
-closed.
+The v4 reviewer bundle does not use that field as readiness authority. It
+publishes independent quality, scope, registration, binding, Oracle, runtime,
+functionality, and review axes. `readiness_summary_status` and the workstream
+are deterministic primary-next-action views only. Development and legacy
+exposure exist exclusively in `task-roles.jsonl` and cannot change technical
+readiness.
+
+The v4 build derives 166 technically ready tasks, including 141 without
+recorded method-development exposure. The change from the legacy 164 count is
+entirely due to removing exposure from technical readiness; no task, contract,
+Oracle, or runtime result was changed. Its primary workstreams are 930 contract
+repairs, six independent quality reviews, 770 scope decisions, 227 mechanism
+registrations, 59 mechanism bindings, seven terminal quality exclusions, and
+166 technically ready tasks. These workstreams are a one-action projection;
+the bundle separately reports every readiness axis.
+
+The 166 technically ready Python task units span seven source lineages and
+thirteen CWEs; 141 are unexposed to method development. Exposure is reported
+separately and does not alter the technical-readiness calculation. Lineage
+count and share are diagnostics rather than quality gates. The largest ready
+lineage is CyberSecEval at 57/166 (34.3%). These counts are planning evidence,
+not a frozen confirmatory sample or authorization to execute one.
 
 ## Oracle choice by layer
 
@@ -188,7 +208,7 @@ closed.
    implementation identity.
 2. **C/C++ memory replication:** the data pool contains 102 strict,
    independently reviewable candidates and at least four for each of the seven
-   planned CWEs. Only six currently reference source tests. Formal admission
+   planned CWEs. Only six currently reference source tests. Formal eligibility
    still requires compilation, a frozen functional test, and task-applicable
    ASan/UBSan or exploit checks. No Python static profile substitutes for this
    layer.
@@ -213,13 +233,13 @@ respectively, also have strict contracts. They remain `PENDING_ORACLE` or
 
 ## Measurement coverage next steps
 
-Measurement support is not a final-dataset gate. It is needed only when a task
+Measurement support is not a curated-corpus quality gate. It is needed only when a task
 is sampled into an effect estimate. All 563 Python tasks already have runtime
 support, so another Python runner is unnecessary. Within the 21 prospectively
-listed Python CWEs, the final dataset contains 351 quality-qualified tasks:
+listed Python CWEs, the curated corpus contains 351 quality-qualified tasks:
 133 injection/interpreter, 104 file/parser/resource, 51
 identity/authorization/permissions, and 63 cryptography/randomness/integrity.
-Of these, 164 are ready. The 59 `PENDING_BINDING` rows include the 15
+Of these, 166 are technically ready. The 59 `PENDING_BINDING` rows include the 15
 conservatively unresolved prior cases plus newly recognized same-CWE tasks that
 fall outside the narrow code-execution, certificate-validation, and cipher/hash
 shapes. Most of the remainder still need a registered mechanism plus a
@@ -235,7 +255,7 @@ static rule.
 The prospective Identity population decision is now frozen in
 `data/dataset-curation/identity-family-scope-v1.json`. The former 60-task number
 is a planning target, not an admission gate. All 48 quality-qualified Identity
-tasks remain in the final data set and are partitioned without outcomes into:
+tasks remain in the curated quality corpus and are partitioned without outcomes into:
 
 - 17 `READY_CONFIRMATORY` tasks with qualified static profiles (CWE-732/798);
 - 20 source-native safety-test candidates (5 CWE-200 and 15 CWE-862); and
@@ -281,7 +301,7 @@ study and would not repair its identity-family population shortfall.
   closed. No confirmatory generation is authorized by this audit.
 
 The data-preparation stage is complete: every source task has a typed
-disposition, every quality-qualified task is in the final dataset, every
+disposition, every quality-qualified task is in the curated corpus, every
 currently supported Oracle is explicit, and both replication inventories are
 closed. The Identity shortfall decision is no longer open. The next step is a
 bounded measurement qualification for the already identified 20 source-native

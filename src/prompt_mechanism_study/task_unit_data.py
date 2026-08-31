@@ -13,6 +13,7 @@ from prompt_mechanism_study.records import canonical_json, content_hash, content
 
 
 _JSONL_FILES = {
+    "functional-contracts.jsonl",
     "near-duplicate-groups.jsonl",
     "readiness-worklist.jsonl",
     "source-lineages.jsonl",
@@ -21,11 +22,14 @@ _JSONL_FILES = {
     "task-units.jsonl",
 }
 _BUNDLE_FILES = _JSONL_FILES | {"report.json"}
-_QUALITY_STATUS = {
-    "INCLUDED_FINAL_DATASET": "PASS",
-    "PENDING_INDEPENDENT_REVIEW": "PENDING_INDEPENDENT_REVIEW",
-    "PENDING_QUALITY_REPAIR": "PENDING_QUALITY_REPAIR",
-    "EXCLUDED_SOURCE_DEFECT": "EXCLUDED_SOURCE_DEFECT",
+_QUALITY_DISPOSITION = {
+    "INCLUDED_FINAL_DATASET": "QUALITY_INCLUDED",
+    "PENDING_INDEPENDENT_REVIEW": "QUALITY_PENDING_INDEPENDENT_REVIEW",
+    "PENDING_QUALITY_REPAIR": "QUALITY_PENDING_CONTRACT_REPAIR",
+    "EXCLUDED_SOURCE_DEFECT": "QUALITY_EXCLUDED_SOURCE_DEFECT",
+    "EXCLUDED_INSUFFICIENT_SPECIFICATION": (
+        "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION"
+    ),
 }
 _QUALITY_REASON_CODES = {
     "known_material_contract_fault",
@@ -36,15 +40,8 @@ _QUALITY_REASON_CODES = {
     "semantic_calibration_required",
     "source_prompt_incoherent",
 }
-_WORKSTREAM_BY_STATUS = {
-    "EXCLUDED_SOURCE_DEFECT": "SOURCE_DEFECT",
-    "PENDING_BINDING": "MECHANISM_BINDING",
-    "PENDING_CONTRACT": "CONTRACT_REPAIR",
-    "PENDING_ORACLE": "ORACLE_QUALIFICATION",
-    "PENDING_RUNTIME": "RUNTIME_QUALIFICATION",
-    "PENDING_SCOPE": "SCOPE_DECISION",
-    "READY_CONFIRMATORY": "TECHNICALLY_READY",
-}
+_REPRESENTATIVE_SELECTION_RULE = "prefer_source_test_then_ascending_record_id_v1"
+_MODEL_VISIBLE_RENDER_MODE = "exact_source_prompt_text_only"
 
 
 class TaskUnitDataError(ValueError):
@@ -56,9 +53,10 @@ def compile_task_unit_data(
     prepared_root: Path,
     clusters_root: Path,
     candidate_root: Path,
+    contracts_root: Path,
+    contract_reviews_root: Path,
     legacy_roles_root: Path,
     development_exclusions_path: Path,
-    role_census_root: Path,
     output: Path,
 ) -> dict[str, Any]:
     """Build one immutable row per frozen task unit without generating Prompt TSGs."""
@@ -67,8 +65,9 @@ def compile_task_unit_data(
         "prepared": prepared_root.resolve(),
         "clusters": clusters_root.resolve(),
         "candidate": candidate_root.resolve(),
+        "contracts": contracts_root.resolve(),
+        "contract_reviews": contract_reviews_root.resolve(),
         "legacy_roles": legacy_roles_root.resolve(),
-        "role_census": role_census_root.resolve(),
     }
     for root in inputs.values():
         verify_bundle(root)
@@ -79,11 +78,22 @@ def compile_task_unit_data(
         "diagnostic edges",
     )
     ledger = _rows(read_json(inputs["candidate"] / "candidate-ledger.json"), "ledger")
+    contracts = _rows(
+        read_json(inputs["contracts"] / "functional-contracts.json"), "contracts"
+    )
+    contract_reviews = _rows(
+        read_json(inputs["contract_reviews"] / "contract-quality-reviews.json"),
+        "contract reviews",
+    )
+    contract_repairs = _rows(
+        read_json(inputs["contracts"] / "repairs.json"), "contract repairs"
+    )
+    contract_review_overrides = _rows(
+        read_json(inputs["contracts"] / "review-overrides.json"),
+        "contract review overrides",
+    )
     legacy_manifest = _object(
         read_json(inputs["legacy_roles"] / "role-manifest.json"), "legacy manifest"
-    )
-    role_census = _rows(
-        read_json(inputs["role_census"] / "task-units.json"), "role census"
     )
     exclusions = _object(
         read_json(development_exclusions_path.resolve()), "development exclusions"
@@ -96,6 +106,18 @@ def compile_task_unit_data(
     ledger_by_id = _unique_by(ledger, "task_unit_id", "candidate ledger")
     if set(cluster_by_id) != set(ledger_by_id):
         raise TaskUnitDataError("task units and candidate ledger differ")
+    contract_rows = _reviewer_contract_rows(
+        clusters=cluster_by_id,
+        records=records,
+        ledger=ledger_by_id,
+        contracts=contracts,
+        reviews=contract_reviews,
+        repairs=contract_repairs,
+        overrides=contract_review_overrides,
+        contracts_bundle_sha256=bundle_digest(inputs["contracts"]),
+        reviews_bundle_sha256=bundle_digest(inputs["contract_reviews"]),
+    )
+    contract_by_task = _unique_by(contract_rows, "task_unit_id", "reviewer contracts")
     record_to_task: dict[str, str] = {}
     for task_id, cluster in cluster_by_id.items():
         member_ids = _texts(cluster.get("record_ids"), "source member IDs")
@@ -127,6 +149,8 @@ def compile_task_unit_data(
             "prepared_bundle_sha256",
             "clusters_bundle_sha256",
             "candidate_bundle_sha256",
+            "contracts_bundle_sha256",
+            "contract_reviews_bundle_sha256",
         )
     }
     task_units: list[dict[str, Any]] = []
@@ -143,6 +167,15 @@ def compile_task_unit_data(
         if len(lineages) != 1:
             raise TaskUnitDataError("one task unit cannot cross source lineages")
         lineage_id = lineages[0]
+        languages = {row["language"] for row in members}
+        if len(languages) != 1 or representative["language"] not in languages:
+            raise TaskUnitDataError("one task unit cannot cross declared languages")
+        expected_representative = min(
+            members,
+            key=lambda row: (not bool(row.get("source_test_references")), row["record_id"]),
+        )
+        if representative["record_id"] != expected_representative["record_id"]:
+            raise TaskUnitDataError("task representative selection is not deterministic")
         ledger_row = ledger_by_id[task_id]
         if (
             ledger_row.get("representative_record_id") != representative["record_id"]
@@ -164,6 +197,7 @@ def compile_task_unit_data(
                 "source_lineage_id": row["source_lineage_family"],
                 "license_id": row["license_id"],
                 "citation_url": row["citation_url"],
+                "source_test_reference_count": len(row.get("source_test_references", [])),
             }
             for row in sorted(members, key=lambda item: item["record_id"])
         ]
@@ -173,7 +207,7 @@ def compile_task_unit_data(
             for reference in row.get("source_test_references", [])
         ]
         task_core = {
-            "schema_version": "task-unit-3.0",
+            "schema_version": "task-unit-4.0",
             "task_unit_id": task_id,
             "legacy_identity": {
                 "semantic_cluster_id": task_id,
@@ -185,17 +219,34 @@ def compile_task_unit_data(
             "model_visible_input": {
                 "natural_prompt": representative["prompt"],
                 "natural_prompt_content_sha256": representative["prompt_sha256"],
-                "render_mode": "exact_source_prompt_text_only",
-                "declared_environment": {
-                    "language": representative["language"],
-                    "runtime": None,
-                },
+                "visible_assets": [],
+                "render_mode": _MODEL_VISIBLE_RENDER_MODE,
+                "model_visible_input_identity_sha256": content_hash(
+                    {
+                        "natural_prompt": representative["prompt"],
+                        "visible_assets": [],
+                        "render_mode": _MODEL_VISIBLE_RENDER_MODE,
+                    }
+                ),
+            },
+            "declared_execution_context": {
+                "language": representative["language"],
+                "runtime": None,
+                "model_visible_under_current_render_mode": False,
             },
             "pre_treatment_source_metadata": {
                 "language": representative["language"],
                 "source_declared_cwe_ids": list(cluster["cwes"]),
                 "cwe_label_conflict": cluster["cwe_label_conflict"],
                 "label_semantics": "routing_and_census_only_not_prompt_tsg_evidence",
+            },
+            "source_member_summary": {
+                "member_count": len(members),
+                "model_visible_prompt_variant_count": len(
+                    {row["prompt_sha256"] for row in members}
+                ),
+                "representative_selection_rule": _REPRESENTATIVE_SELECTION_RULE,
+                "lineage_variants_are_dependent_descendants": True,
             },
             "evaluation_asset_refs": {
                 "functional_contract_id": ledger_row["contract_id"],
@@ -211,13 +262,12 @@ def compile_task_unit_data(
         )
 
         final_status = ledger_row.get("final_dataset_status")
-        if final_status not in _QUALITY_STATUS:
+        if final_status not in _QUALITY_DISPOSITION:
             raise TaskUnitDataError("unknown final-data quality status")
         quality_core = {
-            "schema_version": "task-quality-3.0",
+            "schema_version": "task-quality-4.0",
             "task_unit_id": task_id,
-            "quality_status": _QUALITY_STATUS[final_status],
-            "source_disposition": final_status,
+            "quality_disposition": _QUALITY_DISPOSITION[final_status],
             "contract_id": ledger_row["contract_id"],
             "contract_quality": ledger_row["contract_quality"],
             "review_contract_status": ledger_row["review_contract_status"],
@@ -229,7 +279,15 @@ def compile_task_unit_data(
                     set(ledger_row.get("blocker_codes", [])) & _QUALITY_REASON_CODES
                 )
             ),
-            "measurement_readiness_is_not_quality": True,
+            "authority_boundary": (
+                "source_and_contract_quality_only_not_scope_measurement_exposure_or_role"
+            ),
+            "decision_provenance": {
+                "candidate_bundle_sha256": provenance["candidate_bundle_sha256"],
+                "contract_record_sha256": contract_by_task[task_id][
+                    "functional_contract_record_sha256"
+                ],
+            },
             "arms_or_outcomes_used": False,
         }
         quality_rows.append(
@@ -254,16 +312,29 @@ def compile_task_unit_data(
             exposure_history = []
             exposure_data_ids = []
             assignment_status = "PENDING_PROSPECTIVE_ALLOCATION"
+        exposure_categories = ["SOURCE_CURATED"]
+        if role != "UNASSIGNED":
+            exposure_categories.append("METHOD_DEVELOPMENT_VIEWED")
+        if role == "LEGACY_ONLY":
+            exposure_categories.append("QUALIFICATION_OUTCOME_VIEWED")
         role_core = {
-            "schema_version": "task-role-3.0",
+            "schema_version": "task-role-4.0",
             "task_unit_id": task_id,
             "data_role": role,
             "role_assignment_status": assignment_status,
             "near_duplicate_group_id": near_group_by_task[task_id],
             "source_lineage_id": lineage_id,
-            "exposure_status": exposure_status,
-            "exposure_history": exposure_history,
+            "exposure_status": (
+                "METHOD_EXPOSED" if role != "UNASSIGNED" else "SOURCE_CURATED_ONLY"
+            ),
+            "exposure_categories": exposure_categories,
+            "exposure_evidence": exposure_history,
             "exposure_data_ids": exposure_data_ids,
+            "prospective_confirmatory_reuse_status": (
+                "EXCLUDED_METHOD_DEVELOPMENT_EXPOSURE"
+                if role != "UNASSIGNED"
+                else "UNDETERMINED_PENDING_FORMAL_ALLOCATION"
+            ),
             "prospective_formal_role_assigned": False,
             "arms_or_outcomes_used": False,
         }
@@ -288,47 +359,39 @@ def compile_task_unit_data(
     near_group_rows = []
     for group_id, task_ids in sorted(near_groups.items()):
         core = {
-            "schema_version": "near-duplicate-group-3.0",
+            "schema_version": "near-duplicate-group-4.0",
             "near_duplicate_group_id": group_id,
             "task_unit_ids": list(task_ids),
             "group_basis": "semantic_task_unit_plus_same_or_uncertain_diagnostic_edges_v1",
+            "maximum_task_units_across_all_prospective_formal_roles": 1,
         }
         near_group_rows.append(
             {**core, "near_duplicate_group_record_sha256": content_hash(core)}
         )
 
-    role_census_by_id = _unique_by(role_census, "task_unit_id", "role census")
-    ready_ids = {
-        task_id
-        for task_id, row in ledger_by_id.items()
-        if row.get("candidate_status") == "READY_CONFIRMATORY"
-    }
-    if set(role_census_by_id) != ready_ids:
-        raise TaskUnitDataError("role census does not equal the ready population")
-    for task_id, row in role_census_by_id.items():
-        if row.get("near_duplicate_group_id") != near_group_by_task[task_id]:
-            raise TaskUnitDataError("role-census near-duplicate identity drift")
     role_by_task = {row["task_unit_id"]: row for row in role_rows}
+    quality_by_task = {row["task_unit_id"]: row for row in quality_rows}
     readiness_rows = [
-        _readiness_work_item(row, role_by_task[task_id])
+        _readiness_work_item(row, quality_by_task[task_id], near_group_by_task[task_id])
         for task_id, row in sorted(ledger_by_id.items())
     ]
+    technical_ready_ids = {
+        row["task_unit_id"]
+        for row in readiness_rows
+        if row["readiness_summary_status"] == "TECHNICALLY_READY_PENDING_METHOD_FREEZE"
+    }
     unexposed_ready = sum(
-        role_by_task[task_id]["data_role"] == "UNASSIGNED" for task_id in ready_ids
+        role_by_task[task_id]["data_role"] == "UNASSIGNED"
+        for task_id in technical_ready_ids
     )
-    role_census_report = _object(
-        read_json(inputs["role_census"] / "report.json"), "role-census report"
-    )
-    if unexposed_ready != role_census_report.get("prospective_unexposed_task_units"):
-        raise TaskUnitDataError("unexposed ready count drifts from the role census")
 
     report = {
-        "schema_version": "3.1",
+        "schema_version": "4.0",
         "status": "TASK_UNIT_DATA_COMPILED_PROMPT_TSG_PENDING_METHOD_FREEZE",
         "source_record_count": len(records),
         "task_unit_count": len(task_units),
-        "quality_status_counts": dict(
-            sorted(Counter(row["quality_status"] for row in quality_rows).items())
+        "quality_disposition_counts": dict(
+            sorted(Counter(row["quality_disposition"] for row in quality_rows).items())
         ),
         "data_role_counts": dict(
             sorted(Counter(row["data_role"] for row in role_rows).items())
@@ -338,12 +401,56 @@ def compile_task_unit_data(
         "multi_record_task_unit_count": sum(
             len(row["legacy_identity"]["source_record_ids"]) > 1 for row in task_units
         ),
-        "ready_task_unit_count": len(ready_ids),
+        "model_visible_variant_task_unit_count": sum(
+            row["source_member_summary"]["model_visible_prompt_variant_count"] > 1
+            for row in task_units
+        ),
+        "functional_contract_count": len(contract_rows),
+        "requirement_evidence_status_counts": dict(
+            sorted(
+                Counter(
+                    row["requirement_evidence_status"] for row in contract_rows
+                ).items()
+            )
+        ),
+        "technical_ready_task_unit_count": len(technical_ready_ids),
         "unexposed_ready_task_unit_count": unexposed_ready,
         "readiness_workstream_counts": dict(
             sorted(Counter(row["workstream"] for row in readiness_rows).items())
         ),
+        "readiness_axis_counts": {
+            field: dict(sorted(Counter(row[field] for row in readiness_rows).items()))
+            for field in (
+                "quality_gate",
+                "scope_status",
+                "mechanism_registration_status",
+                "binding_status",
+                "oracle_status",
+                "runtime_status",
+                "functional_measurement_status",
+                "independent_quality_review_status",
+            )
+        },
+        "referential_integrity": {
+            "core_task_unit_populations_equal": True,
+            "contracts_prompt_hash_bound": True,
+            "quality_contract_version_bound": True,
+            "source_records_partitioned_exactly_once": True,
+            "near_duplicate_groups_partition_task_units": True,
+            "readiness_is_derived_view": True,
+            "downstream_experimental_fields_absent": True,
+        },
         "formal_role_assignment_frozen": False,
+        "readiness_artifact_kind": "DERIVED_VIEW",
+        "readiness_profile_status": "PROVISIONAL_PENDING_METHOD_FREEZE",
+        "near_duplicate_formal_role_rule": (
+            "at_most_one_task_unit_per_group_across_all_prospective_formal_roles"
+        ),
+        "exposure_policy": {
+            "source_curation_alone_is_method_development_exposure": False,
+            "task_level_use_to_change_method_is_method_development_exposure": True,
+            "viewing_qualification_or_generation_outcomes_is_recorded_separately": True,
+        },
         "prompt_tsg": {
             "status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
             "extractor_id": None,
@@ -363,6 +470,7 @@ def compile_task_unit_data(
         output.resolve(),
         {
             "task-units.jsonl": task_units,
+            "functional-contracts.jsonl": contract_rows,
             "task-quality.jsonl": quality_rows,
             "task-roles.jsonl": role_rows,
             "source-lineages.jsonl": lineage_rows,
@@ -383,7 +491,7 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         raise TaskUnitDataError("compiled data manifest is missing")
     manifest = _canonical_json_file(manifest_path, "manifest")
     if (
-        manifest.get("schema_version") != "3.1"
+        manifest.get("schema_version") != "4.0"
         or manifest.get("artifact_kind") != "reviewer_task_unit_dataset"
         or set(manifest.get("files", {})) != _BUNDLE_FILES
     ):
@@ -414,31 +522,134 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         raise TaskUnitDataError("report manifest identity drift")
 
     task_units = _unique_by(artifacts["task-units.jsonl"], "task_unit_id", "task units")
+    contracts = _unique_by(
+        artifacts["functional-contracts.jsonl"], "task_unit_id", "functional contracts"
+    )
     quality = _unique_by(artifacts["task-quality.jsonl"], "task_unit_id", "quality rows")
     roles = _unique_by(artifacts["task-roles.jsonl"], "task_unit_id", "role rows")
     readiness = _unique_by(
         artifacts["readiness-worklist.jsonl"], "task_unit_id", "readiness worklist"
     )
     if (
-        set(task_units) != set(quality)
+        set(task_units) != set(contracts)
+        or set(task_units) != set(quality)
         or set(task_units) != set(roles)
         or set(task_units) != set(readiness)
     ):
         raise TaskUnitDataError("compiled task, quality, role, and readiness populations differ")
+    forbidden_fields = {
+        "task_id",
+        "confirm_add_eligible",
+        "confirm_remove_eligible",
+        "eligible_arm_protocol_ids",
+        "split",
+        "prompt_tsg",
+        "assignment",
+        "generated_code",
+        "outcome",
+    }
+    for rows in (task_units, contracts, quality, roles):
+        if any(forbidden_fields.intersection(row) for row in rows.values()):
+            raise TaskUnitDataError("downstream experimental field entered source data")
     source_records = []
     for task_id, row in task_units.items():
         if (
-            row.get("schema_version") != "task-unit-3.0"
+            row.get("schema_version") != "task-unit-4.0"
             or row.get("legacy_identity", {}).get("semantic_cluster_id") != task_id
             or row.get("task_unit_record_sha256")
             != content_hash({key: value for key, value in row.items() if key != "task_unit_record_sha256"})
             or row.get("model_visible_input", {}).get("natural_prompt_content_sha256")
             != content_hash(row.get("model_visible_input", {}).get("natural_prompt"))
+            or row.get("model_visible_input", {}).get(
+                "model_visible_input_identity_sha256"
+            )
+            != content_hash(
+                {
+                    "natural_prompt": row.get("model_visible_input", {}).get(
+                        "natural_prompt"
+                    ),
+                    "visible_assets": row.get("model_visible_input", {}).get(
+                        "visible_assets"
+                    ),
+                    "render_mode": row.get("model_visible_input", {}).get("render_mode"),
+                }
+            )
         ):
             raise TaskUnitDataError("compiled task identity is invalid")
+        expected_representative = min(
+            row["source_members"],
+            key=lambda member: (
+                not bool(member.get("source_test_reference_count")),
+                member["record_id"],
+            ),
+        )
+        if (
+            row.get("representative_record_id") != expected_representative["record_id"]
+            or row.get("source_member_summary", {}).get("representative_selection_rule")
+            != _REPRESENTATIVE_SELECTION_RULE
+        ):
+            raise TaskUnitDataError("compiled representative identity is invalid")
         source_records.extend(row["legacy_identity"]["source_record_ids"])
     if len(source_records) != len(set(source_records)):
         raise TaskUnitDataError("compiled source records are duplicated")
+
+    for task_id, row in contracts.items():
+        core = {
+            key: value
+            for key, value in row.items()
+            if key != "functional_contract_record_sha256"
+        }
+        if (
+            row.get("schema_version") != "functional-contract-reviewer-4.0"
+            or row.get("functional_contract_record_sha256") != content_hash(core)
+            or row.get("contract_id") != quality[task_id].get("contract_id")
+            or row.get("source_prompt_sha256")
+            != task_units[task_id]["model_visible_input"][
+                "natural_prompt_content_sha256"
+            ]
+        ):
+            raise TaskUnitDataError("functional contract binding is invalid")
+        prompt = task_units[task_id]["model_visible_input"]["natural_prompt"]
+        for evidence in row.get("requirement_evidence", []):
+            start, end = evidence.get("evidence_start"), evidence.get("evidence_end")
+            literal = evidence.get("evidence_text")
+            if (
+                type(start) is not int
+                or type(end) is not int
+                or not isinstance(literal, str)
+                or prompt[start:end] != literal
+                or evidence.get("evidence_sha256") != content_hash(literal)
+            ):
+                raise TaskUnitDataError("functional requirement evidence is invalid")
+    for task_id, row in quality.items():
+        core = {
+            key: value for key, value in row.items() if key != "task_quality_record_sha256"
+        }
+        if (
+            row.get("schema_version") != "task-quality-4.0"
+            or row.get("task_quality_record_sha256") != content_hash(core)
+            or row.get("decision_provenance", {}).get("contract_record_sha256")
+            != contracts[task_id]["functional_contract_record_sha256"]
+        ):
+            raise TaskUnitDataError("task quality binding is invalid")
+    for row in roles.values():
+        core = {key: value for key, value in row.items() if key != "task_role_record_sha256"}
+        categories = row.get("exposure_categories", [])
+        if (
+            row.get("schema_version") != "task-role-4.0"
+            or row.get("task_role_record_sha256") != content_hash(core)
+            or not isinstance(categories, list)
+            or "SOURCE_CURATED" not in categories
+            or (
+                row.get("data_role") == "UNASSIGNED"
+                and "METHOD_DEVELOPMENT_VIEWED" in categories
+            )
+            or (
+                row.get("data_role") != "UNASSIGNED"
+                and "METHOD_DEVELOPMENT_VIEWED" not in categories
+            )
+        ):
+            raise TaskUnitDataError("task exposure and role record is invalid")
 
     group_rows = _unique_by(
         artifacts["near-duplicate-groups.jsonl"],
@@ -448,6 +659,17 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
     grouped_tasks = [task_id for row in group_rows.values() for task_id in row["task_unit_ids"]]
     if len(grouped_tasks) != len(set(grouped_tasks)) or set(grouped_tasks) != set(task_units):
         raise TaskUnitDataError("near-duplicate groups do not partition task units")
+    for group in group_rows.values():
+        if (
+            group.get("schema_version") != "near-duplicate-group-4.0"
+            or group.get("maximum_task_units_across_all_prospective_formal_roles") != 1
+            or sum(
+                bool(roles[task_id].get("prospective_formal_role_assigned"))
+                for task_id in group["task_unit_ids"]
+            )
+            > 1
+        ):
+            raise TaskUnitDataError("near-duplicate formal-role constraint is invalid")
     lineage_rows = _unique_by(
         artifacts["source-lineages.jsonl"], "source_lineage_id", "source lineages"
     )
@@ -457,6 +679,18 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
     if (
         report.get("source_record_count") != len(source_records)
         or report.get("task_unit_count") != len(task_units)
+        or report.get("functional_contract_count") != len(contracts)
+        or report.get("readiness_artifact_kind") != "DERIVED_VIEW"
+        or report.get("referential_integrity")
+        != {
+            "core_task_unit_populations_equal": True,
+            "contracts_prompt_hash_bound": True,
+            "quality_contract_version_bound": True,
+            "source_records_partitioned_exactly_once": True,
+            "near_duplicate_groups_partition_task_units": True,
+            "readiness_is_derived_view": True,
+            "downstream_experimental_fields_absent": True,
+        }
         or report.get("prompt_tsg")
         != {
             "status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
@@ -468,16 +702,33 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         or report.get("formal_execution_authorized") is not False
         or report.get("readiness_workstream_counts")
         != dict(sorted(Counter(row["workstream"] for row in readiness.values()).items()))
+        or report.get("readiness_axis_counts")
+        != {
+            field: dict(sorted(Counter(row[field] for row in readiness.values()).items()))
+            for field in (
+                "quality_gate",
+                "scope_status",
+                "mechanism_registration_status",
+                "binding_status",
+                "oracle_status",
+                "runtime_status",
+                "functional_measurement_status",
+                "independent_quality_review_status",
+            )
+        }
     ):
         raise TaskUnitDataError("compiled data report is invalid")
     for task_id, row in readiness.items():
         core = {key: value for key, value in row.items() if key != "readiness_record_sha256"}
+        summary_status, workstream, _, _ = _readiness_action(row)
         if (
-            row.get("schema_version") != "readiness-work-item-3.1"
+            row.get("schema_version") != "readiness-work-item-4.0"
+            or row.get("artifact_kind") != "DERIVED_VIEW"
             or row.get("readiness_record_sha256") != content_hash(core)
             or row.get("arms_or_outcomes_used") is not False
             or row.get("formal_use_authorized") is not False
-            or row.get("current_data_role") != roles[task_id]["data_role"]
+            or row.get("readiness_summary_status") != summary_status
+            or row.get("workstream") != workstream
         ):
             raise TaskUnitDataError("readiness work item is invalid")
     return {
@@ -485,13 +736,169 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         "bundle_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "source_records": len(source_records),
         "task_units": len(task_units),
-        "quality_status_counts": report["quality_status_counts"],
+        "functional_contracts": len(contracts),
+        "quality_disposition_counts": report["quality_disposition_counts"],
         "data_role_counts": report["data_role_counts"],
         "readiness_workstream_counts": report["readiness_workstream_counts"],
         "prompt_tsg_status": report["prompt_tsg"]["status"],
         "arms_or_outcomes_used": False,
         "formal_execution_authorized": False,
     }
+
+
+def _reviewer_contract_rows(
+    *,
+    clusters: Mapping[str, dict[str, Any]],
+    records: Mapping[str, dict[str, Any]],
+    ledger: Mapping[str, dict[str, Any]],
+    contracts: list[dict[str, Any]],
+    reviews: list[dict[str, Any]],
+    repairs: list[dict[str, Any]],
+    overrides: list[dict[str, Any]],
+    contracts_bundle_sha256: str,
+    reviews_bundle_sha256: str,
+) -> list[dict[str, Any]]:
+    contract_by_task = _unique_by(contracts, "cluster_id", "functional contracts")
+    review_by_task = _unique_by(reviews, "cluster_id", "contract reviews")
+    repair_by_task = _unique_by(repairs, "cluster_id", "contract repairs")
+    override_by_task = _unique_by(overrides, "cluster_id", "contract review overrides")
+    population = set(clusters)
+    if (
+        set(contract_by_task) != population
+        or set(review_by_task) != population
+        or not set(repair_by_task) <= population
+        or not set(override_by_task) <= population
+    ):
+        raise TaskUnitDataError("functional contract populations do not align")
+    frozen = []
+    for task_id in sorted(population):
+        cluster = clusters[task_id]
+        representative = records[cluster["representative_record_id"]]
+        contract = contract_by_task[task_id]
+        review = review_by_task[task_id]
+        ledger_row = ledger[task_id]
+        contract_core = {
+            key: value for key, value in contract.items() if key != "contract_id"
+        }
+        if (
+            contract.get("record_id") != representative["record_id"]
+            or contract.get("source_prompt_sha256") != representative["prompt_sha256"]
+            or contract.get("contract_id") != content_id("cluster_contract_", contract_core)
+            or ledger_row.get("contract_id") != contract.get("contract_id")
+            or review.get("record_id") != contract.get("record_id")
+        ):
+            raise TaskUnitDataError("functional contract source binding is stale")
+        repair = repair_by_task.get(task_id)
+        repair_codes: list[str] = []
+        remaining_deterministic = list(review.get("deterministic_issue_codes", []))
+        if repair is None:
+            if review.get("contract_id") != contract.get("contract_id"):
+                raise TaskUnitDataError("contract review does not bind the current contract")
+        else:
+            repair_codes = list(
+                repair.get("repair_codes")
+                or ([repair["repair_code"]] if isinstance(repair.get("repair_code"), str) else [])
+            )
+            if (
+                review.get("contract_id") != repair.get("old_contract_id")
+                or contract.get("contract_id") != repair.get("new_contract_id")
+                or repair.get("record_id") != contract.get("record_id")
+                or not repair_codes
+            ):
+                raise TaskUnitDataError("contract repair lineage is invalid")
+            if "remove_response_format_instruction_v1" in repair_codes:
+                remaining_deterministic = [
+                    code
+                    for code in remaining_deterministic
+                    if code != "response_format_instruction_leak"
+                ]
+        override = override_by_task.get(task_id)
+        if override is None:
+            contract_status = review.get("contract_status")
+            functional_evaluability = review.get("functional_evaluability")
+            issue_codes = review.get("issue_codes")
+            reason = review.get("reason")
+            adjudication_id = None
+        else:
+            if (
+                override.get("record_id") != contract.get("record_id")
+                or override.get("source_review_contract_id") != review.get("contract_id")
+                or override.get("current_contract_id") != contract.get("contract_id")
+            ):
+                raise TaskUnitDataError("contract review override lineage is invalid")
+            contract_status = override.get("contract_status")
+            functional_evaluability = override.get("functional_evaluability")
+            issue_codes = override.get("issue_codes")
+            reason = override.get("reason")
+            adjudication_id = override.get("adjudication_id")
+        if (
+            ledger_row.get("review_contract_status") != contract_status
+            or ledger_row.get("functional_evaluability") != functional_evaluability
+            or not isinstance(issue_codes, list)
+            or not isinstance(reason, str)
+        ):
+            raise TaskUnitDataError("effective contract review drifts from quality ledger")
+        for field in (
+            "requirements",
+            "inputs",
+            "outputs",
+            "side_effects",
+            "environment_dependencies",
+        ):
+            values = contract.get(field)
+            if not isinstance(values, list) or any(
+                not isinstance(value, str) or not value.strip() for value in values
+            ):
+                raise TaskUnitDataError("functional contract list is invalid")
+        requirement_evidence = contract.get("requirement_evidence")
+        if requirement_evidence is not None and (
+            not isinstance(requirement_evidence, list)
+            or len(requirement_evidence) != len(contract["requirements"])
+            or any(not isinstance(item, dict) for item in requirement_evidence)
+        ):
+            raise TaskUnitDataError("functional contract evidence is invalid")
+        core = {
+            "schema_version": "functional-contract-reviewer-4.0",
+            "task_unit_id": task_id,
+            "contract_id": contract["contract_id"],
+            "record_id": contract["record_id"],
+            "source_prompt_sha256": contract["source_prompt_sha256"],
+            "resolution_status": contract["resolution_status"],
+            "entrypoint": contract["entrypoint"],
+            "requirements": contract["requirements"],
+            "requirement_evidence": requirement_evidence or [],
+            "inputs": contract["inputs"],
+            "outputs": contract["outputs"],
+            "side_effects": contract["side_effects"],
+            "environment_dependencies": contract["environment_dependencies"],
+            "extraction_reason": contract["reason"],
+            "requirement_evidence_status": (
+                "SOURCE_SPANS_COMPLETE"
+                if requirement_evidence is not None
+                else "LEGACY_TEXT_CONTRACT_PENDING_SOURCE_SPAN_ENRICHMENT"
+            ),
+            "review": {
+                "contract_status": contract_status,
+                "functional_evaluability": functional_evaluability,
+                "issue_codes": issue_codes,
+                "remaining_deterministic_issue_codes": sorted(
+                    set(remaining_deterministic)
+                ),
+                "reason": reason,
+                "procedure_id": "blind_functional_contract_quality_review_v1",
+                "adjudication_id": adjudication_id,
+                "repair_codes": sorted(set(repair_codes)),
+            },
+            "provenance": {
+                "contracts_bundle_sha256": contracts_bundle_sha256,
+                "contract_reviews_bundle_sha256": reviews_bundle_sha256,
+            },
+            "arms_or_outcomes_used": False,
+        }
+        frozen.append(
+            {**core, "functional_contract_record_sha256": content_hash(core)}
+        )
+    return frozen
 
 
 def _near_duplicate_groups(
@@ -536,65 +943,65 @@ def _near_duplicate_groups(
 
 
 def _readiness_work_item(
-    ledger_row: Mapping[str, Any], role_row: Mapping[str, Any]
+    ledger_row: Mapping[str, Any],
+    quality_row: Mapping[str, Any],
+    near_duplicate_group_id: str,
 ) -> dict[str, Any]:
     task_id = _text(ledger_row.get("task_unit_id"), "readiness task ID")
-    candidate_status = _text(ledger_row.get("candidate_status"), "candidate status")
     blockers = tuple(sorted(set(_texts(ledger_row.get("blocker_codes"), "blockers"))))
-    if candidate_status == "PENDING_INDEPENDENT_REVIEW":
-        if ledger_row.get("final_dataset_status") == "PENDING_INDEPENDENT_REVIEW":
-            workstream = "INDEPENDENT_QUALITY_REVIEW"
-            action_status = "OPEN"
-            next_action = "ADJUDICATE_SOURCE_PROMPT_AGAINST_FUNCTIONAL_CONTRACT"
-            required_evidence = "independent outcome-blind accept, repair, or exclude decision"
-        elif "development_exposed" in blockers:
-            workstream = "HISTORICAL_EXPOSURE"
-            action_status = "CLOSED_NONCONFIRMATORY"
-            next_action = "RETAIN_OUTSIDE_CONFIRMATORY_ALLOCATION"
-            required_evidence = "none; prior exposure cannot be undone by re-review"
-        else:
-            raise TaskUnitDataError("independent-review status has no recognized basis")
+    quality_disposition = _text(
+        quality_row.get("quality_disposition"), "quality disposition"
+    )
+    if quality_disposition == "QUALITY_INCLUDED":
+        quality_gate = "PASSED"
+    elif quality_disposition.startswith("QUALITY_EXCLUDED_"):
+        quality_gate = "EXCLUDED"
     else:
-        workstream = _WORKSTREAM_BY_STATUS.get(candidate_status)
-        if workstream is None:
-            raise TaskUnitDataError("candidate status has no readiness workstream")
-        action_status, next_action, required_evidence = {
-            "CONTRACT_REPAIR": (
-                "OPEN",
-                "REPAIR_FUNCTIONAL_CONTRACT_OUTCOME_BLINDLY",
-                "faithful and sufficient contract or explicit source-defect exclusion",
-            ),
-            "MECHANISM_BINDING": (
-                "OPEN",
-                "ADJUDICATE_AGAINST_FROZEN_SAME_CWE_REGISTRY",
-                "literal prompt evidence for one task-applicable realization or unresolved decision",
-            ),
-            "ORACLE_QUALIFICATION": (
-                "OPEN_METHOD_EXTENSION",
-                "GROUP_AND_QUALIFY_REUSABLE_ORACLE_PROFILE",
-                "qualified task-applicable profile with secure, insecure, and unknown calibration",
-            ),
-            "RUNTIME_QUALIFICATION": (
-                "OPEN_METHOD_EXTENSION",
-                "QUALIFY_SHARED_LANGUAGE_RUNTIME_AND_TEST_PATH",
-                "replayable compile/run environment and frozen functionality/security measurement",
-            ),
-            "SCOPE_DECISION": (
-                "OPEN_PROSPECTIVE_DECISION",
-                "ASSIGN_PROSPECTIVE_RESEARCH_LAYER_OR_RETAIN_FOR_FUTURE_WORK",
-                "outcome-blind scope decision after the method population is fixed",
-            ),
-            "SOURCE_DEFECT": (
-                "CLOSED_EXCLUDED",
-                "RETAIN_SOURCE_DEFECT_EXCLUSION",
-                "none; preserve the source-level exclusion reason",
-            ),
-            "TECHNICALLY_READY": (
-                "WAITING_METHOD_FREEZE",
-                "GENERATE_PROMPT_TSG_ONLY_AFTER_METHOD_FREEZE",
-                "frozen TSG extractor/catalog followed by prospective data-role allocation",
-            ),
-        }[workstream]
+        quality_gate = "NOT_FINAL"
+    if "known_measurement_scope_concern" in blockers:
+        scope_status = "REVIEW_REQUIRED"
+    elif ledger_row.get("study_layer") is None:
+        scope_status = "OUTSIDE_CURRENT_STUDY_LAYERS"
+    else:
+        scope_status = "IN_CURRENT_STUDY_LAYER"
+    binding_status = str(ledger_row.get("mechanism_binding_status") or "NOT_EVALUATED")
+    mechanism_registration_status = {
+        "BOUND": "REGISTERED",
+        "PENDING_BLIND_REVIEW": "REGISTERED_CANDIDATES_REQUIRE_BINDING",
+        "UNREGISTERED": "NOT_REGISTERED",
+        "CONFLICT": "LABEL_CONFLICT_REQUIRES_REVIEW",
+        "OUTSIDE_CURRENT_SCOPE": "NOT_EVALUATED_OUTSIDE_SCOPE",
+        "PENDING_RUNTIME": "NOT_EVALUATED_PENDING_REPLICATION_RUNTIME",
+        "NOT_APPLICABLE": "NOT_APPLICABLE_CURRENT_PROFILE",
+    }.get(binding_status, "NOT_EVALUATED")
+    oracle_status = str(ledger_row.get("oracle_support_status") or "NOT_EVALUATED")
+    runtime_status = str(ledger_row.get("runtime_support_status") or "NOT_EVALUATED")
+    functional_measurement_status = str(
+        ledger_row.get("functional_measurement") or "NOT_EVALUATED"
+    )
+    independent_quality_review_status = (
+        "PENDING"
+        if quality_disposition == "QUALITY_PENDING_INDEPENDENT_REVIEW"
+        else "NOT_REQUIRED_OR_COMPLETE"
+    )
+    action_input = {
+        "quality_gate": quality_gate,
+        "quality_disposition": quality_disposition,
+        "scope_status": scope_status,
+        "mechanism_registration_status": mechanism_registration_status,
+        "binding_status": binding_status,
+        "oracle_status": oracle_status,
+        "runtime_status": runtime_status,
+        "functional_measurement_status": functional_measurement_status,
+        "independent_quality_review_status": independent_quality_review_status,
+    }
+    summary_status, workstream, next_action, required_evidence = _readiness_action(
+        action_input
+    )
+    action_status = {
+        "QUALITY_EXCLUDED": "CLOSED_EXCLUDED",
+        "TECHNICALLY_READY_PENDING_METHOD_FREEZE": "WAITING_METHOD_FREEZE",
+    }.get(summary_status, "OPEN")
     grouping_coordinates = [
         workstream,
         str(ledger_row.get("language")),
@@ -611,16 +1018,17 @@ def _readiness_work_item(
             str(ledger_row.get("priority_extension_tier") or "unprioritized")
         )
     core = {
-        "schema_version": "readiness-work-item-3.1",
+        "schema_version": "readiness-work-item-4.0",
+        "artifact_kind": "DERIVED_VIEW",
         "task_unit_id": task_id,
-        "current_candidate_status": candidate_status,
-        "current_final_dataset_status": ledger_row.get("final_dataset_status"),
-        "current_data_role": role_row.get("data_role"),
+        **action_input,
+        "readiness_summary_status": summary_status,
+        "readiness_profile_status": "PROVISIONAL_PENDING_METHOD_FREEZE",
         "workstream": workstream,
         "work_group_id": content_id("readiness_work_group_", grouping_coordinates),
         "grouping_coordinates": grouping_coordinates,
         "action_status": action_status,
-        "next_action": next_action,
+        "primary_next_action": next_action,
         "required_evidence": required_evidence,
         "language": ledger_row.get("language"),
         "primary_cwe": ledger_row.get("primary_cwe"),
@@ -629,12 +1037,88 @@ def _readiness_work_item(
         "contract_id": ledger_row.get("contract_id"),
         "mechanism_realization_id": ledger_row.get("mechanism_realization_id"),
         "oracle_profile_id": ledger_row.get("oracle_profile_id"),
-        "current_blocker_codes": list(blockers),
-        "near_duplicate_group_id": role_row.get("near_duplicate_group_id"),
+        "diagnostic_blocker_codes": [
+            blocker
+            for blocker in blockers
+            if blocker != "development_exposed" and not blocker.startswith("pending_")
+        ],
+        "near_duplicate_group_id": near_duplicate_group_id,
         "arms_or_outcomes_used": False,
         "formal_use_authorized": False,
     }
     return {**core, "readiness_record_sha256": content_hash(core)}
+
+
+def _readiness_action(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    if row.get("quality_gate") == "EXCLUDED":
+        return (
+            "QUALITY_EXCLUDED",
+            "QUALITY_EXCLUSION",
+            "RETAIN_TERMINAL_QUALITY_EXCLUSION",
+            "none; preserve the source-level exclusion basis",
+        )
+    if row.get("quality_gate") != "PASSED":
+        if row.get("independent_quality_review_status") == "PENDING":
+            return (
+                "QUALITY_NOT_FINAL",
+                "INDEPENDENT_QUALITY_REVIEW",
+                "ADJUDICATE_SOURCE_PROMPT_AGAINST_FUNCTIONAL_CONTRACT",
+                "independent outcome-blind accept, repair, or source-based exclusion",
+            )
+        return (
+            "QUALITY_NOT_FINAL",
+            "CONTRACT_REPAIR",
+            "REPAIR_FUNCTIONAL_CONTRACT_OUTCOME_BLINDLY",
+            "faithful and sufficient contract or source-based terminal exclusion",
+        )
+    if row.get("scope_status") != "IN_CURRENT_STUDY_LAYER":
+        return (
+            "METHOD_SUPPORT_NOT_READY",
+            "SCOPE_DECISION",
+            "FREEZE_PROSPECTIVE_RESEARCH_LAYER_OR_RETAIN_FOR_FUTURE_WORK",
+            "outcome-blind scope decision",
+        )
+    if row.get("mechanism_registration_status") != "REGISTERED":
+        if row.get("binding_status") == "PENDING_BLIND_REVIEW":
+            return (
+                "METHOD_SUPPORT_NOT_READY",
+                "MECHANISM_BINDING",
+                "ADJUDICATE_AGAINST_CURRENT_REGISTERED_MECHANISMS",
+                "source-bound evidence for one applicable realization or unresolved decision",
+            )
+        return (
+            "METHOD_SUPPORT_NOT_READY",
+            "MECHANISM_REGISTRATION",
+            "REGISTER_OR_EXPLICITLY_EXCLUDE_A_TASK_APPLICABLE_MECHANISM",
+            "frozen task-applicable mechanism specification",
+        )
+    if row.get("oracle_status") != "SUPPORTED":
+        return (
+            "METHOD_SUPPORT_NOT_READY",
+            "ORACLE_QUALIFICATION",
+            "QUALIFY_TASK_APPLICABLE_ORACLE_PROFILE",
+            "secure, insecure, and unknown calibration for the frozen profile",
+        )
+    if row.get("runtime_status") != "SUPPORTED":
+        return (
+            "METHOD_SUPPORT_NOT_READY",
+            "RUNTIME_QUALIFICATION",
+            "QUALIFY_SHARED_LANGUAGE_RUNTIME_AND_TEST_PATH",
+            "replayable compile/run environment and frozen measurement path",
+        )
+    if str(row.get("functional_measurement_status", "")).startswith("PENDING_"):
+        return (
+            "METHOD_SUPPORT_NOT_READY",
+            "FUNCTIONAL_MEASUREMENT_QUALIFICATION",
+            "QUALIFY_TASK_APPLICABLE_FUNCTIONAL_MEASUREMENT",
+            "frozen executable test or explicitly bounded blind plausibility profile",
+        )
+    return (
+        "TECHNICALLY_READY_PENDING_METHOD_FREEZE",
+        "TECHNICALLY_READY",
+        "WAIT_FOR_METHOD_FREEZE_BEFORE_PROMPT_TSG_OR_FORMAL_ALLOCATION",
+        "frozen method followed by prospective TSG and role allocation",
+    )
 
 
 def _legacy_exposure(
@@ -685,7 +1169,7 @@ def _write_bundle(
         "sha256": hashlib.sha256(report_payload).hexdigest(),
     }
     manifest = {
-        "schema_version": "3.1",
+        "schema_version": "4.0",
         "artifact_kind": "reviewer_task_unit_dataset",
         "files": descriptors,
     }

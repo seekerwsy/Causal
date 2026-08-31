@@ -19,7 +19,7 @@ from prompt_mechanism_study.artifact_io import (
 )
 from prompt_mechanism_study.functional_judge import bailian_complete
 from prompt_mechanism_study.mechanisms import load_mechanism_registry
-from prompt_mechanism_study.records import canonical_value, content_id
+from prompt_mechanism_study.records import canonical_value, content_hash, content_id
 from prompt_mechanism_study.security_profiles import LOCAL_PROFILE_IDS
 
 # The frozen provider twice returned only the first ten items from 24-item
@@ -175,7 +175,7 @@ def run_contract_curation(
         )
     seeded, seed_metadata = _load_existing_contracts(existing_contracts_root, items)
     missing_items = [item for item in items if item["record_id"] not in seeded]
-    evaluator, prompt, identities = _policy(root, "contract-extraction-v7.txt")
+    evaluator, prompt, identities = _policy(root, "contract-extraction-v8.txt")
     identities["response_binding"] = "batch_item_index_v1"
     identities["duplicate_index_policy"] = "last_occurrence_wins_if_all_indices_covered"
     identities["duplicate_json_key_policy"] = "collapse_only_type_and_value_identical_v1"
@@ -316,7 +316,7 @@ def run_contract_quality_review(
         )
     evaluator, prompt, identities = _policy(
         root,
-        "functional-contract-review-v1.txt",
+        "functional-contract-review-v2.txt",
         config_name="qwen37max-contract-review.json",
     )
     identities["response_binding"] = "batch_item_index_v1"
@@ -1341,6 +1341,7 @@ def _parse_contracts(raw: bytes, batch: Sequence[dict[str, Any]]) -> list[dict[s
         "resolution_status",
         "entrypoint",
         "requirements",
+        "requirement_evidence",
         "inputs",
         "outputs",
         "side_effects",
@@ -1366,12 +1367,53 @@ def _parse_contracts(raw: bytes, batch: Sequence[dict[str, Any]]) -> list[dict[s
             "environment_dependencies",
         ):
             values = row[name]
-            if not isinstance(values, list) or len(values) > 12:
-                raise CurationError(f"{name} must contain at most twelve items")
+            if not isinstance(values, list) or len(values) > 32:
+                raise CurationError(f"{name} must contain at most thirty-two items")
             for item in values:
                 _bounded(item, 1000, name)
         if row["resolution_status"] == "resolved" and not row["requirements"]:
             raise CurationError("resolved contracts require at least one requirement")
+        evidence_rows = row["requirement_evidence"]
+        if (
+            not isinstance(evidence_rows, list)
+            or len(evidence_rows) != len(row["requirements"])
+        ):
+            raise CurationError("every contract requirement needs one evidence span")
+        normalized_evidence = []
+        for index, evidence in enumerate(evidence_rows, start=1):
+            if (
+                not isinstance(evidence, dict)
+                or set(evidence)
+                != {"requirement_index", "evidence_text", "evidence_occurrence"}
+                or evidence["requirement_index"] != index
+                or type(evidence["evidence_occurrence"]) is not int
+                or evidence["evidence_occurrence"] <= 0
+            ):
+                raise CurationError("contract requirement evidence is malformed")
+            _bounded(evidence["evidence_text"], 2000, "requirement evidence")
+            bound = _canonical_evidence_span(
+                source["source_prompt"],
+                evidence["evidence_text"],
+                evidence["evidence_occurrence"],
+            )
+            if bound is None:
+                raise CurationError("contract requirement evidence is not prompt-bound")
+            literal, occurrence, normalization = bound
+            start = _evidence_occurrence(source["source_prompt"], literal, occurrence)
+            if start is None:
+                raise CurationError("canonical contract evidence is not prompt-bound")
+            normalized_evidence.append(
+                {
+                    "requirement_index": index,
+                    "evidence_text": literal,
+                    "evidence_occurrence": occurrence,
+                    "evidence_start": start,
+                    "evidence_end": start + len(literal),
+                    "evidence_sha256": content_hash(literal),
+                    "normalization": normalization,
+                }
+            )
+        row["requirement_evidence"] = normalized_evidence
         _bounded(row["reason"], 1000, "contract reason")
     return [
         {
@@ -1415,7 +1457,7 @@ def _load_existing_contracts(
         "source_prompt_sha256",
     }
     for row in rows:
-        if set(row) != required_keys:
+        if set(row) not in (required_keys, required_keys | {"requirement_evidence"}):
             raise CurationError("existing contract keys are invalid")
         record_id = row["record_id"]
         if not isinstance(record_id, str) or record_id in seen:

@@ -108,9 +108,10 @@ def _add_data_group(groups: Any) -> None:
     task_units.add_argument("--prepared-root", type=Path)
     task_units.add_argument("--clusters-root", type=Path)
     task_units.add_argument("--candidate-root", type=Path)
+    task_units.add_argument("--contracts-root", type=Path)
+    task_units.add_argument("--contract-reviews-root", type=Path)
     task_units.add_argument("--legacy-roles-root", type=Path)
     task_units.add_argument("--development-exclusions", type=Path)
-    task_units.add_argument("--role-census-root", type=Path)
 
 
 def _add_curation_group(groups: Any) -> None:
@@ -590,9 +591,10 @@ def _run_task_unit_bundle(args: argparse.Namespace, parser: argparse.ArgumentPar
             "prepared_root",
             "clusters_root",
             "candidate_root",
+            "contracts_root",
+            "contract_reviews_root",
             "legacy_roles_root",
             "development_exclusions",
-            "role_census_root",
         )
         missing = tuple(name for name in required if getattr(args, name) is None)
         if missing:
@@ -604,9 +606,10 @@ def _run_task_unit_bundle(args: argparse.Namespace, parser: argparse.ArgumentPar
             prepared_root=args.prepared_root,
             clusters_root=args.clusters_root,
             candidate_root=args.candidate_root,
+            contracts_root=args.contracts_root,
+            contract_reviews_root=args.contract_reviews_root,
             legacy_roles_root=args.legacy_roles_root,
             development_exclusions_path=args.development_exclusions,
-            role_census_root=args.role_census_root,
             output=args.output,
         )
     return _emit_json(report)

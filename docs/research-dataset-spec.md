@@ -5,9 +5,10 @@
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
 coverage target, not a claim of current readiness. The active outcome-blind
-audit admits 1,222 quality-qualified task units into the final dataset. Of its
-563 Python tasks, 164 are currently `READY_CONFIRMATORY`; the remainder stay in
-the dataset with explicit mechanism, Oracle, scope, or review-readiness fields.
+audit places 1,222 quality-qualified task units in the curated corpus. Of its
+563 Python tasks, 166 are currently technically ready; 141 of those are
+unexposed to method development. The remainder stay in the dataset with
+explicit mechanism, Oracle, scope, or review-readiness fields.
 The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
 power-planning canary; it is not a frozen successor assignment manifest or
@@ -216,74 +217,52 @@ The first cleaning pass proceeds in this order:
 4. SecurityEval, CodeSecEval, and SeCodePLT; and
 5. BaxBench and C/C++ sources in their separate replication layers.
 
-## 5. Task admission contract
+## 5. Data quality and later study admission
 
-Every admitted task must bind:
+The field-level authority is `docs/task-unit-data.md` plus its executable
+verifier. This section states only the research boundary so that the data
+specification cannot drift into another hand-maintained schema.
+
+The prospective pipeline has separate records and freeze points:
 
 ```text
-task_id
-task_unit_id
-source_dataset
-source_version
-source_item_id
-source_lineage_family
-language
-task_granularity
-cwe_leaf
-mechanism_family
-functional_contract_id
-security_oracle_profile
-oracle_support_status
-discovery_eligible
-confirm_add_eligible
-confirm_remove_eligible
-source_feature_state
-neutral_counterpart_status
-eligible_arm_protocol_ids
-split
-deduplication_digest
+TaskUnitRecord
+  -> FunctionalContract
+  -> QualityDecision
+  -> RoleExposureRecord
+  -> provisional TechnicalReadiness
+  -> PromptTSG after method freeze
+  -> HypothesisEligibility after hypothesis freeze
+  -> Assignment after confirmation freeze
 ```
 
-All regimes additionally require:
+Admission to the quality-qualified curated corpus requires only:
 
-1. a clear functional request with enough context to produce and evaluate one
-   candidate;
-2. the most specific defensible CWE label and a documented mapping to one
-   mechanism family;
-3. a frozen semantic functional contract independent of the generated
-   candidate; AST/compilation plus the blind Functional Judge is the common
-   functionality Oracle, while source-native executable tests are retained as
-   optional calibration evidence rather than a universal admission condition;
-4. a prospectively calibrated security-Oracle profile for the language,
-   task shape, and CWE;
-5. for confirmation, at least one valid frozen Target/Noop arm protocol for the
-   relevant hypothesis;
-6. stable source, version, license, original identity, and content digest;
-7. no task-unit overlap with development, calibration, discovery, or
-   another confirmatory/replication split; and
-8. no selection based on generated code, security label, functional verdict,
-   or effect direction.
+1. immutable and traceable source identity;
+2. complete representative model-visible input;
+3. a coherent software request with observable behavior;
+4. a source-bound functional contract that is faithful and sufficiently
+   evaluable under blind review; and
+5. no unrecoverable source defect or unresolved source-level insufficiency.
 
-Regime-specific admission is then applied without collapsing the states:
+CWE, mechanism, Oracle, runtime, exposure, ADD/REMOVE applicability, formal
+role, and split do not determine data quality. A task may therefore be
+`QUALITY_INCLUDED` while remaining outside the current study or unsupported by
+the current measurement stack.
 
-- **Discovery:** the source Prompt is natural and unmanipulated. The target
-  feature may be `PRESENT`, `ABSENT`, or `UNRESOLVED`; its state and evidence are
-  extracted before any discovery outcome is read. Each family-local FCI table
-  must pass a frozen within-context positivity and source-overlap audit.
-- **ADD confirmation:** the context is `PRESENT` and the target feature is
-  `ABSENT`. The original Prompt is the source-state no-op; no vulnerable
-  instruction is inserted.
-- **REMOVE confirmation:** the context and target feature are `PRESENT`, the
-  positive requirement has provenance-bound evidence, and a task-preserving
-  neutral counterpart is attested before generation.
+`ADD/REMOVE eligibility` is not an original task property. It is derived only
+after a concrete hypothesis freezes its target control, natural source state,
+operation, allowed requirement delta, Prompt TSG policy, and measurement
+profile. Discovery eligibility, confirmation eligibility, role assignment,
+and assignment are likewise separate successor artifacts and never appear in
+the source-data tables.
 
-Eligibility for one regime does not imply eligibility for another. In
-particular, the security-neutral criterion belongs to ADD confirmation rather
-than to observational discovery as a whole.
-
-A task-level profile may be supported while a generated program still yields
-an Oracle coverage unknown. Such unknowns remain explicit outcomes. They are
-never recoded as secure or removed from assigned-arm ITT.
+The formal allocator must enforce zero task-unit overlap across roles and at
+most one selected task unit per frozen near-duplicate group across the union of
+all prospective formal roles. Development or outcome exposure restricts later
+role reuse but does not rewrite quality. A supported Oracle profile may still
+return `unknown` for generated code; that outcome remains explicit and is never
+recoded as secure or removed from assigned-arm ITT.
 
 ## 6. Deduplication and clustering
 
@@ -418,28 +397,23 @@ do not themselves support a scientific effect claim.
 
 ### 6.2 Active outcome-blind candidate ledger
 
-The active audit emits one record for each of the 2,165 task units. Contract
-quality, mechanism binding, Security-Oracle support, functionality evidence,
-runtime support, development exposure, candidate status, and blocker codes are
-separate fields; a failure at one gate does not erase the task from the ledger.
-Final-dataset admission is explicitly separate from current experimental
-readiness. A task enters `final-dataset.json` when its frozen contract is
-`STRICT` and it has no unresolved quality flag. Language, registered mechanism,
-Security-Oracle support, runtime support, current study scope, source lineage,
-and development exposure do not change that data-quality decision. Development
-exposure remains a confirmatory-sampling exclusion, and unsupported measurement
-coordinates remain visible as readiness fields.
+The outcome-blind audit emits one upstream record for each of the 2,165 task
+units. Its physical `final_dataset_status` and mutually exclusive
+`candidate_status` fields are retained only as legacy compiler inputs. The
+reviewer-facing v4 bundle replaces them with an explicit quality disposition,
+an exposure/role record, and a multi-axis derived readiness view. A failure on
+one axis never erases a task or silently hides another blocker.
 
-Applying that rule to all 2,165 task units admits 1,222 into the final curated
-dataset. It contains 563 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
+Applying the quality-only rule to all 2,165 task units places 1,222 in the
+quality-qualified curated corpus. It contains 563 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
 58 Rust, 53 PHP, and 17 Go task units. Of the 1,229 strict contracts, six remain
-outside the final dataset pending independent review of a known material
+pending independent review of a known material
 omission or functional-evaluability concern. Another 930 task units remain pending
 contract-quality repair, and seven incoherent source prompts are excluded. All
 dispositions remain in the complete ledger.
 
-The 164 `READY_CONFIRMATORY` task units are therefore an implementation-ready
-subset of the 1,222-row final dataset, not the definition of that dataset.
+The old audit's 164 `READY_CONFIRMATORY` rows were a provisional implementation
+view, not the definition of the curated corpus or a formal experiment role.
 The response-format repair produced 1,215 strict contracts. A bounded
 outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
 that otherwise had mechanism, Oracle, and runtime support: eight stale or
@@ -472,10 +446,13 @@ four remain `PENDING_SCOPE` because their source CWE does not match the prompt
 mechanism, and one remains `PENDING_BINDING`. One unresolved literal
 `<language>` prompt was reclassified as a source defect. Five genuinely
 under-specified contracts and one material contract omission remain pending.
-This review therefore increased data-quality coverage without increasing the
-164-task technically ready population.
+This review therefore increased data-quality coverage without changing the
+legacy compiler's 164-task `READY_CONFIRMATORY` count. The corrected v4 view
+derives 166 technically ready tasks because exposure is no longer conflated
+with technical support.
 
-The final mutually exclusive candidate statuses are:
+For historical traceability, the upstream compiler input had these mutually
+exclusive candidate statuses:
 
 | Status | Task units |
 | --- | ---: |
@@ -488,13 +465,20 @@ The final mutually exclusive candidate statuses are:
 | `PENDING_SCOPE` | 607 |
 | `EXCLUDED_SOURCE_DEFECT` | 7 |
 
-The 164 ready Python task units cover seven source lineages and thirteen CWEs.
-Family coverage is 45 injection/interpreter, 60 file/parser/external-resource,
-17 identity/permission, and 42 cryptography/randomness task units. All 164
-remain admissible on task quality; no lineage count or share removes a task.
-Only the file/parser family meets its 60-task target, so the prospective
-240-task-unit population gate remains closed. CyberSecEval contributes 57/164
-(34.8%) of the ready pool; this is reported as a transportability diagnostic.
+They are not the current readiness protocol. The v4 reviewer bundle reports
+scope, mechanism registration, binding, Oracle, runtime, functionality, and
+quality-review axes independently. Its single workstream is only a
+deterministic `primary_next_action`. Exposure exists exclusively in the role
+record, so removing exposure from technical readiness can change the derived
+technical-ready count without changing any task, contract, or measurement
+support.
+
+The 166 technically ready Python task units cover seven source lineages and
+thirteen CWEs; 141 are unexposed. All remain quality-qualified regardless of
+lineage composition; exposure is a separate role coordinate. This population
+is planning evidence, not a frozen confirmatory sample. CyberSecEval contributes
+57/166 (34.3%) of the technically ready pool; this is reported as a
+transportability diagnostic rather than an exclusion rule.
 
 The Security-Oracle registry published with the audit distinguishes 14
 qualified deterministic Python profiles, one registered contextual profile
