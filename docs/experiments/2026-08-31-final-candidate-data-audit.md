@@ -39,10 +39,16 @@ No row is an `user_claim`, and no experimental outcome was used.
   `137f94f6b629585f60308d927496b4ae980bd4b8e1efcadc50ebbb71478623cc`;
 - mechanism-binding plan:
   `f2f8556a4fad016413aa0f4585f4769ea81b0fa11bc2632c2e32a159cb77690e`;
-- mechanism-binding result:
-  `aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed`;
-- final quality-data bundle:
-  `b0800bac8f6e3f0ed61cff2b111cf04e901597d06d77352993590ef9e043fef3`;
+- adjudicated mechanism-binding bundle:
+  `089ac31dd29bb5ba89a4ba5dcd4776f8f6ad2c1e871bf3629d9f0ae59f8eef19`;
+- qualified local Security-Oracle implementation:
+  `6286a2f091322b90bc7b9af28b5aafd1078d9dbe3a4a219a7af9afa19cbd634c`;
+- target Security-Oracle qualification bundle:
+  `fc4216dc7cb6e8f8e0377e69e300bded30485f1725b7d855504adab3b396ab75`;
+- target eligibility policy:
+  `8360ef3f7238ad94c01b048a6be364e2f1e0199af3b507b3b8e52ec35f13466a`;
+- current final quality-data bundle:
+  `bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886`;
 - eligibility policy:
   `29acf991090278a109b23ea358342f4e266e24d2153409abf594a25fddbed17e`;
 - eligibility implementation:
@@ -56,9 +62,10 @@ No row is an `user_claim`, and no experimental outcome was used.
 
 The active local paths are:
 
-- `.codex-runtime/mechanism-binding-review-f2f115f-20260831-01`;
+- `.codex-runtime/mechanism-binding-adjudication-20260831-19`;
 - `.codex-runtime/contract-recovery-adjudication-20260831-10`;
-- `.codex-runtime/dataset-final-quality-20260831-14`.
+- `data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification`;
+- `.codex-runtime/dataset-final-quality-20260831-36-target-oracle-final`.
 
 ## Contract closure
 
@@ -98,12 +105,15 @@ An independent replay found zero accepted evidence spans absent from the source
 prompt, zero unknown realization IDs, and zero accepted profiles outside the 12
 qualified local profiles.
 
-Both new deterministic stages reproduced byte-for-byte: the contract-recovery
+The deterministic stages reproduced byte-for-byte: the contract-recovery
 bundle digest was
 `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`
-on both builds, and the successor candidate-ledger digest was
-`b0800bac8f6e3f0ed61cff2b111cf04e901597d06d77352993590ef9e043fef3`
-on both builds.
+on both builds, the adjudicated binding digest was
+`089ac31dd29bb5ba89a4ba5dcd4776f8f6ad2c1e871bf3629d9f0ae59f8eef19`,
+and the current candidate-ledger bundle digest was
+`bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886`
+on both builds. The binding adjudication resolved 6 of the prior 21 cases and
+conservatively retained 15 as unresolved.
 
 ## Unified candidate status
 
@@ -127,30 +137,33 @@ The separate execution-readiness classification is:
 
 | Status | Task units | Meaning |
 | --- | ---: | --- |
-| `READY_CONFIRMATORY` | 150 | strict contract, supported Python runtime, registered mechanism, qualified local Security Oracle |
+| `READY_CONFIRMATORY` | 164 | strict contract, supported Python runtime, registered mechanism, qualified local Security Oracle |
 | `PENDING_CONTRACT` | 930 | contract quality/evaluability gate not met |
-| `PENDING_ORACLE` | 260 | mechanism or task-applicable Security Oracle not frozen |
+| `PENDING_ORACLE` | 209 | mechanism or task-applicable Security Oracle not frozen |
 | `PENDING_RUNTIME` | 174 | non-Python execution/measurement runtime not qualified |
-| `PENDING_BINDING` | 21 | registered mechanism shape remains unresolved |
+| `PENDING_BINDING` | 58 | a registered same-CWE mechanism exists but its narrow task shape is not established |
 | `PENDING_INDEPENDENT_REVIEW` | 21 | development exposure or known diagnostic concern |
 | `PENDING_SCOPE` | 603 | outside the currently registered research families |
 | `EXCLUDED_SOURCE_DEFECT` | 6 | internally incoherent prompt as written |
 
-The 150 ready Python task units span seven source lineages and ten CWEs. Family
-coverage is 38 injection/interpreter, 59 file/parser/resource, 17
-identity/permission, and 36 cryptography/randomness task units. Lineage count
-and share are diagnostics rather than admission gates, so all 150 remain
-eligible on task quality. The largest ready lineage is CyberSecEval at 54/150
-(36.0%). No family reaches the prospective target of 60; that count shortfall,
-not lineage composition, keeps the 240-task Python population gate closed.
+The 164 ready Python task units span seven source lineages and thirteen CWEs.
+Family coverage is 45 injection/interpreter, 60 file/parser/resource, 17
+identity/permission, and 42 cryptography/randomness task units. Lineage count
+and share are diagnostics rather than admission gates, so all 164 remain
+eligible on task quality. The largest ready lineage is CyberSecEval at 57/164
+(34.8%). The file/parser family now reaches 60; the other three count
+shortfalls, not lineage composition, keep the 240-task Python population gate
+closed.
 
 ## Oracle choice by layer
 
-1. **Python core:** one of 12 qualified deterministic static profiles is bound
+1. **Python core:** one of 14 qualified deterministic static profiles is bound
    before assignment. The same profile is used for all arms; `unknown` is
-   preserved. These profiles have 37 secure/insecure/unknown gold fixtures in
+   preserved. These profiles have 43 secure/insecure/unknown gold fixtures in
    the existing qualification bundle, but that boundary is not a global CWE
-   accuracy claim.
+   accuracy claim. The two new profiles live in the target-schema producer,
+   which delegates the original 12 profiles without changing their frozen
+   implementation identity.
 2. **C/C++ memory replication:** the data pool contains 102 strict,
    independently reviewable candidates and at least four for each of the seven
    planned CWEs. Only six currently reference source tests. Formal admission
@@ -184,18 +197,27 @@ support, so another Python runner is unnecessary. Within the 21 prospectively
 listed Python CWEs, the final dataset contains 346 quality-qualified tasks:
 132 injection/interpreter, 103 file/parser/resource, 48
 identity/authorization/permissions, and 63 cryptography/randomness/integrity.
-Of these, 150 are ready, 21 need only a frozen binding decision, and most of the
-remainder need a registered mechanism plus a qualified task-applicable Oracle.
+Of these, 164 are ready. The 58 `PENDING_BINDING` rows include the 15
+conservatively unresolved prior cases plus newly recognized same-CWE tasks that
+fall outside the narrow code-execution, certificate-validation, and cipher/hash
+shapes. Most of the remainder still need a registered mechanism plus a
+qualified task-applicable Oracle.
 
-The implementation order is therefore:
+The completed extension resolved 6 existing binding cases and added only eight
+quality-qualified READY units: two Python-literal dictionary tasks, two bounded
+certificate-validation tasks, and four cipher/hash-selection tasks. Arbitrary
+code execution, custom OpenSSL contexts, dynamic hash names, and contextual
+identity policy remain non-ready rather than being forced through a broad
+static rule.
 
-1. resolve the 21 existing finite-registry binding cases;
-2. qualify only locally measurable missing profiles, beginning with bounded
-   code-execution and cryptographic API cases rather than contextual Web policy;
-3. make a prospective population decision for the identity family, whose 48
+The remaining implementation order is therefore:
+
+1. make a prospective population decision for the identity family, whose 48
    quality-qualified tasks cannot meet a target of 60 even with perfect
    implementation support;
-4. implement non-Python runtimes only for a separately claimed replication.
+2. review only the bounded injection and crypto task shapes that could close
+   the remaining 15- and 18-unit READY gaps with an honest Oracle;
+3. implement non-Python runtimes only for a separately claimed replication.
 
 The 659 non-Python final-dataset tasks remain valid data without those runtimes.
 Building every language environment is not required for the Python primary

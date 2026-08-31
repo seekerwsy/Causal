@@ -151,6 +151,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repository-root", type=Path, default=Path.cwd()
     )
 
+    target_security_qualification = commands.add_parser(
+        "target-security-oracle-qualification",
+        help="qualify the target-v3 local Security Oracle catalog without mutating legacy producers",
+    )
+    target_security_qualification.add_argument("registry", type=Path)
+    target_security_qualification.add_argument("output", type=Path)
+    target_security_qualification.add_argument(
+        "--cases", type=Path, action="append", required=True
+    )
+    target_security_qualification.add_argument(
+        "--repository-root", type=Path, default=Path.cwd()
+    )
+
     tsg_qualification = commands.add_parser(
         "prompt-tsg-qualification",
         help="compare one extractor bundle with a prospective task-context holdout",
@@ -370,6 +383,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     adjudicate_contracts.add_argument("adjudications", type=Path)
     adjudicate_contracts.add_argument("output", type=Path)
 
+    adjudicate_bindings = commands.add_parser(
+        "apply-binding-adjudications",
+        help="apply bounded outcome-blind corrections to unresolved mechanism bindings",
+    )
+    adjudicate_bindings.add_argument("prepared_root", type=Path)
+    adjudicate_bindings.add_argument("clusters_root", type=Path)
+    adjudicate_bindings.add_argument("bindings_root", type=Path)
+    adjudicate_bindings.add_argument("registry", type=Path)
+    adjudicate_bindings.add_argument("adjudications", type=Path)
+    adjudicate_bindings.add_argument("output", type=Path)
+
     eligibility = commands.add_parser(
         "dataset-eligibility",
         help="audit curated clusters for current experiment readiness",
@@ -525,6 +549,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(report["status"])
         return 0 if report["status"] == "QUALIFIED_FOR_EXPERIMENT" else 2
+    elif args.command == "target-security-oracle-qualification":
+        from prompt_mechanism_study.eligibility import qualify_target_security_profiles
+
+        report = qualify_target_security_profiles(
+            args.repository_root,
+            args.registry,
+            tuple(args.cases),
+            args.output,
+        )
+        print(report["status"])
+        return (
+            0
+            if report["status"] == "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
+            else 2
+        )
     elif args.command == "prompt-tsg-qualification":
         from prompt_mechanism_study.eligibility import qualify_prompt_tsg_extractor
 
@@ -725,6 +764,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             case_audit_path=args.case_audit,
             extension_policy_path=args.extension_policy,
             backend_root=args.backend_root,
+        )
+        print(report["status"])
+    elif args.command == "apply-binding-adjudications":
+        from prompt_mechanism_study.eligibility import apply_binding_adjudications
+
+        report = apply_binding_adjudications(
+            args.prepared_root,
+            args.clusters_root,
+            args.bindings_root,
+            args.registry,
+            args.adjudications,
+            args.output,
         )
         print(report["status"])
     elif args.command == "study-design":

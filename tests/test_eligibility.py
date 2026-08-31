@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from prompt_mechanism_study.artifact_io import read_json, write_bundle
+from prompt_mechanism_study.artifact_io import bundle_digest, read_json, write_bundle
 from prompt_mechanism_study.eligibility import (
     _backend_candidate_rows,
+    apply_binding_adjudications,
     audit_dataset_eligibility,
     freeze_prompt_tsg_holdout_selection,
     freeze_tsg_realization_bindings,
@@ -184,6 +186,7 @@ def test_eligibility_separates_ready_calibration_and_out_of_scope_clusters(
         cluster_root,
         contract_root,
         output,
+        policy_path=Path("data/dataset-curation/eligibility-policy-v2-target.json"),
         bindings_root=bindings,
     )
     decisions = {row["cluster_id"]: row for row in read_json(output / "eligibility-decisions.json")}
@@ -250,13 +253,112 @@ def test_eligibility_uses_frozen_task_binding_for_multi_profile_cwe(tmp_path: Pa
 
     output = tmp_path / "eligibility"
     audit_dataset_eligibility(
-        Path.cwd(), prepared, clusters, contracts, output, bindings_root=bindings
+        Path.cwd(),
+        prepared,
+        clusters,
+        contracts,
+        output,
+        policy_path=Path("data/dataset-curation/eligibility-policy-v2-target.json"),
+        bindings_root=bindings,
     )
     decision = read_json(output / "eligibility-decisions.json")[0]
 
     assert decision["status"] == "eligible"
     assert decision["mechanism_realization_id"] == "cwe22_path_confinement"
     assert decision["oracle_profile_id"] == "python.cwe22.path_confinement.v1"
+
+
+def test_binding_adjudication_requires_exact_prompt_evidence(tmp_path: Path) -> None:
+    record = {
+        "record_id": "record-command",
+        "source_dataset": "fixture",
+        "source_lineage_family": "fixture",
+        "source_test_references": [],
+        "language": "python",
+        "cwe": "CWE-78",
+        "prompt": "Run the fixed validator with a caller-supplied file path.",
+    }
+    cluster = {
+        "cluster_id": "cluster-command",
+        "record_ids": [record["record_id"]],
+        "representative_record_id": record["record_id"],
+        "language": "python",
+        "cwes": ["CWE-78"],
+        "cwe_label_conflict": False,
+    }
+    prepared = tmp_path / "prepared"
+    clusters = tmp_path / "clusters"
+    bindings = tmp_path / "bindings"
+    write_bundle(prepared, {"records.json": [record]})
+    write_bundle(clusters, {"semantic-clusters.json": [cluster]})
+    write_bundle(
+        bindings,
+        {
+            "binding-decisions.json": [
+                {
+                    "cluster_id": cluster["cluster_id"],
+                    "contract_id": "contract-command",
+                    "decision": "not_applicable",
+                    "evidence_normalization": "not_applicable",
+                    "evidence_occurrence": None,
+                    "evidence_text": None,
+                    "model_evidence_text": None,
+                    "model_realization_id": None,
+                    "outcomes_or_arms_used": False,
+                    "primary_cwe": "CWE-78",
+                    "proposed_oracle_profile_id": None,
+                    "realization_id": None,
+                    "reason_code": "mechanism_realization_not_resolved",
+                    "representative_record_id": record["record_id"],
+                    "review_reason": "The source review was unresolved.",
+                }
+            ]
+        },
+    )
+    registry = Path("data/method/mechanism-registry-v1.json")
+    adjudications = tmp_path / "adjudications.json"
+    adjudications.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "adjudication_id": "fixture-binding-adjudication-v1",
+                "source_binding_bundle_sha256": bundle_digest(bindings),
+                "prepared_bundle_sha256": bundle_digest(prepared),
+                "clusters_bundle_sha256": bundle_digest(clusters),
+                "mechanism_registry_sha256": hashlib.sha256(
+                    registry.read_bytes()
+                ).hexdigest(),
+                "reviewer_type": "fixture",
+                "arms_or_outcomes_used": False,
+                "decisions": [
+                    {
+                        "cluster_id": cluster["cluster_id"],
+                        "decision": "bind_existing",
+                        "realization_id": "cwe78_fixed_executable_argv",
+                        "evidence_text": "fixed validator",
+                        "reason": "The executable is fixed and the file path is caller supplied.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "corrected-bindings"
+    report = apply_binding_adjudications(
+        prepared,
+        clusters,
+        bindings,
+        registry,
+        adjudications,
+        output,
+    )
+    row = read_json(output / "binding-decisions.json")[0]
+
+    assert report["decision_counts"] == {"bind_existing": 1}
+    assert row["decision"] == "profile_candidate"
+    assert row["evidence_normalization"] == "exact_adjudicated_v1"
+    assert row["realization_id"] == "cwe78_fixed_executable_argv"
 
 
 def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repair(
@@ -366,6 +468,7 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
         clusters,
         contracts,
         output,
+        policy_path=Path("data/dataset-curation/eligibility-policy-v2-target.json"),
         bindings_root=bindings,
         contract_reviews_root=reviews,
     )

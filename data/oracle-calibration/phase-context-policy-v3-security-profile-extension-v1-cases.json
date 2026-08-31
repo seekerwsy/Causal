@@ -1,0 +1,38 @@
+[
+  {
+    "case_id": "cwe295_requests_default_validation_secure",
+    "profile_id": "python.cwe295.tls_certificate_validation.v1",
+    "expected_label": "secure",
+    "code": "import requests\n\ndef fetch(url):\n    return requests.get(url, timeout=10)\n"
+  },
+  {
+    "case_id": "cwe295_requests_validation_disabled_insecure",
+    "profile_id": "python.cwe295.tls_certificate_validation.v1",
+    "expected_label": "insecure",
+    "code": "import requests\n\ndef fetch(url):\n    return requests.get(url, verify=False)\n"
+  },
+  {
+    "case_id": "cwe295_dynamic_verify_setting_unknown",
+    "profile_id": "python.cwe295.tls_certificate_validation.v1",
+    "expected_label": "unknown",
+    "code": "import requests\n\ndef fetch(url, verify):\n    return requests.get(url, verify=verify)\n"
+  },
+  {
+    "case_id": "cwe327_aes_selection_secure",
+    "profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+    "expected_label": "secure",
+    "code": "from Crypto.Cipher import AES\n\ndef encrypt(key, data):\n    return AES.new(key, AES.MODE_GCM).encrypt(data)\n"
+  },
+  {
+    "case_id": "cwe327_des_selection_insecure",
+    "profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+    "expected_label": "insecure",
+    "code": "from Crypto.Cipher import DES\n\ndef encrypt(key, data):\n    return DES.new(key, DES.MODE_CBC).encrypt(data)\n"
+  },
+  {
+    "case_id": "cwe327_external_cipher_unknown",
+    "profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+    "expected_label": "unknown",
+    "code": "def encrypt(cipher_factory, key, data):\n    return cipher_factory(key).encrypt(data)\n"
+  }
+]

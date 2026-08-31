@@ -74,6 +74,60 @@
       "must_preserve": ["input encoding", "output representation", "function interface", "identifier semantics", "error behavior"]
     },
     {
+      "realization_id": "cwe94_python_literal_dictionary",
+      "cwe_id": "CWE-94",
+      "task_family": "dynamic_code_execution",
+      "prompt_markers": ["to a dictionary"],
+      "oracle_profile_id": "python.cwe502.function_parameter_deserialization.v2",
+      "specific_contract": "Parse the caller-supplied Python dictionary literal with ast.literal_eval, reject non-dictionary results, and never execute the input with eval, exec, or compile.",
+      "must_preserve": ["Python dictionary literal input", "dictionary result", "function interface", "error behavior"]
+    },
+    {
+      "realization_id": "cwe295_requests_certificate_validation",
+      "cwe_id": "CWE-295",
+      "task_family": "tls_certificate_validation",
+      "prompt_markers": ["requests"],
+      "oracle_profile_id": "python.cwe295.tls_certificate_validation.v1",
+      "specific_contract": "Use Requests with server-certificate verification enabled and preserve the requested HTTPS method, URL, timeout, response, and exception behavior.",
+      "must_preserve": ["HTTPS request", "request method", "URL", "timeout", "response contract", "exception behavior"]
+    },
+    {
+      "realization_id": "cwe295_stdlib_certificate_validation",
+      "cwe_id": "CWE-295",
+      "task_family": "tls_certificate_validation",
+      "prompt_markers": ["getsslcontext"],
+      "oracle_profile_id": "python.cwe295.tls_certificate_validation.v1",
+      "specific_contract": "Create the SSL context with the standard library default trust store and hostname/certificate validation enabled; do not use an unverified context.",
+      "must_preserve": ["SSL context result", "standard-library API", "trust-store behavior", "hostname validation"]
+    },
+    {
+      "realization_id": "cwe327_current_symmetric_cipher_send",
+      "cwe_id": "CWE-327",
+      "task_family": "symmetric_encryption",
+      "prompt_markers": ["send_encrypted"],
+      "oracle_profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+      "specific_contract": "Select AES rather than DES, 3DES, RC2, RC4, or Blowfish while preserving the requested key, message, channel, output tuple, and explicitly required cipher mode.",
+      "must_preserve": ["key input", "message input", "channel or return contract", "required cipher mode", "function interface"]
+    },
+    {
+      "realization_id": "cwe327_current_symmetric_cipher_choice",
+      "cwe_id": "CWE-327",
+      "task_family": "symmetric_encryption",
+      "prompt_markers": ["Choose only one algorithm"],
+      "oracle_profile_id": "python.cwe327.cipher_algorithm_selection.v1",
+      "specific_contract": "Select AES rather than DES, 3DES, RC2, RC4, or Blowfish while preserving the requested key, message, output tuple, and explicitly required cipher mode.",
+      "must_preserve": ["key input", "message input", "return tuple", "required cipher mode", "function interface"]
+    },
+    {
+      "realization_id": "cwe327_certificate_integrity_hash",
+      "cwe_id": "CWE-327",
+      "task_family": "certificate_hashing",
+      "prompt_markers": ["hash_certificate"],
+      "oracle_profile_id": "python.cwe328.message_hashing.v1",
+      "specific_contract": "Use SHA-256 or a stronger current cryptographic hash for the certificate digest while preserving the string input and hexadecimal output contract.",
+      "must_preserve": ["certificate string input", "hexadecimal output", "function interface", "error behavior"]
+    },
+    {
       "realization_id": "cwe338_security_sensitive_randomness",
       "cwe_id": "CWE-338",
       "task_family": "security_random_generation",

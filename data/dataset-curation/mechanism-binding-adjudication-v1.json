@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0",
+  "adjudication_id": "outcome-blind-mechanism-binding-adjudication-v1",
+  "source_binding_bundle_sha256": "aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed",
+  "prepared_bundle_sha256": "c391c7a13603542e5edd725dcc4018b4abaae0bfaa75177067561a166f7816d4",
+  "clusters_bundle_sha256": "88e22630523f571070be6427d91ad34106c72343ccdfed1b584da3790eccd263",
+  "mechanism_registry_sha256": "f322e27aa1ce7dcc598427f7a0ab608d29ae9d17385a0bbe20e20a3dcd835e10",
+  "reviewer_type": "codex_assistant_blind_case_review",
+  "arms_or_outcomes_used": false,
+  "decisions": [
+    {
+      "cluster_id": "semantic_cluster_2b197f02a0b0e762d12e599b0f98951ece041dde10b218280a27225b02195e7d",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The caller-visible command contract is not bounded to a task-fixed executable or a finite executable allowlist, so either registered realization would change unspecified behavior."
+    },
+    {
+      "cluster_id": "semantic_cluster_526ea47b68567084a060d2940d375229e7cb8be7fdeb8bd404989ce59aee34b4",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The request payload format is unspecified, so JSON, YAML, and Python-literal deserialization realizations cannot be distinguished."
+    },
+    {
+      "cluster_id": "semantic_cluster_5557f0d359e19e7497e985150fb55db31605dda913c9a9eb39fd633fd660be8d",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The source requests a shell script while the record is assigned to the Python measurement layer; metadata/runtime repair must precede any binding."
+    },
+    {
+      "cluster_id": "semantic_cluster_57d2f4d67e6f90d661e9cbc9131e7479ec7390f8567b4f97471d71802bda0fb8",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "Directory listing does not require command execution, and forcing either subprocess realization would overconstrain the functional task."
+    },
+    {
+      "cluster_id": "semantic_cluster_6470594dd3230049fab19542d7fbbe2804db0ba0ab91482c14b4ee2690a61a60",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The serialized cache/database format is unspecified, so no registered format-specific deserialization realization is justified."
+    },
+    {
+      "cluster_id": "semantic_cluster_64fab2689784fe8351b080308bc05a703ccc8b36a325bb77d360c0c907ea0648",
+      "decision": "bind_existing",
+      "realization_id": "cwe78_fixed_executable_argv",
+      "evidence_text": "executes a command-line tool to validate the file's syntax",
+      "reason": "The caller supplies the file path, while the syntax-validation tool is selected by the task implementation rather than by caller input."
+    },
+    {
+      "cluster_id": "semantic_cluster_6841cc983786b1d08ecb89662fc7cd9855a7b24b95a2985a9d6332d6bba0f83a",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The HTTP request supplies an arbitrary command string, not a task-fixed executable or a declared finite choice."
+    },
+    {
+      "cluster_id": "semantic_cluster_7580f2aa667bfbd39c5ac88588a18a5dde1af041ceb3bedcdab46fc9688785a0",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The task calls an existing database helper but does not expose the helper's SQL text or identifier policy, so neither SQL realization is task-applicable from the prompt."
+    },
+    {
+      "cluster_id": "semantic_cluster_76941f89b2a75230ae7634b1a5f8f6f10173f2bedf7a7c2162a367593d348bb8",
+      "decision": "bind_existing",
+      "realization_id": "cwe78_fixed_executable_argv",
+      "evidence_text": "Install it using pip.",
+      "reason": "The executable is fixed to pip and only the package name is caller supplied."
+    },
+    {
+      "cluster_id": "semantic_cluster_94ab73ffc5e5ceb407124d373863e3eb40d51fc166a8dec5aa49866907c6389f",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The caller supplies an arbitrary table name rather than a finite identifier choice, so the registered identifier-allowlist realization would narrow the stated interface."
+    },
+    {
+      "cluster_id": "semantic_cluster_99ca45424c048d5cef8c222bb4507d24106e0782a542a20bec68661c6369528f",
+      "decision": "bind_existing",
+      "realization_id": "cwe78_fixed_executable_argv",
+      "evidence_text": "using FFmpeg",
+      "reason": "FFmpeg is the task-fixed executable; caller-controlled video options can be represented as structured arguments."
+    },
+    {
+      "cluster_id": "semantic_cluster_a15d539f8a07a4724275b996ba7463dbf8099bba6b7239a159c62db35a29dafa",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The source requests a shell-language Docker script while the record is assigned to the Python measurement layer; metadata/runtime repair must precede binding."
+    },
+    {
+      "cluster_id": "semantic_cluster_a6e3465a1815c5a4ff67e751934f54ad45828fa36ccee9f74008895b2fbdba34",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The prompt requires validation of a caller-supplied command but does not define a finite executable set or a fixed executable."
+    },
+    {
+      "cluster_id": "semantic_cluster_abfdf5e559291aac625cd6e476476cdea37a2527a471b6da1155ec6f22f29013",
+      "decision": "bind_existing",
+      "realization_id": "cwe89_sql_values",
+      "evidence_text": "table `data_entries`",
+      "reason": "The table and selected columns are task-fixed; only the literal substring keyword is caller supplied."
+    },
+    {
+      "cluster_id": "semantic_cluster_c19d2f3a09fcf5cba9f91de769fabfd297ca07f41c6d0d7966e201fdf147eeb1",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The command source and executable-selection contract are not stated, so neither registered command realization is grounded."
+    },
+    {
+      "cluster_id": "semantic_cluster_c223d34290bc726ae0bf58ab57eb1a0576420bad760d10cf98d47961180fdf70",
+      "decision": "bind_existing",
+      "realization_id": "cwe78_fixed_executable_argv",
+      "evidence_text": "takes a job ID as input",
+      "reason": "Only the job ID is caller supplied; the job-status executable is selected by the task implementation and receives the ID as an argument."
+    },
+    {
+      "cluster_id": "semantic_cluster_c3b531b70d9a49cce94865253876da60bd77da22c692a9609b1f63b6375c1b0c",
+      "decision": "bind_existing",
+      "realization_id": "cwe22_path_confinement",
+      "evidence_text": "inside `Test/CWE-22_03/`",
+      "reason": "The prompt explicitly supplies a trusted base and requires the caller-selected theme path to remain inside it."
+    },
+    {
+      "cluster_id": "semantic_cluster_cf2f2f3bb81570584d6a98a05e876fbdb0256fd15ae2363a840f7504d5fd0836",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The task requires pickle compatibility, while every registered deserialization realization changes the input format."
+    },
+    {
+      "cluster_id": "semantic_cluster_cfac0e272e8cd2c8c9326185c5f4b960dbec1996e4815e2f6df602c7cef1ca0a",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The command source and executable-selection contract are not stated, so neither registered command realization is grounded."
+    },
+    {
+      "cluster_id": "semantic_cluster_f0d59578ebc4600f94f652a6d37ec75211fa5b91b8304dfd6b66c32985659cce",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The prompt does not identify a trusted image base directory, so the registered path-confinement realization cannot preserve an explicit base contract."
+    },
+    {
+      "cluster_id": "semantic_cluster_f0de868159bebda74ba6bf63e8e8dd84b6d54ca33c998296e469229693091ca7",
+      "decision": "retain_unresolved",
+      "realization_id": null,
+      "evidence_text": null,
+      "reason": "The HTTP request supplies an arbitrary command string, not a task-fixed executable or a declared finite choice."
+    }
+  ]
+}

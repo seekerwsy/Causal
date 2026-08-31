@@ -18,10 +18,16 @@ from prompt_mechanism_study.prompt_tsg import (
     prompt_tsg_from_record,
     validate_prompt_tsg,
 )
-from prompt_mechanism_study.records import content_id
+from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.security_profiles import (
     LOCAL_PROFILE_IDS,
     evaluate_security_profile,
+)
+from prompt_mechanism_study.target_security_profiles import (
+    TARGET_LOCAL_PROFILE_IDS,
+    TARGET_ONLY_PROFILE_IDS,
+    evaluate_target_security_profile,
+    target_security_profile_producer_sha256,
 )
 
 
@@ -97,6 +103,114 @@ def qualify_local_security_profiles(
         "claim_boundary": (
             "Qualification covers only the frozen local AST profiles and gold idioms; "
             "it is not a global CWE-detection accuracy claim."
+        ),
+    }
+    write_bundle(output, {"case-results.json": results, "qualification.json": report})
+    return report
+
+
+def qualify_target_security_profiles(
+    repository_root: Path,
+    registry_path: Path,
+    case_paths: tuple[Path, ...],
+    output: Path,
+) -> dict[str, Any]:
+    """Qualify the v3 profile catalog without mutating the legacy producer."""
+
+    root = repository_root.resolve()
+    registry_file = registry_path.resolve()
+    if not case_paths or len(case_paths) != len(set(case_paths)):
+        raise EligibilityError("target security qualification case sources are invalid")
+    sources = []
+    cases = []
+    for source_path in case_paths:
+        source = source_path.resolve()
+        try:
+            relative = source.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise EligibilityError(
+                "target security qualification cases must be inside the repository"
+            ) from exc
+        source_cases = _rows(read_json(source))
+        sources.append({"path": relative, "sha256": _sha256(source)})
+        cases.extend(source_cases)
+
+    registry = load_mechanism_registry(registry_file)
+    case_ids = [row.get("case_id") for row in cases]
+    if not cases or len(case_ids) != len(set(case_ids)) or any(
+        not isinstance(case_id, str) or not case_id for case_id in case_ids
+    ):
+        raise EligibilityError("target security qualification case identities are invalid")
+    active_profiles = {
+        row["oracle_profile_id"]
+        for row in registry.values()
+        if row["oracle_profile_id"] in TARGET_LOCAL_PROFILE_IDS
+    }
+    case_profiles = {row.get("profile_id") for row in cases}
+    if case_profiles != active_profiles:
+        raise EligibilityError(
+            "target security qualification cases do not exactly cover target profiles"
+        )
+
+    labels_by_profile: dict[str, set[str]] = {
+        profile: set() for profile in active_profiles
+    }
+    results = []
+    for case in cases:
+        if set(case) != {"case_id", "profile_id", "expected_label", "code"} or case[
+            "expected_label"
+        ] not in {"secure", "insecure", "unknown"}:
+            raise EligibilityError("target security qualification case is invalid")
+        labels_by_profile[case["profile_id"]].add(case["expected_label"])
+        result = evaluate_target_security_profile(case["code"], case["profile_id"])
+        results.append(
+            {
+                "case_id": case["case_id"],
+                "profile_id": case["profile_id"],
+                "expected_label": case["expected_label"],
+                "actual_label": result["security_label"],
+                "reason_code": result["reason_code"],
+                "matched": result["security_label"] == case["expected_label"],
+            }
+        )
+    if any(labels != {"secure", "insecure", "unknown"} for labels in labels_by_profile.values()):
+        raise EligibilityError(
+            "each target local profile requires secure, insecure, and unknown gold cases"
+        )
+
+    mismatches = [row for row in results if not row["matched"]]
+    report = {
+        "schema_version": "3.0",
+        "artifact_kind": "target_security_profile_qualification",
+        "protocol_id": "phase-context-policy-v3",
+        "status": (
+            "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
+            if not mismatches
+            else "TARGET_MEASUREMENT_PROFILE_QUALIFICATION_FAILED"
+        ),
+        "active_local_profiles": sorted(active_profiles),
+        "target_only_profiles": sorted(active_profiles & TARGET_ONLY_PROFILE_IDS),
+        "unsupported_registry_profiles": sorted(
+            {
+                row["oracle_profile_id"]
+                for row in registry.values()
+                if row["oracle_profile_id"] not in TARGET_LOCAL_PROFILE_IDS
+            }
+        ),
+        "case_sources": sources,
+        "cases_sha256": content_hash(sources),
+        "gold_cases": len(cases),
+        "label_mismatches": len(mismatches),
+        "required_labels": ["secure", "insecure", "unknown"],
+        "registry_sha256": _sha256(registry_file),
+        "implementation_sha256": target_security_profile_producer_sha256(),
+        "unknown_is_secure": False,
+        "arms_or_outcomes_used": False,
+        "formal_execution_authorized": False,
+        "scientific_claim_allowed": False,
+        "claim_boundary": (
+            "Qualification covers only the exact target/legacy local AST producers and frozen "
+            "gold idioms; it is not a global CWE-detection accuracy claim."
         ),
     }
     write_bundle(output, {"case-results.json": results, "qualification.json": report})
@@ -608,7 +722,7 @@ def freeze_tsg_realization_bindings(
                 if binding["decision"] == "unresolved"
                 else "tsg_context_not_present"
             )
-        elif profile_id not in LOCAL_PROFILE_IDS:
+        elif profile_id not in TARGET_LOCAL_PROFILE_IDS:
             decision = "contextual_oracle_required"
             reason = "local_security_oracle_not_qualified"
         else:
@@ -711,11 +825,18 @@ def audit_dataset_eligibility(
     if qualification.get("status") != "QUALIFIED_FOR_EXPERIMENT":
         raise EligibilityError("functional Oracle is not qualified")
     security_qualification = read_json(security_qualification_file)
+    qualification_status = security_qualification.get("status")
+    expected_security_implementation = (
+        target_security_profile_producer_sha256()
+        if qualification_status == "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"
+        else _sha256(root / "src/prompt_mechanism_study/security_profiles.py")
+    )
     if (
-        security_qualification.get("status") != "QUALIFIED_FOR_EXPERIMENT"
+        qualification_status
+        not in {"QUALIFIED_FOR_EXPERIMENT", "QUALIFIED_FOR_TARGET_MEASUREMENT_PROFILE"}
         or security_qualification.get("registry_sha256") != _sha256(registry_file)
         or security_qualification.get("implementation_sha256")
-        != _sha256(root / "src/prompt_mechanism_study/security_profiles.py")
+        != expected_security_implementation
     ):
         raise EligibilityError("security Oracle qualification is invalid or stale")
 
@@ -1056,9 +1177,9 @@ def audit_dataset_eligibility(
         "contracts_bundle_sha256": bundle_digest(contracts),
         "policy_sha256": _sha256(policy_file),
         "mechanism_registry_sha256": _sha256(registry_file),
-        "local_security_profiles_sha256": _sha256(
-            root / "src/prompt_mechanism_study/security_profiles.py"
-        ),
+        "local_security_profiles_sha256": security_qualification[
+            "implementation_sha256"
+        ],
         "functional_oracle_qualification_sha256": _sha256(qualification_file),
         "security_oracle_qualification_sha256": _sha256(
             security_qualification_file
@@ -1107,6 +1228,164 @@ def audit_dataset_eligibility(
                 {"blocker_code": blocker, "task_units": count}
                 for blocker, count in sorted(blocker_counts.items())
             ],
+            "report.json": report,
+        },
+    )
+    return report
+
+
+def apply_binding_adjudications(
+    prepared_root: Path,
+    clusters_root: Path,
+    bindings_root: Path,
+    registry_path: Path,
+    adjudications_path: Path,
+    output: Path,
+) -> dict[str, Any]:
+    """Apply bounded, outcome-blind corrections to unresolved binding rows."""
+
+    prepared = prepared_root.resolve()
+    clusters = clusters_root.resolve()
+    bindings = bindings_root.resolve()
+    registry_file = registry_path.resolve()
+    destination = output.resolve()
+    if destination.exists():
+        raise EligibilityError("binding adjudication output already exists")
+    for bundle in (prepared, clusters, bindings):
+        verify_bundle(bundle)
+    adjudications = read_json(adjudications_path.resolve())
+    required = {
+        "schema_version",
+        "adjudication_id",
+        "source_binding_bundle_sha256",
+        "prepared_bundle_sha256",
+        "clusters_bundle_sha256",
+        "mechanism_registry_sha256",
+        "reviewer_type",
+        "arms_or_outcomes_used",
+        "decisions",
+    }
+    if (
+        not isinstance(adjudications, dict)
+        or set(adjudications) != required
+        or adjudications["schema_version"] != "1.0"
+        or adjudications["arms_or_outcomes_used"] is not False
+        or adjudications["source_binding_bundle_sha256"] != bundle_digest(bindings)
+        or adjudications["prepared_bundle_sha256"] != bundle_digest(prepared)
+        or adjudications["clusters_bundle_sha256"] != bundle_digest(clusters)
+        or adjudications["mechanism_registry_sha256"] != _sha256(registry_file)
+    ):
+        raise EligibilityError("binding adjudication provenance is invalid")
+
+    records = {
+        row["record_id"]: row
+        for row in _rows(read_json(prepared / "records.json"))
+    }
+    cluster_rows = {
+        row["cluster_id"]: row
+        for row in _rows(read_json(clusters / "semantic-clusters.json"))
+    }
+    source_rows = _rows(read_json(bindings / "binding-decisions.json"))
+    source_by_id = _binding_rows(source_rows)
+    registry = load_mechanism_registry(registry_file)
+    decisions = _rows(adjudications["decisions"])
+    decision_ids = [row.get("cluster_id") for row in decisions]
+    if len(decision_ids) != len(set(decision_ids)):
+        raise EligibilityError("binding adjudication ids are duplicated")
+
+    corrected = dict(source_by_id)
+    applied_counts: Counter[str] = Counter()
+    for adjudication in decisions:
+        if set(adjudication) != {
+            "cluster_id",
+            "decision",
+            "realization_id",
+            "evidence_text",
+            "reason",
+        }:
+            raise EligibilityError("binding adjudication row fields are invalid")
+        cluster_id = adjudication["cluster_id"]
+        source = source_by_id.get(cluster_id)
+        cluster = cluster_rows.get(cluster_id)
+        if (
+            source is None
+            or cluster is None
+            or source["decision"] != "not_applicable"
+            or source["reason_code"] != "mechanism_realization_not_resolved"
+            or not isinstance(adjudication["reason"], str)
+            or not adjudication["reason"].strip()
+        ):
+            raise EligibilityError("binding adjudication is not an unresolved source row")
+        representative = records[cluster["representative_record_id"]]
+        if source["representative_record_id"] != representative["record_id"]:
+            raise EligibilityError("binding adjudication representative drifted")
+        if adjudication["decision"] == "retain_unresolved":
+            if (
+                adjudication["realization_id"] is not None
+                or adjudication["evidence_text"] is not None
+            ):
+                raise EligibilityError("unresolved binding adjudication must not name evidence")
+            corrected[cluster_id] = {
+                **source,
+                "adjudication_id": adjudications["adjudication_id"],
+                "adjudication_reason": adjudication["reason"],
+            }
+        elif adjudication["decision"] == "bind_existing":
+            realization_id = adjudication["realization_id"]
+            evidence_text = adjudication["evidence_text"]
+            mechanism = registry.get(realization_id)
+            if (
+                mechanism is None
+                or mechanism["cwe_id"] != source["primary_cwe"]
+                or not isinstance(evidence_text, str)
+                or representative["prompt"].count(evidence_text) != 1
+            ):
+                raise EligibilityError("binding adjudication evidence or realization is invalid")
+            corrected[cluster_id] = {
+                **source,
+                "decision": "profile_candidate",
+                "evidence_normalization": "exact_adjudicated_v1",
+                "evidence_occurrence": 1,
+                "evidence_text": evidence_text,
+                "realization_id": realization_id,
+                "proposed_oracle_profile_id": mechanism["oracle_profile_id"],
+                "reason_code": "outcome_blind_binding_adjudication",
+                "adjudication_id": adjudications["adjudication_id"],
+                "adjudication_reason": adjudication["reason"],
+            }
+        else:
+            raise EligibilityError("binding adjudication decision is invalid")
+        applied_counts[adjudication["decision"]] += 1
+
+    corrected_rows = [corrected[row["cluster_id"]] for row in source_rows]
+    report = {
+        "schema_version": "1.0",
+        "status": "BINDING_ADJUDICATION_COMPLETE",
+        "source_binding_rows": len(source_rows),
+        "adjudicated_rows": len(decisions),
+        "decision_counts": dict(sorted(applied_counts.items())),
+        "adjudicated_remaining_unresolved_rows": applied_counts["retain_unresolved"],
+        "profile_candidate_rows": sum(
+            row["decision"] == "profile_candidate" for row in corrected_rows
+        ),
+        "remaining_unresolved_rows": sum(
+            row["reason_code"] == "mechanism_realization_not_resolved"
+            and row["decision"] == "not_applicable"
+            for row in corrected_rows
+        ),
+        "source_binding_bundle_sha256": bundle_digest(bindings),
+        "prepared_bundle_sha256": bundle_digest(prepared),
+        "clusters_bundle_sha256": bundle_digest(clusters),
+        "mechanism_registry_sha256": _sha256(registry_file),
+        "adjudications_sha256": _sha256(adjudications_path.resolve()),
+        "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
+    }
+    write_bundle(
+        destination,
+        {
+            "binding-decisions.json": corrected_rows,
+            "adjudication-decisions.json": decisions,
             "report.json": report,
         },
     )
@@ -1681,7 +1960,7 @@ def _mechanism_from_binding(
     if (
         mechanism["cwe_id"] != representative["cwe"]
         or mechanism["oracle_profile_id"] != binding.get("proposed_oracle_profile_id")
-        or mechanism["oracle_profile_id"] not in LOCAL_PROFILE_IDS
+        or mechanism["oracle_profile_id"] not in TARGET_LOCAL_PROFILE_IDS
     ):
         raise EligibilityError("realization binding and mechanism registry disagree")
     return mechanism, "resolved_by_frozen_task_binding"
@@ -1784,10 +2063,12 @@ def _sha256(path: Path) -> str:
 
 __all__ = [
     "EligibilityError",
+    "apply_binding_adjudications",
     "audit_dataset_eligibility",
     "freeze_prompt_tsg_holdout_selection",
     "freeze_prompt_tsg_task_selection",
     "freeze_tsg_realization_bindings",
     "qualify_local_security_profiles",
+    "qualify_target_security_profiles",
     "qualify_prompt_tsg_extractor",
 ]

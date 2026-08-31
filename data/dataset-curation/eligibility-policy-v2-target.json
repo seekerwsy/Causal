@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.3",
+  "policy_id": "seven-source-dataset-eligibility-target-v2",
+  "active_layer": "python_confirmatory",
+  "source_tests_required": false,
+  "functional_oracle_languages": ["python"],
+  "security_oracle_languages": ["python"],
+  "lineage_policy": {
+    "admission_role": "diagnostic_only",
+    "selection_priority": "prefer_underrepresented_lineages_after_family_and_cwe_balance",
+    "report_source_specific_estimates": true,
+    "report_leave_one_lineage_out": true
+  },
+  "final_dataset_admission": {
+    "required_contract_quality": "STRICT",
+    "disqualifying_quality_flags": [
+      "known_material_contract_fault",
+      "known_scope_or_evaluability_concern",
+      "metadata_repair_required",
+      "semantic_calibration_required",
+      "source_prompt_incoherent"
+    ],
+    "mechanism_oracle_runtime_support_required": false,
+    "development_exposure_changes_dataset_admission": false
+  },
+  "python_families": [
+    {
+      "family_id": "injection_and_interpreter",
+      "target_clusters": 60,
+      "cwes": ["CWE-78", "CWE-79", "CWE-89", "CWE-94"]
+    },
+    {
+      "family_id": "file_parser_external_resource",
+      "target_clusters": 60,
+      "cwes": ["CWE-22", "CWE-434", "CWE-502", "CWE-611", "CWE-776", "CWE-918"]
+    },
+    {
+      "family_id": "identity_authorization_permissions",
+      "target_clusters": 60,
+      "cwes": ["CWE-200", "CWE-287", "CWE-306", "CWE-732", "CWE-798", "CWE-862"]
+    },
+    {
+      "family_id": "cryptography_randomness_integrity",
+      "target_clusters": 60,
+      "cwes": ["CWE-295", "CWE-327", "CWE-328", "CWE-338", "CWE-347"]
+    }
+  ],
+  "mechanism_registry_path": "data/method/mechanism-registry-v1.json",
+  "functional_oracle_qualification_path": "data/functional-judge/functional-oracle-qualification.json",
+  "security_oracle_qualification_path": "data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification/qualification.json",
+  "layers": [
+    {
+      "layer_id": "python_confirmatory",
+      "languages": ["python"],
+      "cwes": [
+        "CWE-22",
+        "CWE-78",
+        "CWE-79",
+        "CWE-89",
+        "CWE-94",
+        "CWE-200",
+        "CWE-287",
+        "CWE-295",
+        "CWE-306",
+        "CWE-327",
+        "CWE-328",
+        "CWE-338",
+        "CWE-347",
+        "CWE-434",
+        "CWE-502",
+        "CWE-611",
+        "CWE-732",
+        "CWE-776",
+        "CWE-798",
+        "CWE-862",
+        "CWE-918"
+      ]
+    },
+    {
+      "layer_id": "c_cpp_memory_replication",
+      "languages": ["c", "cpp"],
+      "cwes": ["CWE-119", "CWE-120", "CWE-125", "CWE-190", "CWE-416", "CWE-476", "CWE-787"]
+    }
+  ]
+}

@@ -6,7 +6,7 @@ This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
 coverage target, not a claim of current readiness. The active outcome-blind
 audit admits 1,217 quality-qualified task units into the final dataset. Of its
-558 Python tasks, 150 are currently `READY_CONFIRMATORY`; the remainder stay in
+558 Python tasks, 164 are currently `READY_CONFIRMATORY`; the remainder stay in
 the dataset with explicit mechanism, Oracle, scope, or review-readiness fields.
 The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
@@ -421,7 +421,7 @@ omission or a scope/evaluability concern. Another 930 task units remain pending
 contract-quality repair, and six incoherent source prompts are excluded. All
 dispositions remain in the complete ledger.
 
-The 150 `READY_CONFIRMATORY` task units are therefore an implementation-ready
+The 164 `READY_CONFIRMATORY` task units are therefore an implementation-ready
 subset of the 1,217-row final dataset, not the definition of that dataset.
 The response-format repair produced 1,215 strict contracts. A bounded
 outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
@@ -440,32 +440,43 @@ by a deterministic case-insensitive contiguous-subspan projection; two weak
 anchors were conservatively downgraded to unresolved. This binding review is a
 single-model curation decision, not human gold.
 
+A subsequent outcome-blind case adjudication reviewed the 21 unresolved rows
+that affected quality-qualified tasks. Six were grounded to an existing
+realization with exact prompt evidence and 15 remained unresolved because the
+registered mechanism would narrow or change the task contract. The bounded
+Oracle extension then admitted only Python-literal dictionary parsing,
+Requests certificate validation, and explicit cipher/hash selection shapes; it
+did not generalize those profiles to arbitrary code execution, custom TLS
+contexts, dynamic algorithm names, or contextual identity policy.
+
 The final mutually exclusive candidate statuses are:
 
 | Status | Task units |
 | --- | ---: |
-| `READY_CONFIRMATORY` | 150 |
+| `READY_CONFIRMATORY` | 164 |
 | `PENDING_CONTRACT` | 930 |
-| `PENDING_ORACLE` | 260 |
+| `PENDING_ORACLE` | 209 |
 | `PENDING_RUNTIME` | 174 |
-| `PENDING_BINDING` | 21 |
+| `PENDING_BINDING` | 58 |
 | `PENDING_INDEPENDENT_REVIEW` | 21 |
 | `PENDING_SCOPE` | 603 |
 | `EXCLUDED_SOURCE_DEFECT` | 6 |
 
-The 150 ready Python task units cover seven source lineages and ten CWEs. Family
-coverage is 38 injection/interpreter, 59 file/parser/external-resource, 17
-identity/permission, and 36 cryptography/randomness task units. All 150 remain
-admissible on task quality; no lineage count or share removes a task. None of
-the four families meets its 60-task target, so the prospective 240-task-unit
-population gate remains closed. CyberSecEval contributes 54/150 (36.0%) of the
-ready pool; this is reported as a transportability diagnostic.
+The 164 ready Python task units cover seven source lineages and thirteen CWEs.
+Family coverage is 45 injection/interpreter, 60 file/parser/external-resource,
+17 identity/permission, and 42 cryptography/randomness task units. All 164
+remain admissible on task quality; no lineage count or share removes a task.
+Only the file/parser family meets its 60-task target, so the prospective
+240-task-unit population gate remains closed. CyberSecEval contributes 57/164
+(34.8%) of the ready pool; this is reported as a transportability diagnostic.
 
-The Security-Oracle registry published with the audit distinguishes 12
+The Security-Oracle registry published with the audit distinguishes 14
 qualified deterministic Python profiles, one registered contextual profile
 that remains unsupported, and 28 BaxBench source-native profiles pending Docker
-qualification. A task can be `READY_CONFIRMATORY` only with a qualified profile;
-an unsupported or missing profile remains `PENDING_ORACLE`.
+qualification. The target-schema producer delegates the 12 immutable legacy
+profiles and owns only the two new CWE-295/CWE-327 profiles. A task can be
+`READY_CONFIRMATORY` only with a qualified profile; an unsupported or missing
+profile remains `PENDING_ORACLE`.
 
 The priority-extension inventory contains 207 source-tested task units:
 
@@ -488,18 +499,20 @@ passes and one framework realization per scenario is selected before outcomes.
 
 The active closed artifacts are:
 
-- blind mechanism-binding run:
-  `.codex-runtime/mechanism-binding-review-f2f115f-20260831-01`, plan SHA-256
-  `f2f8556a4fad016413aa0f4585f4769ea81b0fa11bc2632c2e32a159cb77690e`
-  and final-result SHA-256
-  `aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed`;
+- adjudicated mechanism-binding run:
+  `.codex-runtime/mechanism-binding-adjudication-20260831-19`, SHA-256
+  `089ac31dd29bb5ba89a4ba5dcd4776f8f6ad2c1e871bf3629d9f0ae59f8eef19`;
 - targeted outcome-blind contract recovery:
   `.codex-runtime/contract-recovery-adjudication-20260831-10`, SHA-256
   `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`;
-- unified candidate-data audit:
-  `.codex-runtime/dataset-final-quality-20260831-14`,
+- target Security-Oracle qualification:
+  `data/oracle-calibration/phase-context-policy-v3-security-profiles-v1-qualification`,
   SHA-256
-  `b0800bac8f6e3f0ed61cff2b111cf04e901597d06d77352993590ef9e043fef3`;
+  `fc4216dc7cb6e8f8e0377e69e300bded30485f1725b7d855504adab3b396ab75`;
+- unified candidate-data audit after bounded Oracle expansion:
+  `.codex-runtime/dataset-final-quality-20260831-36-target-oracle-final`,
+  SHA-256
+  `bf94da3ff61a952631bc88f078792531f5bb8c7f16e3341d24256223c439f886`;
 - audit report:
   `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
 
