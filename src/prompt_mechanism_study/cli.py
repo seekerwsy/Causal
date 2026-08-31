@@ -183,6 +183,7 @@ def _add_curation_group(groups: Any) -> None:
     content_proposals.add_argument("--producer-commit", required=True)
     content_proposals.add_argument("--max-new-batches", type=int)
     content_proposals.add_argument("--workers", type=int, default=1)
+    content_proposals.add_argument("--stop-after-evidence", action="store_true")
 
     reserve_future = _leaf(
         actions,
@@ -721,6 +722,7 @@ def _run_contract_content_proposals(
         producer_commit=args.producer_commit,
         max_new_batches=args.max_new_batches,
         workers=args.workers,
+        stop_after_evidence=args.stop_after_evidence,
     )
     return _emit_status(report)
 

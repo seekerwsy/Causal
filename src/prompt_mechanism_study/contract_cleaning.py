@@ -132,6 +132,7 @@ def run_contract_content_proposals(
     producer_commit: str,
     max_new_batches: int | None = None,
     workers: int = 1,
+    stop_after_evidence: bool = False,
     provider: Provider = bailian_complete,
 ) -> dict[str, Any]:
     """Backfill faithful contracts and repair only contracts already judged faulty."""
@@ -202,6 +203,17 @@ def run_contract_content_proposals(
         for task_id, row in evidence_by_task.items()
         if row["binding_status"] == "needs_repair"
     }
+    if stop_after_evidence:
+        return {
+            "schema_version": "1.0",
+            "status": "CONTRACT_EVIDENCE_BACKFILL_COMPLETE",
+            "task_unit_count": len(items),
+            "evidence_item_count": len(evidence_items),
+            "evidence_bound_count": len(evidence_items) - len(escalated_ids),
+            "evidence_escalation_count": len(escalated_ids),
+            "initial_semantic_repair_count": len(initial_repair_items),
+            "complete": False,
+        }
     repair_items = sorted(
         initial_repair_items
         + [item for item in evidence_items if item["task_unit_id"] in escalated_ids],
