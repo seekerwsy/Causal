@@ -39,7 +39,6 @@ _CONTENT_FIELDS = (
     "side_effects",
     "environment_dependencies",
 )
-_EVIDENCE_FIELDS = ("entrypoint", *_CONTENT_FIELDS)
 _SOURCE_ASSESSMENTS = {"sufficient", "insufficient", "defect", "uncertain"}
 _REPAIR_CATEGORIES = {
     "EVIDENCE_BACKFILL_ONLY",
@@ -543,6 +542,7 @@ def _evidence_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
                 "language": item["language"],
                 "source_prompt": item["source_prompt"],
                 "immutable_contract": item["old_contract"],
+                "evidence_targets": _evidence_targets(item["old_contract"]),
             }
             for index, item in enumerate(batch, start=1)
         ],
@@ -591,16 +591,16 @@ def _parse_evidence_backfill(
     raw: bytes, batch: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     rows = _response_rows(raw, "items", len(batch))
-    required = {"item_index", "binding_status", "content_evidence", "reason"}
+    required = {"item_index", "binding_status", "evidence_bindings", "reason"}
     frozen = []
     for row, item in zip(rows, batch, strict=True):
         if set(row) != required or row["binding_status"] not in {"bound", "needs_repair"}:
             raise ContractCleaningError("evidence backfill response is malformed")
         _bounded_reason(row["reason"])
-        evidence = row["content_evidence"]
+        evidence = row["evidence_bindings"]
         if row["binding_status"] == "bound":
             try:
-                evidence = _normalize_content_evidence(
+                evidence = _normalize_evidence_bindings(
                     evidence,
                     item["old_contract"],
                     item["source_prompt"],
@@ -638,7 +638,7 @@ def _parse_semantic_repairs(
         "resolution_status",
         "entrypoint",
         *_CONTENT_FIELDS,
-        "content_evidence",
+        "evidence_bindings",
         "source_specification_assessment",
         "repair_category",
         "reason",
@@ -653,8 +653,8 @@ def _parse_semantic_repairs(
         ):
             raise ContractCleaningError("semantic repair response is malformed")
         contract = _validate_contract_values(row)
-        evidence = _normalize_content_evidence(
-            row["content_evidence"],
+        evidence = _normalize_evidence_bindings(
+            row["evidence_bindings"],
             contract,
             item["source_prompt"],
             item["source_prompt_sha256"],
@@ -750,30 +750,49 @@ def _validate_contract_values(row: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _normalize_content_evidence(
+def _evidence_targets(contract: Mapping[str, Any]) -> list[dict[str, str]]:
+    targets = []
+    if contract["entrypoint"] is not None:
+        targets.append({"target_id": "entrypoint", "value": contract["entrypoint"]})
+    for field in _CONTENT_FIELDS:
+        targets.extend(
+            {"target_id": f"{field}:{index}", "value": value}
+            for index, value in enumerate(contract[field], start=1)
+        )
+    return targets
+
+
+def _normalize_evidence_bindings(
     raw: Any,
     contract: Mapping[str, Any],
     prompt: str,
     source_prompt_sha256: str,
 ) -> dict[str, Any]:
-    if not isinstance(raw, dict) or set(raw) != set(_EVIDENCE_FIELDS):
-        raise ContractCleaningError("content evidence fields are invalid")
-    frozen: dict[str, Any] = {"offset_basis": "utf8_bytes_of_exact_natural_prompt_v1"}
-    entrypoint_spans = raw["entrypoint"]
-    if contract["entrypoint"] is None:
-        if entrypoint_spans != []:
-            raise ContractCleaningError("null entrypoint must not carry evidence")
-        frozen["entrypoint"] = []
-    else:
-        frozen["entrypoint"] = _normalize_span_group(
-            entrypoint_spans, prompt, source_prompt_sha256
+    targets = _evidence_targets(contract)
+    if (
+        not isinstance(raw, list)
+        or len(raw) != len(targets)
+        or any(not isinstance(binding, dict) for binding in raw)
+    ):
+        raise ContractCleaningError("content evidence target count is invalid")
+    expected_ids = [target["target_id"] for target in targets]
+    if [binding.get("target_id") for binding in raw] != expected_ids:
+        raise ContractCleaningError("content evidence target identities are invalid")
+    normalized_by_id = {}
+    for binding in raw:
+        if set(binding) != {"target_id", "spans"}:
+            raise ContractCleaningError("content evidence binding is malformed")
+        normalized_by_id[binding["target_id"]] = _normalize_span_group(
+            binding["spans"], prompt, source_prompt_sha256
         )
+    frozen: dict[str, Any] = {
+        "offset_basis": "utf8_bytes_of_exact_natural_prompt_v1",
+        "entrypoint": normalized_by_id.get("entrypoint", []),
+    }
     for field in _CONTENT_FIELDS:
-        groups = raw[field]
-        if not isinstance(groups, list) or len(groups) != len(contract[field]):
-            raise ContractCleaningError(f"content evidence does not align with {field}")
         frozen[field] = [
-            _normalize_span_group(group, prompt, source_prompt_sha256) for group in groups
+            normalized_by_id[f"{field}:{index}"]
+            for index in range(1, len(contract[field]) + 1)
         ]
     return frozen
 

@@ -38,19 +38,27 @@ def _batch():
 
 
 def _evidence():
-    return {
-        "entrypoint": [{"evidence_text": "solve", "evidence_occurrence": 1}],
-        "requirements": [
-            [
+    return [
+        {
+            "target_id": "entrypoint",
+            "spans": [{"evidence_text": "solve", "evidence_occurrence": 1}],
+        },
+        {
+            "target_id": "requirements:1",
+            "spans": [
                 {"evidence_text": "输入值", "evidence_occurrence": 1},
                 {"evidence_text": "原样返回", "evidence_occurrence": 1},
-            ]
-        ],
-        "inputs": [[{"evidence_text": "输入值", "evidence_occurrence": 1}]],
-        "outputs": [[{"evidence_text": "原样返回", "evidence_occurrence": 1}]],
-        "side_effects": [],
-        "environment_dependencies": [],
-    }
+            ],
+        },
+        {
+            "target_id": "inputs:1",
+            "spans": [{"evidence_text": "输入值", "evidence_occurrence": 1}],
+        },
+        {
+            "target_id": "outputs:1",
+            "spans": [{"evidence_text": "原样返回", "evidence_occurrence": 1}],
+        },
+    ]
 
 
 def test_evidence_backfill_uses_utf8_byte_offsets_and_multiple_spans() -> None:
@@ -60,7 +68,7 @@ def test_evidence_backfill_uses_utf8_byte_offsets_and_multiple_spans() -> None:
                 {
                     "item_index": 1,
                     "binding_status": "bound",
-                    "content_evidence": _evidence(),
+                    "evidence_bindings": _evidence(),
                     "reason": "All values are directly supported.",
                 }
             ]
@@ -84,7 +92,7 @@ def test_unbound_evidence_cannot_carry_partial_spans() -> None:
                 {
                     "item_index": 1,
                     "binding_status": "needs_repair",
-                    "content_evidence": _evidence(),
+                    "evidence_bindings": _evidence(),
                     "reason": "The contract adds behavior.",
                 }
             ]
@@ -97,15 +105,14 @@ def test_unbound_evidence_cannot_carry_partial_spans() -> None:
 
 
 def test_incomplete_bound_evidence_is_deterministically_escalated() -> None:
-    evidence = _evidence()
-    evidence["requirements"] = []
+    evidence = _evidence()[:-1]
     raw = json.dumps(
         {
             "items": [
                 {
                     "item_index": 1,
                     "binding_status": "bound",
-                    "content_evidence": evidence,
+                    "evidence_bindings": evidence,
                     "reason": "Bound by the model.",
                 }
             ]
@@ -130,7 +137,7 @@ def test_semantic_repair_requires_evidence_for_every_contract_value() -> None:
         "outputs": ["the unchanged input value"],
         "side_effects": [],
         "environment_dependencies": [],
-        "content_evidence": _evidence(),
+        "evidence_bindings": _evidence(),
         "source_specification_assessment": "sufficient",
         "repair_category": "CONTRACT_EXTRACTION_ERROR",
         "reason": "The prior wording was not source faithful.",
@@ -140,7 +147,7 @@ def test_semantic_repair_requires_evidence_for_every_contract_value() -> None:
     )[0]
     assert result["source_specification_assessment"] == "sufficient"
 
-    response["content_evidence"]["outputs"] = []
+    response["evidence_bindings"] = response["evidence_bindings"][:-1]
     with pytest.raises(ContractCleaningError):
         _parse_semantic_repairs(
             json.dumps({"items": [response]}, ensure_ascii=False).encode(), _batch()
