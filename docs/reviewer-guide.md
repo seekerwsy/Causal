@@ -27,7 +27,7 @@ is their recovery boundary.
 | Stage | Frozen input | Output | Main implementation |
 | --- | --- | --- | --- |
 | Representation | normalized source records, five-role manifest, and Prompt TSG catalog | deduplicated task units, canonical scope/policy identity, Prompt TSG and control bindings | `representation.py`, `mechanisms.py` |
-| Prioritization | DISCOVERY task units plus accepted Atomic/Pair profiles | sole-difference Full/Ablation fixed slots | `prioritization.py`, `interaction_selector.py` |
+| Prioritization | DISCOVERY task units plus accepted Atomic/Pair/baseline profiles | sole-difference Full/Ablation and qualified optional baseline fixed slots | `prioritization.py`, `interaction_selector.py`, `rq1_baselines.py` |
 | Hypothesis freeze | accepted qualification, budget, fixed slots, unique union and bridge/protocolization | two correctly timed freezes, model-bound dispatch, tasks, realizations, assignments, and ITT plan | `study_design.py`, `prioritization.py` |
 | Intervention/randomization | frozen model-effect coordinates and task-policy bundles | complete assigned-arm blocks with unique request-randomness slots | `intervention.py`, `randomization.py` |
 | Measurement | assigned prompt plus frozen adapters | raw responses, code validity, Security Oracle result, Functional Judge result | `measurement.py` |
@@ -70,6 +70,11 @@ A review should confirm all of the following:
 - ADD and REMOVE use operation-specific target/control coding. In the target
   method, independent compatibility defines the common Pair universe; only
   Pair Full reads relation support, while No-Relation does not.
+- Optional blinded Expert and seeded Random selectors consume that same
+  support-qualified, model-bound universe and `K`. Expert cards cannot read
+  RD/FCI/relation/selector or target-outcome fields; Random uses one frozen
+  SHA-256 ordering seed. Both emit ordinary fixed-slot sources and therefore
+  share the union, bridge, confirmation, status, and accounting path.
 - Every task-unit/realization/model block has complete assigned-arm support.
 - One semantic policy has one protocolization and one task-policy bundle per task;
   model-specific effect records reuse those bytes, while the verifier independently
@@ -103,7 +108,7 @@ The target scientific core can be reviewed in ten files:
 4. `src/prompt_mechanism_study/prioritization.py`
 5. `src/prompt_mechanism_study/interaction_selector.py`
 6. `src/prompt_mechanism_study/study_design.py`
-7. `src/prompt_mechanism_study/intervention.py`
+7. `src/prompt_mechanism_study/rq1_baselines.py`
 8. `src/prompt_mechanism_study/inference.py`
 9. `src/prompt_mechanism_study/selector_analysis.py`
 10. `src/prompt_mechanism_study/selector_verify.py`
@@ -121,14 +126,14 @@ Run the target reviewer-facing invariant suite:
 .venv\Scripts\python.exe -m pytest -m reviewer -q
 ```
 
-The current expected result is 59 passing tests. Run the complete retained
+The current expected result is 65 passing tests. Run the complete retained
 repository suite separately:
 
 ```text
 .venv\Scripts\python.exe -m pytest -q -o addopts=""
 ```
 
-The current expected result is 170 passing tests. The smallest zero-network
+The current expected result is 183 passing tests. The smallest zero-network
 target-method closure is:
 
 ```text
@@ -199,7 +204,9 @@ exploration, or temporary checkpoints.
 The target method remains `SPECIFIED_DRAFT`, but its method core is now
 implemented and reviewer-tested: five data roles and near-duplicate firewall;
 model-independent Atomic/Pair policy identity; Atomic Full/RD-only; Pair
-  Full/No-Relation with four Prompt-TSG predicates; fixed K slots; unique
+  Full/No-Relation with four Prompt-TSG predicates; optional blinded Expert and
+  seeded Random target selectors with shared-universe fixed slots and independent
+  ranking replay; fixed K slots; unique
   model-effect union and model-bound dispatch; shared task-policy bundles;
   deterministic complete-block randomization; assigned-arm task-unit ITT; separate Atomic
 and Pair max-\|T\| families; five statuses; assumption-conditional power;
@@ -227,12 +234,15 @@ defaults or execution authorization, in
 “Single author decision gate.”
 Scope contraction does not remove required comparisons. Atomic Full/RD-only
 and Pair Full/No-Relation are the mandatory Core and are implemented/tested.
-If the author selects Expert, Random, Association, or Prediction as an external
-RQ1 baseline, it must first gain an executable schema-3 selector, qualification
-artifact, fixed-slot output, shared confirmation/accounting path, and
-independent-verifier coverage. At present Expert/Random are only budget names
-and Association/Prediction remain legacy-schema implementations, so no
-external target baseline is yet implementation-complete.
+Blinded Expert and seeded Random are now executable schema-3 selectors for both
+tracks: their information/seed provenance, candidate permutation, model
+dispatch, fixed slots, shared union, and independent replay are tested. The
+budget additionally requires an accepted baseline qualification for every
+selected selector/model coordinate; a scenario name alone cannot pass. The
+author must still choose the exact RQ1 envelope and complete the prospective
+baseline cards/seeds and one-shot qualification. Association/Prediction remain
+legacy-schema implementations and cannot enter the target RQ1 set without a
+separately approved target contract.
 The target budget implementation does not accept an opaque manual per-call
 price: every materialization, generation, and functional-judge rate must derive
 from one frozen currency/region/tier, input/output token ceilings, per-million

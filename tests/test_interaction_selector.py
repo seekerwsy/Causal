@@ -33,9 +33,23 @@ from prompt_mechanism_study.mechanisms import (
     validate_prompt_control_binding,
     validate_pair_relation_evidence,
 )
-from prompt_mechanism_study.prioritization import SlotStatus
+from prompt_mechanism_study.prioritization import (
+    FixedSlotSource,
+    PolicyTrack,
+    SlotStatus,
+    freeze_fixed_slot_ledger,
+    freeze_shared_confirmation_union,
+)
 from prompt_mechanism_study.prompt_tsg import PromptTSG, QueryState, TSGEdge, TSGNode
 from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.rq1_baselines import (
+    BlindExpertRankingCard,
+    SeededRandomRankingPlan,
+    freeze_pair_baseline_universe,
+    run_blind_expert_baseline,
+    run_seeded_random_baseline,
+    verify_rq1_baseline_result,
+)
 from prompt_mechanism_study.representation import (
     AnalysisScope,
     ModelBoundCandidateRecord,
@@ -695,6 +709,131 @@ def test_pair_shadow_has_one_compatibility_first_universe_and_one_rd_path() -> N
         for manifest in result.fold_manifests
         for fold in range(manifest.fold_count)
     )
+
+
+@pytest.mark.reviewer
+def test_pair_rq1_baselines_share_support_gate_and_replay_blind_rankings() -> None:
+    _present, _absent, _incompatible, rows, universe, plan, evidence = (
+        _shadow_fixture()
+    )
+    qualification = run_pair_shadow_qualification(universe, rows, evidence, plan)
+    baseline_universe = freeze_pair_baseline_universe(
+        universe,
+        qualification.support_gates,
+    )
+    expert_card = BlindExpertRankingCard(
+        baseline_universe.protocol_id,
+        baseline_universe.schema_version,
+        baseline_universe.track,
+        "pair_blind_expert",
+        baseline_universe.model_id,
+        baseline_universe.baseline_universe_id,
+        baseline_universe.candidate_material_sha256,
+        (
+            "analysis_scope",
+            "candidate_family",
+            "factor_operations",
+            "factorial_compatibility",
+            "support_summary",
+        ),
+        (
+            "confirmation_assignments",
+            "confirmation_outcomes",
+            "discovery_outcomes",
+            "fci_evidence",
+            "rd_scores",
+            "relation_evidence",
+            "selector_rankings",
+        ),
+        tuple(reversed(baseline_universe.eligible_policy_keys)),
+        content_hash("pair-expert-identity"),
+        content_hash("pair-expert-instructions"),
+        content_hash("pair-expert-independent-review"),
+    )
+    expert = run_blind_expert_baseline(baseline_universe, expert_card)
+    expert_receipt = verify_rq1_baseline_result(
+        baseline_universe,
+        expert,
+        expert_card=expert_card,
+    )
+    random_plan = SeededRandomRankingPlan(
+        baseline_universe.protocol_id,
+        baseline_universe.schema_version,
+        baseline_universe.track,
+        "pair_seeded_random",
+        baseline_universe.model_id,
+        baseline_universe.baseline_universe_id,
+        baseline_universe.candidate_material_sha256,
+        20260832,
+        content_hash("pair-random-seed-source"),
+    )
+    random_result = run_seeded_random_baseline(baseline_universe, random_plan)
+    random_receipt = verify_rq1_baseline_result(
+        baseline_universe,
+        random_result,
+        random_plan=random_plan,
+    )
+
+    assert baseline_universe.source_universe_id == universe.universe_id
+    assert tuple(
+        item.policy_key for item in baseline_universe.expert_candidate_cards
+    ) == baseline_universe.eligible_policy_keys
+    assert all(
+        dict(item.support_summary)["cell_11_task_units"] > 0
+        for item in baseline_universe.expert_candidate_cards
+    )
+    assert set(baseline_universe.eligible_policy_keys) == {
+        item.pair_id for item in qualification.support_gates if item.passed
+    }
+    assert expert.source.model_bound_records == universe.model_bound_records
+    assert random_result == run_seeded_random_baseline(
+        baseline_universe,
+        random_plan,
+    )
+    assert expert_receipt.status == random_receipt.status == "PASS"
+    ledger = freeze_fixed_slot_ledger(
+        baseline_universe.protocol_id,
+        baseline_universe.schema_version,
+        (
+            FixedSlotSource(
+                PolicyTrack.PAIR,
+                "pair_full",
+                baseline_universe.model_id,
+                universe.universe_id,
+                qualification.full.slots,
+                universe.model_bound_records,
+            ),
+            FixedSlotSource(
+                PolicyTrack.PAIR,
+                "pair_no_relation",
+                baseline_universe.model_id,
+                universe.universe_id,
+                qualification.no_relation.slots,
+                universe.model_bound_records,
+            ),
+            expert.source,
+            random_result.source,
+        ),
+    )
+    union = freeze_shared_confirmation_union(ledger)
+    assert {source.selector_id for source in ledger.sources} == {
+        "pair_blind_expert",
+        "pair_full",
+        "pair_no_relation",
+        "pair_seeded_random",
+    }
+    assert len(union.entries) == len(
+        {
+            slot.candidate_record_id
+            for slot in ledger.slots
+            if slot.candidate_record_id is not None
+        }
+    )
+    with pytest.raises(ValueError, match="random ranking plan drifts"):
+        run_seeded_random_baseline(
+            baseline_universe,
+            replace(random_plan, model_id="another-model"),
+        )
 
 
 @pytest.mark.reviewer

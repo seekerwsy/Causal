@@ -1391,8 +1391,11 @@ and tie-break rules. The relation profile freezes the four executable predicates
 minimum resolved tasks/support, maximum unresolved fraction, and labelled qualification evidence.
 
 `QUAL_DEV`, `QUAL_ACCEPT`, discovery, and confirmation task units remain disjoint. Candidate
-profiles may be developed repeatedly on `QUAL_DEV`, but all five selected profile plans are sealed
-together before the one-shot integrated `QUAL_ACCEPT` run. A fold manifest is frozen before the
+profiles may be developed repeatedly on `QUAL_DEV`, but all six selected profile plans—including
+the RQ1 baseline-set profile—are sealed together before the one-shot integrated `QUAL_ACCEPT` run.
+The baseline profile binds the selected envelope, every track/model coordinate, blinded Expert
+information contract or seeded-Random provenance, fixed-slot artifact, and independent replay
+receipt. A fold manifest is frozen before the
 corresponding discovery outcome score is computed. A candidate whose frozen folds or support are
 inadequate is `NON_EVALUABLE`; the implementation never retries another fold count or seed after
 observing its score.

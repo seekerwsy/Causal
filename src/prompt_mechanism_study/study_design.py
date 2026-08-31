@@ -47,6 +47,7 @@ class QualificationProfileKind(StrEnum):
     ATOMIC_RD = "atomic_rd"
     RELATION = "relation"
     PAIR_RD = "pair_rd"
+    RQ1_BASELINES = "rq1_baselines"
     POWER_AND_MARGIN = "power_and_margin"
 
 
@@ -153,7 +154,7 @@ class QualificationPlanBundle:
             raise TypeError("plans must contain QualificationPlan values")
         expected = tuple(QualificationProfileKind)
         if tuple(plan.profile_kind for plan in self.plans) != expected:
-            raise ValueError("qualification bundle must contain all five plans in order")
+            raise ValueError("qualification bundle must contain every target plan in order")
         if type(self.plan_phase) is not QualificationPlanPhase:
             raise TypeError("plan_phase must be a QualificationPlanPhase")
         if {plan.plan_phase for plan in self.plans} != {self.plan_phase}:
@@ -231,7 +232,7 @@ class QualificationBundle:
             raise TypeError("profiles must contain QualificationProfileResult values")
         expected = tuple(QualificationProfileKind)
         if tuple(profile.profile_kind for profile in self.profiles) != expected:
-            raise ValueError("qualification bundle must contain all five results in order")
+            raise ValueError("qualification bundle must contain every target result in order")
         if {
             profile.qualification_accept_data_id for profile in self.profiles
         } != {self.qualification_accept_data_id}:
@@ -296,7 +297,7 @@ def freeze_qualification_bundle(
     if tuple(item.profile_kind for item in frozen_profiles) != tuple(
         QualificationProfileKind
     ):
-        raise ValueError("qualification results must cover all five profiles in order")
+        raise ValueError("qualification results must cover every target profile in order")
     for plan, result in zip(plan_bundle.plans, frozen_profiles, strict=True):
         if (
             result.profile_kind is not plan.profile_kind
@@ -1360,6 +1361,155 @@ def _scenario_selector_ids(
     return tuple(sorted(atomic)), tuple(sorted(pair))
 
 
+def _baseline_profile_id(scenario: RQ1BudgetScenario) -> str:
+    return {
+        RQ1BudgetScenario.CORE: "rq1_baseline_set_core_v1",
+        RQ1BudgetScenario.CORE_EXPERT: "rq1_baseline_set_core_expert_v1",
+        RQ1BudgetScenario.CORE_EXPERT_RANDOM: (
+            "rq1_baseline_set_core_expert_random_v1"
+        ),
+    }[scenario]
+
+
+@dataclass(frozen=True, slots=True)
+class RQ1BaselineQualification:
+    """Qualification evidence for every external baseline selected by RQ1."""
+
+    protocol_id: str
+    scenario: RQ1BudgetScenario
+    model_ids: tuple[str, ...]
+    qualification_accept_data_id: str
+    code_commit: str
+    contract_references: tuple[tuple[str, str, FreezeArtifactReference], ...]
+    status: QualificationStatus
+    blockers: tuple[str, ...]
+    independent_verifier_status: str
+    target_discovery_or_confirmation_outcomes_used: bool = False
+
+    def __post_init__(self) -> None:
+        require_text(self.protocol_id, "baseline qualification protocol_id")
+        if type(self.scenario) is not RQ1BudgetScenario:
+            raise TypeError("baseline qualification scenario must be typed")
+        _require_canonical_texts(self.model_ids, "baseline qualification model_ids")
+        require_text(
+            self.qualification_accept_data_id,
+            "baseline qualification acceptance data",
+        )
+        _require_git_commit(self.code_commit)
+        atomic, pair = _scenario_selector_ids(self.scenario)
+        core = {
+            "atomic_full",
+            "atomic_rd_only",
+            "pair_full",
+            "pair_no_relation",
+        }
+        external = tuple(sorted(set((*atomic, *pair)) - core))
+        expected_coordinates = tuple(
+            sorted(
+                (selector_id, model_id)
+                for selector_id in external
+                for model_id in self.model_ids
+            )
+        )
+        actual_coordinates = tuple(
+            (selector_id, model_id)
+            for selector_id, model_id, _ in self.contract_references
+        )
+        if actual_coordinates != tuple(sorted(set(actual_coordinates))):
+            raise ValueError("baseline qualification contracts must be canonical")
+        if not set(actual_coordinates) <= set(expected_coordinates):
+            raise ValueError("baseline qualification contains an unselected contract")
+        if any(
+            type(reference) is not FreezeArtifactReference
+            for _, _, reference in self.contract_references
+        ):
+            raise TypeError("baseline qualification references must be typed")
+        if type(self.status) is not QualificationStatus:
+            raise TypeError("baseline qualification status must be typed")
+        if self.blockers != tuple(sorted(set(self.blockers))):
+            raise ValueError("baseline qualification blockers must be canonical")
+        if self.independent_verifier_status not in {"PASS", "FAIL"}:
+            raise ValueError("baseline qualification verifier must be PASS or FAIL")
+        if self.target_discovery_or_confirmation_outcomes_used is not False:
+            raise ValueError("baseline qualification cannot use target outcomes")
+        passing = (
+            actual_coordinates == expected_coordinates
+            and not self.blockers
+            and self.independent_verifier_status == "PASS"
+        )
+        if self.status is QualificationStatus.ACCEPTED and not passing:
+            raise ValueError("accepted baseline qualification requires every contract")
+        if self.status is QualificationStatus.BLOCKED and passing:
+            raise ValueError("a fully passing baseline qualification cannot be blocked")
+
+    @property
+    def selected_profile_id(self) -> str:
+        return _baseline_profile_id(self.scenario)
+
+    @property
+    def formal_use_authorized(self) -> bool:
+        return self.status is QualificationStatus.ACCEPTED
+
+    @property
+    def rq1_baseline_qualification_id(self) -> str:
+        return content_id("rq1_baseline_qualification_", self)
+
+
+def qualify_rq1_baselines(
+    *,
+    protocol_id: str,
+    scenario: RQ1BudgetScenario,
+    model_ids: Sequence[str],
+    qualification_accept_data_id: str,
+    code_commit: str,
+    contract_references: Sequence[tuple[str, str, FreezeArtifactReference]],
+    independent_verifier_status: str,
+) -> RQ1BaselineQualification:
+    """Close the selected baseline contracts without reading target outcomes."""
+
+    if type(scenario) is not RQ1BudgetScenario:
+        raise TypeError("baseline qualification scenario must be typed")
+    frozen_models = tuple(sorted(model_ids))
+    _require_canonical_texts(frozen_models, "baseline qualification model_ids")
+    frozen_references = tuple(
+        sorted(contract_references, key=lambda item: (item[0], item[1]))
+    )
+    atomic, pair = _scenario_selector_ids(scenario)
+    core = {
+        "atomic_full",
+        "atomic_rd_only",
+        "pair_full",
+        "pair_no_relation",
+    }
+    expected = {
+        (selector_id, model_id)
+        for selector_id in set((*atomic, *pair)) - core
+        for model_id in frozen_models
+    }
+    actual = {(selector_id, model_id) for selector_id, model_id, _ in frozen_references}
+    blockers = set()
+    if actual != expected:
+        blockers.add("baseline_contract_coverage_incomplete")
+    if independent_verifier_status != "PASS":
+        blockers.add("independent_baseline_verifier_failed")
+    frozen_blockers = tuple(sorted(blockers))
+    return RQ1BaselineQualification(
+        protocol_id,
+        scenario,
+        frozen_models,
+        qualification_accept_data_id,
+        code_commit,
+        frozen_references,
+        (
+            QualificationStatus.ACCEPTED
+            if not frozen_blockers
+            else QualificationStatus.BLOCKED
+        ),
+        frozen_blockers,
+        independent_verifier_status,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RQ1BudgetReservation:
     scenario: RQ1BudgetScenario
@@ -1432,6 +1582,7 @@ class RQ1BudgetQualification:
     pair_selector_ids: tuple[str, ...]
     power_and_margin_memo: PowerAndMarginMemo
     qualification_bundle: QualificationBundle
+    baseline_qualification: RQ1BaselineQualification
     provider_ceilings: ProviderBudgetCeilings
     reservation: RQ1BudgetReservation
     status: QualificationStatus
@@ -1452,6 +1603,8 @@ class RQ1BudgetQualification:
             raise TypeError("RQ1 budget requires a power-and-margin memo")
         if type(self.qualification_bundle) is not QualificationBundle:
             raise TypeError("RQ1 budget requires the integrated qualification bundle")
+        if type(self.baseline_qualification) is not RQ1BaselineQualification:
+            raise TypeError("RQ1 budget requires a baseline qualification")
         if type(self.provider_ceilings) is not ProviderBudgetCeilings:
             raise TypeError("RQ1 budget requires typed provider ceilings")
         if type(self.reservation) is not RQ1BudgetReservation:
@@ -1472,7 +1625,7 @@ class RQ1BudgetQualification:
             raise ValueError("RQ1 budget cannot use target discovery or confirmation outcomes")
         if self.protocol_id != self.power_and_margin_memo.protocol_id or (
             self.protocol_id != self.qualification_bundle.protocol_id
-        ):
+        ) or self.protocol_id != self.baseline_qualification.protocol_id:
             raise ValueError("RQ1 budget protocol lineage drift")
         power_profile = next(
             profile
@@ -1492,11 +1645,33 @@ class RQ1BudgetQualification:
             and self.qualification_bundle.qualification_accept_data_id
             == self.power_and_margin_memo.qualification_accept_data_id
         )
+        baseline_profile = next(
+            profile
+            for profile in self.qualification_bundle.profiles
+            if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
+        )
+        baseline_profile_lineage_matches = (
+            self.baseline_qualification.scenario is self.scenario
+            and self.baseline_qualification.model_ids == self.dimensions.model_ids
+            and baseline_profile.selected_profile_id
+            == self.baseline_qualification.selected_profile_id
+            and baseline_profile.artifact.artifact_id
+            == self.baseline_qualification.rq1_baseline_qualification_id
+            and baseline_profile.artifact.sha256
+            == content_hash(self.baseline_qualification)
+            and baseline_profile.qualification_accept_data_id
+            == self.baseline_qualification.qualification_accept_data_id
+            and baseline_profile.code_commit == self.baseline_qualification.code_commit
+            and self.qualification_bundle.qualification_accept_data_id
+            == self.baseline_qualification.qualification_accept_data_id
+        )
         passing = (
             not self.blockers
             and self.power_and_margin_memo.formal_use_authorized
             and self.qualification_bundle.formal_use_authorized
+            and self.baseline_qualification.formal_use_authorized
             and power_profile_lineage_matches
+            and baseline_profile_lineage_matches
             and self.independent_verifier_status == "PASS"
         )
         if self.status is QualificationStatus.ACCEPTED and not passing:
@@ -1519,6 +1694,7 @@ def qualify_rq1_budget(
     dimensions: RQ1BudgetDimensions,
     power_and_margin_memo: PowerAndMarginMemo,
     qualification_bundle: QualificationBundle,
+    baseline_qualification: RQ1BaselineQualification,
     provider_ceilings: ProviderBudgetCeilings,
     independent_verifier_status: str,
 ) -> RQ1BudgetQualification:
@@ -1526,12 +1702,22 @@ def qualify_rq1_budget(
 
     if type(scenario) is not RQ1BudgetScenario:
         raise TypeError("budget scenario must be typed")
+    if type(baseline_qualification) is not RQ1BaselineQualification:
+        raise TypeError("budget requires an RQ1BaselineQualification")
     reservation = _budget_reservation(dimensions, scenario, provider_ceilings)
     blockers = set()
     if not power_and_margin_memo.formal_use_authorized:
         blockers.add("power_and_margin_not_accepted")
     if not qualification_bundle.formal_use_authorized:
         blockers.add("integrated_qualification_not_accepted")
+    if not baseline_qualification.formal_use_authorized:
+        blockers.add("rq1_baseline_qualification_not_accepted")
+    if not (
+        baseline_qualification.protocol_id == power_and_margin_memo.protocol_id
+        and baseline_qualification.scenario is scenario
+        and baseline_qualification.model_ids == dimensions.model_ids
+    ):
+        blockers.add("baseline_qualification_scope_mismatch")
     power_profile = next(
         profile
         for profile in qualification_bundle.profiles
@@ -1550,6 +1736,24 @@ def qualify_rq1_budget(
         == power_and_margin_memo.qualification_accept_data_id
     ):
         blockers.add("power_profile_lineage_mismatch")
+    baseline_profile = next(
+        profile
+        for profile in qualification_bundle.profiles
+        if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
+    )
+    if not (
+        baseline_profile.selected_profile_id
+        == baseline_qualification.selected_profile_id
+        and baseline_profile.artifact.artifact_id
+        == baseline_qualification.rq1_baseline_qualification_id
+        and baseline_profile.artifact.sha256 == content_hash(baseline_qualification)
+        and baseline_profile.qualification_accept_data_id
+        == baseline_qualification.qualification_accept_data_id
+        and baseline_profile.code_commit == baseline_qualification.code_commit
+        and qualification_bundle.qualification_accept_data_id
+        == baseline_qualification.qualification_accept_data_id
+    ):
+        blockers.add("baseline_profile_lineage_mismatch")
     if independent_verifier_status != "PASS":
         blockers.add("independent_budget_verifier_failed")
     atomic_plan = power_and_margin_memo.atomic_power.plan
@@ -1621,6 +1825,7 @@ def qualify_rq1_budget(
         pair_selectors,
         power_and_margin_memo,
         qualification_bundle,
+        baseline_qualification,
         provider_ceilings,
         reservation,
         QualificationStatus.ACCEPTED if accepted else QualificationStatus.BLOCKED,
@@ -2781,6 +2986,7 @@ __all__ = [
     "QualificationProfileKind",
     "QualificationProfileResult",
     "QualificationStatus",
+    "RQ1BaselineQualification",
     "RQ1BudgetQualification",
     "RQ1BudgetDimensions",
     "RQ1BudgetReservation",
@@ -2796,6 +3002,7 @@ __all__ = [
     "freeze_qualification_bundle",
     "freeze_power_and_margin_memo",
     "qualification_plan_bundle",
+    "qualify_rq1_baselines",
     "qualify_rq1_budget",
     "rq1_worst_case_budget_envelopes",
     "simulate_target_power",

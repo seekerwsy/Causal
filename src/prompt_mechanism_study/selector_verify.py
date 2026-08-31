@@ -417,6 +417,35 @@ def verify_rq1_budget_qualification(
         budget.pair_selector_ids != tuple(sorted(pair_expected))
     ):
         raise ValueError("budget selector set failed independent replay")
+    core_selector_ids = {
+        "atomic_full",
+        "atomic_rd_only",
+        "pair_full",
+        "pair_no_relation",
+    }
+    external_selector_ids = set((*atomic_expected, *pair_expected)) - core_selector_ids
+    expected_baseline_coordinates = tuple(
+        sorted(
+            (selector_id, model_id)
+            for selector_id in external_selector_ids
+            for model_id in budget.dimensions.model_ids
+        )
+    )
+    baseline = budget.baseline_qualification
+    actual_baseline_coordinates = tuple(
+        (selector_id, model_id)
+        for selector_id, model_id, _ in baseline.contract_references
+    )
+    baseline_blockers = set()
+    if actual_baseline_coordinates != expected_baseline_coordinates:
+        baseline_blockers.add("baseline_contract_coverage_incomplete")
+    if baseline.independent_verifier_status != "PASS":
+        baseline_blockers.add("independent_baseline_verifier_failed")
+    if tuple(sorted(baseline_blockers)) != baseline.blockers:
+        raise ValueError("baseline qualification blockers failed independent replay")
+    baseline_accepted = not baseline_blockers
+    if (baseline.status is QualificationStatus.ACCEPTED) is not baseline_accepted:
+        raise ValueError("baseline qualification status failed independent replay")
     dimensions = budget.dimensions
     model_count = len(dimensions.model_ids)
     atomic_effects = selector_count * model_count * dimensions.atomic_top_k
@@ -498,6 +527,14 @@ def verify_rq1_budget_qualification(
         blockers.add("power_and_margin_not_accepted")
     if not budget.qualification_bundle.formal_use_authorized:
         blockers.add("integrated_qualification_not_accepted")
+    if not baseline.formal_use_authorized:
+        blockers.add("rq1_baseline_qualification_not_accepted")
+    if not (
+        baseline.protocol_id == budget.power_and_margin_memo.protocol_id
+        and baseline.scenario is budget.scenario
+        and baseline.model_ids == dimensions.model_ids
+    ):
+        blockers.add("baseline_qualification_scope_mismatch")
     power_profile = next(
         profile
         for profile in budget.qualification_bundle.profiles
@@ -517,6 +554,31 @@ def verify_rq1_budget_qualification(
         == budget.power_and_margin_memo.qualification_accept_data_id
     ):
         blockers.add("power_profile_lineage_mismatch")
+    baseline_profile = next(
+        profile
+        for profile in budget.qualification_bundle.profiles
+        if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
+    )
+    expected_baseline_profile_id = {
+        RQ1BudgetScenario.CORE: "rq1_baseline_set_core_v1",
+        RQ1BudgetScenario.CORE_EXPERT: "rq1_baseline_set_core_expert_v1",
+        RQ1BudgetScenario.CORE_EXPERT_RANDOM: (
+            "rq1_baseline_set_core_expert_random_v1"
+        ),
+    }[budget.scenario]
+    if not (
+        baseline.selected_profile_id == expected_baseline_profile_id
+        and baseline_profile.selected_profile_id == expected_baseline_profile_id
+        and baseline_profile.artifact.artifact_id
+        == baseline.rq1_baseline_qualification_id
+        and baseline_profile.artifact.sha256 == content_hash(baseline)
+        and baseline_profile.qualification_accept_data_id
+        == baseline.qualification_accept_data_id
+        and baseline_profile.code_commit == baseline.code_commit
+        and budget.qualification_bundle.qualification_accept_data_id
+        == baseline.qualification_accept_data_id
+    ):
+        blockers.add("baseline_profile_lineage_mismatch")
     if budget.independent_verifier_status != "PASS":
         blockers.add("independent_budget_verifier_failed")
     for plan, family, tasks, realizations, slots, prefix in (
@@ -547,9 +609,17 @@ def verify_rq1_budget_qualification(
             blockers.add(f"{prefix}_block_slot_mismatch")
     ceilings = budget.provider_ceilings
     for actual, limit, reason in (
-        (materialization, ceilings.materialization_call_ceiling, "materialization_call_ceiling_exceeded"),
+        (
+            materialization,
+            ceilings.materialization_call_ceiling,
+            "materialization_call_ceiling_exceeded",
+        ),
         (generation, ceilings.generation_call_ceiling, "generation_call_ceiling_exceeded"),
-        (functional, ceilings.functional_judge_call_ceiling, "functional_judge_call_ceiling_exceeded"),
+        (
+            functional,
+            ceilings.functional_judge_call_ceiling,
+            "functional_judge_call_ceiling_exceeded",
+        ),
         (external, ceilings.external_call_ceiling, "external_call_ceiling_exceeded"),
         (cost, ceilings.external_cost_ceiling_microunits, "external_cost_ceiling_exceeded"),
     ):
@@ -564,6 +634,7 @@ def verify_rq1_budget_qualification(
         "status": "RQ1_BUDGET_QUALIFICATION_VERIFIED",
         "budget_qualification_id": budget.rq1_budget_qualification_id,
         "scenario": budget.scenario.value,
+        "baseline_qualification_id": baseline.rq1_baseline_qualification_id,
         "external_call_upper_bound": external,
         "external_cost_upper_bound_microunits": cost,
         "budget_currency": next(iter(currencies)),

@@ -61,6 +61,7 @@ from prompt_mechanism_study.study_design import (
     QualificationProfileKind,
     QualificationProfileResult,
     QualificationStatus,
+    RQ1BaselineQualification,
     RQ1BudgetQualification,
     RQ1BudgetDimensions,
     RQ1BudgetScenario,
@@ -78,6 +79,7 @@ from prompt_mechanism_study.study_design import (
     freeze_target_discovery_design,
     freeze_target_study_index,
     authorize_target_report,
+    qualify_rq1_baselines,
     qualify_rq1_budget,
     qualification_plan_bundle,
     rq1_worst_case_budget_envelopes,
@@ -171,12 +173,24 @@ def _qualification_manifest(
 def _accepted_qualification_bundle(
     manifest: DataRoleManifest,
     power_memo: PowerAndMarginMemo | None = None,
+    baseline_qualification: RQ1BaselineQualification | None = None,
 ) -> QualificationBundle:
+    baseline_qualification = baseline_qualification or _baseline_qualification(
+        manifest
+    )
     plans = tuple(
         QualificationPlan(
             kind,
-            (f"{kind.value}-candidate-1",),
-            f"{kind.value}-candidate-1",
+            (
+                baseline_qualification.selected_profile_id
+                if kind is QualificationProfileKind.RQ1_BASELINES
+                else f"{kind.value}-candidate-1",
+            ),
+            (
+                baseline_qualification.selected_profile_id
+                if kind is QualificationProfileKind.RQ1_BASELINES
+                else f"{kind.value}-candidate-1"
+            ),
             f"{kind.value}-selection-rule-v1",
             (f"{kind.value}-acceptance-metric",),
             content_hash(f"{kind.value}-thresholds"),
@@ -197,6 +211,11 @@ def _accepted_qualification_bundle(
                 )
                 if plan.profile_kind is QualificationProfileKind.POWER_AND_MARGIN
                 and power_memo is not None
+                else FreezeArtifactReference(
+                    baseline_qualification.rq1_baseline_qualification_id,
+                    content_hash(baseline_qualification),
+                )
+                if plan.profile_kind is QualificationProfileKind.RQ1_BASELINES
                 else _artifact_ref(f"{plan.profile_kind.value}-qualification-result")
             ),
             QualificationStatus.ACCEPTED,
@@ -211,6 +230,37 @@ def _accepted_qualification_bundle(
         plan_bundle,
         profile_results,
         verifier_status="PASS",
+    )
+
+
+def _baseline_qualification(
+    manifest: DataRoleManifest,
+    *,
+    scenario: RQ1BudgetScenario = RQ1BudgetScenario.CORE,
+    model_ids: tuple[str, ...] = ("model-a",),
+    independent_verifier_status: str = "PASS",
+) -> RQ1BaselineQualification:
+    selector_ids: tuple[str, ...] = ()
+    if scenario in {
+        RQ1BudgetScenario.CORE_EXPERT,
+        RQ1BudgetScenario.CORE_EXPERT_RANDOM,
+    }:
+        selector_ids += ("atomic_blind_expert", "pair_blind_expert")
+    if scenario is RQ1BudgetScenario.CORE_EXPERT_RANDOM:
+        selector_ids += ("atomic_seeded_random", "pair_seeded_random")
+    references = tuple(
+        (selector_id, model_id, _artifact_ref(f"{selector_id}-{model_id}-contract"))
+        for selector_id in sorted(selector_ids)
+        for model_id in model_ids
+    )
+    return qualify_rq1_baselines(
+        protocol_id=manifest.protocol_id,
+        scenario=scenario,
+        model_ids=model_ids,
+        qualification_accept_data_id=manifest.qualification_accept_data_id,
+        code_commit="a" * 40,
+        contract_references=references,
+        independent_verifier_status=independent_verifier_status,
     )
 
 
@@ -257,12 +307,23 @@ def _power_result(
     return simulate_target_power(plan)
 
 
-def _power_memo(manifest: DataRoleManifest) -> PowerAndMarginMemo:
+def _power_memo(
+    manifest: DataRoleManifest,
+    *,
+    atomic_family_size: int = 2,
+    pair_family_size: int = 2,
+) -> PowerAndMarginMemo:
     return freeze_power_and_margin_memo(
         manifest,
         code_commit="a" * 40,
-        atomic_power=_power_result(PolicyTrack.ATOMIC),
-        pair_power=_power_result(PolicyTrack.PAIR),
+        atomic_power=_power_result(
+            PolicyTrack.ATOMIC,
+            family_size=atomic_family_size,
+        ),
+        pair_power=_power_result(
+            PolicyTrack.PAIR,
+            family_size=pair_family_size,
+        ),
         bootstrap_draws=1000,
         bootstrap_seed=2026083103,
         minimum_valid_bootstrap_fraction=0.9,
@@ -301,9 +362,14 @@ def _provider_ceilings(*, generation_ceiling: int = 1000) -> ProviderBudgetCeili
     )
 
 
-def _accepted_budget(manifest: DataRoleManifest) -> RQ1BudgetQualification:
+def _accepted_budget(
+    manifest: DataRoleManifest,
+    *,
+    scenario: RQ1BudgetScenario = RQ1BudgetScenario.CORE,
+    model_ids: tuple[str, ...] = ("model-a",),
+) -> RQ1BudgetQualification:
     dimensions = RQ1BudgetDimensions(
-        ("model-a",),
+        model_ids,
         atomic_top_k=1,
         pair_top_k=1,
         atomic_task_units_per_effect=10,
@@ -313,12 +379,32 @@ def _accepted_budget(manifest: DataRoleManifest) -> RQ1BudgetQualification:
         atomic_total_block_slots=4,
         pair_total_block_slots=4,
     )
-    power_memo = _power_memo(manifest)
+    selector_count = {
+        RQ1BudgetScenario.CORE: 2,
+        RQ1BudgetScenario.CORE_EXPERT: 3,
+        RQ1BudgetScenario.CORE_EXPERT_RANDOM: 4,
+    }[scenario]
+    family_size = selector_count * len(model_ids)
+    power_memo = _power_memo(
+        manifest,
+        atomic_family_size=family_size,
+        pair_family_size=family_size,
+    )
+    baseline_qualification = _baseline_qualification(
+        manifest,
+        scenario=scenario,
+        model_ids=model_ids,
+    )
     return qualify_rq1_budget(
-        scenario=RQ1BudgetScenario.CORE,
+        scenario=scenario,
         dimensions=dimensions,
         power_and_margin_memo=power_memo,
-        qualification_bundle=_accepted_qualification_bundle(manifest, power_memo),
+        qualification_bundle=_accepted_qualification_bundle(
+            manifest,
+            power_memo,
+            baseline_qualification,
+        ),
+        baseline_qualification=baseline_qualification,
         provider_ceilings=_provider_ceilings(),
         independent_verifier_status="PASS",
     )
@@ -472,6 +558,7 @@ def test_joint_rq1_budget_gate_binds_power_family_calls_cost_and_verifier() -> N
         dimensions=accepted.dimensions,
         power_and_margin_memo=accepted.power_and_margin_memo,
         qualification_bundle=accepted.qualification_bundle,
+        baseline_qualification=accepted.baseline_qualification,
         provider_ceilings=_provider_ceilings(generation_ceiling=159),
         independent_verifier_status="PASS",
     )
@@ -488,6 +575,7 @@ def test_joint_rq1_budget_gate_binds_power_family_calls_cost_and_verifier() -> N
         dimensions=accepted.dimensions,
         power_and_margin_memo=accepted.power_and_margin_memo,
         qualification_bundle=accepted.qualification_bundle,
+        baseline_qualification=accepted.baseline_qualification,
         provider_ceilings=replace(
             _provider_ceilings(), external_cost_ceiling_microunits=879
         ),
@@ -522,6 +610,7 @@ def test_joint_rq1_budget_gate_binds_power_family_calls_cost_and_verifier() -> N
         dimensions=mismatched_dimensions,
         power_and_margin_memo=accepted.power_and_margin_memo,
         qualification_bundle=accepted.qualification_bundle,
+        baseline_qualification=accepted.baseline_qualification,
         provider_ceilings=_provider_ceilings(),
         independent_verifier_status="PASS",
     )
@@ -533,6 +622,7 @@ def test_joint_rq1_budget_gate_binds_power_family_calls_cost_and_verifier() -> N
         dimensions=accepted.dimensions,
         power_and_margin_memo=accepted.power_and_margin_memo,
         qualification_bundle=unbound_qualification,
+        baseline_qualification=accepted.baseline_qualification,
         provider_ceilings=_provider_ceilings(),
         independent_verifier_status="PASS",
     )
@@ -549,6 +639,103 @@ def test_joint_rq1_budget_gate_binds_power_family_calls_cost_and_verifier() -> N
         2_000_000,
     )
     with pytest.raises(ValueError, match="token-price replay"):
+        verify_rq1_budget_qualification(independently_tampered)
+
+
+@pytest.mark.reviewer
+def test_selected_rq1_baselines_require_qualified_contracts_before_budget() -> None:
+    manifest = _qualification_manifest()
+    accepted = _accepted_budget(
+        manifest,
+        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
+        model_ids=("model-a", "model-b"),
+    )
+
+    assert accepted.status is QualificationStatus.ACCEPTED
+    assert accepted.atomic_selector_ids == (
+        "atomic_blind_expert",
+        "atomic_full",
+        "atomic_rd_only",
+        "atomic_seeded_random",
+    )
+    assert accepted.pair_selector_ids == (
+        "pair_blind_expert",
+        "pair_full",
+        "pair_no_relation",
+        "pair_seeded_random",
+    )
+    assert len(accepted.baseline_qualification.contract_references) == 8
+    assert verify_rq1_budget_qualification(accepted)["baseline_qualification_id"] == (
+        accepted.baseline_qualification.rq1_baseline_qualification_id
+    )
+
+    missing = qualify_rq1_baselines(
+        protocol_id=manifest.protocol_id,
+        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
+        model_ids=accepted.dimensions.model_ids,
+        qualification_accept_data_id=manifest.qualification_accept_data_id,
+        code_commit="a" * 40,
+        contract_references=accepted.baseline_qualification.contract_references[:-1],
+        independent_verifier_status="PASS",
+    )
+    missing_bundle = _accepted_qualification_bundle(
+        manifest,
+        accepted.power_and_margin_memo,
+        missing,
+    )
+    blocked = qualify_rq1_budget(
+        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
+        dimensions=accepted.dimensions,
+        power_and_margin_memo=accepted.power_and_margin_memo,
+        qualification_bundle=missing_bundle,
+        baseline_qualification=missing,
+        provider_ceilings=_provider_ceilings(),
+        independent_verifier_status="PASS",
+    )
+
+    assert blocked.status is QualificationStatus.BLOCKED
+    assert blocked.blockers == ("rq1_baseline_qualification_not_accepted",)
+    assert verify_rq1_budget_qualification(blocked)["provider_calls_authorized"] is False
+
+    baseline_profile_index = next(
+        index
+        for index, profile in enumerate(accepted.qualification_bundle.profiles)
+        if profile.profile_kind is QualificationProfileKind.RQ1_BASELINES
+    )
+    profiles = list(accepted.qualification_bundle.profiles)
+    profiles[baseline_profile_index] = replace(
+        profiles[baseline_profile_index],
+        artifact=_artifact_ref("budget-only-baseline-name"),
+    )
+    budget_only_bundle = replace(
+        accepted.qualification_bundle,
+        profiles=tuple(profiles),
+    )
+    budget_only = qualify_rq1_budget(
+        scenario=accepted.scenario,
+        dimensions=accepted.dimensions,
+        power_and_margin_memo=accepted.power_and_margin_memo,
+        qualification_bundle=budget_only_bundle,
+        baseline_qualification=accepted.baseline_qualification,
+        provider_ceilings=accepted.provider_ceilings,
+        independent_verifier_status="PASS",
+    )
+    assert budget_only.blockers == ("baseline_profile_lineage_mismatch",)
+
+    independently_tampered = _accepted_budget(
+        manifest,
+        scenario=RQ1BudgetScenario.CORE_EXPERT_RANDOM,
+        model_ids=("model-a", "model-b"),
+    )
+    object.__setattr__(
+        independently_tampered.baseline_qualification,
+        "contract_references",
+        independently_tampered.baseline_qualification.contract_references[:-1],
+    )
+    with pytest.raises(
+        ValueError,
+        match="baseline qualification blockers failed independent replay",
+    ):
         verify_rq1_budget_qualification(independently_tampered)
 
 

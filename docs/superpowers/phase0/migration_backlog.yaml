@@ -165,7 +165,7 @@ tasks:
       - acceptance_seed_or_fold_retry
       - default_cli
     acceptance:
-      - all_five_profile_kinds_are_present
+      - all_six_profile_kinds_are_present
       - candidate_profiles_are_locked_before_qual_dev
       - development_metrics_thresholds_selection_rule_tie_break_and_failure_behavior_are_locked
       - selected_profile_is_absent_until_qual_dev_evidence_exists
@@ -343,7 +343,7 @@ tasks:
 
   - id: RQ1-COMPARISON-BASELINES
     slice: SLICE-3
-    status: CORE_IMPLEMENTATION_TESTED_BLOCKED_AUTHOR_BASELINE_SET
+    status: IMPLEMENTATION_TESTED_BLOCKED_AUTHOR_AND_QUALIFICATION
     depends_on:
       - ATOMIC-SHADOW-QUALIFICATION
       - PAIR-SHADOW-QUALIFICATION
@@ -355,6 +355,7 @@ tasks:
     allowed_files:
       - src/prompt_mechanism_study/prioritization.py
       - src/prompt_mechanism_study/interaction_selector.py
+      - src/prompt_mechanism_study/rq1_baselines.py
       - src/prompt_mechanism_study/study_design.py
       - src/prompt_mechanism_study/selector_verify.py
       - tests/test_selector_study.py
@@ -375,13 +376,17 @@ tasks:
       - independent_verifier_rejects_missing_budget_only_legacy_or_tampered_baselines
       - rq1_claim_strength_matches_the_frozen_external_baseline_set
     outputs:
-      - rq1_comparison_set_qualification.json
+      - rq1_baseline_qualification.json
       - target_baseline_selector_artifacts
       - independent_baseline_verifier_evidence
     progress:
       - mandatory_core_comparisons_are_implemented_and_reviewer_tested
       - core_expert_and_random_budget_envelopes_are_replayable
-    blocker: The author has not frozen the external RQ1 baseline set; Expert/Random lack target ranking implementations and Association/Prediction remain legacy Atomic selectors without a target Pair/fairness contract.
+      - blinded_expert_and_seeded_random_are_implemented_for_both_tracks_against_the_shared_support_qualified_universe
+      - baseline_rankings_emit_ordinary_fixed_slot_sources_and_share_union_bridge_confirmation_and_accounting
+      - independent_replay_covers_information_blindness_seed_permutation_k_model_dispatch_and_tampering
+      - budget_authorization_requires_every_selected_selector_model_contract_and_the_sixth_integrated_profile
+    blocker: The author has not frozen the RQ1 envelope or supplied the prospective Expert cards/Random seeds, and the one-shot baseline qualification has not run. Association/Prediction remain legacy-only unless separately selected and specified.
 
   - id: POWER-BUDGET-QUALIFICATION
     slice: SLICE-4
@@ -429,8 +434,9 @@ tasks:
     depends_on:
       - ATOMIC-SHADOW-QUALIFICATION
       - PAIR-SHADOW-QUALIFICATION
+      - RQ1-COMPARISON-BASELINES
       - POWER-BUDGET-QUALIFICATION
-    objective: Select and freeze one integrated FCI, Atomic RD, Relation, Pair RD, and power-and-margin profile after QUAL_DEV and before QUAL_ACCEPT is read.
+    objective: Select and freeze one integrated FCI, Atomic RD, Relation, Pair RD, RQ1 baseline-set, and power-and-margin profile after QUAL_DEV and before QUAL_ACCEPT is read.
     authoritative_sources:
       - protocol_sections_7_12_19
       - parameter_qualification_register
@@ -444,7 +450,7 @@ tasks:
       - acceptance_seed_or_fold_retry
       - default_cli
     acceptance:
-      - all_five_profile_kinds_are_present
+      - all_six_profile_kinds_are_present
       - candidate_profiles_and_one_selected_profile_are_frozen
       - selection_rule_thresholds_tie_break_and_failure_behavior_are_frozen
       - all_plans_bind_one_code_commit_and_one_unexposed_acceptance_data_id

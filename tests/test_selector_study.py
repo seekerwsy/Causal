@@ -30,6 +30,14 @@ from prompt_mechanism_study.prioritization import (
     run_selector_suite,
 )
 from prompt_mechanism_study.records import content_hash
+from prompt_mechanism_study.rq1_baselines import (
+    BlindExpertRankingCard,
+    SeededRandomRankingPlan,
+    freeze_atomic_baseline_universe,
+    run_blind_expert_baseline,
+    run_seeded_random_baseline,
+    verify_rq1_baseline_result,
+)
 from prompt_mechanism_study.representation import (
     AnalysisScope,
     AtomicPolicyKey,
@@ -356,6 +364,136 @@ def test_atomic_full_and_rd_only_share_everything_except_fci_gate() -> None:
             assert {
                 item.target_state for item in manifest.assignments if item.fold == fold
             } == {0, 1}
+
+
+@pytest.mark.reviewer
+@pytest.mark.extended
+def test_atomic_rq1_baselines_share_universe_and_replay_blind_rankings() -> None:
+    universe, rows, plan, evidence, _positive_id, _negative_id = (
+        _atomic_shadow_fixture()
+    )
+    core = run_atomic_shadow_qualification(universe, rows, plan, evidence)
+    baseline_universe = freeze_atomic_baseline_universe(universe)
+    expert_card = BlindExpertRankingCard(
+        baseline_universe.protocol_id,
+        baseline_universe.schema_version,
+        PolicyTrack.ATOMIC,
+        "atomic_blind_expert",
+        baseline_universe.model_id,
+        baseline_universe.baseline_universe_id,
+        baseline_universe.candidate_material_sha256,
+        (
+            "analysis_scope",
+            "candidate_family",
+            "factor_operations",
+            "mechanism_realization",
+            "support_summary",
+        ),
+        (
+            "confirmation_assignments",
+            "confirmation_outcomes",
+            "discovery_outcomes",
+            "fci_evidence",
+            "rd_scores",
+            "relation_evidence",
+            "selector_rankings",
+        ),
+        tuple(reversed(baseline_universe.eligible_policy_keys)),
+        content_hash("atomic-expert-identity"),
+        content_hash("atomic-expert-instructions"),
+        content_hash("atomic-expert-independent-review"),
+    )
+    expert = run_blind_expert_baseline(baseline_universe, expert_card)
+    expert_receipt = verify_rq1_baseline_result(
+        baseline_universe,
+        expert,
+        expert_card=expert_card,
+    )
+
+    random_plan = SeededRandomRankingPlan(
+        baseline_universe.protocol_id,
+        baseline_universe.schema_version,
+        PolicyTrack.ATOMIC,
+        "atomic_seeded_random",
+        baseline_universe.model_id,
+        baseline_universe.baseline_universe_id,
+        baseline_universe.candidate_material_sha256,
+        20260831,
+        content_hash("atomic-random-seed-source"),
+    )
+    random_result = run_seeded_random_baseline(baseline_universe, random_plan)
+    random_receipt = verify_rq1_baseline_result(
+        baseline_universe,
+        random_result,
+        random_plan=random_plan,
+    )
+
+    assert expert.source.universe_id == universe.universe_id
+    assert tuple(
+        item.policy_key for item in baseline_universe.expert_candidate_cards
+    ) == baseline_universe.eligible_policy_keys
+    assert all(
+        item.support_summary == (("support_gate_passed", 1),)
+        for item in baseline_universe.expert_candidate_cards
+    )
+    assert random_result.source.universe_id == universe.universe_id
+    assert expert.source.model_bound_records == universe.model_bound_records
+    assert random_result == run_seeded_random_baseline(
+        baseline_universe,
+        random_plan,
+    )
+    assert expert_receipt.status == random_receipt.status == "PASS"
+    ledger = freeze_fixed_slot_ledger(
+        baseline_universe.protocol_id,
+        baseline_universe.schema_version,
+        (
+            FixedSlotSource(
+                PolicyTrack.ATOMIC,
+                "atomic_full",
+                baseline_universe.model_id,
+                universe.universe_id,
+                core.full.slots,
+                universe.model_bound_records,
+            ),
+            FixedSlotSource(
+                PolicyTrack.ATOMIC,
+                "atomic_rd_only",
+                baseline_universe.model_id,
+                universe.universe_id,
+                core.rd_only.slots,
+                universe.model_bound_records,
+            ),
+            expert.source,
+            random_result.source,
+        ),
+    )
+    union = freeze_shared_confirmation_union(ledger)
+    assert {source.selector_id for source in ledger.sources} == {
+        "atomic_blind_expert",
+        "atomic_full",
+        "atomic_rd_only",
+        "atomic_seeded_random",
+    }
+    assert len(union.entries) == len(
+        {
+            slot.candidate_record_id
+            for slot in ledger.slots
+            if slot.candidate_record_id is not None
+        }
+    )
+    with pytest.raises(ValueError, match="cannot use discovery or confirmation"):
+        replace(expert_card, arms_or_outcomes_used=True)
+    with pytest.raises(ValueError, match="drifts from the frozen eligible universe"):
+        run_blind_expert_baseline(
+            baseline_universe,
+            replace(expert_card, protocol_id="another-protocol"),
+        )
+    with pytest.raises(ValueError, match="failed independent replay"):
+        verify_rq1_baseline_result(
+            baseline_universe,
+            random_result,
+            random_plan=replace(random_plan, ranking_seed=20260830),
+        )
 
 
 @pytest.mark.reviewer

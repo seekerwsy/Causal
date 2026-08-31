@@ -7,7 +7,7 @@ Default reviewer layer:
     python -m pytest -q
 
 The default layer is intentionally limited to the paper-facing scientific
-invariants (59 tests at the 2026-08-31 implementation checkpoint):
+invariants (65 tests at the 2026-08-31 implementation checkpoint):
 
 - exact-byte artifact closure and rejection of unlisted evidence;
 - conservative semantic task-unit merge authority and discover/confirm separation;
@@ -23,6 +23,9 @@ invariants (59 tests at the 2026-08-31 implementation checkpoint):
 - selector support-gate closure without retaining the superseded five-selector,
   expected-direction, or rank-pair RQ2 contracts;
 - Atomic Full/RD-only and Pair Full/No-Relation sole-difference selectors,
+  both-track blinded Expert and seeded Random shared-universe baselines with
+  typed candidate cards, fixed-slot/union replay, and per-selector/model
+  qualification coverage,
   fixed K slots, shared policy protocolization/task bundles, deterministic
   complete-block arm/variant/provider-seed replay, unique model-effect dispatch,
   separate max-|T| families, five statuses, fixed-denominator RQ tables, formal

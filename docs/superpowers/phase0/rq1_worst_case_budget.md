@@ -66,14 +66,17 @@ must not reduce the prespecified `Yield@K` denominators or trigger replacement s
 | Core + one expert baseline | 3 | 3 | `3 M K_A` | `3 M K_I` | Optional; only if expert protocols exist for both tracks and fit budget |
 | Core + expert + random | 4 | 4 | `4 M K_A` | `4 M K_I` | Optional maximum comparison set |
 
-The table is a budget envelope, not approval of Pair expert/random selectors. If baseline sets differ
+The table is a budget envelope, not approval of a formal Expert/Random run. If baseline sets differ
 by track, use the general `S_A`/`S_I` formulas rather than forcing equal counts.
 
 It is also not implementation evidence. Selecting an envelope requires every named baseline to emit
 target-schema fixed slots under a frozen ranking/blindness contract and to pass the same bridge,
-confirmation, status, accounting, and independent-verifier boundaries as Core. The current
-Expert/Random names in budget code reserve capacity only. Legacy Association/Prediction code may
-enter only through an explicit target definition and qualification; it cannot be silently promoted.
+confirmation, status, accounting, and independent-verifier boundaries as Core. Target-schema
+blinded Expert and seeded Random implementations now satisfy that engineering contract for both
+tracks. The budget Gate still requires a prospectively accepted contract artifact for every
+selected selector/model coordinate, so implementation availability does not select an envelope or
+authorize execution. Legacy Association/Prediction code may enter only through an explicit target
+definition and qualification; it cannot be silently promoted.
 
 ## Exact assignment identity
 
