@@ -14,6 +14,7 @@ from prompt_mechanism_study.records import canonical_json, content_hash, content
 
 _JSONL_FILES = {
     "near-duplicate-groups.jsonl",
+    "readiness-worklist.jsonl",
     "source-lineages.jsonl",
     "task-quality.jsonl",
     "task-roles.jsonl",
@@ -34,6 +35,15 @@ _QUALITY_REASON_CODES = {
     "pending_independent_review",
     "semantic_calibration_required",
     "source_prompt_incoherent",
+}
+_WORKSTREAM_BY_STATUS = {
+    "EXCLUDED_SOURCE_DEFECT": "SOURCE_DEFECT",
+    "PENDING_BINDING": "MECHANISM_BINDING",
+    "PENDING_CONTRACT": "CONTRACT_REPAIR",
+    "PENDING_ORACLE": "ORACLE_QUALIFICATION",
+    "PENDING_RUNTIME": "RUNTIME_QUALIFICATION",
+    "PENDING_SCOPE": "SCOPE_DECISION",
+    "READY_CONFIRMATORY": "TECHNICALLY_READY",
 }
 
 
@@ -299,6 +309,10 @@ def compile_task_unit_data(
         if row.get("near_duplicate_group_id") != near_group_by_task[task_id]:
             raise TaskUnitDataError("role-census near-duplicate identity drift")
     role_by_task = {row["task_unit_id"]: row for row in role_rows}
+    readiness_rows = [
+        _readiness_work_item(row, role_by_task[task_id])
+        for task_id, row in sorted(ledger_by_id.items())
+    ]
     unexposed_ready = sum(
         role_by_task[task_id]["data_role"] == "UNASSIGNED" for task_id in ready_ids
     )
@@ -309,7 +323,7 @@ def compile_task_unit_data(
         raise TaskUnitDataError("unexposed ready count drifts from the role census")
 
     report = {
-        "schema_version": "3.0",
+        "schema_version": "3.1",
         "status": "TASK_UNIT_DATA_COMPILED_PROMPT_TSG_PENDING_METHOD_FREEZE",
         "source_record_count": len(records),
         "task_unit_count": len(task_units),
@@ -326,6 +340,9 @@ def compile_task_unit_data(
         ),
         "ready_task_unit_count": len(ready_ids),
         "unexposed_ready_task_unit_count": unexposed_ready,
+        "readiness_workstream_counts": dict(
+            sorted(Counter(row["workstream"] for row in readiness_rows).items())
+        ),
         "formal_role_assignment_frozen": False,
         "prompt_tsg": {
             "status": "NOT_GENERATED_PENDING_METHOD_FREEZE",
@@ -350,6 +367,7 @@ def compile_task_unit_data(
             "task-roles.jsonl": role_rows,
             "source-lineages.jsonl": lineage_rows,
             "near-duplicate-groups.jsonl": near_group_rows,
+            "readiness-worklist.jsonl": readiness_rows,
         },
         report,
     )
@@ -365,7 +383,7 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         raise TaskUnitDataError("compiled data manifest is missing")
     manifest = _canonical_json_file(manifest_path, "manifest")
     if (
-        manifest.get("schema_version") != "3.0"
+        manifest.get("schema_version") != "3.1"
         or manifest.get("artifact_kind") != "reviewer_task_unit_dataset"
         or set(manifest.get("files", {})) != _BUNDLE_FILES
     ):
@@ -398,8 +416,15 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
     task_units = _unique_by(artifacts["task-units.jsonl"], "task_unit_id", "task units")
     quality = _unique_by(artifacts["task-quality.jsonl"], "task_unit_id", "quality rows")
     roles = _unique_by(artifacts["task-roles.jsonl"], "task_unit_id", "role rows")
-    if set(task_units) != set(quality) or set(task_units) != set(roles):
-        raise TaskUnitDataError("compiled task, quality, and role populations differ")
+    readiness = _unique_by(
+        artifacts["readiness-worklist.jsonl"], "task_unit_id", "readiness worklist"
+    )
+    if (
+        set(task_units) != set(quality)
+        or set(task_units) != set(roles)
+        or set(task_units) != set(readiness)
+    ):
+        raise TaskUnitDataError("compiled task, quality, role, and readiness populations differ")
     source_records = []
     for task_id, row in task_units.items():
         if (
@@ -441,8 +466,20 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         }
         or report.get("arms_or_outcomes_used") is not False
         or report.get("formal_execution_authorized") is not False
+        or report.get("readiness_workstream_counts")
+        != dict(sorted(Counter(row["workstream"] for row in readiness.values()).items()))
     ):
         raise TaskUnitDataError("compiled data report is invalid")
+    for task_id, row in readiness.items():
+        core = {key: value for key, value in row.items() if key != "readiness_record_sha256"}
+        if (
+            row.get("schema_version") != "readiness-work-item-3.1"
+            or row.get("readiness_record_sha256") != content_hash(core)
+            or row.get("arms_or_outcomes_used") is not False
+            or row.get("formal_use_authorized") is not False
+            or row.get("current_data_role") != roles[task_id]["data_role"]
+        ):
+            raise TaskUnitDataError("readiness work item is invalid")
     return {
         "status": "VERIFIED_TASK_UNIT_DATA_PROMPT_TSG_PENDING",
         "bundle_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
@@ -450,6 +487,7 @@ def verify_task_unit_data(root: Path) -> dict[str, Any]:
         "task_units": len(task_units),
         "quality_status_counts": report["quality_status_counts"],
         "data_role_counts": report["data_role_counts"],
+        "readiness_workstream_counts": report["readiness_workstream_counts"],
         "prompt_tsg_status": report["prompt_tsg"]["status"],
         "arms_or_outcomes_used": False,
         "formal_execution_authorized": False,
@@ -495,6 +533,108 @@ def _near_duplicate_groups(
         for task_id in frozen:
             by_task[task_id] = group_id
     return by_task, groups
+
+
+def _readiness_work_item(
+    ledger_row: Mapping[str, Any], role_row: Mapping[str, Any]
+) -> dict[str, Any]:
+    task_id = _text(ledger_row.get("task_unit_id"), "readiness task ID")
+    candidate_status = _text(ledger_row.get("candidate_status"), "candidate status")
+    blockers = tuple(sorted(set(_texts(ledger_row.get("blocker_codes"), "blockers"))))
+    if candidate_status == "PENDING_INDEPENDENT_REVIEW":
+        if ledger_row.get("final_dataset_status") == "PENDING_INDEPENDENT_REVIEW":
+            workstream = "INDEPENDENT_QUALITY_REVIEW"
+            action_status = "OPEN"
+            next_action = "ADJUDICATE_SOURCE_PROMPT_AGAINST_FUNCTIONAL_CONTRACT"
+            required_evidence = "independent outcome-blind accept, repair, or exclude decision"
+        elif "development_exposed" in blockers:
+            workstream = "HISTORICAL_EXPOSURE"
+            action_status = "CLOSED_NONCONFIRMATORY"
+            next_action = "RETAIN_OUTSIDE_CONFIRMATORY_ALLOCATION"
+            required_evidence = "none; prior exposure cannot be undone by re-review"
+        else:
+            raise TaskUnitDataError("independent-review status has no recognized basis")
+    else:
+        workstream = _WORKSTREAM_BY_STATUS.get(candidate_status)
+        if workstream is None:
+            raise TaskUnitDataError("candidate status has no readiness workstream")
+        action_status, next_action, required_evidence = {
+            "CONTRACT_REPAIR": (
+                "OPEN",
+                "REPAIR_FUNCTIONAL_CONTRACT_OUTCOME_BLINDLY",
+                "faithful and sufficient contract or explicit source-defect exclusion",
+            ),
+            "MECHANISM_BINDING": (
+                "OPEN",
+                "ADJUDICATE_AGAINST_FROZEN_SAME_CWE_REGISTRY",
+                "literal prompt evidence for one task-applicable realization or unresolved decision",
+            ),
+            "ORACLE_QUALIFICATION": (
+                "OPEN_METHOD_EXTENSION",
+                "GROUP_AND_QUALIFY_REUSABLE_ORACLE_PROFILE",
+                "qualified task-applicable profile with secure, insecure, and unknown calibration",
+            ),
+            "RUNTIME_QUALIFICATION": (
+                "OPEN_METHOD_EXTENSION",
+                "QUALIFY_SHARED_LANGUAGE_RUNTIME_AND_TEST_PATH",
+                "replayable compile/run environment and frozen functionality/security measurement",
+            ),
+            "SCOPE_DECISION": (
+                "OPEN_PROSPECTIVE_DECISION",
+                "ASSIGN_PROSPECTIVE_RESEARCH_LAYER_OR_RETAIN_FOR_FUTURE_WORK",
+                "outcome-blind scope decision after the method population is fixed",
+            ),
+            "SOURCE_DEFECT": (
+                "CLOSED_EXCLUDED",
+                "RETAIN_SOURCE_DEFECT_EXCLUSION",
+                "none; preserve the source-level exclusion reason",
+            ),
+            "TECHNICALLY_READY": (
+                "WAITING_METHOD_FREEZE",
+                "GENERATE_PROMPT_TSG_ONLY_AFTER_METHOD_FREEZE",
+                "frozen TSG extractor/catalog followed by prospective data-role allocation",
+            ),
+        }[workstream]
+    grouping_coordinates = [
+        workstream,
+        str(ledger_row.get("language")),
+        str(ledger_row.get("primary_cwe")),
+    ]
+    if workstream == "CONTRACT_REPAIR":
+        grouping_coordinates.append(str(ledger_row.get("source_dataset")))
+    elif workstream == "RUNTIME_QUALIFICATION":
+        grouping_coordinates.append(
+            str(ledger_row.get("mechanism_realization_id") or "unbound")
+        )
+    elif workstream == "SCOPE_DECISION":
+        grouping_coordinates.append(
+            str(ledger_row.get("priority_extension_tier") or "unprioritized")
+        )
+    core = {
+        "schema_version": "readiness-work-item-3.1",
+        "task_unit_id": task_id,
+        "current_candidate_status": candidate_status,
+        "current_final_dataset_status": ledger_row.get("final_dataset_status"),
+        "current_data_role": role_row.get("data_role"),
+        "workstream": workstream,
+        "work_group_id": content_id("readiness_work_group_", grouping_coordinates),
+        "grouping_coordinates": grouping_coordinates,
+        "action_status": action_status,
+        "next_action": next_action,
+        "required_evidence": required_evidence,
+        "language": ledger_row.get("language"),
+        "primary_cwe": ledger_row.get("primary_cwe"),
+        "source_lineage_id": ledger_row.get("source_lineage_family"),
+        "source_test_available": ledger_row.get("source_test_available"),
+        "contract_id": ledger_row.get("contract_id"),
+        "mechanism_realization_id": ledger_row.get("mechanism_realization_id"),
+        "oracle_profile_id": ledger_row.get("oracle_profile_id"),
+        "current_blocker_codes": list(blockers),
+        "near_duplicate_group_id": role_row.get("near_duplicate_group_id"),
+        "arms_or_outcomes_used": False,
+        "formal_use_authorized": False,
+    }
+    return {**core, "readiness_record_sha256": content_hash(core)}
 
 
 def _legacy_exposure(
@@ -545,7 +685,7 @@ def _write_bundle(
         "sha256": hashlib.sha256(report_payload).hexdigest(),
     }
     manifest = {
-        "schema_version": "3.0",
+        "schema_version": "3.1",
         "artifact_kind": "reviewer_task_unit_dataset",
         "files": descriptors,
     }

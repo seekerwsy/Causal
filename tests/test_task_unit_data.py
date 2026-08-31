@@ -171,5 +171,9 @@ def test_task_unit_compiler_keeps_tasks_quality_roles_and_tsg_separate(tmp_path)
         "QUAL_DEV": 1,
         "UNASSIGNED": 1,
     }
+    assert result["readiness_workstream_counts"] == {
+        "CONTRACT_REPAIR": 1,
+        "TECHNICALLY_READY": 2,
+    }
     assert result["prompt_tsg_status"] == "NOT_GENERATED_PENDING_METHOD_FREEZE"
     assert verify_task_unit_data(output) == result
