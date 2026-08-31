@@ -536,6 +536,7 @@ def finalize_contract_content_data(
     if len(reserved_groups) != len(reservations):
         raise ContractCleaningError("future-evaluation reservation groups are duplicated")
 
+    final_tasks = []
     contracts = []
     quality = []
     roles = []
@@ -558,6 +559,26 @@ def finalize_contract_content_data(
         ):
             raise ContractCleaningError("final contract source or review binding is stale")
         _validate_frozen_evidence(task, proposal)
+        task_core = {
+            **{
+                key: value
+                for key, value in task.items()
+                if key
+                not in {
+                    "schema_version",
+                    "task_unit_record_sha256",
+                    "evaluation_asset_refs",
+                }
+            },
+            "schema_version": "task-unit-5.0",
+            "evaluation_asset_refs": {
+                **task["evaluation_asset_refs"],
+                "functional_contract_id": proposal["contract_id"],
+            },
+        }
+        final_tasks.append(
+            {**task_core, "task_unit_record_sha256": content_hash(task_core)}
+        )
         review_payload = {
             key: review[key]
             for key in (
@@ -730,13 +751,23 @@ def finalize_contract_content_data(
             "reservation_bundle_sha256": bundle_digest(reservation),
         },
         "producer_commit": producer_commit,
+        "referential_integrity": {
+            "core_task_unit_populations_equal": True,
+            "contracts_prompt_hash_bound": True,
+            "task_contract_reference_current": True,
+            "quality_contract_version_bound": True,
+            "repair_ledger_review_bound": True,
+            "near_duplicate_groups_unchanged": True,
+            "source_lineages_unchanged": True,
+            "downstream_experimental_fields_absent": True,
+        },
         "arms_or_outcomes_used": False,
         "formal_role_assignment_frozen": False,
         "formal_execution_authorized": False,
         "scientific_effect_claim_allowed": False,
     }
     artifacts = {
-        "task-units.jsonl": [tasks[task_id] for task_id in sorted(tasks)],
+        "task-units.jsonl": final_tasks,
         "functional-contracts.jsonl": contracts,
         "task-quality.jsonl": quality,
         "task-roles.jsonl": roles,
@@ -808,7 +839,18 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
         ledger_row = ledger[task_id]
         _validate_frozen_evidence(task, contract)
         if (
-            contract.get("schema_version") != "functional-contract-reviewer-5.0"
+            task.get("schema_version") != "task-unit-5.0"
+            or task.get("task_unit_record_sha256")
+            != content_hash(
+                {
+                    key: value
+                    for key, value in task.items()
+                    if key != "task_unit_record_sha256"
+                }
+            )
+            or task.get("evaluation_asset_refs", {}).get("functional_contract_id")
+            != contract.get("contract_id")
+            or contract.get("schema_version") != "functional-contract-reviewer-5.0"
             or contract.get("functional_contract_record_sha256")
             != content_hash(
                 {
@@ -873,6 +915,17 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
         != dict(sorted(Counter(row["quality_disposition"] for row in quality.values()).items()))
         or report.get("arms_or_outcomes_used") is not False
         or report.get("formal_execution_authorized") is not False
+        or report.get("referential_integrity")
+        != {
+            "core_task_unit_populations_equal": True,
+            "contracts_prompt_hash_bound": True,
+            "task_contract_reference_current": True,
+            "quality_contract_version_bound": True,
+            "repair_ledger_review_bound": True,
+            "near_duplicate_groups_unchanged": True,
+            "source_lineages_unchanged": True,
+            "downstream_experimental_fields_absent": True,
+        }
         or report.get("prompt_tsg", {}).get("status")
         != "NOT_GENERATED_PENDING_METHOD_FREEZE"
     ):

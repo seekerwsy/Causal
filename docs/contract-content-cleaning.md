@@ -77,12 +77,25 @@ prompt-mechanism-study curate contract-content-proposals BASE PROPOSALS `
 
 prompt-mechanism-study curate contract-content-review `
   BASE PROPOSALS/final REVIEW --workers 6
+
+prompt-mechanism-study curate finalize-contract-content build FINAL `
+  --base-bundle BASE --proposals-root PROPOSALS/final `
+  --reviews-root REVIEW/final --reservation-root RESERVATION `
+  --producer-commit COMMIT
+
+prompt-mechanism-study curate finalize-contract-content verify FINAL
 ```
 
 Run one batch of each producer mode and one review batch before scaling. Runs
 are resumable only from closed successful batches with the same frozen plan.
 Raw requests and provider responses remain in the run directory; credentials
 are never recorded.
+
+The finalizer accepts no nonterminal review. It converts the evidence to no
+other offset system, recomputes quality and the derived readiness view, records
+`CONTRACT_REPAIR_VIEWED`, and carries the prompt-blind reservation into the
+role record without assigning a formal role. Its independent verifier rechecks
+each evidence span directly against the UTF-8 prompt bytes.
 
 ## Completion gate
 
