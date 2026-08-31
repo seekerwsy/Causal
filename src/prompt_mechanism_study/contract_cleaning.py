@@ -1835,7 +1835,7 @@ def _review_request(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
 def _parse_evidence_backfill(
     raw: bytes, batch: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    rows = _response_rows(raw, "items", len(batch))
+    rows = _evidence_response_rows(raw, batch)
     required = {"item_index", "binding_status", "evidence_bindings", "reason"}
     frozen = []
     for row, item in zip(rows, batch, strict=True):
@@ -1872,6 +1872,33 @@ def _parse_evidence_backfill(
             }
         )
     return frozen
+
+
+def _evidence_response_rows(
+    raw: bytes, batch: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Project only an exact single-task echo of the supplied target list."""
+
+    try:
+        value = json.loads(raw)
+    except (UnicodeError, json.JSONDecodeError):
+        raise ContractCleaningError("model response is not JSON") from None
+    if not isinstance(value, dict) or set(value) != {"items"}:
+        raise ContractCleaningError("model response top-level fields are invalid")
+    raw_rows = value["items"]
+    if not isinstance(raw_rows, list) or any(not isinstance(row, dict) for row in raw_rows):
+        raise ContractCleaningError("model response item binding is invalid")
+    if len(batch) == 1:
+        target_echoes = [
+            row for row in raw_rows if set(row) == {"target_id", "value"}
+        ]
+        if target_echoes:
+            if target_echoes != _evidence_targets(batch[0]["old_contract"]):
+                raise ContractCleaningError("evidence target echo differs from the request")
+            raw_rows = [row for row in raw_rows if set(row) != {"target_id", "value"}]
+    return _response_rows(
+        canonical_json({"items": raw_rows}).encode("utf-8"), "items", len(batch)
+    )
 
 
 def _parse_semantic_repairs(

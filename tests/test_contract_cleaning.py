@@ -130,6 +130,43 @@ def test_incomplete_bound_evidence_is_deterministically_escalated() -> None:
     assert row["content_evidence"] is None
 
 
+def test_single_task_evidence_projects_only_exact_target_echoes() -> None:
+    decision = {
+        "item_index": 1,
+        "binding_status": "needs_repair",
+        "evidence_bindings": None,
+        "reason": "One contract value is not directly supported.",
+    }
+    targets = []
+    contract = _batch()[0]["old_contract"]
+    if contract["entrypoint"] is not None:
+        targets.append({"target_id": "entrypoint", "value": contract["entrypoint"]})
+    for field in (
+        "requirements",
+        "inputs",
+        "outputs",
+        "side_effects",
+        "environment_dependencies",
+    ):
+        targets.extend(
+            {"target_id": f"{field}:{index}", "value": value}
+            for index, value in enumerate(contract[field], start=1)
+        )
+
+    row = _parse_evidence_backfill(
+        json.dumps({"items": [decision, *targets]}, ensure_ascii=False).encode(),
+        _batch(),
+    )[0]
+    assert row["binding_status"] == "needs_repair"
+
+    targets[0] = {**targets[0], "value": "changed"}
+    with pytest.raises(ContractCleaningError):
+        _parse_evidence_backfill(
+            json.dumps({"items": [decision, *targets]}, ensure_ascii=False).encode(),
+            _batch(),
+        )
+
+
 def test_semantic_repair_requires_evidence_for_every_contract_value() -> None:
     response = {
         "item_index": 1,
