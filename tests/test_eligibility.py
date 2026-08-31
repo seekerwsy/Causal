@@ -370,11 +370,16 @@ def test_candidate_ledger_accepts_a_reviewed_contract_after_a_traced_format_repa
         contract_reviews_root=reviews,
     )
     ledger = read_json(output / "candidate-ledger.json")
+    final_dataset = read_json(output / "final-dataset.json")
 
     assert report["candidate_ledger_complete"] is True
     assert report["candidate_status_counts"] == {"READY_CONFIRMATORY": 1}
+    assert report["final_dataset_task_units"] == 1
+    assert report["final_dataset_status_counts"] == {"INCLUDED_FINAL_DATASET": 1}
     assert ledger[0]["contract_quality"] == "STRICT"
     assert ledger[0]["candidate_status"] == "READY_CONFIRMATORY"
+    assert ledger[0]["final_dataset_status"] == "INCLUDED_FINAL_DATASET"
+    assert [row["task_unit_id"] for row in final_dataset] == ["cluster-command"]
 
 
 @pytest.mark.reviewer

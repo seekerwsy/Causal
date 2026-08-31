@@ -889,6 +889,11 @@ def audit_dataset_eligibility(
             oracle_support,
             runtime_status,
         )
+        final_dataset_status = _final_dataset_status(
+            quality,
+            blockers,
+            policy["final_dataset_admission"],
+        )
         if readiness.startswith("PENDING_"):
             blockers.append(readiness.casefold())
         ledger_core = {
@@ -922,6 +927,7 @@ def audit_dataset_eligibility(
                 None if extension is None else extension["extension_family"]
             ),
             "candidate_status": readiness,
+            "final_dataset_status": final_dataset_status,
             "blocker_codes": sorted(set(blockers)),
             "arms_or_outcomes_used": False,
         }
@@ -949,7 +955,15 @@ def audit_dataset_eligibility(
     ready_confirmatory = [
         row for row in candidate_ledger if row["candidate_status"] == "READY_CONFIRMATORY"
     ]
+    final_dataset = [
+        row
+        for row in candidate_ledger
+        if row["final_dataset_status"] == "INCLUDED_FINAL_DATASET"
+    ]
     candidate_statuses = Counter(row["candidate_status"] for row in candidate_ledger)
+    final_dataset_statuses = Counter(
+        row["final_dataset_status"] for row in candidate_ledger
+    )
     contract_qualities = Counter(row["contract_quality"] for row in candidate_ledger)
     blocker_counts = Counter(
         blocker for row in candidate_ledger for blocker in row["blocker_codes"]
@@ -984,6 +998,15 @@ def audit_dataset_eligibility(
         "status_counts": dict(sorted(statuses.items())),
         "reason_counts": dict(sorted(reasons.items())),
         "candidate_status_counts": dict(sorted(candidate_statuses.items())),
+        "final_dataset_status_counts": dict(sorted(final_dataset_statuses.items())),
+        "final_dataset_task_units": len(final_dataset),
+        "final_dataset_language_counts": dict(
+            sorted(Counter(row["language"] for row in final_dataset).items())
+        ),
+        "final_dataset_source_counts": dict(
+            sorted(Counter(row["source_dataset"] for row in final_dataset).items())
+        ),
+        "final_dataset_admission": policy["final_dataset_admission"],
         "contract_quality_counts": dict(sorted(contract_qualities.items())),
         "blocker_counts": dict(sorted(blocker_counts.items())),
         "ready_confirmatory_task_units": len(ready_confirmatory),
@@ -1074,6 +1097,7 @@ def audit_dataset_eligibility(
             ],
             "excluded-clusters.json": [row for row in decisions if row["status"] == "excluded"],
             "candidate-ledger.json": candidate_ledger,
+            "final-dataset.json": final_dataset,
             "ready-confirmatory-task-units.json": ready_confirmatory,
             "priority-extension-candidates.json": extensions,
             "oracle-profile-summary.json": oracle_profile_rows,
@@ -1361,6 +1385,22 @@ def _candidate_readiness(
     if extension is not None:
         return "PENDING_ORACLE" if row["language"] == "python" else "PENDING_RUNTIME"
     return "PENDING_SCOPE"
+
+
+def _final_dataset_status(
+    contract_quality: str,
+    blockers: list[str],
+    admission_policy: dict[str, Any],
+) -> str:
+    """Admit by task/contract quality, independently of measurement support."""
+
+    if "source_prompt_incoherent" in blockers:
+        return "EXCLUDED_SOURCE_DEFECT"
+    if contract_quality != admission_policy["required_contract_quality"]:
+        return "PENDING_QUALITY_REPAIR"
+    if set(blockers).intersection(admission_policy["disqualifying_quality_flags"]):
+        return "PENDING_INDEPENDENT_REVIEW"
+    return "INCLUDED_FINAL_DATASET"
 
 
 def _oracle_profile_rows(
@@ -1656,6 +1696,7 @@ def _policy(value: Any) -> dict[str, Any]:
         "functional_oracle_languages",
         "security_oracle_languages",
         "lineage_policy",
+        "final_dataset_admission",
         "python_families",
         "mechanism_registry_path",
         "functional_oracle_qualification_path",
@@ -1663,7 +1704,7 @@ def _policy(value: Any) -> dict[str, Any]:
         "layers",
     }:
         raise EligibilityError("eligibility policy fields are invalid")
-    if value["schema_version"] != "1.2" or value["source_tests_required"] is not False:
+    if value["schema_version"] != "1.3" or value["source_tests_required"] is not False:
         raise EligibilityError("eligibility policy version or test rule is invalid")
     lineage_policy = value["lineage_policy"]
     if not isinstance(lineage_policy, dict) or lineage_policy != {
@@ -1673,6 +1714,20 @@ def _policy(value: Any) -> dict[str, Any]:
         "report_leave_one_lineage_out": True,
     }:
         raise EligibilityError("lineage policy must remain diagnostic-only")
+    final_dataset_admission = value["final_dataset_admission"]
+    if not isinstance(final_dataset_admission, dict) or final_dataset_admission != {
+        "required_contract_quality": "STRICT",
+        "disqualifying_quality_flags": [
+            "known_material_contract_fault",
+            "known_scope_or_evaluability_concern",
+            "metadata_repair_required",
+            "semantic_calibration_required",
+            "source_prompt_incoherent",
+        ],
+        "mechanism_oracle_runtime_support_required": False,
+        "development_exposure_changes_dataset_admission": False,
+    }:
+        raise EligibilityError("final dataset admission must remain quality-only")
     families = value["python_families"]
     if not isinstance(families, list) or not families:
         raise EligibilityError("Python family policy is empty")

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "policy_id": "seven-source-dataset-eligibility-v1",
   "active_layer": "python_confirmatory",
   "source_tests_required": false,
@@ -10,6 +10,18 @@
     "selection_priority": "prefer_underrepresented_lineages_after_family_and_cwe_balance",
     "report_source_specific_estimates": true,
     "report_leave_one_lineage_out": true
+  },
+  "final_dataset_admission": {
+    "required_contract_quality": "STRICT",
+    "disqualifying_quality_flags": [
+      "known_material_contract_fault",
+      "known_scope_or_evaluability_concern",
+      "metadata_repair_required",
+      "semantic_calibration_required",
+      "source_prompt_incoherent"
+    ],
+    "mechanism_oracle_runtime_support_required": false,
+    "development_exposure_changes_dataset_admission": false
   },
   "python_families": [
     {

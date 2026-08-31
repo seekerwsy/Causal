@@ -20,6 +20,7 @@ Oracle qualifications.
 | Targeted outcome-blind contract adjudication, 17 cases | `newly_run` | correct contradictory reviews and bounded contract faults |
 | Blind mechanism-binding run, 220 task units | `newly_run` | resolve finite registered task shapes |
 | Unified 2,165-row candidate ledger | `newly_run` | final data status and blockers |
+| Quality-qualified final dataset, 1,217 task units | `newly_run` | all tasks meeting the frozen data-quality rule, independent of implementation support |
 | BaxBench 28-scenario source audit | `newly_run` | backend replication inventory |
 
 No row is an `user_claim`, and no experimental outcome was used.
@@ -40,13 +41,13 @@ No row is an `user_claim`, and no experimental outcome was used.
   `f2f8556a4fad016413aa0f4585f4769ea81b0fa11bc2632c2e32a159cb77690e`;
 - mechanism-binding result:
   `aa270c7fb9cdc8f32417ee1a7c9d83dcdcf9ab80739cd9cec2b8e82b6da617ed`;
-- final candidate-data bundle:
-  `c29040da2274c413cac6ecd37d8fcc12811278595deae6dc0c14233e6ff97fd2`;
+- final quality-data bundle:
+  `b0800bac8f6e3f0ed61cff2b111cf04e901597d06d77352993590ef9e043fef3`;
 - eligibility policy:
-  `83305113ec7c8e51dfe035102263494309138e958aee616d5e1e7e6a43f58271`;
+  `29acf991090278a109b23ea358342f4e266e24d2153409abf594a25fddbed17e`;
 - eligibility implementation:
   `src/prompt_mechanism_study/eligibility.py`, SHA-256
-  `7d536f378b2f5e86ad802e43d871365ddd78f7cb81f54b7c359b6cb562c58e9a`;
+  `41d6957cbb7e6e57e520af2c4007338460e92aa7562a0a346718f384b373a34b`;
 - curation implementation:
   `src/prompt_mechanism_study/curation.py`, SHA-256
   `4a28c79e45e7accf5f3124cf4bd439d8f2b5ce04835916c7b684447b855d3a6d`;
@@ -57,7 +58,7 @@ The active local paths are:
 
 - `.codex-runtime/mechanism-binding-review-f2f115f-20260831-01`;
 - `.codex-runtime/contract-recovery-adjudication-20260831-10`;
-- `.codex-runtime/dataset-candidate-ledger-20260831-11-contract-recovery`.
+- `.codex-runtime/dataset-final-quality-20260831-14`.
 
 ## Contract closure
 
@@ -101,12 +102,28 @@ Both new deterministic stages reproduced byte-for-byte: the contract-recovery
 bundle digest was
 `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`
 on both builds, and the successor candidate-ledger digest was
-`c29040da2274c413cac6ecd37d8fcc12811278595deae6dc0c14233e6ff97fd2`
+`b0800bac8f6e3f0ed61cff2b111cf04e901597d06d77352993590ef9e043fef3`
 on both builds.
 
 ## Unified candidate status
 
 The final ledger contains exactly 2,165 unique task units:
+
+| Final-dataset disposition | Task units | Meaning |
+| --- | ---: | --- |
+| `INCLUDED_FINAL_DATASET` | 1,217 | strict contract and no unresolved quality flag |
+| `PENDING_INDEPENDENT_REVIEW` | 12 | strict contract but a diagnostic quality concern remains |
+| `PENDING_QUALITY_REPAIR` | 930 | contract is not yet faithful and sufficient under the frozen rule |
+| `EXCLUDED_SOURCE_DEFECT` | 6 | incoherent source prompt |
+
+This is the paper-facing data boundary. Mechanism, Oracle, runtime, language,
+current scope, lineage, and development exposure do not remove a
+quality-qualified row from the final dataset. They determine only whether that
+row can be measured in a particular study. The final dataset contains 558
+Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java, 58 Rust, 53 PHP, and 17
+Go task units.
+
+The separate execution-readiness classification is:
 
 | Status | Task units | Meaning |
 | --- | ---: | --- |

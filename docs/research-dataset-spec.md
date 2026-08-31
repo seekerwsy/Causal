@@ -403,6 +403,24 @@ The active audit emits one record for each of the 2,165 task units. Contract
 quality, mechanism binding, Security-Oracle support, functionality evidence,
 runtime support, development exposure, candidate status, and blocker codes are
 separate fields; a failure at one gate does not erase the task from the ledger.
+Final-dataset admission is explicitly separate from current experimental
+readiness. A task enters `final-dataset.json` when its frozen contract is
+`STRICT` and it has no unresolved quality flag. Language, registered mechanism,
+Security-Oracle support, runtime support, current study scope, source lineage,
+and development exposure do not change that data-quality decision. Development
+exposure remains a confirmatory-sampling exclusion, and unsupported measurement
+coordinates remain visible as readiness fields.
+
+Applying that rule to all 2,165 task units admits 1,217 into the final curated
+dataset. It contains 558 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
+58 Rust, 53 PHP, and 17 Go task units. Of the 1,229 strict contracts, 12 remain
+outside the final dataset pending independent review of a known material
+omission or a scope/evaluability concern. Another 930 task units remain pending
+contract-quality repair, and six incoherent source prompts are excluded. All
+dispositions remain in the complete ledger.
+
+The 150 `READY_CONFIRMATORY` task units are therefore an implementation-ready
+subset of the 1,217-row final dataset, not the definition of that dataset.
 The response-format repair produced 1,215 strict contracts. A bounded
 outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
 that otherwise had mechanism, Oracle, and runtime support: eight stale or
@@ -477,9 +495,9 @@ The active closed artifacts are:
   `.codex-runtime/contract-recovery-adjudication-20260831-10`, SHA-256
   `6df47b0ce9f9a5a02d91a94323c5a12fa56472101e77761f5856994897700be0`;
 - unified candidate-data audit:
-  `.codex-runtime/dataset-candidate-ledger-20260831-11-contract-recovery`,
+  `.codex-runtime/dataset-final-quality-20260831-14`,
   SHA-256
-  `c29040da2274c413cac6ecd37d8fcc12811278595deae6dc0c14233e6ff97fd2`;
+  `b0800bac8f6e3f0ed61cff2b111cf04e901597d06d77352993590ef9e043fef3`;
 - audit report:
   `docs/experiments/2026-08-31-final-candidate-data-audit.md`.
 
