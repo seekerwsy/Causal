@@ -835,6 +835,63 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
     )
     if any(set(rows) != set(tasks) for rows in (contracts, quality, roles, readiness, ledger)):
         raise ContractCleaningError("final data populations differ")
+    forbidden_fields = {
+        "task_id",
+        "confirm_add_eligible",
+        "confirm_remove_eligible",
+        "eligible_arm_protocol_ids",
+        "split",
+        "prompt_tsg",
+        "assignment",
+        "generated_code",
+        "outcome",
+    }
+    if any(
+        forbidden_fields.intersection(row)
+        for rows in (tasks, contracts, quality, roles)
+        for row in rows.values()
+    ):
+        raise ContractCleaningError("downstream experimental field entered final data")
+    group_rows = _unique_by(
+        rows_by_file["near-duplicate-groups.jsonl"],
+        "near_duplicate_group_id",
+        "near-duplicate groups",
+    )
+    lineage_rows = _unique_by(
+        rows_by_file["source-lineages.jsonl"], "source_lineage_id", "source lineages"
+    )
+    task_to_group = {}
+    for group_id, group in group_rows.items():
+        core = {
+            key: value
+            for key, value in group.items()
+            if key != "near_duplicate_group_record_sha256"
+        }
+        if (
+            group.get("schema_version") != "near-duplicate-group-4.0"
+            or group.get("near_duplicate_group_record_sha256") != content_hash(core)
+            or group.get("maximum_task_units_across_all_prospective_formal_roles") != 1
+        ):
+            raise ContractCleaningError("near-duplicate group is invalid")
+        for task_id in group.get("task_unit_ids", []):
+            if task_id in task_to_group:
+                raise ContractCleaningError("near-duplicate groups overlap")
+            task_to_group[task_id] = group_id
+    task_to_lineage = {}
+    for lineage_id, lineage in lineage_rows.items():
+        core = {key: value for key, value in lineage.items() if key != "lineage_record_sha256"}
+        if (
+            lineage.get("schema_version") != "source-lineage-3.0"
+            or lineage.get("lineage_record_sha256") != content_hash(core)
+        ):
+            raise ContractCleaningError("source lineage is invalid")
+        for task_id in lineage.get("task_unit_ids", []):
+            if task_id in task_to_lineage:
+                raise ContractCleaningError("source lineages overlap")
+            task_to_lineage[task_id] = lineage_id
+    if set(task_to_group) != set(tasks) or set(task_to_lineage) != set(tasks):
+        raise ContractCleaningError("groups or lineages do not partition final tasks")
+    source_record_ids = []
     for task_id, task in tasks.items():
         contract = contracts[task_id]
         quality_row = quality[task_id]
@@ -856,6 +913,9 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
             )
             or task.get("evaluation_asset_refs", {}).get("functional_contract_id")
             != contract.get("contract_id")
+            or task.get("model_visible_input", {}).get("natural_prompt_content_sha256")
+            != content_hash(task.get("model_visible_input", {}).get("natural_prompt"))
+            or contract.get("record_id") != task.get("representative_record_id")
             or contract.get("schema_version") != "functional-contract-reviewer-5.0"
             or contract.get("functional_contract_record_sha256")
             != content_hash(
@@ -879,6 +939,8 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
             or role.get("schema_version") != "task-role-5.0"
             or "CONTRACT_REPAIR_VIEWED" not in role.get("exposure_categories", [])
             or role.get("prospective_formal_role_assigned") is not False
+            or role.get("near_duplicate_group_id") != task_to_group[task_id]
+            or role.get("source_lineage_id") != task_to_lineage[task_id]
             or role.get("task_role_record_sha256")
             != content_hash(
                 {
@@ -912,6 +974,18 @@ def verify_contract_content_data(root: Path) -> dict[str, Any]:
             )
         ):
             raise ContractCleaningError("final data record binding is invalid")
+        source_record_ids.extend(task.get("legacy_identity", {}).get("source_record_ids", []))
+    if len(source_record_ids) != len(set(source_record_ids)):
+        raise ContractCleaningError("source records are duplicated across final task units")
+    for group in group_rows.values():
+        if (
+            sum(
+                bool(roles[task_id].get("prospective_formal_role_assigned"))
+                for task_id in group["task_unit_ids"]
+            )
+            > 1
+        ):
+            raise ContractCleaningError("near-duplicate formal-role firewall is violated")
     if (
         report.get("status") != "DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED"
         or report.get("task_unit_count") != len(tasks)
