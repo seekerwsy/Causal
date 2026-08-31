@@ -2435,7 +2435,9 @@ def _response_rows(raw: bytes, field: str, expected: int) -> list[dict[str, Any]
 
 def _validate_contract_values(row: Mapping[str, Any]) -> dict[str, Any]:
     entrypoint = row.get("entrypoint")
-    if entrypoint is not None and (not isinstance(entrypoint, str) or not entrypoint.strip()):
+    if isinstance(entrypoint, str) and not entrypoint.strip():
+        entrypoint = None
+    elif entrypoint is not None and not isinstance(entrypoint, str):
         raise ContractCleaningError("contract entrypoint is invalid")
     result: dict[str, Any] = {
         "resolution_status": row["resolution_status"],

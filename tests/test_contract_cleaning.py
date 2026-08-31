@@ -242,6 +242,27 @@ def test_semantic_contract_repair_does_not_mix_evidence_bookkeeping() -> None:
     assert "evidence_bindings" not in projected
 
 
+def test_empty_entrypoint_normalizes_to_absent_without_inventing_a_contract() -> None:
+    response = {
+        "item_index": 1,
+        "resolution_status": "unsupported",
+        "entrypoint": "",
+        "requirements": [],
+        "inputs": [],
+        "outputs": [],
+        "side_effects": [],
+        "environment_dependencies": [],
+        "source_specification_assessment": "defect",
+        "repair_category": "SOURCE_DEFECT",
+        "reason": "The source does not define a software task.",
+    }
+    row = _parse_contract_repairs(
+        json.dumps({"items": [response]}).encode(), _batch()
+    )[0]
+    assert row["entrypoint"] is None
+    assert row["requirements"] == []
+
+
 def test_review_keeps_producer_failure_nonterminal() -> None:
     raw = json.dumps(
         {
