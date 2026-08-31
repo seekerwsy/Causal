@@ -1,4 +1,6 @@
 import json
+from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +13,7 @@ from prompt_mechanism_study.contract_cleaning import (
     _terminal_quality,
     _transport_retry,
 )
+from prompt_mechanism_study.cli import _run_adjudicate_contract_repair_evidence
 from prompt_mechanism_study.functional_judge import JudgeGateError
 from prompt_mechanism_study.records import content_hash
 
@@ -310,6 +313,39 @@ def test_transport_retry_does_not_retry_semantic_or_credential_failures(monkeypa
 
     with pytest.raises(JudgeGateError):
         _transport_retry(credential)({}, {}, "prompt")
+
+
+def test_adjudication_cli_dispatches_to_the_data_function(monkeypatch) -> None:
+    observed = {}
+
+    def fake(*args, **kwargs):
+        observed["args"] = args
+        observed["kwargs"] = kwargs
+        return {"status": "TEST_ADJUDICATION_DISPATCHED"}
+
+    monkeypatch.setattr(
+        "prompt_mechanism_study.contract_cleaning.adjudicate_unbound_repaired_contract_evidence",
+        fake,
+    )
+    args = Namespace(
+        repository_root=Path("repo"),
+        base_bundle=Path("base"),
+        repairs_root=Path("repairs"),
+        prior_evidence_root=Path("evidence"),
+        output=Path("output"),
+        producer_commit="commit",
+        max_new_batches=1,
+        workers=2,
+    )
+    assert _run_adjudicate_contract_repair_evidence(args, None) == 0
+    assert observed["args"] == (
+        args.repository_root,
+        args.base_bundle,
+        args.repairs_root,
+        args.prior_evidence_root,
+        args.output,
+    )
+    assert observed["kwargs"]["producer_commit"] == "commit"
 
 
 def test_response_binding_uses_last_duplicate_only_when_index_set_is_complete() -> None:

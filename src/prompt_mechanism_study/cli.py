@@ -887,6 +887,19 @@ def _run_adjudicate_contract_repair_evidence(
         adjudicate_unbound_repaired_contract_evidence,
     )
 
+    return _emit_status(
+        adjudicate_unbound_repaired_contract_evidence(
+            args.repository_root,
+            args.base_bundle,
+            args.repairs_root,
+            args.prior_evidence_root,
+            args.output,
+            producer_commit=args.producer_commit,
+            max_new_batches=args.max_new_batches,
+            workers=args.workers,
+        )
+    )
+
 
 def _run_correct_unbound_contract_evidence(
     args: argparse.Namespace, _: argparse.ArgumentParser
@@ -907,20 +920,6 @@ def _run_correct_unbound_contract_evidence(
             workers=args.workers,
         )
     )
-
-    return _emit_status(
-        adjudicate_unbound_repaired_contract_evidence(
-            args.repository_root,
-            args.base_bundle,
-            args.repairs_root,
-            args.prior_evidence_root,
-            args.output,
-            producer_commit=args.producer_commit,
-            max_new_batches=args.max_new_batches,
-            workers=args.workers,
-        )
-    )
-
 
 def _run_assemble_contract_content(
     args: argparse.Namespace, _: argparse.ArgumentParser
