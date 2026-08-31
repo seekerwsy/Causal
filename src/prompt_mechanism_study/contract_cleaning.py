@@ -634,7 +634,7 @@ def _parse_evidence_backfill(
     for row, item in zip(rows, batch, strict=True):
         if set(row) != required or row["binding_status"] not in {"bound", "needs_repair"}:
             raise ContractCleaningError("evidence backfill response is malformed")
-        _bounded_reason(row["reason"])
+        normalized_reason = _normalize_reason(row["reason"])
         evidence = row["evidence_bindings"]
         if row["binding_status"] == "bound":
             try:
@@ -645,7 +645,7 @@ def _parse_evidence_backfill(
                     item["source_prompt_sha256"],
                 )
                 frozen_status = "bound"
-                reason = row["reason"]
+                reason = normalized_reason
             except ContractCleaningError:
                 evidence = None
                 frozen_status = "needs_repair"
@@ -654,7 +654,7 @@ def _parse_evidence_backfill(
             raise ContractCleaningError("unbound contract must not carry evidence")
         else:
             frozen_status = "needs_repair"
-            reason = row["reason"]
+            reason = normalized_reason
         frozen.append(
             {
                 "task_unit_id": item["task_unit_id"],
@@ -697,7 +697,7 @@ def _parse_semantic_repairs(
             item["source_prompt"],
             item["source_prompt_sha256"],
         )
-        _bounded_reason(row["reason"])
+        normalized_reason = _normalize_reason(row["reason"])
         frozen.append(
             {
                 "task_unit_id": item["task_unit_id"],
@@ -705,7 +705,7 @@ def _parse_semantic_repairs(
                 "content_evidence": evidence,
                 "source_specification_assessment": row["source_specification_assessment"],
                 "repair_category": row["repair_category"],
-                "reason": row["reason"],
+                "reason": normalized_reason,
             }
         )
     return frozen
@@ -743,8 +743,17 @@ def _parse_content_reviews(
             )
         ):
             raise ContractCleaningError("contract content review response is malformed")
-        _bounded_reason(row["reason"])
-        frozen.append({"task_unit_id": item["task_unit_id"], **{k: v for k, v in row.items() if k != "item_index"}})
+        normalized_reason = _normalize_reason(row["reason"])
+        frozen.append(
+            {
+                "task_unit_id": item["task_unit_id"],
+                **{
+                    key: (normalized_reason if key == "reason" else value)
+                    for key, value in row.items()
+                    if key != "item_index"
+                },
+            }
+        )
     return frozen
 
 
@@ -882,9 +891,10 @@ def _occurrence_start(prompt: str, literal: str, occurrence: int) -> int | None:
     return found
 
 
-def _bounded_reason(value: Any) -> None:
-    if not isinstance(value, str) or not value.strip() or len(value) > 2000:
+def _normalize_reason(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
         raise ContractCleaningError("curation reason is invalid")
+    return value[:2000]
 
 
 def _unique_results(rows: Sequence[dict[str, Any]], label: str) -> dict[str, dict[str, Any]]:
