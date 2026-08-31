@@ -599,20 +599,31 @@ def _parse_evidence_backfill(
         _bounded_reason(row["reason"])
         evidence = row["content_evidence"]
         if row["binding_status"] == "bound":
-            evidence = _normalize_content_evidence(
-                evidence,
-                item["old_contract"],
-                item["source_prompt"],
-                item["source_prompt_sha256"],
-            )
+            try:
+                evidence = _normalize_content_evidence(
+                    evidence,
+                    item["old_contract"],
+                    item["source_prompt"],
+                    item["source_prompt_sha256"],
+                )
+                frozen_status = "bound"
+                reason = row["reason"]
+            except ContractCleaningError:
+                evidence = None
+                frozen_status = "needs_repair"
+                reason = "Deterministic validation rejected incomplete or non-literal evidence."
         elif evidence is not None:
             raise ContractCleaningError("unbound contract must not carry evidence")
+        else:
+            frozen_status = "needs_repair"
+            reason = row["reason"]
         frozen.append(
             {
                 "task_unit_id": item["task_unit_id"],
-                "binding_status": row["binding_status"],
+                "binding_status": frozen_status,
+                "model_binding_status": row["binding_status"],
                 "content_evidence": evidence,
-                "reason": row["reason"],
+                "reason": reason,
             }
         )
     return frozen

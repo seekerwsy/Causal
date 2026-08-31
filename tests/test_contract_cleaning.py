@@ -96,6 +96,30 @@ def test_unbound_evidence_cannot_carry_partial_spans() -> None:
         _parse_evidence_backfill(raw, _batch())
 
 
+def test_incomplete_bound_evidence_is_deterministically_escalated() -> None:
+    evidence = _evidence()
+    evidence["requirements"] = []
+    raw = json.dumps(
+        {
+            "items": [
+                {
+                    "item_index": 1,
+                    "binding_status": "bound",
+                    "content_evidence": evidence,
+                    "reason": "Bound by the model.",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    ).encode()
+
+    row = _parse_evidence_backfill(raw, _batch())[0]
+
+    assert row["model_binding_status"] == "bound"
+    assert row["binding_status"] == "needs_repair"
+    assert row["content_evidence"] is None
+
+
 def test_semantic_repair_requires_evidence_for_every_contract_value() -> None:
     response = {
         "item_index": 1,
