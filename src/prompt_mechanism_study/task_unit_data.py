@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping
 
 from prompt_mechanism_study.artifact_io import bundle_digest, read_json, verify_bundle
 from prompt_mechanism_study.records import canonical_json, content_hash, content_id
@@ -615,46 +614,8 @@ def _texts(value: Any, label: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    build = commands.add_parser("build")
-    for name in (
-        "prepared_root",
-        "clusters_root",
-        "candidate_root",
-        "legacy_roles_root",
-        "development_exclusions_path",
-        "role_census_root",
-        "output",
-    ):
-        build.add_argument(name, type=Path)
-    verify = commands.add_parser("verify")
-    verify.add_argument("root", type=Path)
-    args = parser.parse_args(argv)
-    if args.command == "verify":
-        result = verify_task_unit_data(args.root)
-    else:
-        result = compile_task_unit_data(
-            prepared_root=args.prepared_root,
-            clusters_root=args.clusters_root,
-            candidate_root=args.candidate_root,
-            legacy_roles_root=args.legacy_roles_root,
-            development_exclusions_path=args.development_exclusions_path,
-            role_census_root=args.role_census_root,
-            output=args.output,
-        )
-    print(canonical_json(result))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 __all__ = [
     "TaskUnitDataError",
     "compile_task_unit_data",
-    "main",
     "verify_task_unit_data",
 ]

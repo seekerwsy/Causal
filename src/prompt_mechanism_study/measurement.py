@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from prompt_mechanism_study.adapters import AdapterBundle
 from prompt_mechanism_study.artifact_io import (
     json_object,
     require_sha256 as _digest,
@@ -17,10 +16,6 @@ from prompt_mechanism_study.functional_judge import (
     build_review_request,
     python_syntax_valid,
     validate_review_response,
-)
-from prompt_mechanism_study.randomization import (
-    FactorialRandomization,
-    SuccessorRandomization,
 )
 from prompt_mechanism_study.records import content_hash, content_id, require_text, require_unique
 from prompt_mechanism_study.security_profiles import evaluate_security_profile
@@ -252,27 +247,6 @@ def measure_generated_code(
     )
 
 
-def close_measurements(
-    randomization: SuccessorRandomization | FactorialRandomization,
-    adapters: AdapterBundle,
-    measurements: Iterable[Measurement],
-    *,
-    study_id: str,
-    infrastructure_failures: Iterable[InfrastructureFailure] = (),
-) -> MeasurementLedger:
-    failures = tuple(infrastructure_failures)
-    if failures:
-        raise ValueError("infrastructure failures require repair or replay before analysis")
-    expected = {item.assignment_id for item in randomization.assignments}
-    return _close_measurement_ledger(
-        expected,
-        measurements,
-        study_id,
-        randomization.randomization_id,
-        adapters.adapter_bundle_id,
-    )
-
-
 def close_target_measurements(
     assignments: Iterable[object],
     measurements: Iterable[Measurement],
@@ -357,7 +331,6 @@ __all__ = [
     "MeasurementExecutionError",
     "MeasurementLedger",
     "OracleStatus",
-    "close_measurements",
     "close_target_measurements",
     "measure_generated_code",
 ]

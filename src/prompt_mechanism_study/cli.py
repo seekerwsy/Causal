@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from prompt_mechanism_study import functional_judge
-from prompt_mechanism_study.artifact_io import read_json, verify_bundle, write_bundle
+from prompt_mechanism_study.artifact_io import verify_bundle
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -35,76 +35,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     judge.add_argument("--gate-config", type=Path)
     judge.add_argument("--pilot-root", type=Path)
     judge.add_argument("--remaining-root", type=Path)
-
-    successor = commands.add_parser(
-        "successor-experiment",
-        help=(
-            "legacy/pre-cutover schema-2 ADD/REMOVE reproduction boundary"
-        ),
-    )
-    successor.add_argument("phase", choices=("preflight", "freeze", "run", "verify"))
-    successor.add_argument("output", type=Path)
-    successor.add_argument("--repository-root", type=Path, default=Path.cwd())
-    successor.add_argument("--config", type=Path)
-    successor.add_argument(
-        "--freeze",
-        type=Path,
-        help="verified pre-outcome successor materialization required by run",
-    )
-
-    factorial = commands.add_parser(
-        "factorial-experiment",
-        help="legacy/pre-cutover schema-1.1 factorial reproduction boundary",
-    )
-    factorial.add_argument(
-        "phase",
-        choices=("preflight", "freeze", "run", "verify"),
-    )
-    factorial.add_argument("output", type=Path)
-    factorial.add_argument("--repository-root", type=Path, default=Path.cwd())
-    factorial.add_argument("--config", type=Path)
-    factorial.add_argument("--freeze", type=Path)
-
-    selector_study = commands.add_parser(
-        "selector-study",
-        help=(
-            "legacy/pre-cutover schema-2.1 selector reproduction boundary"
-        ),
-    )
-    selector_study.add_argument(
-        "phase",
-        choices=(
-            "select",
-            "bridge",
-            "run",
-            "verify",
-            "verify-selection",
-            "verify-bridge",
-            "compare-representations",
-            "verify-representations",
-        ),
-        help=(
-            "active selector stage; compare-representations requires --config and writes "
-            "an end-to-end RQ2 bundle, while verify-representations replays that bundle"
-        ),
-    )
-    selector_study.add_argument("output", type=Path, help="bundle to write or verify")
-    selector_study.add_argument(
-        "--config",
-        type=Path,
-        help="phase-specific frozen input config; required by select/run/comparison phases",
-    )
-    selector_study.add_argument("--selection", type=Path)
-    selector_study.add_argument("--bridge", type=Path)
-    selector_study.add_argument("--successor-result", type=Path, action="append", default=[])
-
-    interaction_selector = commands.add_parser(
-        "interaction-selector",
-        help="freeze or independently verify the Prompt-TSG pair selector",
-    )
-    interaction_selector.add_argument("phase", choices=("freeze", "verify"))
-    interaction_selector.add_argument("output", type=Path)
-    interaction_selector.add_argument("--config", type=Path)
 
     discovery_population = commands.add_parser(
         "discovery-population",
@@ -135,6 +65,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--prompt-tsg-bundle", type=Path, action="append", required=True
     )
     task_partition.add_argument("--seed", type=int, default=2026083001)
+
+    task_unit_data = commands.add_parser(
+        "task-unit-data",
+        help="build or verify the reviewer-facing task-unit data bundle",
+    )
+    task_unit_data.add_argument("phase", choices=("build", "verify"))
+    task_unit_data.add_argument("output", type=Path)
+    task_unit_data.add_argument("--prepared-root", type=Path)
+    task_unit_data.add_argument("--clusters-root", type=Path)
+    task_unit_data.add_argument("--candidate-root", type=Path)
+    task_unit_data.add_argument("--legacy-roles-root", type=Path)
+    task_unit_data.add_argument("--development-exclusions", type=Path)
+    task_unit_data.add_argument("--role-census-root", type=Path)
 
     realization_bindings = commands.add_parser(
         "realization-bindings",
@@ -550,6 +493,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=args.seed,
         )
         print(report["status"])
+    elif args.command == "task-unit-data":
+        from prompt_mechanism_study.task_unit_data import (
+            compile_task_unit_data,
+            verify_task_unit_data,
+        )
+
+        if args.phase == "verify":
+            report = verify_task_unit_data(args.output)
+        else:
+            required = (
+                "prepared_root",
+                "clusters_root",
+                "candidate_root",
+                "legacy_roles_root",
+                "development_exclusions",
+                "role_census_root",
+            )
+            missing = tuple(name for name in required if getattr(args, name) is None)
+            if missing:
+                parser.error(
+                    "task-unit-data build requires "
+                    + ", ".join("--" + name.replace("_", "-") for name in missing)
+                )
+            report = compile_task_unit_data(
+                prepared_root=args.prepared_root,
+                clusters_root=args.clusters_root,
+                candidate_root=args.candidate_root,
+                legacy_roles_root=args.legacy_roles_root,
+                development_exclusions_path=args.development_exclusions,
+                role_census_root=args.role_census_root,
+                output=args.output,
+            )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     elif args.command == "realization-bindings":
         from prompt_mechanism_study.eligibility import freeze_tsg_realization_bindings
 
@@ -824,160 +800,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             family_quotas=family_quotas or None,
         )
         print(report["status"])
-    elif args.command == "factorial-experiment":
-        if args.phase == "verify":
-            from prompt_mechanism_study.factorial_verify import (
-                verify_factorial_result_bundle,
-            )
-
-            report = verify_factorial_result_bundle(args.output)
-            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-            return 0
-        from prompt_mechanism_study.factorial_experiment import (
-            freeze_factorial_experiment,
-            preflight_factorial_experiment,
-            run_factorial_experiment,
-        )
-
-        if args.config is None:
-            parser.error("factorial preflight, freeze, and run require --config")
-        factorial_config_path = (
-            args.config if args.config.is_absolute() else args.repository_root / args.config
-        )
-        if read_json(factorial_config_path).get("schema_version") != "1.1":
-            parser.error("active factorial phases require schema 1.1")
-        if args.phase == "preflight":
-            report = preflight_factorial_experiment(args.repository_root, args.config)
-            write_bundle(args.output, {"report.json": report})
-        elif args.phase == "freeze":
-            report = freeze_factorial_experiment(
-                args.repository_root,
-                args.config,
-                args.output,
-            )
-        else:
-            if args.phase == "run" and args.freeze is None:
-                parser.error("active factorial run requires --freeze")
-            report = run_factorial_experiment(
-                args.repository_root,
-                args.config,
-                args.output,
-                freeze_root=args.freeze,
-            )
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-        return 0
-    elif args.command == "successor-experiment":
-        from prompt_mechanism_study.successor_experiment import (
-            freeze_successor_experiment,
-            preflight_successor_experiment,
-            run_successor_experiment,
-            verify_successor_materialization_bundle,
-        )
-        from prompt_mechanism_study.successor_verify import verify_successor_result_bundle
-
-        if args.phase == "verify":
-            report = verify_successor_result_bundle(args.output)
-        else:
-            if args.config is None:
-                parser.error("successor preflight, freeze, and run require --config")
-            if args.phase == "preflight":
-                report = preflight_successor_experiment(
-                    args.repository_root,
-                    args.config,
-                )
-                write_bundle(args.output, {"report.json": report})
-            elif args.phase == "freeze":
-                report = freeze_successor_experiment(
-                    args.repository_root,
-                    args.config,
-                    args.output,
-                )
-            else:
-                if args.freeze is None:
-                    parser.error("successor run requires --freeze")
-                verify_successor_materialization_bundle(args.freeze)
-                report = run_successor_experiment(
-                    args.repository_root,
-                    args.config,
-                    args.output,
-                    freeze_root=args.freeze,
-                )
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-        return 0
-    elif args.command == "selector-study":
-        from prompt_mechanism_study.selector_analysis import (
-            run_representation_comparison_from_config,
-            run_selector_experiment_from_config,
-            verify_representation_comparison_bundle,
-            verify_selector_experiment_bundle,
-        )
-        from prompt_mechanism_study.selector_experiment import (
-            freeze_bridge_from_config,
-            freeze_selection_from_config,
-            verify_bridge_freeze_bundle,
-            verify_selection_freeze_bundle,
-        )
-
-        if args.phase == "verify":
-            report = verify_selector_experiment_bundle(args.output)
-        elif args.phase == "verify-selection":
-            report = verify_selection_freeze_bundle(args.output)
-        elif args.phase == "verify-bridge":
-            if args.selection is None:
-                parser.error("selector verify-bridge requires --selection")
-            report = verify_bridge_freeze_bundle(args.output, args.selection)
-        elif args.phase == "verify-representations":
-            report = verify_representation_comparison_bundle(args.output)
-        elif args.phase == "select":
-            if args.config is None:
-                parser.error("selector select requires --config")
-            report = freeze_selection_from_config(args.config, args.output)
-        elif args.phase == "bridge":
-            if args.config is None or args.selection is None:
-                parser.error("selector bridge requires --config and --selection")
-            report = freeze_bridge_from_config(
-                args.selection,
-                args.config,
-                args.output,
-            )
-        elif args.phase == "compare-representations":
-            if args.config is None:
-                parser.error("selector compare-representations requires --config")
-            report = run_representation_comparison_from_config(args.config, args.output)
-        else:
-            if (
-                args.config is None
-                or args.selection is None
-                or args.bridge is None
-                or not args.successor_result
-            ):
-                parser.error(
-                    "selector run requires --config, --selection, --bridge, "
-                    "and at least one --successor-result"
-                )
-            report = run_selector_experiment_from_config(
-                args.selection,
-                args.bridge,
-                tuple(args.successor_result),
-                args.config,
-                args.output,
-            )
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-        return 0
-    elif args.command == "interaction-selector":
-        from prompt_mechanism_study.interaction_selector_experiment import (
-            freeze_interaction_selection_from_config,
-            verify_interaction_selection_bundle,
-        )
-
-        if args.phase == "verify":
-            report = verify_interaction_selection_bundle(args.output)
-        else:
-            if args.config is None:
-                parser.error("interaction-selector freeze requires --config")
-            report = freeze_interaction_selection_from_config(args.config, args.output)
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-        return 0
     else:
         return _judge_gate(args)
     return 0

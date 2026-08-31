@@ -1886,7 +1886,7 @@ def validate_formal_budget_preflight(
 ) -> FormalBudgetPreflight:
     """Fail before provider calls on lineage, model, block, count, call, or cost drift."""
 
-    from prompt_mechanism_study.inference import (
+    from prompt_mechanism_study.randomization import (
         ATOMIC_CONFIRMATORY_ARMS,
         PAIR_CONFIRMATORY_ARMS,
         AssignedArmITTRecord,
@@ -2130,7 +2130,7 @@ def freeze_target_confirmation_design(
 ) -> ConfirmationFreeze:
     """Freeze selection, dispatch, assignment, and inference before outcomes."""
 
-    from prompt_mechanism_study.inference import (
+    from prompt_mechanism_study.randomization import (
         AssignedArmITTRecord,
         TargetRandomizationPlan,
         TargetTaskBundle,
@@ -2342,107 +2342,6 @@ def freeze_target_study_index(
     )
 
 
-def authorize_target_report(
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: Any,
-    task_bundles: Sequence[Any],
-    assignments: Sequence[Any],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: Any,
-    yields: Any,
-    execution_environment: FreezeArtifactReference,
-    execution_command: FreezeArtifactReference,
-    provider_call_ledger: FreezeArtifactReference,
-) -> FormalReportAuthorization:
-    """Authorize claim-bearing tables only after the exact formal chain verifies."""
-
-    from prompt_mechanism_study.inference import (
-        EvidenceLevel,
-        SharedEvidenceRecord,
-        TargetSelectorYieldResult,
-    )
-    from prompt_mechanism_study.selector_verify import (
-        verify_target_shared_evidence,
-        verify_target_study_freezes,
-    )
-
-    if type(evidence) is not SharedEvidenceRecord:
-        raise TypeError("formal report authorization requires shared target evidence")
-    if type(yields) is not TargetSelectorYieldResult:
-        raise TypeError("formal report authorization requires target selector yields")
-    if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
-        raise StudyDesignError("tested, demo, or calibration evidence cannot authorize claims")
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    if (
-        evidence.ledger.dispatch != dispatch
-        or evidence.ledger.assignments != frozen_assignments
-        or evidence.plan != budget.power_and_margin_memo.target_itt_plan()
-    ):
-        raise StudyDesignError("report evidence drifted from the formal confirmation freeze")
-    confirmation_task_units = {
-        task.task_unit_id
-        for binding in manifest.bindings
-        if binding.role is DataRole.CONFIRMATION
-        for task in binding.task_units
-    }
-    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
-    if not assigned_task_units or not assigned_task_units <= confirmation_task_units:
-        raise StudyDesignError("formal evidence contains a non-CONFIRMATION task unit")
-    freeze_verification = verify_target_study_freezes(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-    )
-    evidence_verification = verify_target_shared_evidence(evidence, yields)
-    if (
-        freeze_verification.get("status") != "TARGET_STUDY_FREEZE_VERIFIED"
-        or evidence_verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED"
-    ):
-        raise StudyDesignError("formal report inputs did not independently verify")
-    return FormalReportAuthorization(
-        manifest.protocol_id,
-        FreezeArtifactReference(
-            index.study_freeze_index_id,
-            content_hash(index),
-        ),
-        FreezeArtifactReference(
-            evidence.shared_evidence_record_id,
-            content_hash(evidence),
-        ),
-        FreezeArtifactReference(
-            yields.target_selector_yield_result_id,
-            content_hash(yields),
-        ),
-        FreezeArtifactReference(
-            evidence.ledger.evidence_ledger_id,
-            content_hash(evidence.ledger),
-        ),
-        execution_environment,
-        execution_command,
-        provider_call_ledger,
-        content_hash(freeze_verification),
-        content_hash(evidence_verification),
-        evidence.evidence_level.value,
-    )
 
 
 def freeze_study_design(
@@ -2998,7 +2897,6 @@ __all__ = [
     "TargetPowerSimulationPlan",
     "TargetPowerSimulationResult",
     "freeze_study_design",
-    "authorize_target_report",
     "freeze_qualification_bundle",
     "freeze_power_and_margin_memo",
     "qualification_plan_bundle",

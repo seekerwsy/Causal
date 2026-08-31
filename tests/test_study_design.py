@@ -9,15 +9,17 @@ import pytest
 from prompt_mechanism_study.artifact_io import read_json, write_bundle
 from prompt_mechanism_study.cli import main
 from prompt_mechanism_study.inference import (
+   EvidenceLevel,
+   build_target_selector_yields,
+   estimate_target_itt,
+   freeze_assigned_arm_evidence,
+)
+from prompt_mechanism_study.randomization import (
     ATOMIC_CONFIRMATORY_ARMS,
     PAIR_CONFIRMATORY_ARMS,
-    EvidenceLevel,
     TargetRandomizationPlan,
     TargetTaskArmVariant,
     TargetTaskBundle,
-    build_target_selector_yields,
-    estimate_target_itt,
-    freeze_assigned_arm_evidence,
     randomize_target_confirmation,
 )
 from prompt_mechanism_study.outcomes import Outcome
@@ -41,6 +43,7 @@ from prompt_mechanism_study.selector_verify import (
     verify_target_study_freezes,
 )
 from prompt_mechanism_study.selector_analysis import (
+    authorize_target_report,
     build_target_rq_tables,
     write_target_result_bundle,
 )
@@ -78,7 +81,6 @@ from prompt_mechanism_study.study_design import (
     freeze_target_confirmation_design,
     freeze_target_discovery_design,
     freeze_target_study_index,
-    authorize_target_report,
     qualify_rq1_baselines,
     qualify_rq1_budget,
     qualification_plan_bundle,

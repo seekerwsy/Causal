@@ -1,3 +1,5 @@
+"""Atomic schema-3 prioritization, baseline, slot, and backend invariants."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -10,26 +12,20 @@ from prompt_mechanism_study.prioritization import (
     AtomicFCIGateStatus,
     AtomicSelectorVariant,
     AtomicShadowPlan,
-    atomic_preoutcome_observations,
     ConfirmationDispatchManifest,
     DiscoveryObservation,
-    ExpertRankingInput,
     FixedSlotSource,
-    FrozenFCIRelationScores,
     PolicyTrack,
-    SelectorKind,
     SelectorSlot,
-    SelectorSuitePlan,
     SlotStatus,
+    atomic_preoutcome_observations,
     discovery_data_sha256,
     freeze_atomic_candidate_folds,
     freeze_atomic_candidate_universe,
-    freeze_candidate_universe_manifest,
     freeze_confirmation_dispatch,
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
     run_atomic_shadow_qualification,
-    run_selector_suite,
 )
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.rq1_baselines import (
@@ -43,112 +39,10 @@ from prompt_mechanism_study.rq1_baselines import (
 from prompt_mechanism_study.representation import (
     AnalysisScope,
     AtomicPolicyKey,
-    Candidate,
-    ExpectedDirection,
     ModelBoundCandidateRecord,
     Operation,
     PolicyFactor,
-    freeze_universe,
 )
-
-
-def _fixture(*, supported: bool = True):
-    catalog_candidates = (
-        (
-            "context.untrusted_argument_to_fixed_process.v1",
-            "feature.argv_without_shell",
-            "CWE-78",
-        ),
-        (
-            "context.untrusted_argument_to_finite_process_choice.v1",
-            "feature.executable_allowlist_and_argv",
-            "CWE-78",
-        ),
-        (
-            "context.untrusted_value_to_fixed_sql.v1",
-            "feature.sql_value_parameterization",
-            "CWE-89",
-        ),
-        (
-            "context.finite_dynamic_identifier_sql.v1",
-            "feature.sql_identifier_allowlist_and_values",
-            "CWE-89",
-        ),
-    )
-    candidates = tuple(
-        Candidate(
-            f"candidate.{index}",
-            context_query_id,
-            feature_id,
-            Operation.ADD if index % 2 == 0 else Operation.REMOVE,
-            cwe,
-            "oracle_evaluable_secure_code_yield",
-            ExpectedDirection.INCREASE,
-        )
-        for index, (context_query_id, feature_id, cwe) in enumerate(
-            catalog_candidates
-        )
-    )
-    universe = freeze_universe(candidates, representation_adapter_id="prompt-tsg-v2")
-    candidate_ids = tuple(item.candidate_id for item in universe.candidates)
-    rows = []
-    for index in range(40):
-        outcome = index % 2
-        states = {
-            candidate_ids[0]: outcome,
-            candidate_ids[1]: (index // 2) % 2,
-            candidate_ids[2]: (index // 3) % 2,
-            candidate_ids[3]: (index // 5) % 2,
-        }
-        for family_id, family_candidates in (
-            ("family-a", (candidate_ids[0], candidate_ids[2])),
-            ("family-b", (candidate_ids[1], candidate_ids[3])),
-        ):
-            rows.append(
-                DiscoveryObservation(
-                    f"task-unit-{index:02d}-{family_id}",
-                    "model-a",
-                    family_id,
-                    0,
-                    tuple((candidate_id, states[candidate_id]) for candidate_id in family_candidates),
-                    (("source_group", float(index % 3)),),
-                    outcome,
-                )
-            )
-    frozen_rows = tuple(rows)
-    manifest = freeze_candidate_universe_manifest(
-        universe,
-        supported_candidate_ids=candidate_ids if supported else (),
-        realization_policy_ids={candidate_id: f"realization-policy-{index}" for index, candidate_id in enumerate(candidate_ids)},
-        candidate_family_ids={
-            candidate_id: ("family-a" if index in {0, 2} else "family-b")
-            for index, candidate_id in enumerate(candidate_ids)
-        },
-        discovery_data_sha256=discovery_data_sha256(frozen_rows),
-        positivity_audit_sha256=content_hash("positivity-audit"),
-        information_budget_sha256=content_hash("same-information-budget"),
-        outcome_id="oracle_evaluable_secure_code_yield",
-        top_k=3,
-    )
-    plan = SelectorSuitePlan("model-a", 1.0, 4, (11, 22, 33))
-    fci_scores = FrozenFCIRelationScores(
-        manifest.manifest_id,
-        plan.plan_id,
-        content_hash("frozen-fci-relation-evidence"),
-        tuple(
-            (candidate_id, float(4 - index))
-            for index, candidate_id in enumerate(candidate_ids)
-        ),
-    )
-    expert = ExpertRankingInput(
-        manifest.manifest_id,
-        "model-a",
-        content_hash("blinded-candidate-cards"),
-        tuple(reversed(candidate_ids)),
-        True,
-        False,
-    )
-    return manifest, frozen_rows, plan, candidate_ids, fci_scores, expert
 
 
 def _atomic_shadow_fixture():
@@ -244,93 +138,6 @@ def _atomic_shadow_fixture():
         0.5,
     )
     return universe, observations, plan, evidence, first.policy_key, second.policy_key
-
-
-@pytest.mark.reviewer
-@pytest.mark.extended
-def test_gate_failure_is_closed_before_any_selector_ranking() -> None:
-    manifest, rows, plan, _ids, _scores, _expert = _fixture(supported=False)
-    result = run_selector_suite(
-        manifest,
-        rows,
-        plan,
-        fci_relation_scores=FrozenFCIRelationScores(
-            manifest.manifest_id,
-            plan.plan_id,
-            content_hash("unread-because-gate-failed"),
-            (("deliberately-invalid-and-unread", 1.0),),
-        ),
-    )
-
-    assert result.gate_passed is False
-    assert result.runs == ()
-    assert result.selected_union_candidate_ids == ()
-    assert result.gate_failure_reason == "no_candidate_passed_the_frozen_positivity_gate"
-
-
-@pytest.mark.extended
-def test_fci_uses_family_local_task_unit_bootstrap_stability(monkeypatch) -> None:
-    manifest, rows, plan, candidate_ids, _scores, _expert = _fixture()
-    calls = []
-
-    monkeypatch.setattr(prioritization, "_causal_learn_version", lambda: "0.1.4.7")
-
-    def fake_backend(matrix, *, alpha, depth, max_path_length, outcome_index, variable_order, forbidden_directions):
-        calls.append((len(matrix), len(matrix[0]), alpha, depth, max_path_length, outcome_index))
-        assert len(matrix) == 40
-        assert len(matrix[0]) == 4  # one W, two family-local X values, and Y
-        assert outcome_index == 3
-        return {1}, ((variable_order[1], "CIRCLE", variable_order[-1], "CIRCLE"),)
-
-    monkeypatch.setattr(prioritization, "_run_causal_learn_pag", fake_backend)
-    result = run_selector_suite(manifest, rows, plan, expert_input=None)
-    fci = next(run for run in result.runs if run.kind is SelectorKind.FCI)
-    scores = {item.candidate_id: item.score for item in fci.rankings[0].scores}
-
-    # raw, temporal, full, wrong, then every primary bootstrap draw (legacy v1 has no domain family).
-    assert len(calls) == 2 * (4 + plan.fci_bootstrap_draws)
-    assert scores[candidate_ids[0]] == scores[candidate_ids[1]] == 1.0
-    assert scores[candidate_ids[2]] == scores[candidate_ids[3]] == 0.0
-    assert fci.rankings[0].evidence_sha256 != content_hash(scores)
-
-
-@pytest.mark.reviewer
-@pytest.mark.extended
-def test_fci_stability_uses_valid_draw_denominator(monkeypatch) -> None:
-    manifest, rows, plan, candidate_ids, _scores, _expert = _fixture()
-    plan = replace(plan, fci_minimum_valid_fraction=0.5)
-    calls_by_family: dict[str, int] = {}
-
-    monkeypatch.setattr(prioritization, "_causal_learn_version", lambda: "0.1.4.7")
-
-    def fake_backend(
-        matrix,
-        *,
-        alpha,
-        depth,
-        max_path_length,
-        outcome_index,
-        variable_order,
-        forbidden_directions,
-    ):
-        family_key = variable_order[1]
-        call = calls_by_family.get(family_key, 0)
-        calls_by_family[family_key] = call + 1
-        bootstrap_index = call - 4
-        if bootstrap_index >= 0 and bootstrap_index % 4 == 0:
-            raise RuntimeError("synthetic invalid draw")
-        return {1}, ()
-
-    monkeypatch.setattr(prioritization, "_run_causal_learn_pag", fake_backend)
-    result = run_selector_suite(manifest, rows, plan)
-    fci = next(run for run in result.runs if run.kind is SelectorKind.FCI)
-    scores = {item.candidate_id: item.score for item in fci.rankings[0].scores}
-
-    assert scores[candidate_ids[0]] == 1.0
-    assert scores[candidate_ids[1]] == 1.0
-    assert any(
-        failure.reason_code == "fci_bootstrap_failures" for failure in fci.failures
-    )
 
 
 @pytest.mark.reviewer
