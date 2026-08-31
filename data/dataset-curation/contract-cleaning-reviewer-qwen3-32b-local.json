@@ -1,0 +1,1 @@
+{"api_key_env":"OLLAMA_API_KEY","base_url":"http://127.0.0.1:11434/v1","enable_thinking":false,"max_response_bytes":65536,"model_id":"qwen3:32b","provider":"local_ollama_openai_compatible","response_format":{"type":"json_object"},"schema_version":"1.0","seed":95003,"temperature":0.0,"timeout_seconds":300.0,"top_p":1.0}

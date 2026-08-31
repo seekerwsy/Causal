@@ -207,6 +207,10 @@ def _add_curation_group(groups: Any) -> None:
     content_review.add_argument("--repository-root", type=Path, default=Path.cwd())
     content_review.add_argument("--max-new-batches", type=int)
     content_review.add_argument("--workers", type=int, default=1)
+    content_review.add_argument(
+        "--reviewer-config",
+        default="contract-cleaning-reviewer-qwen37max.json",
+    )
 
     semantic_repairs = _leaf(
         actions,
@@ -852,6 +856,7 @@ def _run_contract_content_review(
         args.output,
         max_new_batches=args.max_new_batches,
         workers=args.workers,
+        reviewer_config_name=args.reviewer_config,
     )
     return _emit_status(report)
 

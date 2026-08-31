@@ -364,6 +364,7 @@ def run_contract_content_review(
     *,
     max_new_batches: int | None = None,
     workers: int = 1,
+    reviewer_config_name: str = "contract-cleaning-reviewer-qwen37max.json",
     provider: Provider = bailian_complete,
 ) -> dict[str, Any]:
     """Blindly review every proposed contract and preserve nonterminal failures."""
@@ -392,7 +393,7 @@ def run_contract_content_review(
         output.resolve(),
         items,
         prompt_name="contract-content-review-v1.txt",
-        config_name="contract-cleaning-reviewer-qwen37max.json",
+        config_name=reviewer_config_name,
         stage="contract_content_independent_review",
         base_identity={
             "schema_version": "1.0",
