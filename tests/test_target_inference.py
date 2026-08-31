@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -36,10 +38,41 @@ from prompt_mechanism_study.randomization import (
 from prompt_mechanism_study.records import content_hash
 from prompt_mechanism_study.representation import ModelBoundCandidateRecord
 from prompt_mechanism_study.selector_analysis import build_target_rq_tables
-from prompt_mechanism_study.selector_verify import (
+from prompt_mechanism_study.verification import (
     verify_target_rq_tables,
     verify_target_shared_evidence,
 )
+
+
+@pytest.mark.reviewer
+def test_independent_verifier_imports_schema_not_production_estimators() -> None:
+    verification_root = (
+        Path(__file__).parents[1] / "src" / "prompt_mechanism_study" / "verification"
+    )
+    allowed_inference_schema = {
+        "ConfirmatoryEffectStatus",
+        "EvidenceLevel",
+        "SharedEvidenceRecord",
+        "TargetFamilyStatus",
+        "TargetITTPlan",
+        "TargetSelectorYieldResult",
+    }
+    for path in verification_root.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "prompt_mechanism_study.selector_analysis"
+                if node.module == "prompt_mechanism_study.inference":
+                    assert {item.name for item in node.names} <= allowed_inference_schema
+            elif isinstance(node, ast.Import):
+                assert all(
+                    item.name
+                    not in {
+                        "prompt_mechanism_study.inference",
+                        "prompt_mechanism_study.selector_analysis",
+                    }
+                    for item in node.names
+                )
 
 
 def _target_v3_fixture():

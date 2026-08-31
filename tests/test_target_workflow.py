@@ -16,7 +16,7 @@ from prompt_mechanism_study.prioritization import (
     atomic_preoutcome_observations,
     run_atomic_shadow_qualification,
 )
-from prompt_mechanism_study.selector_verify import (
+from prompt_mechanism_study.verification import (
     load_and_verify_target_result_bundle,
 )
 from prompt_mechanism_study.target_workflow import (

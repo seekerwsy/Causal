@@ -33,7 +33,7 @@ prompt-mechanism-study study verify-result OUTPUT
 | Intervention/randomization | frozen task-policy arm digests and model-effect coordinates | deterministic balanced assigned-arm blocks | `randomization.py` |
 | Measurement | frozen assigned prompt and evaluator identities | code validity, Security Oracle and blinded functionality records | `measurement.py` |
 | Outcome assembly | every assignment plus terminal measurement or infrastructure failure | total assigned-arm outcome ledger | `outcomes.py`, `inference.py` |
-| Inference/reporting | frozen ITT plan, total ledger and study-freeze index | Atomic/Pair simultaneous families, five statuses, fixed-K RQ tables and independent receipt | `inference.py`, `selector_analysis.py`, `selector_verify.py` |
+| Inference/reporting | frozen ITT plan, total ledger and study-freeze index | Atomic/Pair simultaneous families, five statuses, fixed-K RQ tables and independent receipt | `inference.py`, `selector_analysis.py`, `verification/verifier.py` |
 
 The path is linear and typed. There is no active schema-1/2 runner, selector
 study, successor experiment, factorial experiment, or compatibility wrapper in
@@ -94,7 +94,22 @@ The active implementation can then be read in this ten-file order:
 7. `src/prompt_mechanism_study/measurement.py`
 8. `src/prompt_mechanism_study/inference.py`
 9. `src/prompt_mechanism_study/selector_analysis.py`
-10. `src/prompt_mechanism_study/selector_verify.py`
+10. `src/prompt_mechanism_study/verification/verifier.py`
+
+The verifier entry delegates only to verification-owned modules for package
+integrity, qualification/design replay, Atomic/Pair effect reconstruction, and
+report authorization. Those modules may import frozen record types and exact
+serialization helpers, but never production estimators or table builders.
+
+```text
+verification/
+  integrity.py       exact files, typed decoding, package index
+  qualification.py   power, budget, and provider preflight replay
+  design.py          assignment/randomization and freeze replay
+  effects.py         Atomic/Pair effects, status, and Yield@K replay
+  reporting.py       RQ tables and claim authorization replay
+  verifier.py        the only package-level orchestration entry
+```
 
 Supporting modules provide shared records, exact artifact I/O, outcome
 derivation, local security profiles, functional review, and optional RQ1

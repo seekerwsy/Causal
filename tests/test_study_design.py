@@ -32,7 +32,7 @@ from prompt_mechanism_study.prioritization import (
     freeze_fixed_slot_ledger,
     freeze_shared_confirmation_union,
 )
-from prompt_mechanism_study.selector_verify import (
+from prompt_mechanism_study.verification import (
     load_and_verify_target_result_bundle,
     verify_formal_report_authorization,
     verify_formal_budget_preflight,

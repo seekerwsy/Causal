@@ -1,17 +1,15 @@
-"""Result tables and reviewer bundle for the active schema-3 study."""
+"""Independent RQ-table and formal-claim authorization reconstruction."""
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Sequence
-from pathlib import Path
-from typing import Any
+from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 
-from prompt_mechanism_study.artifact_io import write_bundle
 from prompt_mechanism_study.inference import (
     ConfirmatoryEffectStatus,
     EvidenceLevel,
     SharedEvidenceRecord,
+    TargetITTPlan,
     TargetSelectorYieldResult,
 )
 from prompt_mechanism_study.prioritization import (
@@ -28,26 +26,19 @@ from prompt_mechanism_study.randomization import (
 )
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.representation import DataRole, DataRoleManifest
-from prompt_mechanism_study.verification import (
-    load_and_verify_target_result_bundle,
-    target_result_package_index,
-    verify_target_result_components,
-    verify_target_shared_evidence,
-    verify_target_study_freezes,
-)
 from prompt_mechanism_study.study_design import (
     ConfirmationFreeze,
     DiscoveryDesignFreeze,
     FormalBudgetPreflight,
     FormalReportAuthorization,
-    FreezeArtifactReference,
     RQ1BudgetQualification,
-    StudyDesignError,
     StudyFreezeIndex,
 )
 
+from prompt_mechanism_study.verification.design import verify_target_study_freezes
+from prompt_mechanism_study.verification.effects import verify_target_shared_evidence
 
-def authorize_target_report(
+def verify_formal_report_authorization(
     *,
     manifest: DataRoleManifest,
     budget: RQ1BudgetQualification,
@@ -55,44 +46,20 @@ def authorize_target_report(
     ledger: FixedSlotLedger,
     union: SharedConfirmationUnion,
     dispatch: ConfirmationDispatchManifest,
-    randomization_plan: Any,
-    task_bundles: Sequence[Any],
-    assignments: Sequence[Any],
+    randomization_plan: TargetRandomizationPlan,
+    task_bundles: Sequence[TargetTaskBundle],
+    assignments: Sequence[AssignedArmITTRecord],
     preflight: FormalBudgetPreflight,
     confirmation: ConfirmationFreeze,
     index: StudyFreezeIndex,
-    evidence: Any,
-    yields: Any,
-    execution_environment: FreezeArtifactReference,
-    execution_command: FreezeArtifactReference,
-    provider_call_ledger: FreezeArtifactReference,
-) -> FormalReportAuthorization:
-    """Authorize claim-bearing tables only after the exact formal chain verifies."""
+    evidence: SharedEvidenceRecord,
+    yields: TargetSelectorYieldResult,
+    authorization: FormalReportAuthorization,
+) -> dict[str, object]:
+    """Independently verify the only receipt that can enable paper-facing claims."""
 
-    if type(evidence) is not SharedEvidenceRecord:
-        raise TypeError("formal report authorization requires shared target evidence")
-    if type(yields) is not TargetSelectorYieldResult:
-        raise TypeError("formal report authorization requires target selector yields")
-    if evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}:
-        raise StudyDesignError("tested, demo, or calibration evidence cannot authorize claims")
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    if (
-        evidence.ledger.dispatch != dispatch
-        or evidence.ledger.assignments != frozen_assignments
-        or evidence.plan != budget.power_and_margin_memo.target_itt_plan()
-    ):
-        raise StudyDesignError("report evidence drifted from the formal confirmation freeze")
-    confirmation_task_units = {
-        task.task_unit_id
-        for binding in manifest.bindings
-        if binding.role is DataRole.CONFIRMATION
-        for task in binding.task_units
-    }
-    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
-    if not assigned_task_units or not assigned_task_units <= confirmation_task_units:
-        raise StudyDesignError("formal evidence contains a non-CONFIRMATION task unit")
+    if type(authorization) is not FormalReportAuthorization:
+        raise TypeError("report authorization verifier requires a formal receipt")
     freeze_verification = verify_target_study_freezes(
         manifest=manifest,
         budget=budget,
@@ -102,71 +69,109 @@ def authorize_target_report(
         dispatch=dispatch,
         randomization_plan=randomization_plan,
         task_bundles=task_bundles,
-        assignments=frozen_assignments,
+        assignments=assignments,
         preflight=preflight,
         confirmation=confirmation,
         index=index,
     )
     evidence_verification = verify_target_shared_evidence(evidence, yields)
+    frozen_assignments = tuple(
+        sorted(assignments, key=lambda item: item.assignment_id)
+    )
+    confirmation_task_units = {
+        task.task_unit_id
+        for binding in manifest.bindings
+        if binding.role is DataRole.CONFIRMATION
+        for task in binding.task_units
+    }
+    assigned_task_units = {item.task_unit_id for item in frozen_assignments}
+    plan = TargetITTPlan(
+        budget.power_and_margin_memo.bootstrap_seed,
+        budget.power_and_margin_memo.bootstrap_draws,
+        budget.power_and_margin_memo.alpha,
+        budget.power_and_margin_memo.atomic_power.plan.minimum_task_units_per_stratum,
+        budget.power_and_margin_memo.minimum_valid_bootstrap_fraction,
+        budget.power_and_margin_memo.atomic_power.plan.practical_margin,
+        budget.power_and_margin_memo.pair_power.plan.practical_margin,
+        budget.power_and_margin_memo.maximum_unknown_fraction_among_valid,
+    )
     if (
-        freeze_verification.get("status") != "TARGET_STUDY_FREEZE_VERIFIED"
-        or evidence_verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED"
+        evidence.evidence_level not in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
+        or evidence.ledger.dispatch != dispatch
+        or evidence.ledger.assignments != frozen_assignments
+        or evidence.plan != plan
+        or not assigned_task_units
+        or not assigned_task_units <= confirmation_task_units
     ):
-        raise StudyDesignError("formal report inputs did not independently verify")
-    return FormalReportAuthorization(
+        raise ValueError("formal report evidence boundary failed independent replay")
+    expected = (
         manifest.protocol_id,
-        FreezeArtifactReference(
-            index.study_freeze_index_id,
-            content_hash(index),
-        ),
-        FreezeArtifactReference(
-            evidence.shared_evidence_record_id,
-            content_hash(evidence),
-        ),
-        FreezeArtifactReference(
-            yields.target_selector_yield_result_id,
-            content_hash(yields),
-        ),
-        FreezeArtifactReference(
-            evidence.ledger.evidence_ledger_id,
-            content_hash(evidence.ledger),
-        ),
-        execution_environment,
-        execution_command,
-        provider_call_ledger,
+        index.study_freeze_index_id,
+        content_hash(index),
+        evidence.shared_evidence_record_id,
+        content_hash(evidence),
+        yields.target_selector_yield_result_id,
+        content_hash(yields),
+        evidence.ledger.evidence_ledger_id,
+        content_hash(evidence.ledger),
         content_hash(freeze_verification),
         content_hash(evidence_verification),
         evidence.evidence_level.value,
+        "AUTHORIZED",
+        True,
     )
+    observed = (
+        authorization.protocol_id,
+        authorization.study_freeze_index.artifact_id,
+        authorization.study_freeze_index.sha256,
+        authorization.shared_evidence_record.artifact_id,
+        authorization.shared_evidence_record.sha256,
+        authorization.target_selector_yield_result.artifact_id,
+        authorization.target_selector_yield_result.sha256,
+        authorization.evidence_ledger.artifact_id,
+        authorization.evidence_ledger.sha256,
+        authorization.freeze_verification_sha256,
+        authorization.evidence_verification_sha256,
+        authorization.evidence_level,
+        authorization.authorization_status,
+        authorization.scientific_claim_allowed,
+    )
+    if observed != expected:
+        raise ValueError("formal report authorization failed independent replay")
+    return {
+        "status": "FORMAL_REPORT_AUTHORIZATION_VERIFIED",
+        "formal_report_authorization_id": (
+            authorization.formal_report_authorization_id
+        ),
+        "scientific_claim_allowed": True,
+        "evidence_level": evidence.evidence_level.value,
+    }
 
 
-def build_target_rq_tables(
+def verify_target_rq_tables(
     evidence: SharedEvidenceRecord,
     yields: TargetSelectorYieldResult,
+    report: Mapping[str, object],
     authorization: FormalReportAuthorization | None = None,
-) -> dict[str, Any]:
-    """Build claim-gated RQ tables from the one independently verified v3 record."""
+) -> dict[str, object]:
+    """Independently rebuild every target RQ row and its claim-level Gate."""
 
-    if type(evidence) is not SharedEvidenceRecord or type(yields) is not TargetSelectorYieldResult:
-        raise TypeError("target RQ tables require shared evidence and fixed-slot yields")
     verification = verify_target_shared_evidence(evidence, yields)
-    if verification.get("status") != "TARGET_SHARED_EVIDENCE_VERIFIED":
-        raise ValueError("target shared evidence did not verify")
-    slots_by_selector: dict[tuple[PolicyTrack, str, str], list[Any]] = {}
+    slots_by_selector: dict[tuple[PolicyTrack, str, str], list[object]] = defaultdict(list)
     for slot in yields.slots:
-        slots_by_selector.setdefault(
-            (slot.track, slot.model_id, slot.selector_id), []
-        ).append(slot)
+        slots_by_selector[(slot.track, slot.model_id, slot.selector_id)].append(slot)
     selector_rows = []
     for selector in sorted(
         yields.selectors,
         key=lambda item: (item.track.value, item.model_id, item.selector_id),
     ):
-        key = (selector.track, selector.model_id, selector.selector_id)
-        slots = sorted(slots_by_selector.get(key, []), key=lambda item: item.rank)
+        slots = sorted(
+            slots_by_selector[(selector.track, selector.model_id, selector.selector_id)],
+            key=lambda item: item.rank,
+        )
         if len(slots) != selector.top_k:
-            raise ValueError("target selector table lost a fixed K slot")
-        status_counts = Counter(
+            raise ValueError("RQ verifier lost a fixed selector slot")
+        counts = Counter(
             (
                 slot.effect_status.value
                 if slot.effect_status is not None
@@ -186,25 +191,25 @@ def build_target_rq_tables(
                 "top_k": selector.top_k,
                 "meaningful_slots": selector.meaningful_slots,
                 "meaningful_yield_at_k": selector.meaningful_yield_at_k,
-                "positive_meaningful_slots": status_counts[
+                "positive_meaningful_slots": counts[
                     ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL.value
                 ],
-                "negative_meaningful_slots": status_counts[
+                "negative_meaningful_slots": counts[
                     ConfirmatoryEffectStatus.NEGATIVE_MEANINGFUL.value
                 ],
-                "practically_null_slots": status_counts[
+                "practically_null_slots": counts[
                     ConfirmatoryEffectStatus.PRACTICALLY_NULL.value
                 ],
-                "inconclusive_slots": status_counts[
+                "inconclusive_slots": counts[
                     ConfirmatoryEffectStatus.INCONCLUSIVE.value
                 ],
-                "non_evaluable_slots": status_counts[
+                "non_evaluable_slots": counts[
                     ConfirmatoryEffectStatus.NON_EVALUABLE.value
                 ],
-                "selector_empty_or_failure_slots": status_counts[
+                "selector_empty_or_failure_slots": counts[
                     "SELECTOR_EMPTY_OR_FAILURE"
                 ],
-                "bridge_or_protocolization_failure_slots": status_counts[
+                "bridge_or_protocolization_failure_slots": counts[
                     "BRIDGE_OR_PROTOCOLIZATION_FAILURE"
                 ],
             }
@@ -220,22 +225,20 @@ def build_target_rq_tables(
     ):
         models = sorted(
             {
-                model_id
-                for row_track, model_id, selector_id in selector_by_key
-                if row_track == track.value and selector_id in {full_id, ablation_id}
+                model
+                for row_track, model, selector in selector_by_key
+                if row_track == track.value and selector in {full_id, ablation_id}
             }
         )
-        for model_id in models:
-            full = selector_by_key.get((track.value, model_id, full_id))
-            ablation = selector_by_key.get((track.value, model_id, ablation_id))
+        for model in models:
+            full = selector_by_key.get((track.value, model, full_id))
+            ablation = selector_by_key.get((track.value, model, ablation_id))
             if full is None or ablation is None or full["top_k"] != ablation["top_k"]:
-                raise ValueError(
-                    "RQ2 requires both sole-difference variants with the same K"
-                )
+                raise ValueError("RQ2 verifier lacks a sole-difference selector pair")
             rq2_rows.append(
                 {
                     "track": track.value,
-                    "model_id": model_id,
+                    "model_id": model,
                     "full_selector_id": full_id,
                     "ablation_selector_id": ablation_id,
                     "top_k": full["top_k"],
@@ -252,10 +255,10 @@ def build_target_rq_tables(
                     ),
                 }
             )
-    family_rows = []
-    effect_rows = []
+    families = []
+    effects = []
     for family in evidence.families:
-        family_rows.append(
+        families.append(
             {
                 "track": family.track.value,
                 "family_status": family.status.value,
@@ -266,7 +269,7 @@ def build_target_rq_tables(
             }
         )
         for estimate in family.estimates:
-            effect_rows.append(
+            effects.append(
                 {
                     "track": estimate.track.value,
                     "candidate_record_id": estimate.candidate_record_id,
@@ -311,7 +314,7 @@ def build_target_rq_tables(
     claim_allowed = authorization is not None
     if authorization is not None:
         if type(authorization) is not FormalReportAuthorization:
-            raise TypeError("target RQ authorization must be a formal receipt")
+            raise TypeError("RQ verifier requires a formal authorization receipt")
         if (
             authorization.protocol_id
             != evidence.ledger.dispatch.union.ledger.protocol_id
@@ -328,9 +331,7 @@ def build_target_rq_tables(
             or authorization.evidence_level != evidence.evidence_level.value
             or authorization.scientific_claim_allowed is not True
         ):
-            raise ValueError(
-                "formal report authorization drifted from target evidence"
-            )
+            raise ValueError("RQ authorization failed independent evidence binding")
         report_status = "FORMAL_REPORT_AUTHORIZED"
     else:
         report_status = (
@@ -339,7 +340,7 @@ def build_target_rq_tables(
             in {EvidenceLevel.EXECUTED, EvidenceLevel.REPORTED}
             else "NON_CLAIM_TEST_ARTIFACT"
         )
-    report: dict[str, Any] = {
+    expected = {
         "schema_version": "3.0",
         "protocol_id": evidence.ledger.dispatch.union.ledger.protocol_id,
         "shared_evidence_record_id": evidence.shared_evidence_record_id,
@@ -355,106 +356,26 @@ def build_target_rq_tables(
         "endpoint_order": [item.value for item in evidence.plan.metrics],
         "rq1_selector_rows": selector_rows,
         "rq2_full_minus_ablation_rows": rq2_rows,
-        "primary_family_rows": family_rows,
+        "primary_family_rows": families,
         "unique_effect_rows": sorted(
-            effect_rows,
+            effects,
             key=lambda row: (row["track"], row["candidate_record_id"]),
         ),
         "independent_verification": verification,
     }
-    report["target_rq_tables_id"] = content_id("target_rq_tables_", report)
-    return report
+    expected["target_rq_tables_id"] = content_id("target_rq_tables_", expected)
+    if dict(report) != expected:
+        raise ValueError("target RQ tables failed independent replay")
+    return {
+        "status": "TARGET_RQ_TABLES_VERIFIED",
+        "target_rq_tables_id": expected["target_rq_tables_id"],
+        "scientific_claim_allowed": claim_allowed,
+        "selector_rows": len(selector_rows),
+        "rq2_rows": len(rq2_rows),
+        "unique_effect_rows": len(effects),
+    }
 
-
-def write_target_result_bundle(
-    output: Path,
-    *,
-    manifest: DataRoleManifest,
-    budget: RQ1BudgetQualification,
-    discovery: DiscoveryDesignFreeze,
-    ledger: FixedSlotLedger,
-    union: SharedConfirmationUnion,
-    dispatch: ConfirmationDispatchManifest,
-    randomization_plan: TargetRandomizationPlan,
-    task_bundles: Sequence[TargetTaskBundle],
-    assignments: Sequence[AssignedArmITTRecord],
-    preflight: FormalBudgetPreflight,
-    confirmation: ConfirmationFreeze,
-    index: StudyFreezeIndex,
-    evidence: SharedEvidenceRecord,
-    yields: TargetSelectorYieldResult,
-    authorization: FormalReportAuthorization | None = None,
-) -> dict[str, object]:
-    """Write the one exact target-v3 reviewer package and verify its stored bytes."""
-
-    frozen_assignments = tuple(
-        sorted(assignments, key=lambda item: item.assignment_id)
-    )
-    frozen_task_bundles = tuple(
-        sorted(
-            task_bundles,
-            key=lambda item: (item.policy_key, item.task_unit_id, item.task_instance_id),
-        )
-    )
-    report = build_target_rq_tables(evidence, yields, authorization)
-    verification = verify_target_result_components(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=frozen_task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        authorization=authorization,
-    )
-    package_index = target_result_package_index(
-        manifest=manifest,
-        budget=budget,
-        discovery=discovery,
-        ledger=ledger,
-        union=union,
-        dispatch=dispatch,
-        randomization_plan=randomization_plan,
-        task_bundles=frozen_task_bundles,
-        assignments=frozen_assignments,
-        preflight=preflight,
-        confirmation=confirmation,
-        index=index,
-        evidence=evidence,
-        yields=yields,
-        report=report,
-        verification=verification,
-        authorization=authorization,
-    )
-    write_bundle(
-        output,
-        {
-            "package_index.json": package_index,
-            "data_role_manifest.json": manifest,
-            "rq1_budget_qualification.json": budget,
-            "discovery_design_freeze.json": discovery,
-            "fixed_slot_ledger.json": ledger,
-            "shared_confirmation_union.json": union,
-            "confirmation_dispatch_manifest.json": dispatch,
-            "target_randomization_plan.json": randomization_plan,
-            "confirmation_task_bundles.json": frozen_task_bundles,
-            "assignments.json": frozen_assignments,
-            "formal_budget_preflight.json": preflight,
-            "confirmation_freeze.json": confirmation,
-            "study_freeze_index.json": index,
-            "shared_evidence_record.json": evidence,
-            "target_selector_yield_result.json": yields,
-            "formal_report_authorization.json": authorization,
-            "rq_tables.json": report,
-            "verification.json": verification,
-        },
-    )
-    return load_and_verify_target_result_bundle(output)
+__all__ = [
+    "verify_formal_report_authorization",
+    "verify_target_rq_tables",
+]

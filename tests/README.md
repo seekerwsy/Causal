@@ -16,8 +16,8 @@ model-effect deduplication, deterministic arm assignment, total outcome
 accounting, task-unit ITT, five statuses, fixed-K RQ tables, claim gating,
 exact package writing, and independent replay.
 
-The current collection contains 111 test functions and 128 parameterized test
-cases. Only 54 cases form the default reviewer gate; the remaining cases are
+The current collection contains 113 test functions and 130 parameterized test
+cases. Only 55 cases form the default reviewer gate; the remaining cases are
 full-suite calibration, boundary, backend, and tamper checks. Test count is not
 used as a retention criterion: each retained test must protect a distinct
 scientific invariant, transformation boundary, or independent verification

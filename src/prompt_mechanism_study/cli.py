@@ -534,7 +534,7 @@ def _run_study(args: argparse.Namespace, _: argparse.ArgumentParser) -> int:
 
         report = run_target_reviewer_smoke(args.output)
     else:
-        from prompt_mechanism_study.selector_verify import (
+        from prompt_mechanism_study.verification import (
             load_and_verify_target_result_bundle,
         )
 

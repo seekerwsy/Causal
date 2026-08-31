@@ -87,7 +87,7 @@ from prompt_mechanism_study.representation import (
     validate_data_role_firewall,
 )
 from prompt_mechanism_study.selector_analysis import write_target_result_bundle
-from prompt_mechanism_study.selector_verify import (
+from prompt_mechanism_study.verification import (
     load_and_verify_target_result_bundle,
     verify_target_study_freezes,
 )
