@@ -179,6 +179,7 @@ def _add_curation_group(groups: Any) -> None:
     )
     content_proposals.add_argument("base_bundle", type=Path)
     content_proposals.add_argument("output", type=Path)
+    content_proposals.add_argument("--repository-root", type=Path, default=Path.cwd())
     content_proposals.add_argument("--producer-commit", required=True)
     content_proposals.add_argument("--max-new-batches", type=int)
     content_proposals.add_argument("--workers", type=int, default=1)
@@ -202,6 +203,7 @@ def _add_curation_group(groups: Any) -> None:
     content_review.add_argument("base_bundle", type=Path)
     content_review.add_argument("proposals_root", type=Path)
     content_review.add_argument("output", type=Path)
+    content_review.add_argument("--repository-root", type=Path, default=Path.cwd())
     content_review.add_argument("--max-new-batches", type=int)
     content_review.add_argument("--workers", type=int, default=1)
 
