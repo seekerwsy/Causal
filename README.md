@@ -52,23 +52,33 @@ activation, the only executable schema-3 study command is a deterministic,
 zero-network reviewer smoke; result verification is read-only:
 
 ```text
-prompt-mechanism-study target-study smoke REVIEWER_SMOKE_RESULT
-prompt-mechanism-study target-study verify-result REVIEWER_SMOKE_RESULT
+prompt-mechanism-study study smoke REVIEWER_SMOKE_RESULT
+prompt-mechanism-study study verify-result REVIEWER_SMOKE_RESULT
 ```
 
 The smoke traverses all seven stages, writes
 `evidence_level=tested`, makes zero provider calls, and can emit only
 `NON_CLAIM_TEST_ARTIFACT`.
 
-The CLI also retains the data preparation and qualification commands required
-to construct prospective inputs. Run `prompt-mechanism-study --help` for the
-current list. Schema-1/2 selector, successor, and factorial runners are not
-active commands.
+The human-facing CLI is grouped by research responsibility rather than exposing
+every operation at the top level:
+
+```text
+study            schema-3 smoke and result verification
+data             source normalization and task-unit assembly
+curate           blind semantic, contract, and mechanism curation
+representation   task-role freezing and Prompt TSG extraction
+qualification    Oracle, support, representation, and design gates
+artifact         exact-byte bundle verification
+```
+
+Run `prompt-mechanism-study GROUP --help` for one stage's actions. Schema-1/2
+selector, successor, and factorial runners are not active commands.
 
 Generic exact-byte bundle checking remains available:
 
 ```text
-prompt-mechanism-study verify BUNDLE
+prompt-mechanism-study artifact verify BUNDLE
 ```
 
 ## Reproduction

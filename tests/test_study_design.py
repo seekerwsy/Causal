@@ -1178,7 +1178,7 @@ def test_target_two_freeze_lineage_closes_and_independently_replays(
     assert written["status"] == "TARGET_RESULT_BUNDLE_VERIFIED"
     assert written["scientific_claim_allowed"] is True
     assert load_and_verify_target_result_bundle(result_root) == written
-    assert main(["target-study", "verify-result", str(result_root)]) == 0
+    assert main(["study", "verify-result", str(result_root)]) == 0
 
     tampered_artifacts = {
         path.name: read_json(path)

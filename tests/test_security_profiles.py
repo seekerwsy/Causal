@@ -118,7 +118,7 @@ def test_target_only_profiles_match_frozen_extension_cases(
     ),
     ids=lambda case: case["case_id"],
 )
-def test_factorial_sql_profile_covers_all_four_gold_cells(case: dict[str, str]) -> None:
+def test_sql_interaction_profile_covers_all_four_gold_cells(case: dict[str, str]) -> None:
     result = evaluate_security_profile(case["code"], case["profile_id"])
     assert result["security_label"] == case["expected_label"]
     if "expected_reason" in case:
@@ -129,7 +129,7 @@ def test_factorial_sql_profile_covers_all_four_gold_cells(case: dict[str, str]) 
 
 
 @pytest.mark.extended
-def test_factorial_sql_membership_guard_must_stop_before_the_sink() -> None:
+def test_sql_interaction_membership_guard_must_stop_before_the_sink() -> None:
     code = """def list_rows(cursor, order_field, maximum):
     allowed = {'created_at', 'name'}
     cursor.execute(f'SELECT * FROM records ORDER BY {order_field} LIMIT %s', (maximum,))

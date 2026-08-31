@@ -10,7 +10,7 @@ provider execution remains disabled.
 The sole executable study entry point is:
 
 ```text
-prompt-mechanism-study target-study smoke OUTPUT
+prompt-mechanism-study study smoke OUTPUT
 ```
 
 It invokes `run_target_reviewer_smoke` in
@@ -20,7 +20,7 @@ a `NON_CLAIM_TEST_ARTIFACT`. The only other study-facing operation is
 read-only verification:
 
 ```text
-prompt-mechanism-study target-study verify-result OUTPUT
+prompt-mechanism-study study verify-result OUTPUT
 ```
 
 ## Seven-stage path
@@ -118,8 +118,8 @@ Run the milestone smoke and all retained tests:
 Run and independently reload the smallest representative package:
 
 ```text
-prompt-mechanism-study target-study smoke REVIEWER_SMOKE_RESULT
-prompt-mechanism-study target-study verify-result REVIEWER_SMOKE_RESULT
+prompt-mechanism-study study smoke REVIEWER_SMOKE_RESULT
+prompt-mechanism-study study verify-result REVIEWER_SMOKE_RESULT
 ```
 
 The verifier requires the exact schema-3 file set, reconstructs typed records,

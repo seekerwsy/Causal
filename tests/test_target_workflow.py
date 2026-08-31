@@ -35,7 +35,7 @@ def test_target_reviewer_smoke_traverses_seven_stages_and_replays(
 ) -> None:
     output = tmp_path / "target-reviewer-smoke"
 
-    assert main(["target-study", "smoke", str(output)]) == 0
+    assert main(["study", "smoke", str(output)]) == 0
     receipt = json.loads(capsys.readouterr().out)
     verified = load_and_verify_target_result_bundle(output)
 
@@ -50,7 +50,23 @@ def test_target_reviewer_smoke_traverses_seven_stages_and_replays(
     assert receipt["package_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert receipt["scientific_claim_allowed"] is False
     assert verified["bundle_sha256"] == receipt["result_bundle_sha256"]
-    assert main(["target-study", "verify-result", str(output)]) == 0
+    assert main(["study", "verify-result", str(output)]) == 0
+
+
+@pytest.mark.reviewer
+def test_cli_exposes_stage_groups_instead_of_flat_operations(capsys) -> None:
+    with pytest.raises(SystemExit) as help_exit:
+        main(["--help"])
+    assert help_exit.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "study" in help_text
+    assert "data" in help_text
+    assert "curate" in help_text
+    assert "representation" in help_text
+    assert "qualification" in help_text
+    assert "artifact" in help_text
+    assert "target-study" not in help_text
+    assert "dataset-prep" not in help_text
 
 
 @pytest.mark.reviewer

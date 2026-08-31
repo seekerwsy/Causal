@@ -12,23 +12,86 @@ from prompt_mechanism_study.artifact_io import verify_bundle
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="prompt-mechanism-study")
-    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-
-    verify = commands.add_parser("verify", help="verify an exact artifact bundle")
-    verify.add_argument("root", type=Path)
-
-    target_study = commands.add_parser(
-        "target-study",
-        help=(
-            "zero-network reviewer smoke or read-only verification for schema 3.0; "
-            "formal provider execution remains disabled until scientific inputs are frozen"
+    parser = argparse.ArgumentParser(
+        prog="prompt-mechanism-study",
+        description="Schema-3 research artifact and its prospective input pipeline.",
+        epilog=(
+            "Suggested flow: data -> curate -> representation -> qualification -> study. "
+            "Use 'GROUP --help' to list actions in one stage."
         ),
     )
+    groups = parser.add_subparsers(dest="group", required=True, metavar="GROUP")
+
+    target_study = groups.add_parser(
+        "study",
+        help="run the schema-3 reviewer smoke or independently verify its result",
+        description=(
+            "Run the deterministic zero-network schema-3 reviewer smoke or reload it "
+            "with the independent verifier. Formal provider execution remains disabled."
+        ),
+    )
+    target_study.set_defaults(command="target-study")
     target_study.add_argument("phase", choices=("smoke", "verify-result"))
     target_study.add_argument("output", type=Path)
 
-    judge = commands.add_parser("judge-gate", help="run the bounded Functional Judge gate")
+    data_group = groups.add_parser(
+        "data",
+        help="normalize sources and assemble outcome-free task-unit inputs",
+        description="Normalize sources and assemble outcome-free task-unit inputs.",
+    )
+    data_commands = data_group.add_subparsers(
+        dest="action", required=True, metavar="ACTION"
+    )
+
+    curate_group = groups.add_parser(
+        "curate",
+        help="run blind semantic, contract, and mechanism curation",
+        description="Run blind semantic, contract, and mechanism curation.",
+    )
+    curate_commands = curate_group.add_subparsers(
+        dest="action", required=True, metavar="ACTION"
+    )
+
+    representation_group = groups.add_parser(
+        "representation",
+        help="freeze task roles and extract evidence-bound Prompt TSG representations",
+        description=(
+            "Freeze task roles and extract evidence-bound Prompt TSG representations."
+        ),
+    )
+    representation_commands = representation_group.add_subparsers(
+        dest="action", required=True, metavar="ACTION"
+    )
+
+    qualification_group = groups.add_parser(
+        "qualification",
+        help="run Oracle, representation, support, and design qualification gates",
+        description=(
+            "Run Oracle, representation, support, and design qualification gates."
+        ),
+    )
+    qualification_commands = qualification_group.add_subparsers(
+        dest="action", required=True, metavar="ACTION"
+    )
+
+    artifact_group = groups.add_parser(
+        "artifact",
+        help="verify exact-byte artifact bundles",
+        description="Verify exact-byte artifact bundles.",
+    )
+    artifact_commands = artifact_group.add_subparsers(
+        dest="action", required=True, metavar="ACTION"
+    )
+    verify = artifact_commands.add_parser(
+        "verify", help="verify an exact artifact bundle"
+    )
+    verify.set_defaults(command="verify")
+    verify.add_argument("root", type=Path)
+
+    judge = qualification_commands.add_parser(
+        "functional-judge", help="run the bounded Functional Judge gate"
+    )
+    judge.set_defaults(command="judge-gate")
     judge.add_argument("phase", choices=("preflight", "pilot", "remaining", "finalize"))
     judge.add_argument("output", type=Path)
     judge.add_argument("--repository-root", type=Path, default=Path.cwd())
@@ -36,10 +99,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     judge.add_argument("--pilot-root", type=Path)
     judge.add_argument("--remaining-root", type=Path)
 
-    discovery_population = commands.add_parser(
-        "discovery-population",
+    discovery_population = representation_commands.add_parser(
+        "freeze-population",
         help="freeze a natural-Prompt task-unit census without outcomes",
     )
+    discovery_population.set_defaults(command="discovery-population")
     discovery_population.add_argument("prepared_root", type=Path)
     discovery_population.add_argument("clusters_root", type=Path)
     discovery_population.add_argument("catalog", type=Path)
@@ -53,10 +117,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     discovery_population.add_argument("--language", default="python")
 
-    task_partition = commands.add_parser(
-        "task-partition",
+    task_partition = representation_commands.add_parser(
+        "freeze-partition",
         help="freeze an outcome-blind discovery/pilot/confirmation task-unit partition",
     )
+    task_partition.set_defaults(command="task-partition")
     task_partition.add_argument("tasks", type=Path)
     task_partition.add_argument("clusters_root", type=Path)
     task_partition.add_argument("catalog", type=Path)
@@ -66,10 +131,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     task_partition.add_argument("--seed", type=int, default=2026083001)
 
-    task_unit_data = commands.add_parser(
-        "task-unit-data",
+    task_unit_data = data_commands.add_parser(
+        "task-unit-bundle",
         help="build or verify the reviewer-facing task-unit data bundle",
     )
+    task_unit_data.set_defaults(command="task-unit-data")
     task_unit_data.add_argument("phase", choices=("build", "verify"))
     task_unit_data.add_argument("output", type=Path)
     task_unit_data.add_argument("--prepared-root", type=Path)
@@ -79,10 +145,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     task_unit_data.add_argument("--development-exclusions", type=Path)
     task_unit_data.add_argument("--role-census-root", type=Path)
 
-    realization_bindings = commands.add_parser(
-        "realization-bindings",
+    realization_bindings = representation_commands.add_parser(
+        "freeze-bindings",
         help="freeze Prompt-TSG task-to-mechanism and local-Oracle bindings",
     )
+    realization_bindings.set_defaults(command="realization-bindings")
     realization_bindings.add_argument("tasks", type=Path)
     realization_bindings.add_argument("contracts_root", type=Path)
     realization_bindings.add_argument("catalog", type=Path)
@@ -92,10 +159,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--prompt-tsg-bundle", type=Path, action="append", required=True
     )
 
-    security_qualification = commands.add_parser(
-        "security-oracle-qualification",
+    security_qualification = qualification_commands.add_parser(
+        "security-oracle",
         help="replay the frozen gold boundary for active local security profiles",
     )
+    security_qualification.set_defaults(command="security-oracle-qualification")
     security_qualification.add_argument("registry", type=Path)
     security_qualification.add_argument("cases", type=Path)
     security_qualification.add_argument("output", type=Path)
@@ -103,9 +171,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repository-root", type=Path, default=Path.cwd()
     )
 
-    target_security_qualification = commands.add_parser(
-        "target-security-oracle-qualification",
+    target_security_qualification = qualification_commands.add_parser(
+        "target-security-oracle",
         help="qualify the target-v3 local Security Oracle catalog without mutating legacy producers",
+    )
+    target_security_qualification.set_defaults(
+        command="target-security-oracle-qualification"
     )
     target_security_qualification.add_argument("registry", type=Path)
     target_security_qualification.add_argument("output", type=Path)
@@ -116,10 +187,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repository-root", type=Path, default=Path.cwd()
     )
 
-    tsg_qualification = commands.add_parser(
-        "prompt-tsg-qualification",
+    tsg_qualification = qualification_commands.add_parser(
+        "prompt-tsg",
         help="compare one extractor bundle with a prospective task-context holdout",
     )
+    tsg_qualification.set_defaults(command="prompt-tsg-qualification")
     tsg_qualification.add_argument("tasks", type=Path)
     tsg_qualification.add_argument("graph_bundle", type=Path)
     tsg_qualification.add_argument("catalog", type=Path)
@@ -129,10 +201,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     tsg_qualification.add_argument("--repository-root", type=Path, default=Path.cwd())
     tsg_qualification.add_argument("--path-authority-annotations", type=Path)
 
-    contract_qualification = commands.add_parser(
-        "prompt-contract-qualification",
+    contract_qualification = qualification_commands.add_parser(
+        "prompt-contract",
         help="independently replay and score the active task-level Prompt TSG Gate C",
     )
+    contract_qualification.set_defaults(command="prompt-contract-qualification")
     contract_qualification.add_argument("tasks", type=Path)
     contract_qualification.add_argument("extraction_bundle", type=Path)
     contract_qualification.add_argument("catalog", type=Path)
@@ -147,18 +220,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repository-root", type=Path, default=Path.cwd()
     )
 
-    tsg_selection = commands.add_parser(
-        "prompt-tsg-selection",
+    tsg_selection = representation_commands.add_parser(
+        "select-tsg-tasks",
         help="freeze formal Prompt-TSG tasks after provenance-only exclusions",
     )
+    tsg_selection.set_defaults(command="prompt-tsg-selection")
     tsg_selection.add_argument("tasks", type=Path)
     tsg_selection.add_argument("output", type=Path)
     tsg_selection.add_argument("--exclude", type=Path, action="append", required=True)
 
-    tsg_holdout = commands.add_parser(
-        "prompt-tsg-holdout-selection",
+    tsg_holdout = representation_commands.add_parser(
+        "select-tsg-holdout",
         help="freeze a disjoint outcome-blind Prompt TSG qualification holdout",
     )
+    tsg_holdout.set_defaults(command="prompt-tsg-holdout-selection")
     tsg_holdout.add_argument("tasks", type=Path)
     tsg_holdout.add_argument("output", type=Path)
     tsg_holdout.add_argument("--exclude", type=Path, action="append", required=True)
@@ -166,10 +241,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     tsg_holdout.add_argument("--task-units-per-cwe", type=int, default=3)
     tsg_holdout.add_argument("--ranking-salt", required=True)
 
-    prompt_tsg_extract = commands.add_parser(
-        "prompt-tsg-extract",
+    prompt_tsg_extract = representation_commands.add_parser(
+        "extract-tsg",
         help="extract evidence-bound Prompt TSGs for a frozen task file",
     )
+    prompt_tsg_extract.set_defaults(command="prompt-tsg-extract")
     prompt_tsg_extract.add_argument("tasks", type=Path)
     prompt_tsg_extract.add_argument("catalog", type=Path)
     prompt_tsg_extract.add_argument("evaluator", type=Path)
@@ -182,10 +258,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_tsg_extract.add_argument("--semantic-reviewer-prompt", type=Path)
     prompt_tsg_extract.add_argument("--path-authority-annotations", type=Path)
 
-    prompt_contract_extract = commands.add_parser(
-        "prompt-contract-extract",
+    prompt_contract_extract = representation_commands.add_parser(
+        "extract-contracts",
         help="run the active blind dual-annotation task contract extractor",
     )
+    prompt_contract_extract.set_defaults(command="prompt-contract-extract")
     prompt_contract_extract.add_argument("tasks", type=Path)
     prompt_contract_extract.add_argument("catalog", type=Path)
     prompt_contract_extract.add_argument("proposer_evaluator", type=Path)
@@ -196,10 +273,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     prompt_contract_extract.add_argument("output", type=Path)
     prompt_contract_extract.add_argument("--workers", type=int, default=1)
 
-    positivity = commands.add_parser(
-        "positivity-audit",
+    positivity = qualification_commands.add_parser(
+        "positivity",
         help="audit natural Prompt-feature support before FCI",
     )
+    positivity.set_defaults(command="positivity-audit")
     positivity.add_argument("tasks", type=Path)
     positivity.add_argument("catalog", type=Path)
     positivity.add_argument("output", type=Path)
@@ -223,10 +301,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     positivity.add_argument("--minimum-state-task-units", type=int, default=30)
     positivity.add_argument("--minimum-shared-lineages", type=int, default=2)
 
-    dataset_prep = commands.add_parser(
-        "dataset-prep",
+    dataset_prep = data_commands.add_parser(
+        "prepare",
         help="normalize external task sources without executing their code",
     )
+    dataset_prep.set_defaults(command="dataset-prep")
     dataset_prep.add_argument("output", type=Path)
     dataset_prep.add_argument("--sallm-root", type=Path)
     dataset_prep.add_argument("--cweval-root", type=Path)
@@ -237,27 +316,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     dataset_prep.add_argument("--secodeplt-root", type=Path)
     dataset_prep.add_argument("--limit-per-source", type=int)
 
-    contracts = commands.add_parser(
-        "contract-freeze",
+    contracts = data_commands.add_parser(
+        "freeze-contracts",
         help="freeze externally extracted functional contracts",
     )
+    contracts.set_defaults(command="contract-freeze")
     contracts.add_argument("prepared_root", type=Path)
     contracts.add_argument("responses", type=Path)
     contracts.add_argument("output", type=Path)
 
-    dedup = commands.add_parser(
+    dedup = data_commands.add_parser(
         "dedup-candidates",
         help="prepare lexical candidate pairs for semantic adjudication",
     )
+    dedup.set_defaults(command="dedup-candidates")
     dedup.add_argument("prepared_root", type=Path)
     dedup.add_argument("output", type=Path)
     dedup.add_argument("--minimum-jaccard", type=float, default=0.35)
     dedup.add_argument("--max-neighbors-per-record", type=int, default=3)
 
-    semantic = commands.add_parser(
-        "semantic-curation",
+    semantic = curate_commands.add_parser(
+        "semantics",
         help="blindly adjudicate lexical pairs and freeze semantic clusters",
     )
+    semantic.set_defaults(command="semantic-curation")
     semantic.add_argument("prepared_root", type=Path)
     semantic.add_argument("candidates_root", type=Path)
     semantic.add_argument("output", type=Path)
@@ -266,19 +348,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     semantic.add_argument("--workers", type=int, default=1)
     semantic.add_argument("--reuse-root", type=Path)
 
-    assemble_clusters = commands.add_parser(
-        "assemble-semantic-clusters",
+    assemble_clusters = curate_commands.add_parser(
+        "assemble-clusters",
         help="assemble exact/lineage clusters and retain pair decisions as diagnostics",
     )
+    assemble_clusters.set_defaults(command="assemble-semantic-clusters")
     assemble_clusters.add_argument("prepared_root", type=Path)
     assemble_clusters.add_argument("candidates_root", type=Path)
     assemble_clusters.add_argument("adjudication_root", type=Path)
     assemble_clusters.add_argument("output", type=Path)
 
-    curate_contracts = commands.add_parser(
-        "contract-curation",
+    curate_contracts = curate_commands.add_parser(
+        "contracts",
         help="extract one functional contract per semantic cluster",
     )
+    curate_contracts.set_defaults(command="contract-curation")
     curate_contracts.add_argument("prepared_root", type=Path)
     curate_contracts.add_argument("clusters_root", type=Path)
     curate_contracts.add_argument("output", type=Path)
@@ -292,10 +376,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="reuse contracts whose representative record and prompt hash still match",
     )
 
-    review_contracts = commands.add_parser(
-        "contract-quality-review",
+    review_contracts = curate_commands.add_parser(
+        "review-contracts",
         help="blindly triage every functional contract before independent adjudication",
     )
+    review_contracts.set_defaults(command="contract-quality-review")
     review_contracts.add_argument("prepared_root", type=Path)
     review_contracts.add_argument("contracts_root", type=Path)
     review_contracts.add_argument("output", type=Path)
@@ -304,10 +389,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     review_contracts.add_argument("--workers", type=int, default=1)
     review_contracts.add_argument("--reuse-root", type=Path)
 
-    binding_review = commands.add_parser(
-        "mechanism-binding-review",
+    binding_review = curate_commands.add_parser(
+        "review-bindings",
         help="blindly bind ambiguous task units to registered mechanism realizations",
     )
+    binding_review.set_defaults(command="mechanism-binding-review")
     binding_review.add_argument("prepared_root", type=Path)
     binding_review.add_argument("clusters_root", type=Path)
     binding_review.add_argument("contracts_root", type=Path)
@@ -319,26 +405,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     binding_review.add_argument("--workers", type=int, default=1)
     binding_review.add_argument("--reuse-root", type=Path)
 
-    repair_contracts = commands.add_parser(
-        "repair-contract-format-leaks",
-        help="freeze a successor contract bundle without response-format requirements",
+    repair_contracts = curate_commands.add_parser(
+        "repair-contracts",
+        help="freeze a corrected contract bundle without response-format requirements",
     )
+    repair_contracts.set_defaults(command="repair-contract-format-leaks")
     repair_contracts.add_argument("contracts_root", type=Path)
     repair_contracts.add_argument("output", type=Path)
 
-    adjudicate_contracts = commands.add_parser(
+    adjudicate_contracts = curate_commands.add_parser(
         "apply-contract-adjudications",
         help="apply bounded outcome-blind contract and review corrections",
     )
+    adjudicate_contracts.set_defaults(command="apply-contract-adjudications")
     adjudicate_contracts.add_argument("contracts_root", type=Path)
     adjudicate_contracts.add_argument("reviews_root", type=Path)
     adjudicate_contracts.add_argument("adjudications", type=Path)
     adjudicate_contracts.add_argument("output", type=Path)
 
-    adjudicate_bindings = commands.add_parser(
+    adjudicate_bindings = curate_commands.add_parser(
         "apply-binding-adjudications",
         help="apply bounded outcome-blind corrections to unresolved mechanism bindings",
     )
+    adjudicate_bindings.set_defaults(command="apply-binding-adjudications")
     adjudicate_bindings.add_argument("prepared_root", type=Path)
     adjudicate_bindings.add_argument("clusters_root", type=Path)
     adjudicate_bindings.add_argument("bindings_root", type=Path)
@@ -346,10 +435,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     adjudicate_bindings.add_argument("adjudications", type=Path)
     adjudicate_bindings.add_argument("output", type=Path)
 
-    eligibility = commands.add_parser(
-        "dataset-eligibility",
+    eligibility = qualification_commands.add_parser(
+        "dataset",
         help="audit curated clusters for current experiment readiness",
     )
+    eligibility.set_defaults(command="dataset-eligibility")
     eligibility.add_argument("prepared_root", type=Path)
     eligibility.add_argument("clusters_root", type=Path)
     eligibility.add_argument("contracts_root", type=Path)
@@ -375,10 +465,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="optional BaxBench-compatible source snapshot for backend data inventory",
     )
 
-    study_design = commands.add_parser(
+    study_design = qualification_commands.add_parser(
         "study-design",
         help="freeze the outcome-blind Python sample, power assumptions, and replication readiness",
     )
+    study_design.set_defaults(command="study-design")
     study_design.add_argument("eligibility_root", type=Path)
     study_design.add_argument("task_units_root", type=Path)
     study_design.add_argument("output", type=Path)
@@ -800,8 +891,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             family_quotas=family_quotas or None,
         )
         print(report["status"])
-    else:
+    elif args.command == "judge-gate":
         return _judge_gate(args)
+    else:
+        parser.error(f"no runner is registered for {args.group} {args.action}")
     return 0
 
 

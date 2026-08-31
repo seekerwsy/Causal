@@ -585,7 +585,7 @@ def test_bounded_task_concurrency_preserves_frozen_output_order(tmp_path):
 
 
 @pytest.mark.reviewer
-def test_prospective_v10_gate_freeze_closes_bounded_concurrency_successor():
+def test_contract_gate_freeze_closes_bounded_concurrency_and_lineage():
     tasks_path = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v5.json"
     selection_path = (
         ROOT / "data/method/prompt-tsg-external-qualification-selection-v10.json"

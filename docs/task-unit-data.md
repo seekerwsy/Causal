@@ -10,16 +10,16 @@ extraction, experimental assignment, generation, or outcome analysis.
 From the repository root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m prompt_mechanism_study.task_unit_data build `
-  .codex-runtime/external-gate-c-overlap-audit/seven-source-prepared-v2 `
-  .codex-runtime/semantic-problem-pilot-final `
-  .codex-runtime/dataset-final-quality-20260831-36-target-oracle-final `
-  data/method/legacy-v5-role-bindings-v2 `
-  data/dataset-curation/contract-review-development-exclusions-v1.json `
-  data/method/phase-context-policy-v3-role-census-v6 `
-  .codex-runtime/reviewer-task-unit-data-20260831-01
+prompt-mechanism-study data task-unit-bundle build `
+  .codex-runtime/reviewer-task-unit-data-20260831-01 `
+  --prepared-root .codex-runtime/external-gate-c-overlap-audit/seven-source-prepared-v2 `
+  --clusters-root .codex-runtime/semantic-problem-pilot-final `
+  --candidate-root .codex-runtime/dataset-final-quality-20260831-36-target-oracle-final `
+  --legacy-roles-root data/method/legacy-v5-role-bindings-v2 `
+  --development-exclusions data/dataset-curation/contract-review-development-exclusions-v1.json `
+  --role-census-root data/method/phase-context-policy-v3-role-census-v6
 
-.\.venv\Scripts\python.exe -m prompt_mechanism_study.task_unit_data verify `
+prompt-mechanism-study data task-unit-bundle verify `
   .codex-runtime/reviewer-task-unit-data-20260831-01
 ```
 
