@@ -552,6 +552,9 @@ def run_single_task_semantic_repairs(
         "source_specification_assessment_counts": dict(
             sorted(Counter(row["source_specification_assessment"] for row in repairs).items())
         ),
+        "discarded_out_of_scope_evidence_count": sum(
+            row["discarded_out_of_scope_evidence"] for row in repairs
+        ),
         "repair_plan_sha256": content_hash(plan),
         "producer_commit": producer_commit,
         "arms_or_outcomes_used": False,
@@ -1930,8 +1933,11 @@ def _parse_contract_repairs(
     }
     frozen = []
     for row, item in zip(rows, batch, strict=True):
+        keys = set(row)
+        discarded_evidence = keys == required | {"evidence_bindings"}
         if (
-            set(row) != required
+            frozenset(keys)
+            not in {frozenset(required), frozenset(required | {"evidence_bindings"})}
             or row["resolution_status"] not in {"resolved", "ambiguous", "unsupported"}
             or row["source_specification_assessment"] not in _SOURCE_ASSESSMENTS
             or row["repair_category"] not in _REPAIR_CATEGORIES - {"EVIDENCE_BACKFILL_ONLY"}
@@ -1946,6 +1952,7 @@ def _parse_contract_repairs(
                 ],
                 "repair_category": row["repair_category"],
                 "reason": _normalize_reason(row["reason"]),
+                "discarded_out_of_scope_evidence": discarded_evidence,
             }
         )
     return frozen

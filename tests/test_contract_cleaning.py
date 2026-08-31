@@ -176,10 +176,14 @@ def test_semantic_contract_repair_does_not_mix_evidence_bookkeeping() -> None:
     )[0]
     assert row["requirements"] == ["Return the input value unchanged."]
     assert "content_evidence" not in row
+    assert row["discarded_out_of_scope_evidence"] is False
 
     response["evidence_bindings"] = []
-    with pytest.raises(ContractCleaningError):
-        _parse_contract_repairs(json.dumps({"items": [response]}).encode(), _batch())
+    projected = _parse_contract_repairs(
+        json.dumps({"items": [response]}).encode(), _batch()
+    )[0]
+    assert projected["discarded_out_of_scope_evidence"] is True
+    assert "evidence_bindings" not in projected
 
 
 def test_review_keeps_producer_failure_nonterminal() -> None:
