@@ -9,9 +9,11 @@ from prompt_mechanism_study.inference import TargetITTPlan
 from prompt_mechanism_study.prioritization import (
     BridgeStatus,
     ConfirmationDispatchManifest,
+    DiscoveryPopulationStatus,
     FixedSlotLedger,
     PolicyTrack,
     SharedConfirmationUnion,
+    SupplementationDecision,
 )
 from prompt_mechanism_study.randomization import (
     ATOMIC_CONFIRMATORY_ARMS,
@@ -232,6 +234,29 @@ def verify_target_study_freezes(
         or discovery.rq1_budget_qualification.artifact_id
         != budget.rq1_budget_qualification_id
         or discovery.rq1_budget_qualification.sha256 != content_hash(budget)
+        or discovery.discovery_population_sha256
+        != manifest.discovery_population_sha256
+        or not _verify_discovery_population(
+            discovery.discovery_population_lineage,
+            manifest,
+        )
+        or discovery.discovery_population_lineage.profile.protocol_id
+        != manifest.protocol_id
+        or discovery.discovery_population_lineage.accepted_population_manifest_sha256
+        != manifest.discovery_population_sha256
+        or discovery.discovery_population_lineage.pre_census.data_role_manifest_id
+        != manifest.data_role_manifest_id
+        or discovery.discovery_population_lineage.post_census.data_role_manifest_id
+        != manifest.data_role_manifest_id
+        or (
+            discovery.discovery_population_lineage.receipt is not None
+            and discovery.discovery_population_lineage.receipt.data_role_manifest_sha256
+            != content_hash(manifest)
+        )
+        or discovery.atomic_discovery_population_sha256
+        != discovery.discovery_population_sha256
+        or discovery.pair_discovery_population_sha256
+        != discovery.discovery_population_sha256
     ):
         raise ValueError("discovery freeze lineage failed independent replay")
     selector_count = {
@@ -409,6 +434,95 @@ def verify_target_study_freezes(
         "confirmation_outcomes_used": False,
         "randomization_verification_status": randomization_verification["status"],
     }
+
+
+def _verify_discovery_population(lineage, manifest: DataRoleManifest) -> bool:
+    """Independently replay D0 readiness without calling production Gate helpers."""
+
+    profile = lineage.profile
+    pre = lineage.pre_census
+    post = lineage.post_census
+
+    def ready(census) -> bool:
+        cells = {item.target_id: item for item in census.cells}
+        pair_cells = {item.target_id: item for item in census.pair_cells}
+        if (
+            set(cells) != {item.target_id for item in profile.targets}
+            or set(pair_cells) != {item.target_id for item in profile.pair_targets}
+        ):
+            return False
+        for target in profile.targets:
+            cell = cells[target.target_id]
+            shared = set(cell.absent_lineages) & set(cell.present_lineages)
+            if (
+                cell.absent_task_units < target.minimum_absent_task_units
+                or cell.present_task_units < target.minimum_present_task_units
+                or len(shared) < target.minimum_shared_lineages
+            ):
+                return False
+        for target in profile.pair_targets:
+            cell = pair_cells[target.target_id]
+            if (
+                any(
+                    count < target.minimum_cell_task_units
+                    for _, count in cell.cell_task_units
+                )
+                or len(
+                    set.intersection(
+                        *(set(lineages) for _, lineages in cell.cell_lineages)
+                    )
+                )
+                < target.minimum_shared_lineages
+            ):
+                return False
+        return (
+            census.fillable_atomic_candidates
+            >= profile.minimum_fillable_atomic_slots
+            and census.fillable_pair_candidates
+            >= profile.minimum_fillable_pair_slots
+            and census.fold_feasible_atomic_candidates
+            >= profile.minimum_fillable_atomic_slots
+            and census.fold_feasible_pair_candidates
+            >= profile.minimum_fillable_pair_slots
+        )
+
+    if (
+        lineage.accepted_population_manifest_sha256
+        != manifest.discovery_population_sha256
+        or pre.data_role_manifest_id != manifest.data_role_manifest_id
+        or post.data_role_manifest_id != manifest.data_role_manifest_id
+        or lineage.plan.selector_variant_blind is not True
+        or lineage.plan.prohibited_inputs
+        != (
+            "FCI_OR_PAG_EVIDENCE",
+            "NATURAL_OUTCOMES",
+            "PAIR_RELATION_SUPPORT",
+            "RD_SCORES",
+            "SELECTOR_MEMBERSHIP_OR_RANK",
+        )
+    ):
+        return False
+    if lineage.plan.decision is SupplementationDecision.NOT_REQUESTED:
+        return (
+            lineage.receipt is None
+            and ready(pre)
+            and ready(post)
+            and lineage.status
+            is DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION
+        )
+    receipt = lineage.receipt
+    if receipt is None:
+        return False
+    return (
+        not ready(pre)
+        and ready(post)
+        and lineage.status is DiscoveryPopulationStatus.READY_AFTER_ONE_ROUND
+        and receipt.round_index == 1
+        and set(receipt.acquired_task_unit_ids)
+        == set(post.task_unit_ids) - set(pre.task_unit_ids)
+        and receipt.data_role_manifest_sha256 == content_hash(manifest)
+        and receipt.independent_verifier_status == "PASS"
+    )
 
 __all__ = [
     "verify_target_randomization",

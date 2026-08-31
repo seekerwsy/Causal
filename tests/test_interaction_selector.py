@@ -1,5 +1,6 @@
 """Pair schema-3 structural, prioritization, baseline, and slot invariants."""
 
+import inspect
 from dataclasses import replace
 
 import pytest
@@ -27,6 +28,9 @@ from prompt_mechanism_study.mechanisms import (
     validate_prompt_control_binding,
 )
 from prompt_mechanism_study.prioritization import (
+    CandidateCoverageSummary,
+    CandidateKind,
+    DiscoverabilityStatus,
     FixedSlotSource,
     PolicyTrack,
     SlotStatus,
@@ -369,8 +373,27 @@ def _shadow_fixture():
         policies,
         decisions,
         records,
+        coverage_summaries={
+            policy.policy_key: CandidateCoverageSummary(
+                policy.policy_key,
+                CandidateKind.PAIR,
+                (
+                    (("00", 0), ("01", 0), ("10", 0), ("11", 0))
+                    if policy is incompatible
+                    else (("00", 8), ("01", 8), ("10", 8), ("11", 8))
+                ),
+                0 if policy is incompatible else 2,
+                0 if policy is incompatible else 32,
+                0 if policy is incompatible else 32,
+                0 if policy is incompatible else 32,
+                0 if policy is incompatible else 32,
+                0 if policy is incompatible else 8,
+            )
+            for policy in policies
+        },
         candidate_family_ids={policy.policy_key: "pair-shadow" for policy in policies},
         discovery_data_sha256=pair_shadow_data_sha256(rows),
+        discovery_population_sha256=content_hash("pair-discovery-population"),
         information_budget_sha256=content_hash("pair-shadow-budget"),
         top_k=2,
     )
@@ -435,6 +458,142 @@ def test_pair_shadow_has_one_compatibility_first_universe_and_one_rd_path() -> N
         for manifest in result.fold_manifests
         for fold in range(manifest.fold_count)
     )
+
+
+@pytest.mark.reviewer
+def test_pure_interaction_discoverability_has_no_atomic_heredity_input() -> None:
+    present, _absent, _incompatible, rows, universe, plan, evidence = (
+        _shadow_fixture()
+    )
+    preoutcome = freeze_pair_preoutcome_design(
+        universe,
+        pair_preoutcome_observations(rows),
+        plan,
+    )
+    decision = next(
+        item
+        for item in preoutcome.discoverability
+        if item.candidate_id == present.policy_key
+    )
+    incompatible_decision = next(
+        item
+        for item in preoutcome.discoverability
+        if item.candidate_id not in universe.compatible_policy_keys
+    )
+    result = run_pair_shadow_qualification(
+        universe,
+        rows,
+        evidence,
+        plan,
+        preoutcome_freeze=preoutcome,
+    )
+
+    assert decision.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+    assert decision.discovery_population_sha256 == universe.discovery_population_sha256
+    assert decision.coverage_summary.state_or_cell_task_units == (
+        ("00", 8),
+        ("01", 8),
+        ("10", 8),
+        ("11", 8),
+    )
+    assert decision.coverage_summary.representation_resolved_rate == 1.0
+    assert incompatible_decision.status is DiscoverabilityStatus.DISCOVERY_INELIGIBLE
+    assert preoutcome.atomic_evidence_read is False
+    assert not any("ATOMIC" in item for item in preoutcome.eligibility_inputs)
+    assert set(inspect.signature(freeze_pair_preoutcome_design).parameters) == {
+        "universe",
+        "observations",
+        "plan",
+    }
+    assert result.no_relation.slots[0].candidate_id == present.policy_key
+
+
+@pytest.mark.reviewer
+def test_zero_marginal_xor_pair_can_enter_full_without_atomic_signal() -> None:
+    policy = _shadow_policy(
+        "feature.xor_first",
+        "feature.xor_second",
+        "context.shadow.xor",
+    )
+    rows = _shadow_rows(
+        policy,
+        secure_counts={"00": 0, "01": 8, "10": 8, "11": 0},
+    )
+    compatibility = PairCompatibilityDecision(
+        policy,
+        FactorialCompatibility.COMPATIBLE,
+        "compatibility.synthetic.v1",
+        ("surface.xor.first", "surface.xor.second"),
+        content_hash("xor-compatibility"),
+    )
+    record = ModelBoundCandidateRecord(
+        policy.policy_key,
+        "model-v1",
+        "protocol-v3",
+        "3.0",
+    )
+    universe = freeze_pair_candidate_universe(
+        (policy,),
+        (compatibility,),
+        (record,),
+        coverage_summaries={
+            policy.policy_key: CandidateCoverageSummary(
+                policy.policy_key,
+                CandidateKind.PAIR,
+                (("00", 8), ("01", 8), ("10", 8), ("11", 8)),
+                2,
+                32,
+                32,
+                32,
+                32,
+                8,
+            )
+        },
+        candidate_family_ids={policy.policy_key: "pair-shadow"},
+        discovery_data_sha256=pair_shadow_data_sha256(rows),
+        discovery_population_sha256=content_hash("xor-discovery-population"),
+        information_budget_sha256=content_hash("xor-information-budget"),
+        top_k=1,
+    )
+    plan = PairShadowPlan(
+        "model-v1",
+        ("source_code",),
+        4,
+        2,
+        0.9,
+        2,
+        20260901,
+        0.05,
+        40,
+        20260902,
+        8,
+        4,
+        0.5,
+        0.2,
+    )
+    preoutcome = freeze_pair_preoutcome_design(
+        universe,
+        pair_preoutcome_observations(rows),
+        plan,
+    )
+    result = run_pair_shadow_qualification(
+        universe,
+        rows,
+        _shadow_relation_evidence(policy, rows, QueryState.PRESENT),
+        plan,
+        preoutcome_freeze=preoutcome,
+    )
+    means = {
+        cell: sum(row.outcome for row in rows if cell in row.task_unit_id) / 8
+        for cell in ("00", "01", "10", "11")
+    }
+    first_marginal = (means["10"] + means["11"] - means["00"] - means["01"]) / 2
+    second_marginal = (means["01"] + means["11"] - means["00"] - means["10"]) / 2
+
+    assert first_marginal == second_marginal == 0.0
+    assert result.rd_scores[0].signed_risk_difference_interaction < -0.2
+    assert result.full.slots[0].candidate_id == policy.policy_key
+    assert preoutcome.atomic_evidence_read is False
 
 
 @pytest.mark.reviewer

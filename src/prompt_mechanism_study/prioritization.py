@@ -37,6 +37,7 @@ from prompt_mechanism_study.records import (
 )
 from prompt_mechanism_study.representation import (
     AtomicPolicyKey,
+    DataRole,
     ModelBoundCandidateRecord,
     Operation,
 )
@@ -146,16 +147,925 @@ class AtomicFCIGateStatus(StrEnum):
     NON_EVALUABLE = "NON_EVALUABLE"
 
 
+class CoverageCensusPhase(StrEnum):
+    PRE_SUPPLEMENT = "PRE_SUPPLEMENT"
+    POST_SUPPLEMENT = "POST_SUPPLEMENT"
+
+
+class CoverageAcquisitionMode(StrEnum):
+    CONTEXT_FIRST = "CONTEXT_FIRST"
+    STATE_TARGETED = "STATE_TARGETED"
+
+
+class SupplementationDecision(StrEnum):
+    NOT_REQUESTED = "NOT_REQUESTED"
+    PLANNED = "PLANNED"
+
+
+class DiscoveryPopulationStatus(StrEnum):
+    READY_WITHOUT_SUPPLEMENTATION = "READY_WITHOUT_SUPPLEMENTATION"
+    READY_AFTER_ONE_ROUND = "READY_AFTER_ONE_ROUND"
+    COVERAGE_BLOCKED = "COVERAGE_BLOCKED"
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageTarget:
+    """One outcome-blind context/feature support target for D0."""
+
+    context_query_id: str
+    actionable_feature_id: str
+    minimum_absent_task_units: int
+    minimum_present_task_units: int
+    minimum_shared_lineages: int
+
+    def __post_init__(self) -> None:
+        require_text(self.context_query_id, "coverage context_query_id")
+        require_text(self.actionable_feature_id, "coverage actionable_feature_id")
+        for value, name in (
+            (self.minimum_absent_task_units, "minimum_absent_task_units"),
+            (self.minimum_present_task_units, "minimum_present_task_units"),
+            (self.minimum_shared_lineages, "minimum_shared_lineages"),
+        ):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"coverage {name} must be positive")
+
+    @property
+    def target_id(self) -> str:
+        return content_id("coverage_target_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class PairCoverageTarget:
+    """One compatibility-first Pair four-cell coverage target."""
+
+    pair_policy_key: str
+    context_query_id: str
+    factor_feature_ids: tuple[str, str]
+    minimum_cell_task_units: int
+    minimum_shared_lineages: int
+
+    def __post_init__(self) -> None:
+        require_text(self.pair_policy_key, "Pair coverage policy key")
+        require_text(self.context_query_id, "Pair coverage context_query_id")
+        if (
+            len(self.factor_feature_ids) != 2
+            or self.factor_feature_ids != tuple(sorted(set(self.factor_feature_ids)))
+        ):
+            raise ValueError("Pair coverage factors must be two distinct canonical IDs")
+        for value, name in (
+            (self.minimum_cell_task_units, "Pair minimum_cell_task_units"),
+            (self.minimum_shared_lineages, "Pair minimum_shared_lineages"),
+        ):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"coverage {name} must be positive")
+
+    @property
+    def target_id(self) -> str:
+        return content_id("pair_coverage_target_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageTargetProfile:
+    """Prospectively frozen limits for one optional D0 supplementation round."""
+
+    protocol_id: str
+    schema_version: str
+    representation_profile_id: str
+    representation_qualification_sha256: str
+    catalog_sha256: str
+    support_profile_sha256: str
+    common_candidate_universe_sha256: str
+    targets: tuple[CoverageTarget, ...]
+    pair_targets: tuple[PairCoverageTarget, ...]
+    permitted_source_families: tuple[str, ...]
+    acquisition_mode: CoverageAcquisitionMode
+    maximum_source_records: int
+    maximum_new_task_units: int
+    maximum_review_task_units: int
+    maximum_task_units_per_lineage: int
+    minimum_source_lineage_diversity: int
+    minimum_fillable_atomic_slots: int
+    minimum_fillable_pair_slots: int
+    maximum_rounds: int = 1
+    permitted_data_roles: tuple[DataRole, ...] = (DataRole.DISCOVERY,)
+    outcome_blind: bool = True
+    selector_blind: bool = True
+    natural_independent_tasks_only: bool = True
+    candidate_fold_feasibility_required: bool = True
+    capacity_recovery_complete: bool = True
+    stop_rule: str = "COVERAGE_TARGETS_MET_OR_BUDGET_EXHAUSTED"
+
+    def __post_init__(self) -> None:
+        require_text(self.protocol_id, "coverage protocol_id")
+        require_text(self.schema_version, "coverage schema_version")
+        require_text(self.representation_profile_id, "coverage representation_profile_id")
+        _require_digest(
+            self.representation_qualification_sha256,
+            "representation qualification",
+        )
+        for value, name in (
+            (self.catalog_sha256, "coverage catalog"),
+            (self.support_profile_sha256, "coverage support profile"),
+            (self.common_candidate_universe_sha256, "common candidate universe"),
+        ):
+            _require_digest(value, name)
+        if not self.targets or any(type(item) is not CoverageTarget for item in self.targets):
+            raise TypeError("coverage profile requires typed targets")
+        target_keys = tuple(item.target_id for item in self.targets)
+        if target_keys != tuple(sorted(set(target_keys))):
+            raise ValueError("coverage targets must be unique and canonical")
+        pair_target_keys = tuple(item.target_id for item in self.pair_targets)
+        if any(type(item) is not PairCoverageTarget for item in self.pair_targets) or pair_target_keys != tuple(
+            sorted(set(pair_target_keys))
+        ):
+            raise ValueError("Pair coverage targets must be typed, unique, and canonical")
+        if set(target_keys) & set(pair_target_keys):
+            raise ValueError("Atomic and Pair coverage target identities cannot overlap")
+        _canonical_unique(self.permitted_source_families, "coverage source families")
+        if type(self.acquisition_mode) is not CoverageAcquisitionMode:
+            raise TypeError("coverage acquisition mode must be typed")
+        for value, name, minimum in (
+            (self.maximum_source_records, "maximum_source_records", 0),
+            (self.maximum_new_task_units, "maximum_new_task_units", 0),
+            (self.maximum_review_task_units, "maximum_review_task_units", 0),
+            (self.maximum_task_units_per_lineage, "maximum_task_units_per_lineage", 1),
+            (self.minimum_source_lineage_diversity, "minimum_source_lineage_diversity", 1),
+            (self.minimum_fillable_atomic_slots, "minimum_fillable_atomic_slots", 0),
+            (self.minimum_fillable_pair_slots, "minimum_fillable_pair_slots", 0),
+        ):
+            if type(value) is not int or value < minimum:
+                raise ValueError(f"coverage {name} must be at least {minimum}")
+        if self.maximum_new_task_units > self.maximum_source_records:
+            raise ValueError("D0 task ceiling cannot exceed its source-record ceiling")
+        if self.maximum_new_task_units > self.maximum_review_task_units:
+            raise ValueError("D0 task ceiling cannot exceed its review ceiling")
+        if self.maximum_rounds != 1:
+            raise ValueError("D0 permits exactly one bounded supplementation round")
+        if self.permitted_data_roles != (DataRole.DISCOVERY,):
+            raise ValueError("D0 supplementation may create DISCOVERY task units only")
+        if (
+            self.outcome_blind is not True
+            or self.selector_blind is not True
+            or self.natural_independent_tasks_only is not True
+            or self.candidate_fold_feasibility_required is not True
+            or self.capacity_recovery_complete is not True
+        ):
+            raise ValueError("D0 qualification and blindness invariants must all hold")
+        if self.stop_rule != "COVERAGE_TARGETS_MET_OR_BUDGET_EXHAUSTED":
+            raise ValueError("D0 stop rule cannot permit iterative discretion")
+
+    @property
+    def profile_id(self) -> str:
+        return content_id("coverage_target_profile_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageCellSupport:
+    target_id: str
+    context_task_units: int
+    absent_task_units: int
+    present_task_units: int
+    absent_lineages: tuple[str, ...]
+    present_lineages: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.target_id, "coverage target_id")
+        for value in (
+            self.context_task_units,
+            self.absent_task_units,
+            self.present_task_units,
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError("coverage counts must be nonnegative integers")
+        for values, name in (
+            (self.absent_lineages, "absent lineages"),
+            (self.present_lineages, "present lineages"),
+        ):
+            if values != tuple(sorted(set(values))) or any(
+                not isinstance(item, str) or not item.strip() for item in values
+            ):
+                raise ValueError(f"coverage {name} must be canonical")
+
+    @property
+    def shared_lineages(self) -> tuple[str, ...]:
+        return tuple(sorted(set(self.absent_lineages) & set(self.present_lineages)))
+
+
+@dataclass(frozen=True, slots=True)
+class PairCoverageCellSupport:
+    target_id: str
+    cell_task_units: tuple[tuple[str, int], ...]
+    cell_lineages: tuple[tuple[str, tuple[str, ...]], ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.target_id, "Pair coverage target_id")
+        cells = ("00", "01", "10", "11")
+        if tuple(cell for cell, _ in self.cell_task_units) != cells or any(
+            type(value) is not int or value < 0
+            for _, value in self.cell_task_units
+        ):
+            raise ValueError("Pair coverage counts must contain canonical nonnegative cells")
+        if tuple(cell for cell, _ in self.cell_lineages) != cells:
+            raise ValueError("Pair coverage lineages must contain canonical cells")
+        for _, lineages in self.cell_lineages:
+            if lineages != tuple(sorted(set(lineages))) or any(
+                not isinstance(item, str) or not item.strip() for item in lineages
+            ):
+                raise ValueError("Pair coverage lineages must be canonical")
+
+    @property
+    def shared_lineages(self) -> tuple[str, ...]:
+        lineage_sets = [set(lineages) for _, lineages in self.cell_lineages]
+        return tuple(sorted(set.intersection(*lineage_sets)))
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryCoverageCensus:
+    """A qualified natural-population census that cannot carry outcomes/selectors."""
+
+    profile_id: str
+    data_role_manifest_id: str
+    task_population_manifest_id: str
+    representation_profile_id: str
+    catalog_sha256: str
+    phase: CoverageCensusPhase
+    population_manifest_sha256: str
+    representation_qualification_sha256: str
+    task_unit_ids: tuple[str, ...]
+    cells: tuple[CoverageCellSupport, ...]
+    pair_cells: tuple[PairCoverageCellSupport, ...]
+    fillable_atomic_candidates: int
+    fillable_pair_candidates: int
+    fold_feasible_atomic_candidates: int
+    fold_feasible_pair_candidates: int
+    outcomes_read: bool = False
+    selector_evidence_read: bool = False
+    relation_evidence_read: bool = False
+
+    def __post_init__(self) -> None:
+        require_text(self.profile_id, "coverage census profile_id")
+        require_text(self.data_role_manifest_id, "coverage census data_role_manifest_id")
+        require_text(
+            self.task_population_manifest_id,
+            "coverage census task_population_manifest_id",
+        )
+        require_text(
+            self.representation_profile_id,
+            "coverage census representation_profile_id",
+        )
+        _require_digest(self.catalog_sha256, "coverage census catalog")
+        if type(self.phase) is not CoverageCensusPhase:
+            raise TypeError("coverage census phase must be typed")
+        _require_digest(self.population_manifest_sha256, "coverage population manifest")
+        _require_digest(
+            self.representation_qualification_sha256,
+            "coverage representation qualification",
+        )
+        _canonical_unique(self.task_unit_ids, "coverage task units")
+        if tuple(sorted(self.task_unit_ids)) != self.task_unit_ids:
+            raise ValueError("coverage task units must use canonical order")
+        cell_ids = tuple(item.target_id for item in self.cells)
+        if any(type(item) is not CoverageCellSupport for item in self.cells) or cell_ids != tuple(
+            sorted(set(cell_ids))
+        ):
+            raise ValueError("coverage cells must be typed, unique, and canonical")
+        pair_cell_ids = tuple(item.target_id for item in self.pair_cells)
+        if any(type(item) is not PairCoverageCellSupport for item in self.pair_cells) or pair_cell_ids != tuple(
+            sorted(set(pair_cell_ids))
+        ):
+            raise ValueError("Pair coverage cells must be typed, unique, and canonical")
+        if self.outcomes_read or self.selector_evidence_read or self.relation_evidence_read:
+            raise ValueError("coverage census cannot read outcomes or selector evidence")
+        for value, name in (
+            (self.fillable_atomic_candidates, "fillable Atomic candidates"),
+            (self.fillable_pair_candidates, "fillable Pair candidates"),
+            (self.fold_feasible_atomic_candidates, "fold-feasible Atomic candidates"),
+            (self.fold_feasible_pair_candidates, "fold-feasible Pair candidates"),
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"coverage {name} must be nonnegative")
+
+    @property
+    def census_id(self) -> str:
+        return content_id("discovery_coverage_census_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageAcquisitionRequest:
+    target_id: str
+    requested_context_task_units: int
+    requested_absent_task_units: int
+    requested_present_task_units: int
+    requested_pair_cell_task_units: tuple[tuple[str, int], ...] = ()
+
+    def __post_init__(self) -> None:
+        require_text(self.target_id, "coverage request target_id")
+        values = (
+            self.requested_context_task_units,
+            self.requested_absent_task_units,
+            self.requested_present_task_units,
+        )
+        pair_cells = tuple(cell for cell, _ in self.requested_pair_cell_task_units)
+        if (
+            pair_cells != tuple(sorted(set(pair_cells)))
+            or any(cell not in {"00", "01", "10", "11"} for cell in pair_cells)
+            or any(
+                type(value) is not int or value <= 0
+                for _, value in self.requested_pair_cell_task_units
+            )
+        ):
+            raise ValueError("coverage request Pair cells must be positive and canonical")
+        if any(type(value) is not int or value < 0 for value in values) or not (
+            any(values) or self.requested_pair_cell_task_units
+        ):
+            raise ValueError("coverage request requires a positive bounded deficit")
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoverySupplementationPlan:
+    profile_id: str
+    pre_census_id: str
+    pre_population_manifest_sha256: str
+    decision: SupplementationDecision
+    requests: tuple[CoverageAcquisitionRequest, ...]
+    existing_capacity_recovered_task_units: tuple[str, ...]
+    reservation_manifest_sha256: str
+    allowed_source_snapshot_sha256s: tuple[str, ...]
+    retrieval_rule_sha256s: tuple[str, ...]
+    near_duplicate_rule_sha256: str
+    exposure_policy_sha256: str
+    role_allocation_rule_sha256: str
+    plan_code_commit: str
+    coverage_enriched: bool
+    round_index: int
+    permitted_formal_roles: tuple[DataRole, ...] = (DataRole.DISCOVERY,)
+    selector_variant_blind: bool = True
+    prohibited_inputs: tuple[str, ...] = (
+        "FCI_OR_PAG_EVIDENCE",
+        "NATURAL_OUTCOMES",
+        "PAIR_RELATION_SUPPORT",
+        "RD_SCORES",
+        "SELECTOR_MEMBERSHIP_OR_RANK",
+    )
+
+    def __post_init__(self) -> None:
+        require_text(self.profile_id, "supplementation profile_id")
+        require_text(self.pre_census_id, "supplementation pre_census_id")
+        _require_digest(self.pre_population_manifest_sha256, "pre-supplement population")
+        _require_digest(self.reservation_manifest_sha256, "future-evaluation reservation")
+        for values, name in (
+            (self.allowed_source_snapshot_sha256s, "allowed source snapshots"),
+            (self.retrieval_rule_sha256s, "retrieval rules"),
+        ):
+            if values != tuple(sorted(set(values))):
+                raise ValueError(f"D0 {name} must be unique and canonical")
+            for value in values:
+                _require_digest(value, f"D0 {name}")
+        for value, name in (
+            (self.near_duplicate_rule_sha256, "D0 near-duplicate rule"),
+            (self.exposure_policy_sha256, "D0 exposure policy"),
+            (self.role_allocation_rule_sha256, "D0 role-allocation rule"),
+        ):
+            _require_digest(value, name)
+        if (
+            not isinstance(self.plan_code_commit, str)
+            or len(self.plan_code_commit) != 40
+            or any(character not in "0123456789abcdef" for character in self.plan_code_commit)
+        ):
+            raise ValueError("D0 plan_code_commit must be a lowercase Git SHA")
+        if type(self.coverage_enriched) is not bool:
+            raise TypeError("D0 coverage_enriched must be boolean")
+        if type(self.decision) is not SupplementationDecision:
+            raise TypeError("supplementation decision must be typed")
+        request_ids = tuple(item.target_id for item in self.requests)
+        if any(type(item) is not CoverageAcquisitionRequest for item in self.requests) or request_ids != tuple(
+            sorted(set(request_ids))
+        ):
+            raise ValueError("supplementation requests must be typed and canonical")
+        _canonical_unique(
+            self.existing_capacity_recovered_task_units,
+            "recovered existing task units",
+        )
+        if tuple(sorted(self.existing_capacity_recovered_task_units)) != self.existing_capacity_recovered_task_units:
+            raise ValueError("recovered task units must use canonical order")
+        if self.decision is SupplementationDecision.NOT_REQUESTED:
+            if (
+                self.requests
+                or self.round_index != 0
+                or self.allowed_source_snapshot_sha256s
+                or self.retrieval_rule_sha256s
+                or self.coverage_enriched
+            ):
+                raise ValueError("NOT_REQUESTED supplementation cannot contain a round")
+        elif (
+            not self.requests
+            or self.round_index != 1
+            or not self.allowed_source_snapshot_sha256s
+            or not self.retrieval_rule_sha256s
+        ):
+            raise ValueError("planned supplementation must freeze one complete bounded round")
+        if self.permitted_formal_roles != (DataRole.DISCOVERY,):
+            raise ValueError("D0 tasks may be reserved for DISCOVERY only")
+        if self.selector_variant_blind is not True:
+            raise ValueError("D0 plan must be selector-variant blind")
+        expected_prohibited = (
+            "FCI_OR_PAG_EVIDENCE",
+            "NATURAL_OUTCOMES",
+            "PAIR_RELATION_SUPPORT",
+            "RD_SCORES",
+            "SELECTOR_MEMBERSHIP_OR_RANK",
+        )
+        if self.prohibited_inputs != expected_prohibited:
+            raise ValueError("D0 prohibited-input boundary cannot be weakened")
+
+    @property
+    def supplementation_plan_id(self) -> str:
+        return content_id("discovery_supplementation_plan_", self)
+
+
+class D0ExposureCategory(StrEnum):
+    SOURCE_CURATION_VIEWED = "SOURCE_CURATION_VIEWED"
+    METHOD_DEVELOPMENT_VIEWED = "METHOD_DEVELOPMENT_VIEWED"
+    QUALIFICATION_RESULT_VIEWED = "QUALIFICATION_RESULT_VIEWED"
+    GENERATION_OUTCOME_VIEWED = "GENERATION_OUTCOME_VIEWED"
+
+
+@dataclass(frozen=True, slots=True)
+class D0TaskDisposition:
+    source_record_id: str
+    task_unit_id: str
+    near_duplicate_group_id: str
+    source_lineage_id: str
+    accepted: bool
+    disposition: str
+    exposure_categories: tuple[D0ExposureCategory, ...]
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.source_record_id, "D0 source_record_id"),
+            (self.task_unit_id, "D0 task_unit_id"),
+            (self.near_duplicate_group_id, "D0 near_duplicate_group_id"),
+            (self.source_lineage_id, "D0 source_lineage_id"),
+            (self.disposition, "D0 task disposition"),
+        ):
+            require_text(value, name)
+        if type(self.accepted) is not bool:
+            raise TypeError("D0 task accepted flag must be boolean")
+        if any(type(item) is not D0ExposureCategory for item in self.exposure_categories) or self.exposure_categories != tuple(
+            sorted(set(self.exposure_categories), key=lambda item: item.value)
+        ):
+            raise ValueError("D0 exposure categories must be typed and canonical")
+        prohibited = {
+            D0ExposureCategory.METHOD_DEVELOPMENT_VIEWED,
+            D0ExposureCategory.QUALIFICATION_RESULT_VIEWED,
+            D0ExposureCategory.GENERATION_OUTCOME_VIEWED,
+        }
+        if self.accepted and set(self.exposure_categories) & prohibited:
+            raise ValueError("accepted D0 Discovery tasks have prohibited exposure")
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoverySupplementationReceipt:
+    supplementation_plan_id: str
+    round_index: int
+    pre_population_manifest_sha256: str
+    post_population_manifest_sha256: str
+    source_records_retrieved: int
+    tasks_accepted: int
+    tasks_rejected: int
+    acquired_task_unit_ids: tuple[str, ...]
+    task_dispositions: tuple[D0TaskDisposition, ...]
+    source_provenance_sha256: str
+    deduplication_manifest_sha256: str
+    contract_quality_readiness_sha256: str
+    exposure_records_sha256: str
+    data_role_manifest_sha256: str
+    execution_code_commit: str
+    independent_verifier_status: str
+    natural_independent_tasks_only: bool = True
+    paraphrases_or_interventions_used: bool = False
+    synthetic_cell_filling_used: bool = False
+
+    def __post_init__(self) -> None:
+        require_text(self.supplementation_plan_id, "supplementation plan_id")
+        if self.round_index != 1:
+            raise ValueError("a D0 receipt must represent the single allowed round")
+        _require_digest(self.pre_population_manifest_sha256, "D0 pre population")
+        _require_digest(self.post_population_manifest_sha256, "D0 post population")
+        for value, name in (
+            (self.source_records_retrieved, "source records retrieved"),
+            (self.tasks_accepted, "tasks accepted"),
+            (self.tasks_rejected, "tasks rejected"),
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"D0 {name} must be nonnegative")
+        if self.source_records_retrieved < self.tasks_accepted + self.tasks_rejected:
+            raise ValueError("D0 source-record accounting is incomplete")
+        _canonical_unique(self.acquired_task_unit_ids, "acquired task units")
+        if tuple(sorted(self.acquired_task_unit_ids)) != self.acquired_task_unit_ids:
+            raise ValueError("acquired task units must use canonical order")
+        disposition_ids = tuple(item.task_unit_id for item in self.task_dispositions)
+        if any(type(item) is not D0TaskDisposition for item in self.task_dispositions) or disposition_ids != tuple(
+            sorted(set(disposition_ids))
+        ):
+            raise ValueError("D0 task dispositions must be typed, unique, and canonical")
+        accepted_ids = tuple(
+            item.task_unit_id for item in self.task_dispositions if item.accepted
+        )
+        if (
+            accepted_ids != self.acquired_task_unit_ids
+            or self.tasks_accepted != len(accepted_ids)
+            or self.tasks_rejected
+            != sum(not item.accepted for item in self.task_dispositions)
+        ):
+            raise ValueError("D0 accepted/rejected task accounting drifted")
+        accepted_groups = tuple(
+            item.near_duplicate_group_id
+            for item in self.task_dispositions
+            if item.accepted
+        )
+        if len(set(accepted_groups)) != len(accepted_groups):
+            raise ValueError("accepted D0 tasks must have independent near-duplicate groups")
+        for value, name in (
+            (self.source_provenance_sha256, "supplement source provenance"),
+            (self.deduplication_manifest_sha256, "supplement deduplication manifest"),
+            (self.contract_quality_readiness_sha256, "D0 contract/quality/readiness"),
+            (self.exposure_records_sha256, "D0 exposure records"),
+            (self.data_role_manifest_sha256, "supplement data-role manifest"),
+        ):
+            _require_digest(value, name)
+        if (
+            not isinstance(self.execution_code_commit, str)
+            or len(self.execution_code_commit) != 40
+            or any(character not in "0123456789abcdef" for character in self.execution_code_commit)
+        ):
+            raise ValueError("D0 execution_code_commit must be a lowercase Git SHA")
+        if self.independent_verifier_status != "PASS":
+            raise ValueError("D0 receipt requires independent verification PASS")
+        if (
+            self.natural_independent_tasks_only is not True
+            or self.paraphrases_or_interventions_used
+            or self.synthetic_cell_filling_used
+        ):
+            raise ValueError("D0 receipt admits prohibited synthetic or dependent tasks")
+
+    @property
+    def supplementation_receipt_id(self) -> str:
+        return content_id("discovery_supplementation_receipt_", self)
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryPopulationLineage:
+    """The D0/D1 population identity bound by the first formal freeze."""
+
+    profile: CoverageTargetProfile
+    pre_census: DiscoveryCoverageCensus
+    plan: DiscoverySupplementationPlan
+    receipt: DiscoverySupplementationReceipt | None
+    post_census: DiscoveryCoverageCensus
+    accepted_population_manifest_sha256: str
+    status: DiscoveryPopulationStatus
+
+    def __post_init__(self) -> None:
+        if type(self.profile) is not CoverageTargetProfile:
+            raise TypeError("population lineage requires a coverage profile")
+        if type(self.pre_census) is not DiscoveryCoverageCensus or type(
+            self.post_census
+        ) is not DiscoveryCoverageCensus:
+            raise TypeError("population lineage requires typed pre/post censuses")
+        if type(self.plan) is not DiscoverySupplementationPlan:
+            raise TypeError("population lineage requires a supplementation plan")
+        if type(self.status) is not DiscoveryPopulationStatus:
+            raise TypeError("population lineage status must be typed")
+        target_ids = tuple(item.target_id for item in self.profile.targets)
+        pair_target_ids = tuple(item.target_id for item in self.profile.pair_targets)
+        if (
+            self.pre_census.profile_id != self.profile.profile_id
+            or self.post_census.profile_id != self.profile.profile_id
+            or self.plan.profile_id != self.profile.profile_id
+            or self.pre_census.phase is not CoverageCensusPhase.PRE_SUPPLEMENT
+            or self.post_census.phase is not CoverageCensusPhase.POST_SUPPLEMENT
+            or self.plan.pre_census_id != self.pre_census.census_id
+            or self.plan.pre_population_manifest_sha256
+            != self.pre_census.population_manifest_sha256
+            or tuple(item.target_id for item in self.pre_census.cells) != target_ids
+            or tuple(item.target_id for item in self.post_census.cells) != target_ids
+            or tuple(item.target_id for item in self.pre_census.pair_cells)
+            != pair_target_ids
+            or tuple(item.target_id for item in self.post_census.pair_cells)
+            != pair_target_ids
+            or self.pre_census.representation_qualification_sha256
+            != self.profile.representation_qualification_sha256
+            or self.post_census.representation_qualification_sha256
+            != self.profile.representation_qualification_sha256
+            or self.pre_census.representation_profile_id
+            != self.profile.representation_profile_id
+            or self.post_census.representation_profile_id
+            != self.profile.representation_profile_id
+            or self.pre_census.catalog_sha256 != self.profile.catalog_sha256
+            or self.post_census.catalog_sha256 != self.profile.catalog_sha256
+            or self.pre_census.data_role_manifest_id
+            != self.post_census.data_role_manifest_id
+        ):
+            raise ValueError("D0 population lineage or representation qualification drifted")
+        request_ids = {item.target_id for item in self.plan.requests}
+        if not request_ids <= set((*target_ids, *pair_target_ids)):
+            raise ValueError("D0 supplementation request falls outside the frozen profile")
+        if not set(self.plan.existing_capacity_recovered_task_units) <= set(
+            self.pre_census.task_unit_ids
+        ):
+            raise ValueError("recovered existing capacity must precede the formal pre census")
+        if self.profile.acquisition_mode is CoverageAcquisitionMode.CONTEXT_FIRST:
+            requested = sum(
+                item.requested_context_task_units for item in self.plan.requests
+            )
+            if any(
+                item.requested_absent_task_units
+                or item.requested_present_task_units
+                or item.requested_pair_cell_task_units
+                for item in self.plan.requests
+            ):
+                raise ValueError("context-first D0 cannot target feature states")
+        else:
+            requested = sum(
+                item.requested_absent_task_units
+                + item.requested_present_task_units
+                + sum(value for _, value in item.requested_pair_cell_task_units)
+                for item in self.plan.requests
+            )
+            if any(item.requested_context_task_units for item in self.plan.requests):
+                raise ValueError("state-targeted D0 must disclose its requested states")
+        if self.plan.coverage_enriched != (
+            self.profile.acquisition_mode is CoverageAcquisitionMode.STATE_TARGETED
+        ):
+            raise ValueError("D0 enrichment disclosure drifted from acquisition mode")
+        if requested > self.profile.maximum_new_task_units:
+            raise ValueError("D0 plan exceeds the frozen acquisition ceiling")
+        pre_ready = _coverage_targets_met(self.profile, self.pre_census)
+        post_ready = _coverage_targets_met(self.profile, self.post_census)
+        if pre_ready and self.plan.decision is not SupplementationDecision.NOT_REQUESTED:
+            raise ValueError("D0 cannot supplement a population that already meets coverage")
+        _require_digest(self.accepted_population_manifest_sha256, "accepted Discovery population")
+        if self.post_census.population_manifest_sha256 != self.accepted_population_manifest_sha256:
+            raise ValueError("post census does not bind the accepted Discovery population")
+        if self.plan.decision is SupplementationDecision.NOT_REQUESTED:
+            if (
+                self.receipt is not None
+                or self.pre_census.task_unit_ids != self.post_census.task_unit_ids
+                or self.pre_census.cells != self.post_census.cells
+                or self.pre_census.pair_cells != self.post_census.pair_cells
+                or self.pre_census.fillable_atomic_candidates
+                != self.post_census.fillable_atomic_candidates
+                or self.pre_census.fillable_pair_candidates
+                != self.post_census.fillable_pair_candidates
+                or self.pre_census.fold_feasible_atomic_candidates
+                != self.post_census.fold_feasible_atomic_candidates
+                or self.pre_census.fold_feasible_pair_candidates
+                != self.post_census.fold_feasible_pair_candidates
+            ):
+                raise ValueError("unsupplemented D0 lineage changed the population")
+            expected_status = (
+                DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION
+                if post_ready
+                else DiscoveryPopulationStatus.COVERAGE_BLOCKED
+            )
+        else:
+            if (
+                self.plan.decision is not SupplementationDecision.PLANNED
+                or type(self.receipt) is not DiscoverySupplementationReceipt
+                or self.receipt.supplementation_plan_id
+                != self.plan.supplementation_plan_id
+                or self.receipt.round_index != self.plan.round_index
+                or self.receipt.pre_population_manifest_sha256
+                != self.pre_census.population_manifest_sha256
+                or self.receipt.post_population_manifest_sha256
+                != self.post_census.population_manifest_sha256
+                or not set(self.pre_census.task_unit_ids)
+                <= set(self.post_census.task_unit_ids)
+                or set(self.receipt.acquired_task_unit_ids)
+                != set(self.post_census.task_unit_ids) - set(self.pre_census.task_unit_ids)
+            ):
+                raise ValueError("supplemented D0 lineage is not a single additive natural round")
+            if len(self.receipt.acquired_task_unit_ids) > self.profile.maximum_new_task_units:
+                raise ValueError("D0 receipt exceeds the frozen acquisition ceiling")
+            if self.receipt.source_records_retrieved > self.profile.maximum_source_records:
+                raise ValueError("D0 receipt exceeds the frozen source-record ceiling")
+            if len(self.receipt.task_dispositions) > self.profile.maximum_review_task_units:
+                raise ValueError("D0 receipt exceeds the frozen review ceiling")
+            lineage_counts = Counter(
+                item.source_lineage_id
+                for item in self.receipt.task_dispositions
+                if item.accepted
+            )
+            if (
+                len(lineage_counts) < self.profile.minimum_source_lineage_diversity
+                or any(
+                    count > self.profile.maximum_task_units_per_lineage
+                    for count in lineage_counts.values()
+                )
+            ):
+                raise ValueError("D0 receipt violates frozen source-lineage constraints")
+            expected_status = (
+                DiscoveryPopulationStatus.READY_AFTER_ONE_ROUND
+                if post_ready
+                else DiscoveryPopulationStatus.COVERAGE_BLOCKED
+            )
+        if self.status is not expected_status:
+            raise ValueError("D0 population status does not match frozen coverage thresholds")
+
+    @property
+    def population_lineage_id(self) -> str:
+        return content_id("discovery_population_lineage_", self)
+
+    @property
+    def formal_discovery_ready(self) -> bool:
+        return self.status in {
+            DiscoveryPopulationStatus.READY_WITHOUT_SUPPLEMENTATION,
+            DiscoveryPopulationStatus.READY_AFTER_ONE_ROUND,
+        }
+
+
+def _coverage_targets_met(
+    profile: CoverageTargetProfile,
+    census: DiscoveryCoverageCensus,
+) -> bool:
+    target_by_id = {item.target_id: item for item in profile.targets}
+    cells = {item.target_id: item for item in census.cells}
+    pair_cells = {item.target_id: item for item in census.pair_cells}
+    cell_support = all(
+        cells[target_id].absent_task_units >= target.minimum_absent_task_units
+        and cells[target_id].present_task_units >= target.minimum_present_task_units
+        and len(cells[target_id].shared_lineages) >= target.minimum_shared_lineages
+        for target_id, target in target_by_id.items()
+    )
+    pair_support = all(
+        all(
+            count >= target.minimum_cell_task_units
+            for _, count in pair_cells[target.target_id].cell_task_units
+        )
+        and len(pair_cells[target.target_id].shared_lineages)
+        >= target.minimum_shared_lineages
+        for target in profile.pair_targets
+    )
+    return (
+        cell_support
+        and pair_support
+        and census.fillable_atomic_candidates >= profile.minimum_fillable_atomic_slots
+        and census.fillable_pair_candidates >= profile.minimum_fillable_pair_slots
+        and census.fold_feasible_atomic_candidates
+        >= profile.minimum_fillable_atomic_slots
+        and census.fold_feasible_pair_candidates
+        >= profile.minimum_fillable_pair_slots
+    )
+
+
+class CandidateKind(StrEnum):
+    ATOMIC = "ATOMIC"
+    PAIR = "PAIR"
+
+
+class DiscoverabilityStatus(StrEnum):
+    DISCOVERY_ELIGIBLE = "DISCOVERY_ELIGIBLE"
+    DISCOVERY_INELIGIBLE = "DISCOVERY_INELIGIBLE"
+
+
+class DiscoverabilityReason(StrEnum):
+    ATOMIC_NATURAL_SUPPORT_FAILED = "ATOMIC_NATURAL_SUPPORT_FAILED"
+    FACTORIAL_INCOMPATIBLE = "FACTORIAL_INCOMPATIBLE"
+    MISSING_OBSERVATIONS = "MISSING_OBSERVATIONS"
+    DUPLICATE_TASK_UNIT = "DUPLICATE_TASK_UNIT"
+    CANDIDATE_COORDINATE_MISMATCH = "CANDIDATE_COORDINATE_MISMATCH"
+    CONTEXT_NOT_PRESENT = "CONTEXT_NOT_PRESENT"
+    COVARIATE_SCHEMA_MISMATCH = "COVARIATE_SCHEMA_MISMATCH"
+    EXTRACTOR_RELIABILITY_BELOW_THRESHOLD = "EXTRACTOR_RELIABILITY_BELOW_THRESHOLD"
+    FACTOR_STATE_NOT_BINARY = "FACTOR_STATE_NOT_BINARY"
+    INSUFFICIENT_FOUR_CELL_SUPPORT = "INSUFFICIENT_FOUR_CELL_SUPPORT"
+    INSUFFICIENT_SOURCE_LINEAGE_OVERLAP = "INSUFFICIENT_SOURCE_LINEAGE_OVERLAP"
+    LANGUAGE_NONOVERLAP = "LANGUAGE_NONOVERLAP"
+    ARCHETYPE_NONOVERLAP = "ARCHETYPE_NONOVERLAP"
+    API_FAMILY_NONOVERLAP = "API_FAMILY_NONOVERLAP"
+    FOLD_NON_EVALUABLE = "FOLD_NON_EVALUABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateCoverageSummary:
+    """Outcome-blind candidate-level counts; insufficiency is not a null effect."""
+
+    candidate_id: str
+    candidate_kind: CandidateKind
+    state_or_cell_task_units: tuple[tuple[str, int], ...]
+    unique_source_lineages: int
+    near_duplicate_safe_task_units: int
+    representation_resolved_task_units: int
+    total_task_units: int
+    oracle_ready_task_units: int
+    confirmation_baseline_task_units: int
+
+    def __post_init__(self) -> None:
+        require_text(self.candidate_id, "coverage-summary candidate_id")
+        if type(self.candidate_kind) is not CandidateKind:
+            raise TypeError("coverage-summary candidate kind must be typed")
+        expected_cells = (
+            ("0", "1")
+            if self.candidate_kind is CandidateKind.ATOMIC
+            else ("00", "01", "10", "11")
+        )
+        if tuple(cell for cell, _ in self.state_or_cell_task_units) != expected_cells:
+            raise ValueError("candidate coverage cells do not match Atomic/Pair kind")
+        if any(
+            type(value) is not int or value < 0
+            for _, value in self.state_or_cell_task_units
+        ):
+            raise ValueError("candidate coverage counts must be nonnegative")
+        for value, name in (
+            (self.unique_source_lineages, "unique source lineages"),
+            (self.near_duplicate_safe_task_units, "near-duplicate-safe task units"),
+            (self.representation_resolved_task_units, "representation-resolved task units"),
+            (self.total_task_units, "total task units"),
+            (self.oracle_ready_task_units, "Oracle-ready task units"),
+            (self.confirmation_baseline_task_units, "confirmation baseline task units"),
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"candidate coverage {name} must be nonnegative")
+        if sum(value for _, value in self.state_or_cell_task_units) != self.total_task_units:
+            raise ValueError("candidate state/cell counts must sum to total task units")
+        if any(
+            value > self.total_task_units
+            for value in (
+                self.unique_source_lineages,
+                self.near_duplicate_safe_task_units,
+                self.representation_resolved_task_units,
+                self.oracle_ready_task_units,
+                self.confirmation_baseline_task_units,
+            )
+        ):
+            raise ValueError("candidate coverage diagnostics cannot exceed total task units")
+
+    @property
+    def representation_resolved_rate(self) -> float:
+        return (
+            0.0
+            if self.total_task_units == 0
+            else self.representation_resolved_task_units / self.total_task_units
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoverabilityDecision:
+    """Shared outcome-blind Atomic/Pair candidate eligibility record."""
+
+    candidate_id: str
+    candidate_kind: CandidateKind
+    discovery_population_sha256: str
+    universe_id: str
+    support_evidence_sha256: str
+    fold_evidence_sha256: str
+    coverage_summary: CandidateCoverageSummary
+    status: DiscoverabilityStatus
+    reasons: tuple[DiscoverabilityReason, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.candidate_id, "discoverability candidate_id")
+        if type(self.candidate_kind) is not CandidateKind:
+            raise TypeError("discoverability candidate kind must be typed")
+        require_text(self.universe_id, "discoverability universe_id")
+        for value, name in (
+            (self.discovery_population_sha256, "discoverability population"),
+            (self.support_evidence_sha256, "discoverability support evidence"),
+            (self.fold_evidence_sha256, "discoverability fold evidence"),
+        ):
+            _require_digest(value, name)
+        if type(self.status) is not DiscoverabilityStatus or any(
+            type(item) is not DiscoverabilityReason for item in self.reasons
+        ):
+            raise TypeError("discoverability status and reasons must be typed")
+        if (
+            type(self.coverage_summary) is not CandidateCoverageSummary
+            or self.coverage_summary.candidate_id != self.candidate_id
+            or self.coverage_summary.candidate_kind is not self.candidate_kind
+        ):
+            raise ValueError("discoverability coverage summary drifted from candidate identity")
+        if self.reasons != tuple(sorted(set(self.reasons), key=lambda item: item.value)):
+            raise ValueError("discoverability reasons must be unique and canonical")
+        if self.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE:
+            if self.reasons:
+                raise ValueError("a discoverable candidate cannot have failure reasons")
+        elif not self.reasons:
+            raise ValueError("a non-discoverable candidate requires failure reasons")
+
+
 @dataclass(frozen=True, slots=True)
 class AtomicCandidateUniverseManifest:
     """Direction-neutral v3 Atomic universe used by both Core variants."""
 
     policy_keys: tuple[AtomicPolicyKey, ...]
     supported_policy_keys: tuple[str, ...]
+    coverage_summaries: tuple[CandidateCoverageSummary, ...]
     model_bound_records: tuple[ModelBoundCandidateRecord, ...]
     realization_policy_ids: tuple[tuple[str, str], ...]
     candidate_family_ids: tuple[tuple[str, str], ...]
     discovery_data_sha256: str
+    discovery_population_sha256: str
     positivity_audit_sha256: str
     information_budget_sha256: str
     top_k: int
@@ -171,6 +1081,12 @@ class AtomicCandidateUniverseManifest:
         _canonical_unique(self.supported_policy_keys, "supported Atomic policy keys")
         if not set(self.supported_policy_keys) <= set(candidate_ids):
             raise ValueError("supported Atomic policies must belong to the universe")
+        if tuple(item.candidate_id for item in self.coverage_summaries) != candidate_ids or any(
+            type(item) is not CandidateCoverageSummary
+            or item.candidate_kind is not CandidateKind.ATOMIC
+            for item in self.coverage_summaries
+        ):
+            raise ValueError("Atomic coverage summaries must exactly follow the universe")
         if tuple(item.policy_key for item in self.model_bound_records) != candidate_ids:
             raise ValueError("model-bound records must exactly follow Atomic policies")
         if any(
@@ -188,6 +1104,7 @@ class AtomicCandidateUniverseManifest:
                 raise ValueError(f"{name} must contain non-empty values")
         for value, name in (
             (self.discovery_data_sha256, "Atomic discovery data"),
+            (self.discovery_population_sha256, "Atomic Discovery population"),
             (self.positivity_audit_sha256, "Atomic positivity audit"),
             (self.information_budget_sha256, "Atomic information budget"),
         ):
@@ -327,8 +1244,10 @@ class AtomicFoldFreeze:
     universe_id: str
     plan_id: str
     preoutcome_data_sha256: str
+    discovery_population_sha256: str
     manifests: tuple[AtomicCandidateFoldManifest, ...]
     failures: tuple[SelectorFailure, ...]
+    discoverability: tuple[DiscoverabilityDecision, ...]
 
     def __post_init__(self) -> None:
         for value, name in (
@@ -339,6 +1258,10 @@ class AtomicFoldFreeze:
         _require_digest(
             self.preoutcome_data_sha256,
             "Atomic fold-freeze pre-outcome data",
+        )
+        _require_digest(
+            self.discovery_population_sha256,
+            "Atomic fold-freeze Discovery population",
         )
         if tuple(
             sorted(self.manifests, key=lambda item: item.candidate_id)
@@ -365,6 +1288,22 @@ class AtomicFoldFreeze:
             for item in self.failures
         ):
             raise ValueError("Atomic fold freeze contains a non-fold failure")
+        decision_ids = tuple(item.candidate_id for item in self.discoverability)
+        if decision_ids != tuple(sorted(set(decision_ids))) or any(
+            type(item) is not DiscoverabilityDecision
+            or item.candidate_kind is not CandidateKind.ATOMIC
+            or item.discovery_population_sha256 != self.discovery_population_sha256
+            or item.universe_id != self.universe_id
+            for item in self.discoverability
+        ):
+            raise ValueError("Atomic discoverability decisions are not canonical or bound")
+        discoverable = {
+            item.candidate_id
+            for item in self.discoverability
+            if item.status is DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+        }
+        if discoverable != set(manifest_ids):
+            raise ValueError("Atomic discoverability must exactly match frozen fold support")
 
     @property
     def fold_freeze_id(self) -> str:
@@ -995,9 +1934,11 @@ def freeze_atomic_candidate_universe(
     model_bound_records: Sequence[ModelBoundCandidateRecord],
     *,
     supported_policy_keys: Sequence[str],
+    coverage_summaries: Mapping[str, CandidateCoverageSummary],
     realization_policy_ids: Mapping[str, str],
     candidate_family_ids: Mapping[str, str],
     discovery_data_sha256: str,
+    discovery_population_sha256: str,
     positivity_audit_sha256: str,
     information_budget_sha256: str,
     top_k: int,
@@ -1018,13 +1959,17 @@ def freeze_atomic_candidate_universe(
     ):
         if set(values) != set(candidate_ids):
             raise ValueError(f"{name} must bind every policy exactly once")
+    if set(coverage_summaries) != set(candidate_ids):
+        raise ValueError("Atomic coverage summaries must bind every policy exactly once")
     return AtomicCandidateUniverseManifest(
         ordered_keys,
         tuple(sorted(supported_policy_keys)),
+        tuple(coverage_summaries[candidate_id] for candidate_id in candidate_ids),
         tuple(records_by_key[candidate_id] for candidate_id in candidate_ids),
         tuple((candidate_id, realization_policy_ids[candidate_id]) for candidate_id in candidate_ids),
         tuple((candidate_id, candidate_family_ids[candidate_id]) for candidate_id in candidate_ids),
         discovery_data_sha256,
+        discovery_population_sha256,
         positivity_audit_sha256,
         information_budget_sha256,
         top_k,
@@ -1192,17 +2137,66 @@ def freeze_atomic_candidate_folds(
             )
             continue
         manifests.append(manifest)
+    frozen_manifests = tuple(sorted(manifests, key=lambda item: item.candidate_id))
+    frozen_failures = tuple(
+        sorted(
+            failures,
+            key=lambda item: (item.candidate_id or "", item.reason_code),
+        )
+    )
+    manifest_by_id = {item.candidate_id: item for item in frozen_manifests}
+    failure_by_id = {item.candidate_id: item for item in frozen_failures}
+    coverage_by_id = {
+        item.candidate_id: item for item in universe.coverage_summaries
+    }
+    supported = set(universe.supported_policy_keys)
+    discoverability = []
+    for candidate_id in universe.candidate_ids:
+        coverage = coverage_by_id[candidate_id]
+        manifest = manifest_by_id.get(candidate_id)
+        if manifest is not None:
+            fold_counts = Counter(
+                str(item.target_state) for item in manifest.assignments
+            )
+            if coverage.state_or_cell_task_units != (
+                ("0", fold_counts["0"]),
+                ("1", fold_counts["1"]),
+            ):
+                raise ValueError("Atomic coverage summary drifted from outcome-blind folds")
+        reasons = []
+        if candidate_id not in supported:
+            reasons.append(DiscoverabilityReason.ATOMIC_NATURAL_SUPPORT_FAILED)
+        if candidate_id in failure_by_id:
+            reasons.append(DiscoverabilityReason.FOLD_NON_EVALUABLE)
+        fold_evidence = manifest or failure_by_id.get(candidate_id) or {
+            "candidate_id": candidate_id,
+            "fold_status": "NOT_ATTEMPTED_SUPPORT_FAILED",
+        }
+        discoverability.append(
+            DiscoverabilityDecision(
+                candidate_id,
+                CandidateKind.ATOMIC,
+                universe.discovery_population_sha256,
+                universe.universe_id,
+                universe.positivity_audit_sha256,
+                content_hash(fold_evidence),
+                coverage,
+                (
+                    DiscoverabilityStatus.DISCOVERY_ELIGIBLE
+                    if not reasons
+                    else DiscoverabilityStatus.DISCOVERY_INELIGIBLE
+                ),
+                tuple(sorted(reasons, key=lambda item: item.value)),
+            )
+        )
     return AtomicFoldFreeze(
         universe.universe_id,
         plan.plan_id,
         atomic_preoutcome_data_sha256(observations),
-        tuple(sorted(manifests, key=lambda item: item.candidate_id)),
-        tuple(
-            sorted(
-                failures,
-                key=lambda item: (item.candidate_id or "", item.reason_code),
-            )
-        ),
+        universe.discovery_population_sha256,
+        frozen_manifests,
+        frozen_failures,
+        tuple(discoverability),
     )
 
 
@@ -2298,20 +3292,41 @@ __all__ = [
     "AtomicShadowVariantResult",
     "AtomicSoleDifferenceAudit",
     "BridgeStatus",
+    "CandidateKind",
+    "CandidateCoverageSummary",
     "CandidateSlotFanout",
+    "CoverageAcquisitionMode",
+    "CoverageAcquisitionRequest",
+    "CoverageCellSupport",
+    "CoverageCensusPhase",
+    "CoverageTarget",
+    "CoverageTargetProfile",
+    "D0ExposureCategory",
+    "D0TaskDisposition",
     "ConfirmationDispatchManifest",
     "ConfirmationDispatchRecord",
     "DiscoveryObservation",
+    "DiscoveryCoverageCensus",
+    "DiscoveryPopulationLineage",
+    "DiscoveryPopulationStatus",
+    "DiscoverySupplementationPlan",
+    "DiscoverySupplementationReceipt",
+    "DiscoverabilityDecision",
+    "DiscoverabilityReason",
+    "DiscoverabilityStatus",
     "FixedSlotLedger",
     "FixedSlotRecord",
     "FixedSlotSource",
     "PolicyTrack",
+    "PairCoverageCellSupport",
+    "PairCoverageTarget",
     "RankedCandidate",
     "SelectorFailure",
     "SelectorSlot",
     "SharedCandidateUnionEntry",
     "SharedConfirmationUnion",
     "SlotStatus",
+    "SupplementationDecision",
     "atomic_preoutcome_data_sha256",
     "atomic_preoutcome_observations",
     "audit_discovery_positivity",

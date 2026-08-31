@@ -10,7 +10,14 @@ import pytest
 
 from prompt_mechanism_study.inference import (
     ConfirmatoryEffectStatus,
+    ContextAnalysisPlan,
+    ContextAnalysisStatus,
+    ContextModifierSpec,
     EvidenceLevel,
+    PairResponsePatternPlan,
+    PairResponsePatternPlanStatus,
+    ResponsePatternAssessment,
+    ResponsePatternStatus,
     TargetFamilyStatus,
     TargetITTPlan,
     build_target_selector_yields,
@@ -50,9 +57,12 @@ def test_independent_verifier_imports_schema_not_production_estimators() -> None
         Path(__file__).parents[1] / "src" / "prompt_mechanism_study" / "verification"
     )
     allowed_inference_schema = {
-        "ConfirmatoryEffectStatus",
-        "EvidenceLevel",
-        "SharedEvidenceRecord",
+            "ConfirmatoryEffectStatus",
+            "ContextAnalysisStatus",
+            "EvidenceLevel",
+            "PairResponsePatternPlanStatus",
+            "ResponsePatternStatus",
+            "SharedEvidenceRecord",
         "TargetFamilyStatus",
         "TargetITTPlan",
         "TargetSelectorYieldResult",
@@ -228,10 +238,18 @@ def test_target_v3_shared_itt_confirms_each_unique_effect_once_and_fans_out() ->
     assert all(item.status is ConfirmatoryEffectStatus.POSITIVE_MEANINGFUL for item in estimates)
     assert all(item.assignments == 48 and item.task_units == 12 for item in estimates)
     atomic = next(item for item in estimates if item.track is PolicyTrack.ATOMIC)
+    pair = next(item for item in estimates if item.track is PolicyTrack.PAIR)
     assert atomic.point == pytest.approx(0.75)
     assert atomic.latent_upper > atomic.point
     target_summary = atomic.arm_summaries[0]
     assert target_summary.oracle_unknown_valid_assignments == 1
+    assert atomic.response_pattern.status is ResponsePatternStatus.NOT_APPLICABLE
+    assert pair.response_pattern.status is (
+        ResponsePatternStatus.BLOCKED_NO_FROZEN_PREDICATE
+    )
+    assert pair.response_pattern.label is None
+    assert pair.response_pattern.surface is not None
+    assert pair.response_pattern.surface.interaction == pytest.approx(pair.point)
     assert len(yields.slots) == 4
     assert all(item.meaningful_yield == 1 for item in yields.slots)
     assert all(item.top_k == 1 and item.meaningful_yield_at_k == 1 for item in yields.selectors)
@@ -249,6 +267,19 @@ def test_target_v3_rq_tables_are_fixed_denominator_and_claim_gated() -> None:
 
     assert report["report_status"] == "NON_CLAIM_TEST_ARTIFACT"
     assert report["scientific_claim_allowed"] is False
+    assert report["context_analysis_status"] == "BLOCKED_NO_FROZEN_CONTEXT_RULE"
+    assert report["context_modifier_rows"] == []
+    assert report["pair_response_pattern_plan_status"] == (
+        "BLOCKED_NO_FROZEN_PREDICATE"
+    )
+    pair_row = next(
+        row for row in report["unique_effect_rows"] if row["track"] == "pair"
+    )
+    assert pair_row["response_pattern_classification_status"] == (
+        "BLOCKED_NO_FROZEN_PREDICATE"
+    )
+    assert pair_row["response_pattern"] is None
+    assert pair_row["pair_response_surface"] is not None
     assert len(report["rq1_selector_rows"]) == 4
     assert len(report["rq2_full_minus_ablation_rows"]) == 2
     assert all(
@@ -292,6 +323,77 @@ def test_target_v3_independent_verifier_rejects_effect_drift() -> None:
     yields = build_target_selector_yields(tampered)
 
     with pytest.raises(ValueError, match="point estimate"):
+        verify_target_shared_evidence(tampered, yields)
+
+
+@pytest.mark.reviewer
+def test_context_and_pair_pattern_activation_fail_closed_without_implementations() -> None:
+    evidence, plan = _target_v3_fixture()
+    modifier = ContextModifierSpec(
+        "context-modifier.api-family",
+        "api_family",
+        ("api-a", "api-b"),
+        "prompt-tsg-natural-api-family-v1",
+        "FAIL_CLOSED",
+        content_hash("context-task-assignments"),
+        "context-contrast-family-v1",
+        content_hash("shared-policy-semantics"),
+        content_hash("shared-realization-family"),
+        (PolicyTrack.ATOMIC, PolicyTrack.PAIR),
+        ("assigned_arm_itt_heterogeneity",),
+        4,
+    )
+    frozen_context = ContextAnalysisPlan(
+        ContextAnalysisStatus.FROZEN,
+        (modifier,),
+        content_hash("joint-context-bootstrap-rule"),
+        content_hash("context-multiplicity-family"),
+    )
+    with pytest.raises(ValueError, match="context analysis is blocked"):
+        estimate_target_itt(
+            evidence,
+            replace(plan, context_analysis=frozen_context),
+            evidence_level=EvidenceLevel.TESTED,
+        )
+
+    frozen_patterns = PairResponsePatternPlan(
+        PairResponsePatternPlanStatus.FROZEN,
+        content_hash("pair-pattern-predicates"),
+        ("neutral-pattern-a", "neutral-pattern-b"),
+        ("neutral-pattern-a", "neutral-pattern-b"),
+    )
+    with pytest.raises(ValueError, match="classification is blocked"):
+        estimate_target_itt(
+            evidence,
+            replace(plan, pair_response_patterns=frozen_patterns),
+            evidence_level=EvidenceLevel.TESTED,
+        )
+
+
+@pytest.mark.reviewer
+def test_independent_verifier_rejects_an_unfrozen_pair_pattern_label() -> None:
+    evidence, plan = _target_v3_fixture()
+    result = estimate_target_itt(evidence, plan, evidence_level=EvidenceLevel.TESTED)
+    pair_family = result.families[1]
+    pair = pair_family.estimates[0]
+    tampered_pattern = ResponsePatternAssessment(
+        ResponsePatternStatus.CLASSIFIED,
+        pair.response_pattern.surface,
+        "invented-pattern",
+        content_hash("invented-predicate"),
+        (),
+    )
+    tampered_pair = replace(pair, response_pattern=tampered_pattern)
+    tampered = replace(
+        result,
+        families=(
+            result.families[0],
+            replace(pair_family, estimates=(tampered_pair,)),
+        ),
+    )
+    yields = build_target_selector_yields(tampered)
+
+    with pytest.raises(ValueError, match="blocked Pair response-pattern status"):
         verify_target_shared_evidence(tampered, yields)
 
 

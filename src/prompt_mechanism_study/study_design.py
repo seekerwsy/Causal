@@ -25,6 +25,7 @@ from prompt_mechanism_study.records import content_hash, content_id, require_tex
 from prompt_mechanism_study.prioritization import (
     BridgeStatus,
     ConfirmationDispatchManifest,
+    DiscoveryPopulationLineage,
     FixedSlotLedger,
     PolicyTrack,
     SharedConfirmationUnion,
@@ -374,9 +375,14 @@ class DiscoveryDesignFreeze:
     schema_version: str
     data_role_manifest: FreezeArtifactReference
     qualification_bundle: FreezeArtifactReference
+    discovery_population_lineage: DiscoveryPopulationLineage
+    discovery_population_sha256: str
+    atomic_discovery_population_sha256: str
+    pair_discovery_population_sha256: str
     identity_and_scope_decision: FreezeArtifactReference
     candidate_universe_contract: FreezeArtifactReference
     support_gate_contract: FreezeArtifactReference
+    discoverability_contract: FreezeArtifactReference
     candidate_fold_manifests: FreezeArtifactReference
     selector_contract: FreezeArtifactReference
     rq1_budget_qualification: FreezeArtifactReference
@@ -403,6 +409,7 @@ class DiscoveryDesignFreeze:
             "identity_and_scope_decision",
             "candidate_universe_contract",
             "support_gate_contract",
+            "discoverability_contract",
             "candidate_fold_manifests",
             "selector_contract",
             "rq1_budget_qualification",
@@ -410,6 +417,26 @@ class DiscoveryDesignFreeze:
         ):
             if type(getattr(self, name)) is not FreezeArtifactReference:
                 raise TypeError(f"{name} must be a FreezeArtifactReference")
+        if type(self.discovery_population_lineage) is not DiscoveryPopulationLineage:
+            raise TypeError(
+                "discovery_population_lineage must be a DiscoveryPopulationLineage"
+            )
+        if (
+            self.discovery_population_lineage.accepted_population_manifest_sha256
+            != self.discovery_population_sha256
+        ):
+            raise ValueError("Discovery population lineage drifted inside the freeze")
+        require_sha256(
+            self.discovery_population_sha256,
+            "Discovery population sha256",
+        )
+        for value, name in (
+            (self.atomic_discovery_population_sha256, "Atomic Discovery population"),
+            (self.pair_discovery_population_sha256, "Pair Discovery population"),
+        ):
+            require_sha256(value, name)
+            if value != self.discovery_population_sha256:
+                raise ValueError(f"{name} drifted from the accepted population")
         for value, name in (
             (self.atomic_top_k, "atomic_top_k"),
             (self.pair_top_k, "pair_top_k"),
@@ -2046,9 +2073,13 @@ def freeze_target_discovery_design(
     manifest: DataRoleManifest,
     qualification_bundle: QualificationBundle,
     budget: RQ1BudgetQualification,
+    population_lineage: DiscoveryPopulationLineage,
+    atomic_discovery_population_sha256: str,
+    pair_discovery_population_sha256: str,
     identity_and_scope_decision: FreezeArtifactReference,
     candidate_universe_contract: FreezeArtifactReference,
     support_gate_contract: FreezeArtifactReference,
+    discoverability_contract: FreezeArtifactReference,
     candidate_fold_manifests: FreezeArtifactReference,
     selector_contract: FreezeArtifactReference,
     discovery_outcome_contract: FreezeArtifactReference,
@@ -2061,6 +2092,10 @@ def freeze_target_discovery_design(
         raise TypeError("target discovery freeze requires a QualificationBundle")
     if type(budget) is not RQ1BudgetQualification:
         raise TypeError("target discovery freeze requires an RQ1BudgetQualification")
+    if type(population_lineage) is not DiscoveryPopulationLineage:
+        raise TypeError("target discovery freeze requires a DiscoveryPopulationLineage")
+    if not population_lineage.formal_discovery_ready:
+        raise StudyDesignError("target discovery is COVERAGE_BLOCKED")
     if not qualification_bundle.formal_use_authorized:
         raise StudyDesignError("target discovery requires accepted qualification")
     if not budget.provider_calls_authorized:
@@ -2075,6 +2110,25 @@ def freeze_target_discovery_design(
         or qualification_bundle.data_role_manifest.sha256 != content_hash(manifest)
     ):
         raise StudyDesignError("target discovery data-role lineage drift")
+    if (
+        population_lineage.profile.protocol_id != manifest.protocol_id
+        or population_lineage.accepted_population_manifest_sha256
+        != manifest.discovery_population_sha256
+        or population_lineage.pre_census.data_role_manifest_id
+        != manifest.data_role_manifest_id
+        or population_lineage.post_census.data_role_manifest_id
+        != manifest.data_role_manifest_id
+        or (
+            population_lineage.receipt is not None
+            and population_lineage.receipt.data_role_manifest_sha256
+            != content_hash(manifest)
+        )
+        or atomic_discovery_population_sha256
+        != population_lineage.accepted_population_manifest_sha256
+        or pair_discovery_population_sha256
+        != population_lineage.accepted_population_manifest_sha256
+    ):
+        raise StudyDesignError("target Discovery population lineage drift")
     dimensions = budget.dimensions
     atomic_selectors, pair_selectors = _scenario_selector_ids(budget.scenario)
     core = {
@@ -2095,9 +2149,14 @@ def freeze_target_discovery_design(
             qualification_bundle.qualification_bundle_id,
             content_hash(qualification_bundle),
         ),
+        population_lineage,
+        population_lineage.accepted_population_manifest_sha256,
+        atomic_discovery_population_sha256,
+        pair_discovery_population_sha256,
         identity_and_scope_decision,
         candidate_universe_contract,
         support_gate_contract,
+        discoverability_contract,
         candidate_fold_manifests,
         selector_contract,
         FreezeArtifactReference(

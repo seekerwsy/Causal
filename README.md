@@ -28,9 +28,15 @@ The path preserves these boundaries:
 
 - Prompt TSG facts describe prompt semantics; they are not causal edges.
 - A task unit is the independent, cross-source-deduplicated analysis unit.
+- After representation qualification, an optional pre-Discovery D0 may use one
+  bounded selector-blind round of independently sourced natural tasks. Its
+  schema and fail-closed validators are implemented; no acquisition runs while
+  cleaning and coverage thresholds remain unfinished.
 - Atomic Full/RD-only and Pair Full/No-Relation are the required RQ2
   comparisons. Qualified blinded Expert and seeded Random selectors are
   available RQ1 baselines on the same support-qualified universe and fixed K.
+- Atomic and Pair discoverability bind the same Discovery-population identity.
+  Pair admission has no Atomic heredity requirement.
 - Assignments are complete-block, replayable, and frozen before generation.
 - Assigned-arm task-unit ITT is primary. Fidelity, semantic compliance,
   generation success, and non-target drift are diagnostics, not denominator
@@ -41,6 +47,9 @@ The path preserves these boundaries:
   failure. Zero, harmful, unknown, invalid, and failed outcomes are retained.
 - Only a prospectively authorized formal package may support a scientific
   claim. Smoke, qualification, calibration, and development artifacts cannot.
+- Context contrasts and Pair response-pattern labels fail closed until their
+  exact prospective rules are frozen; the verified four-cell Pair surface is
+  retained without inventing a label.
 
 The detailed implementation map and scientific invariants are in the
 [reviewer guide](docs/reviewer-guide.md).

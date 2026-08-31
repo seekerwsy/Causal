@@ -7,9 +7,10 @@ import random
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
+from prompt_mechanism_study.artifact_io import require_sha256 as _require_digest
 from prompt_mechanism_study.measurement import InfrastructureFailure
 from prompt_mechanism_study.outcomes import Outcome
 from prompt_mechanism_study.prioritization import (
@@ -60,6 +61,209 @@ class EvidenceLevel(StrEnum):
     REPORTED = "reported"
 
 
+class ContextAnalysisStatus(StrEnum):
+    BLOCKED_NO_FROZEN_CONTEXT_RULE = "BLOCKED_NO_FROZEN_CONTEXT_RULE"
+    FROZEN = "FROZEN"
+
+
+@dataclass(frozen=True, slots=True)
+class ContextModifierSpec:
+    """One prospectively assigned Stage-III heterogeneity coordinate."""
+
+    modifier_id: str
+    source_field: str
+    levels: tuple[str, ...]
+    stratum_assignment_rule_id: str
+    missing_value_policy: str
+    task_assignment_sha256: str
+    context_contrast_family_id: str
+    policy_semantics_sha256: str
+    realization_family_sha256: str
+    eligible_tracks: tuple[PolicyTrack, ...]
+    estimand_ids: tuple[str, ...]
+    minimum_task_units_per_level: int
+
+    def __post_init__(self) -> None:
+        require_text(self.modifier_id, "context modifier_id")
+        require_text(self.source_field, "context modifier source_field")
+        require_text(
+            self.stratum_assignment_rule_id,
+            "context stratum_assignment_rule_id",
+        )
+        require_text(
+            self.context_contrast_family_id,
+            "context contrast family_id",
+        )
+        if self.levels != tuple(sorted(set(self.levels))) or len(self.levels) < 2:
+            raise ValueError("context modifier requires at least two canonical levels")
+        if self.missing_value_policy not in {"EXPLICIT_MISSING_LEVEL", "FAIL_CLOSED"}:
+            raise ValueError("context modifier missing-value policy is not frozen")
+        _require_digest(self.task_assignment_sha256, "context task assignment")
+        _require_digest(self.policy_semantics_sha256, "context policy semantics")
+        _require_digest(self.realization_family_sha256, "context realization family")
+        if (
+            not self.eligible_tracks
+            or len(set(self.eligible_tracks)) != len(self.eligible_tracks)
+            or any(type(item) is not PolicyTrack for item in self.eligible_tracks)
+            or tuple(sorted(self.eligible_tracks, key=lambda item: item.value))
+            != self.eligible_tracks
+        ):
+            raise ValueError("context modifier tracks must be typed and canonical")
+        if self.estimand_ids != tuple(sorted(set(self.estimand_ids))) or not self.estimand_ids:
+            raise ValueError("context modifier estimands must be non-empty and canonical")
+        if type(self.minimum_task_units_per_level) is not int or self.minimum_task_units_per_level < 2:
+            raise ValueError("context modifier minimum support must be at least two")
+
+
+@dataclass(frozen=True, slots=True)
+class ContextAnalysisPlan:
+    status: ContextAnalysisStatus
+    modifiers: tuple[ContextModifierSpec, ...]
+    joint_bootstrap_rule_sha256: str | None
+    multiplicity_family_sha256: str | None
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not ContextAnalysisStatus:
+            raise TypeError("context analysis status must be typed")
+        modifier_ids = tuple(item.modifier_id for item in self.modifiers)
+        if any(type(item) is not ContextModifierSpec for item in self.modifiers) or modifier_ids != tuple(
+            sorted(set(modifier_ids))
+        ):
+            raise ValueError("context modifiers must be typed, unique, and canonical")
+        if self.status is ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE:
+            if self.modifiers or self.joint_bootstrap_rule_sha256 is not None or self.multiplicity_family_sha256 is not None:
+                raise ValueError("blocked context analysis cannot carry partial rules")
+        else:
+            if not self.modifiers or self.joint_bootstrap_rule_sha256 is None or self.multiplicity_family_sha256 is None:
+                raise ValueError("frozen context analysis requires complete rules")
+            _require_digest(self.joint_bootstrap_rule_sha256, "context bootstrap rule")
+            _require_digest(self.multiplicity_family_sha256, "context multiplicity family")
+
+
+def blocked_context_analysis_plan() -> ContextAnalysisPlan:
+    return ContextAnalysisPlan(
+        ContextAnalysisStatus.BLOCKED_NO_FROZEN_CONTEXT_RULE,
+        (),
+        None,
+        None,
+    )
+
+
+class PairResponsePatternPlanStatus(StrEnum):
+    BLOCKED_NO_FROZEN_PREDICATE = "BLOCKED_NO_FROZEN_PREDICATE"
+    FROZEN = "FROZEN"
+
+
+@dataclass(frozen=True, slots=True)
+class PairResponsePatternPlan:
+    status: PairResponsePatternPlanStatus
+    predicate_sha256: str | None
+    labels: tuple[str, ...]
+    precedence: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not PairResponsePatternPlanStatus:
+            raise TypeError("Pair response-pattern plan status must be typed")
+        if self.status is PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE:
+            if self.predicate_sha256 is not None or self.labels or self.precedence:
+                raise ValueError("blocked Pair response-pattern plan cannot contain guessed rules")
+        else:
+            if self.predicate_sha256 is None or not self.labels or self.precedence != self.labels:
+                raise ValueError("frozen Pair response-pattern plan requires ordered exact predicates")
+            _require_digest(self.predicate_sha256, "Pair response-pattern predicates")
+            if len(set(self.labels)) != len(self.labels) or any(
+                not isinstance(item, str) or not item.strip() for item in self.labels
+            ):
+                raise ValueError("Pair response-pattern labels must be unique non-empty strings")
+
+
+def blocked_pair_response_pattern_plan() -> PairResponsePatternPlan:
+    return PairResponsePatternPlan(
+        PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE,
+        None,
+        (),
+        (),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PairResponseSurface:
+    mean_00: float
+    mean_10: float
+    mean_01: float
+    mean_11: float
+    factor_1_at_0: float
+    factor_2_at_0: float
+    joint: float
+    factor_1_at_1: float
+    factor_2_at_1: float
+    interaction: float
+
+    def __post_init__(self) -> None:
+        values = (
+            self.mean_00,
+            self.mean_10,
+            self.mean_01,
+            self.mean_11,
+            self.factor_1_at_0,
+            self.factor_2_at_0,
+            self.joint,
+            self.factor_1_at_1,
+            self.factor_2_at_1,
+            self.interaction,
+        )
+        if any(type(value) is not float or not math.isfinite(value) for value in values):
+            raise ValueError("Pair response surface values must be finite floats")
+        if any(not 0 <= value <= 1 for value in values[:4]):
+            raise ValueError("Pair response-surface cell means must be on [0, 1]")
+        expected = (
+            self.mean_10 - self.mean_00,
+            self.mean_01 - self.mean_00,
+            self.mean_11 - self.mean_00,
+            self.mean_11 - self.mean_01,
+            self.mean_11 - self.mean_10,
+            self.mean_11 - self.mean_10 - self.mean_01 + self.mean_00,
+        )
+        observed = values[4:]
+        if any(not math.isclose(left, right, abs_tol=1e-12) for left, right in zip(observed, expected, strict=True)):
+            raise ValueError("Pair response surface effects do not match its four cell means")
+
+
+class ResponsePatternStatus(StrEnum):
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    BLOCKED_NO_FROZEN_PREDICATE = "BLOCKED_NO_FROZEN_PREDICATE"
+    NON_EVALUABLE = "NON_EVALUABLE"
+    CLASSIFIED = "CLASSIFIED"
+
+
+@dataclass(frozen=True, slots=True)
+class ResponsePatternAssessment:
+    status: ResponsePatternStatus
+    surface: PairResponseSurface | None
+    label: str | None
+    predicate_sha256: str | None
+    reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not ResponsePatternStatus:
+            raise TypeError("response-pattern status must be typed")
+        if self.reasons != tuple(sorted(set(self.reasons))):
+            raise ValueError("response-pattern reasons must be canonical")
+        if self.status is ResponsePatternStatus.NOT_APPLICABLE:
+            if any(value is not None for value in (self.surface, self.label, self.predicate_sha256)) or self.reasons:
+                raise ValueError("Atomic response-pattern assessment must be NOT_APPLICABLE only")
+        elif self.status is ResponsePatternStatus.BLOCKED_NO_FROZEN_PREDICATE:
+            if type(self.surface) is not PairResponseSurface or self.label is not None or self.predicate_sha256 is not None or self.reasons:
+                raise ValueError("blocked Pair classification requires only its response surface")
+        elif self.status is ResponsePatternStatus.NON_EVALUABLE:
+            if self.label is not None or self.predicate_sha256 is not None or not self.reasons:
+                raise ValueError("non-evaluable Pair classification requires reasons and no label")
+        else:
+            if type(self.surface) is not PairResponseSurface or not self.label or self.predicate_sha256 is None or self.reasons:
+                raise ValueError("classified Pair response requires surface, label, and predicate")
+            _require_digest(self.predicate_sha256, "Pair response-pattern predicate")
+
+
 TARGET_ENDPOINT_ORDER = (
     Metric.SECURE_YIELD,
     Metric.CODE_VALID,
@@ -83,6 +287,12 @@ class TargetITTPlan:
     maximum_unknown_fraction_among_valid: float
     metrics: tuple[Metric, ...] = TARGET_ENDPOINT_ORDER
     bootstrap_quantile_method: str = "higher"
+    context_analysis: ContextAnalysisPlan = field(
+        default_factory=blocked_context_analysis_plan
+    )
+    pair_response_patterns: PairResponsePatternPlan = field(
+        default_factory=blocked_pair_response_pattern_plan
+    )
 
     def __post_init__(self) -> None:
         if type(self.bootstrap_seed) is not int:
@@ -115,6 +325,10 @@ class TargetITTPlan:
             raise ValueError("target endpoint order must be secure, valid, evaluable, functional, joint")
         if self.bootstrap_quantile_method != "higher":
             raise ValueError("target ITT bootstrap quantile method must be higher")
+        if type(self.context_analysis) is not ContextAnalysisPlan:
+            raise TypeError("target ITT context analysis plan must be typed")
+        if type(self.pair_response_patterns) is not PairResponsePatternPlan:
+            raise TypeError("target ITT Pair response-pattern plan must be typed")
 
     @property
     def target_itt_plan_id(self) -> str:
@@ -324,6 +538,7 @@ class TargetEffectEstimate:
     assignments: int
     arm_summaries: tuple[TargetArmEndpointSummary, ...]
     task_unit_contributions: tuple[TargetTaskUnitContribution, ...]
+    response_pattern: ResponsePatternAssessment
 
     def __post_init__(self) -> None:
         for name in (
@@ -394,6 +609,12 @@ class TargetEffectEstimate:
             )
         ) != self.task_unit_contributions:
             raise ValueError("target task-unit contributions must use canonical order")
+        if type(self.response_pattern) is not ResponsePatternAssessment:
+            raise TypeError("target response-pattern assessment must be typed")
+        if self.track is PolicyTrack.ATOMIC and self.response_pattern.status is not ResponsePatternStatus.NOT_APPLICABLE:
+            raise ValueError("Atomic effects cannot receive Pair response-pattern labels")
+        if self.track is PolicyTrack.PAIR and self.response_pattern.status is ResponsePatternStatus.NOT_APPLICABLE:
+            raise ValueError("Pair effects must retain response-pattern readiness")
 
 
 @dataclass(frozen=True, slots=True)
@@ -580,6 +801,14 @@ def estimate_target_itt(
         raise TypeError("target ITT requires a frozen assigned-arm ledger and plan")
     if type(evidence_level) is not EvidenceLevel:
         raise TypeError("target ITT evidence level must be typed")
+    if plan.context_analysis.status is ContextAnalysisStatus.FROZEN:
+        raise ValueError(
+            "context analysis is blocked until its frozen joint estimator is implemented"
+        )
+    if plan.pair_response_patterns.status is PairResponsePatternPlanStatus.FROZEN:
+        raise ValueError(
+            "Pair response-pattern classification is blocked until its predicates are implemented"
+        )
     track_by_candidate = {
         item.candidate_record_id: item.track
         for item in ledger.dispatch.union.entries
@@ -823,6 +1052,7 @@ def _target_family(
             works,
             "primary_family_invalid_provenance",
             _target_margin(track, plan),
+            plan.pair_response_patterns,
         )
     if all_reasons & {
         "insufficient_task_units_per_stratum",
@@ -834,6 +1064,7 @@ def _target_family(
             works,
             "primary_family_insufficient_support",
             _target_margin(track, plan),
+            plan.pair_response_patterns,
         )
     if "zero_standard_error" in all_reasons:
         return _target_failed_family(
@@ -842,6 +1073,7 @@ def _target_family(
             works,
             "primary_family_zero_standard_error",
             _target_margin(track, plan),
+            plan.pair_response_patterns,
         )
     maxima, invalid = _target_family_bootstrap(track, works, plan)
     minimum_valid = math.ceil(
@@ -854,6 +1086,7 @@ def _target_family(
             works,
             "primary_family_insufficient_valid_bootstrap",
             _target_margin(track, plan),
+            plan.pair_response_patterns,
             valid_draws=len(maxima),
             invalid_draws=invalid,
         )
@@ -864,7 +1097,12 @@ def _target_family(
         else plan.pair_practical_margin
     )
     estimates = tuple(
-        _target_effect_estimate(item, critical, margin)
+        _target_effect_estimate(
+            item,
+            critical,
+            margin,
+            plan.pair_response_patterns,
+        )
         for item in works
     )
     return TargetFamilyInference(
@@ -883,6 +1121,7 @@ def _target_failed_family(
     works: tuple[_TargetEffectWork, ...],
     family_reason: str,
     margin: float,
+    response_pattern_plan: PairResponsePatternPlan,
     *,
     valid_draws: int = 0,
     invalid_draws: int = 0,
@@ -907,6 +1146,11 @@ def _target_failed_family(
             item.assignments,
             item.arm_summaries,
             item.contributions,
+            _response_pattern_assessment(
+                item.track,
+                item.arm_summaries,
+                response_pattern_plan,
+            ),
         )
         for item in works
     )
@@ -924,6 +1168,7 @@ def _target_effect_estimate(
     work: _TargetEffectWork,
     critical: float,
     margin: float,
+    response_pattern_plan: PairResponsePatternPlan,
 ) -> TargetEffectEstimate:
     if work.point is None or work.standard_error is None:
         raise ValueError("an evaluable target family lacks a point estimate")
@@ -954,7 +1199,61 @@ def _target_effect_estimate(
         work.assignments,
         work.arm_summaries,
         work.contributions,
+        _response_pattern_assessment(
+            work.track,
+            work.arm_summaries,
+            response_pattern_plan,
+        ),
     )
+
+
+def _response_pattern_assessment(
+    track: PolicyTrack,
+    summaries: tuple[TargetArmEndpointSummary, ...],
+    plan: PairResponsePatternPlan,
+) -> ResponsePatternAssessment:
+    if track is PolicyTrack.ATOMIC:
+        return ResponsePatternAssessment(
+            ResponsePatternStatus.NOT_APPLICABLE,
+            None,
+            None,
+            None,
+            (),
+        )
+    if tuple(item.arm for item in summaries) != PAIR_CONFIRMATORY_ARMS:
+        return ResponsePatternAssessment(
+            ResponsePatternStatus.NON_EVALUABLE,
+            None,
+            None,
+            None,
+            ("pair_response_surface_unavailable",),
+        )
+    means = {item.arm: float(item.secure_yield) for item in summaries}
+    mean_00 = means[ConfirmatoryArm.PAIR_00]
+    mean_10 = means[ConfirmatoryArm.PAIR_10]
+    mean_01 = means[ConfirmatoryArm.PAIR_01]
+    mean_11 = means[ConfirmatoryArm.PAIR_11]
+    surface = PairResponseSurface(
+        mean_00,
+        mean_10,
+        mean_01,
+        mean_11,
+        mean_10 - mean_00,
+        mean_01 - mean_00,
+        mean_11 - mean_00,
+        mean_11 - mean_01,
+        mean_11 - mean_10,
+        mean_11 - mean_10 - mean_01 + mean_00,
+    )
+    if plan.status is PairResponsePatternPlanStatus.BLOCKED_NO_FROZEN_PREDICATE:
+        return ResponsePatternAssessment(
+            ResponsePatternStatus.BLOCKED_NO_FROZEN_PREDICATE,
+            surface,
+            None,
+            None,
+            (),
+        )
+    raise ValueError("frozen Pair response-pattern predicates lack an implementation")
 
 
 def _target_margin(track: PolicyTrack, plan: TargetITTPlan) -> float:

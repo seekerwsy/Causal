@@ -7,6 +7,15 @@ There is one active method: prospective protocol
 implemented and tested; formal inputs have not been accepted and formal
 provider execution remains disabled.
 
+Before the seven scientific stages, the target schema now supports one
+optional D0 data-preparation decision: a qualified, outcome-blind coverage
+census may either accept the existing Discovery population, execute one
+bounded selector-blind natural-task supplementation round, or end in
+`COVERAGE_BLOCKED`. The repository currently implements and tests the D0
+records and validators only. It does not acquire tasks, assign new formal
+roles, or generate formal Prompt TSGs while data cleaning and author threshold
+freezing remain incomplete.
+
 The sole executable study entry point is:
 
 ```text
@@ -28,7 +37,7 @@ prompt-mechanism-study study verify-result OUTPUT
 | Stage | Frozen input | Output | Implementation |
 | --- | --- | --- | --- |
 | Representation | source records, data roles, catalog and Prompt TSG evidence | deduplicated task units and canonical policy identities | `representation.py`, `mechanisms.py` |
-| Prioritization | DISCOVERY-only observations and accepted selector profiles | support-qualified Full/Ablation/baseline fixed slots | `prioritization.py`, `interaction_selector.py`, `rq1_baselines.py` |
+| Prioritization | one accepted Discovery-population lineage, DISCOVERY-only observations and accepted selector profiles | unified Atomic/Pair discoverability, support-qualified Full/Ablation/baseline fixed slots | `prioritization.py`, `interaction_selector.py`, `rq1_baselines.py` |
 | Hypothesis freeze | accepted qualification, budget, candidate folds and fixed slots | discovery freeze, unique confirmation union, model-bound dispatch and confirmation freeze | `study_design.py`, `prioritization.py` |
 | Intervention/randomization | frozen task-policy arm digests and model-effect coordinates | deterministic balanced assigned-arm blocks | `randomization.py` |
 | Measurement | frozen assigned prompt and evaluator identities | code validity, Security Oracle and blinded functionality records | `measurement.py` |
@@ -52,6 +61,16 @@ A reviewer should confirm that:
   discovery outcomes. Fixed slots, their unique union, protocolization,
   task-policy bundles, assignments, estimands and report rules are frozen
   before confirmation outcomes.
+- D0 follows representation qualification and capacity recovery. Its pre
+  census, plan, optional receipt and post census bind one population version,
+  source/retrieval limits, exposure and deduplication policy, role policy,
+  lineage quotas, stopping rule and future-evaluation reservation. It cannot
+  read FCI/PAG, RD, rank, Full/Ablation membership, relation support, or any
+  outcome, and it cannot create paraphrases, interventions or synthetic cells.
+- Atomic and Pair candidates carry one typed discoverability decision tied to
+  the same accepted population. Pair eligibility reads no Atomic support,
+  adjacency, rank or selection result; a pure interaction can proceed on its
+  own compatible four-cell support and folds.
 - A semantic `policy_key` is model-independent. A scientific effect is bound
   to `(policy_key, model_id)`; model dispatch is not crossed with the model
   list a second time.
@@ -75,6 +94,14 @@ A reviewer should confirm that:
 - Atomic and Pair effects use separate frozen simultaneous families and the
   direction-free five-status rule. RQ2 is the descriptive fixed-denominator
   Full-minus-Ablation Yield@K difference.
+- Context modifiers are Stage-III secondary analyses, not selectors or policy
+  identity. Because exact task assignments, joint bootstrap and multiplicity
+  are not yet author-frozen, the active record is
+  `BLOCKED_NO_FROZEN_CONTEXT_RULE` and emits no context table.
+- Pair results retain their independently verified four-cell response surface.
+  Because deterministic label predicates are not yet author-frozen, the
+  classification status is `BLOCKED_NO_FROZEN_PREDICATE` and the response
+  pattern itself is null; Atomic records say `NOT_APPLICABLE`.
 - Formal claim authorization requires accepted prospective lineage and the
   exact frozen package. `specified`, `implemented`, `tested`, `executed`
   and `reported` are never conflated.
@@ -141,7 +168,8 @@ The verifier requires the exact schema-3 file set, reconstructs typed records,
 and independently replays role lineage, budget, both freezes, fixed slots,
 model-bound dispatch, arm order, variant and seed binding, assigned-arm ITT,
 simultaneous families, five statuses, Yield@K, claim authorization and RQ
-tables. It never starts provider calls.
+tables, context-analysis readiness, and Pair response surfaces/classification
+status. It never starts provider calls.
 
 A future frozen full reproduction must also provide every raw response,
 measurement, input identity, environment, command and provider-ledger artifact

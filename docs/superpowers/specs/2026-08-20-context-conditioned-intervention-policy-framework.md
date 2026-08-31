@@ -8,7 +8,7 @@
 
 **Prospective schema family:** `3.x` (not yet authorized for formal execution)
 
-**Draft revision:** 2026-08-31 identity, data-role, and budget-envelope decision patch
+**Draft revision:** 2026-09-01 discovery-population, discoverability, and post-confirmation analysis patch
 
 **Scope:** Prospective theory, discovery, hypothesis selection, randomized confirmation,
 inference, and paper-facing research questions
@@ -115,6 +115,15 @@ stages, their immutable boundaries, and one linear execution path.
 12. `K_A`, `K_I`, selector baselines, model sets, task counts, realization counts, block slots, and
     provider ceilings are one joint budget decision. Empty, failed, and non-evaluable slots stay in
     the fixed denominator and cannot be replaced.
+13. Discovery-population supplementation is an optional, bounded pre-Discovery preparation step,
+    not a fourth scientific stage. It may add only independently sourced natural task units and is
+    blind to outcomes, FCI/RD outputs, selector ranks, and Pair relation support.
+14. Atomic and Pair discoverability use one outcome-blind Gate family. Pair admission never depends
+    on either factor having passed or been selected by the Atomic pipeline; pure interactions remain
+    eligible when their own Pair context, compatibility, support, lineage, and fold Gates pass.
+15. Context-modifier inference and Pair response-pattern classification are inactive until their
+    exact task assignment, multiplicity/bootstrap rules, and deterministic predicates have been
+    prospectively frozen. Missing rules produce explicit blocked states, never guessed defaults.
 
 ## 4. Two Explicit Data-Generating Regimes
 
@@ -1575,6 +1584,19 @@ verification, qualification artifacts, and spec audits prove:
     per-protocol diagnostics cannot change primary evidence or denominators;
 18. one reviewer smoke run, one clean frozen reproduction, the independent result verifier, RQ table
     builders, and a reading guide of at most ten core files agree on the single seven-stage path.
+19. a qualified representation profile precedes the D0 census; the four D0 records bind source,
+    retrieval, exposure, deduplication, role, budget, lineage, stopping, code, and verifier evidence,
+    and validators reject selector/outcome reads, synthetic tasks, and a second round;
+20. the post-census population digest is identical in `DiscoveryDesignFreeze`, Atomic and Pair
+    universes, and both discoverability/fold freezes; `COVERAGE_BLOCKED` cannot enter Discovery;
+21. every Atomic and Pair candidate receives one typed discoverability decision, and a pure-
+    interaction fixture proves that Pair support, folds, RD and selection read no Atomic result;
+22. context modifiers remain `BLOCKED_NO_FROZEN_CONTEXT_RULE` with no table until exact task
+    assignment, support, joint bootstrap and multiplicity rules are frozen and independently
+    implemented; and
+23. every Pair result retains an independently reconstructed four-cell response surface while an
+    absent rule set produces `BLOCKED_NO_FROZEN_PREDICATE` and a null label; Atomic effects are
+    explicitly `NOT_APPLICABLE`.
 
 ## 23. Conflict-and-Decision Ledger
 
@@ -1904,3 +1926,105 @@ outcomes, eligibility rules, or denominator filters.
 This extension can produce a meaningful null, harmful, beneficial, or interacting policy result. A
 failure to obtain statistical significance is not permission to change the same frozen pair,
 population, endpoint, Oracle, arm text, denominator, or multiplicity family after unblinding.
+
+## 25. Controlled Discovery-Population and Analysis Migration
+
+This section is the prospective D0--D5 migration contract. It changes no completed artifact and
+adds no scientific stage, selector family, outcome, or estimand. Until every referenced rule is
+frozen, the framework remains `SPECIFIED_DRAFT` and formal execution is prohibited.
+
+### 25.1 D0: coverage-aware Discovery-population preparation
+
+Representation qualification precedes any formal coverage census. The census is computed only from
+qualified, natural, deduplicated task units that are eligible for the `DISCOVERY` role and have not
+been exposed to outcomes or selector outputs. A frozen `CoverageTargetProfile` identifies the
+contexts and atomic feature states to count, minimum state-cell task units, minimum independent
+source lineages, permitted source families, maximum acquisitions, stopping rule, and exactly one
+supplementation round.
+
+The four logical D0 artifacts are:
+
+1. a pre-supplement census over the frozen coverage target;
+2. an outcome- and selector-blind supplementation plan;
+3. an acquisition receipt authenticating source, license/provenance, natural-task identity,
+   deduplication, and role eligibility; and
+4. a post-supplement census computed by the same representation and Gate implementation.
+
+Capacity recovery on existing unexposed task units is attempted and reported before external
+acquisition. Context-first acquisition is the default. State-targeted acquisition is allowed only
+when its state-only sampling rule was frozen in the profile and is disclosed. Paraphrases,
+intervention-generated Prompts, synthetic records, duplicated task descendants, and constructed
+four-cell completion are forbidden. The plan and receipt cannot contain natural outcomes, FCI/PAG
+evidence, RD values, selector ranks, Full/ablation membership, or Prompt-TSG relation support.
+Discovery and Confirmation capacities remain separate; supplementation cannot borrow, relabel, or
+consume Confirmation task units.
+
+The repository implements and validates these records now, but does not execute acquisition while
+the qualified population and author-owned thresholds are unsettled. Missing targets or a second
+round fail closed.
+
+### 25.2 D1: population-version binding
+
+`DiscoveryDesignFreeze` binds the accepted pre/post census lineage, qualification identity,
+`CoverageTargetProfile`, supplementation decision (`NOT_REQUESTED`, `PLANNED`, or `COMPLETED`),
+permitted data roles, and the exact Discovery population manifest. Candidate universes, folds, FCI,
+RD, and selector ranks must all point to that same population identity. A changed member, role,
+representation digest, target profile, or census invalidates downstream discovery artifacts rather
+than silently regenerating them under the same freeze.
+
+### 25.3 D2: unified candidate discoverability and no-heredity Pair admission
+
+Every Atomic and Pair candidate stores one typed discoverability decision with a finite reason
+vocabulary and references to the candidate universe, natural-support audit, fold freeze, and
+population identity. Its only statuses are `DISCOVERY_ELIGIBLE` and `DISCOVERY_INELIGIBLE`; the
+record retains state/four-cell counts, unique lineages, near-duplicate-safe counts, representation-
+resolved rate, Oracle-ready count, confirmation-baseline count, fold evidence, and finite reason
+codes. Atomic discoverability requires its context/source-state support and Atomic fold
+prerequisites. Pair discoverability independently requires its pair context, factorial
+compatibility, natural four-cell support, source-lineage overlap, and Pair fold prerequisites.
+
+Atomic selection, Atomic FCI adjacency, Atomic RD rank, and Atomic support decisions are forbidden
+Pair inputs. Therefore a Pair may be discoverable and selected even when one or both factors are not
+Atomic candidates. Tests must include such a pure-interaction fixture and prove that changing Atomic
+artifacts cannot change Pair rows, folds, score, rank, or eligibility.
+
+### 25.4 D3: prospectively frozen context modifiers and contrasts
+
+Context modifiers are Stage-III analysis coordinates, not new selectors and not policy-key fields.
+A modifier specification freezes a stable identifier, source field, finite levels, missing-value
+policy, task-unit assignment digest, eligible policy family, estimands, contrast family, minimum
+support, bootstrap coupling, and multiplicity family before confirmation outcomes are loaded.
+Primary assigned-arm task-unit ITT remains unchanged; modifier analyses are predeclared secondary
+heterogeneity analyses and retain every assigned unit under the frozen missing-value policy.
+
+The current draft authorizes schema, provenance, validation, and report/verifier plumbing only. The
+exact modifier levels, joint bootstrap rule, multiplicity family, and support thresholds are not yet
+frozen. Activation therefore returns `BLOCKED_NO_FROZEN_CONTEXT_RULE` and cannot produce intervals,
+statuses, tables, or claims.
+
+### 25.5 D4: deterministic Pair response-pattern classification
+
+Pair response patterns are deterministic post-estimation summaries of the verified four assigned-arm
+means, main/joint/simple effects, interaction estimate and simultaneous interval, frozen practical
+margins, unknown bounds, functionality Gate, and claim scope. They never affect candidate identity,
+support, ranking, selection, replacement, randomization, or estimation. Atomic effects record the
+classifier as `NOT_APPLICABLE`.
+
+The neutral label vocabulary and the exact mutually exclusive predicates and precedence order have
+not been author-frozen. Pair results therefore store the four-cell response surface and
+`BLOCKED_NO_FROZEN_PREDICATE`, with no label. A missing predicate must not be represented as
+`NONE`, `null-without-status`, or a default scientific interpretation. Once frozen, production and
+the independent verifier must implement the predicates separately and compare the result.
+
+### 25.6 D5: evidence and report integration
+
+The schema-3 result bundle retains its single exact file set. The new population lineage,
+discoverability decisions, inactive context-analysis plan/status, Pair response surface, and
+classifier status are nested in their owning frozen records and evidence rows. Result authorization
+must reject any active context or response-pattern claim whose rule digest is missing, any Pair path
+that reads Atomic selection evidence, and any population identity mismatch. Smoke and fixture
+outputs remain `tested`, never `executed` or `reported` evidence.
+
+Implementation readiness means that these schemas, validators, fail-closed states, result fields,
+independent reconstruction, and representative tests pass. It does not mean that D0 acquisition,
+formal Discovery, Confirmation, or any scientific claim has run.
