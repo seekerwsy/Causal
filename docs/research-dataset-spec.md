@@ -4,11 +4,15 @@
 
 This document defines the prospective dataset design for the single active
 Prompt Mechanism Study path. The 240-task-unit Python population remains a
-coverage target, not a claim of current readiness. The active outcome-blind
-audit places 1,222 quality-qualified task units in the curated corpus. Of its
-563 Python tasks, 166 are currently technically ready; 141 of those are
-unexposed to method development. The remainder stay in the dataset with
-explicit mechanism, Oracle, scope, or review-readiness fields.
+coverage target, not a claim of current readiness. The previously reported
+1,222 quality-qualified tasks, 563 Python tasks, and 166 technically ready
+Python tasks belong to the frozen pre-successor v4 baseline; they are planning
+history, not the current quality authority. The active successor retains all
+2,165 task units and requires the unanchored dual-subagent review, blind third
+adjudication, and repaired-subset re-review defined in
+[the contract content cleaning protocol](contract-content-cleaning.md). Its
+final quality and readiness counts remain unset until that data foundation
+passes the independent verifier.
 The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
 power-planning canary; it is not a frozen successor assignment manifest or
@@ -395,16 +399,16 @@ No generated program, experimental arm, Security Oracle output, or experiment
 outcome was supplied to curation. The artifacts are preparation evidence and
 do not themselves support a scientific effect claim.
 
-### 6.2 Active outcome-blind candidate ledger
+### 6.2 Pre-successor frozen candidate ledger
 
-The outcome-blind audit emits one upstream record for each of the 2,165 task
+The frozen v4 outcome-blind audit emits one upstream record for each of the 2,165 task
 units. Its physical `final_dataset_status` and mutually exclusive
 `candidate_status` fields are retained only as legacy compiler inputs. The
 reviewer-facing v4 bundle replaces them with an explicit quality disposition,
 an exposure/role record, and a multi-axis derived readiness view. A failure on
 one axis never erases a task or silently hides another blocker.
 
-Applying the quality-only rule to all 2,165 task units places 1,222 in the
+Applying the former quality-only rule to all 2,165 task units placed 1,222 in the
 quality-qualified curated corpus. It contains 563 Python, 151 C, 102 C++, 121 JavaScript, 91 C#, 66 Java,
 58 Rust, 53 PHP, and 17 Go task units. Of the 1,229 strict contracts, six remain
 pending independent review of a known material
@@ -418,7 +422,7 @@ The response-format repair produced 1,215 strict contracts. A bounded
 outcome-blind adjudication then reviewed the 17 faulty+sufficient Python tasks
 that otherwise had mechanism, Oracle, and runtime support: eight stale or
 self-contradictory review labels were corrected, six contracts were repaired,
-and three source-inconsistent cases remained pending. The active population now
+and three source-inconsistent cases remained pending. That pre-successor population
 contains 1,229 strict and 936 repairable contracts.
 
 The deterministic registry matcher left 220 task units ambiguous or unresolved.
@@ -475,8 +479,9 @@ support.
 
 The 166 technically ready Python task units cover seven source lineages and
 thirteen CWEs; 141 are unexposed. All remain quality-qualified regardless of
-lineage composition; exposure is a separate role coordinate. This population
-is planning evidence, not a frozen confirmatory sample. CyberSecEval contributes
+lineage composition; exposure is a separate role coordinate. This historical
+population is planning evidence, not the active successor or a frozen confirmatory
+sample. CyberSecEval contributes
 57/166 (34.3%) of the technically ready pool; this is reported as a
 transportability diagnostic rather than an exclusion rule.
 

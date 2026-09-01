@@ -13,11 +13,13 @@ Selection sees only task IDs, group IDs, and prior roles. The reservation is not
 a formal Discovery, qualification, or Confirmation role. It permits only blind
 curation until a later prospectively frozen allocation.
 
-The producer stages send source prompts and contracts to the frozen Bailian
-curators. Final content review uses three local Codex subagent slots under the
-same frozen review prompt. Review packets exclude CWE labels, readiness, roles,
-arms, generated code, Oracle results, and outcomes. The operator reviews only
-aggregate counts. Every task processed by this path receives the exposure category
+The producer stages may use the frozen Bailian curator, but producer output is
+never a quality authority. Final content review uses three local Codex subagent
+slots under the same frozen review prompt. Review packets contain only task ID,
+the exact source prompt, and the proposed contract with evidence. They exclude
+the producer's source assessment, declared-language metadata, CWE labels,
+readiness, roles, arms, generated code, Oracle results, and outcomes. The
+operator reviews only aggregate counts. Every task processed by this path receives the exposure category
 `CONTRACT_REPAIR_VIEWED`; that category does not imply method-development
 exposure.
 
@@ -122,11 +124,40 @@ prompt-mechanism-study curate seal-initial-subagent-contract-review `
 
 # The third reviewer slot blindly reviews every packet emitted for disagreement.
 prompt-mechanism-study curate finalize-subagent-contract-review `
-  INITIAL-REVIEW ADJUDICATION-DECISIONS PROPOSALS-FINAL REVIEW
+  INITIAL-REVIEW ADJUDICATION-DECISIONS PROPOSALS-FINAL REVIEW-ROUND-1
+
+# Only nonterminal contracts are repaired. Repair decisions are source-only;
+# exact whole-prompt evidence remains pending until independent re-review.
+prompt-mechanism-study curate prepare-subagent-contract-repairs `
+  BASE PROPOSALS-FINAL REVIEW-ROUND-1 REPAIR-PACKETS `
+  --producer-commit COMMIT
+
+# Three producer slots populate REPAIR-DECISIONS from the frozen repair packets.
+prompt-mechanism-study curate finalize-subagent-contract-repairs `
+  BASE PROPOSALS-FINAL REVIEW-ROUND-1 REPAIR-PACKETS REPAIR-DECISIONS `
+  PROPOSALS-REPAIRED --producer-commit COMMIT
+
+# Re-review only contracts changed by the repair round.
+prompt-mechanism-study curate prepare-subagent-contract-review `
+  BASE PROPOSALS-REPAIRED REPAIR-REVIEW-PACKETS --producer-commit COMMIT `
+  --nonterminal-reviews-root REVIEW-ROUND-1
+
+prompt-mechanism-study curate seal-initial-subagent-contract-review `
+  REPAIR-REVIEW-PACKETS REPAIR-REVIEW-DECISIONS REPAIR-INITIAL-REVIEW
+
+prompt-mechanism-study curate finalize-subagent-contract-review `
+  REPAIR-INITIAL-REVIEW REPAIR-ADJUDICATION-DECISIONS `
+  PROPOSALS-REPAIRED REPAIR-REVIEW
+
+prompt-mechanism-study curate merge-subagent-contract-reviews `
+  REVIEW-ROUND-1 REPAIR-REVIEW PROPOSALS-REPAIRED REVIEW-FINAL
+
+# REVIEW-FINAL/report.json must report nonterminal_count=0. If not, repeat only
+# the remaining nonterminal subset; never relabel or silently omit it.
 
 prompt-mechanism-study curate finalize-contract-content build FINAL `
-  --base-bundle BASE --proposals-root PROPOSALS-FINAL `
-  --reviews-root REVIEW/final --reservation-root RESERVATION `
+  --base-bundle BASE --proposals-root PROPOSALS-REPAIRED `
+  --reviews-root REVIEW-FINAL --reservation-root RESERVATION `
   --producer-commit COMMIT
 
 prompt-mechanism-study curate finalize-contract-content verify FINAL

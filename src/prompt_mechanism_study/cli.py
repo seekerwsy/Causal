@@ -196,9 +196,9 @@ def _add_curation_group(groups: Any) -> None:
 
     content_review = _leaf(
         actions,
-        "contract-content-review",
+        "legacy-contract-content-review",
         _run_contract_content_review,
-        "independently review every evidence-complete proposed contract",
+        "replay the archived single-provider review; output cannot enter the final data gate",
     )
     content_review.add_argument("base_bundle", type=Path)
     content_review.add_argument("proposals_root", type=Path)
