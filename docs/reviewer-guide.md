@@ -28,6 +28,14 @@ author selection, not provider authorization: every assigned Flash role must
 still pass its prospective qualification, and historical Qwen3.7-Max judge
 evidence remains legacy-only.
 
+The author has separately approved at most CNY 100 for non-confirmatory
+preexperiment and role-qualification calls. This does not change
+`SPECIFIED_DRAFT`, authorize a formal experiment, or permit exploratory outputs
+to enter a confirmatory evidence package. The recommended CNY 1,000 formal cap
+remains unapproved. Provider credentials remain in the remote execution
+environment; neither the secret nor its value is copied into the repository or
+result artifacts.
+
 The sole executable study entry point is:
 
 ```text

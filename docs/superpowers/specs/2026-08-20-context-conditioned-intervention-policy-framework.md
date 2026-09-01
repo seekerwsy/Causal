@@ -1624,6 +1624,7 @@ verification, qualification artifacts, and spec audits prove:
 | one pre-confirmation object can freeze both design and selected hypotheses | qualification review, 2026-08-31 | use `DiscoveryDesignFreeze` before formal discovery outcomes and `ConfirmationFreeze` after fixed slots but before confirmation outcomes; index both by ID and SHA-256 |
 | RQ1 baselines and `K` can be selected independently | Phase 0 author decision, 2026-08-31 | compare Core, Core+Expert, and Core+Expert+Random worst-case envelopes first; exact baseline set, `K_A`, `K_I`, tasks, realizations, slots, margins, and provider cap remain qualification-blocked |
 | prospective calls may mix models or follow a dynamic alias | Author decision, 2026-09-02 | every prospective external LLM role uses Beijing Alibaba Bailian fixed snapshot `qwen3.7-flash-2026-07-15`; dynamic aliases, fallback models, replication models, and hidden retries are forbidden. Each assigned role must still qualify independently, and the historical Max functional-judge result is not transferable |
+| a preexperiment budget authorizes formal execution | Author decision, 2026-09-02 | at most CNY 100 is authorized for non-confirmatory preexperiment and role-qualification calls only; it cannot activate the formal protocol, consume a formal evidence role without a role freeze, or promote exploratory outputs. The full formal cap remains unapproved |
 
 This ledger is prospective. It does not relabel or reinterpret completed legacy experiments.
 

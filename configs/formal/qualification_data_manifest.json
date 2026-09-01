@@ -43,12 +43,16 @@
   },
   "prospective_provider_policy": {
     "decision_path": "configs/formal/identity_and_scope_decision.json",
-    "status": "AUTHOR_SELECTED_PENDING_ROLE_QUALIFICATION_AND_TOTAL_COST_CAP",
+    "status": "AUTHOR_SELECTED_PREEXPERIMENT_CNY100_APPROVED_PENDING_ROLE_QUALIFICATION",
     "provider_id": "ali_bailian_pay_as_you_go",
     "deployment_region": "cn-beijing",
     "fixed_snapshot_model_id": "qwen3.7-flash-2026-07-15",
     "dynamic_alias_allowed": false,
     "fallback_model_ids": [],
+    "credential_execution": "REMOTE_SERVER_ENVIRONMENT_ONLY",
+    "credential_material_recorded": false,
+    "preexperiment_budget_authorization_id": "qwen37flash-preexperiment-cny100-2026-09-02",
+    "preexperiment_maximum_total_external_cost_microunits": 100000000,
     "formal_use_authorized": false,
     "functional_judge_qualification_status": "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
   },
@@ -252,7 +256,7 @@
     "The 381-task quality-included Python source population is frozen, but its representation profile, qualification thresholds, and outcome-blind eligibility rule are not accepted.",
     "Power-qualified counts for QUAL_DEV, QUAL_ACCEPT, DISCOVERY, and CONFIRMATION have not been selected, so no prospective role is assigned.",
     "A one-shot QUAL_ACCEPT subset has not been independently sealed from the frozen source population.",
-    "Qwen3.7-Flash is author-selected for all prospective calls, but role-specific qualification, practical margins, K ceilings, familywise alpha, target power, request slots, and the total provider-cost cap remain unapproved."
+    "Qwen3.7-Flash and a CNY 100 non-confirmatory preexperiment cap are author-approved, but role-specific qualification, practical margins, K ceilings, familywise alpha, target power, request slots, and the full formal provider-cost cap remain unapproved."
   ],
   "next_gate": "Complete the remaining joint author decision, qualify the fixed Qwen3.7-Flash snapshot for each assigned role, freeze the representation qualification plan and its outcome-blind eligibility rule, then power-qualify and freeze one complete DataRoleManifest before opening QUAL_ACCEPT or generating formal Prompt TSGs."
 }

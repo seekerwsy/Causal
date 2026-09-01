@@ -109,7 +109,7 @@ No entry in this Phase 0 register is `FROZEN`.
 | BUD-01 | RQ1 comparison and baseline set | Target Core and both-track blinded Expert/seeded Random selectors are implemented and tested. Expert sees only the frozen semantic/support card fields; Random uses one frozen SHA-256 seed; both emit ordinary fixed-slot sources and independently replay. The integrated qualification now has a sixth baseline-set profile, and the budget requires an accepted contract for every selected selector/model coordinate. Legacy Association/Prediction remain old-schema only. | Author freezes the exact RQ1 claim and one Core/+Expert/+Random envelope before outcomes, supplies the actual Expert cards or Random seeds, and runs the one-shot integrated baseline qualification. Association/Prediction require a separately approved target contract if selected. | Core sole-difference and baseline blindness/seed/permutation/shared-union tests pass; missing-coordinate, budget-only, or legacy-only baselines cannot authorize the budget or `DiscoveryDesignFreeze` | `IMPLEMENTATION_TESTED_BASELINE_SET_AUTHOR_AND_QUALIFICATION_BLOCKED` |
 | BUD-02 | `K_A` and `K_I` | The joint Gate now derives max-\|T\| family size and worst-case calls from `K_A/K_I`; values still have no author-approved qualification | Joint feasibility, power, and worst-case call budget qualification | Values fit support and approved cap; empty slots remain denominators | `BLOCKED` |
 | BUD-03 | Models, tasks, realizations, and total block slots | The author selected Beijing `qwen3.7-flash-2026-07-15` as the sole fixed snapshot for every prospective external LLM role, with no dynamic alias, fallback, or replication model. Model-bound dispatch, one realization per task-policy coordinate, exact four-arm/cell slots, and actual-assignment replay are implemented; task, realization, and slot values remain unset | Qualify the fixed snapshot separately for every assigned role, freeze exact coordinates and minimum tasks per realization/stratum, and verify the smallest representative run first | One numeric request table with no hidden model, fallback, retry, or realization cross-product | `AUTHOR_MODEL_SELECTED_REMAINING_INPUT_AND_QUALIFICATION_BLOCKED` |
-| BUD-04 | Provider/request and cost ceilings | The author selected Alibaba Bailian pay-as-you-go, Beijing, CNY, and the fixed Flash snapshot for all three formal call classes. Candidate list-price/token ceilings now replay to CNY 0.004916 materialization, 0.004096 generation, and 0.002458 functional-judge maxima per call. `ProviderBudgetCeilings` rejects hidden retries, tier overflow, or cost mismatch; the total monetary cap is not approved | Recheck and freeze the service price reference and conservative token caps with the selected joint design, then approve one total-cost ceiling | Independent replay rejects tier overflow, cost mismatch, mixed currencies, hidden retry, or any reservation above a call/cost ceiling | `IMPLEMENTATION_TESTED_PROVIDER_SELECTED_TOTAL_CAP_BLOCKED` |
+| BUD-04 | Provider/request and cost ceilings | The author selected Alibaba Bailian pay-as-you-go, Beijing, CNY, and the fixed Flash snapshot for all call classes, and approved a CNY 100 ceiling for non-confirmatory preexperiment work. Candidate list-price/token ceilings replay to CNY 0.004916 materialization, 0.004096 generation, and 0.002458 functional-judge maxima per call. `ProviderBudgetCeilings` rejects hidden retries, tier overflow, or cost mismatch; the full formal cap is not approved | Recheck and freeze the service price reference and conservative token caps with each design; keep the preexperiment and formal ledgers disjoint, then separately approve the formal ceiling | Independent replay rejects tier overflow, cost mismatch, mixed currencies, hidden retry, scope promotion, or any reservation above the applicable call/cost ceiling | `PREEXPERIMENT_CNY100_APPROVED_FORMAL_CAP_BLOCKED` |
 
 ## Single author decision gate
 
@@ -140,7 +140,7 @@ new identity-family and four genuinely new cryptography-family task units, plus 
 later near-duplicate exclusions.
 
 ```yaml
-author_decision_status: PARTIALLY_DECIDED_PROVIDER_MODEL_ONLY
+author_decision_status: PARTIALLY_DECIDED_PROVIDER_MODEL_AND_PREEXPERIMENT_BUDGET
 
 # Choose exactly one. The second option may use fewer than 240 only when the
 # prospectively frozen power and role-disjointness Gates pass; otherwise new
@@ -198,27 +198,31 @@ request_slots_per_task_arm: UNDECIDED
 # kinds require frozen price references and conservative per-call microunit
 # bounds. Automatic retry ceiling remains zero.
 budget_currency: CNY
-maximum_total_external_cost: UNDECIDED
+preexperiment_budget_scope: PREEXPERIMENT_ONLY_NON_CONFIRMATORY
+preexperiment_maximum_total_external_cost: 100
+formal_maximum_total_external_cost: UNDECIDED
 provider_deployment_region: cn-beijing
 materialization_provider: ali_bailian_pay_as_you_go
 generation_provider: ali_bailian_pay_as_you_go
 functional_judge_provider: ali_bailian_pay_as_you_go
 automatic_retry_ceiling: 0
+credential_execution: REMOTE_SERVER_ENVIRONMENT_ONLY
+credential_material_recorded: false
 ```
 
 The current evidence-based starting recommendation, still non-authorizing, is:
 `retain_240_and_expand`, preserve the current 21-CWE scope, practical margins 0.05/0.05, Core RQ1,
 the author-selected fixed `qwen3.7-flash-2026-07-15` snapshot for all external LLM roles with no
 replication or fallback model, `K_A <= 5`, `K_I <= 3`, alpha 0.05, minimum power 0.80, two global
-realizations, and two request slots per arm. A CNY 100 cap is recommended for the initial
-exploratory study and CNY 1,000 for the full formal envelope; the applicable cap still requires
-explicit author approval. Flash must pass each role-specific qualification, including a fresh,
+realizations, and two request slots per arm. The author approved the CNY 100 cap for the initial
+non-confirmatory preexperiment; CNY 1,000 remains only a recommendation for the full formal
+envelope and is not authorized. Flash must pass each role-specific qualification, including a fresh,
 role-disjoint functional-judge `QUAL_ACCEPT`, before formal use.
 This replaces the earlier 10/5 and one-slot planning suggestion because the implemented
 outcome-blind sensitivity calculation shows materially weaker Pair power and a much larger call
 envelope. See `rq1_worst_case_budget.md` under “Outcome-blind author-decision sensitivity.” The
-author must still approve this package and supply a total monetary cap before any value can be
-frozen.
+author must still approve the remaining scientific parameters and a separate formal monetary cap
+before a claim-bearing design can be frozen.
 
 After approval, the permitted sequence is mechanical: freeze the candidate assumption/profile
 grid; power-qualify role counts without target outcomes; either expand the population or seal one

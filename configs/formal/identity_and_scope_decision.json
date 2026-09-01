@@ -33,7 +33,7 @@
   "decided_on": "2026-08-31",
   "formal_execution_authorized": false,
   "prospective_provider_policy": {
-    "status": "AUTHOR_SELECTED_PENDING_ROLE_QUALIFICATION_AND_TOTAL_COST_CAP",
+    "status": "AUTHOR_SELECTED_PREEXPERIMENT_CNY100_APPROVED_PENDING_ROLE_QUALIFICATION",
     "selected_on": "2026-09-02",
     "provider_id": "ali_bailian_pay_as_you_go",
     "deployment_region": "cn-beijing",
@@ -43,6 +43,8 @@
     "replication_model_ids": [],
     "enable_thinking": false,
     "automatic_retry_ceiling": 0,
+    "credential_execution": "REMOTE_SERVER_ENVIRONMENT_ONLY",
+    "credential_material_recorded": false,
     "scope": "all prospective external LLM calls, including representation qualification, intervention materialization and validation, code generation, and functional judgment",
     "formal_budget_call_kinds": [
       "materialization",
@@ -85,9 +87,16 @@
       "qualification_inherited_from_qwen37max": false,
       "formal_use_authorized": false
     },
-    "recommended_budget_caps_pending_author_approval": {
-      "initial_exploratory_study_cny": 100,
-      "full_formal_study_cny": 1000
+    "budget_authorization": {
+      "authorization_id": "qwen37flash-preexperiment-cny100-2026-09-02",
+      "approved_on": "2026-09-02",
+      "scope": "PREEXPERIMENT_ONLY",
+      "evidence_level": "EXPLORATORY_NON_CONFIRMATORY",
+      "maximum_total_external_cost_microunits": 100000000,
+      "provider_calls_authorized_after_required_preflight": true,
+      "formal_experiment_authorized": false,
+      "full_formal_budget_status": "UNAPPROVED",
+      "full_formal_budget_recommendation_cny": 1000
     }
   },
   "prospective_source_population": {

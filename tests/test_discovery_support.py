@@ -263,6 +263,14 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
     assert provider["fixed_snapshot_model_id"] == "qwen3.7-flash-2026-07-15"
     assert provider["dynamic_alias_allowed"] is False
     assert provider["fallback_model_ids"] == []
+    assert provider["credential_execution"] == "REMOTE_SERVER_ENVIRONMENT_ONLY"
+    assert provider["credential_material_recorded"] is False
+    assert provider["preexperiment_budget_authorization_id"] == (
+        "qwen37flash-preexperiment-cny100-2026-09-02"
+    )
+    assert provider["preexperiment_maximum_total_external_cost_microunits"] == (
+        100_000_000
+    )
     assert provider["formal_use_authorized"] is False
     assert provider["functional_judge_qualification_status"] == (
         "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"

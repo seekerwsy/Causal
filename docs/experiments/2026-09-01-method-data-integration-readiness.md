@@ -66,4 +66,7 @@ retry. That closes model/provider identity only. The Flash functional judge and
 all other assigned roles still require prospective qualification, and the
 unresolved joint block still includes practical margins, RQ1 comparator set,
 K ceilings, alpha, target power, realization/request-slot counts, final token
-ceilings, and the total cost ceiling.
+ceilings, and the formal total cost ceiling. On 2026-09-02 the author separately
+approved a CNY 100 ceiling for non-confirmatory preexperiment and qualification
+work. That limited authorization does not activate the formal protocol or
+permit exploratory evidence to be promoted into Confirmation.

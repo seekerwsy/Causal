@@ -284,9 +284,10 @@ arm, one model, and no overlap credit, the selected Flash rates give:
 
 A smaller exploratory Core design with `K_A=2`, `K_I=1`, 100 tasks per effect, and the same
 two-slot rule reserves 10,800 formal-stage calls at CNY 37.36. The current non-authorizing cap
-recommendations are therefore CNY 100 for that initial exploratory study and CNY 1,000 for the
-full formal envelope, leaving room for role qualification and conservative request-size variance.
-The applicable cap must still be approved before any provider execution.
+The author approved a CNY 100 ceiling for that initial non-confirmatory preexperiment, leaving room
+for role qualification and conservative request-size variance. CNY 1,000 remains a recommendation,
+not an authorization, for the full formal envelope. Preexperiment spending cannot be promoted into
+formal evidence or charged against a later formal cap without a new freeze.
 
 Historical factorial records contain no provider token-usage ledger, so their byte lengths cannot
 be converted into an exact bill. The observed maximum serialized generation request/response

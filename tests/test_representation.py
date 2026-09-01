@@ -40,7 +40,7 @@ def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
     assert decision["formal_execution_authorized"] is False
     provider = decision["prospective_provider_policy"]
     assert provider["status"] == (
-        "AUTHOR_SELECTED_PENDING_ROLE_QUALIFICATION_AND_TOTAL_COST_CAP"
+        "AUTHOR_SELECTED_PREEXPERIMENT_CNY100_APPROVED_PENDING_ROLE_QUALIFICATION"
     )
     assert provider["fixed_snapshot_model_id"] == "qwen3.7-flash-2026-07-15"
     assert provider["deployment_region"] == "cn-beijing"
@@ -48,7 +48,15 @@ def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
     assert provider["fallback_model_ids"] == []
     assert provider["replication_model_ids"] == []
     assert provider["automatic_retry_ceiling"] == 0
+    assert provider["credential_execution"] == "REMOTE_SERVER_ENVIRONMENT_ONLY"
+    assert provider["credential_material_recorded"] is False
     assert provider["qualification"]["formal_use_authorized"] is False
+    budget = provider["budget_authorization"]
+    assert budget["scope"] == "PREEXPERIMENT_ONLY"
+    assert budget["evidence_level"] == "EXPLORATORY_NON_CONFIRMATORY"
+    assert budget["maximum_total_external_cost_microunits"] == 100_000_000
+    assert budget["provider_calls_authorized_after_required_preflight"] is True
+    assert budget["formal_experiment_authorized"] is False
     cost_basis = provider["token_cost_basis"]
     for ceiling in provider["call_ceilings"].values():
         numerator = (
