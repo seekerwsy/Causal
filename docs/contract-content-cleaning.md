@@ -13,10 +13,11 @@ Selection sees only task IDs, group IDs, and prior roles. The reservation is not
 a formal Discovery, qualification, or Confirmation role. It permits only blind
 curation until a later prospectively frozen allocation.
 
-The cleaning runner sends source prompts and contracts to the frozen Bailian
-curators. Requests exclude CWE labels, readiness, roles, arms, generated code,
-Oracle results, and outcomes. The operator reviews only aggregate counts. Every
-task processed by this path receives the exposure category
+The producer stages send source prompts and contracts to the frozen Bailian
+curators. Final content review uses three local Codex subagent slots under the
+same frozen review prompt. Review packets exclude CWE labels, readiness, roles,
+arms, generated code, Oracle results, and outcomes. The operator reviews only
+aggregate counts. Every task processed by this path receives the exposure category
 `CONTRACT_REPAIR_VIEWED`; that category does not imply method-development
 exposure.
 
@@ -47,10 +48,20 @@ ambiguous rather than shortened.
 
 ## Independent review and terminal quality
 
-The independent reviewer receives only the prompt, proposed contract, and
-evidence. It separately decides contract faithfulness, evidence support, and
-source-specification sufficiency. Producer failure remains nonterminal and can
-never be converted into source insufficiency.
+Each task receives two independent subagent reviews. Reviewer assignment is a
+frozen hash of `task_unit_id`; the two reviewers receive only the prompt,
+proposed contract, and evidence. They separately decide contract faithfulness,
+evidence support, and source-specification sufficiency. When those three fields
+disagree, the third reviewer receives the same blind task packet without either
+prior decision and supplies the final adjudication. Producer failure remains
+nonterminal and can never be converted into source insufficiency.
+
+The collaboration backend does not expose a seed-stable public replay API.
+Reproducibility therefore rests on the frozen prompt, complete blind packets,
+per-reviewer decisions, assignment plan, and deterministic merger rather than
+an assertion that a future model call will reproduce identical prose. These
+curation judgments define the released data foundation; they are not experimental
+outcomes or evidence for an RQ effect.
 
 Only a faithful, evidence-supported contract can receive a terminal quality
 decision:
@@ -102,8 +113,16 @@ prompt-mechanism-study curate assemble-contract-content `
   PROPOSALS-FINAL `
   --producer-commit COMMIT
 
-prompt-mechanism-study curate contract-content-review `
-  BASE PROPOSALS-FINAL REVIEW --workers 6
+prompt-mechanism-study curate prepare-subagent-contract-review `
+  BASE PROPOSALS-FINAL REVIEW-PACKETS --producer-commit COMMIT
+
+# Three reviewer slots independently populate DECISIONS from their frozen packets.
+prompt-mechanism-study curate seal-initial-subagent-contract-review `
+  REVIEW-PACKETS DECISIONS INITIAL-REVIEW
+
+# The third reviewer slot blindly reviews every packet emitted for disagreement.
+prompt-mechanism-study curate finalize-subagent-contract-review `
+  INITIAL-REVIEW ADJUDICATION-DECISIONS PROPOSALS-FINAL REVIEW
 
 prompt-mechanism-study curate finalize-contract-content build FINAL `
   --base-bundle BASE --proposals-root PROPOSALS-FINAL `
@@ -118,10 +137,10 @@ per provider request. Only the semantic contract is consumed from the first
 LLM call; the v1 producer sometimes emitted an auxiliary evidence array, which
 is deterministically discarded and counted. Code then constructs the exact
 target list, and the second call alone supplies the frozen source spans. Run
-one batch of each producer mode and one review batch before scaling. Runs
-are resumable only from closed successful batches with the same frozen plan.
-Raw requests and provider responses remain in the run directory; credentials
-are never recorded.
+one batch of each producer mode and one review packet before scaling. Subagent
+decisions are resumable only by exact packet ID under the same frozen plan.
+Raw producer requests and provider responses and all subagent packet decisions
+remain in the closed run directory; credentials are never recorded.
 
 Evidence binding is vacuously complete when the immutable contract contains no
 non-empty values. If the first binder disputes a non-empty contract, only that
@@ -152,7 +171,7 @@ each evidence span directly against the UTF-8 prompt bytes.
 
 The data foundation is complete only when all 2,165 task units have exactly one
 current evidence-complete contract, all quality rows are one of the three
-terminal dispositions above, the six former independent-review cases are
-closed, role/exposure and near-duplicate firewalls still hold, two final builds
+terminal dispositions above, every dual-review disagreement has a blind third
+decision, role/exposure and near-duplicate firewalls still hold, two final builds
 are byte-identical, and the verifier/default reviewer suite pass. Prompt TSG,
 formal roles, arms, generated code, and outcomes must remain absent.

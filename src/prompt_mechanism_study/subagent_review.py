@@ -126,6 +126,8 @@ def prepare_subagent_contract_reviews(
     plan = {
         "schema_version": "subagent-contract-review-plan-1.0",
         "protocol_id": "dual_blind_subagent_review_with_third_adjudication_v1",
+        "reviewer_backend": "codex_collaboration_subagent_inherited_model_unseeded",
+        "replay_boundary": "frozen_packets_decisions_and_merger_not_future_model_sampling",
         "producer_commit": producer_commit,
         "base_bundle_sha256": _manifest_digest(base),
         "proposals_bundle_sha256": bundle_digest(proposals),
@@ -183,6 +185,8 @@ def seal_initial_subagent_contract_reviews(
         for packet in plan["packets"]
         for item in read_json(packets / packet["file_name"])["tasks"]
     }
+    if set(task_by_id) != set(assignments):
+        raise ContractCleaningError("subagent packet population differs from the review plan")
     for task_id in sorted(assignments):
         assignment = assignments[task_id]
         primary = decisions[assignment["primary_reviewer"]][task_id]
@@ -313,6 +317,17 @@ def finalize_subagent_contract_reviews(
         "nonterminal_count": len(frozen) - terminal,
         "dual_review_agreement_count": len(agreements),
         "blind_third_adjudication_count": len(adjudications),
+        "contract_status_counts": dict(
+            sorted(Counter(row["contract_status"] for row in frozen).items())
+        ),
+        "evidence_status_counts": dict(
+            sorted(Counter(row["evidence_status"] for row in frozen).items())
+        ),
+        "source_specification_disposition_counts": dict(
+            sorted(
+                Counter(row["source_specification_disposition"] for row in frozen).items()
+            )
+        ),
         "quality_disposition_counts": dict(
             sorted(
                 Counter(
@@ -343,7 +358,16 @@ def _assignment_map(plan: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         or plan.get("arms_or_outcomes_used") is not False
     ):
         raise ContractCleaningError("subagent review plan is invalid")
-    return _unique_by(plan["assignments"], "task_unit_id", "review assignments")
+    assignments = _unique_by(plan["assignments"], "task_unit_id", "review assignments")
+    for assignment in assignments.values():
+        roles = {
+            assignment.get("primary_reviewer"),
+            assignment.get("secondary_reviewer"),
+            assignment.get("blind_adjudicator"),
+        }
+        if roles != set(_SLOTS):
+            raise ContractCleaningError("subagent review assignment does not separate reviewers")
+    return assignments
 
 
 def _load_slot_decisions(
