@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -647,6 +648,32 @@ def test_response_parser_canonicalizes_transport_only_payload() -> None:
     assert normalized_absent.occurrence is None
     assert normalized_absent.attributes == ()
     assert all(row.rationale == row.rationale.strip() for row in parsed.relation_decisions)
+
+
+def test_response_parser_rebinds_wrapped_and_whitespace_normalized_evidence() -> None:
+    task, catalog = _inputs()
+    value = json.loads(_response(_contract(task, catalog)))
+    sink = value["semantic_decisions"]["sink.sql_execution"]
+    source = value["semantic_decisions"]["source.untrusted_sql_value"]
+    expected_sink = sink["evidence_text"]
+    expected_source = source["evidence_text"]
+    escaped_sink = expected_sink.replace('"', r'\"')
+    sink["evidence_text"] = f'"{escaped_sink}"'
+    source["evidence_text"] = re.sub(r"\s+", " \n  ", expected_source)
+
+    parsed = contract_from_response(
+        json.dumps(value).encode(),
+        task=task,
+        catalog=catalog,
+        annotator_id="evidence-transport-normalization-test",
+        review_status="development_exposed",
+    )
+    decisions = {row.semantic_id: row for row in parsed.semantic_decisions}
+
+    assert decisions["sink.sql_execution"].state is QueryState.PRESENT
+    assert decisions["sink.sql_execution"].evidence_text == expected_sink
+    assert decisions["source.untrusted_sql_value"].state is QueryState.PRESENT
+    assert decisions["source.untrusted_sql_value"].evidence_text == expected_source
 
 
 def test_response_parser_deterministically_closes_relation_endpoint_states():

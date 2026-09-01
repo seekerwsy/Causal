@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -44,7 +45,7 @@ _RELATION_FIELDS = {
     "state",
     "rationale",
 }
-_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v3"
+_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v4"
 
 
 class PromptContractExtractionError(RuntimeError):
@@ -184,10 +185,10 @@ def _close_relation_endpoint_states(
     return tuple(closed)
 
 
-def _has_exact_prompt_occurrence(
+def _canonical_prompt_evidence(
     prompt: str, evidence_text: object, occurrence: object
-) -> bool:
-    """Return whether a claimed 1-based literal occurrence exists in the prompt."""
+) -> tuple[str, int] | None:
+    """Bind transport-normalized evidence back to one exact source-prompt span."""
 
     if (
         not isinstance(evidence_text, str)
@@ -196,14 +197,48 @@ def _has_exact_prompt_occurrence(
         or type(occurrence) is not int
         or occurrence <= 0
     ):
-        return False
+        return None
+    candidates: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(evidence_text)
+    add(evidence_text.strip())
+    for value in tuple(candidates):
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'", "`"}:
+            add(value[1:-1].strip())
+    for value in tuple(candidates):
+        add(value.replace(r'\"', '"').replace(r"\'", "'"))
+
+    for candidate in candidates:
+        starts = _literal_starts(prompt, candidate)
+        if occurrence <= len(starts):
+            return candidate, occurrence
+    for candidate in candidates:
+        tokens = candidate.split()
+        if len(tokens) < 2:
+            continue
+        matches = list(re.finditer(r"\s+".join(re.escape(token) for token in tokens), prompt))
+        if occurrence > len(matches):
+            continue
+        match = matches[occurrence - 1]
+        exact = prompt[match.start() : match.end()]
+        exact_starts = _literal_starts(prompt, exact)
+        return exact, exact_starts.index(match.start()) + 1
+    return None
+
+
+def _literal_starts(text: str, fragment: str) -> list[int]:
+    starts: list[int] = []
     offset = 0
-    for _ in range(occurrence):
-        offset = prompt.find(evidence_text, offset)
+    while True:
+        offset = text.find(fragment, offset)
         if offset < 0:
-            return False
+            return starts
+        starts.append(offset)
         offset += 1
-    return True
 
 
 def _demote_unverified_present_evidence(
@@ -211,25 +246,29 @@ def _demote_unverified_present_evidence(
 ) -> tuple[SemanticDecision, ...]:
     """Fail closed on unsupported presence without aborting the task batch."""
 
-    return tuple(
-        replace(
-            row,
-            state=QueryState.UNRESOLVED,
-            rationale=(
-                "Deterministic evidence validation: claimed presence lacks an exact "
-                "source-prompt occurrence; conservatively unresolved."
-            ),
-            evidence_text=None,
-            occurrence=None,
-            attributes=(),
-        )
-        if row.state is QueryState.PRESENT
-        and not _has_exact_prompt_occurrence(
-            prompt, row.evidence_text, row.occurrence
-        )
-        else row
-        for row in semantic_decisions
-    )
+    closed = []
+    for row in semantic_decisions:
+        if row.state is not QueryState.PRESENT:
+            closed.append(row)
+            continue
+        evidence = _canonical_prompt_evidence(prompt, row.evidence_text, row.occurrence)
+        if evidence is None:
+            closed.append(
+                replace(
+                    row,
+                    state=QueryState.UNRESOLVED,
+                    rationale=(
+                        "Deterministic evidence validation: claimed presence lacks an exact "
+                        "source-prompt occurrence; conservatively unresolved."
+                    ),
+                    evidence_text=None,
+                    occurrence=None,
+                    attributes=(),
+                )
+            )
+        else:
+            closed.append(replace(row, evidence_text=evidence[0], occurrence=evidence[1]))
+    return tuple(closed)
 
 
 def contract_decision_request(

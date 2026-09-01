@@ -141,7 +141,7 @@ def qualify_prompt_contract_extractor(
         "proposer_prompt_sha256": _sha256(proposer_prompt_path),
         "reviewer_evaluator_sha256": _sha256(reviewer_evaluator_path),
         "reviewer_prompt_sha256": _sha256(reviewer_prompt_path),
-        "response_protocol_id": "task_keyed_prompt_contract_json_schema_v3",
+        "response_protocol_id": "task_keyed_prompt_contract_json_schema_v4",
         "failed_task_unit_count": 0,
         "failed_task_units": [],
         "review_status": "prospective_frozen",
