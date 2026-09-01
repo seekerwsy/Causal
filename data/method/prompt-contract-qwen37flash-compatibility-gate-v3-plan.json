@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "prompt_contract_provider_compatibility_gate_plan",
+  "plan_id": "prompt-contract-qwen37flash-compatibility-gate-v3",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "frozen_on": "2026-09-02",
+  "protocol_id": "phase-context-policy-v3",
+  "response_protocol_id": "task_keyed_prompt_contract_json_schema_v2",
+  "data_role": "LEGACY_EXPOSED_DEVELOPMENT_COMPATIBILITY_GATE",
+  "formal_use_authorized": false,
+  "scientific_claim_allowed": false,
+  "qualification_accept_consumed": false,
+  "arms_or_outcomes_used": false,
+  "budget_authorization_id": "qwen37flash-preexperiment-cny100-2026-09-02",
+  "budget_currency": "CNY",
+  "maximum_provider_calls": 6,
+  "maximum_cost_microunits": 29496,
+  "automatic_retry_ceiling": 0,
+  "pre_call_budget_accounting": {
+    "authorized_total_microunits": 100000000,
+    "prior_conservative_spend_microunits": 108152,
+    "cumulative_maximum_after_gate_microunits": 137648,
+    "minimum_remaining_after_gate_microunits": 99862352
+  },
+  "trigger": {
+    "predecessor_plan_id": "prompt-contract-qwen37flash-compatibility-gate-v2",
+    "predecessor_status": "PROMPT_CONTRACT_EXTRACTION_FAILED",
+    "predecessor_provider_calls": 6,
+    "predecessor_successful_task_units": 1,
+    "predecessor_failed_task_units": 2,
+    "predecessor_manifest_sha256": "80997d92ab2ac32ffa8a97d2022f7abea134ffb7940dd467090ac9b84d2943f9",
+    "predecessor_report_sha256": "2fe31c3b0a6ef903b57888d96c43aa0b02beb0491e7a72fe1c5871aea502ecb5",
+    "closed_failure_diagnosis": {
+      "error": "task context semantic rationale is invalid",
+      "violating_rationale_character_lengths": [
+        4909,
+        4556,
+        1662
+      ],
+      "local_frozen_maximum_utf8_bytes": 1024,
+      "predecessor_transport_schema_had_maximum": false,
+      "repair": "Add minLength 1 and maxLength 1024 to both semantic and relation rationale fields in the task-specific provider JSON Schema."
+    },
+    "interpretation": "This is a transport-schema alignment with an existing local invariant; it does not change Prompt TSG semantics, task selection, prompts, gold labels, or acceptance thresholds."
+  },
+  "execution": {
+    "task_units": 3,
+    "calls_per_task": 2,
+    "task_workers": 1,
+    "within_task_order": "proposer_then_reviewer",
+    "artifact_order": "frozen_selection_order",
+    "output_must_close_before_fail_stop": true,
+    "continue_rule": "Proceed to the separately frozen 28-task development regression only if all three task contracts and graphs close from exactly six single-attempt responses under response protocol v2; any failure stops expansion and remains engineering evidence."
+  },
+  "model_policy": {
+    "provider": "ali_bailian_pay_as_you_go",
+    "deployment_region": "cn-beijing",
+    "fixed_snapshot_model_id": "qwen3.7-flash-2026-07-15",
+    "dynamic_alias_allowed": false,
+    "fallback_model_ids": [],
+    "enable_thinking": false,
+    "maximum_input_tokens_per_call": 8192,
+    "maximum_output_tokens_per_call": 4096,
+    "maximum_cost_microunits_per_call": 4916,
+    "credential_execution": "REMOTE_SERVER_ENVIRONMENT_ONLY",
+    "credential_material_recorded": false
+  },
+  "implementation": {
+    "commit": "406058dd0184dc89b5074d504316979f464134e5",
+    "base_source_archive_sha256": "ebe566ab72c27782088942684c7361cbd251563f6602f89619105e0561419263",
+    "delta_source_archive_sha256": "d89a34c808ed7f4ff23ba41cb0b3b57f88a512d48760e48dbe58a95874c57d42",
+    "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/qwen37flash-preexperiment-406058d-20260902-05",
+    "extractor_sha256": "5cae418ee4d3fec1f387ac774583ed6da69366cb4136fd221c769dea3dcfa349"
+  },
+  "inputs": {
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+      "sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8"
+    },
+    "selection": {
+      "path": "data/method/prompt-contract-json-schema-pilot-selection-v1.json",
+      "sha256": "f7814f4d62bbd4bac51d7c96a34daf042ee6d26571337b0307602031a50128f4"
+    },
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37flash-v1.json",
+      "sha256": "9d9df5785814aac2c42e49bbebb03edd538de5035c3d7b582806b2983dc1e0ef"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v3.txt",
+      "sha256": "27c71e2ef0e86aac441317f982cbea01108bd443b0391bf7e82450b795aba48a"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37flash-v1.json",
+      "sha256": "1e31d7478c7024d280972879ee8f90cb8cbe8a595d2ea3cd9be74923e8605d95"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v3.txt",
+      "sha256": "f78bda9376136b4009b6bdafedf9d0b60a177aa02043cdd3d8def747e739c93a"
+    }
+  }
+}

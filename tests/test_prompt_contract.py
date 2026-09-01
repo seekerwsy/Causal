@@ -151,6 +151,48 @@ def test_flash_compatibility_gate_v2_closes_expansion_and_budget() -> None:
     assert len(plan["implementation"]["extractor_sha256"]) == 64
 
 
+@pytest.mark.reviewer
+def test_flash_compatibility_gate_v3_freezes_schema_repair_only() -> None:
+    plan = json.loads(
+        (
+            ROOT / "data/method/prompt-contract-qwen37flash-compatibility-gate-v3-plan.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["response_protocol_id"] == "task_keyed_prompt_contract_json_schema_v2"
+    assert plan["formal_use_authorized"] is False
+    assert plan["scientific_claim_allowed"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["arms_or_outcomes_used"] is False
+    assert plan["maximum_provider_calls"] == 6
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["maximum_cost_microunits"] == (
+        plan["maximum_provider_calls"]
+        * plan["model_policy"]["maximum_cost_microunits_per_call"]
+    )
+    accounting = plan["pre_call_budget_accounting"]
+    assert accounting["cumulative_maximum_after_gate_microunits"] == (
+        accounting["prior_conservative_spend_microunits"]
+        + plan["maximum_cost_microunits"]
+    )
+    assert accounting["minimum_remaining_after_gate_microunits"] == (
+        accounting["authorized_total_microunits"]
+        - accounting["cumulative_maximum_after_gate_microunits"]
+    )
+    diagnosis = plan["trigger"]["closed_failure_diagnosis"]
+    assert diagnosis["predecessor_transport_schema_had_maximum"] is False
+    assert all(
+        length > diagnosis["local_frozen_maximum_utf8_bytes"]
+        for length in diagnosis["violating_rationale_character_lengths"]
+    )
+    assert plan["implementation"]["commit"] == "406058dd0184dc89b5074d504316979f464134e5"
+    assert len(plan["implementation"]["extractor_sha256"]) == 64
+    for value in plan["inputs"].values():
+        path = ROOT / value["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
+
+
 def _inputs():
     tasks = {
         task["source"]["upstream_id"]: task
