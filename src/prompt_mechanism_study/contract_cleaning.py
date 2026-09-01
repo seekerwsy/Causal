@@ -1363,6 +1363,12 @@ def finalize_contract_content_data(
     reserved_groups = {row["near_duplicate_group_id"] for row in reservations.values()}
     if len(reserved_groups) != len(reservations):
         raise ContractCleaningError("future-evaluation reservation groups are duplicated")
+    input_bundle_hashes = {
+        "base_bundle_sha256": _manifest_digest(base),
+        "proposals_bundle_sha256": bundle_digest(proposals),
+        "reviews_bundle_sha256": bundle_digest(reviews),
+        "reservation_bundle_sha256": bundle_digest(reservation),
+    }
 
     final_tasks = []
     contracts = []
@@ -1446,9 +1452,12 @@ def finalize_contract_content_data(
             "requirement_evidence_status": "SOURCE_SPANS_COMPLETE_UTF8_BYTES",
             "review": review_payload,
             "provenance": {
-                "base_bundle_sha256": _manifest_digest(base),
-                "proposals_bundle_sha256": bundle_digest(proposals),
-                "reviews_bundle_sha256": bundle_digest(reviews),
+                key: input_bundle_hashes[key]
+                for key in (
+                    "base_bundle_sha256",
+                    "proposals_bundle_sha256",
+                    "reviews_bundle_sha256",
+                )
             },
             "arms_or_outcomes_used": False,
         }
@@ -1587,12 +1596,7 @@ def finalize_contract_content_data(
             "catalog_sha256": None,
             "task_count": 0,
         },
-        "input_bundles": {
-            "base_bundle_sha256": _manifest_digest(base),
-            "proposals_bundle_sha256": bundle_digest(proposals),
-            "reviews_bundle_sha256": bundle_digest(reviews),
-            "reservation_bundle_sha256": bundle_digest(reservation),
-        },
+        "input_bundles": input_bundle_hashes,
         "producer_commit": producer_commit,
         "referential_integrity": {
             "core_task_unit_populations_equal": True,

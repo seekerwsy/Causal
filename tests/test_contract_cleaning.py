@@ -492,6 +492,7 @@ def test_subagent_review_decisions_use_the_frozen_content_validator() -> None:
         _decision_rows([{**decision, "unexpected": True}])
 
 
+@pytest.mark.reviewer
 def test_repair_selection_reopens_terminal_contract_inconsistencies() -> None:
     proposed = {
         "format": {
@@ -512,6 +513,7 @@ def test_repair_selection_reopens_terminal_contract_inconsistencies() -> None:
     assert _repair_task_ids(proposed, reviewed) == {"format", "ambiguous", "pending"}
 
 
+@pytest.mark.reviewer
 def test_final_readiness_discards_superseded_contract_diagnostics() -> None:
     old = {
         "task_unit_id": "task-a",
