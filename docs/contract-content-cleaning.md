@@ -44,6 +44,12 @@ quoted_text
 span_sha256
 ```
 
+`source_prompt_sha256` is the repository content hash of the canonical JSON
+string, not the hash of the unquoted UTF-8 bytes. Response-envelope
+instructions such as `only return code` are not generated-software behavior
+and therefore do not enter the functional contract. These two boundaries are
+shared by extraction, repair, review, and verification.
+
 There is no silent truncation. A resolved contract has 1--32 requirements. A
 source with more irreducible requirements or an internal conflict is marked
 ambiguous rather than shortened.
@@ -126,8 +132,9 @@ prompt-mechanism-study curate seal-initial-subagent-contract-review `
 prompt-mechanism-study curate finalize-subagent-contract-review `
   INITIAL-REVIEW ADJUDICATION-DECISIONS PROPOSALS-FINAL REVIEW-ROUND-1
 
-# Only nonterminal contracts are repaired. Repair decisions are source-only;
-# exact whole-prompt evidence remains pending until independent re-review.
+# Nonterminal contracts and contracts rejected by a deterministic protocol
+# invariant are repaired. Repair decisions are source-only; exact whole-prompt
+# evidence remains pending until independent re-review.
 prompt-mechanism-study curate prepare-subagent-contract-repairs `
   BASE PROPOSALS-FINAL REVIEW-ROUND-1 REPAIR-PACKETS `
   --producer-commit COMMIT
@@ -137,7 +144,7 @@ prompt-mechanism-study curate finalize-subagent-contract-repairs `
   BASE PROPOSALS-FINAL REVIEW-ROUND-1 REPAIR-PACKETS REPAIR-DECISIONS `
   PROPOSALS-REPAIRED --producer-commit COMMIT
 
-# Re-review only contracts changed by the repair round.
+# Re-review only contracts whose content identity changed in the repair round.
 prompt-mechanism-study curate prepare-subagent-contract-review `
   BASE PROPOSALS-REPAIRED REPAIR-REVIEW-PACKETS --producer-commit COMMIT `
   --nonterminal-reviews-root REVIEW-ROUND-1
@@ -195,8 +202,11 @@ review remains nonterminal.
 The finalizer accepts no nonterminal review. It converts the evidence to no
 other offset system, recomputes quality and the derived readiness view, records
 `CONTRACT_REPAIR_VIEWED`, and carries the prompt-blind reservation into the
-role record without assigning a formal role. Its independent verifier rechecks
-each evidence span directly against the UTF-8 prompt bytes.
+role record without assigning a prospective formal role. Historical frozen
+exposure roles remain intact. Its independent verifier rechecks each evidence
+span directly against the UTF-8 prompt bytes. The repair ledger's
+`source_specification_disposition` is the repair producer's diagnostic; the
+review record and `task-quality.jsonl` remain the final quality authority.
 
 ## Completion gate
 
@@ -205,4 +215,45 @@ current evidence-complete contract, all quality rows are one of the three
 terminal dispositions above, every dual-review disagreement has a blind third
 decision, role/exposure and near-duplicate firewalls still hold, two final builds
 are byte-identical, and the verifier/default reviewer suite pass. Prompt TSG,
-formal roles, arms, generated code, and outcomes must remain absent.
+prospective formal-role assignments, arms, generated code, and outcomes must
+remain absent.
+
+## Completed 2026-09-01 execution
+
+The all-task subagent execution is frozen locally under
+`.codex-runtime/subagent-full-review`. An earlier anchored v1 attempt is invalid
+and supplies no decisions to the final lineage. The active lineage used
+unanchored v2 packets, bounded source-only repair, repaired-subset re-review,
+and the v3/v4 clarifications above. A final all-contract invariant scan found
+87 response-envelope residues and 19 included-but-ambiguous contracts, with one
+overlap. Commit `4acfb5c` reopened exactly those 105 contracts; fresh repair
+producers and separate dual reviewers repaired and re-reviewed them. Five
+remaining extraction errors received one final bounded repair and fresh dual
+review. No selection used a role, arm, generated program, Oracle, or outcome.
+
+The terminal review covers all 2,165 task units:
+
+| Quality disposition | Count |
+| --- | ---: |
+| `QUALITY_INCLUDED` | 720 |
+| `QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION` | 1,284 |
+| `QUALITY_EXCLUDED_SOURCE_DEFECT` | 161 |
+
+Every final contract is `faithful`, every evidence binding is `supported`, and
+`nonterminal_count=0`. The two independent final builds
+`final-data-v7-a` and `final-data-v7-b` contain the same ten files byte for
+byte. Their common bundle/manifest SHA-256 is
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
+The independent verifier returns
+`VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`.
+
+The terminal corpus contains no response-envelope requirement, no included
+contract with unresolved semantics, and no stale contract-quality diagnostic
+in readiness. Technical readiness remains separate and currently contains 101
+task units under the existing mechanism, Oracle, runtime, and functionality
+stack.
+
+This is a completed data-quality foundation, not a formal experiment freeze.
+Prompt TSG remains `NOT_GENERATED_PENDING_METHOD_FREEZE`; prospective formal
+roles, arms, generated programs, Oracles, outcomes, and effect claims remain
+absent. Historical `FROZEN_HISTORICAL` exposure roles are preserved.

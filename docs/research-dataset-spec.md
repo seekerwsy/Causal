@@ -8,11 +8,13 @@ coverage target, not a claim of current readiness. The previously reported
 1,222 quality-qualified tasks, 563 Python tasks, and 166 technically ready
 Python tasks belong to the frozen pre-successor v4 baseline; they are planning
 history, not the current quality authority. The active successor retains all
-2,165 task units and requires the unanchored dual-subagent review, blind third
-adjudication, and repaired-subset re-review defined in
-[the contract content cleaning protocol](contract-content-cleaning.md). Its
-final quality and readiness counts remain unset until that data foundation
-passes the independent verifier.
+2,165 task units and has completed the unanchored dual-subagent review, blind
+third adjudication, and repaired-subset re-review defined in
+[the contract content cleaning protocol](contract-content-cleaning.md). The
+independently verified successor contains 720 quality-included task units,
+1,284 source-insufficient exclusions, and 161 source-defect exclusions. Of the
+720 included units, 381 are Python; technical readiness remains a separate
+derived axis and currently marks 101 units ready under the existing stack.
 The 240-task Python measurement gate therefore remains closed. Section 8 records a smaller,
 outcome-blind 60-task-unit sample as a historical population-feasibility and
 power-planning canary; it is not a frozen successor assignment manifest or
@@ -399,7 +401,52 @@ No generated program, experimental arm, Security Oracle output, or experiment
 outcome was supplied to curation. The artifacts are preparation evidence and
 do not themselves support a scientific effect claim.
 
-### 6.2 Pre-successor frozen candidate ledger
+### 6.2 Active all-task subagent successor
+
+The active content authority supersedes the pre-successor counts below. It
+reviewed every one of the 2,165 task units with two unanchored subagent reviews
+and a blind third review for disagreements. Repairs were limited to nonterminal
+contracts or contracts rejected by a deterministic protocol invariant, and
+every changed subset was independently re-reviewed. The final quality
+distribution is:
+
+| Disposition | All languages | Python |
+| --- | ---: | ---: |
+| `QUALITY_INCLUDED` | 720 | 381 |
+| excluded: insufficient source specification | 1,284 | not used as an admission pool |
+| excluded: source defect | 161 | not used as an admission pool |
+
+The included corpus spans Python 381, C 67, C++ 66, JavaScript 54, C# 55,
+Java 37, Rust 33, PHP 19, and Go 8. It also spans all seven source lineages:
+CyberSecEval Instruct Prime 313, CodeSecEval Plus 128, CWEval 70, SeCodePLT
+64, SALLM 56, SecurityEval 54, and LLMSecEval 35.
+
+The final local artifact is
+`.codex-runtime/subagent-full-review/final-data-v7-a`, with a byte-identical
+second build at `final-data-v7-b`. Their common bundle SHA-256 is
+`33ab47c3b7f40f9a66a008460510e50c8a9afbda08ec951aab1d400e6cda93da`.
+The verifier status is
+`VERIFIED_DATA_FOUNDATION_COMPLETE_PROMPT_TSG_DEFERRED`. The review uses no
+CWE/readiness metadata, experimental role, arm, generated code, Oracle result,
+or outcome. Prompt TSG remains intentionally empty until the method is frozen.
+
+During review, two protocol ambiguities were exposed and corrected only for
+their affected nonterminal subsets: response-envelope instructions are not
+software behavior, and `source_prompt_sha256` denotes the canonical-JSON
+content hash rather than raw unquoted bytes. The final frozen review protocol
+states both rules explicitly. Subagent decisions are the released curation
+authority, not human gold; reproducibility is defined by frozen packets,
+decisions, plans, prompts, and deterministic merges rather than future model
+sampling producing identical prose.
+
+A final corpus-wide invariant scan reopened 105 previously terminal contracts:
+87 contained a response-envelope residue, 19 were included while still marked
+`ambiguous`, and one met both conditions. Fresh source-only repair and separate
+dual review closed that defect class; five remaining extraction errors received
+one final bounded repair. The final verifier reports zero such residues and
+zero stale contract-quality blockers in readiness.
+
+### 6.3 Pre-successor frozen candidate ledger
 
 The frozen v4 outcome-blind audit emits one upstream record for each of the 2,165 task
 units. Its physical `final_dataset_status` and mutually exclusive
