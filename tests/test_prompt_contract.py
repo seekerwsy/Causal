@@ -421,13 +421,13 @@ def test_task_specific_response_schema_requires_every_finite_decision_key():
         assert decision_schema["properties"]["rationale"] == {
             "type": "string",
             "minLength": 1,
-            "maxLength": 1024,
+            "maxLength": 256,
         }
     for decision_schema in relation_schema["properties"].values():
         assert decision_schema["properties"]["rationale"] == {
             "type": "string",
             "minLength": 1,
-            "maxLength": 1024,
+            "maxLength": 256,
         }
 
 
@@ -531,6 +531,45 @@ def test_response_parser_rejects_omission_and_consensus_makes_disagreement_unres
         if row.semantic_id == "feature.sql_value_parameterization"
     ).state is QueryState.UNRESOLVED
     compile_task_context_contract(consensus, prompt=task["prompt"], catalog=catalog)
+
+
+def test_response_parser_canonicalizes_transport_only_payload() -> None:
+    task, catalog = _inputs()
+    value = json.loads(_response(_contract(task, catalog)))
+    absent_id, absent = next(
+        (semantic_id, row)
+        for semantic_id, row in value["semantic_decisions"].items()
+        if row["state"] == "absent"
+    )
+    absent.update(
+        rationale="  Source-only test decision. \n",
+        evidence_text="executes",
+        occurrence=1,
+        attributes=["irrelevant_nonpresent_payload"],
+    )
+    present_relation = next(
+        row
+        for row in value["relation_decisions"].values()
+        if row["state"] == "present"
+    )
+    present_relation["rationale"] = "\tSource-only test decision.\n"
+
+    parsed = contract_from_response(
+        json.dumps(value).encode(),
+        task=task,
+        catalog=catalog,
+        annotator_id="transport-normalization-test",
+        review_status="development_exposed",
+    )
+    normalized_absent = next(
+        row for row in parsed.semantic_decisions if row.semantic_id == absent_id
+    )
+
+    assert normalized_absent.rationale == "Source-only test decision."
+    assert normalized_absent.evidence_text is None
+    assert normalized_absent.occurrence is None
+    assert normalized_absent.attributes == ()
+    assert all(row.rationale == row.rationale.strip() for row in parsed.relation_decisions)
 
 
 def test_response_parser_deterministically_closes_relation_endpoint_states():

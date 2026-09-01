@@ -44,7 +44,7 @@ _RELATION_FIELDS = {
     "state",
     "rationale",
 }
-_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v2"
+_RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v3"
 
 
 class PromptContractExtractionError(RuntimeError):
@@ -96,7 +96,7 @@ def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "enum": ["present", "absent", "unresolved"],
             },
-            "rationale": {"type": "string", "minLength": 1, "maxLength": 1024},
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 256},
             "evidence_text": {"type": ["string", "null"]},
             "occurrence": {"type": ["integer", "null"]},
             "attributes": {"type": "array", "items": {"type": "string"}},
@@ -111,7 +111,7 @@ def contract_response_format(request: Mapping[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "enum": ["present", "absent", "unresolved"],
             },
-            "rationale": {"type": "string", "minLength": 1, "maxLength": 1024},
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 256},
         },
     }
     return {
@@ -356,10 +356,22 @@ def contract_from_response(
             SemanticDecision(
                 semantic_id,
                 QueryState(row["state"]),
-                row["rationale"],
-                row["evidence_text"],
-                row["occurrence"],
-                tuple((attribute, True) for attribute in sorted(row["attributes"])),
+                row["rationale"].strip(),
+                (
+                    row["evidence_text"]
+                    if QueryState(row["state"]) is QueryState.PRESENT
+                    else None
+                ),
+                (
+                    row["occurrence"]
+                    if QueryState(row["state"]) is QueryState.PRESENT
+                    else None
+                ),
+                (
+                    tuple((attribute, True) for attribute in sorted(row["attributes"]))
+                    if QueryState(row["state"]) is QueryState.PRESENT
+                    else ()
+                ),
             )
             for semantic_id, row in semantic_rows.items()
         )
@@ -369,7 +381,7 @@ def contract_from_response(
                 relation_by_key[relation_id][1],
                 relation_by_key[relation_id][2],
                 QueryState(row["state"]),
-                row["rationale"],
+                row["rationale"].strip(),
             )
             for relation_id, row in relation_rows.items()
         )
