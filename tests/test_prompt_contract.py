@@ -60,7 +60,7 @@ def test_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
     )
     assert plan["model_policy"]["fallback_model_ids"] == []
     assert plan["automatic_retry_ceiling"] == 0
-    assert plan["maximum_provider_calls"] == 56
+    assert plan["maximum_provider_calls"] == 62
     assert plan["maximum_cost_microunits"] == (
         plan["maximum_provider_calls"]
         * plan["model_policy"]["maximum_cost_microunits_per_call"]
@@ -68,6 +68,10 @@ def test_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
     for value in plan["inputs"].values():
         path = ROOT / value["path"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
+    pilot = plan["execution"]["provider_compatibility_pilot"]
+    for prefix in ("tasks", "selection"):
+        path = ROOT / pilot[f"{prefix}_path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == pilot[f"{prefix}_sha256"]
 
 
 def _inputs():
