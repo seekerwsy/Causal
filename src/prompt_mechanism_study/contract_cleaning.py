@@ -1298,6 +1298,14 @@ def finalize_contract_content_data(
     verify_task_unit_data(base)
     for root in (proposals, reviews, reservation):
         verify_bundle(root)
+    review_report = read_json(reviews / "report.json")
+    if review_report.get("review_protocol_id") not in {
+        "dual_blind_subagent_review_with_third_adjudication_v2_unanchored",
+        "subagent_review_repair_merge_v1",
+    }:
+        raise ContractCleaningError(
+            "final data requires the active dual-blind subagent review protocol"
+        )
     tasks = _unique_by(
         _canonical_jsonl(base / "task-units.jsonl", "tasks"), "task_unit_id", "tasks"
     )

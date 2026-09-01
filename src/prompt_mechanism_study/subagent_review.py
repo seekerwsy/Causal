@@ -80,9 +80,6 @@ def prepare_subagent_contract_reviews(
         "task_unit_id",
         "proposed contracts",
     )
-    reviewed_task_ids = set(_assignment_map(plan))
-    if not reviewed_task_ids <= set(proposed):
-        raise ContractCleaningError("subagent review selection is absent from proposals")
     if set(tasks) != set(proposed):
         raise ContractCleaningError("proposal population differs from the base task population")
     selected_task_ids = set(tasks)
@@ -131,9 +128,8 @@ def prepare_subagent_contract_reviews(
         task = tasks[task_id]
         item = {
             "task_unit_id": task_id,
-            "language": task["declared_execution_context"]["language"],
             "source_prompt": task["model_visible_input"]["natural_prompt"],
-            "proposed_contract": _proposal_payload(proposed[task_id]),
+            "proposed_contract": _blind_proposal_payload(proposed[task_id]),
         }
         by_slot[primary].append(item)
         by_slot[secondary].append(item)
@@ -147,7 +143,7 @@ def prepare_subagent_contract_reviews(
             packet_id = f"{slot}-{number:04d}"
             file_name = f"{packet_id}.json"
             packet = {
-                "schema_version": "subagent-contract-review-packet-1.0",
+                "schema_version": "subagent-contract-review-packet-1.1",
                 "packet_id": packet_id,
                 "reviewer_slot": slot,
                 "blindness": {
@@ -168,8 +164,8 @@ def prepare_subagent_contract_reviews(
                 }
             )
     plan = {
-        "schema_version": "subagent-contract-review-plan-1.0",
-        "protocol_id": "dual_blind_subagent_review_with_third_adjudication_v1",
+        "schema_version": "subagent-contract-review-plan-1.1",
+        "protocol_id": "dual_blind_subagent_review_with_third_adjudication_v2_unanchored",
         "reviewer_backend": "codex_collaboration_subagent_inherited_model_unseeded",
         "replay_boundary": "frozen_packets_decisions_and_merger_not_future_model_sampling",
         "producer_commit": producer_commit,
@@ -183,6 +179,9 @@ def prepare_subagent_contract_reviews(
         "assignments": assignments,
         "packets": packet_index,
         "decision_fields": sorted(_DECISION_FIELDS),
+        "review_input_fields": ["task_unit_id", "source_prompt", "proposed_contract"],
+        "producer_source_assessment_withheld": True,
+        "declared_language_metadata_withheld": True,
         "decision_rule": {
             "agreement_fields": [
                 "contract_status",
@@ -242,6 +241,10 @@ def prepare_subagent_contract_repairs(
     )
     if set(tasks) != set(proposed) or set(tasks) != set(reviewed):
         raise ContractCleaningError("repair inputs do not cover the base task population")
+    for task_id, review in reviewed.items():
+        _validate_review_record_identity(review)
+        if review.get("contract_id") != proposed[task_id].get("contract_id"):
+            raise ContractCleaningError("repair selection review is stale")
     repair_ids = {
         task_id
         for task_id, review in reviewed.items()
@@ -264,7 +267,6 @@ def prepare_subagent_contract_repairs(
         by_slot[slot].append(
             {
                 "task_unit_id": task_id,
-                "language": task["declared_execution_context"]["language"],
                 "source_prompt": task["model_visible_input"]["natural_prompt"],
                 "previous_contract": _proposal_payload(proposed[task_id]),
                 "previous_review": {
@@ -396,7 +398,7 @@ def seal_initial_subagent_contract_reviews(
             packet_id = f"{slot}-adjudication-{number:04d}"
             file_name = f"{packet_id}.json"
             artifacts[file_name] = {
-                "schema_version": "subagent-contract-review-packet-1.0",
+                "schema_version": "subagent-contract-review-packet-1.1",
                 "packet_id": packet_id,
                 "reviewer_slot": slot,
                 "blindness": {
@@ -451,11 +453,23 @@ def finalize_subagent_contract_reviews(
         "task_unit_id",
         "proposed contracts",
     )
+    if plan.get("proposals_bundle_sha256") != bundle_digest(proposals):
+        raise ContractCleaningError("reviewed proposal bundle identity has drifted")
+    assignments = _assignment_map(plan)
+    reviewed_task_ids = set(assignments)
+    if not reviewed_task_ids <= set(proposed):
+        raise ContractCleaningError("subagent review selection is absent from proposals")
     agreements = _unique_by(read_json(initial / "agreements.json"), "task_unit_id", "agreements")
     disagreements = _unique_by(
         read_json(initial / "disagreements.json"), "task_unit_id", "disagreements"
     )
     adjudication_plan = read_json(initial / "adjudication-plan.json")
+    for packet in adjudication_plan.get("packets", []):
+        if any(
+            assignments[task_id]["blind_adjudicator"] != packet.get("reviewer_slot")
+            for task_id in packet.get("task_unit_ids", [])
+        ):
+            raise ContractCleaningError("adjudication packet reviewer assignment is invalid")
     adjudications = _load_adjudications(
         initial, adjudication_decisions_root.resolve(), adjudication_plan
     )
@@ -565,6 +579,10 @@ def finalize_subagent_contract_repairs(
     if (
         plan.get("schema_version") != "subagent-contract-repair-plan-1.0"
         or plan.get("arms_or_outcomes_used") is not False
+        or plan.get("base_bundle_sha256") != _manifest_digest(base)
+        or plan.get("proposals_bundle_sha256") != bundle_digest(proposals)
+        or plan.get("reviews_bundle_sha256") != bundle_digest(reviews)
+        or plan.get("producer_commit") != producer_commit
         or set(tasks) != set(proposed)
         or set(tasks) != set(prior_ledger)
         or set(tasks) != set(reviewed)
@@ -585,6 +603,12 @@ def finalize_subagent_contract_repairs(
     repaired: dict[str, dict[str, Any]] = {}
     for packet_row in plan["packets"]:
         packet = read_json(packets / packet_row["file_name"])
+        _validate_packet_against_plan(
+            packet,
+            packet_row,
+            protocol_prompt_sha256=plan["protocol_prompt_sha256"],
+            slot_field="repair_producer",
+        )
         rows = _repair_rows(
             read_json(decisions / f"{packet_row['packet_id']}.json"),
             packet["tasks"],
@@ -719,6 +743,8 @@ def merge_subagent_contract_reviews(
     )
     if set(prior) != set(proposed) or not set(revised) <= set(prior):
         raise ContractCleaningError("review merge populations are invalid")
+    for review in (*prior.values(), *revised.values()):
+        _validate_review_record_identity(review)
     if any(
         prior[task_id].get("terminal_quality_decision") is not None
         for task_id in revised
@@ -778,7 +804,8 @@ def merge_subagent_contract_reviews(
 
 def _assignment_map(plan: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     if (
-        plan.get("schema_version") != "subagent-contract-review-plan-1.0"
+        plan.get("schema_version")
+        not in {"subagent-contract-review-plan-1.0", "subagent-contract-review-plan-1.1"}
         or plan.get("reviewer_slots") != list(_SLOTS)
         or plan.get("arms_or_outcomes_used") is not False
     ):
@@ -805,6 +832,12 @@ def _load_slot_decisions(
         raise ContractCleaningError("subagent decision file set is incomplete")
     for packet in plan["packets"]:
         source = read_json(packets_root / packet["file_name"])
+        _validate_packet_against_plan(
+            source,
+            packet,
+            protocol_prompt_sha256=plan["protocol_prompt_sha256"],
+            slot_field="reviewer_slot",
+        )
         rows = _decision_rows(read_json(decisions_root / f"{packet['packet_id']}.json"))
         expected = {item["task_unit_id"] for item in source["tasks"]}
         values = _unique_by(rows, "task_unit_id", "subagent packet decisions")
@@ -833,6 +866,12 @@ def _load_adjudications(
     result: dict[str, dict[str, Any]] = {}
     for packet in packets:
         source = read_json(initial_root / packet["file_name"])
+        _validate_packet_against_plan(
+            source,
+            packet,
+            protocol_prompt_sha256=plan["protocol_prompt_sha256"],
+            slot_field="reviewer_slot",
+        )
         values = _unique_by(
             _decision_rows(read_json(decisions_root / f"{packet['packet_id']}.json")),
             "task_unit_id",
@@ -864,6 +903,31 @@ def _decision_rows(value: Any) -> list[dict[str, Any]]:
         row.clear()
         row.update(normalized)
     return value
+
+
+def _validate_packet_against_plan(
+    packet: Mapping[str, Any],
+    plan_row: Mapping[str, Any],
+    *,
+    protocol_prompt_sha256: str,
+    slot_field: str,
+) -> None:
+    tasks = packet.get("tasks")
+    if (
+        packet.get("packet_id") != plan_row.get("packet_id")
+        or packet.get(slot_field) != plan_row.get(slot_field)
+        or packet.get("protocol_prompt_sha256") != protocol_prompt_sha256
+        or not isinstance(tasks, list)
+        or [item.get("task_unit_id") for item in tasks]
+        != plan_row.get("task_unit_ids")
+    ):
+        raise ContractCleaningError("subagent packet identity differs from its frozen plan")
+
+
+def _blind_proposal_payload(row: Mapping[str, Any]) -> dict[str, Any]:
+    payload = _proposal_payload(row)
+    payload.pop("producer_source_assessment")
+    return payload
 
 
 def _repair_rows(value: Any, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -344,7 +344,12 @@ def test_task_unit_compiler_keeps_tasks_quality_roles_and_tsg_separate(tmp_path)
         tmp_path / "content-reviews",
         {
             "contract-content-reviews.json": reviews,
-            "report.json": {"status": "fixture"},
+            "report.json": {
+                "status": "fixture",
+                "review_protocol_id": (
+                    "dual_blind_subagent_review_with_third_adjudication_v2_unanchored"
+                ),
+            },
         },
     )
     reservation_root = tmp_path / "reservation"
