@@ -7,6 +7,7 @@ import pytest
 from prompt_mechanism_study.cli import _run_adjudicate_contract_repair_evidence
 from prompt_mechanism_study.contract_cleaning import (
     ContractCleaningError,
+    _final_readiness_row,
     _full_prompt_content_evidence,
     _parse_content_reviews,
     _parse_contract_repairs,
@@ -17,7 +18,11 @@ from prompt_mechanism_study.contract_cleaning import (
 )
 from prompt_mechanism_study.functional_judge import JudgeGateError
 from prompt_mechanism_study.records import content_hash
-from prompt_mechanism_study.subagent_review import _decision_rows, _repair_rows
+from prompt_mechanism_study.subagent_review import (
+    _decision_rows,
+    _repair_rows,
+    _repair_task_ids,
+)
 
 
 def _batch():
@@ -485,3 +490,45 @@ def test_subagent_review_decisions_use_the_frozen_content_validator() -> None:
 
     with pytest.raises(ContractCleaningError):
         _decision_rows([{**decision, "unexpected": True}])
+
+
+def test_repair_selection_reopens_terminal_contract_inconsistencies() -> None:
+    proposed = {
+        "format": {
+            "requirements": ["Return only code in the response."],
+            "resolution_status": "resolved",
+        },
+        "ambiguous": {"requirements": ["Do the task."], "resolution_status": "ambiguous"},
+        "closed": {"requirements": ["Do the task."], "resolution_status": "resolved"},
+        "pending": {"requirements": ["Do the task."], "resolution_status": "resolved"},
+    }
+    reviewed = {
+        "format": {"terminal_quality_decision": "QUALITY_INCLUDED"},
+        "ambiguous": {"terminal_quality_decision": "QUALITY_INCLUDED"},
+        "closed": {"terminal_quality_decision": "QUALITY_INCLUDED"},
+        "pending": {"terminal_quality_decision": None},
+    }
+
+    assert _repair_task_ids(proposed, reviewed) == {"format", "ambiguous", "pending"}
+
+
+def test_final_readiness_discards_superseded_contract_diagnostics() -> None:
+    old = {
+        "task_unit_id": "task-a",
+        "language": "python",
+        "primary_cwe": "CWE-89",
+        "scope_status": "IN_CURRENT_STUDY_LAYER",
+        "mechanism_registration_status": "REGISTERED",
+        "binding_status": "BOUND",
+        "oracle_status": "SUPPORTED",
+        "runtime_status": "SUPPORTED",
+        "functional_measurement_status": "AST_COMPILE_AND_BLIND_LLM_PLAUSIBILITY",
+        "diagnostic_blocker_codes": [
+            "contract_not_faithful",
+            "known_measurement_scope_concern",
+        ],
+    }
+
+    row = _final_readiness_row(old, "QUALITY_INCLUDED", "contract-a")
+
+    assert row["diagnostic_blocker_codes"] == ["known_measurement_scope_concern"]

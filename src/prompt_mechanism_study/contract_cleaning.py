@@ -21,6 +21,7 @@ from prompt_mechanism_study.curation import (
     _batches,
     _execute,
     _initialize,
+    _is_response_format_requirement,
 )
 from prompt_mechanism_study.functional_judge import JudgeGateError, bailian_complete
 from prompt_mechanism_study.records import (
@@ -87,6 +88,13 @@ _TERMINAL_QUALITY = {
     "QUALITY_INCLUDED",
     "QUALITY_EXCLUDED_SOURCE_DEFECT",
     "QUALITY_EXCLUDED_INSUFFICIENT_SPECIFICATION",
+}
+_SUPERSEDED_CONTRACT_DIAGNOSTICS = {
+    "contract_not_faithful",
+    "functional_evaluability_insufficient",
+    "functional_evaluability_limited",
+    "known_material_contract_fault",
+    "response_format_instruction_leak",
 }
 
 
@@ -1380,6 +1388,17 @@ def finalize_contract_content_data(
             raise ContractCleaningError("final contract source or review binding is stale")
         _validate_proposal_identity(proposal)
         _validate_terminal_review(review)
+        if any(
+            _is_response_format_requirement(requirement)
+            for requirement in proposal["requirements"]
+        ):
+            raise ContractCleaningError(
+                "response-format instructions cannot enter the final functional contract"
+            )
+        if disposition == "QUALITY_INCLUDED" and proposal["resolution_status"] != "resolved":
+            raise ContractCleaningError(
+                "included contracts must have resolved source semantics"
+            )
         if proposal_ledger[task_id].get("new_contract_id") != proposal["contract_id"]:
             raise ContractCleaningError("proposal ledger does not bind the cleaned contract")
         _validate_frozen_evidence(task, proposal)
@@ -2174,6 +2193,7 @@ def _final_readiness_row(
                 "primary_next_action",
                 "required_evidence",
                 "contract_id",
+                "diagnostic_blocker_codes",
             }
         },
         "schema_version": "readiness-work-item-5.0",
@@ -2189,6 +2209,11 @@ def _final_readiness_row(
         "primary_next_action": action,
         "required_evidence": evidence,
         "contract_id": contract_id,
+        "diagnostic_blocker_codes": [
+            code
+            for code in old.get("diagnostic_blocker_codes", [])
+            if code not in _SUPERSEDED_CONTRACT_DIAGNOSTICS
+        ],
     }
     return {**core, "readiness_record_sha256": content_hash(core)}
 

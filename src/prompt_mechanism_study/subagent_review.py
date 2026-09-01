@@ -27,6 +27,7 @@ from prompt_mechanism_study.contract_cleaning import (
     _terminal_quality,
     _unique_by,
 )
+from prompt_mechanism_study.curation import _is_response_format_requirement
 from prompt_mechanism_study.records import content_hash, content_id
 from prompt_mechanism_study.task_unit_data import verify_task_unit_data
 
@@ -64,8 +65,9 @@ def prepare_subagent_contract_reviews(
 ) -> dict[str, Any]:
     """Freeze two blind reviewer assignments and inspectable work packets per task.
 
-    A prior review bundle may select only nonterminal contracts after repair.  The
-    selection is frozen in the plan; it never depends on task roles or outcomes.
+    A prior review bundle selects nonterminal contracts and contracts whose
+    content identity changed after repair.  The selection is frozen in the plan;
+    it never depends on task roles or outcomes.
     """
 
     if not producer_commit or any(character.isspace() for character in producer_commit):
@@ -94,16 +96,26 @@ def prepare_subagent_contract_reviews(
         )
         if set(prior) != set(tasks):
             raise ContractCleaningError("prior review population differs from the base tasks")
-        selected_task_ids = {
+        nonterminal_ids = {
             task_id
             for task_id, review in prior.items()
             if review.get("terminal_quality_decision") is None
         }
+        changed_ids = {
+            task_id
+            for task_id, review in prior.items()
+            if review.get("contract_id") != proposed[task_id].get("contract_id")
+        }
+        selected_task_ids = nonterminal_ids | changed_ids
         if not selected_task_ids:
-            raise ContractCleaningError("prior review bundle has no nonterminal contracts")
+            raise ContractCleaningError(
+                "prior review bundle has no nonterminal or changed contracts"
+            )
         selection = {
-            "kind": "prior_nonterminal_contracts",
+            "kind": "prior_nonterminal_or_changed_contracts",
             "prior_reviews_bundle_sha256": bundle_digest(prior_reviews),
+            "nonterminal_contract_count": len(nonterminal_ids),
+            "changed_contract_count": len(changed_ids),
         }
     prompt_path = repository_root.resolve() / "data/dataset-curation/contract-content-review-v1.txt"
     prompt = prompt_path.read_text(encoding="utf-8").strip()
@@ -218,7 +230,7 @@ def prepare_subagent_contract_repairs(
     *,
     producer_commit: str,
 ) -> dict[str, Any]:
-    """Freeze source-only repair packets for every nonterminal contract review."""
+    """Freeze repairs for nonterminal or deterministically inconsistent contracts."""
 
     if not producer_commit or any(character.isspace() for character in producer_commit):
         raise ValueError("producer_commit must be one non-empty token")
@@ -245,11 +257,7 @@ def prepare_subagent_contract_repairs(
         _validate_review_record_identity(review)
         if review.get("contract_id") != proposed[task_id].get("contract_id"):
             raise ContractCleaningError("repair selection review is stale")
-    repair_ids = {
-        task_id
-        for task_id, review in reviewed.items()
-        if review.get("terminal_quality_decision") is None
-    }
+    repair_ids = _repair_task_ids(proposed, reviewed)
     if not repair_ids:
         raise ContractCleaningError("contract review has no nonterminal repairs")
     prompt_path = repository_root.resolve() / "data/dataset-curation/contract-semantic-repair-v2.txt"
@@ -588,11 +596,7 @@ def finalize_subagent_contract_repairs(
         or set(tasks) != set(reviewed)
     ):
         raise ContractCleaningError("subagent repair inputs are invalid")
-    repair_ids = {
-        task_id
-        for task_id, review in reviewed.items()
-        if review.get("terminal_quality_decision") is None
-    }
+    repair_ids = _repair_task_ids(proposed, reviewed)
     planned_ids = {row["task_unit_id"] for row in plan.get("assignments", [])}
     if planned_ids != repair_ids:
         raise ContractCleaningError("subagent repair selection is stale")
@@ -747,9 +751,12 @@ def merge_subagent_contract_reviews(
         _validate_review_record_identity(review)
     if any(
         prior[task_id].get("terminal_quality_decision") is not None
+        and prior[task_id].get("contract_id") == proposed[task_id].get("contract_id")
         for task_id in revised
     ):
-        raise ContractCleaningError("revised reviews may replace only prior nonterminal tasks")
+        raise ContractCleaningError(
+            "revised reviews may replace only prior nonterminal or changed contracts"
+        )
 
     merged = []
     for task_id in sorted(prior):
@@ -820,6 +827,34 @@ def _assignment_map(plan: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         if roles != set(_SLOTS):
             raise ContractCleaningError("subagent review assignment does not separate reviewers")
     return assignments
+
+
+def _repair_task_ids(
+    proposed: Mapping[str, Mapping[str, Any]],
+    reviewed: Mapping[str, Mapping[str, Any]],
+) -> set[str]:
+    """Select only unresolved reviews or proposal/review contradictions."""
+
+    selected = set()
+    for task_id, review in reviewed.items():
+        proposal = proposed[task_id]
+        requirements = proposal.get("requirements")
+        response_format_leak = isinstance(requirements, list) and any(
+            isinstance(requirement, str)
+            and _is_response_format_requirement(requirement)
+            for requirement in requirements
+        )
+        included_unresolved = (
+            review.get("terminal_quality_decision") == "QUALITY_INCLUDED"
+            and proposal.get("resolution_status") != "resolved"
+        )
+        if (
+            review.get("terminal_quality_decision") is None
+            or response_format_leak
+            or included_unresolved
+        ):
+            selected.add(task_id)
+    return selected
 
 
 def _load_slot_decisions(

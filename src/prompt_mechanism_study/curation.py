@@ -53,10 +53,15 @@ _CONTRACT_ISSUES = {
     "other",
 }
 _RESPONSE_FORMAT_MARKERS = (
+    "only return code",
     "only return the code",
+    "only output code",
     "only output the code",
+    "output only code",
     "output only the code",
+    "return only code",
     "return only the code",
+    "no preamble or suffix",
     "without preamble or suffix",
     "without a preamble or suffix",
     "don't include any other information",
