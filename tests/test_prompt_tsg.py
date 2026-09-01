@@ -178,6 +178,23 @@ def test_compiled_extractor_candidate_files_share_the_model_fact_contract():
         assert "never copy node_type into a fact" in prompt
     assert "asserted, unresolved, or omitted" in reviewer_prompt
 
+    flash_proposer = json.loads(
+        (ROOT / "data/method/prompt-contract-proposer-qwen37flash-v1.json").read_text()
+    )
+    flash_reviewer = json.loads(
+        (ROOT / "data/method/prompt-contract-reviewer-qwen37flash-v1.json").read_text()
+    )
+    assert {flash_proposer["model_id"], flash_reviewer["model_id"]} == {
+        "qwen3.7-flash-2026-07-15"
+    }
+    assert {flash_proposer["enable_thinking"], flash_reviewer["enable_thinking"]} == {
+        False
+    }
+    assert {
+        flash_proposer["maximum_output_tokens"],
+        flash_reviewer["maximum_output_tokens"],
+    } == {4096}
+
 
 
 def test_legacy_deveval_v4_freeze_verifies_against_its_original_commit():

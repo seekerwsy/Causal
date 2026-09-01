@@ -43,6 +43,33 @@ TASKS_PATH = ROOT / "data/method/prompt-tsg-external-qualification-tasks-v4.json
 CATALOG_PATH = ROOT / "data/method/prompt-tsg-catalog-v11.json"
 
 
+@pytest.mark.reviewer
+def test_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
+    plan = json.loads(
+        (
+            ROOT / "data/method/prompt-contract-qwen37flash-qual-dev-v1-plan.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["data_role"] == "LEGACY_EXPOSED_DEVELOPMENT_REGRESSION"
+    assert plan["formal_use_authorized"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["model_policy"]["fixed_snapshot_model_id"] == (
+        "qwen3.7-flash-2026-07-15"
+    )
+    assert plan["model_policy"]["fallback_model_ids"] == []
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["maximum_provider_calls"] == 56
+    assert plan["maximum_cost_microunits"] == (
+        plan["maximum_provider_calls"]
+        * plan["model_policy"]["maximum_cost_microunits_per_call"]
+    )
+    for value in plan["inputs"].values():
+        path = ROOT / value["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
+
+
 def _inputs():
     tasks = {
         task["source"]["upstream_id"]: task
@@ -416,6 +443,7 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
         "enable_thinking": False,
         "timeout_seconds": 1.0,
         "max_response_bytes": 65536,
+        "maximum_output_tokens": 4096,
         "max_attempts": 1,
     }
     proposer_path = tmp_path / "proposer.json"
@@ -465,6 +493,7 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
 
     def provider(request, evaluator_record, prompt):
         assert request["arms_or_outcomes_included"] is False
+        assert evaluator_record["maximum_output_tokens"] == 4096
         response_schema = evaluator_record["response_format"]["json_schema"]["schema"]
         assert set(
             response_schema["properties"]["semantic_decisions"]["required"]

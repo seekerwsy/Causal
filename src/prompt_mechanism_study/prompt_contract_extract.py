@@ -684,14 +684,25 @@ def _evaluator(value: Any, evaluator_path: Path) -> dict[str, Any]:
         "max_attempts",
     }
     structured_fields = {"response_format_path", "response_format_sha256"}
+    optional_fields = {"maximum_output_tokens"}
+    present_fields = set(value) if isinstance(value, dict) else set()
     if (
         not isinstance(value, dict)
-        or frozenset(value)
-        not in {frozenset(base_fields), frozenset(base_fields | structured_fields)}
+        or not base_fields <= present_fields
+        or present_fields - base_fields - structured_fields - optional_fields
+        or bool(present_fields & structured_fields)
+        != bool(structured_fields <= present_fields)
         or value["schema_version"] != "1.0"
         or value["api_key_env"] != "ALI_BAILIAN_API_KEY"
         or value["temperature"] != 0.0
         or value["max_attempts"] != 1
+        or (
+            "maximum_output_tokens" in value
+            and (
+                type(value["maximum_output_tokens"]) is not int
+                or value["maximum_output_tokens"] <= 0
+            )
+        )
     ):
         raise PromptContractExtractionError("contract evaluator is invalid")
     if not structured_fields <= set(value):
