@@ -104,6 +104,47 @@ def test_flash_failure_diagnostic_is_single_attempt_and_non_scientific() -> None
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
 
 
+@pytest.mark.reviewer
+def test_flash_compatibility_gate_v2_closes_expansion_and_budget() -> None:
+    plan = json.loads(
+        (
+            ROOT / "data/method/prompt-contract-qwen37flash-compatibility-gate-v2-plan.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert plan["status"] == "FROZEN_BEFORE_PROVIDER_CALL"
+    assert plan["data_role"] == "LEGACY_EXPOSED_DEVELOPMENT_COMPATIBILITY_GATE"
+    assert plan["formal_use_authorized"] is False
+    assert plan["scientific_claim_allowed"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["arms_or_outcomes_used"] is False
+    assert plan["maximum_provider_calls"] == 6
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["maximum_cost_microunits"] == (
+        plan["maximum_provider_calls"]
+        * plan["model_policy"]["maximum_cost_microunits_per_call"]
+    )
+    accounting = plan["pre_call_budget_accounting"]
+    assert accounting["cumulative_maximum_after_gate_microunits"] == (
+        accounting["prior_conservative_spend_microunits"]
+        + plan["maximum_cost_microunits"]
+    )
+    assert accounting["minimum_remaining_after_gate_microunits"] == (
+        accounting["authorized_total_microunits"]
+        - accounting["cumulative_maximum_after_gate_microunits"]
+    )
+    assert plan["execution"]["task_units"] == 3
+    assert plan["execution"]["task_workers"] == 1
+    assert plan["execution"]["output_must_close_before_fail_stop"] is True
+    for value in plan["inputs"].values():
+        path = ROOT / value["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
+    extractor = ROOT / "src/prompt_mechanism_study/prompt_contract_extract.py"
+    assert hashlib.sha256(extractor.read_bytes()).hexdigest() == plan["implementation"][
+        "extractor_sha256"
+    ]
+
+
 def _inputs():
     tasks = {
         task["source"]["upstream_id"]: task

@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "prompt_contract_provider_compatibility_gate_plan",
+  "plan_id": "prompt-contract-qwen37flash-compatibility-gate-v2",
+  "status": "FROZEN_BEFORE_PROVIDER_CALL",
+  "frozen_on": "2026-09-02",
+  "protocol_id": "phase-context-policy-v3",
+  "data_role": "LEGACY_EXPOSED_DEVELOPMENT_COMPATIBILITY_GATE",
+  "formal_use_authorized": false,
+  "scientific_claim_allowed": false,
+  "qualification_accept_consumed": false,
+  "arms_or_outcomes_used": false,
+  "budget_authorization_id": "qwen37flash-preexperiment-cny100-2026-09-02",
+  "budget_currency": "CNY",
+  "maximum_provider_calls": 6,
+  "maximum_cost_microunits": 29496,
+  "automatic_retry_ceiling": 0,
+  "pre_call_budget_accounting": {
+    "authorized_total_microunits": 100000000,
+    "prior_conservative_spend_microunits": 78656,
+    "cumulative_maximum_after_gate_microunits": 108152,
+    "minimum_remaining_after_gate_microunits": 99891848
+  },
+  "trigger": {
+    "predecessor_plan_id": "prompt-contract-qwen37flash-qual-dev-v1",
+    "predecessor_gate_status": "FAILED_WITHOUT_ARCHIVED_RAW_RESPONSES",
+    "failure_closure_fix_commit": "b2de70a6a541b848cc7c84c6495def76d8a3c244",
+    "diagnostic_plan_id": "prompt-contract-qwen37flash-failure-diagnostic-v1",
+    "diagnostic_status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
+    "diagnostic_provider_calls": 2,
+    "diagnostic_manifest_sha256": "6a49bcc78b097eae2c9ab6e9874c92917e39cc735455733f1a1828e9a05395b4",
+    "diagnostic_report_sha256": "72d70f991fe7510ef33a286daf64f3394099890056cc73adb96e4581086f97b2",
+    "interpretation": "The diagnostic established closed single-task transport only; this gate rechecks all three frozen exposed compatibility tasks before any regression expansion."
+  },
+  "execution": {
+    "task_units": 3,
+    "calls_per_task": 2,
+    "task_workers": 1,
+    "within_task_order": "proposer_then_reviewer",
+    "artifact_order": "frozen_selection_order",
+    "output_must_close_before_fail_stop": true,
+    "continue_rule": "Proceed to the separately frozen 28-task development regression only if all three task contracts and graphs close from exactly six single-attempt responses; any failure stops expansion and remains engineering evidence."
+  },
+  "model_policy": {
+    "provider": "ali_bailian_pay_as_you_go",
+    "deployment_region": "cn-beijing",
+    "fixed_snapshot_model_id": "qwen3.7-flash-2026-07-15",
+    "dynamic_alias_allowed": false,
+    "fallback_model_ids": [],
+    "enable_thinking": false,
+    "maximum_input_tokens_per_call": 8192,
+    "maximum_output_tokens_per_call": 4096,
+    "maximum_cost_microunits_per_call": 4916,
+    "credential_execution": "REMOTE_SERVER_ENVIRONMENT_ONLY",
+    "credential_material_recorded": false
+  },
+  "implementation": {
+    "commit": "b2de70a6a541b848cc7c84c6495def76d8a3c244",
+    "source_archive_sha256": "ebe566ab72c27782088942684c7361cbd251563f6602f89619105e0561419263",
+    "remote_deployment": "/home/wsy/prompt-mechanism-study-deployments/qwen37flash-preexperiment-b2de70a-20260902-04",
+    "extractor_sha256": "febfaf7580e3a1eaeb50d1d61fa8ad59a91df1d1ea1e53870a30c54791a84b45"
+  },
+  "inputs": {
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+      "sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8"
+    },
+    "selection": {
+      "path": "data/method/prompt-contract-json-schema-pilot-selection-v1.json",
+      "sha256": "f7814f4d62bbd4bac51d7c96a34daf042ee6d26571337b0307602031a50128f4"
+    },
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37flash-v1.json",
+      "sha256": "9d9df5785814aac2c42e49bbebb03edd538de5035c3d7b582806b2983dc1e0ef"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v3.txt",
+      "sha256": "27c71e2ef0e86aac441317f982cbea01108bd443b0391bf7e82450b795aba48a"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37flash-v1.json",
+      "sha256": "1e31d7478c7024d280972879ee8f90cb8cbe8a595d2ea3cd9be74923e8605d95"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v3.txt",
+      "sha256": "f78bda9376136b4009b6bdafedf9d0b60a177aa02043cdd3d8def747e739c93a"
+    }
+  }
+}
