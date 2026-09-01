@@ -165,7 +165,7 @@ def prepare_subagent_contract_reviews(
             )
     plan = {
         "schema_version": "subagent-contract-review-plan-1.1",
-        "protocol_id": "dual_blind_subagent_review_with_third_adjudication_v3_response_format_excluded",
+        "protocol_id": "dual_blind_subagent_review_with_third_adjudication_v4_hash_semantics_explicit",
         "reviewer_backend": "codex_collaboration_subagent_inherited_model_unseeded",
         "replay_boundary": "frozen_packets_decisions_and_merger_not_future_model_sampling",
         "producer_commit": producer_commit,

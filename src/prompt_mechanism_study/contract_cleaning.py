@@ -1302,6 +1302,7 @@ def finalize_contract_content_data(
     if review_report.get("review_protocol_id") not in {
         "dual_blind_subagent_review_with_third_adjudication_v2_unanchored",
         "dual_blind_subagent_review_with_third_adjudication_v3_response_format_excluded",
+        "dual_blind_subagent_review_with_third_adjudication_v4_hash_semantics_explicit",
         "subagent_review_repair_merge_v1",
     }:
         raise ContractCleaningError(
