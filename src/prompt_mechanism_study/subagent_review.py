@@ -646,6 +646,16 @@ def finalize_subagent_contract_repairs(
             "evidence_adjudication": "FULL_PROMPT_PENDING_INDEPENDENT_REVIEW",
             "review_status": "PENDING",
             "review_issue_codes": [],
+            "input_sha256": content_hash(
+                {
+                    "task_unit_id": task_id,
+                    "source_prompt_sha256": prompt_sha256,
+                    "old_contract_id": proposed[task_id]["contract_id"],
+                    "prior_review_record_sha256": reviewed[task_id][
+                        "contract_content_review_record_sha256"
+                    ],
+                }
+            ),
             "output_sha256": content_hash(proposal),
             "producer_commit": producer_commit,
         }
