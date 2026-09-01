@@ -142,8 +142,11 @@ def qualify_prompt_contract_extractor(
         "reviewer_evaluator_sha256": _sha256(reviewer_evaluator_path),
         "reviewer_prompt_sha256": _sha256(reviewer_prompt_path),
         "response_protocol_id": "task_keyed_prompt_contract_json_schema_v1",
+        "failed_task_unit_count": 0,
+        "failed_task_units": [],
         "review_status": "prospective_frozen",
         "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
     }
     if (
         gold["extractor_candidate_id"] != candidate_id
@@ -202,12 +205,24 @@ def qualify_prompt_contract_extractor(
         response_fields = {
             "task_id",
             "response_format_sha256",
+            "provider_calls",
+            "status",
             "proposer_response_sha256",
             "proposer_response_text",
             "reviewer_response_sha256",
             "reviewer_response_text",
+            "error_type",
+            "error_message",
         }
-        if set(response) != response_fields:
+        if (
+            set(response) != response_fields
+            or response["provider_calls"] != 2
+            or response["status"] != "complete"
+            or response["error_type"] is not None
+            or response["error_message"] is not None
+            or not isinstance(response["proposer_response_text"], str)
+            or not isinstance(response["reviewer_response_text"], str)
+        ):
             raise PromptContractQualificationError("Prompt contract response closure fields are invalid")
         expected_request = contract_decision_request(task, catalog)
         if response["response_format_sha256"] != content_hash(

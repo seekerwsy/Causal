@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "prompt_contract_provider_failure_diagnostic_plan",
+  "plan_id": "prompt-contract-qwen37flash-failure-diagnostic-v1",
+  "status": "FROZEN_BEFORE_DIAGNOSTIC_REPLAY",
+  "frozen_on": "2026-09-02",
+  "protocol_id": "phase-context-policy-v3",
+  "data_role": "LEGACY_EXPOSED_DEVELOPMENT_DIAGNOSTIC",
+  "formal_use_authorized": false,
+  "scientific_claim_allowed": false,
+  "qualification_accept_consumed": false,
+  "arms_or_outcomes_used": false,
+  "budget_authorization_id": "qwen37flash-preexperiment-cny100-2026-09-02",
+  "budget_currency": "CNY",
+  "maximum_provider_calls": 2,
+  "maximum_cost_microunits": 9832,
+  "automatic_retry_ceiling": 0,
+  "trigger": {
+    "prior_plan_id": "prompt-contract-qwen37flash-qual-dev-v1",
+    "prior_attempt_scope": "three previously exposed task units with four task workers",
+    "prior_attempt_reserved_provider_calls": 6,
+    "prior_attempt_reserved_cost_microunits": 29496,
+    "observed_error": "task context semantic rationale is invalid",
+    "audit_gap": "the pre-fix concurrent extractor raised before writing its five-file response bundle",
+    "interpretation": "engineering failure only; no method, qualification, or scientific result was produced"
+  },
+  "execution": {
+    "task_units": 1,
+    "calls_per_task": 2,
+    "task_workers": 1,
+    "within_task_order": "proposer_then_reviewer",
+    "artifact_order": "frozen_selection_order",
+    "output_must_close_before_fail_stop": true,
+    "continue_rule": "The replay is diagnostic only. A closed failure may justify only a common-cause transport or schema repair already required by the local parser; a closed success does not authorize the 28-task regression without a newly frozen three-task compatibility gate."
+  },
+  "model_policy": {
+    "provider": "ali_bailian_pay_as_you_go",
+    "deployment_region": "cn-beijing",
+    "fixed_snapshot_model_id": "qwen3.7-flash-2026-07-15",
+    "dynamic_alias_allowed": false,
+    "fallback_model_ids": [],
+    "enable_thinking": false,
+    "maximum_input_tokens_per_call": 8192,
+    "maximum_output_tokens_per_call": 4096,
+    "maximum_cost_microunits_per_call": 4916,
+    "credential_execution": "REMOTE_SERVER_ENVIRONMENT_ONLY",
+    "credential_material_recorded": false
+  },
+  "inputs": {
+    "tasks": {
+      "path": "data/method/prompt-tsg-external-qualification-tasks-v4.json",
+      "sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8"
+    },
+    "selection": {
+      "path": "data/method/prompt-contract-qwen37flash-failure-diagnostic-selection-v1.json",
+      "sha256": "26edff99b0ab312c1d6382add4972e6a9d5727808eda847ada4437eb484df217"
+    },
+    "catalog": {
+      "path": "data/method/prompt-tsg-catalog-v11.json",
+      "sha256": "05a2f6fd6b56d5514f8af7fe1ac1df6548d42fb28e3e825a1ff4e27207173a09"
+    },
+    "proposer_evaluator": {
+      "path": "data/method/prompt-contract-proposer-qwen37flash-v1.json",
+      "sha256": "9d9df5785814aac2c42e49bbebb03edd538de5035c3d7b582806b2983dc1e0ef"
+    },
+    "proposer_prompt": {
+      "path": "data/method/prompts/prompt-contract-proposer-v3.txt",
+      "sha256": "27c71e2ef0e86aac441317f982cbea01108bd443b0391bf7e82450b795aba48a"
+    },
+    "reviewer_evaluator": {
+      "path": "data/method/prompt-contract-reviewer-qwen37flash-v1.json",
+      "sha256": "1e31d7478c7024d280972879ee8f90cb8cbe8a595d2ea3cd9be74923e8605d95"
+    },
+    "reviewer_prompt": {
+      "path": "data/method/prompts/prompt-contract-reviewer-v3.txt",
+      "sha256": "f78bda9376136b4009b6bdafedf9d0b60a177aa02043cdd3d8def747e739c93a"
+    },
+    "extractor_implementation": {
+      "path": "src/prompt_mechanism_study/prompt_contract_extract.py",
+      "sha256": "febfaf7580e3a1eaeb50d1d61fa8ad59a91df1d1ea1e53870a30c54791a84b45"
+    }
+  }
+}

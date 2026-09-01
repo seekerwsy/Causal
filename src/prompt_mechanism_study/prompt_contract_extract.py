@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,23 @@ _RESPONSE_PROTOCOL_ID = "task_keyed_prompt_contract_json_schema_v1"
 
 class PromptContractExtractionError(RuntimeError):
     """The frozen request, model decision table, or extraction closure is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class _TaskContractAttempt:
+    task_id: str
+    request: dict[str, Any]
+    provider_calls: int
+    proposer_raw: bytes | None
+    reviewer_raw: bytes | None
+    contract: TaskContextContract | None
+    graph: PromptTSG | None
+    error_type: str | None
+    error_message: str | None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.contract is not None and self.graph is not None and self.error_type is None
 
 
 def _relation_decision_key(relation: Sequence[str]) -> str:
@@ -497,35 +514,109 @@ def extract_task_contract(
 ) -> tuple[TaskContextContract, PromptTSG, dict[str, Any], bytes, bytes]:
     """Run two source-only annotations and compile their deterministic consensus."""
 
+    attempt = _attempt_task_contract(
+        task,
+        catalog=catalog,
+        proposer_evaluator=proposer_evaluator,
+        proposer_prompt=proposer_prompt,
+        reviewer_evaluator=reviewer_evaluator,
+        reviewer_prompt=reviewer_prompt,
+        review_status=review_status,
+        provider=provider,
+    )
+    if not attempt.succeeded:
+        raise PromptContractExtractionError(
+            attempt.error_message or attempt.error_type or "task contract extraction failed"
+        )
+    assert attempt.contract is not None
+    assert attempt.graph is not None
+    assert attempt.proposer_raw is not None
+    assert attempt.reviewer_raw is not None
+    return (
+        attempt.contract,
+        attempt.graph,
+        attempt.request,
+        attempt.proposer_raw,
+        attempt.reviewer_raw,
+    )
+
+
+def _attempt_task_contract(
+    task: Mapping[str, Any],
+    *,
+    catalog: Mapping[str, Any],
+    proposer_evaluator: Mapping[str, Any],
+    proposer_prompt: str,
+    reviewer_evaluator: Mapping[str, Any],
+    reviewer_prompt: str,
+    review_status: str,
+    provider: Provider,
+) -> _TaskContractAttempt:
+    """Close raw responses and call counts even when deterministic parsing fails."""
+
     request = contract_decision_request(task, catalog)
     response_format = contract_response_format(request)
-    proposer_raw = provider(
-        request, {**proposer_evaluator, "response_format": response_format}, proposer_prompt
-    )
-    reviewer_raw = provider(
-        request, {**reviewer_evaluator, "response_format": response_format}, reviewer_prompt
-    )
-    proposer = contract_from_response(
+    provider_calls = 0
+    proposer_raw: bytes | None = None
+    reviewer_raw: bytes | None = None
+    try:
+        provider_calls += 1
+        proposer_raw = provider(
+            request,
+            {**proposer_evaluator, "response_format": response_format},
+            proposer_prompt,
+        )
+        provider_calls += 1
+        reviewer_raw = provider(
+            request,
+            {**reviewer_evaluator, "response_format": response_format},
+            reviewer_prompt,
+        )
+        proposer = contract_from_response(
+            proposer_raw,
+            task=task,
+            catalog=catalog,
+            annotator_id=proposer_evaluator["candidate_id"],
+            review_status=review_status,
+        )
+        reviewer = contract_from_response(
+            reviewer_raw,
+            task=task,
+            catalog=catalog,
+            annotator_id=reviewer_evaluator["candidate_id"],
+            review_status=review_status,
+        )
+        annotator_id = (
+            f"dual-blind-consensus:{proposer_evaluator['candidate_id']}"
+            f"+{reviewer_evaluator['candidate_id']}"
+        )
+        contract = consensus_contract(proposer, reviewer, annotator_id=annotator_id)
+        graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
+    except (MemoryError, KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as error:  # noqa: BLE001 - evidence must close before fail-stop
+        return _TaskContractAttempt(
+            str(task["task_id"]),
+            request,
+            provider_calls,
+            proposer_raw,
+            reviewer_raw,
+            None,
+            None,
+            type(error).__name__,
+            str(error),
+        )
+    return _TaskContractAttempt(
+        str(task["task_id"]),
+        request,
+        provider_calls,
         proposer_raw,
-        task=task,
-        catalog=catalog,
-        annotator_id=proposer_evaluator["candidate_id"],
-        review_status=review_status,
-    )
-    reviewer = contract_from_response(
         reviewer_raw,
-        task=task,
-        catalog=catalog,
-        annotator_id=reviewer_evaluator["candidate_id"],
-        review_status=review_status,
+        contract,
+        graph,
+        None,
+        None,
     )
-    annotator_id = (
-        f"dual-blind-consensus:{proposer_evaluator['candidate_id']}"
-        f"+{reviewer_evaluator['candidate_id']}"
-    )
-    contract = consensus_contract(proposer, reviewer, annotator_id=annotator_id)
-    graph = compile_task_context_contract(contract, prompt=task["prompt"], catalog=catalog)
-    return contract, graph, request, proposer_raw, reviewer_raw
 
 
 def extract_contract_task_file(
@@ -581,8 +672,8 @@ def extract_contract_task_file(
     if not proposer_prompt or not reviewer_prompt:
         raise PromptContractExtractionError("contract annotator prompt is empty")
 
-    def extract(task: Mapping[str, Any]):
-        return extract_task_contract(
+    def extract(task: Mapping[str, Any]) -> _TaskContractAttempt:
+        return _attempt_task_contract(
             task,
             catalog=catalog,
             proposer_evaluator=proposer_evaluator,
@@ -603,32 +694,72 @@ def extract_contract_task_file(
     graphs: list[dict[str, Any]] = []
     requests: list[dict[str, Any]] = []
     responses: list[dict[str, Any]] = []
-    for task, result in zip(selected, extracted, strict=True):
-        contract, graph, request, proposer_raw, reviewer_raw = result
-        contracts.append(task_context_contract_record(contract))
-        graphs.append(prompt_tsg_record(graph))
-        requests.append(request)
+    failed_task_units: list[dict[str, Any]] = []
+    for task, attempt in zip(selected, extracted, strict=True):
+        requests.append(attempt.request)
         responses.append(
             {
                 "task_id": task["task_id"],
                 "response_format_sha256": content_hash(
-                    contract_response_format(request)
+                    contract_response_format(attempt.request)
                 ),
-                "proposer_response_sha256": hashlib.sha256(proposer_raw).hexdigest(),
-                "proposer_response_text": proposer_raw.decode("utf-8"),
-                "reviewer_response_sha256": hashlib.sha256(reviewer_raw).hexdigest(),
-                "reviewer_response_text": reviewer_raw.decode("utf-8"),
+                "provider_calls": attempt.provider_calls,
+                "status": "complete" if attempt.succeeded else "failed",
+                "proposer_response_sha256": (
+                    hashlib.sha256(attempt.proposer_raw).hexdigest()
+                    if attempt.proposer_raw is not None
+                    else None
+                ),
+                "proposer_response_text": (
+                    attempt.proposer_raw.decode("utf-8")
+                    if attempt.proposer_raw is not None
+                    else None
+                ),
+                "reviewer_response_sha256": (
+                    hashlib.sha256(attempt.reviewer_raw).hexdigest()
+                    if attempt.reviewer_raw is not None
+                    else None
+                ),
+                "reviewer_response_text": (
+                    attempt.reviewer_raw.decode("utf-8")
+                    if attempt.reviewer_raw is not None
+                    else None
+                ),
+                "error_type": attempt.error_type,
+                "error_message": attempt.error_message,
             }
         )
-    candidate_id = contracts[0]["annotator_id"]
+        if attempt.succeeded:
+            assert attempt.contract is not None
+            assert attempt.graph is not None
+            contracts.append(task_context_contract_record(attempt.contract))
+            graphs.append(prompt_tsg_record(attempt.graph))
+        else:
+            failed_task_units.append(
+                {
+                    "task_id": attempt.task_id,
+                    "provider_calls": attempt.provider_calls,
+                    "error_type": attempt.error_type,
+                    "error_message": attempt.error_message,
+                }
+            )
+    candidate_id = (
+        f"dual-blind-consensus:{proposer_evaluator['candidate_id']}"
+        f"+{reviewer_evaluator['candidate_id']}"
+    )
+    complete = not failed_task_units
     report = {
         "schema_version": "1.0",
-        "status": "PROMPT_CONTRACT_EXTRACTION_COMPLETE",
+        "status": (
+            "PROMPT_CONTRACT_EXTRACTION_COMPLETE"
+            if complete
+            else "PROMPT_CONTRACT_EXTRACTION_FAILED"
+        ),
         "protocol_id": "task_context_contract_v2_dual_blind_consensus",
         "tasks": len(selected),
         "contracts": len(contracts),
         "graphs": len(graphs),
-        "provider_calls": 2 * len(selected),
+        "provider_calls": sum(attempt.provider_calls for attempt in extracted),
         "task_workers": max_workers,
         "effective_task_workers": min(max_workers, len(selected)),
         "candidate_id": candidate_id,
@@ -643,8 +774,11 @@ def extract_contract_task_file(
         "provider_adapter_sha256": _sha256(Path(provider.__code__.co_filename)),
         "response_protocol_id": _RESPONSE_PROTOCOL_ID,
         "unresolved_task_units": sum(bool(graph["unresolved_semantics"]) for graph in graphs),
+        "failed_task_unit_count": len(failed_task_units),
+        "failed_task_units": failed_task_units,
         "review_status": review_status,
         "arms_or_outcomes_used": False,
+        "scientific_claim_allowed": False,
     }
     if "response_format_sha256" in proposer_evaluator:
         report["proposer_response_format_sha256"] = proposer_evaluator[
@@ -664,6 +798,10 @@ def extract_contract_task_file(
             "responses.json": responses,
         },
     )
+    if not complete:
+        raise PromptContractExtractionError(
+            "prompt contract extraction failed; inspect closed bundle"
+        )
     return report
 
 

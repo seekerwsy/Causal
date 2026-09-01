@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "source_tasks_sha256": "a8acecece5d08bdbeb533ff6da630b414430ac3bbf39b6bf3114383405e4d0d8",
+  "selection_rule": "One previously exposed pilot task selected before replay solely to diagnose the closed failure mode from the unarchived three-task provider-compatibility attempt; no arm, outcome, or gold label was used.",
+  "task_ids": [
+    "deveval_task_08709b2fb296933ca37bf4f1fa964dc3e273b9570d7f913705a45c37743ef3f0"
+  ],
+  "arms_or_outcomes_used": false
+}

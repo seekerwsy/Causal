@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from prompt_mechanism_study.artifact_io import verify_bundle
 from prompt_mechanism_study.prompt_contract import (
     RelationDecision,
     SemanticDecision,
@@ -72,6 +73,35 @@ def test_flash_qual_dev_plan_closes_inputs_and_budget() -> None:
     for prefix in ("tasks", "selection"):
         path = ROOT / pilot[f"{prefix}_path"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == pilot[f"{prefix}_sha256"]
+
+
+@pytest.mark.reviewer
+def test_flash_failure_diagnostic_is_single_attempt_and_non_scientific() -> None:
+    plan = json.loads(
+        (
+            ROOT
+            / "data/method/prompt-contract-qwen37flash-failure-diagnostic-v1-plan.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert plan["status"] == "FROZEN_BEFORE_DIAGNOSTIC_REPLAY"
+    assert plan["data_role"] == "LEGACY_EXPOSED_DEVELOPMENT_DIAGNOSTIC"
+    assert plan["formal_use_authorized"] is False
+    assert plan["scientific_claim_allowed"] is False
+    assert plan["qualification_accept_consumed"] is False
+    assert plan["arms_or_outcomes_used"] is False
+    assert plan["maximum_provider_calls"] == 2
+    assert plan["automatic_retry_ceiling"] == 0
+    assert plan["maximum_cost_microunits"] == (
+        plan["maximum_provider_calls"]
+        * plan["model_policy"]["maximum_cost_microunits_per_call"]
+    )
+    assert plan["execution"]["task_units"] == 1
+    assert plan["execution"]["task_workers"] == 1
+    assert plan["execution"]["output_must_close_before_fail_stop"] is True
+    for value in plan["inputs"].values():
+        path = ROOT / value["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
 
 
 def _inputs():
@@ -562,6 +592,77 @@ def test_contract_bundle_and_gate_replay_close_with_mocked_provider(tmp_path):
     assert "proposer_response_format_sha256" in report
     assert qualification["status"] == "QUALIFIED_FOR_FORMAL_EXTRACTION"
     assert qualification["exact_context_accuracy"] == 1.0
+
+
+@pytest.mark.reviewer
+def test_contract_extraction_closes_raw_responses_before_fail_stop(tmp_path):
+    task, catalog = _inputs()
+    contract = _contract(task, catalog)
+    tasks_path = tmp_path / "tasks.json"
+    tasks_path.write_text(json.dumps([task]), encoding="utf-8")
+    selection_path = tmp_path / "selection.json"
+    selection_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "source_tasks_sha256": hashlib.sha256(
+                    tasks_path.read_bytes()
+                ).hexdigest(),
+                "selection_rule": "One exposed task for failure-closure testing.",
+                "task_ids": [task["task_id"]],
+                "arms_or_outcomes_used": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    valid_response = json.loads(_response(contract))
+    invalid_response = json.loads(_response(contract))
+    next(iter(invalid_response["semantic_decisions"].values()))["rationale"] = ""
+    call_count = 0
+
+    def provider(_request, _evaluator, _prompt):
+        nonlocal call_count
+        call_count += 1
+        value = valid_response if call_count == 1 else invalid_response
+        return json.dumps(value).encode("utf-8")
+
+    output = tmp_path / "failed-extraction"
+    with pytest.raises(
+        PromptContractExtractionError,
+        match="inspect closed bundle",
+    ):
+        extract_contract_task_file(
+            tasks_path,
+            CATALOG_PATH,
+            ROOT / "data/method/prompt-contract-proposer-qwen37flash-v1.json",
+            ROOT / "data/method/prompts/prompt-contract-proposer-v3.txt",
+            ROOT / "data/method/prompt-contract-reviewer-qwen37flash-v1.json",
+            ROOT / "data/method/prompts/prompt-contract-reviewer-v3.txt",
+            selection_path,
+            output,
+            provider=provider,
+        )
+
+    verify_bundle(output)
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    responses = json.loads((output / "responses.json").read_text(encoding="utf-8"))
+    response = responses[0]
+
+    assert report["status"] == "PROMPT_CONTRACT_EXTRACTION_FAILED"
+    assert report["provider_calls"] == 2
+    assert report["contracts"] == report["graphs"] == 0
+    assert report["failed_task_unit_count"] == 1
+    assert report["failed_task_units"][0]["task_id"] == task["task_id"]
+    assert report["scientific_claim_allowed"] is False
+    assert response["status"] == "failed"
+    assert response["provider_calls"] == 2
+    assert response["proposer_response_text"] == json.dumps(valid_response)
+    assert response["reviewer_response_text"] == json.dumps(invalid_response)
+    assert response["proposer_response_sha256"] is not None
+    assert response["reviewer_response_sha256"] is not None
+    assert response["error_type"] == "PromptContractExtractionError"
+    assert "rationale is invalid" in response["error_message"]
+    assert "ALI_BAILIAN_API_KEY" not in json.dumps(responses)
 
 
 def test_bounded_task_concurrency_preserves_frozen_output_order(tmp_path):
