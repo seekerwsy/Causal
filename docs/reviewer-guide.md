@@ -36,6 +36,16 @@ remains unapproved. Provider credentials remain in the remote execution
 environment; neither the secret nor its value is copied into the repository or
 result artifacts.
 
+The 2026-09-02 exposed development regressions are now complete. The Flash
+Functional Judge passed 15/16 cases, and Prompt-contract response protocol v4 met
+its unchanged legacy-exposed thresholds (27/28 exact context matches, 0.90 present
+recall, zero false-positive-present and zero wrong-realization results). The
+conservative cumulative cost is CNY 0.973368. These results are development
+evidence only: no prospective role is assigned, no fresh `QUAL_ACCEPT` has been
+opened, and no randomized preexperiment has started. Exact attempt and artifact
+hashes are recorded in `data/method/qwen37flash-preexperiment-ledger-v1.json` and
+summarized in `docs/experiments/2026-09-02-qwen37flash-preexperiment.md`.
+
 The sole executable study entry point is:
 
 ```text

@@ -372,6 +372,66 @@ def test_flash_qual_dev_regression_v4_binds_evidence_replay_and_budget() -> None
         assert hashlib.sha256(path.read_bytes()).hexdigest() == value["sha256"]
 
 
+@pytest.mark.reviewer
+def test_flash_preexperiment_ledger_closes_cost_and_evidence_boundaries() -> None:
+    ledger = json.loads(
+        (ROOT / "data/method/qwen37flash-preexperiment-ledger-v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    totals = ledger["totals"]
+    attempts = ledger["attempts"]
+
+    assert ledger["status"] == (
+        "EXPOSED_DEVELOPMENT_REGRESSIONS_COMPLETE_FRESH_ROLE_QUALIFICATION_PENDING"
+    )
+    assert ledger["model_policy"]["fixed_snapshot_model_id"] == (
+        "qwen3.7-flash-2026-07-15"
+    )
+    assert ledger["model_policy"]["credential_execution"] == (
+        "REMOTE_SERVER_ENVIRONMENT_ONLY"
+    )
+    assert ledger["model_policy"]["credential_material_recorded"] is False
+    assert totals["provider_calls_closed"] == sum(
+        attempt["provider_calls_closed"] for attempt in attempts
+    )
+    assert totals["provider_calls_reserved_unclosed"] == sum(
+        attempt["provider_calls_reserved_unclosed"] for attempt in attempts
+    )
+    assert totals["provider_calls_conservative_total"] == (
+        totals["provider_calls_closed"] + totals["provider_calls_reserved_unclosed"]
+    )
+    assert totals["conservative_total_cost_microunits"] == sum(
+        attempt["conservative_cost_microunits"] for attempt in attempts
+    )
+    assert totals["minimum_remaining_authorized_cost_microunits"] == (
+        ledger["budget_authorization"]["maximum_total_cost_microunits"]
+        - totals["conservative_total_cost_microunits"]
+    )
+    assert totals["conservative_total_cost_cny"] == (
+        totals["conservative_total_cost_microunits"] / 1_000_000
+    )
+    assert totals["minimum_remaining_authorized_cost_cny"] == (
+        totals["minimum_remaining_authorized_cost_microunits"] / 1_000_000
+    )
+    for attempt in attempts:
+        assert attempt["scientific_claim_allowed"] is False
+        for field in ("bundle_manifest_sha256", "primary_report_sha256"):
+            value = attempt[field]
+            assert value is None or len(value) == 64
+    assert ledger["evidence_boundary"] == {
+        "formal_use_authorized": False,
+        "fresh_qual_accept_consumed": False,
+        "formal_prompt_tsg_generated": False,
+        "discovery_started": False,
+        "randomized_preexperiment_started": False,
+        "scientific_effect_claim_allowed": False,
+        "reviewer_archive_status": (
+            "RAW_BUNDLES_REMOTE_AND_LOCAL_RUNTIME_ONLY_PENDING_TRACKED_ARCHIVE_PUBLICATION"
+        ),
+    }
+
+
 def _inputs():
     tasks = {
         task["source"]["upstream_id"]: task
