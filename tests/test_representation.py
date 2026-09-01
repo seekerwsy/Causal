@@ -38,6 +38,28 @@ def test_identity_and_scope_author_decision_matches_target_primitives() -> None:
     assert decision["protocol_id"] == "phase-context-policy-v3"
     assert decision["status"] == "DECISION_RECORDED"
     assert decision["formal_execution_authorized"] is False
+    provider = decision["prospective_provider_policy"]
+    assert provider["status"] == (
+        "AUTHOR_SELECTED_PENDING_ROLE_QUALIFICATION_AND_TOTAL_COST_CAP"
+    )
+    assert provider["fixed_snapshot_model_id"] == "qwen3.7-flash-2026-07-15"
+    assert provider["deployment_region"] == "cn-beijing"
+    assert provider["dynamic_alias_allowed"] is False
+    assert provider["fallback_model_ids"] == []
+    assert provider["replication_model_ids"] == []
+    assert provider["automatic_retry_ceiling"] == 0
+    assert provider["qualification"]["formal_use_authorized"] is False
+    cost_basis = provider["token_cost_basis"]
+    for ceiling in provider["call_ceilings"].values():
+        numerator = (
+            ceiling["maximum_input_tokens"]
+            * cost_basis["input_price_microunits_per_million_tokens"]
+            + ceiling["maximum_output_tokens"]
+            * cost_basis["output_price_microunits_per_million_tokens"]
+        )
+        assert ceiling["maximum_call_cost_microunits"] == (
+            numerator + 999_999
+        ) // 1_000_000
     source_population = decision["prospective_source_population"]
     assert source_population["status"] == (
         "SOURCE_POPULATION_FROZEN_PENDING_REPRESENTATION_QUALIFICATION"

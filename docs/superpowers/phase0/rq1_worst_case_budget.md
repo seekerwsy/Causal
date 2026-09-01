@@ -258,14 +258,35 @@ budget function gives these exact call ceilings:
 | 5 | 3 | 170 | 5,440 | 21,760 | 21,760 | 48,960 |
 | 10 | 5 | 190 | 11,400 | 45,600 | 45,600 | 102,600 |
 
-The repository's current Beijing pay-as-you-go candidates are
-`qwen3.5-flash-2026-02-23` for generation and `qwen3.7-max-2026-05-20` for the
-blind functional judge/validation path. The official public list price checked on 2026-08-31 is
-CNY 0.2 input / CNY 2 output per million tokens for Flash requests up to 128K input, and CNY 12
-input / CNY 36 output per million tokens for Max requests. Sources:
-[Qwen3.5-Flash model information](https://help.aliyun.com/en/model-studio/qwen3-5-flash) and
+The author selected the Beijing pay-as-you-go fixed snapshot
+`qwen3.7-flash-2026-07-15` for every prospective external LLM call: representation
+qualification, intervention materialization/validation, code generation, and functional judgment.
+Dynamic aliases, fallback models, replication models, hidden retries, promotional credits, free
+quota, and cache discounts are excluded. The official public list price checked on 2026-09-02 for
+requests with at most 32K input tokens is CNY 0.2 input / CNY 0.8 output per million tokens:
 [Alibaba Cloud Model Studio pricing](https://help.aliyun.com/zh/model-studio/model-pricing).
-Promotions are deliberately excluded.
+
+The current candidate planning ceilings are 8,192/4,096 input/output tokens for materialization,
+4,096/4,096 for generation, and 8,192/1,024 for the functional judge. They replay to maximum
+per-call costs of CNY 0.004916, 0.004096, and 0.002458 respectively. These ceilings remain
+qualification inputs rather than a formal freeze. The active Flash functional-judge request now
+enforces its 1,024-output-token limit, but it must still pass a fresh, role-disjoint
+`QUAL_ACCEPT`; the historical Max result is not transferable.
+
+For the conservative Core + Expert + Random envelope, `K_A=5`, `K_I=3`, two request slots per
+arm, one model, and no overlap credit, the selected Flash rates give:
+
+| Tasks per Atomic/Pair effect | Materialization | Generation | Functional judge | Total calls | Maximum list-price cost |
+|---:|---:|---:|---:|---:|---:|
+| 120 | 7,680 | 30,720 | 30,720 | 69,120 | CNY 239.09 |
+| 170 | 10,880 | 43,520 | 43,520 | 97,920 | CNY 338.72 |
+| 240 | 15,360 | 61,440 | 61,440 | 138,240 | CNY 478.19 |
+
+A smaller exploratory Core design with `K_A=2`, `K_I=1`, 100 tasks per effect, and the same
+two-slot rule reserves 10,800 formal-stage calls at CNY 37.36. The current non-authorizing cap
+recommendations are therefore CNY 100 for that initial exploratory study and CNY 1,000 for the
+full formal envelope, leaving room for role qualification and conservative request-size variance.
+The applicable cap must still be approved before any provider execution.
 
 Historical factorial records contain no provider token-usage ledger, so their byte lengths cannot
 be converted into an exact bill. The observed maximum serialized generation request/response

@@ -3,7 +3,7 @@
   "artifact_kind": "qualification_data_manifest_draft",
   "protocol_id": "phase-context-policy-v3",
   "protocol_status": "SPECIFIED_DRAFT",
-  "status": "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_AND_POWER",
+  "status": "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_POWER_AND_PROVIDER_QUALIFICATION",
   "formal_use_authorized": false,
   "scientific_claim_allowed": false,
   "arms_or_outcomes_used": false,
@@ -40,6 +40,17 @@
     "task_unit_id_set_sha256": "d172831733911a29bfe4755adec05b86490d7e72873d5f03bca30d0ad5a819e8",
     "technical_readiness_diagnostic_count": 101,
     "technical_readiness_is_not_an_admission_rule": true
+  },
+  "prospective_provider_policy": {
+    "decision_path": "configs/formal/identity_and_scope_decision.json",
+    "status": "AUTHOR_SELECTED_PENDING_ROLE_QUALIFICATION_AND_TOTAL_COST_CAP",
+    "provider_id": "ali_bailian_pay_as_you_go",
+    "deployment_region": "cn-beijing",
+    "fixed_snapshot_model_id": "qwen3.7-flash-2026-07-15",
+    "dynamic_alias_allowed": false,
+    "fallback_model_ids": [],
+    "formal_use_authorized": false,
+    "functional_judge_qualification_status": "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
   },
   "bindings": [
     {
@@ -241,7 +252,7 @@
     "The 381-task quality-included Python source population is frozen, but its representation profile, qualification thresholds, and outcome-blind eligibility rule are not accepted.",
     "Power-qualified counts for QUAL_DEV, QUAL_ACCEPT, DISCOVERY, and CONFIRMATION have not been selected, so no prospective role is assigned.",
     "A one-shot QUAL_ACCEPT subset has not been independently sealed from the frozen source population.",
-    "Practical margins, model policy, K ceilings, familywise alpha, target power, request slots, and provider budget remain author-unapproved."
+    "Qwen3.7-Flash is author-selected for all prospective calls, but role-specific qualification, practical margins, K ceilings, familywise alpha, target power, request slots, and the total provider-cost cap remain unapproved."
   ],
-  "next_gate": "Approve the joint author decision, freeze the representation qualification plan and its outcome-blind eligibility rule, then power-qualify and freeze one complete DataRoleManifest before opening QUAL_ACCEPT or generating formal Prompt TSGs."
+  "next_gate": "Complete the remaining joint author decision, qualify the fixed Qwen3.7-Flash snapshot for each assigned role, freeze the representation qualification plan and its outcome-blind eligibility rule, then power-qualify and freeze one complete DataRoleManifest before opening QUAL_ACCEPT or generating formal Prompt TSGs."
 }

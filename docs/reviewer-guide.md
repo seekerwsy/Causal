@@ -21,6 +21,13 @@ diagnostic and is not an admission rule. The repository still does not assign
 new formal roles or generate formal Prompt TSGs while representation profiles,
 author thresholds, power, and budget remain unfrozen.
 
+The sole prospective provider/model coordinate is now Beijing Alibaba Bailian
+`qwen3.7-flash-2026-07-15` for every external LLM role. Dynamic aliases,
+fallbacks, replication models, and automatic retries are forbidden. This is an
+author selection, not provider authorization: every assigned Flash role must
+still pass its prospective qualification, and historical Qwen3.7-Max judge
+evidence remains legacy-only.
+
 The sole executable study entry point is:
 
 ```text

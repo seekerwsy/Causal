@@ -66,7 +66,7 @@ def load_gate_inputs(
 ) -> GateInputs:
     root = repository_root.resolve()
     gate_path = (
-        root / "configs/functional-judge/functional-oracle-qwen37max.json"
+        root / "configs/functional-judge/functional-oracle-qwen37flash.json"
         if gate_config is None
         else _inside(root, gate_config)
     )
@@ -96,6 +96,11 @@ def load_gate_inputs(
         raise JudgeGateError("evaluator identity does not match the frozen gate")
     if evaluator.get("api_key_env") != "ALI_BAILIAN_API_KEY":
         raise JudgeGateError("unexpected credential coordinate")
+    maximum_output_tokens = evaluator.get("maximum_output_tokens")
+    if maximum_output_tokens is not None and (
+        type(maximum_output_tokens) is not int or maximum_output_tokens <= 0
+    ):
+        raise JudgeGateError("maximum output tokens must be a positive integer")
     prompt = prompt_path.read_text(encoding="utf-8")
     if not prompt.strip():
         raise JudgeGateError("judge prompt is empty")
@@ -443,6 +448,9 @@ def bailian_complete(
         "response_format": response_format,
         "enable_thinking": evaluator["enable_thinking"],
     }
+    maximum_output_tokens = evaluator.get("maximum_output_tokens")
+    if maximum_output_tokens is not None:
+        body["max_tokens"] = maximum_output_tokens
     http_request = Request(
         endpoint,
         data=canonical_json(body).encode("utf-8"),

@@ -246,7 +246,8 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
     assert manifest["protocol_id"] == "phase-context-policy-v3"
     assert manifest["protocol_status"] == "SPECIFIED_DRAFT"
     assert manifest["status"] == (
-        "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_AND_POWER"
+        "SOURCE_POPULATION_FROZEN_BLOCKED_REPRESENTATION_ROLE_ALLOCATION_"
+        "POWER_AND_PROVIDER_QUALIFICATION"
     )
     assert manifest["formal_use_authorized"] is False
     assert manifest["scientific_claim_allowed"] is False
@@ -258,6 +259,14 @@ def test_legacy_v5_inventory_is_complete_and_cannot_authorize_formal_use() -> No
         "DISCOVERY",
         "CONFIRMATION",
     ]
+    provider = manifest["prospective_provider_policy"]
+    assert provider["fixed_snapshot_model_id"] == "qwen3.7-flash-2026-07-15"
+    assert provider["dynamic_alias_allowed"] is False
+    assert provider["fallback_model_ids"] == []
+    assert provider["formal_use_authorized"] is False
+    assert provider["functional_judge_qualification_status"] == (
+        "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
+    )
     source_population = manifest["prospective_source_population"]
     assert source_population["data_manifest_sha256"] == hashlib.sha256(
         (

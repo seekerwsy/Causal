@@ -59,7 +59,11 @@ the active protocol remains `SPECIFIED_DRAFT`. Prompt TSG extraction, role
 allocation, D0 census, and provider execution remain disabled until the joint
 author decision in
 `docs/superpowers/phase0/parameter_qualification_register.md` is approved and
-qualified. The unresolved block includes practical margins, RQ1 comparator
-set, primary/replication models, K ceilings, alpha, target power, realization
-and request-slot counts, provider identities, pricing references, and total
-cost ceiling.
+qualified. On 2026-09-02 the author selected Beijing Alibaba Bailian
+`qwen3.7-flash-2026-07-15` as the fixed snapshot for every prospective external
+LLM call, with no dynamic alias, fallback, replication model, or automatic
+retry. That closes model/provider identity only. The Flash functional judge and
+all other assigned roles still require prospective qualification, and the
+unresolved joint block still includes practical margins, RQ1 comparator set,
+K ceilings, alpha, target power, realization/request-slot counts, final token
+ceilings, and the total cost ceiling.

@@ -108,8 +108,8 @@ No entry in this Phase 0 register is `FROZEN`.
 | INF-06 | RQ2 descriptive yield rule | Target shared evidence fans one unique status to every fixed slot; empty/failure/non-evaluable slots contribute zero and no rank pairing or nested utility interval is used | Freeze fixed-slot, unique-result fan-out, zero contribution of empty/failure/non-evaluable slots | Hand ledger reproduces Full-minus-Ablation without rank pairing | `DECISION_RECORDED` |
 | BUD-01 | RQ1 comparison and baseline set | Target Core and both-track blinded Expert/seeded Random selectors are implemented and tested. Expert sees only the frozen semantic/support card fields; Random uses one frozen SHA-256 seed; both emit ordinary fixed-slot sources and independently replay. The integrated qualification now has a sixth baseline-set profile, and the budget requires an accepted contract for every selected selector/model coordinate. Legacy Association/Prediction remain old-schema only. | Author freezes the exact RQ1 claim and one Core/+Expert/+Random envelope before outcomes, supplies the actual Expert cards or Random seeds, and runs the one-shot integrated baseline qualification. Association/Prediction require a separately approved target contract if selected. | Core sole-difference and baseline blindness/seed/permutation/shared-union tests pass; missing-coordinate, budget-only, or legacy-only baselines cannot authorize the budget or `DiscoveryDesignFreeze` | `IMPLEMENTATION_TESTED_BASELINE_SET_AUTHOR_AND_QUALIFICATION_BLOCKED` |
 | BUD-02 | `K_A` and `K_I` | The joint Gate now derives max-\|T\| family size and worst-case calls from `K_A/K_I`; values still have no author-approved qualification | Joint feasibility, power, and worst-case call budget qualification | Values fit support and approved cap; empty slots remain denominators | `BLOCKED` |
-| BUD-03 | Models, tasks, realizations, and total block slots | Model-bound dispatch, one realization per task-policy coordinate, exact four-arm/cell slots, and actual-assignment replay are implemented; exact values remain unset | Freeze exact coordinates, minimum tasks per realization/stratum, and verify the smallest representative run first | One numeric request table with no hidden model or realization cross-product | `AUTHOR_INPUT_NEEDED` |
-| BUD-04 | Provider/request and cost ceilings | `ProviderBudgetCeilings` now requires each call kind's currency, region, named token-pricing tier/boundary, input/output token ceilings, microunit prices, and frozen reference; the stored per-call cost must replay from them, and formal preflight recomputes materialization, generation, functional-judge, total calls, and total cost while rejecting hidden retries or overflow | Freeze service-specific token caps, current rates/references, one currency, and approved ceilings with the selected joint design | Independent replay rejects tier overflow, cost mismatch, mixed currencies, hidden retry, or any reservation above a call/cost ceiling | `IMPLEMENTATION_TESTED_AUTHOR_INPUT_BLOCKED` |
+| BUD-03 | Models, tasks, realizations, and total block slots | The author selected Beijing `qwen3.7-flash-2026-07-15` as the sole fixed snapshot for every prospective external LLM role, with no dynamic alias, fallback, or replication model. Model-bound dispatch, one realization per task-policy coordinate, exact four-arm/cell slots, and actual-assignment replay are implemented; task, realization, and slot values remain unset | Qualify the fixed snapshot separately for every assigned role, freeze exact coordinates and minimum tasks per realization/stratum, and verify the smallest representative run first | One numeric request table with no hidden model, fallback, retry, or realization cross-product | `AUTHOR_MODEL_SELECTED_REMAINING_INPUT_AND_QUALIFICATION_BLOCKED` |
+| BUD-04 | Provider/request and cost ceilings | The author selected Alibaba Bailian pay-as-you-go, Beijing, CNY, and the fixed Flash snapshot for all three formal call classes. Candidate list-price/token ceilings now replay to CNY 0.004916 materialization, 0.004096 generation, and 0.002458 functional-judge maxima per call. `ProviderBudgetCeilings` rejects hidden retries, tier overflow, or cost mismatch; the total monetary cap is not approved | Recheck and freeze the service price reference and conservative token caps with the selected joint design, then approve one total-cost ceiling | Independent replay rejects tier overflow, cost mismatch, mixed currencies, hidden retry, or any reservation above a call/cost ceiling | `IMPLEMENTATION_TESTED_PROVIDER_SELECTED_TOTAL_CAP_BLOCKED` |
 
 ## Single author decision gate
 
@@ -140,7 +140,7 @@ new identity-family and four genuinely new cryptography-family task units, plus 
 later near-duplicate exclusions.
 
 ```yaml
-author_decision_status: UNDECIDED
+author_decision_status: PARTIALLY_DECIDED_PROVIDER_MODEL_ONLY
 
 # Choose exactly one. The second option may use fewer than 240 only when the
 # prospectively frozen power and role-disjointness Gates pass; otherwise new
@@ -171,10 +171,14 @@ rq1_scenario: core | core_plus_expert | core_plus_expert_plus_random
 # ablations. Empty means none.
 additional_statistical_baselines: []
 
-# Exact provider model identifiers. Primary candidates are confirmed only at
-# their bound primary model; replication hypotheses require a separate freeze.
-primary_generation_models: UNDECIDED
-replication_models: UNDECIDED
+# Author-selected exact provider coordinate for every prospective external LLM
+# call. Role-specific qualification is still mandatory; in particular, the old
+# Qwen3.7-Max judge result does not qualify the new Flash judge.
+prospective_llm_snapshot: qwen3.7-flash-2026-07-15
+primary_generation_models: [qwen3.7-flash-2026-07-15]
+replication_models: []
+dynamic_model_alias_allowed: false
+fallback_models: []
 
 # These are qualification ceilings, not guaranteed selected values. The final
 # K and task counts are the largest prospectively allowed combination that
@@ -193,17 +197,23 @@ request_slots_per_task_arm: UNDECIDED
 # A monetary cap alone is insufficient: after model selection, all three call
 # kinds require frozen price references and conservative per-call microunit
 # bounds. Automatic retry ceiling remains zero.
-budget_currency: UNDECIDED
+budget_currency: CNY
 maximum_total_external_cost: UNDECIDED
-materialization_provider: UNDECIDED
-generation_provider: UNDECIDED
-functional_judge_provider: UNDECIDED
+provider_deployment_region: cn-beijing
+materialization_provider: ali_bailian_pay_as_you_go
+generation_provider: ali_bailian_pay_as_you_go
+functional_judge_provider: ali_bailian_pay_as_you_go
+automatic_retry_ceiling: 0
 ```
 
 The current evidence-based starting recommendation, still non-authorizing, is:
 `retain_240_and_expand`, preserve the current 21-CWE scope, practical margins 0.05/0.05, Core RQ1,
-one `qwen3.5-flash-2026-02-23` primary generation model with no replication model, `K_A <= 5`,
-`K_I <= 3`, alpha 0.05, minimum power 0.80, two global realizations, and two request slots per arm.
+the author-selected fixed `qwen3.7-flash-2026-07-15` snapshot for all external LLM roles with no
+replication or fallback model, `K_A <= 5`, `K_I <= 3`, alpha 0.05, minimum power 0.80, two global
+realizations, and two request slots per arm. A CNY 100 cap is recommended for the initial
+exploratory study and CNY 1,000 for the full formal envelope; the applicable cap still requires
+explicit author approval. Flash must pass each role-specific qualification, including a fresh,
+role-disjoint functional-judge `QUAL_ACCEPT`, before formal use.
 This replaces the earlier 10/5 and one-slot planning suggestion because the implemented
 outcome-blind sensitivity calculation shows materially weaker Pair power and a much larger call
 envelope. See `rq1_worst_case_budget.md` under “Outcome-blind author-decision sensitivity.” The

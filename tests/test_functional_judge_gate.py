@@ -8,6 +8,7 @@ import pytest
 from prompt_mechanism_study.artifact_io import verify_bundle
 from prompt_mechanism_study.functional_judge import (
     JudgeGateError,
+    bailian_complete,
     load_gate_inputs,
     preflight,
     python_syntax_valid,
@@ -42,17 +43,30 @@ def test_preflight_closes_frozen_inputs_without_provider(monkeypatch, tmp_path: 
     assert report["live_ready"] is False
     assert len(report["pilot_case_ids"]) == 4
     assert len(report["remaining_case_ids"]) == 12
-    oracle = load_gate_inputs(
-        ROOT,
-        Path("configs/functional-judge/functional-oracle-qwen37max.json"),
+    oracle = load_gate_inputs(ROOT)
+    assert oracle.evaluator["candidate_id"] == (
+        "qwen37flash-software-engineer-functional-judge-v1"
     )
-    assert oracle.evaluator["candidate_id"] == ("qwen37max-software-engineer-functional-judge-v2")
+    assert oracle.evaluator["model_id"] == "qwen3.7-flash-2026-07-15"
+    assert oracle.evaluator["maximum_output_tokens"] == 1024
+    assert oracle.gate["status"] == "PENDING_QUAL_DEV_AND_FRESH_QUAL_ACCEPT"
+    assert oracle.gate["formal_use_authorized"] is False
+    assert oracle.gate["dynamic_alias_allowed"] is False
+    assert oracle.gate["fallback_model_ids"] == []
     assert len(oracle.prompt.split()) < 300
     assert not {"pdftotext", "slurm", "pragma"} & set(oracle.prompt.casefold().split())
     case = oracle.cases[0]
     projected = request_for(case, oracle.contracts[case["task_id"]])
     assert projected["functional_task"]
     assert all(set(item) == {"requirement_id", "criterion"} for item in projected["requirements"])
+
+    legacy = load_gate_inputs(
+        ROOT,
+        Path("configs/functional-judge/functional-oracle-qwen37max.json"),
+    )
+    assert legacy.evaluator["candidate_id"] == (
+        "qwen37max-software-engineer-functional-judge-v2"
+    )
 
 
 @pytest.mark.reviewer
@@ -100,3 +114,43 @@ def test_pilot_runs_four_closed_single_attempt_cases(tmp_path: Path) -> None:
         "invalid": 0,
         "provider_attempts": 4,
     }
+
+
+def test_active_flash_request_enforces_snapshot_and_output_ceiling(monkeypatch) -> None:
+    inputs = load_gate_inputs(ROOT)
+    observed: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _maximum: int) -> bytes:
+            payload = {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": '{"verdict":"unknown"}'},
+                    }
+                ]
+            }
+            return json.dumps(payload).encode()
+
+    def _urlopen(request, *, timeout):
+        observed["body"] = json.loads(request.data)
+        observed["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setenv("ALI_BAILIAN_API_KEY", "test-only")
+    monkeypatch.setattr("prompt_mechanism_study.functional_judge.urlopen", _urlopen)
+
+    bailian_complete({}, inputs.evaluator, inputs.prompt)
+
+    body = observed["body"]
+    assert isinstance(body, dict)
+    assert body["model"] == "qwen3.7-flash-2026-07-15"
+    assert body["max_tokens"] == 1024
+    assert body["enable_thinking"] is False
+    assert body["n"] == 1
